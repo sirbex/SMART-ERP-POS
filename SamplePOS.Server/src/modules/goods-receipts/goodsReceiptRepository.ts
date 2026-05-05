@@ -214,7 +214,15 @@ export const goodsReceiptRepository = {
          gr.version,
          po.order_number AS "poNumber",
          po.supplier_id as "supplierId",
-         s."CompanyName" as "supplierName"
+         s."CompanyName" as "supplierName",
+         (SELECT si."SupplierInvoiceNumber"
+            FROM supplier_invoice_grn_links sigl
+            JOIN supplier_invoices si ON si."Id" = sigl.invoice_id
+           WHERE sigl.grn_id = gr.id
+             AND si.deleted_at IS NULL
+             AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+           ORDER BY si."CreatedAt" DESC
+           LIMIT 1) AS "supplierBillNumber"
        FROM goods_receipts gr
        LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
        LEFT JOIN suppliers s ON po.supplier_id = s."Id"
@@ -236,7 +244,7 @@ export const goodsReceiptRepository = {
          p.name as "productName",
          ROUND(COALESCE(poi.ordered_quantity, gri.received_quantity)::numeric, 2) as "orderedQuantity",
          ROUND(gri.received_quantity::numeric, 2) as "receivedQuantity",
-         gri.batch_number as "batchNumber",
+         COALESCE(gri.batch_number, ib.batch_number) as "batchNumber",
          gri.expiry_date as "expiryDate",
          ROUND(gri.cost_price::numeric, 2) as "unitCost",
          gri.is_bonus as "isBonus",
@@ -253,6 +261,9 @@ export const goodsReceiptRepository = {
        JOIN products p ON gri.product_id = p.id
        LEFT JOIN product_valuation pv ON pv.product_id = p.id
        LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id
+       LEFT JOIN inventory_batches ib ON ib.goods_receipt_id = gri.goods_receipt_id
+         AND ib.product_id = gri.product_id
+         AND gri.batch_number IS NULL
        LEFT JOIN uoms u ON u.id = COALESCE(gri.uom_id, poi.uom_id)
        LEFT JOIN product_uoms pu ON pu.product_id = gri.product_id AND pu.uom_id = COALESCE(gri.uom_id, poi.uom_id)
        LEFT JOIN product_uoms def_pu ON def_pu.product_id = gri.product_id AND def_pu.is_default = true

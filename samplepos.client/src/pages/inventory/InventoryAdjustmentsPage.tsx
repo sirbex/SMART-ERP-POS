@@ -10,6 +10,8 @@
  */
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
@@ -120,6 +122,27 @@ export default function InventoryAdjustmentsPage() {
 
   // Physical Count modal state
   const [showPhysicalCountModal, setShowPhysicalCountModal] = useState(false);
+
+  // ── Transaction Guard ──────────────────────────────────────────────────
+  const { openGuard, closeGuard } = useTransactionGuard();
+  const adjustGuardRef = useRef<GuardHandle | null>(null);
+  const physicalCountGuardRef = useRef<GuardHandle | null>(null);
+
+  useEffect(() => {
+    if (showAdjustModal) {
+      adjustGuardRef.current = openGuard({ cancellable: false, label: 'Stock adjustment' });
+      return () => { if (adjustGuardRef.current) { closeGuard(adjustGuardRef.current.id); adjustGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAdjustModal]);
+
+  useEffect(() => {
+    if (showPhysicalCountModal) {
+      physicalCountGuardRef.current = openGuard({ cancellable: false, label: 'Physical stock count' });
+      return () => { if (physicalCountGuardRef.current) { closeGuard(physicalCountGuardRef.current.id); physicalCountGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPhysicalCountModal]);
   const [countedQuantities, setCountedQuantities] = useState<Record<string, string>>({});
   const [physicalCountReason, setPhysicalCountReason] = useState('Physical inventory count - ' + getBusinessDate());
   const [isProcessingCount, setIsProcessingCount] = useState(false);
@@ -886,15 +909,8 @@ export default function InventoryAdjustmentsPage() {
       {/* Adjustment Modal */}
       {showAdjustModal && selectedBatch && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-          onClick={(e) => {
-            console.log('🔵 Overlay clicked', e.target);
-            // Only close if clicking the overlay itself, not its children
-            if (e.target === e.currentTarget) {
-              console.log('🔵 Closing modal from overlay click');
-              setShowAdjustModal(false);
-            }
-          }}
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ zIndex: adjustGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
         >
           <div
             className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4"
@@ -1137,7 +1153,7 @@ export default function InventoryAdjustmentsPage() {
 
       {/* Physical Count Modal */}
       {showPhysicalCountModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowPhysicalCountModal(false)}>
+        <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: physicalCountGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}>
           <div className="bg-white rounded-lg shadow-xl w-full max-w-[95vw] sm:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
             <div className="px-6 py-4 border-b border-gray-200 bg-purple-600">

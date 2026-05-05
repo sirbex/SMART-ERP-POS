@@ -87,15 +87,26 @@ export interface SupplierStatementEntry {
     date: string;
     /** GL transaction number (e.g. TXN-2025-0001) */
     docNumber: string;
-    type: string;   // SUPPLIER_INVOICE, SUPPLIER_CREDIT_NOTE, SUPPLIER_DEBIT_NOTE, SUPPLIER_PAYMENT, RETURN_GRN
+    type: string;   // SUPPLIER_INVOICE, SUPPLIER_CREDIT_NOTE, SUPPLIER_DEBIT_NOTE, SUPPLIER_PAYMENT, RETURN_GRN, GOODS_RECEIPT, SYSTEM_CORRECTION
     reference: string;
     description: string;
     debit: number;
     credit: number;
-    /** Open = invoice/debit note outstanding, Applied = payment made, Credit Note = supplier credit note, Voided = reversed */
-    itemStatus: 'Open' | 'Applied' | 'Credit Note' | 'Voided';
+    /**
+     * Document classification for the supplier liability workspace:
+     *  - Open         = invoice/debit note outstanding (AP 2100 credit)
+     *  - Applied      = payment made (AP 2100 debit)
+     *  - Credit Note  = supplier credit note issued
+     *  - Pending Bill = goods received, awaiting invoice (GR/IR 2150 credit)
+     *  - Return       = return-to-supplier reduces unbilled liability (GR/IR 2150 debit)
+     *  - Correction   = SYSTEM_CORRECTION journal entry
+     *  - Voided       = transaction reversed
+     */
+    itemStatus: 'Open' | 'Applied' | 'Credit Note' | 'Pending Bill' | 'Return' | 'Correction' | 'Voided';
     /** Payment method — populated for SUPPLIER_PAYMENT entries (e.g. CASH, BANK_TRANSFER) */
     paymentMethod?: string;
+    /** GL account this entry posted to: '2100' (AP) or '2150' (GR/IR Clearing) */
+    accountCode?: string;
 }
 
 export interface SupplierStatementData {

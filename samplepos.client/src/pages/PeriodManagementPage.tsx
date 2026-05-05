@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useTransactionGuard, ZINDEX } from '../hooks/useTransactionGuard';
+import type { GuardHandle } from '../hooks/useTransactionGuard';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle, History, X, Plus } from 'lucide-react';
 import { formatTimestamp } from '../utils/businessDate';
@@ -110,6 +112,45 @@ export default function PeriodManagementPage() {
     const [showReopenModal, setShowReopenModal] = useState<{ year: number; month: number } | null>(null);
     const [showLockModal, setShowLockModal] = useState<{ year: number; month: number } | null>(null);
     const [showHistoryModal, setShowHistoryModal] = useState<{ year: number; month: number } | null>(null);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const closeGuardRef = useRef<GuardHandle | null>(null);
+    const reopenGuardRef = useRef<GuardHandle | null>(null);
+    const lockGuardRef = useRef<GuardHandle | null>(null);
+    const historyGuardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (showCloseModal) {
+            closeGuardRef.current = openGuard({ cancellable: false, label: 'Close accounting period' });
+            return () => { if (closeGuardRef.current) { closeGuard(closeGuardRef.current.id); closeGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showCloseModal]);
+
+    useEffect(() => {
+        if (showReopenModal) {
+            reopenGuardRef.current = openGuard({ cancellable: false, label: 'Reopen accounting period' });
+            return () => { if (reopenGuardRef.current) { closeGuard(reopenGuardRef.current.id); reopenGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showReopenModal]);
+
+    useEffect(() => {
+        if (showLockModal) {
+            lockGuardRef.current = openGuard({ cancellable: false, label: 'Lock accounting period permanently' });
+            return () => { if (lockGuardRef.current) { closeGuard(lockGuardRef.current.id); lockGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showLockModal]);
+
+    useEffect(() => {
+        if (showHistoryModal) {
+            historyGuardRef.current = openGuard({ cancellable: true, label: 'View period history' });
+            return () => { if (historyGuardRef.current) { closeGuard(historyGuardRef.current.id); historyGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showHistoryModal]);
     const [closeNotes, setCloseNotes] = useState('');
     const [reopenReason, setReopenReason] = useState('');
     const [error, setError] = useState<string | null>(null);
@@ -415,7 +456,7 @@ export default function PeriodManagementPage() {
 
             {/* Close Period Modal */}
             {showCloseModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowCloseModal(null)}>
+                <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: closeGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }} onClick={() => setShowCloseModal(null)}>
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
                         <div className="px-6 py-4 border-b flex items-center justify-between">
                             <h2 className="text-xl font-semibold">Close Period</h2>
@@ -480,7 +521,7 @@ export default function PeriodManagementPage() {
 
             {/* Reopen Period Modal */}
             {showReopenModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowReopenModal(null)}>
+                <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: reopenGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }} onClick={() => setShowReopenModal(null)}>
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
                         <div className="px-6 py-4 border-b flex items-center justify-between">
                             <h2 className="text-xl font-semibold">Reopen Period</h2>
@@ -553,7 +594,7 @@ export default function PeriodManagementPage() {
 
             {/* Lock Period Modal */}
             {showLockModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowLockModal(null)}>
+                <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: lockGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }} onClick={() => setShowLockModal(null)}>
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
                         <div className="px-6 py-4 border-b flex items-center justify-between">
                             <h2 className="text-xl font-semibold">Lock Period Permanently</h2>
@@ -612,7 +653,7 @@ export default function PeriodManagementPage() {
 
             {/* History Modal */}
             {showHistoryModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowHistoryModal(null)}>
+                <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: historyGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }} onClick={() => setShowHistoryModal(null)}>
                     <div className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-2xl w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="px-6 py-4 border-b flex items-center justify-between">
                             <h2 className="text-xl font-semibold">

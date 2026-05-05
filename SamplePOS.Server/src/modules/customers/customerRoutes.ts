@@ -34,7 +34,16 @@ router.get('/:id/transactions', customerController.getCustomerTransactions);
 router.get('/:id/summary', customerController.getCustomerSummary);
 router.get('/:id/statement', customerController.getCustomerStatement);
 router.get('/:id/statement/export.csv', customerController.exportCustomerStatementCsv);
-router.get('/:id/statement/export.pdf', customerController.exportCustomerStatementPdf);
+// PDF export — redirect to centralized DocumentRenderer
+router.get('/:id/statement/export.pdf', (req, res) => {
+  const qs = new URLSearchParams();
+  const start = (req.query.start as string | undefined) ?? (req.query.startDate as string | undefined);
+  const end = (req.query.end as string | undefined) ?? (req.query.endDate as string | undefined);
+  if (start) qs.set('startDate', start.slice(0, 10));
+  if (end) qs.set('endDate', end.slice(0, 10));
+  const query = qs.toString();
+  res.redirect(307, `/api/documents/CUSTOMER_STATEMENT/${req.params.id}${query ? `?${query}` : ''}`);
+});
 
 // Create/Update/Delete - requires customer permissions
 router.post('/', authenticate, requirePermission('customers.create'), customerController.createCustomer);

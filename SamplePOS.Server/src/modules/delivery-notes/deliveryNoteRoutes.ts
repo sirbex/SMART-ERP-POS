@@ -42,7 +42,7 @@ router.get('/:id/pick-list', deliveryNoteController.pickList);
 // Invoice from DN (wholesale invoicing)
 router.post('/:id/invoice', requirePermission('sales.create'), deliveryNoteController.createInvoice);
 
-// PDF export
-router.get('/:id/pdf', deliveryNoteController.exportPdf);
+// PDF export — use the centralized DocumentRenderer:
+//   GET /api/documents/DELIVERY_NOTE/:id
 
 export default router;

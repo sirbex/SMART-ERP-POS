@@ -3,6 +3,8 @@ import { api } from '../../utils/api';
 import { extractApiError } from '../../utils/extractApiError';
 import { formatCurrency } from '../../utils/currency';
 import Decimal from 'decimal.js';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 
 interface RefundItem {
     saleItemId: string;
@@ -48,6 +50,15 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
         itemsRestored: number;
     } | null>(null);
     const modalRef = useRef<HTMLDivElement>(null);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const guardRef = useRef<GuardHandle | null>(null);
+    useEffect(() => {
+        guardRef.current = openGuard({ cancellable: false, label: 'Process sale refund/return' });
+        return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Build refundable items list
     const [refundItems, setRefundItems] = useState<RefundItem[]>(() =>
@@ -168,7 +179,8 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
     if (successResult) {
         return (
             <div
-                className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]"
+                className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+                style={{ zIndex: guardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
                 onClick={(e) => { if (e.target === e.currentTarget) onSuccess(); }}
                 role="dialog"
                 aria-modal="true"
@@ -215,7 +227,8 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
 
     return (
         <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]"
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+            style={{ zIndex: guardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
             onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
             role="dialog"
             aria-modal="true"

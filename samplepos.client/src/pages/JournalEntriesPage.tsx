@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Decimal from 'decimal.js';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
+import { useTransactionGuard, ZINDEX } from '../hooks/useTransactionGuard';
+import type { GuardHandle } from '../hooks/useTransactionGuard';
 import { ClipboardCheck, Plus, RotateCcw, Search, RefreshCw, AlertTriangle, CheckCircle, X, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
@@ -157,6 +159,53 @@ export default function JournalEntriesPage() {
     const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
     const [reverseReason, setReverseReason] = useState('');
     const [error, setError] = useState<string | null>(null);
+
+    // ── Transaction Guard ─────────────────────────────────────────────────────
+    // Lock the ERP UI whenever a journal posting or reversal dialog is open.
+    // This prevents filter/date changes behind an open journal entry dialog
+    // and eliminates double-posting from rapid button clicks.
+    const { openGuard, closeGuard, singleSubmit } = useTransactionGuard();
+    const createGuardRef = useRef<GuardHandle | null>(null);
+    const reverseGuardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (showCreateModal) {
+            createGuardRef.current = openGuard({
+                cancellable: true,
+                label: 'New Journal Entry',
+            });
+            return () => {
+                if (createGuardRef.current) {
+                    closeGuard(createGuardRef.current.id);
+                    createGuardRef.current = null;
+                }
+            };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showCreateModal]);
+
+    useEffect(() => {
+        if (showReverseModal) {
+            reverseGuardRef.current = openGuard({
+                cancellable: true,
+                label: 'Reverse Journal Entry',
+            });
+            return () => {
+                if (reverseGuardRef.current) {
+                    closeGuard(reverseGuardRef.current.id);
+                    reverseGuardRef.current = null;
+                }
+            };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showReverseModal]);
+
+    // Wrap submit handlers with double-submission prevention
+    const handleSubmitOnce = singleSubmit(async () => { handleSubmit(); });
+    const handleReverseOnce = singleSubmit(async () => {
+        if (!showReverseModal || !reverseReason.trim()) return;
+        reverseMutation.mutate({ id: showReverseModal, reason: reverseReason.trim() });
+    });
 
     // Form state for new journal entry
     const [form, setForm] = useState<JournalEntryForm>({
@@ -506,9 +555,13 @@ export default function JournalEntriesPage() {
                 )}
             </div>
 
-            {/* Create Modal */}
+            {/* Create Modal — guarded: ERP UI is locked while journal entry is being composed */}
             {showCreateModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowCreateModal(false)}>
+                <div
+                    className="fixed inset-0 flex items-center justify-center p-4"
+                    style={{ zIndex: createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
+                    onClick={(e) => { if (e.target === e.currentTarget) setShowCreateModal(false); }}
+                >
                     <div className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-4xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <div className="px-6 py-4 border-b flex items-center justify-between">
                             <h2 className="text-xl font-semibold">New Journal Entry</h2>
@@ -726,7 +779,7 @@ export default function JournalEntriesPage() {
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={handleSubmit}
+                                    onClick={() => handleSubmitOnce()}
                                     disabled={createMutation.isPending || !isBalanced}
                                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center space-x-2"
                                 >
@@ -743,9 +796,13 @@ export default function JournalEntriesPage() {
                 </div>
             )}
 
-            {/* Reverse Modal */}
+            {/* Reverse Modal — guarded: prevents re-reversal or context change during reversal */}
             {showReverseModal && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => { setShowReverseModal(null); setReverseReason(''); }}>
+                <div
+                    className="fixed inset-0 flex items-center justify-center p-4"
+                    style={{ zIndex: reverseGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
+                    onClick={(e) => { if (e.target === e.currentTarget) { setShowReverseModal(null); setReverseReason(''); } }}
+                >
                     <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
                         <div className="px-6 py-4 border-b">
                             <h2 className="text-xl font-semibold">Reverse Journal Entry</h2>
@@ -785,7 +842,7 @@ export default function JournalEntriesPage() {
                                     Cancel
                                 </button>
                                 <button
-                                    onClick={() => reverseMutation.mutate({ id: showReverseModal, reason: reverseReason })}
+                                    onClick={() => handleReverseOnce()}
                                     disabled={reverseMutation.isPending || reverseReason.length < 5}
                                     className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 flex items-center space-x-2"
                                 >

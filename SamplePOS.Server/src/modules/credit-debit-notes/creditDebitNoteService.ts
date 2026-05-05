@@ -9,7 +9,7 @@
  * 2. Post note (DRAFT → POSTED) → creates GL entries, adjusts balances
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import {
     creditDebitNoteRepository,
@@ -672,13 +672,20 @@ export const supplierCreditDebitNoteService = {
 
             if (note.documentType === 'SUPPLIER_CREDIT_NOTE') {
                 await recordSupplierCreditNoteToGL(glData, pool);
-                // Reduce AP on original invoice (SAP/Odoo compliance)
-                await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
-                    client,
-                    note.referenceInvoiceId,
-                    note.totalAmount,
-                    'CREDIT',
-                );
+
+                // SAP/Odoo hybrid model:
+                //  • If the CN points at a specific bill (referenceInvoiceId is
+                //    set — typical for RGRN-derived or user-targeted CNs), apply
+                //    immediately to that bill. No floating credit.
+                //  • If the CN is standalone (no reference), leave it as
+                //    on-account credit (Status='POSTED', OB=full). The user can
+                //    later click "Apply to Open Bills" to auto-FIFO it.
+                if (note.referenceInvoiceId) {
+                    await this.applySupplierCreditNote(client, note.id, {
+                        primaryBillId: note.referenceInvoiceId,
+                        allowFIFO: false,
+                    });
+                }
             } else {
                 await recordSupplierDebitNoteToGL(glData, pool);
                 // Debit notes track their additional AP obligation via the note's own
@@ -821,5 +828,136 @@ export const supplierCreditDebitNoteService = {
         const creditNotes = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(pool, invoiceId, 'SUPPLIER_CREDIT_NOTE');
         const debitNotes = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(pool, invoiceId, 'SUPPLIER_DEBIT_NOTE');
         return { creditNotes, debitNotes };
+    },
+
+    /**
+     * Apply a posted Supplier Credit Note's residual balance against open
+     * bills. Used by:
+     *  - postNote() for RGRN-derived / referenced CNs (allowFIFO=false,
+     *    primaryBillId=referenceInvoiceId) — guaranteed-correct allocation.
+     *  - returnGrnService for RGRN flows (same).
+     *  - The "Apply to Open Bills" manual button for standalone CNs
+     *    (allowFIFO=true, no primary).
+     *
+     * Returns the per-bill allocation summary so callers / UI can display it.
+     * Idempotent: re-running on a fully-applied CN is a no-op.
+     */
+    async applySupplierCreditNote(
+        clientOrPool: Pool | PoolClient,
+        creditNoteId: string,
+        options: { primaryBillId?: string | null; allowFIFO: boolean },
+    ): Promise<{
+        creditNoteId: string;
+        totalApplied: number;
+        residual: number;
+        status: string;
+        allocations: Array<{ billId: string; amount: number }>;
+    }> {
+        const note = await supplierCreditDebitNoteRepository.getSupplierNoteById(clientOrPool, creditNoteId);
+        if (!note) throw new Error('Supplier credit note not found');
+        if (note.documentType !== 'SUPPLIER_CREDIT_NOTE') {
+            throw new Error('Only supplier credit notes can be applied');
+        }
+        if (note.status !== 'POSTED') {
+            // APPLIED / CANCELLED / DRAFT — nothing to apply
+            return {
+                creditNoteId,
+                totalApplied: 0,
+                residual: 0,
+                status: note.status,
+                allocations: [],
+            };
+        }
+
+        // Compute current residual from the row itself (may be partially applied
+        // already). Total - AmountPaid is the live remaining amount.
+        const noteRow = await clientOrPool.query(
+            `SELECT "TotalAmount", COALESCE("AmountPaid", 0) AS "AmountPaid", "SupplierId"
+             FROM supplier_invoices WHERE "Id" = $1`,
+            [creditNoteId],
+        );
+        if (!noteRow.rows[0]) throw new Error('Supplier credit note not found');
+        const total = Number(noteRow.rows[0].TotalAmount);
+        const alreadyApplied = Number(noteRow.rows[0].AmountPaid);
+        const supplierId = noteRow.rows[0].SupplierId as string;
+        let remaining = Math.max(total - alreadyApplied, 0);
+        if (remaining <= 0) {
+            return { creditNoteId, totalApplied: 0, residual: 0, status: 'APPLIED', allocations: [] };
+        }
+
+        const allocations: Array<{ billId: string; amount: number }> = [];
+
+        // 1) Primary bill first (RGRN flow / referenceInvoiceId).
+        if (options.primaryBillId) {
+            const r = await supplierCreditDebitNoteRepository.applyAmountToSupplierBill(
+                clientOrPool, options.primaryBillId, remaining,
+            );
+            if (r.applied > 0) {
+                allocations.push({ billId: options.primaryBillId, amount: r.applied });
+                remaining -= r.applied;
+            }
+        }
+
+        // 2) FIFO fallback for residual (only when explicitly allowed).
+        if (options.allowFIFO && remaining > 0) {
+            const openBills = await supplierCreditDebitNoteRepository.getOpenBillsForSupplierFIFO(
+                clientOrPool, supplierId, options.primaryBillId ?? null,
+            );
+            for (const bill of openBills) {
+                if (remaining <= 0) break;
+                const r = await supplierCreditDebitNoteRepository.applyAmountToSupplierBill(
+                    clientOrPool, bill.id, remaining,
+                );
+                if (r.applied > 0) {
+                    allocations.push({ billId: bill.id, amount: r.applied });
+                    remaining -= r.applied;
+                }
+            }
+        }
+
+        // 3) Close out the CN itself (mark APPLIED if fully consumed).
+        const totalApplied = allocations.reduce((s, a) => s + a.amount, 0);
+        let status = note.status;
+        if (totalApplied > 0) {
+            const closed = await supplierCreditDebitNoteRepository.closeAppliedCreditNote(
+                clientOrPool, creditNoteId, totalApplied,
+            );
+            status = closed.status;
+        }
+
+        // 4) Recalculate the supplier's cached outstanding (live derivation
+        //    elsewhere is correct, but the cache should be in sync for
+        //    legacy reads).
+        if (supplierId) {
+            await recalcSupplierBalance(clientOrPool as PoolClient, supplierId);
+        }
+
+        logger.info('Supplier credit note applied', {
+            creditNoteId, totalApplied, residual: remaining, allocations: allocations.length, status,
+        });
+
+        return {
+            creditNoteId,
+            totalApplied,
+            residual: Math.max(remaining, 0),
+            status,
+            allocations,
+        };
+    },
+
+    /**
+     * Public entry point for the "Apply to Open Bills" manual button.
+     * Wraps applySupplierCreditNote in a transaction with allowFIFO=true.
+     */
+    async applyCreditNoteToOpenBillsFIFO(
+        pool: Pool,
+        creditNoteId: string,
+    ) {
+        return UnitOfWork.run(pool, async (client) => {
+            return this.applySupplierCreditNote(client, creditNoteId, {
+                primaryBillId: null,
+                allowFIFO: true,
+            });
+        });
     },
 };

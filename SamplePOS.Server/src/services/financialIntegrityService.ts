@@ -135,11 +135,16 @@ async function checkAR(pool: pg.Pool): Promise<IntegrityCheck> {
 }
 
 async function checkAP(pool: pg.Pool): Promise<IntegrityCheck> {
-  // Only compare supplier-facing AP entries (GR, returns, supplier payments).
-  // EXPENSE / EXPENSE_PAYMENT entries also post to 2100 but are NOT tracked in
-  // suppliers.OutstandingBalance — excluding them prevents a false drift equal
-  // to net-unpaid-expense obligations.
+  // 3-way match (SAP) model: GRs credit GRIR Clearing (2150), NOT AP (2100).
+  // AP is only created when a Supplier Invoice is posted (SUPPLIER_INVOICE).
   // Include ALL suppliers (active and inactive) to match GL which has no IsActive filter.
+  // GL = ALL 2100 entries EXCEPT non-supplier types (EXPENSE / EXPENSE_PAYMENT
+  // are general-expense obligations not tracked in suppliers.OutstandingBalance).
+  // This blacklist approach (vs a whitelist of supplier types) ensures that
+  // legacy GOODS_RECEIPT mispostings to 2100 AND their corrective CORRECTION
+  // journals both count, so paired GR + correction net to zero. New
+  // CORRECTION reclassifications (e.g. write-off of accumulated over-credits)
+  // therefore bring GL and subledger back into agreement.
   const r = await pool.query(`
     SELECT
       COALESCE((SELECT SUM(le."CreditAmount") - SUM(le."DebitAmount")
@@ -147,7 +152,7 @@ async function checkAP(pool: pg.Pool): Promise<IntegrityCheck> {
                 JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
                 JOIN accounts a ON le."AccountId" = a."Id"
                 WHERE a."AccountCode" = '2100'
-                  AND lt."ReferenceType" IN ('GOODS_RECEIPT', 'RETURN_GRN', 'SUPPLIER_PAYMENT')
+                  AND lt."ReferenceType" NOT IN ('EXPENSE', 'EXPENSE_PAYMENT')
                   AND ${NET_ACTIVE_TXNS}), 0) AS gl,
       COALESCE((SELECT SUM("OutstandingBalance") FROM suppliers), 0) AS sub
   `);

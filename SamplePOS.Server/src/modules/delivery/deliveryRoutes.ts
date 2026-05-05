@@ -68,12 +68,9 @@ router.get(
  * Params: identifier (UUID or DEL-YYYY-NNNN)
  * Response: { success: boolean, data?: DeliveryOrderWithDetails, error?: string }
  */
-router.get(
-  '/orders/:identifier/pdf',
-  authenticate,
-  requirePermission('delivery.read'),
-  deliveryController.exportDeliveryNotePdf
-);
+// PDF export removed — delivery orders use a different identifier than DELIVERY_NOTE documents.
+// If a PDF is needed, render via the centralized DocumentRenderer for the matching delivery_note.
+
 router.get(
   '/orders/:identifier',
   authenticate,

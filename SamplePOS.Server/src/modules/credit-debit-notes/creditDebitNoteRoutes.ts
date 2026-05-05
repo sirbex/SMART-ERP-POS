@@ -124,3 +124,12 @@ creditDebitNoteRoutes.post(
     requirePermission('accounting.create'),
     supplierCreditDebitNoteController.cancelNote,
 );
+
+// Apply a standalone Supplier Credit Note to that supplier's open bills (FIFO).
+// Used by the "Apply to Open Bills" button on the SCN row in Supplier Payments.
+creditDebitNoteRoutes.post(
+    '/supplier/:id/apply',
+    authenticate,
+    requirePermission('accounting.create'),
+    supplierCreditDebitNoteController.applyCreditNote,
+);

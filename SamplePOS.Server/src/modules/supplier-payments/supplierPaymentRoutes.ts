@@ -93,6 +93,14 @@ const CreateInvoiceSchema = z.object({
             })
         )
         .min(1, 'At least one line item is required'),
+    grnIds: z.array(z.string().uuid()).optional(),
+});
+const CreateInvoiceFromGRNSchema = z.object({
+    grnId: z.string().uuid(),
+    supplierInvoiceNumber: z.string().optional(),
+    invoiceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    notes: z.string().optional(),
 });
 const CreateAllocationSchema = z.object({
     supplierPaymentId: z.string().uuid(),
@@ -722,6 +730,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         supplierId: z.string().uuid(),
         amount: z.union([z.number().positive(), z.string().transform(Number)]),
         asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+        dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         notes: z.string().optional(),
     });
 
@@ -734,7 +743,9 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 supplierId: validated.supplierId,
                 amount: new Decimal(validated.amount).toNumber(),
                 asOfDate: validated.asOfDate,
+                dueDate: validated.dueDate,
                 notes: validated.notes,
+                userId: req.user!.id,
             });
             res.status(201).json({ success: true, data: result });
         })
@@ -770,10 +781,26 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                     dueDate: validated.dueDate,
                     notes: validated.notes,
                     lineItems: validated.lineItems,
+                    grnIds: validated.grnIds,
                 },
                 userId
             );
 
+            res.status(201).json({ success: true, data: invoice });
+        })
+    );
+
+    // Create supplier invoice from a Goods Receipt (3-way match one-click bill)
+    router.post(
+        '/invoices/from-grn',
+        requirePermission('purchasing.create'),
+        asyncHandler(async (req, res) => {
+            const validated = CreateInvoiceFromGRNSchema.parse(req.body);
+            const invoice = await supplierPaymentService.createInvoiceFromGRN(
+                p(req),
+                validated,
+                req.user?.id,
+            );
             res.status(201).json({ success: true, data: invoice });
         })
     );

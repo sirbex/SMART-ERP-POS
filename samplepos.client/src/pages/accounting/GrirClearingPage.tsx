@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import {
   useGrirOpenItems,
   useGrirBalance,
@@ -10,6 +10,8 @@ import {
   useGrirAutoMatch,
   type GrirOpenFilters,
 } from '../../hooks/useAccountingModules';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import {
   Search,
   FileCheck,
@@ -138,16 +140,18 @@ function Modal({
   title,
   wide,
   children,
+  zIndex,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   wide?: boolean;
   children: React.ReactNode;
+  zIndex?: number;
 }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4" role="dialog" aria-modal="true" aria-label={title}>
+    <div className="fixed inset-0 flex items-start justify-center pt-16 px-4" style={{ zIndex: zIndex ?? 50 }} role="dialog" aria-modal="true" aria-label={title}>
       <div className="fixed inset-0 bg-black/40" onClick={onClose} />
       <div className={`relative bg-white rounded-lg shadow-xl ${wide ? 'max-w-5xl' : 'max-w-2xl'} w-full max-h-[80vh] flex flex-col`}>
         <div className="flex items-center justify-between px-6 py-4 border-b">
@@ -180,6 +184,45 @@ export default function GrirClearingPage() {
   const [autoMatchModal, setAutoMatchModal] = useState(false);
   const [drillDownGrId, setDrillDownGrId] = useState<string | null>(null);
   const [historyPoId, setHistoryPoId] = useState<string | null>(null);
+
+  // ── Transaction Guards ────────────────────────────────────────────
+  const { openGuard: openClearGuard, closeGuard: closeClearGuard } = useTransactionGuard();
+  const clearGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (clearingModal) {
+      clearGuardRef.current = openClearGuard({ cancellable: false, label: 'Manual GR/IR clearing' });
+      return () => { if (clearGuardRef.current) { closeClearGuard(clearGuardRef.current.id); clearGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearingModal]);
+  const { openGuard: openAutoGuard, closeGuard: closeAutoGuard } = useTransactionGuard();
+  const autoGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (autoMatchModal) {
+      autoGuardRef.current = openAutoGuard({ cancellable: false, label: 'Automatic GR/IR clearing' });
+      return () => { if (autoGuardRef.current) { closeAutoGuard(autoGuardRef.current.id); autoGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoMatchModal]);
+  const { openGuard: openDrillGuard, closeGuard: closeDrillGuard } = useTransactionGuard();
+  const drillGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (drillDownGrId) {
+      drillGuardRef.current = openDrillGuard({ cancellable: true, label: 'View 3-way match' });
+      return () => { if (drillGuardRef.current) { closeDrillGuard(drillGuardRef.current.id); drillGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drillDownGrId]);
+  const { openGuard: openHistoryGuard, closeGuard: closeHistoryGuard } = useTransactionGuard();
+  const historyGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (historyPoId) {
+      historyGuardRef.current = openHistoryGuard({ cancellable: true, label: 'View clearing history' });
+      return () => { if (historyGuardRef.current) { closeHistoryGuard(historyGuardRef.current.id); historyGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyPoId]);
+
   const [autoMatchSupplier, setAutoMatchSupplier] = useState('');
   const [autoMatchTolerance, setAutoMatchTolerance] = useState('2');
 
@@ -516,7 +559,7 @@ export default function GrirClearingPage() {
       {/* ═══════════════════════════════════════════════════════════ */}
 
       {/* ── Manual Clearing Modal (MR11N) ───────────────────────── */}
-      <Modal open={!!clearingModal} onClose={() => setClearingModal(null)} title="Manual Clearing — MR11N">
+      <Modal open={!!clearingModal} onClose={() => setClearingModal(null)} title="Manual Clearing — MR11N" zIndex={clearGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         {clearingModal && (
           <div className="space-y-4">
             <p className="text-sm text-gray-600">
@@ -637,7 +680,7 @@ export default function GrirClearingPage() {
       </Modal>
 
       {/* ── Auto-Match Modal (F.13) ─────────────────────────────── */}
-      <Modal open={autoMatchModal} onClose={() => setAutoMatchModal(false)} title="Automatic Clearing — F.13">
+      <Modal open={autoMatchModal} onClose={() => setAutoMatchModal(false)} title="Automatic Clearing — F.13" zIndex={autoGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
             Automatically match goods receipts with supplier invoices.
@@ -701,7 +744,7 @@ export default function GrirClearingPage() {
       </Modal>
 
       {/* ── 3-Way Match Drill-Down Modal ────────────────────────── */}
-      <Modal open={!!drillDownGrId} onClose={() => setDrillDownGrId(null)} title="3-Way Match — Line Items" wide>
+      <Modal open={!!drillDownGrId} onClose={() => setDrillDownGrId(null)} title="3-Way Match — Line Items" wide zIndex={drillGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         {loadingGrItems ? (
           <LoadingState message="Loading line items..." />
         ) : grItems.length === 0 ? (
@@ -750,7 +793,7 @@ export default function GrirClearingPage() {
       </Modal>
 
       {/* ── Clearing History Modal ───────────────────────────────── */}
-      <Modal open={!!historyPoId} onClose={() => setHistoryPoId(null)} title="Clearing History">
+      <Modal open={!!historyPoId} onClose={() => setHistoryPoId(null)} title="Clearing History" zIndex={historyGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         {loadingHistory ? (
           <LoadingState message="Loading history..." />
         ) : history.length === 0 ? (

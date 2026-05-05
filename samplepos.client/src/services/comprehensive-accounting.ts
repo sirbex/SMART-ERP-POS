@@ -258,10 +258,10 @@ export const comprehensiveSupplierService = {
  * Supplier Invoice Management - Uses Node.js backend directly
  */
 export const supplierInvoiceService = {
-    // Get invoice summary stats (total, unpaid, outstanding)
-    async getInvoiceSummary(): Promise<{ totalInvoices: number; unpaidInvoices: number; totalOutstanding: number }> {
+    // Get invoice summary stats (total, unpaid, outstanding, credit balance)
+    async getInvoiceSummary(): Promise<{ totalInvoices: number; unpaidInvoices: number; totalOutstanding: number; totalCreditBalance: number }> {
         const response = await supplierApi.get('/invoices/summary');
-        return response.data?.data ?? { totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 };
+        return response.data?.data ?? { totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0, totalCreditBalance: 0 };
     },
 
     // Get all supplier invoices

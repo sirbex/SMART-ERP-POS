@@ -91,7 +91,20 @@ export async function findAll(pool: Pool, limit: number, offset: number, search?
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      COALESCE("OutstandingBalance", 0) as "outstandingBalance",
+      -- Live-derived outstanding balance from the invoice subledger.
+      -- Uses the same formula as recalculateOutstandingBalance() so the
+      -- displayed value is always in sync, even if the cached column is stale.
+      GREATEST(COALESCE((
+        SELECT SUM(
+          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+               THEN -COALESCE(si."OutstandingBalance", 0)
+               ELSE  COALESCE(si."OutstandingBalance", 0) END
+        )
+        FROM supplier_invoices si
+        WHERE si."SupplierId" = suppliers."Id"
+          AND si.deleted_at IS NULL
+          AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
+      ), 0), 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
@@ -113,7 +126,17 @@ export async function findById(pool: Pool, id: string): Promise<Supplier | null>
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      COALESCE("OutstandingBalance", 0) as "outstandingBalance",
+      GREATEST(COALESCE((
+        SELECT SUM(
+          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+               THEN -COALESCE(si."OutstandingBalance", 0)
+               ELSE  COALESCE(si."OutstandingBalance", 0) END
+        )
+        FROM supplier_invoices si
+        WHERE si."SupplierId" = suppliers."Id"
+          AND si.deleted_at IS NULL
+          AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
+      ), 0), 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
@@ -132,7 +155,17 @@ export async function findBySupplierNumber(pool: Pool, supplierNumber: string): 
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      COALESCE("OutstandingBalance", 0) as "outstandingBalance",
+      GREATEST(COALESCE((
+        SELECT SUM(
+          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+               THEN -COALESCE(si."OutstandingBalance", 0)
+               ELSE  COALESCE(si."OutstandingBalance", 0) END
+        )
+        FROM supplier_invoices si
+        WHERE si."SupplierId" = suppliers."Id"
+          AND si.deleted_at IS NULL
+          AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
+      ), 0), 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
@@ -151,7 +184,17 @@ export async function searchSuppliers(pool: Pool, searchTerm: string, limit: num
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      COALESCE("OutstandingBalance", 0) as "outstandingBalance",
+      GREATEST(COALESCE((
+        SELECT SUM(
+          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+               THEN -COALESCE(si."OutstandingBalance", 0)
+               ELSE  COALESCE(si."OutstandingBalance", 0) END
+        )
+        FROM supplier_invoices si
+        WHERE si."SupplierId" = suppliers."Id"
+          AND si.deleted_at IS NULL
+          AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
+      ), 0), 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
@@ -395,8 +438,25 @@ export async function countAll(pool: Pool, search?: string, includeInactive: boo
  * Used for the "Total Outstanding" summary card on SuppliersPage.
  */
 export async function getTotalOutstanding(pool: Pool): Promise<number> {
+  // Live-derived from the invoice subledger so the "Total Outstanding"
+  // summary card stays in sync with per-supplier balances and with the
+  // invoice list, without depending on the cached suppliers.OutstandingBalance.
   const result = await pool.query(
-    `SELECT COALESCE(SUM("OutstandingBalance"), 0) as total FROM suppliers WHERE "IsActive" = true`
+    `SELECT COALESCE(SUM(
+       GREATEST(COALESCE((
+         SELECT SUM(
+           CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+                THEN -COALESCE(si."OutstandingBalance", 0)
+                ELSE  COALESCE(si."OutstandingBalance", 0) END
+         )
+         FROM supplier_invoices si
+         WHERE si."SupplierId" = s."Id"
+           AND si.deleted_at IS NULL
+           AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
+       ), 0), 0)
+     ), 0) as total
+     FROM suppliers s
+     WHERE s."IsActive" = true`
   );
   return parseFloat(result.rows[0].total);
 }

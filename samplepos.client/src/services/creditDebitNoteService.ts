@@ -42,6 +42,8 @@ export interface SupplierCreditDebitNote {
     subtotal: number;
     taxAmount: number;
     totalAmount: number;
+    /** Live remaining balance — SCN > 0 means on-account (unapplied) credit. */
+    outstandingBalance: number;
     status: string;
     reason: string | null;
     notes: string | null;
@@ -209,6 +211,27 @@ export const creditDebitNoteService = {
 
     async cancelSupplierNote(id: string, reason: string) {
         const response = await api.post(`/credit-debit-notes/supplier/${id}/cancel`, { reason });
+        return response.data;
+    },
+
+    /**
+     * Apply a posted standalone Supplier Credit Note to that supplier's open
+     * bills using FIFO (oldest InvoiceDate first). Used by the
+     * "Apply to Open Bills" button on standalone (non-RGRN) credit notes.
+     * RGRN-derived credit notes are auto-applied at post-time and never need
+     * this endpoint.
+     */
+    async applySupplierCreditNoteFIFO(id: string): Promise<{
+        success: boolean;
+        data: {
+            creditNoteId: string;
+            totalApplied: number;
+            residual: number;
+            allocations: Array<{ billId: string; amount: number }>;
+        };
+        message?: string;
+    }> {
+        const response = await api.post(`/credit-debit-notes/supplier/${id}/apply`);
         return response.data;
     },
 };

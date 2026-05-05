@@ -112,6 +112,13 @@ apiClient.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
+    // Idempotency key — prevents duplicate transactions from retries / double-clicks.
+    // Generated per request so each submission gets a unique key.
+    const method = (config.method ?? 'get').toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && config.headers) {
+      config.headers['X-Idempotency-Key'] = crypto.randomUUID();
+    }
+
     // Log request in development
     if (import.meta.env.DEV) {
       console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
@@ -441,6 +448,7 @@ export const api = {
     list: (params?: { page?: number; limit?: number; status?: string; supplierId?: string }) =>
       apiClient.get<ApiResponse>('purchase-orders', { params }),
     getById: (id: string) => apiClient.get<ApiResponse>(`purchase-orders/${id}`),
+    getItems: (id: string) => apiClient.get<ApiResponse>(`purchase-orders/${id}/items`),
     create: (data: CreatePurchaseOrderInput) =>
       apiClient.post<ApiResponse>('purchase-orders', data),
     updateStatus: (id: string, status: string) =>
@@ -770,6 +778,7 @@ export const api = {
       supplierId: string;
       amount: number;
       asOfDate: string;
+      dueDate?: string;
       notes?: string;
     }) => apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance', data),
   },

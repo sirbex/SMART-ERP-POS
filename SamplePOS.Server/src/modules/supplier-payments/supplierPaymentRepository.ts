@@ -344,13 +344,30 @@ export async function findAllInvoices(
         search?: string;
         startDate?: string;
         endDate?: string;
+        /**
+         * Optional document_type filter. Defaults to bills only
+         * (SUPPLIER_INVOICE + SUPPLIER_DEBIT_NOTE) — credit notes are a
+         * separate concept and must NOT appear in the Bills tab.
+         */
+        documentTypes?: string[];
+        includeCreditNotes?: boolean;
     }
 ): Promise<{ items: SupplierInvoice[]; total: number }> {
-    const { limit = 50, offset = 0, supplierId, status, search, startDate, endDate } = options;
+    const { limit = 50, offset = 0, supplierId, status, search, startDate, endDate, documentTypes, includeCreditNotes } = options;
 
     let whereClause = 'WHERE si.deleted_at IS NULL';
-    const params: (string | number)[] = [];
+    const params: (string | number | string[])[] = [];
     let paramIndex = 1;
+
+    // Default behaviour: exclude credit notes from the bills list. Credit
+    // notes have their own document_type=SUPPLIER_CREDIT_NOTE and are
+    // surfaced via dedicated UI / Credit Balance card.
+    if (documentTypes && documentTypes.length > 0) {
+        whereClause += ` AND si.document_type = ANY($${paramIndex++}::text[])`;
+        params.push(documentTypes);
+    } else if (!includeCreditNotes) {
+        whereClause += ` AND COALESCE(si.document_type, 'SUPPLIER_INVOICE') <> 'SUPPLIER_CREDIT_NOTE'`;
+    }
 
     if (supplierId) {
         whereClause += ` AND si."SupplierId" = $${paramIndex++}`;
@@ -476,6 +493,8 @@ export async function findOutstandingInvoices(pool: Pool | PoolClient, supplierI
      LEFT JOIN suppliers s ON si."SupplierId" = s."Id"
      WHERE si."SupplierId" = $1 
        AND si.deleted_at IS NULL
+       AND si.document_type = 'SUPPLIER_INVOICE'
+       AND si.is_posted_to_gl = TRUE
        AND si."Status" NOT IN ('Paid', 'PAID', 'Cancelled', 'CANCELLED')
        AND COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) > 0
      ORDER BY si."DueDate" ASC NULLS LAST, si."InvoiceDate" ASC`,
@@ -763,13 +782,52 @@ export async function updateInvoicePaidAmount(
 
 /**
  * Soft delete supplier invoice (sets deleted_at timestamp)
- * NOTE: This does NOT permanently remove the record - use for data safety
+ * NOTE: This does NOT permanently remove the record - use for data safety.
+ *
+ * INVOICE-LOSS PROTECTION (zero-tolerance):
+ *   1. Cannot delete if invoice has any payment allocations (existing rule)
+ *   2. Cannot delete if invoice has POSTED ledger entries — must reverse the
+ *      journal entry first via the accounting reversal flow. This guarantees
+ *      the supplier subledger and the GL never silently diverge from a delete.
+ *   3. Cannot delete CANCELLED invoices (already terminal)
+ *   4. Cannot delete CREDIT/DEBIT notes that have been APPLIED to other docs
  */
 export async function deleteInvoice(client: PoolClient, id: string): Promise<boolean> {
     // Protection: block deletion of cancelled invoices (replaces trg_protect_paid_supplier_invoice)
-    const statusCheck = await client.query('SELECT "Status" FROM supplier_invoices WHERE "Id" = $1', [id]);
-    if (statusCheck.rows[0]?.Status === 'Cancelled') {
+    const statusCheck = await client.query(
+        'SELECT "Status", document_type FROM supplier_invoices WHERE "Id" = $1',
+        [id],
+    );
+    const status = String(statusCheck.rows[0]?.Status || '').toUpperCase();
+    const docType = statusCheck.rows[0]?.document_type;
+    if (status === 'CANCELLED') {
         throw new Error('Cannot modify a cancelled supplier invoice');
+    }
+    if (status === 'APPLIED') {
+        throw new Error(
+            `Cannot delete an APPLIED ${docType ?? 'document'}. Unapply allocations first.`,
+        );
+    }
+    if (status === 'PAID' || status === 'PARTIALLY_PAID') {
+        throw new Error(
+            'Cannot delete a paid or partially-paid invoice. Reverse the payment first.',
+        );
+    }
+
+    // Block delete if any POSTED ledger transaction references this invoice
+    // (i.e. the GL already records a liability for it). The user must reverse
+    // the JE first — that flow correctly mirrors all subledger movements.
+    const glCheck = await client.query(
+        `SELECT COUNT(*)::int AS count
+         FROM ledger_transactions
+         WHERE "ReferenceId" = $1
+           AND "Status" = 'POSTED'`,
+        [id],
+    );
+    if ((glCheck.rows[0]?.count ?? 0) > 0) {
+        throw new Error(
+            'Cannot delete an invoice that has POSTED GL entries. Reverse the journal entry first.',
+        );
     }
 
     // Check if invoice has payments allocated - prevent deletion if paid
@@ -975,12 +1033,28 @@ export async function getInvoiceSummary(pool: Pool | PoolClient): Promise<{
     totalInvoices: number;
     unpaidInvoices: number;
     totalOutstanding: number;
+    totalCreditBalance: number;
 }> {
+    // Mirrors supplierRepository.recalculateOutstandingBalance() — credit notes
+    // offset (negative), and the floor at 0 prevents over-credits from showing
+    // a negative AP. unpaid_invoices counts only positive document types
+    // (bills/debit notes), excluding credit notes.
     const result = await pool.query(`
         SELECT
             COUNT(*)::int AS total_invoices,
-            COUNT(*) FILTER (WHERE "Status" NOT IN ('Paid', 'Cancelled'))::int AS unpaid_invoices,
-            COALESCE(SUM("OutstandingBalance") FILTER (WHERE "Status" NOT IN ('Paid', 'Cancelled')), 0) AS total_outstanding
+            COUNT(*) FILTER (
+                WHERE UPPER("Status") NOT IN ('PAID', 'CANCELLED', 'DELETED')
+                  AND COALESCE(document_type, '') <> 'SUPPLIER_CREDIT_NOTE'
+            )::int AS unpaid_invoices,
+            GREATEST(COALESCE(SUM(
+                CASE WHEN document_type = 'SUPPLIER_CREDIT_NOTE'
+                     THEN -COALESCE("OutstandingBalance", 0)
+                     ELSE  COALESCE("OutstandingBalance", 0) END
+            ) FILTER (WHERE UPPER("Status") NOT IN ('PAID', 'CANCELLED', 'DELETED')), 0), 0) AS total_outstanding,
+            COALESCE(SUM(COALESCE("OutstandingBalance", 0)) FILTER (
+                WHERE document_type = 'SUPPLIER_CREDIT_NOTE'
+                  AND UPPER("Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'APPLIED')
+            ), 0) AS total_credit_balance
         FROM supplier_invoices
         WHERE deleted_at IS NULL
     `);
@@ -989,6 +1063,7 @@ export async function getInvoiceSummary(pool: Pool | PoolClient): Promise<{
         totalInvoices: row.total_invoices,
         unpaidInvoices: row.unpaid_invoices,
         totalOutstanding: new Decimal(row.total_outstanding || 0).toNumber(),
+        totalCreditBalance: new Decimal(row.total_credit_balance || 0).toNumber(),
     };
 }
 
@@ -1068,6 +1143,30 @@ export async function findUnbilledGRNs(
         totalAmount: new Decimal(r.totalAmount || 0).toNumber(),
         itemCount: r.itemCount as number,
     }));
+}
+
+/**
+ * Link a supplier invoice to one or more GRNs via supplier_invoice_grn_links.
+ * Idempotent — duplicate (invoice_id, grn_id) pairs are silently skipped.
+ */
+export async function linkInvoiceToGRNs(
+    client: PoolClient,
+    invoiceId: string,
+    grnIds: string[],
+): Promise<void> {
+    if (grnIds.length === 0) return;
+    const values: string[] = [];
+    const params: unknown[] = [invoiceId];
+    grnIds.forEach((grnId, idx) => {
+        params.push(grnId);
+        values.push(`($1, $${idx + 2})`);
+    });
+    await client.query(
+        `INSERT INTO supplier_invoice_grn_links (invoice_id, grn_id)
+         VALUES ${values.join(', ')}
+         ON CONFLICT DO NOTHING`,
+        params,
+    );
 }
 
 // ============================================================
@@ -1161,7 +1260,7 @@ export async function lockAndComputeInvoiceOutstanding(
         [invoiceId]
     );
     const returnCredits = new Decimal(creditRes.rows[0].return_credits || 0);
-    const creditNotes   = new Decimal(creditRes.rows[0].credit_notes   || 0);
+    const creditNotes = new Decimal(creditRes.rows[0].credit_notes || 0);
 
     const outstandingBalance = originalAmount
         .minus(paidAmount)
@@ -1287,18 +1386,18 @@ export async function findAllUnpaidInvoicesForMassPayment(
     );
 
     return result.rows.map((r) => ({
-        id:                    r.id as string,
-        invoiceNumber:         r.invoiceNumber as string,
+        id: r.id as string,
+        invoiceNumber: r.invoiceNumber as string,
         supplierInvoiceNumber: r.supplierInvoiceNumber as string | null,
-        supplierId:            r.supplierId as string,
-        supplierName:          r.supplierName as string,
-        invoiceDate:           r.invoiceDate as string,
-        dueDate:               r.dueDate as string | null,
-        originalAmount:        new Decimal(r.originalAmount  || 0).toNumber(),
-        paidAmount:            new Decimal(r.paidAmount      || 0).toNumber(),
-        returnCredits:         new Decimal(r.returnCredits   || 0).toNumber(),
-        creditNotes:           new Decimal(r.creditNotes     || 0).toNumber(),
-        outstandingBalance:    new Decimal(r.outstandingBalance || 0).toNumber(),
+        supplierId: r.supplierId as string,
+        supplierName: r.supplierName as string,
+        invoiceDate: r.invoiceDate as string,
+        dueDate: r.dueDate as string | null,
+        originalAmount: new Decimal(r.originalAmount || 0).toNumber(),
+        paidAmount: new Decimal(r.paidAmount || 0).toNumber(),
+        returnCredits: new Decimal(r.returnCredits || 0).toNumber(),
+        creditNotes: new Decimal(r.creditNotes || 0).toNumber(),
+        outstandingBalance: new Decimal(r.outstandingBalance || 0).toNumber(),
     }));
 }
 

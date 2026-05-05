@@ -92,8 +92,8 @@ export default defineConfig({
                     // Forms and validation
                     'forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
 
-                    // PDF generation
-                    'pdf': ['jspdf', 'jspdf-autotable'],
+                    // PDF generation: removed — all PDFs now go through /api/documents
+                    // via DocumentPreviewModal (server-side pdfkit only).
 
                     // Data fetching and state
                     'query': ['@tanstack/react-query', 'axios', 'zustand'],

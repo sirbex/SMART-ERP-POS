@@ -141,7 +141,10 @@ export const paymentsService = {
           throw new Error('Customer ID required for credit payment');
         }
 
-        // Get current balance
+        // Layer 2: Lock customer row to serialize concurrent credit transactions
+        await client.query('SELECT id FROM customers WHERE id = $1 FOR UPDATE', [input.customerId]);
+
+        // Get current balance (already uses FOR UPDATE on customer_credit_transactions)
         const currentBalance = await paymentsRepository.getCustomerBalance(
           client,
           input.customerId
@@ -239,7 +242,10 @@ export const paymentsService = {
     }
   ): Promise<{ newBalance: number; transactionId: string }> {
     const result = await UnitOfWork.run(pool, async (client) => {
-      // Get current balance
+      // Layer 2: Lock customer row to serialize concurrent balance updates
+      await client.query('SELECT id FROM customers WHERE id = $1 FOR UPDATE', [input.customerId]);
+
+      // Get current balance (already uses FOR UPDATE on customer_credit_transactions)
       const currentBalance = await paymentsRepository.getCustomerBalance(client, input.customerId);
       const paymentAmount = new Decimal(input.amount);
       const newBalance = new Decimal(currentBalance).minus(paymentAmount);

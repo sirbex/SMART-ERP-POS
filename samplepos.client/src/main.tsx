@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './contexts/AuthContext';
 import { OfflineProvider } from './contexts/OfflineContext';
 import { TenantProvider } from './contexts/TenantContext';
+import { TransactionGuardProvider } from './contexts/TransactionGuardContext';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
@@ -168,7 +169,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <TenantProvider>
           <OfflineProvider>
             <AuthProvider>
-              <App />
+              <TransactionGuardProvider>
+                <App />
+              </TransactionGuardProvider>
             </AuthProvider>
           </OfflineProvider>
         </TenantProvider>

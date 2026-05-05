@@ -519,10 +519,12 @@ export async function getInvoiceAdjustments(
 
 // ─── 8. Supplier Statement ─────────────────────────────────────────
 /**
- * GL-driven opening balance for supplier statement.
- * Reads from AP (2100) ledger entries tagged to this supplier.
- * Balance = SUM(Credit) - SUM(Debit) on AP account before startDate.
- * (Credit to AP = we owe more, Debit to AP = we paid / reduced)
+ * GL-driven opening balance for supplier statement (SAP supplier-position view).
+ * Reads from BOTH Accounts Payable (2100) AND GR/IR Clearing (2150) ledger entries
+ * tagged to this supplier.
+ *   - 2100 = billed liability (after invoice posted)
+ *   - 2150 = received-not-billed liability (after GR, before invoice)
+ * Balance = SUM(Credit) - SUM(Debit) on those accounts before startDate.
  */
 export async function getSupplierStatementOpeningBalance(
   pool: Pool,
@@ -536,9 +538,9 @@ export async function getSupplierStatementOpeningBalance(
          FROM ledger_entries le
          JOIN accounts a ON le."AccountId" = a."Id"
          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-         WHERE a."AccountCode" = '2100'
+         WHERE a."AccountCode" IN ('2100', '2150')
            AND le."EntityId" = $1
-           AND le."EntityType" = 'supplier'
+           AND UPPER(le."EntityType") = 'SUPPLIER'
            AND lt."Status" = 'POSTED'
            AND le."EntryDate"::date < $2::date`,
     [supplierId, beforeDate],
@@ -548,17 +550,24 @@ export async function getSupplierStatementOpeningBalance(
 }
 
 /**
- * GL-driven supplier statement entries.
- * Reads from AP (2100) ledger entries tagged to this supplier.
+ * GL-driven supplier statement entries — SAP Supplier Liability Workspace view.
  *
- * Architecture (3-way match — post migration 513 + 514):
- *   Entries shown in AP account (business documents only):
- *     - SUPPLIER_INVOICE (DR GRIR 2150 / CR AP 2100) → itemStatus = 'Open'
- *     - SUPPLIER_PAYMENT (DR AP / CR Cash)            → itemStatus = 'Applied'
- *     - SUPPLIER_CREDIT_NOTE (DR AP / CR GRIR 2150)   → itemStatus = 'Credit Note'
- *   Excluded from ledger view (internal/correction entries):
- *     - GOODS_RECEIPT → excluded after migration 514 (historical AP credits rerouted)
- *     - SYSTEM_CORRECTION → migration correction entries, not business documents
+ * Includes BOTH:
+ *   - Accounts Payable (2100): billed liability
+ *   - GR/IR Clearing (2150):  received-not-billed liability
+ *
+ * Why both?
+ *   In SAP, the supplier position = billed (AP) + unbilled (GR/IR). Showing only
+ *   AP hides goods that were received but not yet invoiced. The supplier ledger
+ *   must reflect the full economic obligation.
+ *
+ * Document categories shown:
+ *   - GOODS_RECEIPT      (CR 2150) → itemStatus = 'Pending Bill'
+ *   - SUPPLIER_INVOICE   (DR 2150 / CR 2100) → 'Open' until paid
+ *   - SUPPLIER_PAYMENT   (DR 2100) → 'Applied'
+ *   - SUPPLIER_CREDIT_NOTE (DR 2100 / CR 2150) → 'Credit Note'
+ *   - RETURN_GRN         (DR 2150) → 'Return'
+ *   - SYSTEM_CORRECTION  → 'Correction'
  * - IsReversed = true → itemStatus = 'Voided'
  */
 export async function getSupplierStatementEntries(
@@ -577,18 +586,18 @@ export async function getSupplierStatementEntries(
            le."CreditAmount" AS debit,
            le."DebitAmount" AS credit,
            COALESCE(lt."IsReversed", false) AS is_reversed,
-           sp."PaymentMethod" AS payment_method
+           sp."PaymentMethod" AS payment_method,
+           a."AccountCode" AS account_code
          FROM ledger_entries le
          JOIN accounts a ON le."AccountId" = a."Id"
          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
          LEFT JOIN supplier_payments sp
            ON lt."ReferenceType" = 'SUPPLIER_PAYMENT'
            AND sp."PaymentNumber" = lt."ReferenceNumber"
-         WHERE a."AccountCode" = '2100'
+         WHERE a."AccountCode" IN ('2100', '2150')
            AND le."EntityId" = $1
            AND UPPER(le."EntityType") = 'SUPPLIER'
            AND lt."Status" = 'POSTED'
-           AND lt."ReferenceType" NOT IN ('GOODS_RECEIPT', 'SYSTEM_CORRECTION')
            AND le."EntryDate"::date >= $2::date
            AND le."EntryDate"::date <= $3::date
          ORDER BY le."EntryDate" ASC, le."CreatedAt" ASC`,
@@ -600,9 +609,16 @@ export async function getSupplierStatementEntries(
     const debit = toNum(r.debit);
     const credit = toNum(r.credit);
     const type = r.type as string;
-    let itemStatus: 'Open' | 'Applied' | 'Credit Note' | 'Voided';
+    const accountCode = r.account_code as string;
+    let itemStatus: SupplierStatementEntry['itemStatus'];
     if (isReversed) {
       itemStatus = 'Voided';
+    } else if (type === 'GOODS_RECEIPT') {
+      itemStatus = 'Pending Bill';
+    } else if (type === 'RETURN_GRN') {
+      itemStatus = 'Return';
+    } else if (type === 'SYSTEM_CORRECTION' || type === 'CORRECTION') {
+      itemStatus = 'Correction';
     } else if (type === 'SUPPLIER_INVOICE') {
       itemStatus = 'Open';
     } else if (type === 'SUPPLIER_CREDIT_NOTE') {
@@ -624,6 +640,7 @@ export async function getSupplierStatementEntries(
       credit,
       itemStatus,
       paymentMethod: r.payment_method ?? undefined,
+      accountCode,
     };
   });
 }
@@ -642,6 +659,7 @@ export async function getSupplierAging(
        SELECT
          le."EntityId" AS supplier_id,
          lt."Id" AS txn_id,
+         lt."ReferenceNumber" AS reference_number,
          le."EntryDate"::date AS entry_date,
          SUM(le."CreditAmount") - SUM(le."DebitAmount") AS net_amount
        FROM ledger_entries le
@@ -652,7 +670,7 @@ export async function getSupplierAging(
          AND le."EntityId" IS NOT NULL
          AND lt."Status" = 'POSTED'
          AND le."EntryDate"::date <= $1::date
-       GROUP BY le."EntityId", lt."Id", le."EntryDate"::date
+       GROUP BY le."EntityId", lt."Id", lt."ReferenceNumber", le."EntryDate"::date
        HAVING SUM(le."CreditAmount") - SUM(le."DebitAmount") > 0
      ),
      with_supplier AS (
@@ -661,9 +679,15 @@ export async function getSupplierAging(
          s."CompanyName" AS supplier_name,
          apt.txn_id,
          apt.net_amount,
-         ($1::date - apt.entry_date) AS days_overdue
+         -- Age against supplier_invoices.DueDate (SAP baseline / Odoo date_maturity)
+         -- when the AP credit maps to an invoice; fall back to GL EntryDate otherwise.
+         ($1::date - COALESCE(si."DueDate"::date, apt.entry_date)) AS days_overdue
        FROM ap_transactions apt
        JOIN suppliers s ON s."Id" = apt.supplier_id::uuid
+       LEFT JOIN supplier_invoices si
+         ON si."SupplierInvoiceNumber" = apt.reference_number
+        AND si."SupplierId" = apt.supplier_id::uuid
+        AND si.deleted_at IS NULL
      )
      SELECT
        supplier_id,

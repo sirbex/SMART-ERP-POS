@@ -5,10 +5,13 @@
  * Handles invoice creation, payments, aging, and full lifecycle management
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { AxiosError } from 'axios';
-import { Plus, Search, Eye, FileText, DollarSign, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Eye, FileText, DollarSign, AlertTriangle, Printer } from 'lucide-react';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
+import { downloadFile } from '../../utils/download';
 import {
     Button,
     Input,
@@ -17,7 +20,6 @@ import {
     DialogDescription,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
     DialogFooter,
     Label,
     Select,
@@ -77,6 +79,37 @@ const ComprehensiveInvoicesPage: React.FC = () => {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [isViewModalOpen, setIsViewModalOpen] = useState(false);
+    // Invoice PDF export — direct download via downloadFile (no modal needed)
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const createGuardRef = useRef<GuardHandle | null>(null);
+    const paymentGuardRef = useRef<GuardHandle | null>(null);
+    const viewGuardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (isCreateModalOpen) {
+            createGuardRef.current = openGuard({ cancellable: false, label: 'Create invoice' });
+            return () => { if (createGuardRef.current) { closeGuard(createGuardRef.current.id); createGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isCreateModalOpen]);
+
+    useEffect(() => {
+        if (isPaymentModalOpen) {
+            paymentGuardRef.current = openGuard({ cancellable: false, label: 'Record invoice payment' });
+            return () => { if (paymentGuardRef.current) { closeGuard(paymentGuardRef.current.id); paymentGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isPaymentModalOpen]);
+
+    useEffect(() => {
+        if (isViewModalOpen) {
+            viewGuardRef.current = openGuard({ cancellable: true, label: 'View invoice details' });
+            return () => { if (viewGuardRef.current) { closeGuard(viewGuardRef.current.id); viewGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isViewModalOpen]);
 
     const [selectedInvoice, setSelectedInvoice] = useState<ComprehensiveInvoice | null>(null);
 
@@ -400,14 +433,10 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                     <p className="text-gray-600">Create, manage and track customer invoices and payments</p>
                 </div>
 
-                <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-                    <DialogTrigger asChild>
-                        <Button className="flex items-center gap-2">
-                            <Plus className="h-4 w-4" />
-                            Create Invoice
-                        </Button>
-                    </DialogTrigger>
-                </Dialog>
+                <Button className="flex items-center gap-2" onClick={() => setIsCreateModalOpen(true)}>
+                    <Plus className="h-4 w-4" />
+                    Create Invoice
+                </Button>
             </div>
 
             {/* Filters */}
@@ -542,6 +571,16 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                                                     View
                                                 </Button>
 
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => downloadFile(`/documents/INVOICE/${invoice.id}`, `invoice-${invoice.invoiceNumber}.pdf`).catch((err: Error) => alert(`PDF export failed: ${err.message}`))}
+                                                    className="flex items-center gap-1"
+                                                >
+                                                    <Printer className="h-4 w-4" />
+                                                    Print
+                                                </Button>
+
                                                 {parseFloat(invoice.outstandingBalance.toString()) > 0 && invoice.status !== 'CANCELLED' && (
                                                     <Button
                                                         variant="outline"
@@ -650,7 +689,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             </Tabs>
 
             {/* Create Invoice Modal */}
-            <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+            <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen} zIndex={createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Create New Invoice</DialogTitle>
@@ -792,7 +831,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             </Dialog>
 
             {/* Record Payment Modal */}
-            <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
+            <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen} zIndex={paymentGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
                         <DialogTitle>Record Payment</DialogTitle>
@@ -860,7 +899,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             </Dialog>
 
             {/* Invoice Details Modal */}
-            <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen}>
+            <Dialog open={isViewModalOpen} onOpenChange={setIsViewModalOpen} zIndex={viewGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-2xl">
                     <DialogHeader>
                         <DialogTitle>Invoice Details</DialogTitle>
@@ -952,6 +991,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
         </div>
     );
 };

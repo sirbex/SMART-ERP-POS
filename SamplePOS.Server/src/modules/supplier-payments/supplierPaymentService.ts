@@ -13,6 +13,8 @@ import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { AccountingCore } from '../../services/accountingCore.js';
+import { ValidationError } from '../../middleware/errorHandler.js';
+import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -39,6 +41,12 @@ export interface CreateSupplierInvoiceInput {
         quantity: number;
         unitPrice: number;
     }>;
+    /**
+     * GRN ids to link to this invoice via supplier_invoice_grn_links.
+     * When set, also signals to postInvoiceToGL that DR should hit GR/IR Clearing (2150)
+     * via the existing InternalReferenceNumber detection.
+     */
+    grnIds?: string[];
 }
 
 export interface AllocatePaymentInput {
@@ -110,6 +118,41 @@ export async function createSupplierPayment(
             throw new Error('Payment amount must be greater than zero');
         }
 
+        // ── Layer 2: Row-level lock on supplier to serialize concurrent payments ──
+        // Must happen BEFORE any reads/writes so concurrent requests queue up here.
+        const supplierLockResult = await client.query<{
+            Id: string; CompanyName: string; ContactName: string | null;
+            Email: string | null; Phone: string | null;
+        }>(
+            'SELECT "Id", "CompanyName", "ContactName", "Email", "Phone" FROM suppliers WHERE "Id" = $1 FOR UPDATE',
+            [data.supplierId]
+        );
+        if (!supplierLockResult.rows[0]) {
+            throw new ValidationError(`Supplier ${data.supplierId} not found`);
+        }
+        const supplier = supplierLockResult.rows[0];
+
+        // ── Layer 2: If targeting a specific invoice, lock it and re-read outstanding ──
+        // Prevents two payments from both seeing the same outstanding balance.
+        if (data.targetInvoiceId) {
+            const invoiceLedger = await supplierPaymentRepository.lockAndComputeInvoiceOutstanding(
+                client,
+                data.targetInvoiceId
+            );
+            if (!invoiceLedger) {
+                throw new ValidationError(`Invoice ${data.targetInvoiceId} not found or deleted`);
+            }
+            if (invoiceLedger.outstandingBalance.lessThan(0.01)) {
+                throw new ValidationError('Invoice has no outstanding balance — it may have already been paid');
+            }
+            if (paymentAmount.greaterThan(invoiceLedger.outstandingBalance)) {
+                throw new ValidationError(
+                    `Payment amount (${paymentAmount.toFixed(2)}) exceeds invoice outstanding balance ` +
+                    `(${invoiceLedger.outstandingBalance.toFixed(2)})`
+                );
+            }
+        }
+
         // Create the payment record
         const payment = await supplierPaymentRepository.createPayment(client, {
             supplierId: data.supplierId,
@@ -120,16 +163,10 @@ export async function createSupplierPayment(
             notes: data.notes,
         });
 
-        // Get supplier details for receipt
-        const supplierResult = await client.query(
-            'SELECT "CompanyName", "ContactName", "Email", "Phone" FROM suppliers WHERE "Id" = $1',
-            [data.supplierId]
-        );
-        const supplier = supplierResult.rows[0];
-
         // Auto-allocate to outstanding invoices (FIFO by due date)
+        // Use client (not pool) so this read is inside the transaction and sees locked rows.
         let outstandingInvoices = await supplierPaymentRepository.findOutstandingInvoices(
-            pool,
+            client,
             data.supplierId
         );
 
@@ -473,11 +510,20 @@ export async function createSupplierInvoice(
             await supplierPaymentRepository.createInvoiceLineItems(client, invoice.id, mappedLineItems);
         }
 
+        // Link to GRNs (3-way match) so postInvoiceToGL clears GR/IR (2150)
+        if (data.grnIds && data.grnIds.length > 0) {
+            await supplierPaymentRepository.linkInvoiceToGRNs(client, invoice.id, data.grnIds);
+        }
+
         logger.info('Supplier invoice created', {
             invoiceId: invoice.id,
             totalAmount: totalAmount.toNumber(),
             supplierId: data.supplierId,
+            grnIds: data.grnIds,
         });
+
+        // Recalculate supplier outstanding balance after invoice creation
+        await recalcSupplierBalance(client, data.supplierId);
 
         return invoice;
     });
@@ -492,8 +538,129 @@ export async function deleteSupplierInvoice(pool: Pool, id: string) {
         }
 
         const result = await supplierPaymentRepository.deleteInvoice(client, id);
+
+        // Recalculate supplier balance after deletion
+        if (invoice?.supplierId) {
+            await recalcSupplierBalance(client, invoice.supplierId);
+        }
+
         return result;
     });
+}
+
+// ============================================================
+// 3-WAY MATCH: CREATE SUPPLIER INVOICE FROM A GOODS RECEIPT
+// ============================================================
+// One-click "Bill This Receipt" workflow used by the Supplier Liability Workspace.
+//   1. Loads GR header + items
+//   2. Builds line items from received (non-bonus) quantities at GR cost
+//   3. Calls createSupplierInvoice with grnIds=[grnId] and InternalReferenceNumber
+//      set to the GR receipt_number (text link consumed by postInvoiceToGL routing)
+//   4. Calls postInvoiceToGL → DR GR/IR Clearing (2150) / CR Accounts Payable (2100)
+// ============================================================
+
+export interface CreateInvoiceFromGRNInput {
+    grnId: string;
+    /** Supplier-provided invoice number (free text). Defaults to the GR receipt_number. */
+    supplierInvoiceNumber?: string;
+    /** Optional override; defaults to invoice date + 30 days. */
+    dueDate?: string;
+    /** Optional invoice date; defaults to GR received_date. */
+    invoiceDate?: string;
+    notes?: string;
+}
+
+/**
+ * Normalize any date-ish value (Date, ISO string, 'YYYY-MM-DD HH:mm:ss+TZ')
+ * to plain 'YYYY-MM-DD' for downstream Zod schemas / DATE columns.
+ */
+function normalizeToDateOnly(value: string | Date | null | undefined): string {
+    if (!value) return new Date().toISOString().slice(0, 10);
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    const s = String(value).trim();
+    // Already a date-only string
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // Take leading date portion of any ISO/timestamp string
+    const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+    // Last resort: try Date()
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    return new Date().toISOString().slice(0, 10);
+}
+
+export async function createInvoiceFromGRN(
+    pool: Pool,
+    input: CreateInvoiceFromGRNInput,
+    userId?: string,
+) {
+    const grRecord = await goodsReceiptRepository.getGRById(pool, input.grnId);
+    if (!grRecord) {
+        throw new ValidationError(`Goods Receipt ${input.grnId} not found`);
+    }
+    const { gr, items } = grRecord;
+    if (gr.status !== 'COMPLETED') {
+        throw new ValidationError(`Cannot bill GR ${gr.grNumber} — status is ${gr.status}, expected COMPLETED`);
+    }
+
+    const supplierId = (gr as { supplierId?: string }).supplierId;
+    if (!supplierId) {
+        throw new ValidationError(`GR ${gr.grNumber} has no supplier — cannot create invoice`);
+    }
+
+    // Prevent double-billing: refuse if any active invoice already links this GR
+    const existing = await pool.query(
+        `SELECT si."SupplierInvoiceNumber"
+           FROM supplier_invoice_grn_links sigl
+           JOIN supplier_invoices si ON si."Id" = sigl.invoice_id
+          WHERE sigl.grn_id = $1
+            AND si.deleted_at IS NULL
+            AND COALESCE(si."Status", '') NOT IN ('Cancelled', 'CANCELLED', 'Voided', 'VOIDED')
+          LIMIT 1`,
+        [input.grnId],
+    );
+    if (existing.rows.length > 0) {
+        throw new ValidationError(
+            `GR ${gr.grNumber} is already billed under invoice ${existing.rows[0].SupplierInvoiceNumber}`,
+        );
+    }
+
+    // Build line items from received non-bonus items (Decimal.js precision)
+    const lineItems = items
+        .filter((it) => !it.isBonus)
+        .map((it) => ({
+            productName: it.productName || 'Item',
+            description: it.batchNumber ? `Batch ${it.batchNumber}` : undefined,
+            quantity: new Decimal(it.receivedQuantity).toNumber(),
+            unitPrice: new Decimal(it.unitCost).toNumber(),
+        }));
+
+    if (lineItems.length === 0) {
+        throw new ValidationError(`GR ${gr.grNumber} has no billable (non-bonus) items`);
+    }
+
+    const invoiceDate = input.invoiceDate || normalizeToDateOnly(gr.receivedDate as unknown as string | Date);
+    const grNumber = gr.grNumber;
+
+    const created = await createSupplierInvoice(
+        pool,
+        {
+            supplierId,
+            // Use GR number as the internal reference so postInvoiceToGL routes via GR/IR (2150)
+            supplierInvoiceNumber: input.supplierInvoiceNumber || grNumber,
+            invoiceDate,
+            dueDate: input.dueDate,
+            notes: input.notes || `Bill for Goods Receipt ${grNumber}`,
+            lineItems,
+            grnIds: [input.grnId],
+        },
+        userId,
+    );
+
+    // Post immediately so the GR/IR Clearing (2150) is cleared and AP (2100) recognized
+    await postInvoiceToGL(pool, created.id);
+
+    return created;
 }
 
 // ============================================================
@@ -509,6 +676,7 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
             `SELECT si."Id", si."SupplierInvoiceNumber", si."SupplierId",
                     TO_CHAR(si."InvoiceDate", 'YYYY-MM-DD') AS "InvoiceDate",
                     si."TotalAmount", si.is_posted_to_gl, si."Status", si.deleted_at,
+                    si.document_type, si."InternalReferenceNumber",
                     s."CompanyName" AS supplier_name
              FROM supplier_invoices si
              LEFT JOIN suppliers s ON s."Id" = si."SupplierId"
@@ -532,13 +700,35 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
         if (inv.Status === 'Cancelled') {
             throw new Error(`Cannot post a cancelled supplier invoice`);
         }
+        if (inv.document_type === 'SUPPLIER_CREDIT_NOTE' || inv.document_type === 'SUPPLIER_DEBIT_NOTE') {
+            throw new ValidationError(
+                `Cannot post ${inv.SupplierInvoiceNumber} via postInvoiceToGL: ` +
+                `use the credit/debit note module (postNote) for ${inv.document_type} documents.`
+            );
+        }
 
         const totalAmount = new Decimal(inv.TotalAmount).toNumber();
         if (totalAmount <= 0) {
             throw new Error(`Supplier invoice ${inv.SupplierInvoiceNumber} has zero amount — nothing to post`);
         }
 
-        // Post GL: DR GRN/IR Clearing (2150) / CR Accounts Payable (2100)
+        // Determine routing path:
+        //   GR-linked invoice → DR GR/IR Clearing (2150) / CR AP (2100)
+        //   Standalone invoice → DR General Expense (6900) / CR AP (2100)
+        //
+        // An invoice is GR-linked when InternalReferenceNumber points to a
+        // completed GR (starts with "GR-"). Standalone bills (services, ad-hoc
+        // purchases) post to expense — NEVER to Inventory (1300), because no
+        // GR fed the physical batch subledger and routing them to inventory
+        // creates a permanent GL-vs-subledger drift.
+        const grRef = (inv.InternalReferenceNumber || '').trim();
+        const hasGrReference = grRef.startsWith('GR-') &&
+            (await client.query(
+                `SELECT 1 FROM goods_receipts WHERE receipt_number = $1 AND status = 'COMPLETED' LIMIT 1`,
+                [grRef],
+            )).rows.length > 0;
+
+        // Post GL
         await glEntryService.recordSupplierInvoiceToGL(
             {
                 invoiceId: inv.Id,
@@ -547,6 +737,7 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
                 totalAmount,
                 supplierId: inv.SupplierId,
                 supplierName: inv.supplier_name || 'Unknown Supplier',
+                hasGrReference,
             },
             undefined,
             client,
@@ -844,7 +1035,7 @@ export async function massPaymentRun(
                 if (['Cancelled', 'CANCELLED'].includes(ledger.status)) {
                     throw new Error(`Cannot pay a cancelled invoice (${ledger.invoiceNumber})`);
                 }
-                const allocAmount    = new Decimal(alloc.amount);
+                const allocAmount = new Decimal(alloc.amount);
                 const trueOutstanding = ledger.outstandingBalance;
 
                 if (trueOutstanding.lessThanOrEqualTo(0)) {
@@ -930,8 +1121,10 @@ export async function massPaymentRun(
 export interface ImportSupplierOpeningBalanceInput {
     supplierId: string;
     amount: number;
-    asOfDate: string;   // YYYY-MM-DD
+    asOfDate: string;   // YYYY-MM-DD — posting date (cutover)
+    dueDate?: string;   // YYYY-MM-DD — original invoice/baseline date for aging (SAP ZFBDT / Odoo date_maturity). Defaults to asOfDate.
     notes?: string;
+    userId: string;     // performing operator (for audit_log FK)
 }
 
 /**
@@ -989,26 +1182,30 @@ export async function importSupplierOpeningBalance(
         const invoiceNumber = `OB-${String(nextNum).padStart(6, '0')}`;
 
         // Create supplier invoice record (POSTED, no line items needed)
+        // InvoiceDate = asOfDate (posting / cutover date)
+        // DueDate = baseline date for aging — defaults to asOfDate when not supplied
+        const dueDate = data.dueDate ?? data.asOfDate;
         const invoiceResult = await client.query(
             `INSERT INTO supplier_invoices (
                "Id", "SupplierInvoiceNumber", "SupplierId",
                "InvoiceDate", "DueDate",
                "Subtotal", "TaxAmount", "TotalAmount",
                "AmountPaid", "OutstandingBalance",
-               "Status", document_type,
+               "Status", "CurrencyCode", document_type,
                "Notes", "CreatedAt", "UpdatedAt"
              ) VALUES (
                gen_random_uuid(), $1, $2,
-               $3, $3,
-               $4, 0, $4,
-               0, $4,
-               'Pending', 'SUPPLIER_INVOICE',
-               $5, NOW(), NOW()
+               $3, $4,
+               $5, 0, $5,
+               0, $5,
+               'Pending', 'UGX', 'SUPPLIER_INVOICE',
+               $6, NOW(), NOW()
              ) RETURNING "Id", "SupplierInvoiceNumber"`,
             [
                 invoiceNumber,
                 data.supplierId,
                 data.asOfDate,
+                dueDate,
                 amount.toNumber(),
                 data.notes ?? `Opening balance as of ${data.asOfDate}`,
             ]
@@ -1039,9 +1236,9 @@ export async function importSupplierOpeningBalance(
                         entityId: data.supplierId,
                     },
                 ],
-                userId: 'SYSTEM',
+                userId: data.userId,
                 idempotencyKey: `SUPPLIER_OB-${invoice.Id}`,
-                source: 'PURCHASE_BILL',
+                source: 'OPENING_BALANCE_WIZARD',
             },
             pool,
             client

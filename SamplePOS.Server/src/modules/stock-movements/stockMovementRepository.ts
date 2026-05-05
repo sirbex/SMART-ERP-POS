@@ -77,7 +77,21 @@ export async function getMovementsByProduct(
   ]);
 
   const result = await pool.query(
-    `SELECT 
+    `WITH balance_cte AS (
+       SELECT
+         sm.id,
+         SUM(
+           CASE WHEN sm.movement_type IN (
+             'GOODS_RECEIPT','ADJUSTMENT_IN','TRANSFER_IN','RETURN','OPENING_BALANCE','SUPPLIER_RETURN'
+           ) THEN sm.quantity ELSE -sm.quantity END
+         ) OVER (
+           PARTITION BY sm.product_id
+           ORDER BY sm.created_at ASC, sm.id ASC
+         ) AS balance_after
+       FROM stock_movements sm
+       WHERE sm.product_id = $1
+     )
+     SELECT
        sm.id,
        sm.movement_number AS "movementNumber",
        sm.product_id AS "productId",
@@ -91,12 +105,27 @@ export async function getMovementsByProduct(
        sm.created_by_id AS "createdById",
        sm.created_at AS "createdAt",
        p.name AS "productName",
-       b.batch_number AS "batchNumber"
+       p.category AS "productCategory",
+       COALESCE(def_u.symbol, 'PCS') AS "productUom",
+       b.batch_number AS "batchNumber",
+       s.sale_number AS "saleNumber",
+       gr.receipt_number AS "grNumber",
+       sup."CompanyName" AS "supplierName",
+       u.full_name AS "userName",
+       bc.balance_after AS "balanceAfter"
      FROM stock_movements sm
      JOIN products p ON sm.product_id = p.id
      LEFT JOIN inventory_batches b ON sm.batch_id = b.id
+     LEFT JOIN sales s ON sm.reference_type = 'SALE' AND sm.reference_id = s.id
+     LEFT JOIN goods_receipts gr ON sm.reference_type = 'GOODS_RECEIPT' AND sm.reference_id = gr.id
+     LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
+     LEFT JOIN suppliers sup ON po.supplier_id = sup."Id"
+     LEFT JOIN product_uoms def_uom ON def_uom.product_id = p.id AND def_uom.is_default = true
+     LEFT JOIN uoms def_u ON def_uom.uom_id = def_u.id
+     LEFT JOIN users u ON sm.created_by_id = u.id
+     JOIN balance_cte bc ON bc.id = sm.id
      WHERE sm.product_id = $1
-     ORDER BY sm.created_at DESC
+     ORDER BY sm.created_at DESC, sm.id DESC
      LIMIT $2 OFFSET $3`,
     [productId, limit, offset]
   );
@@ -123,7 +152,21 @@ export async function getMovementsByBatch(
   ]);
 
   const result = await pool.query(
-    `SELECT 
+    `WITH balance_cte AS (
+       SELECT
+         sm.id,
+         SUM(
+           CASE WHEN sm.movement_type IN (
+             'GOODS_RECEIPT','ADJUSTMENT_IN','TRANSFER_IN','RETURN','OPENING_BALANCE','SUPPLIER_RETURN'
+           ) THEN sm.quantity ELSE -sm.quantity END
+         ) OVER (
+           PARTITION BY sm.product_id
+           ORDER BY sm.created_at ASC, sm.id ASC
+         ) AS balance_after
+       FROM stock_movements sm
+       WHERE sm.batch_id = $1
+     )
+     SELECT
        sm.id,
        sm.movement_number AS "movementNumber",
        sm.product_id AS "productId",
@@ -137,12 +180,27 @@ export async function getMovementsByBatch(
        sm.created_by_id AS "createdById",
        sm.created_at AS "createdAt",
        p.name AS "productName",
-       b.batch_number AS "batchNumber"
+       p.category AS "productCategory",
+       COALESCE(def_u.symbol, 'PCS') AS "productUom",
+       b.batch_number AS "batchNumber",
+       s.sale_number AS "saleNumber",
+       gr.receipt_number AS "grNumber",
+       sup."CompanyName" AS "supplierName",
+       u.full_name AS "userName",
+       bc.balance_after AS "balanceAfter"
      FROM stock_movements sm
      JOIN products p ON sm.product_id = p.id
      LEFT JOIN inventory_batches b ON sm.batch_id = b.id
+     LEFT JOIN sales s ON sm.reference_type = 'SALE' AND sm.reference_id = s.id
+     LEFT JOIN goods_receipts gr ON sm.reference_type = 'GOODS_RECEIPT' AND sm.reference_id = gr.id
+     LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
+     LEFT JOIN suppliers sup ON po.supplier_id = sup."Id"
+     LEFT JOIN product_uoms def_uom ON def_uom.product_id = p.id AND def_uom.is_default = true
+     LEFT JOIN uoms def_u ON def_uom.uom_id = def_u.id
+     LEFT JOIN users u ON sm.created_by_id = u.id
+     JOIN balance_cte bc ON bc.id = sm.id
      WHERE sm.batch_id = $1
-     ORDER BY sm.created_at DESC
+     ORDER BY sm.created_at DESC, sm.id DESC
      LIMIT $2 OFFSET $3`,
     [batchId, limit, offset]
   );
@@ -220,7 +278,7 @@ export async function getAllMovements(
          sm.id,
          SUM(
            CASE WHEN sm.movement_type IN (
-             'GOODS_RECEIPT','ADJUSTMENT_IN','TRANSFER_IN','RETURN','OPENING_BALANCE'
+             'GOODS_RECEIPT','ADJUSTMENT_IN','TRANSFER_IN','RETURN','OPENING_BALANCE','SUPPLIER_RETURN'
            ) THEN sm.quantity ELSE -sm.quantity END
          ) OVER (
            PARTITION BY sm.product_id

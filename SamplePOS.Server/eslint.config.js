@@ -30,6 +30,33 @@ export default defineConfig([
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
       'no-console': ['warn', { allow: ['warn', 'error'] }],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'pdfkit',
+              message:
+                'PDFKit is only allowed inside src/modules/documents/. Use DocumentRenderer.render() everywhere else.',
+            },
+            {
+              name: 'jspdf',
+              message: 'jsPDF is forbidden on the backend. Use DocumentRenderer.render().',
+            },
+            {
+              name: 'jspdf-autotable',
+              message: 'jspdf-autotable is forbidden on the backend. Use DocumentRenderer.render().',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // Allow pdfkit inside the centralized documents module
+  {
+    files: ['src/modules/documents/**/*.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
 ]);

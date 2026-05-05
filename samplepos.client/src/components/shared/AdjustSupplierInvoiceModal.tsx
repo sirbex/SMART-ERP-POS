@@ -8,7 +8,7 @@
  *   Step 3 — Review & confirm
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -21,6 +21,8 @@ import {
     Input,
 } from '../ui/temp-ui-components';
 import { formatCurrency } from '../../utils/currency';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { toast } from 'react-hot-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -59,6 +61,21 @@ function safeNum(v: string): number {
 
 export function AdjustSupplierInvoiceModal({ open, onClose, invoiceId, invoiceNumber }: Props) {
     const queryClient = useQueryClient();
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const guardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (open) {
+            guardRef.current = openGuard({ cancellable: false, label: `Adjust invoice ${invoiceNumber ?? invoiceId.slice(0, 8)}` });
+            return () => {
+                if (guardRef.current) {
+                    closeGuard(guardRef.current.id);
+                    guardRef.current = null;
+                }
+            };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -261,7 +278,7 @@ export function AdjustSupplierInvoiceModal({ open, onClose, invoiceId, invoiceNu
     const maxCorrectionAmount = context?.invoice.outstandingBalance ?? 0;
 
     return (
-        <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+        <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }} zIndex={guardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Adjust Invoice {invoiceNumber ?? invoiceId.slice(0, 8)}</DialogTitle>

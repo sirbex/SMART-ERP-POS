@@ -8,7 +8,7 @@
  * - Other: Miscellaneous cash movements
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -16,7 +16,9 @@ import {
     DialogTitle,
     DialogDescription,
     DialogFooter,
-} from '../ui/dialog';
+} from '../ui/temp-ui-components';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -96,6 +98,17 @@ export function CashMovementDialog({
 
     const recordMovement = useRecordMovement();
 
+    // ── Transaction Guard ──────────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const guardRef = useRef<GuardHandle | null>(null);
+    useEffect(() => {
+        if (open) {
+            guardRef.current = openGuard({ cancellable: false, label: 'Record cash movement' });
+            return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
     const isCashIn = type === 'CASH_IN';
     const subTypes = isCashIn ? cashInSubTypes : cashOutSubTypes;
 
@@ -142,7 +155,7 @@ export function CashMovementDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={onOpenChange} zIndex={guardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">

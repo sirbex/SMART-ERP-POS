@@ -8,7 +8,9 @@ export const invoiceRoutes = Router();
 // List / Get
 invoiceRoutes.get('/', authenticate, invoiceController.listInvoices);
 invoiceRoutes.get('/:id', authenticate, invoiceController.getInvoice);
-invoiceRoutes.get('/:id/export.pdf', authenticate, invoiceController.exportInvoicePdf);
+invoiceRoutes.get('/:id/export.pdf', authenticate, (req, res) =>
+  res.redirect(307, `/api/documents/INVOICE/${req.params.id}`)
+);
 
 // Create invoice - requires accounting.create permission
 invoiceRoutes.post('/', authenticate, requirePermission('accounting.create'), invoiceController.createInvoice);

@@ -28,14 +28,14 @@ const MOVEMENT_TYPES = {
   ADJUSTMENT_OUT: { label: 'Adjustment Out', color: 'bg-orange-100 text-orange-800', icon: '⚖️', sign: '-' },
   TRANSFER_IN: { label: 'Transfer In', color: 'bg-purple-100 text-purple-800', icon: '🔄', sign: '+' },
   TRANSFER_OUT: { label: 'Transfer Out', color: 'bg-pink-100 text-pink-800', icon: '🔄', sign: '-' },
-  RETURN: { label: 'Return', color: 'bg-indigo-100 text-indigo-800', icon: '↩️', sign: '+' },
+  RETURN: { label: 'Customer Return', color: 'bg-indigo-100 text-indigo-800', icon: '↩️', sign: '+' },
+  SUPPLIER_RETURN: { label: 'Supplier Return', color: 'bg-rose-100 text-rose-800', icon: '↩️', sign: '-' },
   DAMAGE: { label: 'Damage', color: 'bg-red-100 text-red-800', icon: '⚠️', sign: '-' },
   EXPIRY: { label: 'Expiry', color: 'bg-gray-100 text-gray-800', icon: '⏰', sign: '-' },
   OPENING_BALANCE: { label: 'Opening Balance', color: 'bg-cyan-100 text-cyan-800', icon: '📋', sign: '+' },
 } as const;
 
 type MovementType = keyof typeof MOVEMENT_TYPES;
-
 
 
 // Row shape returned by the stock movements API
@@ -632,7 +632,7 @@ export default function StockMovementsPage() {
 
                   const quantity = new Decimal(movement.quantity || 0);
                   const unitCost = new Decimal(movement.unitCost || 0);
-                  const totalValue = quantity.times(unitCost);
+                  const totalValue = quantity.abs().times(unitCost);
 
                   return (
                     <tr key={movement.id} className="hover:bg-gray-50">
@@ -687,7 +687,7 @@ export default function StockMovementsPage() {
                       <td className="px-4 py-4 whitespace-nowrap text-right">
                         <div className={`text-sm font-medium ${movementConfig.sign === '+' ? 'text-green-600' : 'text-red-600'
                           }`}>
-                          {movementConfig.sign}{quantity.toFixed(2)}
+                          {movementConfig.sign}{quantity.abs().toFixed(2)}
                         </div>
                         <div className="text-xs text-gray-500">
                           {movement.productUom || product?.unitOfMeasure || 'PCS'}
@@ -728,7 +728,9 @@ export default function StockMovementsPage() {
                               ? movement.saleNumber
                               : movement.referenceType === 'GOODS_RECEIPT' && movement.grNumber
                                 ? movement.grNumber
-                                : `${movement.referenceType}-${movement.referenceId}`}
+                                : movement.referenceType
+                                  ? movement.referenceType.replace(/_/g, ' ')
+                                  : '-'}
                           </div>
                         ) : (
                           <div className="text-sm text-gray-400">-</div>

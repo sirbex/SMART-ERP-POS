@@ -4,12 +4,14 @@
  * Displays bank transactions with filtering, manual entry, and transfers.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Plus, ArrowUpRight, ArrowDownLeft, ArrowLeftRight, Search, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/temp-ui-components';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -72,6 +74,36 @@ export const BankTransactionsTab: React.FC = () => {
     const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
     const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
     const [isReverseModalOpen, setIsReverseModalOpen] = useState(false);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const transactionGuardRef = useRef<GuardHandle | null>(null);
+    const transferGuardRef = useRef<GuardHandle | null>(null);
+    const reverseGuardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (isTransactionModalOpen) {
+            transactionGuardRef.current = openGuard({ cancellable: false, label: 'Add bank transaction' });
+            return () => { if (transactionGuardRef.current) { closeGuard(transactionGuardRef.current.id); transactionGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isTransactionModalOpen]);
+
+    useEffect(() => {
+        if (isTransferModalOpen) {
+            transferGuardRef.current = openGuard({ cancellable: false, label: 'Bank transfer' });
+            return () => { if (transferGuardRef.current) { closeGuard(transferGuardRef.current.id); transferGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isTransferModalOpen]);
+
+    useEffect(() => {
+        if (isReverseModalOpen) {
+            reverseGuardRef.current = openGuard({ cancellable: false, label: 'Reverse bank transaction' });
+            return () => { if (reverseGuardRef.current) { closeGuard(reverseGuardRef.current.id); reverseGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isReverseModalOpen]);
     const [selectedTransaction, setSelectedTransaction] = useState<BankTransaction | null>(null);
     const [reverseReason, setReverseReason] = useState('');
 
@@ -346,7 +378,7 @@ export const BankTransactionsTab: React.FC = () => {
             </CardContent>
 
             {/* Add Transaction Modal */}
-            <Dialog open={isTransactionModalOpen} onOpenChange={setIsTransactionModalOpen}>
+            <Dialog open={isTransactionModalOpen} onOpenChange={setIsTransactionModalOpen} zIndex={transactionGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle>Add Transaction</DialogTitle>
@@ -469,7 +501,7 @@ export const BankTransactionsTab: React.FC = () => {
             </Dialog>
 
             {/* Transfer Modal */}
-            <Dialog open={isTransferModalOpen} onOpenChange={setIsTransferModalOpen}>
+            <Dialog open={isTransferModalOpen} onOpenChange={setIsTransferModalOpen} zIndex={transferGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle>Bank Transfer</DialogTitle>
@@ -566,7 +598,7 @@ export const BankTransactionsTab: React.FC = () => {
             </Dialog>
 
             {/* Reverse Transaction Modal */}
-            <Dialog open={isReverseModalOpen} onOpenChange={setIsReverseModalOpen}>
+            <Dialog open={isReverseModalOpen} onOpenChange={setIsReverseModalOpen} zIndex={reverseGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
                         <DialogTitle>Reverse Transaction</DialogTitle>

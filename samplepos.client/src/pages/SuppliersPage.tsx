@@ -1,7 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
 import Decimal from 'decimal.js';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import Layout from '../components/Layout';
 import {
   useSuppliers,
@@ -15,6 +13,7 @@ import { api } from '../services/api';
 import { handleApiError } from '../utils/errorHandler';
 import { downloadFile } from '../utils/download';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
+import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -975,6 +974,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   const [loadingInvoiceDetails, setLoadingInvoiceDetails] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState<string | null>(null);
   const [loadingTab, setLoadingTab] = useState<string | null>(null);
+  const [expandedPOId, setExpandedPOId] = useState<string | null>(null);
 
   // Ledger state
   const defaultEnd = new Date().toLocaleDateString('en-CA');
@@ -1291,91 +1291,17 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     URL.revokeObjectURL(url);
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = (): void => {
     if (!ledger) return;
-    const filteredEntries = ledger.entries.filter(
-      (e) => ledgerFilter === 'all' || e.itemStatus === ledgerFilter,
-    );
-    const fmt = (n: number) =>
-      n.toLocaleString('en-UG', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-
-    // Header
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Supplier Ledger Statement', 14, 16);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(80, 80, 80);
-    doc.text(`${ledger.supplierName}   |   Period: ${ledger.periodStart} to ${ledger.periodEnd}`, 14, 22);
-    doc.setTextColor(0, 0, 0);
-
-    // Opening balance row + transaction rows
-    const openingRow = [ledger.periodStart, '—', 'Opening Balance', '—', '—', '', '', fmt(ledger.openingBalance), ''];
-    const dataRows = filteredEntries.map((e) => [
-      e.date,
-      e.docNumber || '—',
-      (e.type || '').replace(/_/g, ' '),
-      e.reference || '—',
-      e.description || '—',
-      e.debit > 0 ? fmt(e.debit) : '',
-      e.credit > 0 ? fmt(e.credit) : '',
-      fmt(e.balanceAfter),
-      e.itemStatus + (e.paymentMethod ? ` (${e.paymentMethod.replace(/_/g, ' ')})` : ''),
-    ]);
-
-    autoTable(doc, {
-      startY: 27,
-      head: [['Date', 'Doc No', 'Type', 'Reference', 'Description', 'Debit', 'Credit', 'Balance', 'Status']],
-      body: [openingRow, ...dataRows],
-      styles: { fontSize: 7.5, cellPadding: 1.8, overflow: 'ellipsize' },
-      headStyles: { fillColor: [243, 244, 246], textColor: [30, 30, 30], fontStyle: 'bold', fontSize: 7 },
-      columnStyles: {
-        0: { cellWidth: 20 },
-        1: { cellWidth: 24, font: 'courier' },
-        2: { cellWidth: 28 },
-        3: { cellWidth: 22 },
-        4: { cellWidth: 'auto' },
-        5: { cellWidth: 22, halign: 'right', textColor: [185, 28, 28] },
-        6: { cellWidth: 22, halign: 'right', textColor: [21, 128, 61] },
-        7: { cellWidth: 24, halign: 'right', textColor: [29, 78, 216] },
-        8: { cellWidth: 28 },
-      },
-      didParseCell: (data) => {
-        // Highlight opening balance row
-        if (data.row.index === 0) {
-          data.cell.styles.fillColor = [254, 252, 232];
-          data.cell.styles.fontStyle = 'italic';
-        }
-      },
-    });
-
-    // Summary footer
-    const finalY = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
-    const totalDebits = ledger.entries.reduce((s, e) => s + e.debit, 0);
-    const totalCredits = ledger.entries.reduce((s, e) => s + e.credit, 0);
-    const summaryItems = [
-      ['Opening Balance', fmt(ledger.openingBalance)],
-      ['Total Invoiced', fmt(totalDebits)],
-      ['Total Paid / Returned', fmt(totalCredits)],
-      ['Closing Balance', fmt(ledger.closingBalance)],
-    ];
-    let x = 14;
-    summaryItems.forEach(([label, value]) => {
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(100, 100, 100);
-      doc.text(label, x, finalY);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(0, 0, 0);
-      doc.text(value, x, finalY + 5);
-      x += 55;
-    });
-
-    const filename = `supplier-ledger-${ledger.supplierName.replace(/[^a-z0-9]/gi, '-').toLowerCase()}-${ledger.periodStart}-${ledger.periodEnd}.pdf`;
-    doc.save(filename);
+    const supplierSlug = ledger.supplierName.replace(/\s+/g, '-');
+    const dateSuffix = `${ledgerStartDate || 'start'}-${ledgerEndDate || 'end'}`;
+    const qs = new URLSearchParams();
+    if (ledgerStartDate) qs.set('startDate', ledgerStartDate);
+    if (ledgerEndDate) qs.set('endDate', ledgerEndDate);
+    downloadFile(
+      `/documents/SUPPLIER_STATEMENT/${supplier.id}?${qs.toString()}`,
+      `supplier-statement-${supplierSlug}-${dateSuffix}.pdf`,
+    ).catch((err: Error) => alert(`PDF export failed: ${err.message}`));
   };
 
   const openPayModal = (inv: SupplierInvoiceSummary) => {
@@ -1696,45 +1622,56 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                   <div className="text-gray-600">Loading orders...</div>
                 </div>
               ) : orders.length > 0 ? (
-                <div className="space-y-3">
-                  {orders.map((order: SupplierOrder) => (
-                    <div
-                      key={order.id}
-                      className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50"
-                    >
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <div className="font-semibold text-blue-600">{order.poNumber}</div>
-                          <div className="text-sm text-gray-600">
-                            {formatDisplayDate(order.orderDate)}
-                          </div>
-                        </div>
-                        <span
-                          className={`px-3 py-1 text-xs font-semibold rounded-full ${order.status === 'COMPLETED'
-                            ? 'bg-green-100 text-green-800'
-                            : order.status === 'PENDING'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-gray-100 text-gray-800'
-                            }`}
+                <div className="space-y-2">
+                  {orders.map((order: SupplierOrder) => {
+                    const isExpanded = expandedPOId === order.id;
+                    return (
+                      <div key={order.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                        <div
+                          className="p-4 cursor-pointer hover:bg-gray-50 transition-colors select-none"
+                          onClick={() => setExpandedPOId(isExpanded ? null : order.id)}
                         >
-                          {order.status}
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <div className="text-sm text-gray-600">
-                          {order.expectedDelivery && (
-                            <>Expected: {formatDisplayDate(order.expectedDelivery)}</>
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-gray-400 text-xs w-3">{isExpanded ? '▼' : '▶'}</span>
+                              <div>
+                                <div className="font-semibold text-blue-600">{order.poNumber}</div>
+                                <div className="text-sm text-gray-600">{formatDisplayDate(order.orderDate)}</div>
+                              </div>
+                            </div>
+                            <span
+                              className={`px-3 py-1 text-xs font-semibold rounded-full ${order.status === 'COMPLETED'
+                                ? 'bg-green-100 text-green-800'
+                                : order.status === 'PENDING'
+                                  ? 'bg-yellow-100 text-yellow-800'
+                                  : 'bg-gray-100 text-gray-800'
+                                }`}
+                            >
+                              {order.status}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center pl-5">
+                            <div className="text-sm text-gray-600">
+                              {order.expectedDelivery && (
+                                <>Expected: {formatDisplayDate(order.expectedDelivery)}</>
+                              )}
+                            </div>
+                            <div className="text-lg font-bold text-gray-900">
+                              {formatCurrency(order.totalAmount)}
+                            </div>
+                          </div>
+                          {order.notes && (
+                            <div className="mt-2 text-xs text-gray-500 pl-5">{order.notes}</div>
                           )}
                         </div>
-                        <div className="text-lg font-bold text-gray-900">
-                          {formatCurrency(order.totalAmount)}
-                        </div>
+                        {isExpanded && (
+                          <div className="border-t border-gray-200 bg-gray-50 px-4 py-3">
+                            <SupplierPOItemsInline poId={order.id} />
+                          </div>
+                        )}
                       </div>
-                      {order.notes && (
-                        <div className="mt-2 text-xs text-gray-500">{order.notes}</div>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-12 text-gray-500">No purchase orders yet</div>

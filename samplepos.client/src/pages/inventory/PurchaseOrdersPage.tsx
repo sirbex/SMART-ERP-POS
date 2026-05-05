@@ -19,10 +19,11 @@ import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import Decimal from 'decimal.js';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 
 import { DatePicker } from '../../components/ui/date-picker';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { downloadFile } from '../../utils/download';
 import type { Supplier } from '../../types';
 import {
   SupplierSelector,
@@ -334,6 +335,16 @@ interface CreatePOModalProps {
 
 function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModalProps) {
   const { user } = useAuth();
+
+  // ── Transaction Guard ──────────────────────────────────────────────────
+  const { openGuard: openCreateGuard, closeGuard: closeCreateGuard } = useTransactionGuard();
+  const createGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    createGuardRef.current = openCreateGuard({ cancellable: false, label: 'Create purchase order' });
+    return () => { if (createGuardRef.current) { closeCreateGuard(createGuardRef.current.id); createGuardRef.current = null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [supplierId, setSupplierId] = useState('');
   const [expectedDelivery, setExpectedDelivery] = useState('');
   const [notes, setNotes] = useState('');
@@ -619,7 +630,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   });
 
   return (
-    <ModalContainer>
+    <ModalContainer zIndex={createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
       <ModalHeader
         title="Create Purchase Order"
         description="ERP-grade procurement — search, add, Tab through. Ctrl+Enter to submit."
@@ -821,6 +832,16 @@ interface EditPOModalProps {
 
 function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
   const supplierId = po.supplierId || '';
+
+  // ── Transaction Guard ──────────────────────────────────────────────────
+  const { openGuard: openEditGuard, closeGuard: closeEditGuard } = useTransactionGuard();
+  const editGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    editGuardRef.current = openEditGuard({ cancellable: false, label: 'Edit purchase order' });
+    return () => { if (editGuardRef.current) { closeEditGuard(editGuardRef.current.id); editGuardRef.current = null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const [expectedDelivery, setExpectedDelivery] = useState(po.expectedDelivery || po.expected_delivery_date || '');
   const [notes, setNotes] = useState(po.notes || '');
   const [lineItems, setLineItems] = useState<POLineItem[]>(() => {
@@ -1057,7 +1078,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
   });
 
   return (
-    <ModalContainer>
+    <ModalContainer zIndex={editGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
       <ModalHeader
         title={`Edit Purchase Order — ${po.poNumber || po.order_number}`}
         description="Edit draft PO — modify header, add/remove items. Ctrl+Enter to save."
@@ -1166,6 +1187,17 @@ export default function PurchaseOrdersPage() {
   const [selectedPO, setSelectedPO] = useState<PORow | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [editingPO, setEditingPO] = useState<PORow | null>(null);
+
+  // ── Transaction Guard for Details overlay ──────────────────────────────────
+  const { openGuard: openDetailsGuard, closeGuard: closeDetailsGuard } = useTransactionGuard();
+  const detailsGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (showDetailsModal) {
+      detailsGuardRef.current = openDetailsGuard({ cancellable: true, label: 'View purchase order' });
+      return () => { if (detailsGuardRef.current) { closeDetailsGuard(detailsGuardRef.current.id); detailsGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDetailsModal]);
   const [selectedStatus, setSelectedStatus] = useState<POStatus | 'ALL'>('ALL');
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [page, setPage] = useState(1);
@@ -1416,140 +1448,13 @@ export default function PurchaseOrdersPage() {
     }
   };
 
-  // Export Purchase Order to PDF
-  const handleExportPDF = (po: PORow | null) => {
+  // Export Purchase Order to PDF — direct authenticated download (same pattern as Customer statement)
+  const handleExportPDF = (po: PORow | null): void => {
     if (!po) return;
-
-    const doc = new jsPDF();
-    // Use shared formatCurrency for PDF — consistent UGX formatting
-    const formatCurrencyPDF = (amount: number) => formatCurrency(amount, true, 2);
-
-    // Title
-    doc.setFontSize(20);
-    doc.setFont('helvetica', 'bold');
-    doc.text('PURCHASE ORDER', 105, 20, { align: 'center' });
-
-    // PO Number
-    doc.setFontSize(14);
-    doc.setFont('helvetica', 'normal');
-    doc.text(po.poNumber || 'N/A', 105, 30, { align: 'center' });
-
-    // Status Badge
-    doc.setFontSize(10);
-    const statusLabel = PO_STATUSES[po.status as POStatus]?.label || po.status;
-    doc.text(`Status: ${statusLabel}`, 105, 38, { align: 'center' });
-
-    // Line separator
-    doc.setDrawColor(200, 200, 200);
-    doc.line(15, 45, 195, 45);
-
-    let yPos = 55;
-
-    // Supplier Information
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('SUPPLIER', 15, yPos);
-    yPos += 7;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(po.supplierName || 'N/A', 15, yPos);
-    if (po.supplierContact) {
-      yPos += 5;
-      doc.text(`Contact: ${po.supplierContact}`, 15, yPos);
-    }
-
-    // Order Details (right side)
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('ORDER DETAILS', 110, 55);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Order Date: ${formatDate(po.orderDate)}`, 110, 62);
-    doc.text(`Expected Delivery: ${formatDate(po.expectedDelivery)}`, 110, 69);
-
-    yPos = Math.max(yPos + 15, 85);
-
-    // Notes if present
-    if (po.notes) {
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Notes:', 15, yPos);
-      doc.setFont('helvetica', 'normal');
-      const splitNotes = doc.splitTextToSize(po.notes, 180);
-      doc.text(splitNotes, 15, yPos + 5);
-      yPos += 5 + splitNotes.length * 5 + 10;
-    }
-
-    // Line Items Table
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('LINE ITEMS', 15, yPos);
-    yPos += 5;
-
-    if (po.items && po.items.length > 0) {
-      const itemTableData = po.items.map((item: POItemRow) => {
-        const quantity = new Decimal(item.quantity || 0);
-        const unitCost = new Decimal(item.unitCost || 0);
-        const total = quantity.times(unitCost);
-
-        return [
-          item.productName || 'N/A',
-          quantity.toString(),
-          item.uomName || item.uom_name || 'Base UoM',
-          formatCurrencyPDF(unitCost.toNumber()),
-          formatCurrencyPDF(total.toNumber()),
-        ];
-      });
-
-      autoTable(doc, {
-        startY: yPos,
-        head: [['Product', 'Quantity', 'UOM', 'Unit Cost', 'Total']],
-        body: itemTableData,
-        styles: { fontSize: 9, cellPadding: 3 },
-        headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold' },
-        columnStyles: {
-          0: { cellWidth: 60 },
-          1: { cellWidth: 25, halign: 'right' },
-          2: { cellWidth: 30 },
-          3: { cellWidth: 35, halign: 'right' },
-          4: { cellWidth: 35, halign: 'right' },
-        },
-        margin: { left: 15, right: 15 },
-      });
-
-      yPos = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
-    } else {
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'italic');
-      doc.text('No line items', 15, yPos + 5);
-      yPos += 15;
-    }
-
-    // Total Amount
-    doc.setDrawColor(200, 200, 200);
-    doc.line(120, yPos, 195, yPos);
-    yPos += 8;
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'bold');
-    doc.text('TOTAL AMOUNT:', 120, yPos);
-    doc.text(formatCurrencyPDF(new Decimal(po.totalAmount || 0).toNumber()), 195, yPos, {
-      align: 'right',
+    const poNumber = (po as unknown as Record<string, unknown>).order_number as string || po.poNumber || po.id;
+    downloadFile(`/documents/PURCHASE_ORDER/${po.id}`, `po-${poNumber}.pdf`).catch((err: Error) => {
+      alert(`PDF export failed: ${err.message}`);
     });
-
-    // Footer
-    yPos += 20;
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(128, 128, 128);
-    doc.text(`Generated on ${new Date().toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE })}`, 15, yPos);
-    doc.text(
-      `Created: ${formatDate(po.createdAt)} | Updated: ${formatDate(po.updatedAt)}`,
-      15,
-      yPos + 5
-    );
-
-    // Save PDF
-    doc.save(`PurchaseOrder_${po.poNumber || 'Unknown'}.pdf`);
   };
 
   // Loading state
@@ -1992,7 +1897,8 @@ export default function PurchaseOrdersPage() {
       {/* Details Modal */}
       {showDetailsModal && selectedPO && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4"
+          style={{ zIndex: detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
           onClick={() => setShowDetailsModal(false)}
         >
           <div
@@ -2183,6 +2089,7 @@ export default function PurchaseOrdersPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

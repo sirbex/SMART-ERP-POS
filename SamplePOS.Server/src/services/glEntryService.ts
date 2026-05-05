@@ -859,6 +859,11 @@ export interface SupplierInvoiceGLData {
   totalAmount: number;
   supplierId: string;
   supplierName: string;
+  /**
+   * true  → GR-linked invoice: DR GR/IR Clearing (2150) / CR AP (2100)
+   * false → Standalone invoice (no GR): DR Inventory (1300) / CR AP (2100)
+   */
+  hasGrReference: boolean;
 }
 
 export interface ReturnGrnGLData {
@@ -919,19 +924,45 @@ export async function recordReturnGrnToGL(
 }
 
 // =============================================================================
-// SUPPLIER INVOICE (BILL) GL POSTING — 3-WAY MATCH CLEARING
+// SUPPLIER INVOICE (BILL) GL POSTING — TWO PATHS
 // =============================================================================
-// Posted when the user confirms a Supplier Invoice (Bill) against received GRNs.
-//   DR GRN/IR Clearing (2150) — clears the outstanding GRN clearing balance
-//   CR Accounts Payable (2100) — creates the formal AP liability to supplier
 //
-// This is the ONLY way AP (2100) should be credited in the procure-to-pay cycle.
+// PATH A — GR-linked invoice (3-way match, standard procurement):
+//   DR GRN/IR Clearing (2150) — clears the outstanding GRN clearing balance
+//   CR Accounts Payable (2100)
+//
+// PATH B — Standalone invoice (no GR in system, e.g. service bills, ad-hoc):
+//   DR General Expense (6900) — service/expense recognition (NEVER 1300 Inventory,
+//     because no GR ever increased the physical batch subledger; routing such
+//     bills to 1300 corrupts the inventory-vs-GL reconciliation).
+//   CR Accounts Payable (2100)
+//
+// Rule: only invoices whose InternalReferenceNumber matches a completed GR
+// should go through GR/IR Clearing. Standalone bills go to expense, not inventory.
+// Routing is done by the caller (postInvoiceToGL) based on hasGrReference.
 // =============================================================================
 export async function recordSupplierInvoiceToGL(
   data: SupplierInvoiceGLData,
   pool?: pg.Pool,
   txClient?: pg.PoolClient,
 ): Promise<void> {
+  // PATH A: GR-linked → DR GR/IR Clearing / CR AP
+  // PATH B: Standalone → DR General Expense / CR AP (NEVER Inventory)
+  const debitAccountCode = data.hasGrReference
+    ? AccountCodes.GRIR_CLEARING
+    : AccountCodes.GENERAL_EXPENSE;
+  const debitDescription = data.hasGrReference
+    ? `Clear GRN/IR — Invoice ${data.invoiceNumber}`
+    : `Expense (no GR) — Invoice ${data.invoiceNumber}`;
+  const path = data.hasGrReference ? 'GR-linked (GRIR → AP)' : 'standalone (Expense → AP)';
+  if (!data.hasGrReference) {
+    logger.warn('Supplier invoice posted as standalone expense — no GR reference found', {
+      invoiceId: data.invoiceId,
+      invoiceNumber: data.invoiceNumber,
+      amount: data.totalAmount,
+    });
+  }
+
   try {
     await AccountingCore.createJournalEntry({
       entryDate: data.invoiceDate,
@@ -941,8 +972,8 @@ export async function recordSupplierInvoiceToGL(
       referenceNumber: data.invoiceNumber,
       lines: [
         {
-          accountCode: AccountCodes.GRIR_CLEARING,
-          description: `Clear GRN/IR — Invoice ${data.invoiceNumber}`,
+          accountCode: debitAccountCode,
+          description: debitDescription,
           debitAmount: data.totalAmount,
           creditAmount: 0,
           entityType: 'supplier',
@@ -962,10 +993,11 @@ export async function recordSupplierInvoiceToGL(
       source: 'PURCHASE_BILL' as const,
     }, pool, txClient);
 
-    logger.info('Recorded supplier invoice to GL (GRIR → AP)', {
+    logger.info(`Recorded supplier invoice to GL (${path})`, {
       invoiceId: data.invoiceId,
       invoiceNumber: data.invoiceNumber,
       amount: data.totalAmount,
+      hasGrReference: data.hasGrReference,
     });
   } catch (error: unknown) {
     logger.error('Failed to record supplier invoice to GL', { error, data });

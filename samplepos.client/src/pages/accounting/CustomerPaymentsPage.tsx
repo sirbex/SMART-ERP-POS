@@ -5,7 +5,9 @@
  * Works with existing customer and invoice system
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { AxiosError } from 'axios';
 import { Plus, Search, DollarSign, FileText, ArrowUpRight } from 'lucide-react';
 import {
@@ -16,7 +18,6 @@ import {
     DialogDescription,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
     DialogFooter,
     Label,
     Select,
@@ -53,6 +54,27 @@ const CustomerPaymentsPage: React.FC = () => {
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isAllocationModalOpen, setIsAllocationModalOpen] = useState(false);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const createGuardRef = useRef<GuardHandle | null>(null);
+    const allocationGuardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (isCreateModalOpen) {
+            createGuardRef.current = openGuard({ cancellable: false, label: 'Record customer payment' });
+            return () => { if (createGuardRef.current) { closeGuard(createGuardRef.current.id); createGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isCreateModalOpen]);
+
+    useEffect(() => {
+        if (isAllocationModalOpen) {
+            allocationGuardRef.current = openGuard({ cancellable: false, label: 'Allocate customer payment' });
+            return () => { if (allocationGuardRef.current) { closeGuard(allocationGuardRef.current.id); allocationGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isAllocationModalOpen]);
     const [selectedPayment, setSelectedPayment] = useState<CustomerPayment | null>(null);
     const [outstandingInvoices, setOutstandingInvoices] = useState<ComprehensiveInvoice[]>([]);
     const [allocatingPayment, setAllocatingPayment] = useState(false);
@@ -287,13 +309,11 @@ const CustomerPaymentsPage: React.FC = () => {
                     <p className="text-gray-600">Manage customer deposits, payments and invoice allocations</p>
                 </div>
 
-                <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
-                    <DialogTrigger asChild>
-                        <Button className="flex items-center gap-2">
-                            <Plus className="h-4 w-4" />
-                            Record Payment
-                        </Button>
-                    </DialogTrigger>
+                <Button className="flex items-center gap-2" onClick={() => setIsCreateModalOpen(true)}>
+                    <Plus className="h-4 w-4" />
+                    Record Payment
+                </Button>
+                <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen} zIndex={createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                     <DialogContent className="max-w-md">
                         <DialogHeader>
                             <DialogTitle>Record Customer Payment</DialogTitle>
@@ -512,7 +532,7 @@ const CustomerPaymentsPage: React.FC = () => {
             </div>
 
             {/* Payment Allocation Modal */}
-            <Dialog open={isAllocationModalOpen} onOpenChange={setIsAllocationModalOpen}>
+            <Dialog open={isAllocationModalOpen} onOpenChange={setIsAllocationModalOpen} zIndex={allocationGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-4xl">
                     <DialogHeader>
                         <DialogTitle>Allocate Payment to Invoices</DialogTitle>

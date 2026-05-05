@@ -380,7 +380,8 @@ export const returnGrnRepository = {
            SELECT 1 FROM supplier_invoices si
            WHERE si.return_grn_id = r.id
              AND si.document_type = 'SUPPLIER_CREDIT_NOTE'
-             AND si."Status" IN ('POSTED', 'PARTIAL')
+             AND si.deleted_at IS NULL
+             AND UPPER(si."Status") NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
          ) AS "hasCreditNote"
        FROM return_grn r
        JOIN suppliers s ON s."Id" = r.supplier_id

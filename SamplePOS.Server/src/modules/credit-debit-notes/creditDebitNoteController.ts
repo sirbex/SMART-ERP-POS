@@ -296,4 +296,29 @@ export const supplierCreditDebitNoteController = {
             throw new ValidationError(msg);
         }
     }),
+
+    /**
+     * Apply a posted standalone Supplier Credit Note to that supplier's open
+     * bills using FIFO (oldest InvoiceDate first). The CN's residual balance
+     * is consumed; any remainder stays on-account.
+     */
+    applyCreditNote: asyncHandler(async (req: Request, res: Response) => {
+        const pool = req.tenantPool || globalPool;
+        const { id } = UuidParamSchema.parse(req.params);
+        try {
+            const result = await supplierCreditDebitNoteService.applyCreditNoteToOpenBillsFIFO(pool, id);
+            res.json({
+                success: true,
+                data: result,
+                message: result.totalApplied > 0
+                    ? `Applied ${result.totalApplied} across ${result.allocations.length} bill(s). Residual: ${result.residual}.`
+                    : 'No open bills available — credit note remains on-account.',
+            });
+        } catch (error: unknown) {
+            if (error instanceof AppError) throw error;
+            const msg = error instanceof Error ? error.message : String(error);
+            if (msg.includes('not found')) throw new AppError(404, msg);
+            throw new ValidationError(msg);
+        }
+    }),
 };

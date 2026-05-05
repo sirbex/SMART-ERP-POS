@@ -76,6 +76,7 @@ export class GLIntegrityChecker {
       productDailySummaryRecon,
       inventoryBalancesRecon,
       customerBalancesRecon,
+      supplierInvoiceSafety,
     ] = await Promise.all([
       this.checkUnbalancedTransactions(pool),
       this.checkOrphanEntries(pool),
@@ -93,6 +94,7 @@ export class GLIntegrityChecker {
       this.checkProductDailySummaryReconciliation(pool),
       this.checkInventoryBalancesReconciliation(pool),
       this.checkCustomerBalancesReconciliation(pool),
+      this.checkSupplierInvoiceSafety(pool),
     ]);
 
     findings.push(
@@ -112,6 +114,7 @@ export class GLIntegrityChecker {
       ...productDailySummaryRecon,
       ...inventoryBalancesRecon,
       ...customerBalancesRecon,
+      ...supplierInvoiceSafety,
     );
 
     const errors = findings.filter(f => f.severity === 'ERROR').length;
@@ -122,7 +125,7 @@ export class GLIntegrityChecker {
       runDate: new Date().toISOString(),
       durationMs,
       passed: errors === 0,
-      totalChecks: 16,
+      totalChecks: 17,
       errors,
       warnings,
       findings,
@@ -432,8 +435,8 @@ export class GLIntegrityChecker {
              AND lt."Status" = 'POSTED'), 0
         ) as gl_balance,
         COALESCE(
-          (SELECT SUM(remaining_quantity * unit_cost)
-           FROM cost_layers
+          (SELECT SUM(remaining_quantity * cost_price)
+           FROM inventory_batches
            WHERE remaining_quantity > 0), 0
         ) as subledger_balance
     `);
@@ -446,10 +449,10 @@ export class GLIntegrityChecker {
       findings.push({
         check: 'inventory_reconciliation',
         severity: 'WARNING',
-        message: `Inventory GL (1300) differs from cost layers by ${diff.toFixed(2)}`,
+        message: `Inventory GL (1300) differs from inventory_batches subledger by ${diff.toFixed(2)}`,
         details: {
           glBalance: glBalance.toNumber(),
-          costLayerBalance: subBalance.toNumber(),
+          subledgerBalance: subBalance.toNumber(),
           difference: diff.toNumber(),
         },
       });
@@ -457,7 +460,7 @@ export class GLIntegrityChecker {
       findings.push({
         check: 'inventory_reconciliation',
         severity: 'INFO',
-        message: 'Inventory reconciliation: GL matches cost layers.',
+        message: 'Inventory reconciliation: GL matches inventory_batches subledger.',
       });
     }
 
@@ -993,6 +996,93 @@ export class GLIntegrityChecker {
         check: 'customer_balances_reconciliation',
         severity: 'INFO',
         message: 'customer_balances table not yet created — skipping check.',
+      });
+    }
+
+    return findings;
+  }
+
+  // ===========================================================================
+  // CHECK 17: Supplier Invoice Safety — no document with POSTED GL may be lost
+  // ===========================================================================
+  // Detects two failure modes:
+  //   A) GL→Subledger: a POSTED ledger transaction whose ReferenceType is a
+  //      supplier-invoice doc, but its referenced supplier_invoices row is
+  //      either gone (hard-deleted) or soft-deleted while the GL still posts.
+  //   B) Subledger→GL: a non-cancelled supplier_invoices row with
+  //      OutstandingBalance > 0 that has zero POSTED ledger transactions.
+  //
+  // Either case means the system silently lost (or never recorded) a liability.
+  // This check guards the user's invariant: "no invoice of any supplier can
+  // ever get lost or disappear".
+  // ===========================================================================
+  private static async checkSupplierInvoiceSafety(
+    pool: pg.Pool,
+  ): Promise<IntegrityFinding[]> {
+    const findings: IntegrityFinding[] = [];
+
+    // (A) Orphan GL: POSTED ledger TX referencing a supplier-doc that is
+    //                hard-deleted or soft-deleted.
+    const orphanGl = await pool.query(`
+      SELECT lt."TransactionNumber" AS tx_num,
+             lt."ReferenceType"     AS ref_type,
+             lt."ReferenceId"       AS ref_id,
+             lt."Description"       AS description
+      FROM ledger_transactions lt
+      WHERE lt."Status" = 'POSTED'
+        AND lt."ReferenceType" IN (
+          'SUPPLIER_INVOICE','SUPPLIER_CREDIT_NOTE','SUPPLIER_DEBIT_NOTE'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM supplier_invoices si
+          WHERE si."Id" = lt."ReferenceId" AND si.deleted_at IS NULL
+        )
+      LIMIT 100
+    `);
+
+    // (B) Lost subledger: live invoice with OB>0 that has zero POSTED GL TX.
+    const orphanInvoices = await pool.query(`
+      SELECT si."SupplierInvoiceNumber" AS inv_num,
+             si.document_type           AS doc_type,
+             si."Status"                AS status,
+             si."OutstandingBalance"    AS ob
+      FROM supplier_invoices si
+      WHERE si.deleted_at IS NULL
+        AND COALESCE(si."OutstandingBalance", 0) > 0
+        AND UPPER(si."Status") NOT IN ('CANCELLED','VOID','VOIDED','DELETED')
+        AND NOT EXISTS (
+          SELECT 1 FROM ledger_transactions lt
+          WHERE lt."ReferenceId" = si."Id"
+            AND lt."Status" IN ('POSTED','REVERSED')
+        )
+      LIMIT 100
+    `);
+
+    if (orphanGl.rows.length === 0 && orphanInvoices.rows.length === 0) {
+      findings.push({
+        check: 'supplier_invoice_safety',
+        severity: 'INFO',
+        message:
+          'Supplier invoice safety: every POSTED GL doc has a live subledger row, every live invoice has a GL trail.',
+      });
+    } else {
+      const parts: string[] = [];
+      if (orphanGl.rows.length > 0) {
+        parts.push(`${orphanGl.rows.length} POSTED GL tx(s) reference a deleted/missing supplier doc`);
+      }
+      if (orphanInvoices.rows.length > 0) {
+        parts.push(`${orphanInvoices.rows.length} live invoice(s) with OB>0 have no GL posting`);
+      }
+      findings.push({
+        check: 'supplier_invoice_safety',
+        severity: 'ERROR',
+        message: `Supplier invoice safety violation: ${parts.join('; ')}.`,
+        details: {
+          orphanGlCount: orphanGl.rows.length,
+          orphanGlSamples: orphanGl.rows.slice(0, 5),
+          orphanInvoicesCount: orphanInvoices.rows.length,
+          orphanInvoicesSamples: orphanInvoices.rows.slice(0, 5),
+        },
       });
     }
 

@@ -5,7 +5,9 @@
  * customer deposits, credits, and account balances.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import Decimal from 'decimal.js';
 import { Plus, Search, CreditCard, DollarSign, Users, Loader } from 'lucide-react';
 import {
@@ -16,7 +18,6 @@ import {
     DialogDescription,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
     DialogFooter,
     Label,
     Select,
@@ -152,6 +153,36 @@ const CustomerFinancialPage = () => {
     const [showDepositDialog, setShowDepositDialog] = useState(false);
     const [showCreditDialog, setShowCreditDialog] = useState(false);
     const [showReceivableDialog, setShowReceivableDialog] = useState(false);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const depositGuardRef = useRef<GuardHandle | null>(null);
+    const creditGuardRef = useRef<GuardHandle | null>(null);
+    const receivableGuardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (showDepositDialog) {
+            depositGuardRef.current = openGuard({ cancellable: false, label: 'Record customer deposit' });
+            return () => { if (depositGuardRef.current) { closeGuard(depositGuardRef.current.id); depositGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showDepositDialog]);
+
+    useEffect(() => {
+        if (showCreditDialog) {
+            creditGuardRef.current = openGuard({ cancellable: false, label: 'Add customer credit' });
+            return () => { if (creditGuardRef.current) { closeGuard(creditGuardRef.current.id); creditGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showCreditDialog]);
+
+    useEffect(() => {
+        if (showReceivableDialog) {
+            receivableGuardRef.current = openGuard({ cancellable: false, label: 'Record customer debt' });
+            return () => { if (receivableGuardRef.current) { closeGuard(receivableGuardRef.current.id); receivableGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showReceivableDialog]);
 
     // Form states
     const [depositForm, setDepositForm] = useState<CreateDepositRequest>({
@@ -542,13 +573,11 @@ const CustomerFinancialPage = () => {
                                     {selectedCustomer.name} - Account Summary
                                 </CardTitle>
                                 <div className="flex gap-2">
-                                    <Dialog open={showDepositDialog} onOpenChange={setShowDepositDialog}>
-                                        <DialogTrigger asChild>
-                                            <Button size="sm" className="flex items-center gap-2">
-                                                <Plus className="h-4 w-4" />
-                                                Record Deposit
-                                            </Button>
-                                        </DialogTrigger>
+                                    <Button size="sm" className="flex items-center gap-2" onClick={() => setShowDepositDialog(true)}>
+                                        <Plus className="h-4 w-4" />
+                                        Record Deposit
+                                    </Button>
+                                    <Dialog open={showDepositDialog} onOpenChange={setShowDepositDialog} zIndex={depositGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                                         <DialogContent>
                                             <DialogHeader>
                                                 <DialogTitle>Record Customer Deposit</DialogTitle>
@@ -612,13 +641,11 @@ const CustomerFinancialPage = () => {
                                         </DialogContent>
                                     </Dialog>
 
-                                    <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog}>
-                                        <DialogTrigger asChild>
-                                            <Button variant="outline" size="sm" className="flex items-center gap-2">
-                                                <CreditCard className="h-4 w-4" />
-                                                Add Credit
-                                            </Button>
-                                        </DialogTrigger>
+                                    <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => setShowCreditDialog(true)}>
+                                        <CreditCard className="h-4 w-4" />
+                                        Add Credit
+                                    </Button>
+                                    <Dialog open={showCreditDialog} onOpenChange={setShowCreditDialog} zIndex={creditGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                                         <DialogContent>
                                             <DialogHeader>
                                                 <DialogTitle>Add Customer Credit</DialogTitle>
@@ -683,13 +710,11 @@ const CustomerFinancialPage = () => {
                                         </DialogContent>
                                     </Dialog>
 
-                                    <Dialog open={showReceivableDialog} onOpenChange={setShowReceivableDialog}>
-                                        <DialogTrigger asChild>
-                                            <Button variant="outline" size="sm" className="flex items-center gap-2">
-                                                <Plus className="h-4 w-4" />
-                                                Record Debt
-                                            </Button>
-                                        </DialogTrigger>
+                                    <Button variant="outline" size="sm" className="flex items-center gap-2" onClick={() => setShowReceivableDialog(true)}>
+                                        <Plus className="h-4 w-4" />
+                                        Record Debt
+                                    </Button>
+                                    <Dialog open={showReceivableDialog} onOpenChange={setShowReceivableDialog} zIndex={receivableGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                                         <DialogContent>
                                             <DialogHeader>
                                                 <DialogTitle>Record Customer Debt</DialogTitle>

@@ -149,6 +149,7 @@ export default function CreateDeliveryNoteDrawer({
             subtitle={quoteNumber}
             width="3xl"
             footer={footer}
+            transactional
         >
             <div className="space-y-6">
                 {/* Delivery details */}

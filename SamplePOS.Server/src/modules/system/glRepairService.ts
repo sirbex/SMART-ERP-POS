@@ -1,0 +1,1348 @@
+/**
+ * GL REPAIR SERVICE
+ *
+ * Expanded idempotent repair engine that scans all historical documents for
+ * missing GL entries and reposts them using the canonical glEntryService functions.
+ *
+ * Covered document types:
+ *   1. Goods Receipts         (COMPLETED, DR Inventory / CR GRIR Clearing)
+ *   2. Return GRNs            (POSTED, DR GRIR Clearing / CR Inventory)
+ *   3. Supplier Invoices      (POSTED / Paid / PartiallyPaid, DR GRIR / CR AP)
+ *   4. Supplier Payments      (COMPLETED, DR AP / CR Cash)
+ *   5. Stock Movements        (ADJUSTMENT_IN/OUT, DAMAGE, EXPIRY)
+ *   6. Opening Stock          (OPENING_BALANCE movements)
+ *   7. Sales                  (COMPLETED, DR Cash / CR Revenue + COGS)
+ *
+ * ALL calls are fully idempotent — AccountingCore.createJournalEntry enforces a
+ * UNIQUE constraint on IdempotencyKey, so re-running is always safe.
+ */
+
+import { pool as globalPool } from '../../db/pool.js';
+import type pg from 'pg';
+import Decimal from 'decimal.js';
+import logger from '../../utils/logger.js';
+import * as glEntryService from '../../services/glEntryService.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
+import { Money } from '../../utils/money.js';
+import { AccountingCore } from '../../services/accountingCore.js';
+
+export interface RepairTypeResult {
+    found: number;
+    reposted: number;
+    skipped: number;
+    errors: string[];
+}
+
+export interface GLRepairResult {
+    goodsReceipts: RepairTypeResult;
+    returnGrns: RepairTypeResult;
+    supplierInvoices: RepairTypeResult;
+    supplierPayments: RepairTypeResult;
+    stockMovements: RepairTypeResult;
+    openingStock: RepairTypeResult;
+    sales: RepairTypeResult;
+    summary: string;
+    totalFound: number;
+    totalReposted: number;
+    totalErrors: number;
+}
+
+export interface GLIntegrityStatus {
+    systemStatus: 'GREEN' | 'YELLOW' | 'RED';
+    checkedAt: string;
+    checks: {
+        apReconciliation: {
+            glBalance: number;
+            subledgerBalance: number;
+            difference: number;
+            isBalanced: boolean;
+            legacyGrInAp: number;
+        };
+        inventoryReconciliation: {
+            glBalance: number;
+            subledgerBalance: number;
+            difference: number;
+            isBalanced: boolean;
+        };
+        arReconciliation: {
+            glBalance: number;
+            subledgerBalance: number;
+            difference: number;
+            isBalanced: boolean;
+        };
+        missingGL: {
+            goodsReceiptsWithoutGL: number;
+            returnGrnsWithoutGL: number;
+            supplierInvoicesWithoutGL: number;
+            supplierPaymentsWithoutGL: number;
+            stockMovementsWithoutGL: number;
+            salesWithoutGL: number;
+        };
+        unbalancedJournals: number;
+        suspiciousMovements: Array<{
+            movementNumber: string;
+            movementType: string;
+            totalValue: number;
+            notes: string | null;
+        }>;
+    };
+    alerts: string[];
+}
+
+// ============================================================================
+// REPAIR ENGINE
+// ============================================================================
+
+/**
+ * Scan all historical documents for missing GL entries and repost them.
+ * Fully idempotent — safe to call multiple times.
+ */
+export async function repostAllMissingGL(dbPool?: pg.Pool): Promise<GLRepairResult> {
+    const pool = dbPool || globalPool;
+
+    const grResult = await repairGoodsReceipts(pool);
+    const rgrResult = await repairReturnGrns(pool);
+    const siResult = await repairSupplierInvoices(pool);
+    const spResult = await repairSupplierPayments(pool);
+    const smResult = await repairStockMovements(pool);
+    const osResult = await repairOpeningStock(pool);
+    const saleResult = await repairSales(pool);
+
+    const totalFound =
+        grResult.found + rgrResult.found + siResult.found + spResult.found +
+        smResult.found + osResult.found + saleResult.found;
+    const totalReposted =
+        grResult.reposted + rgrResult.reposted + siResult.reposted + spResult.reposted +
+        smResult.reposted + osResult.reposted + saleResult.reposted;
+    const totalErrors =
+        grResult.errors.length + rgrResult.errors.length + siResult.errors.length +
+        spResult.errors.length + smResult.errors.length + osResult.errors.length +
+        saleResult.errors.length;
+
+    const summary =
+        `GRs: ${grResult.reposted}/${grResult.found} | ` +
+        `Returns: ${rgrResult.reposted}/${rgrResult.found} | ` +
+        `Invoices: ${siResult.reposted}/${siResult.found} | ` +
+        `Payments: ${spResult.reposted}/${spResult.found} | ` +
+        `StockMvts: ${smResult.reposted}/${smResult.found} | ` +
+        `OpeningStock: ${osResult.reposted}/${osResult.found} | ` +
+        `Sales: ${saleResult.reposted}/${saleResult.found}` +
+        (totalErrors > 0 ? ` | Errors: ${totalErrors}` : '');
+
+    logger.info('GL repair engine completed', { summary, totalFound, totalReposted, totalErrors });
+
+    return {
+        goodsReceipts: grResult,
+        returnGrns: rgrResult,
+        supplierInvoices: siResult,
+        supplierPayments: spResult,
+        stockMovements: smResult,
+        openingStock: osResult,
+        sales: saleResult,
+        summary,
+        totalFound,
+        totalReposted,
+        totalErrors,
+    };
+}
+
+// ============================================================================
+// 1. GOODS RECEIPTS
+// ============================================================================
+async function repairGoodsReceipts(pool: pg.Pool): Promise<RepairTypeResult> {
+    const result: RepairTypeResult = { found: 0, reposted: 0, skipped: 0, errors: [] };
+
+    const rows = await pool.query(`
+    SELECT
+      gr.id,
+      gr.receipt_number,
+      gr.received_date,
+      po.supplier_id,
+      s."CompanyName" AS supplier_name,
+      COALESCE(gr.total_value, 0) AS total_value
+    FROM goods_receipts gr
+    LEFT JOIN purchase_orders po ON po.id = gr.purchase_order_id
+    LEFT JOIN suppliers s ON s."Id" = po.supplier_id
+    WHERE gr.status = 'COMPLETED'
+      AND COALESCE(gr.total_value, 0) > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'GOODS_RECEIPT'
+          AND lt."ReferenceId" = gr.id
+      )
+  `);
+
+    result.found = rows.rows.length;
+
+    for (const gr of rows.rows) {
+        try {
+            await glEntryService.recordGoodsReceiptToGL({
+                grId: gr.id,
+                grNumber: gr.receipt_number || gr.id,
+                grDate: toDateString(gr.received_date),
+                totalAmount: new Decimal(gr.total_value).toNumber(),
+                supplierId: gr.supplier_id || '',
+                supplierName: gr.supplier_name || 'Unknown Supplier',
+            }, pool);
+            result.reposted++;
+            logger.info('Repaired missing GR GL entry', { grId: gr.id, grNumber: gr.receipt_number });
+        } catch (err) {
+            const msg = `GR ${gr.receipt_number}: ${err instanceof Error ? err.message : String(err)}`;
+            result.errors.push(msg);
+            logger.error('Failed to repair GR GL entry', { grId: gr.id, error: msg });
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// 2. RETURN GRNs
+// ============================================================================
+async function repairReturnGrns(pool: pg.Pool): Promise<RepairTypeResult> {
+    const result: RepairTypeResult = { found: 0, reposted: 0, skipped: 0, errors: [] };
+
+    const rows = await pool.query(`
+    SELECT
+      r.id,
+      r.return_grn_number,
+      r.return_date,
+      r.supplier_id,
+      s."CompanyName" AS supplier_name,
+      COALESCE(SUM(rl.line_total), 0) AS total_amount,
+      gr.receipt_number AS original_gr_number
+    FROM return_grn r
+    LEFT JOIN return_grn_lines rl ON rl.rgrn_id = r.id
+    LEFT JOIN suppliers s ON s."Id" = r.supplier_id
+    LEFT JOIN goods_receipts gr ON gr.id = r.grn_id
+    WHERE r.status = 'POSTED'
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'RETURN_GRN'
+          AND lt."ReferenceId" = r.id
+      )
+    GROUP BY r.id, r.return_grn_number, r.return_date, r.supplier_id, s."CompanyName", gr.receipt_number
+    HAVING COALESCE(SUM(rl.line_total), 0) > 0
+  `);
+
+    result.found = rows.rows.length;
+
+    for (const rgrn of rows.rows) {
+        try {
+            await glEntryService.recordReturnGrnToGL({
+                returnGrnId: rgrn.id,
+                returnGrnNumber: rgrn.return_grn_number || rgrn.id,
+                returnDate: toDateString(rgrn.return_date),
+                totalAmount: new Decimal(rgrn.total_amount).toNumber(),
+                supplierId: rgrn.supplier_id || '',
+                supplierName: rgrn.supplier_name || 'Unknown Supplier',
+                originalGrNumber: rgrn.original_gr_number || undefined,
+            }, pool);
+            result.reposted++;
+            logger.info('Repaired missing Return GRN GL entry', { id: rgrn.id, number: rgrn.return_grn_number });
+        } catch (err) {
+            const msg = `Return GRN ${rgrn.return_grn_number}: ${err instanceof Error ? err.message : String(err)}`;
+            result.errors.push(msg);
+            logger.error('Failed to repair Return GRN GL entry', { id: rgrn.id, error: msg });
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// 3. SUPPLIER INVOICES
+// ============================================================================
+async function repairSupplierInvoices(pool: pg.Pool): Promise<RepairTypeResult> {
+    const result: RepairTypeResult = { found: 0, reposted: 0, skipped: 0, errors: [] };
+
+    // Posted / Paid / PartiallyPaid invoices that have no SUPPLIER_INVOICE GL entry
+    const rows = await pool.query(`
+    SELECT
+      si."Id"                       AS id,
+      si."SupplierInvoiceNumber"    AS invoice_number,
+      si."InvoiceDate"              AS invoice_date,
+      si."TotalAmount"              AS total_amount,
+      si."SupplierId"               AS supplier_id,
+      si."InternalReferenceNumber"  AS internal_reference_number,
+      s."CompanyName"               AS supplier_name
+    FROM supplier_invoices si
+    LEFT JOIN suppliers s ON s."Id" = si."SupplierId"
+    WHERE si."Status" IN ('POSTED', 'Paid', 'PartiallyPaid', 'PAID', 'PARTIALLY_PAID')
+      AND COALESCE(si."TotalAmount", 0) > 0
+      AND si.deleted_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'SUPPLIER_INVOICE'
+          AND lt."ReferenceId" = si."Id"
+      )
+  `);
+
+    result.found = rows.rows.length;
+
+    for (const inv of rows.rows) {
+        try {
+            // Determine routing: GR-linked → GR/IR Clearing; standalone → General Expense
+            const grRef = (inv.internal_reference_number || '').trim();
+            let hasGrReference = false;
+            if (grRef.startsWith('GR-')) {
+                const grCheck = await pool.query(
+                    `SELECT 1 FROM goods_receipts WHERE receipt_number = $1 AND status = 'COMPLETED' LIMIT 1`,
+                    [grRef],
+                );
+                hasGrReference = grCheck.rows.length > 0;
+            }
+
+            await glEntryService.recordSupplierInvoiceToGL({
+                invoiceId: inv.id,
+                invoiceNumber: inv.invoice_number || inv.id,
+                invoiceDate: toDateString(inv.invoice_date),
+                totalAmount: new Decimal(inv.total_amount).toNumber(),
+                supplierId: inv.supplier_id || '',
+                supplierName: inv.supplier_name || 'Unknown Supplier',
+                hasGrReference,
+            }, pool);
+            result.reposted++;
+            logger.info('Repaired missing Supplier Invoice GL entry', { id: inv.id, number: inv.invoice_number });
+        } catch (err) {
+            const msg = `Invoice ${inv.invoice_number}: ${err instanceof Error ? err.message : String(err)}`;
+            result.errors.push(msg);
+            logger.error('Failed to repair Supplier Invoice GL entry', { id: inv.id, error: msg });
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// 4. SUPPLIER PAYMENTS
+// ============================================================================
+async function repairSupplierPayments(pool: pg.Pool): Promise<RepairTypeResult> {
+    const result: RepairTypeResult = { found: 0, reposted: 0, skipped: 0, errors: [] };
+
+    const rows = await pool.query(`
+    SELECT
+      sp."Id"            AS id,
+      sp."PaymentNumber" AS payment_number,
+      sp."PaymentDate"   AS payment_date,
+      sp."Amount"        AS amount,
+      sp."PaymentMethod" AS payment_method,
+      sp."SupplierId"    AS supplier_id,
+      s."CompanyName"    AS supplier_name
+    FROM supplier_payments sp
+    LEFT JOIN suppliers s ON s."Id" = sp."SupplierId"
+    WHERE sp."Status" = 'COMPLETED'
+      AND sp.deleted_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'SUPPLIER_PAYMENT'
+          AND lt."ReferenceId" = sp."Id"
+      )
+  `);
+
+    result.found = rows.rows.length;
+
+    for (const sp of rows.rows) {
+        try {
+            await glEntryService.recordSupplierPaymentToGL({
+                paymentId: sp.id,
+                paymentNumber: sp.payment_number || sp.id,
+                paymentDate: toDateString(sp.payment_date),
+                amount: new Decimal(sp.amount).toNumber(),
+                paymentMethod: (sp.payment_method as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY') || 'CASH',
+                supplierId: sp.supplier_id || '',
+                supplierName: sp.supplier_name || 'Unknown Supplier',
+            }, pool);
+            result.reposted++;
+            logger.info('Repaired missing Supplier Payment GL entry', { id: sp.id, number: sp.payment_number });
+        } catch (err) {
+            const msg = `Payment ${sp.payment_number}: ${err instanceof Error ? err.message : String(err)}`;
+            result.errors.push(msg);
+            logger.error('Failed to repair Supplier Payment GL entry', { id: sp.id, error: msg });
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// 5. STOCK MOVEMENTS (ADJUSTMENT_IN/OUT, DAMAGE, EXPIRY)
+// ============================================================================
+async function repairStockMovements(pool: pg.Pool): Promise<RepairTypeResult> {
+    const result: RepairTypeResult = { found: 0, reposted: 0, skipped: 0, errors: [] };
+
+    const rows = await pool.query(`
+    SELECT
+      sm.id,
+      sm.movement_number,
+      sm.movement_type,
+      sm.product_id,
+      sm.quantity,
+      sm.unit_cost,
+      sm.created_at,
+      p.name AS product_name
+    FROM stock_movements sm
+    LEFT JOIN products p ON p.id = sm.product_id
+    WHERE sm.movement_type IN ('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY')
+      AND sm.unit_cost > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'STOCK_MOVEMENT'
+          AND lt."ReferenceId" = sm.id
+      )
+    ORDER BY sm.created_at
+  `);
+
+    result.found = rows.rows.length;
+
+    for (const sm of rows.rows) {
+        const movementValue = new Decimal(sm.quantity).abs().times(new Decimal(sm.unit_cost)).toNumber();
+        if (movementValue <= 0) {
+            result.skipped++;
+            continue;
+        }
+
+        try {
+            await glEntryService.recordStockMovementToGL({
+                movementId: sm.id,
+                movementNumber: sm.movement_number || sm.id,
+                movementDate: toDateString(sm.created_at),
+                movementType: sm.movement_type as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY',
+                movementValue,
+                productName: sm.product_name || undefined,
+            }, pool);
+            result.reposted++;
+            logger.info('Repaired missing Stock Movement GL entry', { id: sm.id, type: sm.movement_type });
+        } catch (err) {
+            const msg = `StockMovement ${sm.movement_number} (${sm.movement_type}): ${err instanceof Error ? err.message : String(err)}`;
+            result.errors.push(msg);
+            logger.error('Failed to repair Stock Movement GL entry', { id: sm.id, error: msg });
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// 6. OPENING STOCK (movement_type = 'OPENING_BALANCE')
+// ============================================================================
+async function repairOpeningStock(pool: pg.Pool): Promise<RepairTypeResult> {
+    const result: RepairTypeResult = { found: 0, reposted: 0, skipped: 0, errors: [] };
+
+    const rows = await pool.query(`
+    SELECT
+      sm.id,
+      sm.movement_number,
+      sm.product_id,
+      sm.quantity,
+      sm.unit_cost,
+      sm.created_at,
+      ib.batch_number,
+      p.name AS product_name
+    FROM stock_movements sm
+    LEFT JOIN products p ON p.id = sm.product_id
+    LEFT JOIN inventory_batches ib ON ib.id = sm.batch_id
+    WHERE sm.movement_type = 'OPENING_BALANCE'
+      AND sm.unit_cost > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'OPENING_STOCK'
+          AND lt."ReferenceId" = sm.id
+      )
+    ORDER BY sm.created_at
+  `);
+
+    result.found = rows.rows.length;
+
+    for (const sm of rows.rows) {
+        const movementValue = new Decimal(sm.quantity).abs().times(new Decimal(sm.unit_cost)).toNumber();
+        if (movementValue <= 0) {
+            result.skipped++;
+            continue;
+        }
+
+        try {
+            await glEntryService.recordOpeningStockToGL({
+                movementId: sm.id,
+                movementNumber: sm.movement_number || sm.id,
+                movementDate: toDateString(sm.created_at),
+                movementValue,
+                productId: sm.product_id,
+                batchNumber: sm.batch_number || sm.id,
+                productName: sm.product_name || undefined,
+            }, pool);
+            result.reposted++;
+            logger.info('Repaired missing Opening Stock GL entry', { id: sm.id, productId: sm.product_id });
+        } catch (err) {
+            const msg = `OpeningStock ${sm.movement_number}: ${err instanceof Error ? err.message : String(err)}`;
+            result.errors.push(msg);
+            logger.error('Failed to repair Opening Stock GL entry', { id: sm.id, error: msg });
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// 7. SALES
+// ============================================================================
+async function repairSales(pool: pg.Pool): Promise<RepairTypeResult> {
+    const result: RepairTypeResult = { found: 0, reposted: 0, skipped: 0, errors: [] };
+
+    const rows = await pool.query(`
+    SELECT
+      s.id, s.sale_number, s.sale_date, s.total_amount, s.total_cost,
+      s.payment_method, s.amount_paid, s.tax_amount, s.customer_id
+    FROM sales s
+    WHERE s.status = 'COMPLETED'
+      AND COALESCE(s.total_amount, 0) > 0
+      AND NOT EXISTS (
+        SELECT 1 FROM ledger_transactions lt
+        WHERE lt."ReferenceType" = 'SALE'
+          AND lt."ReferenceId" = s.id
+      )
+    ORDER BY s.sale_date
+  `);
+
+    result.found = rows.rows.length;
+
+    for (const sale of rows.rows) {
+        try {
+            const itemsResult = await pool.query(`
+        SELECT product_type, total_price, unit_cost, quantity
+        FROM sale_items WHERE sale_id = $1
+      `, [sale.id]);
+
+            const saleItems = itemsResult.rows.map((item: { product_type: string; total_price: string; unit_cost: string; quantity: string }) => ({
+                productType: (item.product_type === 'service' ? 'service' : 'inventory') as 'inventory' | 'service',
+                totalPrice: new Decimal(item.total_price || 0).toNumber(),
+                unitCost: new Decimal(item.unit_cost || 0).toNumber(),
+                quantity: new Decimal(item.quantity || 0).toNumber(),
+            }));
+
+            await glEntryService.recordSaleToGL({
+                saleId: sale.id,
+                saleNumber: sale.sale_number,
+                saleDate: toDateString(sale.sale_date),
+                totalAmount: new Decimal(sale.total_amount || 0).toNumber(),
+                costAmount: new Decimal(sale.total_cost || 0).toNumber(),
+                paymentMethod: (sale.payment_method as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT') || 'CASH',
+                amountPaid: sale.amount_paid != null ? new Decimal(sale.amount_paid).toNumber() : undefined,
+                taxAmount: sale.tax_amount != null ? new Decimal(sale.tax_amount).toNumber() : undefined,
+                customerId: sale.customer_id || undefined,
+                saleItems,
+            }, pool);
+            result.reposted++;
+            logger.info('Repaired missing Sale GL entry', { saleId: sale.id, saleNumber: sale.sale_number });
+        } catch (err) {
+            const msg = `Sale ${sale.sale_number}: ${err instanceof Error ? err.message : String(err)}`;
+            result.errors.push(msg);
+            logger.error('Failed to repair Sale GL entry', { id: sale.id, error: msg });
+        }
+    }
+
+    return result;
+}
+
+// ============================================================================
+// INTEGRITY CHECK
+// ============================================================================
+
+/**
+ * Full GL integrity check — compares GL balances against subledgers and counts
+ * documents with missing GL entries. Returns GREEN / YELLOW / RED status.
+ *
+ * GREEN  = fully balanced, no missing GL entries
+ * YELLOW = small differences (< 1.00) or low count of missing entries (< 5)
+ * RED    = balance differences ≥ 1.00 or ≥ 5 missing GL entries
+ */
+export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrityStatus> {
+    const pool = dbPool || globalPool;
+    const checkedAt = new Date().toISOString();
+    const alerts: string[] = [];
+
+    // ── AP reconciliation (2100 vs suppliers.OutstandingBalance) ──────────────
+    // NOTE: Under the 3-way match (SAP) model, GOODS_RECEIPT entries go to GRIR
+    // Clearing (2150), NOT AP (2100). Legacy EF Core–era GRs posted directly to
+    // 2100 and are excluded here so that the AP reconciliation only covers the
+    // current procure-to-pay AP lifecycle.  The legacy GR amount is reported
+    // separately as `legacyGrInAp` so operators know a GRIR correction is pending.
+    const apResult = await pool.query(`
+    SELECT
+      -- AP GL balance: all entries EXCEPT legacy GOODS_RECEIPT (belongs to GRIR)
+      COALESCE(
+        (SELECT SUM(
+           CASE
+             WHEN le."EntryType" IS NOT NULL AND le."Amount" IS NOT NULL
+             THEN CASE WHEN le."EntryType"='CREDIT' THEN le."Amount" ELSE -le."Amount" END
+             ELSE COALESCE(le."CreditAmount",0) - COALESCE(le."DebitAmount",0)
+           END)
+         FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE a."AccountCode" = '2100'
+           AND lt."ReferenceType" IN (
+             'SUPPLIER_INVOICE','SUPPLIER_PAYMENT',
+             'SUPPLIER_DEBIT_NOTE','SUPPLIER_CREDIT_NOTE',
+             'RETURN_GRN','EXPENSE','EXPENSE_PAYMENT'
+           )
+           AND lt."IsReversed" = FALSE), 0
+      ) AS gl_balance,
+      -- Legacy GOODS_RECEIPT credits sitting in AP that should be in GRIR 2150
+      COALESCE(
+        (SELECT SUM(
+           CASE
+             WHEN le."EntryType" IS NOT NULL AND le."Amount" IS NOT NULL
+             THEN CASE WHEN le."EntryType"='CREDIT' THEN le."Amount" ELSE -le."Amount" END
+             ELSE COALESCE(le."CreditAmount",0) - COALESCE(le."DebitAmount",0)
+           END)
+         FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE a."AccountCode" = '2100'
+           AND lt."ReferenceType" = 'GOODS_RECEIPT'
+           AND lt."IsReversed" = FALSE), 0
+      ) AS legacy_gr_in_ap,
+      -- Supplier subledger: sum of all supplier outstanding balances
+      COALESCE((SELECT SUM("OutstandingBalance") FROM suppliers), 0) AS subledger_balance
+  `);
+    const apGL = new Decimal(apResult.rows[0]?.gl_balance ?? 0).toNumber();
+    const apSub = new Decimal(apResult.rows[0]?.subledger_balance ?? 0).toNumber();
+    const legacyGrInAp = new Decimal(apResult.rows[0]?.legacy_gr_in_ap ?? 0).toNumber();
+    const apDiff = new Decimal(apGL).minus(apSub).toNumber();
+    const apBalanced = new Decimal(apDiff).abs().lessThan('0.01');
+    if (legacyGrInAp > 0.01) {
+        alerts.push(
+            `AP contains ${legacyGrInAp.toFixed(2)} of legacy GR credits that belong in GRIR Clearing (2150). ` +
+            `Post a correcting entry: DR AP 2100 / CR GRIR 2150 for ${legacyGrInAp.toFixed(2)}.`,
+        );
+    }
+    if (!apBalanced) {
+        alerts.push(`AP drift: GL=${apGL.toFixed(2)}, Subledger=${apSub.toFixed(2)}, Diff=${apDiff.toFixed(2)}`);
+    }
+
+    // ── Inventory reconciliation (1300 vs batch subledger) ────────────────────
+    const invResult = await pool.query(`
+    SELECT
+      COALESCE(
+        (SELECT SUM(
+           CASE
+             WHEN le."EntryType" IS NOT NULL AND le."Amount" IS NOT NULL
+             THEN CASE WHEN le."EntryType"='DEBIT' THEN le."Amount" ELSE -le."Amount" END
+             ELSE COALESCE(le."DebitAmount",0) - COALESCE(le."CreditAmount",0)
+           END)
+         FROM ledger_entries le
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE a."AccountCode" = '1300'), 0
+      ) AS gl_balance,
+      COALESCE(
+        (SELECT SUM(remaining_quantity * cost_price)
+         FROM inventory_batches
+         WHERE remaining_quantity > 0), 0
+      ) AS subledger_balance
+  `);
+    const invGL = new Decimal(invResult.rows[0]?.gl_balance ?? 0).toNumber();
+    const invSub = new Decimal(invResult.rows[0]?.subledger_balance ?? 0).toNumber();
+    const invDiff = new Decimal(invGL).minus(invSub).toNumber();
+    const invBalanced = new Decimal(invDiff).abs().lessThan('0.01');
+    if (!invBalanced) {
+        alerts.push(`Inventory drift: GL=${invGL.toFixed(2)}, Subledger=${invSub.toFixed(2)}, Diff=${invDiff.toFixed(2)}`);
+    }
+
+    // ── AR reconciliation (1200 vs customers.balance) ─────────────────────────
+    const arResult = await pool.query(`
+    SELECT
+      COALESCE(
+        (SELECT SUM(
+           CASE
+             WHEN le."EntryType" IS NOT NULL AND le."Amount" IS NOT NULL
+             THEN CASE WHEN le."EntryType"='DEBIT' THEN le."Amount" ELSE -le."Amount" END
+             ELSE COALESCE(le."DebitAmount",0) - COALESCE(le."CreditAmount",0)
+           END)
+         FROM ledger_entries le
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE a."AccountCode" = '1200'), 0
+      ) AS gl_balance,
+      COALESCE((SELECT SUM(balance) FROM customers), 0) AS subledger_balance
+  `);
+    const arGL = new Decimal(arResult.rows[0]?.gl_balance ?? 0).toNumber();
+    const arSub = new Decimal(arResult.rows[0]?.subledger_balance ?? 0).toNumber();
+    const arDiff = new Decimal(arGL).minus(arSub).toNumber();
+    const arBalanced = new Decimal(arDiff).abs().lessThan('0.01');
+    if (!arBalanced) {
+        alerts.push(`AR drift: GL=${arGL.toFixed(2)}, Subledger=${arSub.toFixed(2)}, Diff=${arDiff.toFixed(2)}`);
+    }
+
+    // ── Missing GL counts ──────────────────────────────────────────────────────
+    const missingResult = await pool.query(`
+    SELECT
+      (SELECT COUNT(*) FROM goods_receipts gr
+       WHERE gr.status = 'COMPLETED'
+         AND NOT EXISTS (
+           SELECT 1 FROM ledger_transactions lt
+           WHERE lt."ReferenceType" = 'GOODS_RECEIPT' AND lt."ReferenceId" = gr.id
+         )
+      ) AS grs_without_gl,
+
+      (SELECT COUNT(*) FROM return_grn r
+       WHERE r.status = 'POSTED'
+         AND NOT EXISTS (
+           SELECT 1 FROM ledger_transactions lt
+           WHERE lt."ReferenceType" = 'RETURN_GRN' AND lt."ReferenceId" = r.id
+         )
+      ) AS returns_without_gl,
+
+      (SELECT COUNT(*) FROM supplier_invoices si
+       WHERE si."Status" IN ('POSTED','Paid','PartiallyPaid','PAID','PARTIALLY_PAID')
+         AND si.deleted_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM ledger_transactions lt
+           WHERE lt."ReferenceType" = 'SUPPLIER_INVOICE' AND lt."ReferenceId" = si."Id"
+         )
+      ) AS invoices_without_gl,
+
+      (SELECT COUNT(*) FROM supplier_payments sp
+       WHERE sp."Status" = 'COMPLETED'
+         AND sp.deleted_at IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM ledger_transactions lt
+           WHERE lt."ReferenceType" = 'SUPPLIER_PAYMENT' AND lt."ReferenceId" = sp."Id"
+         )
+      ) AS payments_without_gl,
+
+      (SELECT COUNT(*) FROM stock_movements sm
+       WHERE sm.movement_type IN ('ADJUSTMENT_IN','ADJUSTMENT_OUT','DAMAGE','EXPIRY')
+         AND sm.unit_cost > 0
+         AND NOT EXISTS (
+           SELECT 1 FROM ledger_transactions lt
+           WHERE lt."ReferenceType" = 'STOCK_MOVEMENT' AND lt."ReferenceId" = sm.id
+         )
+      ) AS stock_movements_without_gl,
+
+      (SELECT COUNT(*) FROM sales s
+       WHERE s.status = 'COMPLETED'
+         AND COALESCE(s.total_amount, 0) > 0
+         AND NOT EXISTS (
+           SELECT 1 FROM ledger_transactions lt
+           WHERE lt."ReferenceType" = 'SALE' AND lt."ReferenceId" = s.id
+         )
+      ) AS sales_without_gl
+  `);
+
+    const m = missingResult.rows[0];
+    const missingGL = {
+        goodsReceiptsWithoutGL: parseInt(m?.grs_without_gl ?? '0'),
+        returnGrnsWithoutGL: parseInt(m?.returns_without_gl ?? '0'),
+        supplierInvoicesWithoutGL: parseInt(m?.invoices_without_gl ?? '0'),
+        supplierPaymentsWithoutGL: parseInt(m?.payments_without_gl ?? '0'),
+        stockMovementsWithoutGL: parseInt(m?.stock_movements_without_gl ?? '0'),
+        salesWithoutGL: parseInt(m?.sales_without_gl ?? '0'),
+    };
+    const totalMissing = Object.values(missingGL).reduce((a, b) => a + b, 0);
+    if (totalMissing > 0) {
+        alerts.push(`${totalMissing} document(s) have missing GL entries (run repair to fix)`);
+    }
+
+    // ── Unbalanced journal entries (dual-format) ──────────────────────────────
+    const unbalancedResult = await pool.query(`
+    SELECT COUNT(*) AS count
+    FROM (
+      SELECT lt."Id"
+      FROM ledger_transactions lt
+      JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+      WHERE lt."IsReversed" = FALSE
+      GROUP BY lt."Id"
+      HAVING ABS(SUM(
+        CASE
+          WHEN le."EntryType" = 'DEBIT'  AND le."Amount" IS NOT NULL THEN  le."Amount"
+          WHEN le."EntryType" = 'CREDIT' AND le."Amount" IS NOT NULL THEN -le."Amount"
+          ELSE COALESCE(le."DebitAmount",0) - COALESCE(le."CreditAmount",0)
+        END
+      )) > 0.01
+    ) sub
+  `);
+    const unbalancedJournals = parseInt(unbalancedResult.rows[0]?.count ?? '0');
+    if (unbalancedJournals > 0) {
+        alerts.push(`${unbalancedJournals} unbalanced journal entr${unbalancedJournals === 1 ? 'y' : 'ies'} detected`);
+    }
+
+    // ── Suspicious high-value stock adjustments ───────────────────────────────
+    const suspiciousResult = await pool.query(`
+    SELECT sm.movement_number, sm.movement_type,
+           sm.quantity, sm.unit_cost,
+           (sm.quantity * sm.unit_cost) AS total_value,
+           sm.notes
+    FROM stock_movements sm
+    WHERE sm.movement_type IN ('ADJUSTMENT_IN','ADJUSTMENT_OUT')
+      AND (sm.quantity * sm.unit_cost) > 10000000
+    ORDER BY (sm.quantity * sm.unit_cost) DESC
+  `);
+    const suspiciousMovements: Array<{ movementNumber: string; movementType: string; totalValue: number; notes: string | null }> =
+        suspiciousResult.rows.map((r: { movement_number: string; movement_type: string; quantity: string; unit_cost: string; notes: string | null }) => ({
+            movementNumber: r.movement_number,
+            movementType: r.movement_type,
+            totalValue: parseFloat(r.quantity) * parseFloat(r.unit_cost),
+            notes: r.notes ?? null,
+        }));
+    if (suspiciousMovements.length > 0) {
+        const total = suspiciousMovements.reduce((a, b) => a + b.totalValue, 0);
+        alerts.push(
+            `${suspiciousMovements.length} high-value stock adjustment(s) totalling ${total.toFixed(2)} may inflate GL 1300 ` +
+            `(e.g. ${suspiciousMovements[0].movementNumber}: ${suspiciousMovements[0].totalValue.toFixed(0)} — "${suspiciousMovements[0].notes ?? ''}")`,
+        );
+    }
+
+    // ── Determine system status ────────────────────────────────────────────────
+    const maxAbsDiff = Math.max(
+        Math.abs(apDiff),
+        Math.abs(invDiff),
+        Math.abs(arDiff),
+    );
+
+    let systemStatus: 'GREEN' | 'YELLOW' | 'RED';
+    if (alerts.length === 0) {
+        systemStatus = 'GREEN';
+    } else if (maxAbsDiff < 1.0 && totalMissing < 5 && unbalancedJournals === 0) {
+        systemStatus = 'YELLOW';
+    } else {
+        systemStatus = 'RED';
+    }
+
+    logger.info('GL integrity check completed', { systemStatus, alertCount: alerts.length, totalMissing });
+
+    return {
+        systemStatus,
+        checkedAt,
+        checks: {
+            apReconciliation: { glBalance: apGL, subledgerBalance: apSub, difference: apDiff, isBalanced: apBalanced, legacyGrInAp },
+            inventoryReconciliation: { glBalance: invGL, subledgerBalance: invSub, difference: invDiff, isBalanced: invBalanced },
+            arReconciliation: { glBalance: arGL, subledgerBalance: arSub, difference: arDiff, isBalanced: arBalanced },
+            missingGL,
+            unbalancedJournals,
+            suspiciousMovements,
+        },
+        alerts,
+    };
+}
+
+export const glRepairService = {
+    repostAllMissingGL,
+    runGLIntegrityCheck,
+    rebuildPeriodBalances,
+    recalcAllSupplierBalances,
+    rebuildInventoryBalances,
+    rebuildProductDailySummary,
+    healAPDrift,
+};
+
+// ============================================================================
+// HEAL: REBUILD gl_period_balances FROM ledger_entries
+// ----------------------------------------------------------------------------
+// Heals two ERROR-level audit findings simultaneously:
+//   1. period_balances_reconciliation — totals drift between gpb and le.
+//   2. running_balance_invariant      — running_balance != debits - credits.
+//
+// Strategy:
+//   - Aggregate POSTED ledger_entries by (account, year, month).
+//   - UPSERT into gl_period_balances with absolute (replace) totals.
+//   - DELETE any gpb rows that no longer have backing ledger entries
+//     (orphans from reversed/deleted transactions).
+//   - Skip period 0 (carry-forward) and any LOCKED/CLOSED financial periods.
+//
+// Idempotent: re-running is safe and yields the same result.
+// Locked periods are NEVER touched — preserves audit trail integrity.
+// ============================================================================
+
+export interface RebuildPeriodBalancesResult {
+    rowsRecomputed: number;
+    rowsInserted: number;
+    rowsUpdated: number;
+    orphansDeleted: number;
+    skippedLockedPeriods: number;
+    durationMs: number;
+}
+
+export async function rebuildPeriodBalances(
+    dbPool?: pg.Pool,
+): Promise<RebuildPeriodBalancesResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // 1. Snapshot how many rows currently exist (open periods only) so we
+        //    can compute inserts vs updates after the upsert.
+        const beforeCount = await client.query(
+            `SELECT COUNT(*)::INT AS n FROM gl_period_balances gpb
+             WHERE gpb.fiscal_period BETWEEN 1 AND 12
+               AND NOT EXISTS (
+                 SELECT 1 FROM financial_periods fp
+                 WHERE fp.period_year = gpb.fiscal_year
+                   AND fp.period_month = gpb.fiscal_period
+                   AND fp."Status" IN ('CLOSED', 'LOCKED')
+               )`,
+        );
+        const beforeOpen: number = beforeCount.rows[0]?.n ?? 0;
+
+        // 2. Recompute totals from ledger_entries and UPSERT.
+        //    Includes BOTH 'POSTED' and 'REVERSED' transactions: when a tx is
+        //    reversed, the original keeps its entries (status=REVERSED) and a
+        //    new POSTED reversal tx is created with offsetting entries. The
+        //    audit checker sums both, so the rebuild must too — otherwise the
+        //    rebuild itself introduces drift. DRAFT is excluded because
+        //    jeApprovalService reverses its gpb contribution when parking.
+        //    Locked/closed periods are filtered out via NOT EXISTS clause.
+        const upsertRes = await client.query(
+            `WITH fresh AS (
+               SELECT
+                 le."AccountId"                                         AS account_id,
+                 EXTRACT(YEAR  FROM lt."TransactionDate")::INT          AS fiscal_year,
+                 EXTRACT(MONTH FROM lt."TransactionDate")::INT          AS fiscal_period,
+                 COALESCE(SUM(le."DebitAmount"),  0)                    AS debits,
+                 COALESCE(SUM(le."CreditAmount"), 0)                    AS credits
+               FROM ledger_entries le
+               JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+               WHERE lt."Status" IN ('POSTED', 'REVERSED')
+               GROUP BY le."AccountId",
+                        EXTRACT(YEAR  FROM lt."TransactionDate")::INT,
+                        EXTRACT(MONTH FROM lt."TransactionDate")::INT
+             )
+             INSERT INTO gl_period_balances
+                 (account_id, fiscal_year, fiscal_period,
+                  debit_total, credit_total, running_balance, last_updated)
+             SELECT
+                 fresh.account_id, fresh.fiscal_year, fresh.fiscal_period,
+                 fresh.debits, fresh.credits,
+                 fresh.debits - fresh.credits,
+                 NOW()
+             FROM fresh
+             WHERE fresh.fiscal_period BETWEEN 1 AND 12
+               AND NOT EXISTS (
+                 SELECT 1 FROM financial_periods fp
+                 WHERE fp.period_year  = fresh.fiscal_year
+                   AND fp.period_month = fresh.fiscal_period
+                   AND fp."Status" IN ('CLOSED', 'LOCKED')
+               )
+             ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
+                 debit_total     = EXCLUDED.debit_total,
+                 credit_total    = EXCLUDED.credit_total,
+                 running_balance = EXCLUDED.running_balance,
+                 last_updated    = NOW()`,
+        );
+        const rowsRecomputed = upsertRes.rowCount ?? 0;
+
+        // 3. Delete orphan gpb rows: open periods where no ledger_entries exist.
+        //    These linger after transactions are reversed/deleted.
+        const orphanRes = await client.query(
+            `DELETE FROM gl_period_balances gpb
+             WHERE gpb.fiscal_period BETWEEN 1 AND 12
+               AND NOT EXISTS (
+                 SELECT 1 FROM financial_periods fp
+                 WHERE fp.period_year  = gpb.fiscal_year
+                   AND fp.period_month = gpb.fiscal_period
+                   AND fp."Status" IN ('CLOSED', 'LOCKED')
+               )
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM ledger_entries le
+                 JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+                 WHERE le."AccountId" = gpb.account_id
+                   AND lt."Status" IN ('POSTED', 'REVERSED')
+                   AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = gpb.fiscal_year
+                   AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = gpb.fiscal_period
+               )`,
+        );
+        const orphansDeleted = orphanRes.rowCount ?? 0;
+
+        // 4. Count how many LOCKED/CLOSED periods we skipped (informational).
+        const skippedRes = await client.query(
+            `SELECT COUNT(DISTINCT (gpb.fiscal_year, gpb.fiscal_period))::INT AS n
+             FROM gl_period_balances gpb
+             WHERE EXISTS (
+               SELECT 1 FROM financial_periods fp
+               WHERE fp.period_year  = gpb.fiscal_year
+                 AND fp.period_month = gpb.fiscal_period
+                 AND fp."Status" IN ('CLOSED', 'LOCKED')
+             )`,
+        );
+        const skippedLockedPeriods: number = skippedRes.rows[0]?.n ?? 0;
+
+        await client.query('COMMIT');
+
+        const afterCount = await pool.query(
+            `SELECT COUNT(*)::INT AS n FROM gl_period_balances gpb
+             WHERE gpb.fiscal_period BETWEEN 1 AND 12
+               AND NOT EXISTS (
+                 SELECT 1 FROM financial_periods fp
+                 WHERE fp.period_year = gpb.fiscal_year
+                   AND fp.period_month = gpb.fiscal_period
+                   AND fp."Status" IN ('CLOSED', 'LOCKED')
+               )`,
+        );
+        const afterOpen: number = afterCount.rows[0]?.n ?? 0;
+        const rowsInserted = Math.max(afterOpen - (beforeOpen - orphansDeleted), 0);
+        const rowsUpdated = Math.max(rowsRecomputed - rowsInserted, 0);
+
+        const durationMs = Date.now() - startedAt;
+        logger.info('gl_period_balances rebuilt from ledger_entries', {
+            rowsRecomputed, rowsInserted, rowsUpdated, orphansDeleted,
+            skippedLockedPeriods, durationMs,
+        });
+
+        return {
+            rowsRecomputed, rowsInserted, rowsUpdated, orphansDeleted,
+            skippedLockedPeriods, durationMs,
+        };
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+// ============================================================================
+// HEAL: RECALC suppliers."OutstandingBalance" FROM supplier_invoices
+// ----------------------------------------------------------------------------
+// Heals ap_reconciliation drift between the GL (account 2100) and the supplier
+// subledger when the cached suppliers.OutstandingBalance has fallen out of sync.
+// Uses the same formula as recalculateOutstandingBalance() in supplierRepository.
+// ============================================================================
+
+export interface RecalcSupplierBalancesResult {
+    suppliersScanned: number;
+    suppliersUpdated: number;
+    durationMs: number;
+}
+
+export async function recalcAllSupplierBalances(
+    dbPool?: pg.Pool,
+): Promise<RecalcSupplierBalancesResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+
+    const scanRes = await pool.query(`SELECT COUNT(*)::INT AS n FROM suppliers`);
+    const suppliersScanned: number = scanRes.rows[0]?.n ?? 0;
+
+    const updateRes = await pool.query(
+        `WITH per_supplier AS (
+           SELECT s."Id" AS supplier_id,
+                  COALESCE(SUM(
+                    CASE
+                      WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+                        THEN -COALESCE(si."OutstandingBalance", 0)
+                      ELSE
+                            COALESCE(si."OutstandingBalance", 0)
+                    END
+                  ), 0) AS net_outstanding
+           FROM suppliers s
+           LEFT JOIN supplier_invoices si
+             ON si."SupplierId" = s."Id"
+            AND si.deleted_at IS NULL
+            AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED')
+           GROUP BY s."Id"
+         )
+         UPDATE suppliers s
+         SET "OutstandingBalance" = GREATEST(per_supplier.net_outstanding, 0),
+             "UpdatedAt"          = NOW()
+         FROM per_supplier
+         WHERE s."Id" = per_supplier.supplier_id
+           AND ABS(COALESCE(s."OutstandingBalance", 0) - GREATEST(per_supplier.net_outstanding, 0)) > 0.01`,
+    );
+
+    const durationMs = Date.now() - startedAt;
+    return {
+        suppliersScanned,
+        suppliersUpdated: updateRes.rowCount ?? 0,
+        durationMs,
+    };
+}
+
+// ============================================================================
+// HEAL: REBUILD inventory_balances FROM products.quantity_on_hand
+// ----------------------------------------------------------------------------
+// products.quantity_on_hand is the source of truth (updated atomically by every
+// stock movement under withTransaction). inventory_balances is a denormalised
+// state-table maintained by stateTablesRepository's UPSERTs at write time. If
+// it falls out of sync (e.g. failed savepoint, manual SQL, restored backup),
+// this rebuild snaps every row back to products.quantity_on_hand. Idempotent.
+// ============================================================================
+
+export interface RebuildInventoryBalancesResult {
+    rowsScanned: number;
+    rowsUpdated: number;
+    rowsInserted: number;
+    durationMs: number;
+}
+
+export async function rebuildInventoryBalances(
+    dbPool?: pg.Pool,
+): Promise<RebuildInventoryBalancesResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+
+    const beforeRes = await pool.query(
+        `SELECT COUNT(*)::INT AS n FROM inventory_balances`,
+    );
+    const before: number = beforeRes.rows[0]?.n ?? 0;
+
+    // UPSERT: snap inventory_balances.quantity_on_hand to products.quantity_on_hand
+    // for every product, leaving cumulative tallies (total_received/sold/adjusted)
+    // alone — those are write-time movement counters that the rebuild has no way
+    // to recompute without scanning stock_movements (separate concern).
+    const upsertRes = await pool.query(
+        `WITH src AS (
+           SELECT p.id, COALESCE(p.quantity_on_hand, 0) AS qoh
+           FROM products p
+         )
+         INSERT INTO inventory_balances (product_id, quantity_on_hand, updated_at)
+         SELECT id, qoh, NOW() FROM src
+         ON CONFLICT (product_id) DO UPDATE
+            SET quantity_on_hand = EXCLUDED.quantity_on_hand,
+                updated_at       = NOW()
+          WHERE ABS(inventory_balances.quantity_on_hand - EXCLUDED.quantity_on_hand) > 0.001`,
+    );
+
+    const afterRes = await pool.query(
+        `SELECT COUNT(*)::INT AS n FROM inventory_balances`,
+    );
+    const after: number = afterRes.rows[0]?.n ?? 0;
+
+    const rowsInserted = Math.max(after - before, 0);
+    const rowsUpdated = Math.max((upsertRes.rowCount ?? 0) - rowsInserted, 0);
+
+    return {
+        rowsScanned: after,
+        rowsUpdated,
+        rowsInserted,
+        durationMs: Date.now() - startedAt,
+    };
+}
+
+// ============================================================================
+// HEAL: REBUILD product_daily_summary FROM sale_items
+// ----------------------------------------------------------------------------
+// product_daily_summary is a per-(business_date, product_id) state table
+// maintained at write-time by stateTablesRepository when sales are completed.
+// If it drifts from sale_items (e.g. partial savepoint failure, restored
+// backup, missed UPSERT), this rebuild snaps every row back to the source of
+// truth: COMPLETED sales × sale_items aggregates. Cost lookup uses
+// si.unit_cost (already captured at sale time) so cost_layers are not needed.
+// ============================================================================
+
+export interface RebuildProductDailySummaryResult {
+    rowsAffected: number;
+    rowsDeleted: number;
+    durationMs: number;
+}
+
+export async function rebuildProductDailySummary(
+    dbPool?: pg.Pool,
+): Promise<RebuildProductDailySummaryResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+
+    const result = await pool.query(`
+      WITH agg AS (
+        SELECT
+          s.sale_date                                  AS business_date,
+          si.product_id                                AS product_id,
+          COALESCE(MAX(p.category), 'Uncategorized')   AS category,
+          SUM(si.quantity)::numeric(15,4)              AS units_sold,
+          SUM(si.total_price)::numeric(15,2)           AS revenue,
+          SUM(COALESCE(si.unit_cost, 0) * si.quantity)::numeric(15,2) AS cost_of_goods,
+          SUM(si.total_price - COALESCE(si.unit_cost,0) * si.quantity)::numeric(15,2) AS gross_profit,
+          SUM(COALESCE(si.discount_amount, 0))::numeric(15,2) AS discount_given,
+          COUNT(DISTINCT s.id)::int                    AS transaction_count
+        FROM sales s
+        JOIN sale_items si ON si.sale_id = s.id
+        LEFT JOIN products p ON p.id = si.product_id
+        WHERE s.status = 'COMPLETED'
+          AND si.product_id IS NOT NULL
+        GROUP BY s.sale_date, si.product_id
+      )
+      INSERT INTO product_daily_summary (
+        business_date, product_id, category,
+        units_sold, revenue, cost_of_goods, gross_profit,
+        discount_given, transaction_count, updated_at
+      )
+      SELECT
+        business_date, product_id, category,
+        units_sold, revenue, cost_of_goods, gross_profit,
+        discount_given, transaction_count, NOW()
+      FROM agg
+      ON CONFLICT (business_date, product_id) DO UPDATE SET
+        category          = EXCLUDED.category,
+        units_sold        = EXCLUDED.units_sold,
+        revenue           = EXCLUDED.revenue,
+        cost_of_goods     = EXCLUDED.cost_of_goods,
+        gross_profit      = EXCLUDED.gross_profit,
+        discount_given    = EXCLUDED.discount_given,
+        transaction_count = EXCLUDED.transaction_count,
+        updated_at        = NOW()
+    `);
+
+    // Remove orphan PDS rows that no longer have any matching COMPLETED sale_items.
+    // These typically arise from voided/refunded sales where the original PDS
+    // upsert ran but the void path didn't roll the counter back.
+    const deleteRes = await pool.query(`
+      DELETE FROM product_daily_summary pds
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM sales s
+        JOIN sale_items si ON si.sale_id = s.id
+        WHERE s.status = 'COMPLETED'
+          AND si.product_id = pds.product_id
+          AND s.sale_date   = pds.business_date
+      )
+    `);
+
+    return {
+        rowsAffected: result.rowCount ?? 0,
+        rowsDeleted: deleteRes.rowCount ?? 0,
+        durationMs: Date.now() - startedAt,
+    };
+}
+
+// ============================================================================
+// HEAL: AP DRIFT — post a CORRECTION JE to align GL 2100 with subledger
+// ----------------------------------------------------------------------------
+// When the GL 2100 (Accounts Payable) balance drifts from the supplier
+// subledger (sum of supplier_invoices.OutstandingBalance with SCN sign-flip),
+// the safest, audit-trail-preserving fix is to post a single CORRECTION
+// journal entry that closes the gap, NOT to adjust historical entries.
+//
+// Rules:
+//   • Drift = GL 2100 (POSTED only) − subledger sum.
+//   • If |drift| < 0.01 → no-op.
+//   • If drift > 0  (GL > subledger): GL is overstating AP. We DEBIT 2100
+//                                     and CREDIT a "GL Adjustments" expense
+//                                     (account 5900) to reduce AP liability.
+//   • If drift < 0  (GL < subledger): GL is understating AP. We CREDIT 2100
+//                                     and DEBIT 5900.
+//
+// The supplier subledger is NEVER touched — the GL is brought to it. Idempotent
+// via an audit-tagged idempotency key (one heal per UTC date).
+// ============================================================================
+
+export interface HealAPDriftResult {
+    drift: number;
+    subledgerBalance: number;
+    glBalance: number;
+    action: 'no-op' | 'debit-ap' | 'credit-ap';
+    transactionNumber?: string;
+    transactionId?: string;
+    durationMs: number;
+}
+
+export async function healAPDrift(
+    dbPool?: pg.Pool,
+    userId?: string,
+): Promise<HealAPDriftResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+
+    // Compute drift exactly as the audit does
+    const balRes = await pool.query(`
+      SELECT
+        COALESCE(
+          (SELECT SUM("CreditAmount") - SUM("DebitAmount")
+             FROM ledger_entries le
+             JOIN accounts a ON a."Id" = le."AccountId"
+             JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+            WHERE a."AccountCode" = '2100' AND lt."Status" = 'POSTED'), 0
+        ) AS gl_balance,
+        COALESCE((SELECT SUM("OutstandingBalance") FROM suppliers), 0) AS sub_balance
+    `);
+    const glBalance = Money.toNumber(Money.parseDb(balRes.rows[0].gl_balance));
+    const subBalance = Money.toNumber(Money.parseDb(balRes.rows[0].sub_balance));
+    const drift = Money.toNumber(Money.subtract(glBalance, subBalance));
+
+    if (Math.abs(drift) < 0.01) {
+        return {
+            drift, subledgerBalance: subBalance, glBalance,
+            action: 'no-op',
+            durationMs: Date.now() - startedAt,
+        };
+    }
+
+    // Resolve account codes (we use codes, not IDs, with AccountingCore)
+    const accCodes = ['2100', '5900'];
+    const accRes = await pool.query(
+        `SELECT "AccountCode" FROM accounts WHERE "AccountCode" = ANY($1::text[])`,
+        [accCodes],
+    );
+    const found = new Set<string>(accRes.rows.map(r => r.AccountCode));
+    if (!found.has('2100')) {
+        throw new Error('Account 2100 (Accounts Payable) not found');
+    }
+    let offsetCode = '5900';
+    if (!found.has('5900')) {
+        // Fall back to any expense account
+        const fallback = await pool.query(
+            `SELECT "AccountCode" FROM accounts WHERE "AccountType" = 'EXPENSE' ORDER BY "AccountCode" LIMIT 1`,
+        );
+        if (fallback.rowCount === 0) {
+            throw new Error('No expense account available for AP-drift correction');
+        }
+        offsetCode = fallback.rows[0].AccountCode;
+    }
+
+    // Build the correction JE. drift > 0 → GL > subledger → DEBIT AP / CREDIT Expense.
+    const action: 'debit-ap' | 'credit-ap' = drift > 0 ? 'debit-ap' : 'credit-ap';
+    const absDrift = Math.abs(drift);
+    const today = getBusinessDate();
+    const idempotencyKey = `AP-DRIFT-HEAL-${today}`;
+
+    const description =
+        `AP drift correction: align GL 2100 (${glBalance.toFixed(2)}) `
+        + `to supplier subledger (${subBalance.toFixed(2)}); drift=${drift.toFixed(2)}`;
+
+    const lines = action === 'debit-ap'
+        ? [
+            { accountCode: '2100',     debitAmount: absDrift, creditAmount: 0,
+              description: 'AP drift correction (reduce overstated liability)' },
+            { accountCode: offsetCode, debitAmount: 0,        creditAmount: absDrift,
+              description: 'AP drift correction (offset to GL adjustments)' },
+        ]
+        : [
+            { accountCode: offsetCode, debitAmount: absDrift, creditAmount: 0,
+              description: 'AP drift correction (offset to GL adjustments)' },
+            { accountCode: '2100',     debitAmount: 0,        creditAmount: absDrift,
+              description: 'AP drift correction (recognise understated liability)' },
+        ];
+
+    const tx = await AccountingCore.createJournalEntry({
+        entryDate: today,
+        description,
+        referenceType: 'CORRECTION',
+        referenceId: '00000000-0000-0000-0000-000000000000',
+        referenceNumber: idempotencyKey,
+        idempotencyKey,
+        userId: userId ?? '00000000-0000-0000-0000-000000000000',
+        lines,
+        source: 'SYSTEM_CORRECTION',
+    }, pool);
+
+    return {
+        drift,
+        subledgerBalance: subBalance,
+        glBalance,
+        action,
+        transactionNumber: tx.transactionNumber,
+        transactionId: tx.transactionId,
+        durationMs: Date.now() - startedAt,
+    };
+}
+
+// ─── internal helpers ─────────────────────────────────────────────────────────
+
+/** Normalise any date value (Date object, ISO string, or date-only string) to YYYY-MM-DD. */
+function toDateString(value: Date | string | null | undefined): string {
+    if (!value) return getBusinessDate();
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    // Already a date string or ISO string
+    return String(value).slice(0, 10);
+}

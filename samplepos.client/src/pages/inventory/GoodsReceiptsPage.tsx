@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { downloadFile } from '../../utils/download';
 import { getBusinessDate } from '../../utils/businessDate';
 import {
   useGoodsReceipts,
@@ -23,7 +24,6 @@ import type { ReturnableItem } from '../../hooks/useReturnGrn';
 import { useAuth } from '../../hooks/useAuth';
 import { useTenant } from '../../contexts/TenantContext';
 import { formatCurrency } from '../../utils/currency';
-import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
@@ -79,6 +79,7 @@ interface GRRow {
   po_number?: string;
   supplierName?: string;
   supplier_name?: string;
+  supplierId?: string;
   status: string;
   receivedDate?: string;
   received_date?: string;
@@ -204,11 +205,41 @@ export default function GoodsReceiptsPage() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
+  // ── Transaction Guard ──────────────────────────────────────────────────
+  const { openGuard, closeGuard } = useTransactionGuard();
+  const detailsGuardRef = useRef<GuardHandle | null>(null);
+  const createGuardRef = useRef<GuardHandle | null>(null);
+  const returnGuardRef = useRef<GuardHandle | null>(null);
+
+  useEffect(() => {
+    if (showDetailsModal) {
+      detailsGuardRef.current = openGuard({ cancellable: true, label: 'Goods receipt details' });
+      return () => { if (detailsGuardRef.current) { closeGuard(detailsGuardRef.current.id); detailsGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDetailsModal]);
+
+  useEffect(() => {
+    if (showCreateModal) {
+      createGuardRef.current = openGuard({ cancellable: true, label: 'Create goods receipt' });
+      return () => { if (createGuardRef.current) { closeGuard(createGuardRef.current.id); createGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCreateModal]);
+
   // Permission gating
   const canCreateGR = useCanAccess([], ['purchasing.create']);
   const canFinalizeGR = useCanAccess([], ['purchasing.post']);
   const [showAlertsModal, setShowAlertsModal] = useState(false);
   const [costAlerts, setCostAlerts] = useState<CostAlert[]>([]);
+  // Post-finalize "Create Bill?" prompt (designed modal, not browser confirm)
+  const [billPrompt, setBillPrompt] = useState<{
+    grId: string;
+    grNumber: string;
+    total: number;
+    supplierName: string;
+  } | null>(null);
+  const [billPromptLoading, setBillPromptLoading] = useState(false);
   const [baseline, setBaseline] = useState<'PO' | 'PRODUCT'>('PO');
   const [poSearch, setPoSearch] = useState('');
   const [poPage, setPoPage] = useState(1);
@@ -220,6 +251,16 @@ export default function GoodsReceiptsPage() {
   const [batchWarnings, setBatchWarnings] = useState<Record<string, string>>({});
   const validationTimeout = useRef<Record<string, NodeJS.Timeout>>({});
   const [showReturnModal, setShowReturnModal] = useState(false);
+  const [creatingBillForGR, setCreatingBillForGR] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (showReturnModal) {
+      returnGuardRef.current = openGuard({ cancellable: false, label: 'Return goods to supplier' });
+      return () => { if (returnGuardRef.current) { closeGuard(returnGuardRef.current.id); returnGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showReturnModal]);
+
   const [returnReason, setReturnReason] = useState('');
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [showAddItemForm, setShowAddItemForm] = useState(false);
@@ -307,174 +348,18 @@ export default function GoodsReceiptsPage() {
     return Array.isArray(raw) ? raw : [];
   }, [returnGrnData]);
 
-  // PDF Export for Goods Receipt
-  const handleExportGRPDF = (gr: GRRow, grItems: GRItemRow[]) => {
-    const doc = new jsPDF();
-
-    // Header
-    doc.setFontSize(18);
-    doc.setFont('helvetica', 'bold');
-    doc.text(brandName, 14, 20);
-
-    doc.setFontSize(14);
-    doc.text('Goods Receipt', 14, 30);
-
-    // GR Number and Status
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'normal');
-    const grNumber = gr.grNumber || gr.receiptNumber || gr.receipt_number || 'N/A';
-    const poNumber = gr.poNumber || gr.po_number || 'N/A';
-    const supplierName = gr.supplierName || gr.supplier_name || 'N/A';
-    const status = gr.status || 'DRAFT';
-
-    doc.text(`GR Number: ${grNumber}`, 14, 42);
-    doc.text(`PO Number: ${poNumber}`, 14, 50);
-    doc.text(`Supplier: ${supplierName}`, 14, 58);
-
-    // Status badge simulation
-    const statusColors: Record<string, { r: number; g: number; b: number }> = {
-      DRAFT: { r: 245, g: 158, b: 11 },
-      PENDING: { r: 59, g: 130, b: 246 },
-      COMPLETED: { r: 16, g: 185, b: 129 },
-      FINALIZED: { r: 16, g: 185, b: 129 },
-    };
-    const statusColor = statusColors[status] || { r: 107, g: 114, b: 128 };
-    doc.setFillColor(statusColor.r, statusColor.g, statusColor.b);
-    doc.roundedRect(130, 38, 60, 8, 2, 2, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(10);
-    doc.text(status, 160, 44, { align: 'center' });
-    doc.setTextColor(0, 0, 0);
-
-    // Receipt details
-    doc.setFontSize(10);
-    const receivedDate = gr.received_date || gr.receivedDate || '-';
-    const receivedBy = gr.received_by_name || gr.receivedByName || '-';
-    const deliveryNote = gr.delivery_note || gr.deliveryNote || '-';
-
-    doc.text(`Received Date: ${formatDisplayDate(receivedDate)}`, 14, 70);
-    doc.text(`Received By: ${receivedBy}`, 14, 78);
-    doc.text(`Delivery Note: ${deliveryNote}`, 14, 86);
-
-    // Items table
-    const tableData = grItems.map((item: GRItemRow) => {
-      const productName = item.productName || item.product_name || 'Unknown';
-      // Get UoM and conversion factor from item data
-      const uomSymbol =
-        item.uomSymbol || item.uom_symbol || item.uomName || item.uom_name || 'base';
-      const conversionFactor = parseFloat(
-        String(item.conversionFactor || item.conversion_factor || 1)
-      );
-
-      // Base quantities from database
-      const baseOrderedQty = parseFloat(String(item.orderedQuantity || item.ordered_quantity || 0));
-      const baseReceivedQty = parseFloat(
-        String(item.receivedQuantity || item.received_quantity || 0)
-      );
-      const baseUnitCost = parseFloat(String(item.unitCost || item.unit_cost || 0));
-
-      // Convert to ordering UoM quantities
-      const orderedQty =
-        conversionFactor > 0
-          ? new Decimal(baseOrderedQty).div(conversionFactor).toNumber()
-          : baseOrderedQty;
-      const receivedQty =
-        conversionFactor > 0
-          ? new Decimal(baseReceivedQty).div(conversionFactor).toNumber()
-          : baseReceivedQty;
-      // Unit cost in ordering UoM = base cost * conversion factor
-      const unitCost = new Decimal(baseUnitCost).times(conversionFactor).toNumber();
-
-      const batchNumber = item.batchNumber || item.batch_number || '-';
-      const expiryDate = item.expiryDate || item.expiry_date || '-';
-      const totalCost = new Decimal(baseReceivedQty).times(baseUnitCost).toNumber();
-      const qtyVariance =
-        baseOrderedQty > 0
-          ? (((baseReceivedQty - baseOrderedQty) / baseOrderedQty) * 100).toFixed(2)
-          : '0.00';
-
-      return [
-        productName,
-        uomSymbol,
-        orderedQty.toString(),
-        receivedQty.toString(),
-        formatCurrency(unitCost),
-        formatCurrency(totalCost),
-        batchNumber,
-        formatDisplayDate(expiryDate),
-        `${parseFloat(qtyVariance) >= 0 ? '+' : ''}${qtyVariance}%`,
-      ];
+  // PDF Export for Goods Receipt — direct authenticated download (same pattern as Customer statement)
+  const handleExportGRPDF = (gr: GRRow, _grItems: GRItemRow[]): void => {
+    void _grItems;
+    const grNumber = (gr as unknown as Record<string, unknown>).receipt_number as string || gr.receiptNumber || gr.id;
+    downloadFile(`/documents/GOODS_RECEIPT/${gr.id}`, `gr-${grNumber}.pdf`).catch((err: Error) => {
+      alert(`PDF export failed: ${err.message}`);
     });
-
-    autoTable(doc, {
-      startY: 95,
-      head: [
-        [
-          'Product',
-          'UoM',
-          'Ordered',
-          'Received',
-          'Unit Cost',
-          'Total Cost',
-          'Batch #',
-          'Expiry',
-          'Qty Var',
-        ],
-      ],
-      body: tableData,
-      theme: 'striped',
-      headStyles: {
-        fillColor: [59, 130, 246],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold',
-        fontSize: 9,
-      },
-      styles: {
-        fontSize: 8,
-        cellPadding: 3,
-      },
-      columnStyles: {
-        0: { cellWidth: 35 },
-        1: { cellWidth: 18 },
-        4: { halign: 'right' },
-        5: { halign: 'right' },
-        8: { halign: 'center' },
-      },
-    });
-
-    // Calculate total
-    const totalValue = grItems.reduce((sum: number, item: GRItemRow) => {
-      const receivedQty = parseFloat(String(item.receivedQuantity || item.received_quantity || 0));
-      const unitCost = parseFloat(String(item.unitCost || item.unit_cost || 0));
-      return sum + new Decimal(receivedQty).times(unitCost).toNumber();
-    }, 0);
-
-    // Get final Y position after table
-    const finalY =
-      (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 150;
-
-    // Total box
-    doc.setFillColor(240, 240, 240);
-    doc.rect(130, finalY + 10, 65, 10, 'F');
-    doc.setFontSize(11);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Total Value:', 132, finalY + 17);
-    doc.text(formatCurrency(totalValue), 193, finalY + 17, { align: 'right' });
-
-    // Footer
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(128, 128, 128);
-    doc.text(`Generated on ${new Date().toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE })}`, 14, 285);
-    doc.text(`${brandName} - Goods Receipt Document`, 196, 285, { align: 'right' });
-
-    // Save
-    doc.save(`GoodsReceipt_${grNumber}.pdf`);
   };
   const createGRMutation = useCreateGoodsReceipt();
   const { user } = useAuth();
   const { config } = useTenant();
-  const brandName = config.branding.companyName || config.name || 'SMART ERP';
+  void config;
   const queryClient = useQueryClient();
 
   // Persist baseline selection
@@ -634,8 +519,13 @@ export default function GoodsReceiptsPage() {
         }
       }
 
-      // Single batch request instead of N parallel PUTs
-      if (batchItems.length > 0) {
+      // Single batch request instead of N parallel PUTs.
+      // Skip if GR is already finalized — backend rejects item updates on
+      // COMPLETED/FINALIZED GRs ("Cannot update items of a finalized goods
+      // receipt"), and there is nothing to save anyway.
+      const grStatus = (selectedGR?.status || '').toUpperCase();
+      const grAlreadyFinalized = grStatus === 'COMPLETED' || grStatus === 'FINALIZED';
+      if (batchItems.length > 0 && !grAlreadyFinalized) {
         await api.goodsReceipts.batchUpdateItems(id, batchItems);
       }
 
@@ -667,6 +557,35 @@ export default function GoodsReceiptsPage() {
         setShowAlertsModal(true);
       } else {
         alert('Goods receipt finalized successfully!');
+      }
+
+      // ── One-click bill prompt ──────────────────────────────────────────
+      // Modern UX: offer to create the supplier bill immediately so the user
+      // does not have to navigate back to the GR later. The bill is built
+      // entirely from this GR's data on the backend (createInvoiceFromGRN).
+      try {
+        // Compute total from the same items array used elsewhere on this page.
+        const grTotal = items.reduce((sum, it) => {
+          const edits = editItems[it.id] || {};
+          const qty = Number(edits.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
+          const cost = Number(edits.unitCost ?? it.unitCost ?? it.unit_cost ?? 0);
+          return sum + qty * cost;
+        }, 0);
+        const grNumber = selectedGR?.receiptNumber || selectedGR?.receipt_number || '';
+        const alreadyBilled =
+          ((grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '').length > 0;
+        const supplierName =
+          (grDetail?.gr as { supplierName?: string; supplier_name?: string } | undefined)?.supplierName ||
+          (grDetail?.gr as { supplierName?: string; supplier_name?: string } | undefined)?.supplier_name ||
+          (selectedGR as { supplierName?: string; supplier_name?: string } | undefined)?.supplierName ||
+          (selectedGR as { supplierName?: string; supplier_name?: string } | undefined)?.supplier_name ||
+          '';
+        if (grTotal > 0 && !alreadyBilled) {
+          // Open designed modal (not browser confirm) — see post-finalize modal below.
+          setBillPrompt({ grId: id, grNumber, total: grTotal, supplierName });
+        }
+      } catch {
+        // Non-fatal: finalize already succeeded, bill prompt is opportunistic.
       }
 
       setShowDetailsModal(false);
@@ -1053,7 +972,8 @@ export default function GoodsReceiptsPage() {
       {/* Details Modal */}
       {showDetailsModal && selectedGR && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ zIndex: detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
           onClick={() => setShowDetailsModal(false)}
         >
           <div
@@ -1359,6 +1279,69 @@ export default function GoodsReceiptsPage() {
                       </svg>
                       Return to Supplier
                     </button>
+                    {(grDetail?.gr?.supplierId || selectedGR.supplierId) && (() => {
+                      const grId = selectedGR.id || (selectedGR as { gr_id?: string }).gr_id || '';
+                      const grNumber = selectedGR.receiptNumber || selectedGR.receipt_number || '';
+                      const existingBillNum = (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
+                      const totalVal = items.reduce((sum, it) => {
+                        const qty = Number(it.receivedQuantity ?? it.received_quantity ?? 0);
+                        const cost = Number(it.unitCost ?? it.unit_cost ?? 0);
+                        return sum + qty * cost;
+                      }, 0);
+                      const isCreating = creatingBillForGR === grId;
+                      // Already billed → show a passive badge instead of the action button
+                      if (existingBillNum) {
+                        return (
+                          <div
+                            className="px-4 py-2 bg-green-50 border border-green-300 text-green-800 rounded-lg flex items-center gap-2 text-sm font-semibold"
+                            title={`Bill ${existingBillNum} already exists for ${grNumber}`}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Billed: {existingBillNum}
+                          </div>
+                        );
+                      }
+                      const handleOneClickBill = async () => {
+                        const ok = window.confirm(
+                          `Create supplier bill from ${grNumber} for ${formatCurrency(totalVal)}?\n\n` +
+                          `This will:\n` +
+                          `  • Clear GR/IR Clearing (2150)\n` +
+                          `  • Post Accounts Payable (2100)\n\n` +
+                          `Bill number, line items, costs and supplier will be filled from this Goods Receipt automatically.`
+                        );
+                        if (!ok) return;
+                        setCreatingBillForGR(grId);
+                        try {
+                          const { data } = await api.post('/supplier-payments/invoices/from-grn', { grnId: grId });
+                          if (!data.success) throw new Error(data.error || 'Failed to create bill');
+                          const dataObj = data.data as { invoice?: Record<string, unknown>; invoiceNumber?: string; SupplierInvoiceNumber?: string } | undefined;
+                          const inv = dataObj?.invoice ?? dataObj;
+                          const invNum = (inv?.invoiceNumber as string | undefined) || (inv?.SupplierInvoiceNumber as string | undefined) || '';
+                          alert(`✅ Supplier bill ${invNum} created from ${grNumber}.`);
+                          await detailsQuery.refetch();
+                        } catch (err: unknown) {
+                          handleApiError(err);
+                          alert(err instanceof Error ? err.message : 'Failed to create supplier bill');
+                        } finally {
+                          setCreatingBillForGR(null);
+                        }
+                      };
+                      return (
+                        <button
+                          onClick={handleOneClickBill}
+                          disabled={isCreating || !grId}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2"
+                          title={`One-click create supplier bill for ${grNumber} — ${formatCurrency(totalVal)}`}
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          {isCreating ? 'Creating Bill…' : `Create Supplier Bill (${formatCurrency(totalVal)})`}
+                        </button>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
@@ -1370,7 +1353,8 @@ export default function GoodsReceiptsPage() {
       {/* Return to Supplier Modal */}
       {showReturnModal && selectedGR && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ zIndex: returnGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
           onClick={() => !returnSubmitting && setShowReturnModal(false)}
         >
           <div
@@ -1526,10 +1510,129 @@ export default function GoodsReceiptsPage() {
         </div>
       )}
 
+      {/* Post-Finalize: Create Supplier Bill Prompt (designed modal) */}
+      {billPrompt && (
+        <div
+          className="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          style={{ zIndex: (detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL) + 1 }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bill-prompt-title"
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header — green success accent (this is a positive workflow, not an error) */}
+            <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-5 text-white">
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 id="bill-prompt-title" className="text-lg font-bold">Goods Receipt Finalized</h3>
+                  <p className="text-emerald-50 text-sm">{billPrompt.grNumber} is now in stock</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5">
+              <p className="text-gray-800 font-semibold text-base mb-1">
+                Create supplier bill now?
+              </p>
+              <p className="text-gray-600 text-sm mb-4">
+                The bill will be built automatically from this Goods Receipt — no typing required.
+              </p>
+
+              <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-2 text-sm">
+                {billPrompt.supplierName && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Supplier</span>
+                    <span className="font-medium text-gray-900">{billPrompt.supplierName}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Goods Receipt</span>
+                  <span className="font-mono font-medium text-gray-900">{billPrompt.grNumber}</span>
+                </div>
+                <div className="flex justify-between border-t border-gray-200 pt-2">
+                  <span className="text-gray-700 font-semibold">Bill amount</span>
+                  <span className="font-bold text-emerald-700 text-base">
+                    {formatCurrency(billPrompt.total)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 px-3 py-2 bg-blue-50 border border-blue-100 rounded text-xs text-blue-800">
+                <strong>GL impact:</strong> DR GR/IR Clearing (2150) &nbsp;/&nbsp; CR Accounts Payable (2100)
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-3 justify-end">
+              <button
+                type="button"
+                disabled={billPromptLoading}
+                onClick={() => setBillPrompt(null)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Skip for now
+              </button>
+              <button
+                type="button"
+                disabled={billPromptLoading}
+                onClick={async () => {
+                  if (!billPrompt) return;
+                  setBillPromptLoading(true);
+                  setCreatingBillForGR(billPrompt.grId);
+                  try {
+                    const { data } = await api.post('/supplier-payments/invoices/from-grn', { grnId: billPrompt.grId });
+                    if (!data.success) throw new Error(data.error || 'Failed to create bill');
+                    const dataObj = data.data as { invoice?: Record<string, unknown>; invoiceNumber?: string; SupplierInvoiceNumber?: string } | undefined;
+                    const inv = dataObj?.invoice ?? dataObj;
+                    const invNum = (inv?.invoiceNumber as string | undefined) || (inv?.SupplierInvoiceNumber as string | undefined) || '';
+                    setBillPrompt(null);
+                    await detailsQuery.refetch();
+                    alert(`✅ Supplier bill ${invNum} created from ${billPrompt.grNumber}.`);
+                  } catch (billErr: unknown) {
+                    handleApiError(billErr, { fallback: 'Failed to create supplier bill' });
+                  } finally {
+                    setBillPromptLoading(false);
+                    setCreatingBillForGR(null);
+                  }
+                }}
+                className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 flex items-center gap-2"
+              >
+                {billPromptLoading ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Creating bill…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Create supplier bill
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Cost Alerts Modal */}
       {showAlertsModal && costAlerts.length > 0 && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ zIndex: detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
           onClick={() => setShowAlertsModal(false)}
         >
           <div
@@ -1643,7 +1746,8 @@ export default function GoodsReceiptsPage() {
       {/* Create GR Modal */}
       {showCreateModal && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ zIndex: createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
           onClick={() => {
             setShowCreateModal(false);
             setSelectedPoId('');
@@ -1813,6 +1917,7 @@ export default function GoodsReceiptsPage() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

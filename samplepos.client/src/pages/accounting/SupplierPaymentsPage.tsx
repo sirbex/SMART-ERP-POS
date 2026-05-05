@@ -15,9 +15,10 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Decimal from 'decimal.js';
 import { AxiosError } from 'axios';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import { downloadFile } from '../../utils/download';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { AdjustSupplierInvoiceModal } from '../../components/shared/AdjustSupplierInvoiceModal';
 import { api } from '../../utils/api';
@@ -29,7 +30,6 @@ import {
     DialogDescription,
     DialogHeader,
     DialogTitle,
-    DialogTrigger,
     DialogFooter,
     Label,
     Select,
@@ -69,12 +69,7 @@ import type {
     SupplierPaymentReceipt
 } from '../../types/comprehensive-accounting';
 
-/** jsPDF instance extended with autoTable tracking properties */
-interface JsPDFWithAutoTable extends jsPDF {
-    lastAutoTable: { finalY: number };
-}
-
-// Unified Supplier interface matching backend response
+/** Unified Supplier interface matching backend response */
 interface Supplier {
     id: string;
     supplierNumber?: string;
@@ -113,6 +108,12 @@ const SupplierPaymentsPage: React.FC = () => {
     const [activeTab, setActiveTab] = useState('payments');
     const [payments, setPayments] = useState<SupplierPayment[]>([]);
     const [bills, setBills] = useState<SupplierInvoice[]>([]);
+    const [invoiceSummary, setInvoiceSummary] = useState<{
+        totalInvoices: number;
+        unpaidInvoices: number;
+        totalOutstanding: number;
+        totalCreditBalance: number;
+    }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0, totalCreditBalance: 0 });
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
     const [startDate, setStartDate] = useState<string>('');
@@ -136,6 +137,38 @@ const SupplierPaymentsPage: React.FC = () => {
     const [isAllocationModalOpen, setIsAllocationModalOpen] = useState(false);
     const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
     const [adjustInvoice, setAdjustInvoice] = useState<{ id: string; invoiceNumber: string } | null>(null);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    // Lock the ERP UI whenever a financial modal is open — prevents background
+    // interactions, duplicate submissions, and race conditions.
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const paymentGuardRef = useRef<GuardHandle | null>(null);
+    const billGuardRef = useRef<GuardHandle | null>(null);
+    const allocationGuardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (isPaymentModalOpen) {
+            paymentGuardRef.current = openGuard({ cancellable: false, label: 'Record supplier payment' });
+            return () => { if (paymentGuardRef.current) { closeGuard(paymentGuardRef.current.id); paymentGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isPaymentModalOpen]);
+
+    useEffect(() => {
+        if (isBillModalOpen) {
+            billGuardRef.current = openGuard({ cancellable: true, label: 'Record supplier bill' });
+            return () => { if (billGuardRef.current) { closeGuard(billGuardRef.current.id); billGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isBillModalOpen]);
+
+    useEffect(() => {
+        if (isAllocationModalOpen) {
+            allocationGuardRef.current = openGuard({ cancellable: false, label: 'Allocate payment' });
+            return () => { if (allocationGuardRef.current) { closeGuard(allocationGuardRef.current.id); allocationGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isAllocationModalOpen]);
 
     const [selectedPayment, setSelectedPayment] = useState<SupplierPayment | null>(null);
     const [outstandingBills, setOutstandingBills] = useState<SupplierInvoice[]>([]);
@@ -265,6 +298,7 @@ const SupplierPaymentsPage: React.FC = () => {
     const [obSupplierId, setObSupplierId] = useState('');
     const [obAmount, setObAmount] = useState('');
     const [obDate, setObDate] = useState('');
+    const [obDueDate, setObDueDate] = useState('');
     const [obNotes, setObNotes] = useState('');
     const [obPosting, setObPosting] = useState(false);
 
@@ -273,11 +307,18 @@ const SupplierPaymentsPage: React.FC = () => {
         const amt = parseFloat(obAmount);
         if (!amt || amt <= 0) { toast.error('Enter a positive amount'); return; }
         if (!obDate) { toast.error('As-of date is required'); return; }
+        if (obDueDate && obDueDate > obDate) { toast.error('Original invoice date cannot be after the as-of (cutover) date'); return; }
         setObPosting(true);
         try {
-            await api.supplierPayments.importOpeningBalance({ supplierId: obSupplierId, amount: amt, asOfDate: obDate, notes: obNotes || undefined });
+            await api.supplierPayments.importOpeningBalance({
+                supplierId: obSupplierId,
+                amount: amt,
+                asOfDate: obDate,
+                dueDate: obDueDate || undefined,
+                notes: obNotes || undefined,
+            });
             toast.success('Opening balance posted');
-            setObAmount(''); setObNotes(''); setObSupplierId(''); setObDate('');
+            setObAmount(''); setObNotes(''); setObSupplierId(''); setObDate(''); setObDueDate('');
         } catch (err) {
             const axErr = err as AxiosError<{ error?: string }>;
             toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
@@ -349,12 +390,47 @@ const SupplierPaymentsPage: React.FC = () => {
         }
     }, [suppliers, suppliersError]);
 
+    // Handle URL params from GR "Create Supplier Invoice" button
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get('createBill') === '1') {
+            const supplierId = params.get('supplierId') || '';
+            const grNumber = params.get('grNumber') || '';
+            const amount = params.get('amount') || '';
+            setBillFormData(prev => ({
+                ...prev,
+                supplierId,
+                supplierInvoiceNumber: grNumber ? `INV-${grNumber}` : '',
+                notes: grNumber ? `Goods received per ${grNumber}` : '',
+                lineItems: [{
+                    productName: grNumber ? `Goods received per ${grNumber}` : '',
+                    description: grNumber,
+                    quantity: '1',
+                    unitPrice: amount
+                }]
+            }));
+            setIsBillModalOpen(true);
+            // Clean the URL without reloading
+            const url = new URL(window.location.href);
+            url.searchParams.delete('createBill');
+            url.searchParams.delete('supplierId');
+            url.searchParams.delete('grNumber');
+            url.searchParams.delete('amount');
+            window.history.replaceState({}, '', url.toString());
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     const loadTabData = async () => {
         try {
             setLoading(true);
 
             // Always load both payments and bills for summary cards
-            await Promise.all([loadPayments(), loadBills()]);
+            await Promise.all([
+                loadPayments(),
+                loadBills(),
+                supplierInvoiceService.getInvoiceSummary().then(setInvoiceSummary).catch(() => { /* keep defaults */ }),
+            ]);
         } catch (error: unknown) {
             console.error('[SupplierPayments] Error loading tab data:', error);
             if (!(error instanceof AxiosError && error.response?.status === 403)) {
@@ -645,235 +721,14 @@ const SupplierPaymentsPage: React.FC = () => {
         });
     };
 
-    // Export payment voucher as PDF with detailed invoice line items
-    const handleExportPDF = () => {
+    // Export payment voucher as PDF (centralized via DocumentRenderer)
+    // Export Payment Voucher — direct authenticated download (same pattern as Customer statement)
+    const handleExportPDF = (): void => {
         if (!paymentReceipt) return;
-
-        const doc = new jsPDF();
-        const pageWidth = doc.internal.pageSize.getWidth();
-        let yPos = 20;
-
-        // Use shared formatCurrency for PDF — consistent UGX formatting
-        const formatCurrencyPDF = (amount: number): string => formatCurrency(amount, true, 0);
-
-        // Header
-        doc.setFontSize(20);
-        doc.setFont('helvetica', 'bold');
-        doc.text('SUPPLIER PAYMENT VOUCHER', pageWidth / 2, yPos, { align: 'center' });
-        yPos += 10;
-
-        doc.setFontSize(14);
-        doc.text(paymentReceipt.payment.paymentNumber, pageWidth / 2, yPos, { align: 'center' });
-        yPos += 8;
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Date: ${new Date(paymentReceipt.payment.paymentDate).toLocaleDateString('en-US', {
-            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-        })}`, pageWidth / 2, yPos, { align: 'center' });
-        yPos += 10;
-
-        // Line separator
-        doc.setLineWidth(0.5);
-        doc.line(15, yPos, pageWidth - 15, yPos);
-        yPos += 10;
-
-        // Supplier Info Section
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'bold');
-        doc.text('PAID TO', 15, yPos);
-        yPos += 6;
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Supplier: ${paymentReceipt.supplier.name}`, 15, yPos);
-        yPos += 5;
-        if (paymentReceipt.supplier.contactPerson) {
-            doc.text(`Contact: ${paymentReceipt.supplier.contactPerson}`, 15, yPos);
-            yPos += 5;
-        }
-        if (paymentReceipt.supplier.phone) {
-            doc.text(`Phone: ${paymentReceipt.supplier.phone}`, 15, yPos);
-            yPos += 5;
-        }
-        if (paymentReceipt.supplier.email) {
-            doc.text(`Email: ${paymentReceipt.supplier.email}`, 15, yPos);
-            yPos += 5;
-        }
-        yPos += 5;
-
-        // Payment Details Section
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'bold');
-        doc.text('PAYMENT DETAILS', 15, yPos);
-        yPos += 6;
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Payment Method: ${paymentReceipt.payment.paymentMethod}`, 15, yPos);
-        doc.text(`Reference: ${paymentReceipt.payment.reference || 'N/A'}`, 100, yPos);
-        yPos += 5;
-        if (paymentReceipt.payment.notes) {
-            doc.text(`Notes: ${paymentReceipt.payment.notes}`, 15, yPos);
-            yPos += 5;
-        }
-        yPos += 10;
-
-        // Invoices Summary Table
-        if (paymentReceipt.allocations.length > 0) {
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            doc.text(`INVOICES PAID (${paymentReceipt.allocations.length})`, 15, yPos);
-            yPos += 5;
-
-            // Invoice summary table - show both Bill # and Supplier Reference
-            const invoiceTableData = paymentReceipt.allocations.map(alloc => [
-                alloc.invoiceNumber + (alloc.supplierInvoiceRef ? `\n(Ref: ${alloc.supplierInvoiceRef})` : ''),
-                formatCurrencyPDF(alloc.invoiceTotal),
-                formatCurrencyPDF(alloc.previouslyPaid),
-                formatCurrencyPDF(alloc.allocationAmount),
-                formatCurrencyPDF(alloc.newOutstanding),
-                alloc.status === 'Paid' ? '✓ PAID' : alloc.status === 'PartiallyPaid' ? 'PARTIAL' : alloc.status
-            ]);
-
-            autoTable(doc, {
-                startY: yPos,
-                head: [['Invoice # / Ref', 'Total', 'Prev. Paid', 'This Payment', 'Balance', 'Status']],
-                body: invoiceTableData,
-                styles: { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [100, 100, 100], textColor: 255, fontStyle: 'bold' },
-                columnStyles: {
-                    0: { cellWidth: 30 },
-                    1: { cellWidth: 30, halign: 'right' },
-                    2: { cellWidth: 28, halign: 'right' },
-                    3: { cellWidth: 30, halign: 'right' },
-                    4: { cellWidth: 28, halign: 'right' },
-                    5: { cellWidth: 22, halign: 'center' }
-                },
-                margin: { left: 15, right: 15 }
-            });
-
-            yPos = (doc as unknown as JsPDFWithAutoTable).lastAutoTable.finalY + 10;
-
-            // Detailed Invoice Line Items
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'bold');
-            doc.text('DETAILED INVOICE ITEMS', 15, yPos);
-            yPos += 8;
-
-            for (const alloc of paymentReceipt.allocations) {
-                // Check if we need a new page
-                if (yPos > 250) {
-                    doc.addPage();
-                    yPos = 20;
-                }
-
-                doc.setFontSize(10);
-                doc.setFont('helvetica', 'bold');
-                doc.text(`Invoice: ${alloc.invoiceNumber}${alloc.supplierInvoiceRef ? ` (Ref: ${alloc.supplierInvoiceRef})` : ''}`, 15, yPos);
-                if (alloc.invoiceDate) {
-                    doc.setFont('helvetica', 'normal');
-                    doc.text(`Date: ${formatTimestampDate(alloc.invoiceDate)}`, 130, yPos);
-                }
-                yPos += 3;
-
-                if (alloc.lineItems && alloc.lineItems.length > 0) {
-                    const itemTableData = alloc.lineItems.map(item => [
-                        item.productName,
-                        item.description || '-',
-                        `${item.quantity} ${item.unitOfMeasure || ''}`.trim(),
-                        formatCurrencyPDF(item.unitCost),
-                        formatCurrencyPDF(item.lineTotal)
-                    ]);
-
-                    autoTable(doc, {
-                        startY: yPos,
-                        head: [['Product', 'Description', 'Qty', 'Unit Cost', 'Total']],
-                        body: itemTableData,
-                        styles: { fontSize: 8, cellPadding: 2 },
-                        headStyles: { fillColor: [150, 150, 150], textColor: 255, fontStyle: 'bold' },
-                        columnStyles: {
-                            0: { cellWidth: 45 },
-                            1: { cellWidth: 45 },
-                            2: { cellWidth: 25, halign: 'center' },
-                            3: { cellWidth: 30, halign: 'right' },
-                            4: { cellWidth: 30, halign: 'right' }
-                        },
-                        margin: { left: 20, right: 15 }
-                    });
-
-                    yPos = (doc as unknown as JsPDFWithAutoTable).lastAutoTable.finalY + 8;
-                } else {
-                    doc.setFont('helvetica', 'italic');
-                    doc.setFontSize(9);
-                    doc.text('No line item details available', 20, yPos + 3);
-                    yPos += 10;
-                }
-            }
-        }
-
-        // Summary Section
-        if (yPos > 230) {
-            doc.addPage();
-            yPos = 20;
-        }
-
-        yPos += 5;
-        doc.setFillColor(240, 240, 240);
-        doc.rect(15, yPos, pageWidth - 30, 40, 'F');
-        yPos += 8;
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Total Payment Amount:', 20, yPos);
-        doc.text(formatCurrencyPDF(paymentReceipt.summary.totalPayment), pageWidth - 25, yPos, { align: 'right' });
-        yPos += 7;
-
-        doc.text('Allocated to Invoices:', 20, yPos);
-        doc.text(formatCurrencyPDF(paymentReceipt.summary.totalAllocated), pageWidth - 25, yPos, { align: 'right' });
-        yPos += 7;
-
-        if (paymentReceipt.summary.unallocatedBalance > 0) {
-            doc.text('Unallocated (Credit Balance):', 20, yPos);
-            doc.text(formatCurrencyPDF(paymentReceipt.summary.unallocatedBalance), pageWidth - 25, yPos, { align: 'right' });
-            yPos += 7;
-        }
-
-        yPos += 3;
-        doc.setLineWidth(0.5);
-        doc.line(20, yPos, pageWidth - 20, yPos);
-        yPos += 8;
-
-        doc.setFontSize(14);
-        doc.setFont('helvetica', 'bold');
-        doc.text('TOTAL PAID:', 20, yPos);
-        doc.text(formatCurrencyPDF(paymentReceipt.summary.totalPayment), pageWidth - 25, yPos, { align: 'right' });
-
-        // Signature lines (if space allows)
-        if (yPos < 230) {
-            yPos = 250;
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'normal');
-
-            doc.line(20, yPos, 60, yPos);
-            doc.text('Prepared By', 30, yPos + 5);
-
-            doc.line(80, yPos, 120, yPos);
-            doc.text('Approved By', 90, yPos + 5);
-
-            doc.line(140, yPos, 190, yPos);
-            doc.text('Received By (Supplier)', 148, yPos + 5);
-        }
-
-        // Footer
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Generated on ${new Date().toLocaleString('en-GB', { timeZone: BUSINESS_TIMEZONE })}`, pageWidth / 2, 285, { align: 'center' });
-        doc.text('Computer-generated document. No signature required for amounts under UGX 1,000,000.', pageWidth / 2, 290, { align: 'center' });
-
-        // Save the PDF
-        doc.save(`Payment_Voucher_${paymentReceipt.payment.paymentNumber}.pdf`);
-        toast.success('PDF exported successfully');
+        const paymentNumber = paymentReceipt.payment.paymentNumber || paymentReceipt.payment.id;
+        downloadFile(`/documents/PAYMENT_VOUCHER/${paymentReceipt.payment.id}`, `payment-voucher-${paymentNumber}.pdf`).catch((err: Error) => {
+            alert(`PDF export failed: ${err.message}`);
+        });
     };
 
     const handleCreateBill = async () => {
@@ -1133,25 +988,17 @@ const SupplierPaymentsPage: React.FC = () => {
 
                 <div className="flex gap-2">
                     {canCreateBill && (
-                        <Dialog open={isBillModalOpen} onOpenChange={setIsBillModalOpen}>
-                            <DialogTrigger asChild>
-                                <Button variant="outline" className="flex items-center gap-2">
-                                    <FileText className="h-4 w-4" />
-                                    Record Bill
-                                </Button>
-                            </DialogTrigger>
-                        </Dialog>
+                        <Button variant="outline" className="flex items-center gap-2" onClick={() => setIsBillModalOpen(true)}>
+                            <FileText className="h-4 w-4" />
+                            Record Bill
+                        </Button>
                     )}
 
                     {canCreatePayment && (
-                        <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-                            <DialogTrigger asChild>
-                                <Button className="flex items-center gap-2">
-                                    <Plus className="h-4 w-4" />
-                                    Make Payment
-                                </Button>
-                            </DialogTrigger>
-                        </Dialog>
+                        <Button className="flex items-center gap-2" onClick={() => setIsPaymentModalOpen(true)}>
+                            <Plus className="h-4 w-4" />
+                            Make Payment
+                        </Button>
                     )}
                 </div>
             </div>
@@ -1212,7 +1059,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             <div>
                                 <p className="text-sm text-gray-500">Credit Balance</p>
                                 <p className="text-xl font-bold text-purple-600">
-                                    {formatCurrency(totalUnallocatedCredit)}
+                                    {formatCurrency(invoiceSummary.totalCreditBalance + totalUnallocatedCredit)}
                                 </p>
                             </div>
                         </div>
@@ -1689,7 +1536,7 @@ const SupplierPaymentsPage: React.FC = () => {
                             <p className="text-xs text-gray-500 mb-4">
                                 Post a historical balance brought forward as a single Opening Balance journal (DR Opening Balance Equity / CR Accounts Payable). Each supplier may only have one opening balance.
                             </p>
-                            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+                            <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end">
                                 <div className="sm:col-span-2">
                                     <Label className="text-xs text-gray-600 mb-1 block">Supplier *</Label>
                                     <Select value={obSupplierId} onValueChange={setObSupplierId}>
@@ -1707,7 +1554,13 @@ const SupplierPaymentsPage: React.FC = () => {
                                 </div>
                                 <div>
                                     <Label className="text-xs text-gray-600 mb-1 block">As-Of Date *</Label>
-                                    <DatePicker value={obDate} onChange={setObDate} placeholder="Opening date" />
+                                    <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
+                                    <p className="text-[10px] text-gray-400 mt-0.5">Posting / cutover date</p>
+                                </div>
+                                <div>
+                                    <Label className="text-xs text-gray-600 mb-1 block">Original Invoice Date</Label>
+                                    <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
+                                    <p className="text-[10px] text-gray-400 mt-0.5">Baseline for aging (defaults to As-Of)</p>
                                 </div>
                                 <div>
                                     <Label className="text-xs text-gray-600 mb-1 block">Notes</Label>
@@ -1725,11 +1578,11 @@ const SupplierPaymentsPage: React.FC = () => {
 
             </Tabs>
 
-            {/* Payment Modal */}
+            {/* Payment Modal — guarded: cancellable=false, ERP locked during payment */}
             <Dialog open={isPaymentModalOpen} onOpenChange={(open) => {
                 setIsPaymentModalOpen(open);
                 if (!open) resetPaymentForm();
-            }}>
+            }} zIndex={paymentGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
                         <DialogTitle>Record Supplier Payment</DialogTitle>
@@ -1962,8 +1815,8 @@ const SupplierPaymentsPage: React.FC = () => {
                 </DialogContent>
             </Dialog>
 
-            {/* Bill Modal */}
-            <Dialog open={isBillModalOpen} onOpenChange={setIsBillModalOpen}>
+            {/* Bill Modal — guarded: cancellable=true, ERP locked during bill entry */}
+            <Dialog open={isBillModalOpen} onOpenChange={setIsBillModalOpen} zIndex={billGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Record Supplier Bill</DialogTitle>
@@ -2091,8 +1944,8 @@ const SupplierPaymentsPage: React.FC = () => {
                 </DialogContent>
             </Dialog>
 
-            {/* Payment Allocation Modal */}
-            <Dialog open={isAllocationModalOpen} onOpenChange={setIsAllocationModalOpen}>
+            {/* Payment Allocation Modal — guarded: cancellable=false, double allocation prevented */}
+            <Dialog open={isAllocationModalOpen} onOpenChange={setIsAllocationModalOpen} zIndex={allocationGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-4xl">
                     <DialogHeader>
                         <DialogTitle>Allocate Payment to Bills</DialogTitle>
@@ -2443,6 +2296,7 @@ const SupplierPaymentsPage: React.FC = () => {
                     }}
                 />
             )}
+
         </div>
     );
 };

@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Plus, Filter, Search, Download, FileText, Eye, CheckCircle, XCircle, Send, DollarSign, Wallet, Loader2, BarChart3 } from 'lucide-react';
 import { useExpenses, useSubmitExpense, useApproveExpense, useRejectExpense, useMarkAsPaid, useDeleteExpense, usePaymentAccounts } from '../../hooks/useExpenses';
 import { ExpenseFilter, Expense } from '@shared/types/expense';
@@ -7,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../../components/ui/temp-ui-components';
 import { DatePicker } from '../../components/ui/date-picker';
 import { CreateExpenseForm } from '../../components/expenses/CreateExpenseForm';
 import { formatCurrency } from '../../utils/currency';
@@ -25,6 +27,45 @@ const ExpensesPage: React.FC = () => {
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+
+  // ── Transaction Guard ──────────────────────────────────────────────────
+  const { openGuard, closeGuard } = useTransactionGuard();
+  const createGuardRef = useRef<GuardHandle | null>(null);
+  const viewGuardRef = useRef<GuardHandle | null>(null);
+  const rejectGuardRef = useRef<GuardHandle | null>(null);
+  const paymentGuardRef = useRef<GuardHandle | null>(null);
+
+  useEffect(() => {
+    if (isCreateModalOpen) {
+      createGuardRef.current = openGuard({ cancellable: true, label: 'Create expense' });
+      return () => { if (createGuardRef.current) { closeGuard(createGuardRef.current.id); createGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCreateModalOpen]);
+
+  useEffect(() => {
+    if (!!selectedExpense) {
+      viewGuardRef.current = openGuard({ cancellable: true, label: 'View expense' });
+      return () => { if (viewGuardRef.current) { closeGuard(viewGuardRef.current.id); viewGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedExpense]);
+
+  useEffect(() => {
+    if (rejectDialogOpen) {
+      rejectGuardRef.current = openGuard({ cancellable: false, label: 'Reject expense' });
+      return () => { if (rejectGuardRef.current) { closeGuard(rejectGuardRef.current.id); rejectGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rejectDialogOpen]);
+
+  useEffect(() => {
+    if (paymentDialogOpen) {
+      paymentGuardRef.current = openGuard({ cancellable: false, label: 'Mark expense as paid' });
+      return () => { if (paymentGuardRef.current) { closeGuard(paymentGuardRef.current.id); paymentGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentDialogOpen]);
   const [selectedPaymentAccountId, setSelectedPaymentAccountId] = useState<string>('');
   const [filter, setFilter] = useState<ExpenseFilter>({
     page: 1,
@@ -430,7 +471,7 @@ const ExpensesPage: React.FC = () => {
       </Card>
 
       {/* Create Expense Modal */}
-      <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen}>
+      <Dialog open={isCreateModalOpen} onOpenChange={setIsCreateModalOpen} zIndex={createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         <DialogContent className="max-w-5xl max-h-[95vh] overflow-hidden flex flex-col animate-in fade-in-0 zoom-in-95 duration-200">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="text-2xl flex items-center gap-2">
@@ -454,7 +495,7 @@ const ExpensesPage: React.FC = () => {
       </Dialog>
 
       {/* View Expense Modal */}
-      <Dialog open={!!selectedExpense} onOpenChange={(open) => !open && setSelectedExpense(null)}>
+      <Dialog open={!!selectedExpense} onOpenChange={(open) => !open && setSelectedExpense(null)} zIndex={viewGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in-0 zoom-in-95 duration-200">
           <DialogHeader className="flex-shrink-0 pb-4 border-b">
             <DialogTitle className="text-2xl">Expense Details</DialogTitle>
@@ -676,7 +717,7 @@ const ExpensesPage: React.FC = () => {
       </Dialog>
 
       {/* Rejection Reason Dialog */}
-      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
+      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen} zIndex={rejectGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         <DialogContent className="max-w-lg animate-in fade-in-0 zoom-in-95 duration-200">
           <DialogHeader>
             <DialogTitle className="text-xl flex items-center gap-2 text-red-600">
@@ -737,7 +778,7 @@ const ExpensesPage: React.FC = () => {
       </Dialog>
 
       {/* Payment Account Selection Dialog */}
-      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen} zIndex={paymentGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         <DialogContent className="max-w-lg animate-in fade-in-0 zoom-in-95 duration-200">
           <DialogHeader>
             <DialogTitle className="text-xl flex items-center gap-2 text-green-600">

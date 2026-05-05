@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import { useCustomers } from '../../hooks/useApi';
 import { DatePicker } from '../ui/date-picker';
 import { formatTimestampDate } from '../../utils/businessDate';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 
 interface StoreCredit {
     id: string;
@@ -36,6 +38,18 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
     const [credits, setCredits] = useState<StoreCredit[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [showAddModal, setShowAddModal] = useState(false);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const guardRef = useRef<GuardHandle | null>(null);
+    useEffect(() => {
+        if (showAddModal) {
+            guardRef.current = openGuard({ cancellable: false, label: 'Issue store credit' });
+            return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showAddModal]);
+
     const [selectedCustomer, setSelectedCustomer] = useState<string>(customerId || '');
 
     // Add credit form state
@@ -426,7 +440,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
 
             {/* Add Credit Modal */}
             {showAddModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style={{ zIndex: guardRef.current?.panelZIndex ?? ZINDEX.PANEL }} onClick={() => setShowAddModal(false)}>
                     <div className="bg-white rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
                         <h3 className="text-lg font-semibold mb-4">Issue Store Credit</h3>
 

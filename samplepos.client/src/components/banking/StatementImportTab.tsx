@@ -4,12 +4,14 @@
  * Upload and process bank statements with CSV parsing and pattern matching.
  */
 
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Upload, FileText, Loader2, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/temp-ui-components';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -75,6 +77,18 @@ export const StatementImportTab: React.FC = () => {
     const [processingLineId, setProcessingLineId] = useState<string | null>(null);
 
     const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const guardRef = useRef<GuardHandle | null>(null);
+    useEffect(() => {
+        if (isTemplateModalOpen) {
+            guardRef.current = openGuard({ cancellable: false, label: 'Create import template' });
+            return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isTemplateModalOpen]);
+
     const [templateForm, setTemplateForm] = useState<TemplateFormData>(emptyTemplateForm);
     const [amountFormatTab, setAmountFormatTab] = useState('single');
 
@@ -457,7 +471,7 @@ export const StatementImportTab: React.FC = () => {
             </CardContent>
 
             {/* Create Template Modal */}
-            <Dialog open={isTemplateModalOpen} onOpenChange={setIsTemplateModalOpen}>
+            <Dialog open={isTemplateModalOpen} onOpenChange={setIsTemplateModalOpen} zIndex={guardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="sm:max-w-lg">
                     <DialogHeader>
                         <DialogTitle>Create Import Template</DialogTitle>

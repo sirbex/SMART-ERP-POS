@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { formatCurrency } from '../../utils/currency';
 import { useCustomers } from '../../hooks/useApi';
 import { apiClient } from '../../utils/api';
 import { formatTimestampDate } from '../../utils/businessDate';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 
 interface CustomerDeposit {
     id: string;
@@ -45,6 +47,18 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
     const [summary, setSummary] = useState<DepositSummary | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [showAddModal, setShowAddModal] = useState(false);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const guardRef = useRef<GuardHandle | null>(null);
+    useEffect(() => {
+        if (showAddModal) {
+            guardRef.current = openGuard({ cancellable: false, label: 'Add customer deposit' });
+            return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [showAddModal]);
+
     const [selectedCustomer, setSelectedCustomer] = useState<string>(customerId || '');
     const [error, setError] = useState<string | null>(null);
 
@@ -367,7 +381,7 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
 
             {/* Add Deposit Modal */}
             {showAddModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowAddModal(false)}>
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style={{ zIndex: guardRef.current?.panelZIndex ?? ZINDEX.PANEL }} onClick={() => setShowAddModal(false)}>
                     <div className="bg-white rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
                         <h3 className="text-lg font-semibold mb-4">Add Customer Deposit</h3>
 

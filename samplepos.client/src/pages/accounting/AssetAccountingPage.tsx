@@ -1,8 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   useAssetCategories, useCreateAssetCategory, useAssets, useCreateAsset, useRunDepreciation,
   useDisposeAsset,
 } from '../../hooks/useAccountingModules';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import {
   Building, Plus, X, Play, Package, Search, Eye,
   Trash2, DollarSign, BarChart3, FileText, Settings, ArrowRight,
@@ -78,6 +80,45 @@ export default function AssetAccountingPage() {
   const [showAssetForm, setShowAssetForm] = useState(false);
   const [showDepRun, setShowDepRun] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+
+  // ── Transaction Guards ─────────────────────────────────────────────
+  const { openGuard: openCatGuard, closeGuard: closeCatGuard } = useTransactionGuard();
+  const catGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (showCategoryForm) {
+      catGuardRef.current = openCatGuard({ cancellable: false, label: 'Create asset category' });
+      return () => { if (catGuardRef.current) { closeCatGuard(catGuardRef.current.id); catGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showCategoryForm]);
+  const { openGuard: openAssetGuard, closeGuard: closeAssetGuard } = useTransactionGuard();
+  const assetGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (showAssetForm) {
+      assetGuardRef.current = openAssetGuard({ cancellable: false, label: 'Acquire fixed asset' });
+      return () => { if (assetGuardRef.current) { closeAssetGuard(assetGuardRef.current.id); assetGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showAssetForm]);
+  const { openGuard: openDepGuard, closeGuard: closeDepGuard } = useTransactionGuard();
+  const depGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (showDepRun) {
+      depGuardRef.current = openDepGuard({ cancellable: false, label: 'Run depreciation' });
+      return () => { if (depGuardRef.current) { closeDepGuard(depGuardRef.current.id); depGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDepRun]);
+  const { openGuard: openDetailGuard, closeGuard: closeDetailGuard } = useTransactionGuard();
+  const detailGuardRef = useRef<GuardHandle | null>(null);
+  useEffect(() => {
+    if (selectedAsset) {
+      detailGuardRef.current = openDetailGuard({ cancellable: true, label: 'View asset details' });
+      return () => { if (detailGuardRef.current) { closeDetailGuard(detailGuardRef.current.id); detailGuardRef.current = null; } };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAsset]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
@@ -306,7 +347,7 @@ export default function AssetAccountingPage() {
 
       {/* ═══════════════ Depreciation Run Modal ═══════════════ */}
       {showDepRun && (
-        <Modal title="Run Monthly Depreciation" onClose={() => setShowDepRun(false)}>
+        <Modal title="Run Monthly Depreciation" onClose={() => setShowDepRun(false)} zIndex={depGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
           <p className="text-sm text-gray-600 mb-4">
             Posts GL entries for all active assets: DR Depreciation Expense, CR Accumulated Depreciation.
             Already-processed periods are skipped (idempotent).
@@ -342,7 +383,7 @@ export default function AssetAccountingPage() {
 
       {/* ═══════════════ New Category Form ═══════════════ */}
       {showCategoryForm && (
-        <Modal title="Create Asset Class" onClose={() => setShowCategoryForm(false)} wide>
+        <Modal title="Create Asset Class" onClose={() => setShowCategoryForm(false)} wide zIndex={catGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
           <p className="text-sm text-gray-500 mb-4">
             Define GL account determination and depreciation parameters for this asset class.
           </p>
@@ -417,7 +458,7 @@ export default function AssetAccountingPage() {
 
       {/* ═══════════════ Acquire Asset Form ═══════════════ */}
       {showAssetForm && (
-        <Modal title="Acquire Fixed Asset" onClose={() => setShowAssetForm(false)} wide>
+        <Modal title="Acquire Fixed Asset" onClose={() => setShowAssetForm(false)} wide zIndex={assetGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
           <p className="text-sm text-gray-500 mb-4">
             Register a new asset. A GL journal entry will be posted automatically:
             DR Fixed Assets, CR {assetForm.paymentMethod === 'CASH' ? 'Cash' : 'Accounts Payable'}.
@@ -532,7 +573,7 @@ export default function AssetAccountingPage() {
 
       {/* ═══════════════ Asset Detail ═══════════════ */}
       {selectedAsset && (
-        <Modal title={`${selectedAsset.assetNumber} — ${selectedAsset.name}`} onClose={() => setSelectedAsset(null)} wide>
+        <Modal title={`${selectedAsset.assetNumber} — ${selectedAsset.name}`} onClose={() => setSelectedAsset(null)} wide zIndex={detailGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
           <div className="space-y-4">
             {/* Status Bar */}
             <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${STATUS_CONFIG[selectedAsset.status]?.bg || 'bg-gray-50 border-gray-200'}`}>
@@ -889,11 +930,11 @@ function SummaryCard({ icon: Icon, label, value, sub, color }: {
   );
 }
 
-function Modal({ title, children, onClose, wide }: {
-  title: string; children: React.ReactNode; onClose: () => void; wide?: boolean;
+function Modal({ title, children, onClose, wide, zIndex }: {
+  title: string; children: React.ReactNode; onClose: () => void; wide?: boolean; zIndex?: number;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-start justify-center pt-8 px-4 overflow-y-auto" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-start justify-center pt-8 px-4 overflow-y-auto" style={{ zIndex: zIndex ?? 50 }} onClick={onClose}>
       <div className={`bg-white rounded-xl shadow-xl w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} mb-8`} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b">
           <h2 className="text-lg font-semibold text-gray-900">{title}</h2>

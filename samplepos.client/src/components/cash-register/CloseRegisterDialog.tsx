@@ -5,7 +5,7 @@
  * Shows summary and captures actual closing amount.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Decimal from 'decimal.js';
 import {
     Dialog,
@@ -14,7 +14,9 @@ import {
     DialogTitle,
     DialogDescription,
     DialogFooter,
-} from '../ui/dialog';
+} from '../ui/temp-ui-components';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -42,6 +44,17 @@ export function CloseRegisterDialog({
 
     const { data: summary, isLoading } = useSessionSummary(sessionId);
     const closeSession = useCloseSession();
+
+    // ── Transaction Guard ──────────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const guardRef = useRef<GuardHandle | null>(null);
+    useEffect(() => {
+        if (open) {
+            guardRef.current = openGuard({ cancellable: false, label: 'Close cash register' });
+            return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     // Reset form when dialog opens
     useEffect(() => {
@@ -80,7 +93,7 @@ export function CloseRegisterDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog open={open} onOpenChange={onOpenChange} zIndex={guardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
             <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">

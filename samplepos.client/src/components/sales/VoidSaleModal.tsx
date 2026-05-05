@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../../utils/api';
 import { extractApiError } from '../../utils/extractApiError';
 import { formatCurrency } from '../../utils/currency';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
 
 interface VoidSaleModalProps {
     saleId: string;
@@ -18,6 +20,24 @@ export function VoidSaleModal({ saleId, saleNumber, totalAmount, onClose, onSucc
     const [confirmed, setConfirmed] = useState(false);
     const modalRef = useRef<HTMLDivElement>(null);
     const reasonRef = useRef<HTMLTextAreaElement>(null);
+    const guardHandleRef = useRef<GuardHandle | null>(null);
+    const { openGuard, closeGuard } = useTransactionGuard();
+
+    // Activate guard on mount — voiding a sale is irreversible,
+    // so we lock the entire ERP UI while this dialog is open.
+    useEffect(() => {
+        guardHandleRef.current = openGuard({
+            cancellable: false,
+            label: `Voiding sale ${saleNumber}`,
+        });
+        return () => {
+            if (guardHandleRef.current) {
+                closeGuard(guardHandleRef.current.id);
+                guardHandleRef.current = null;
+            }
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -52,8 +72,8 @@ export function VoidSaleModal({ saleId, saleNumber, totalAmount, onClose, onSucc
 
     return (
         <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]"
-            onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+            className="fixed inset-0 flex items-center justify-center"
+            style={{ zIndex: guardHandleRef.current?.panelZIndex ?? ZINDEX.PANEL }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="void-modal-title"

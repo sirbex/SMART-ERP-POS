@@ -23,6 +23,7 @@ import { purchaseOrderRoutes } from './modules/purchase-orders/purchaseOrderRout
 import { goodsReceiptRoutes } from './modules/goods-receipts/goodsReceiptRoutes.js';
 import { stockMovementRoutes } from './modules/stock-movements/stockMovementRoutes.js';
 import { invoiceRoutes } from './modules/invoices/invoiceRoutes.js';
+import { createDocumentRoutes } from './modules/documents/documentRoutes.js';
 import { invoiceSettingsRoutes } from './modules/settings/invoiceSettingsRoutes.js';
 import { systemSettingsRoutes } from './modules/system-settings/systemSettingsRoutes.js';
 import { createReportsRouter } from './modules/reports/reportsRoutes.js';
@@ -58,6 +59,7 @@ import { returnGrnRoutes } from './modules/return-grn/returnGrnRoutes.js';
 import { supplierAdjustmentRoutes } from './modules/supplier-adjustments/supplierAdjustmentRoutes.js';
 import { documentFlowRoutes } from './modules/document-flow/documentFlowRoutes.js';
 import { pricingEngineRoutes } from './modules/pricing/pricingRoutes.js';
+import { glRepairRoutes } from './modules/system/glRepairRoutes.js';
 import ordersRoutes from './modules/orders/ordersRoutes.js';
 import { costCenterRoutes } from './modules/cost-centers/costCenterRoutes.js';
 import { periodControlRoutes } from './modules/period-control/periodControlRoutes.js';
@@ -78,6 +80,7 @@ import { syncRoutes } from './modules/platform/syncRoutes.js';
 import { tenantConfigRoutes } from './modules/tenant/tenantConfigRoutes.js';
 import { tenantMiddleware } from './middleware/tenantMiddleware.js';
 import { tenantRateLimit } from './middleware/tenantRateLimit.js';
+import { idempotencyMiddleware } from './middleware/idempotency.js';
 import { requireFeature } from './middleware/requireFeature.js';
 import type { TenantPlan } from '../../shared/types/tenant.js';
 import { jobQueue } from './services/jobQueue.js';
@@ -243,6 +246,9 @@ app.use(tenantMiddleware);
 // Per-tenant rate limiting (must be after tenant resolution, before routes)
 app.use(tenantRateLimit);
 
+// Idempotency deduplication (after tenant resolution so req.tenantPool is available)
+app.use(idempotencyMiddleware(pool));
+
 // ============================================================
 // ROUTES
 // ============================================================
@@ -368,6 +374,7 @@ app.use('/api/supplier-payments', requireFeature('purchase_orders'), createSuppl
 
 // ── Invoices & Credit Notes (plan: STARTER+) ────────────────
 app.use('/api/invoices', requireFeature('invoices'), invoiceRoutes);
+app.use('/api/documents', createDocumentRoutes(pool));
 app.use('/api/credit-debit-notes', requireFeature('invoices'), creditDebitNoteRoutes);
 app.use('/api/document-flow', requireFeature('invoices'), documentFlowRoutes);
 app.use('/api/deposits', requireFeature('customers'), depositsRoutes);
@@ -380,6 +387,7 @@ app.use('/api/reports', requireFeature('reports'), createReportsRouter(pool));
 app.use('/api/users', createUserRoutes());
 app.use('/api/admin', adminRoutes);
 app.use('/api/system', systemManagementRoutes);
+app.use('/api/system/gl', glRepairRoutes);
 app.use('/api/audit', authenticate, auditRoutes);
 app.use('/api/rbac', createRbacRoutes(pool));
 app.use('/api/import', importRoutes);

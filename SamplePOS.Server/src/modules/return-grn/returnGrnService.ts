@@ -29,10 +29,12 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import {
     supplierCreditDebitNoteRepository,
 } from '../credit-debit-notes/creditDebitNoteRepository.js';
+import { supplierCreditDebitNoteService } from '../credit-debit-notes/creditDebitNoteService.js';
 import { recordSupplierCreditNoteToGL, AccountCodes } from '../../services/glEntryService.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import { ValidationError } from '../../middleware/errorHandler.js';
 
 export interface CreateReturnGrnInput {
     grnId: string;
@@ -446,24 +448,40 @@ export const returnGrnService = {
             const supplierId: string = grResult.rows[0]?.supplier_id || rgrn.supplierId || '';
             const supplierName: string = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
 
-            // 5. Find the original Supplier Invoice (to reduce its outstanding balance)
+            // 5. Find the original Supplier Invoice (to reduce its outstanding balance).
+            //    Look-up order (most specific first):
+            //      a) supplier_invoice_grn_links junction (set by createInvoiceFromGRN)
+            //      b) InternalReferenceNumber = GR receipt_number (set by from-GR flow)
+            //      c) PurchaseOrderId = GR's PO (legacy path / single-bill-per-PO)
             let referenceInvoiceId: string | undefined = knownReferenceInvoiceId;
             if (!referenceInvoiceId) {
                 const siResult = await client.query(
-                    `SELECT si."Id" FROM supplier_invoices si
-                     WHERE si."PurchaseOrderId" = (
-                       SELECT purchase_order_id FROM goods_receipts WHERE id = $1
-                     )
-                     AND si.document_type = 'SUPPLIER_INVOICE'
+                    `SELECT si."Id"
+                     FROM supplier_invoices si
+                     WHERE si.document_type = 'SUPPLIER_INVOICE'
+                       AND si.deleted_at IS NULL
+                       AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+                       AND (
+                         si."Id" IN (
+                           SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+                           WHERE sigl.grn_id = $1
+                         )
+                         OR si."InternalReferenceNumber" = (
+                           SELECT receipt_number FROM goods_receipts WHERE id = $1
+                         )
+                         OR si."PurchaseOrderId" = (
+                           SELECT purchase_order_id FROM goods_receipts WHERE id = $1
+                         )
+                       )
                      ORDER BY si."CreatedAt" DESC LIMIT 1`,
                     [rgrn.grnId],
                 );
                 referenceInvoiceId = siResult.rows[0]?.Id as string | undefined;
             }
             if (!referenceInvoiceId) {
-                throw new Error(
-                    'Cannot create Supplier Credit Note: no Supplier Invoice found for this Return GRN. ' +
-                    'Ensure the Return GRN is linked to a Purchase Order that has a posted Supplier Invoice.',
+                throw new ValidationError(
+                    'Cannot create Supplier Credit Note: no Supplier Invoice has been billed for this Goods Receipt yet. ' +
+                    'Open the Goods Receipt and click "Create Supplier Bill" first, then retry the Credit Note.',
                 );
             }
 
@@ -516,13 +534,15 @@ export const returnGrnService = {
                 clearingAccountCode: AccountCodes.GRIR_CLEARING,
             }, undefined, client);
 
-            // 10. Reduce outstanding on original supplier invoice (if found)
+            // 10. Auto-allocate the credit note against the referenced bill
+            //     (SAP/Odoo Case 1 — Return-derived CN, bill is known with
+            //     certainty). The bill's outstanding is reduced and the CN is
+            //     marked APPLIED if fully consumed. No floating credit.
             if (referenceInvoiceId) {
-                await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
+                await supplierCreditDebitNoteService.applySupplierCreditNote(
                     client,
-                    referenceInvoiceId,
-                    returnTotalNum,
-                    'CREDIT',
+                    postedScn.id,
+                    { primaryBillId: referenceInvoiceId, allowFIFO: false },
                 );
             }
 

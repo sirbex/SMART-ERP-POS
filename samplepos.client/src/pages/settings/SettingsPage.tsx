@@ -8,14 +8,19 @@ import SystemSettingsTab from './tabs/SystemSettingsTab';
 import DataManagementTab from './tabs/DataManagementTab';
 import BrandingSettingsTab from './tabs/BrandingSettingsTab';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
+import GLIntegrityPanel from '../../components/GLIntegrityPanel';
+import { useAuth } from '../../hooks/useAuth';
 
-const VALID_TABS = ['invoice', 'company', 'users', 'system', 'branding', 'data', 'offline'] as const;
+const VALID_TABS = ['invoice', 'company', 'users', 'system', 'branding', 'data', 'offline', 'gl-integrity'] as const;
 
 export default function SettingsPage() {
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const initialTab = tabParam && (VALID_TABS as readonly string[]).includes(tabParam) ? tabParam : 'invoice';
   const [activeTab, setActiveTab] = useState(initialTab);
+
+  const canViewGLIntegrity = user?.role === 'ADMIN' || user?.role === 'MANAGER';
 
   // Update tab if the URL search param changes (e.g. navigating from POS badge)
   useEffect(() => {
@@ -81,6 +86,14 @@ export default function SettingsPage() {
               >
                 Offline
               </Tabs.Trigger>
+              {canViewGLIntegrity && (
+                <Tabs.Trigger
+                  value="gl-integrity"
+                  className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-purple-600 data-[state=active]:border-purple-600 transition-colors whitespace-nowrap"
+                >
+                  GL Integrity
+                </Tabs.Trigger>
+              )}
             </Tabs.List>
 
             <Tabs.Content value="invoice">
@@ -113,6 +126,12 @@ export default function SettingsPage() {
             <Tabs.Content value="offline">
               <OfflineSyncStatusPanel />
             </Tabs.Content>
+
+            {canViewGLIntegrity && (
+              <Tabs.Content value="gl-integrity">
+                <GLIntegrityPanel />
+              </Tabs.Content>
+            )}
           </Tabs.Root>
         </div>
       </div>

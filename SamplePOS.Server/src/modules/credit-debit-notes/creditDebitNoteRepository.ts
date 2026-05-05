@@ -55,6 +55,8 @@ export interface SupplierCreditDebitNoteRecord {
     subtotal: number;
     taxAmount: number;
     totalAmount: number;
+    /** Live remaining balance on the note. For SCNs > 0 means on-account credit. */
+    outstandingBalance: number;
     status: string;
     reason: string | null;
     notes: string | null;
@@ -681,6 +683,7 @@ export const supplierCreditDebitNoteRepository = {
             subtotal: Money.toNumber(Money.parseDb(r.Subtotal)),
             taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
             totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
+            outstandingBalance: Money.toNumber(Money.parseDb(r.OutstandingBalance ?? r.TotalAmount)),
             status: r.Status,
             reason: r.reason,
             notes: r.Notes,
@@ -753,6 +756,7 @@ export const supplierCreditDebitNoteRepository = {
             subtotal: Money.toNumber(Money.parseDb(r.Subtotal)),
             taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
             totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
+            outstandingBalance: Money.toNumber(Money.parseDb(r.OutstandingBalance ?? r.TotalAmount)),
             status: r.Status, reason: r.reason, notes: r.Notes,
             createdAt: r.CreatedAt, updatedAt: r.UpdatedAt,
         };
@@ -822,6 +826,7 @@ export const supplierCreditDebitNoteRepository = {
                 subtotal: Money.toNumber(Money.parseDb(r.Subtotal)),
                 taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
                 totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
+                outstandingBalance: Money.toNumber(Money.parseDb(r.OutstandingBalance ?? r.TotalAmount)),
                 status: r.Status as string,
                 reason: r.reason as string | null,
                 notes: r.Notes as string | null,
@@ -876,6 +881,118 @@ export const supplierCreditDebitNoteRepository = {
     },
 
     // ----------------------------------------------------------
+    // SAP/Odoo-grade credit-note application primitives
+    //
+    // adjustSupplierInvoiceBalance() above only updates the BILL side; it does
+    // not cap AmountPaid at TotalAmount and does not touch the credit note's
+    // own row. The two helpers below are the safe primitives used by the
+    // applySupplierCreditNote service flow.
+    // ----------------------------------------------------------
+
+    /**
+     * Apply a credit-note amount against ONE bill, capped at that bill's
+     * remaining outstanding. Returns the amount actually applied so the
+     * caller can carry residuals to the next bill (FIFO).
+     */
+    async applyAmountToSupplierBill(
+        client: Pool | PoolClient,
+        billId: string,
+        requestedAmount: number,
+    ): Promise<{ applied: number; billOutstandingAfter: number }> {
+        const billRes = await client.query(
+            `SELECT "TotalAmount", COALESCE("AmountPaid", 0) AS "AmountPaid"
+             FROM supplier_invoices
+             WHERE "Id" = $1 AND deleted_at IS NULL
+               AND COALESCE(document_type, 'SUPPLIER_INVOICE') NOT IN ('SUPPLIER_CREDIT_NOTE')
+             FOR UPDATE`,
+            [billId],
+        );
+        if (!billRes.rows[0]) return { applied: 0, billOutstandingAfter: 0 };
+        const total = Number(billRes.rows[0].TotalAmount);
+        const paid = Number(billRes.rows[0].AmountPaid);
+        const open = Math.max(total - paid, 0);
+        const applied = Math.min(Math.max(requestedAmount, 0), open);
+        if (applied <= 0) return { applied: 0, billOutstandingAfter: open };
+
+        await client.query(
+            `UPDATE supplier_invoices
+             SET "AmountPaid" = LEAST(COALESCE("AmountPaid", 0) + $2, "TotalAmount"),
+                 "OutstandingBalance" = GREATEST("TotalAmount" - LEAST(COALESCE("AmountPaid", 0) + $2, "TotalAmount"), 0),
+                 "Status" = CASE
+                   WHEN "TotalAmount" - LEAST(COALESCE("AmountPaid", 0) + $2, "TotalAmount") <= 0 THEN 'PAID'
+                   WHEN LEAST(COALESCE("AmountPaid", 0) + $2, "TotalAmount") > 0 THEN 'PARTIALLY_PAID'
+                   ELSE "Status"
+                 END,
+                 "UpdatedAt" = NOW()
+             WHERE "Id" = $1`,
+            [billId, applied],
+        );
+        return { applied, billOutstandingAfter: Math.max(open - applied, 0) };
+    },
+
+    /**
+     * Mark a credit note as (fully or partially) applied. Bumps the CN's own
+     * AmountPaid / OutstandingBalance and flips Status to 'APPLIED' once the
+     * residual reaches zero. Idempotent: capped at TotalAmount.
+     */
+    async closeAppliedCreditNote(
+        client: Pool | PoolClient,
+        creditNoteId: string,
+        appliedAmount: number,
+    ): Promise<{ outstandingAfter: number; status: string }> {
+        const res = await client.query(
+            `UPDATE supplier_invoices
+             SET "AmountPaid" = LEAST(COALESCE("AmountPaid", 0) + $2, "TotalAmount"),
+                 "OutstandingBalance" = GREATEST("TotalAmount" - LEAST(COALESCE("AmountPaid", 0) + $2, "TotalAmount"), 0),
+                 "Status" = CASE
+                   WHEN "TotalAmount" - LEAST(COALESCE("AmountPaid", 0) + $2, "TotalAmount") <= 0 THEN 'APPLIED'
+                   ELSE "Status"
+                 END,
+                 "UpdatedAt" = NOW()
+             WHERE "Id" = $1 AND document_type = 'SUPPLIER_CREDIT_NOTE'
+             RETURNING "OutstandingBalance", "Status"`,
+            [creditNoteId, appliedAmount],
+        );
+        if (!res.rows[0]) return { outstandingAfter: 0, status: 'UNKNOWN' };
+        return {
+            outstandingAfter: Number(res.rows[0].OutstandingBalance),
+            status: res.rows[0].Status as string,
+        };
+    },
+
+    /**
+     * Fetch open bills for a supplier in FIFO order (oldest InvoiceDate first),
+     * excluding the CN itself, debit notes posted but unrelated, paid/cancelled,
+     * and an optional bill to skip (when it was already applied as primary).
+     */
+    async getOpenBillsForSupplierFIFO(
+        client: Pool | PoolClient,
+        supplierId: string,
+        excludeBillId?: string | null,
+    ): Promise<Array<{ id: string; outstanding: number }>> {
+        const params: unknown[] = [supplierId];
+        let extra = '';
+        if (excludeBillId) {
+            extra = ` AND "Id" <> $2`;
+            params.push(excludeBillId);
+        }
+        const res = await client.query(
+            `SELECT "Id" AS id,
+                    GREATEST("TotalAmount" - COALESCE("AmountPaid", 0), 0) AS outstanding
+             FROM supplier_invoices
+             WHERE "SupplierId" = $1
+               AND deleted_at IS NULL
+               AND COALESCE(document_type, 'SUPPLIER_INVOICE') IN ('SUPPLIER_INVOICE', 'SUPPLIER_DEBIT_NOTE')
+               AND UPPER("Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'APPLIED')
+               AND GREATEST("TotalAmount" - COALESCE("AmountPaid", 0), 0) > 0
+               ${extra}
+             ORDER BY "InvoiceDate" ASC, "CreatedAt" ASC`,
+            params,
+        );
+        return res.rows.map((r) => ({ id: r.id, outstanding: Number(r.outstanding) }));
+    },
+
+    // ----------------------------------------------------------
     // Cancel a posted supplier note (POSTED → CANCELLED)
     // ----------------------------------------------------------
 
@@ -897,6 +1014,7 @@ export const supplierCreditDebitNoteRepository = {
             subtotal: Money.toNumber(Money.parseDb(r.Subtotal)),
             taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
             totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
+            outstandingBalance: Money.toNumber(Money.parseDb(r.OutstandingBalance ?? r.TotalAmount)),
             status: r.Status, reason: r.reason, notes: r.Notes,
             createdAt: r.CreatedAt, updatedAt: r.UpdatedAt,
         };
@@ -924,6 +1042,7 @@ export const supplierCreditDebitNoteRepository = {
             subtotal: Money.toNumber(Money.parseDb(r.Subtotal)),
             taxAmount: Money.toNumber(Money.parseDb(r.TaxAmount)),
             totalAmount: Money.toNumber(Money.parseDb(r.TotalAmount)),
+            outstandingBalance: Money.toNumber(Money.parseDb(r.OutstandingBalance ?? r.TotalAmount)),
             status: r.Status, reason: r.reason, notes: r.Notes,
             createdAt: r.CreatedAt, updatedAt: r.UpdatedAt,
         };

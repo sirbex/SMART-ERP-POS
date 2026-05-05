@@ -24,6 +24,30 @@ export default defineConfig([
       'jsx-a11y/select-has-accessible-name': 'off', // Temp components have accessible names
       'jsx-a11y/control-has-associated-label': 'off', // Temp components are properly labeled
 
+      // Centralized PDF generation: all PDFs must go through DocumentPreviewModal /
+      // /api/documents endpoints. Frontend may not generate PDFs directly.
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'jspdf',
+              message:
+                'jsPDF is forbidden. Use <DocumentPreviewModal type=... id=... /> which calls /api/documents.',
+            },
+            {
+              name: 'jspdf-autotable',
+              message:
+                'jspdf-autotable is forbidden. Use <DocumentPreviewModal /> which calls /api/documents.',
+            },
+            {
+              name: 'pdfkit',
+              message: 'pdfkit is a server-only dependency. Do not import in frontend code.',
+            },
+          ],
+        },
+      ],
+
       // Responsive guards — enforce wrapper primitives
       'no-restricted-syntax': [
         'warn',

@@ -5,8 +5,10 @@
  * Tabs: Customer Notes | Supplier Notes
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Eye, Check, FileText, FileMinus, FilePlus, XCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
+import type { GuardHandle } from '../../hooks/useTransactionGuard';
+import { Plus, Search, Eye, Check, FileText, FileMinus, FilePlus, XCircle, Sparkles } from 'lucide-react';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import {
     Button,
@@ -102,6 +104,18 @@ function CustomerNotesTab() {
     const [createType, setCreateType] = useState<'CREDIT_NOTE' | 'DEBIT_NOTE'>('CREDIT_NOTE');
     const [selectedNote, setSelectedNote] = useState<CreditDebitNote | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard, closeGuard } = useTransactionGuard();
+    const detailGuardRef = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (isDetailOpen) {
+            detailGuardRef.current = openGuard({ cancellable: true, label: 'View credit/debit note' });
+            return () => { if (detailGuardRef.current) { closeGuard(detailGuardRef.current.id); detailGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isDetailOpen]);
 
     const fetchNotes = useCallback(async () => {
         setLoading(true);
@@ -280,7 +294,7 @@ function CustomerNotesTab() {
             />
 
             {/* Detail View */}
-            <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
+            <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen} zIndex={detailGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle>{selectedNote?.invoiceNumber}</DialogTitle>
@@ -331,6 +345,18 @@ function SupplierNotesTab() {
     const [selectedNote, setSelectedNote] = useState<SupplierCreditDebitNote | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
 
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard: openGuardS, closeGuard: closeGuardS } = useTransactionGuard();
+    const detailGuardRefS = useRef<GuardHandle | null>(null);
+
+    useEffect(() => {
+        if (isDetailOpen) {
+            detailGuardRefS.current = openGuardS({ cancellable: true, label: 'View supplier credit/debit note' });
+            return () => { if (detailGuardRefS.current) { closeGuardS(detailGuardRefS.current.id); detailGuardRefS.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isDetailOpen]);
+
     const fetchNotes = useCallback(async () => {
         setLoading(true);
         try {
@@ -366,6 +392,35 @@ function SupplierNotesTab() {
             fetchNotes();
         } catch {
             toast.error('Failed to cancel supplier note');
+        }
+    };
+
+    /**
+     * Apply a posted, standalone (unreferenced) Supplier Credit Note against
+     * the supplier's open bills using FIFO. Mirrors the SAP/Odoo "Apply to
+     * Open Bills" action: one-click, residual stays on-account.
+     */
+    const [applyingNoteId, setApplyingNoteId] = useState<string | null>(null);
+    const handleApplyFIFO = async (noteId: string) => {
+        setApplyingNoteId(noteId);
+        try {
+            const res = await creditDebitNoteService.applySupplierCreditNoteFIFO(noteId);
+            const applied = res.data?.totalApplied ?? 0;
+            const residual = res.data?.residual ?? 0;
+            const count = res.data?.allocations?.length ?? 0;
+            if (applied > 0) {
+                toast.success(
+                    `Applied ${formatCurrency(applied)} across ${count} bill${count === 1 ? '' : 's'}.` +
+                    (residual > 0 ? ` ${formatCurrency(residual)} remains on-account.` : '')
+                );
+            } else {
+                toast('No open bills available — credit note remains on-account.');
+            }
+            fetchNotes();
+        } catch {
+            toast.error('Failed to apply credit note to open bills');
+        } finally {
+            setApplyingNoteId(null);
         }
     };
 
@@ -439,6 +494,15 @@ function SupplierNotesTab() {
                                             <Badge variant={note.status === 'POSTED' ? 'default' : 'secondary'}>
                                                 {note.status}
                                             </Badge>
+                                            {/* SAP/Odoo-style on-account credit indicator. Visible only for
+                                                posted standalone SCNs that still have residual outstanding. */}
+                                            {note.documentType === 'SUPPLIER_CREDIT_NOTE'
+                                                && note.status === 'POSTED'
+                                                && note.outstandingBalance > 0 && (
+                                                <Badge variant="outline" className="border-purple-300 bg-purple-50 text-purple-700">
+                                                    On-account: {formatCurrency(note.outstandingBalance)}
+                                                </Badge>
+                                            )}
                                         </div>
                                         <div className="mt-1 text-sm text-gray-600">
                                             <span className="font-medium">{note.supplierName || 'Unknown supplier'}</span>
@@ -491,6 +555,22 @@ function SupplierNotesTab() {
                                                 Cancel
                                             </Button>
                                         )}
+                                        {/* Any posted SCN with residual on-account balance can be
+                                            applied via FIFO. Auto-applied (RGRN-derived) notes already
+                                            have outstandingBalance = 0 and won't show this button. */}
+                                        {note.documentType === 'SUPPLIER_CREDIT_NOTE'
+                                            && note.status === 'POSTED'
+                                            && note.outstandingBalance > 0 && (
+                                            <Button
+                                                size="sm"
+                                                onClick={() => handleApplyFIFO(note.id)}
+                                                disabled={applyingNoteId === note.id}
+                                                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                            >
+                                                <Sparkles className="h-4 w-4" />
+                                                {applyingNoteId === note.id ? 'Applying…' : 'Apply to Open Bills'}
+                                            </Button>
+                                        )}
                                     </div>
                                 </div>
                             </CardContent>
@@ -508,7 +588,7 @@ function SupplierNotesTab() {
             />
 
             {/* Detail View */}
-            <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
+            <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen} zIndex={detailGuardRefS.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle>{selectedNote?.invoiceNumber}</DialogTitle>
@@ -566,6 +646,17 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
         { productName: '', quantity: 1, unitPrice: 0, taxRate: 0 },
     ]);
     const [submitting, setSubmitting] = useState(false);
+
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard: openCNGuard, closeGuard: closeCNGuard } = useTransactionGuard();
+    const cnGuardRef = useRef<GuardHandle | null>(null);
+    useEffect(() => {
+        if (open) {
+            cnGuardRef.current = openCNGuard({ cancellable: false, label: 'Create customer credit/debit note' });
+            return () => { if (cnGuardRef.current) { closeCNGuard(cnGuardRef.current.id); cnGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
 
     // Invoice search
     const [invoiceSearch, setInvoiceSearch] = useState('');
@@ -654,7 +745,7 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
     };
 
     return (
-        <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+        <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }} zIndex={cnGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>
@@ -867,6 +958,17 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
     const [additionalNotes, setAdditionalNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
+    // ── Transaction Guard ──────────────────────────────────────────────────
+    const { openGuard: openSNGuard, closeGuard: closeSNGuard } = useTransactionGuard();
+    const snGuardRef = useRef<GuardHandle | null>(null);
+    useEffect(() => {
+        if (open) {
+            snGuardRef.current = openSNGuard({ cancellable: false, label: 'Create supplier credit/debit note' });
+            return () => { if (snGuardRef.current) { closeSNGuard(snGuardRef.current.id); snGuardRef.current = null; } };
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
     // Invoice search
     const [invoiceSearch, setInvoiceSearch] = useState('');
     const [invoiceResults, setInvoiceResults] = useState<Array<{ id: string; invoiceNumber: string; supplierName: string; totalAmount: string }>>([]);
@@ -938,7 +1040,7 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
     };
 
     return (
-        <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+        <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }} zIndex={snGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
             <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>

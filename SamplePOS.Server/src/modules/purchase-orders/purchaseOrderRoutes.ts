@@ -369,6 +369,34 @@ export const purchaseOrderController = {
   },
 
   /**
+   * Get items for a specific PO (lightweight endpoint for inline display)
+   */
+  async getPOItems(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const result = await purchaseOrderService.getPOById(pool, id);
+
+    if (!result) {
+      res.status(404).json({ success: false, error: 'Purchase order not found' });
+      return;
+    }
+
+    // Normalize DB snake_case columns to camelCase for the frontend
+    const items = (result.items as unknown as Record<string, unknown>[]).map((row) => ({
+      id: row.id,
+      productId: row.product_id,
+      productName: row.product_name,
+      orderedQuantity: row.ordered_quantity ?? row.quantity ?? 0,
+      receivedQuantity: row.received_quantity ?? row.receivedQuantity ?? 0,
+      unitPrice: row.unit_price ?? row.unitCost ?? 0,
+      lineTotal: row.total_price ?? row.lineTotal ?? 0,
+      uomName: row.uom_name ?? null,
+    }));
+
+    res.json({ success: true, data: items });
+  },
+
+  /**
    * Record payment
    */
   async recordPayment(req: Request, res: Response): Promise<void> {
@@ -462,6 +490,7 @@ purchaseOrderRoutes.get('/', authenticate, asyncHandler(purchaseOrderController.
 purchaseOrderRoutes.get('/resolve-unit-cost', authenticate, asyncHandler(resolveUnitCost));
 
 purchaseOrderRoutes.get('/:id', authenticate, asyncHandler(purchaseOrderController.getPOById));
+purchaseOrderRoutes.get('/:id/items', authenticate, asyncHandler(purchaseOrderController.getPOItems));
 
 // Create/modify routes - requires purchasing permissions
 purchaseOrderRoutes.post(

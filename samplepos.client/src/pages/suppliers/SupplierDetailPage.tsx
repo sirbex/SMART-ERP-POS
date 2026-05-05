@@ -3,8 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useSupplier, useSupplierPerformance, useSupplierOrders, useSupplierProducts } from '../../hooks/useSuppliers';
 import { formatCurrency } from '../../utils/currency';
 import Decimal from 'decimal.js';
-import { api } from '../../services/api';
 import type { Supplier } from '../../types/business';
+import SupplierPOItemsInline from '../../components/suppliers/SupplierPOItemsInline';
 
 /** Performance metrics returned by GET /suppliers/:id/performance */
 interface SupplierPerformanceData {
@@ -27,17 +27,6 @@ interface SupplierOrderRow {
   status: 'DRAFT' | 'PENDING' | 'COMPLETED' | 'CANCELLED';
   totalAmount: number;
   notes?: string;
-}
-
-/** PO line-item returned by GET /purchase-orders/:id/items */
-interface POItemRow {
-  id: string;
-  productName: string;
-  sku: string;
-  orderedQuantity: number | string;
-  receivedQuantity: number | string;
-  unitPrice: number;
-  totalPrice: number | string;
 }
 
 // TIMEZONE STRATEGY: Display dates without conversion
@@ -343,8 +332,14 @@ function PerformanceTab({ performance, loading }: { performance: SupplierPerform
   );
 }
 
-// Orders Tab Component
+// Orders Tab Component — inline expandable master–detail grid
 function OrdersTab({ orders, loading }: { orders: SupplierOrderRow[] | undefined; loading: boolean }) {
+  const [expandedPOId, setExpandedPOId] = useState<string | null>(null);
+
+  const togglePO = (id: string) => {
+    setExpandedPOId((prev) => (prev === id ? null : id));
+  };
+
   if (loading) {
     return (
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -374,6 +369,7 @@ function OrdersTab({ orders, loading }: { orders: SupplierOrderRow[] | undefined
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-8" />
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 PO Number
               </th>
@@ -389,49 +385,60 @@ function OrdersTab({ orders, loading }: { orders: SupplierOrderRow[] | undefined
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Total Amount
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Notes
-              </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
             {orders.map((order) => (
-              <tr key={order.id} className="hover:bg-gray-50">
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <div className="text-sm font-medium text-blue-600">{order.poNumber}</div>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">
-                    {formatDisplayDate(order.orderDate)}
-                  </div>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900">
-                    {order.expectedDelivery
-                      ? formatDisplayDate(order.expectedDelivery)
-                      : '-'}
-                  </div>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap">
-                  <span
-                    className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[order.status as keyof typeof statusColors] ||
-                      'bg-gray-100 text-gray-800'
-                      }`}
-                  >
-                    {order.status}
-                  </span>
-                </td>
-                <td className="px-4 py-4 whitespace-nowrap text-right">
-                  <div className="text-sm font-medium text-gray-900">
-                    {formatCurrency(order.totalAmount)}
-                  </div>
-                </td>
-                <td className="px-4 py-4">
-                  <div className="text-sm text-gray-600 max-w-xs truncate">
-                    {order.notes || '-'}
-                  </div>
-                </td>
-              </tr>
+              <>
+                {/* Master row — clickable */}
+                <tr
+                  key={order.id}
+                  onClick={() => togglePO(order.id)}
+                  className="cursor-pointer hover:bg-gray-50 transition-colors"
+                >
+                  <td className="px-4 py-4 whitespace-nowrap text-gray-400 text-xs select-none">
+                    {expandedPOId === order.id ? '▼' : '▶'}
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <div className="text-sm font-medium text-blue-600">{order.poNumber}</div>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {formatDisplayDate(order.orderDate)}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">
+                      {order.expectedDelivery ? formatDisplayDate(order.expectedDelivery) : '—'}
+                    </div>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap">
+                    <span
+                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[order.status as keyof typeof statusColors] ?? 'bg-gray-100 text-gray-800'
+                        }`}
+                    >
+                      {order.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4 whitespace-nowrap text-right">
+                    <div className="text-sm font-medium text-gray-900">
+                      {formatCurrency(order.totalAmount)}
+                    </div>
+                  </td>
+                </tr>
+
+                {/* Inline detail row */}
+                {expandedPOId === order.id && (
+                  <tr key={`${order.id}-detail`}>
+                    <td colSpan={6} className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                      <div className="mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Items — {order.poNumber}
+                      </div>
+                      <SupplierPOItemsInline poId={order.id} />
+                    </td>
+                  </tr>
+                )}
+              </>
             ))}
           </tbody>
         </table>
@@ -440,30 +447,15 @@ function OrdersTab({ orders, loading }: { orders: SupplierOrderRow[] | undefined
   );
 }
 
-// Products Tab Component - Shows Purchase Orders with View Items
+// Products Tab Component — inline expandable view of items supplied per PO
 function ProductsTab({ supplierId, loading }: { supplierId: string; products: unknown; loading: boolean }) {
-  const [selectedPO, setSelectedPO] = useState<SupplierOrderRow | null>(null);
-  const [poItems, setPOItems] = useState<POItemRow[]>([]);
-  const [loadingItems, setLoadingItems] = useState(false);
+  const [expandedPOId, setExpandedPOId] = useState<string | null>(null);
 
-  // Fetch orders data instead
   const { data: ordersData, isLoading: ordersLoading } = useSupplierOrders(supplierId, { page: 1, limit: 100 });
   const orders = ordersData?.data as SupplierOrderRow[] | undefined;
 
-  const loadPOItems = async (poId: string) => {
-    setLoadingItems(true);
-    try {
-      const { data } = await api.get(`/purchase-orders/${poId}/items`);
-      if (data.success) {
-        setPOItems(data.data);
-        const po = orders?.find((o) => o.id === poId);
-        setSelectedPO(po ?? null);
-      }
-    } catch (error) {
-      console.error('Failed to load PO items:', error);
-    } finally {
-      setLoadingItems(false);
-    }
+  const togglePO = (id: string) => {
+    setExpandedPOId((prev) => (prev === id ? null : id));
   };
 
   if (ordersLoading || loading) {
@@ -490,49 +482,50 @@ function ProductsTab({ supplierId, loading }: { supplierId: string; products: un
   };
 
   return (
-    <div className="space-y-6">
-      {/* Purchase Orders Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">Purchase Orders</h3>
-          <p className="text-sm text-gray-600 mt-1">View items and costs for each purchase order</p>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  PO Number
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Order Date
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total Amount
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {orders.map((order) => (
-                <tr key={order.id} className="hover:bg-gray-50">
+    <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-200">
+        <h3 className="text-lg font-semibold text-gray-900">Items Supplied per Purchase Order</h3>
+        <p className="text-sm text-gray-600 mt-1">Click a row to see line items for that order</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 w-8" />
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                PO Number
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Order Date
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Total Amount
+              </th>
+            </tr>
+          </thead>
+          <tbody className="bg-white divide-y divide-gray-200">
+            {orders.map((order) => (
+              <>
+                <tr
+                  key={order.id}
+                  onClick={() => togglePO(order.id)}
+                  className="cursor-pointer hover:bg-gray-50 transition-colors"
+                >
+                  <td className="px-4 py-4 whitespace-nowrap text-gray-400 text-xs select-none">
+                    {expandedPOId === order.id ? '▼' : '▶'}
+                  </td>
                   <td className="px-4 py-4 whitespace-nowrap">
                     <div className="text-sm font-medium text-blue-600">{order.poNumber}</div>
                   </td>
                   <td className="px-4 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900">
-                      {formatDisplayDate(order.orderDate)}
-                    </div>
+                    <div className="text-sm text-gray-900">{formatDisplayDate(order.orderDate)}</div>
                   </td>
                   <td className="px-4 py-4 whitespace-nowrap">
                     <span
-                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[order.status as keyof typeof statusColors] ||
-                        'bg-gray-100 text-gray-800'
+                      className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColors[order.status as keyof typeof statusColors] ?? 'bg-gray-100 text-gray-800'
                         }`}
                     >
                       {order.status}
@@ -543,126 +536,26 @@ function ProductsTab({ supplierId, loading }: { supplierId: string; products: un
                       {formatCurrency(order.totalAmount)}
                     </div>
                   </td>
-                  <td className="px-4 py-4 whitespace-nowrap text-center">
-                    <button
-                      onClick={() => loadPOItems(order.id)}
-                      className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                    >
-                      View Items
-                    </button>
-                  </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
-      {/* Items Modal/Panel */}
-      {selectedPO && (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">
-                Items for {selectedPO.poNumber}
-              </h3>
-              <p className="text-sm text-gray-600 mt-1">
-                Order Date: {formatDisplayDate(selectedPO.orderDate)} •
-                Total: {formatCurrency(selectedPO.totalAmount)}
-              </p>
-            </div>
-            <button
-              onClick={() => {
-                setSelectedPO(null);
-                setPOItems([]);
-              }}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              ✕
-            </button>
-          </div>
-
-          {loadingItems ? (
-            <div className="p-6 text-center">
-              <p className="text-gray-600">Loading items...</p>
-            </div>
-          ) : poItems.length === 0 ? (
-            <div className="p-6 text-center">
-              <p className="text-gray-600">No items found</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Product
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Ordered Qty
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Received Qty
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Unit Price
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Total Price
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {poItems.map((item) => (
-                    <tr key={item.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-4">
-                        <div className="text-sm font-medium text-gray-900">{item.productName}</div>
-                        <div className="text-xs text-gray-500">{item.sku}</div>
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm text-gray-900">
-                          {new Decimal(item.orderedQuantity || 0).toFixed(2)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm text-gray-900">
-                          {new Decimal(item.receivedQuantity || 0).toFixed(2)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm text-gray-900">
-                          {formatCurrency(item.unitPrice)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 whitespace-nowrap text-right">
-                        <div className="text-sm font-medium text-gray-900">
-                          {formatCurrency(item.totalPrice)}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="bg-gray-50">
-                  <tr>
-                    <td colSpan={4} className="px-4 py-4 text-right text-sm font-semibold text-gray-900">
-                      Total Cost:
-                    </td>
-                    <td className="px-4 py-4 whitespace-nowrap text-right">
-                      <div className="text-sm font-bold text-gray-900">
-                        {formatCurrency(
-                          poItems.reduce((sum, item) =>
-                            sum + parseFloat(String(item.totalPrice || 0)), 0
-                          )
-                        )}
+                {expandedPOId === order.id && (
+                  <tr key={`${order.id}-detail`}>
+                    <td colSpan={5} className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                      <div className="mb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                        Items — {order.poNumber}
                       </div>
+                      <SupplierPOItemsInline poId={order.id} />
                     </td>
                   </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
+
+
+

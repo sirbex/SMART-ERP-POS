@@ -9,6 +9,7 @@ interface ModalContainerProps {
   maxWidth?: "2xl" | "4xl" | "6xl";
   className?: string;
   onClose?: () => void;
+  zIndex?: number;
 }
 
 export function ModalContainer({
@@ -16,6 +17,7 @@ export function ModalContainer({
   maxWidth = "6xl",
   className = "",
   onClose,
+  zIndex,
 }: ModalContainerProps) {
   const widthClasses = {
     "2xl": "max-w-2xl",
@@ -25,7 +27,8 @@ export function ModalContainer({
 
   return (
     <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
+      style={{ zIndex: zIndex ?? 50 }}
       onClick={onClose}
     >
       <div
