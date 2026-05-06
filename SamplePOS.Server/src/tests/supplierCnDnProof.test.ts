@@ -183,7 +183,7 @@ afterAll(async () => {
       if (res.rows.length === 0) continue;
       const { Status: status } = res.rows[0];
 
-      if (status === 'POSTED') {
+      if (status === 'POSTED' || status === 'APPLIED') {
         await supplierCreditDebitNoteService.cancelNote(pool, noteId, 'TEST CLEANUP');
       }
     } catch {
@@ -312,10 +312,11 @@ describe('Supplier CN/DN — Real Database Proof Tests', () => {
 
     test('POST: supplier outstanding balance decreased after credit note', async () => {
       const balanceAfterPost = await getSupplierBalance(TEST_SUPPLIER_ID);
-      // The recalc formula: SUM(invoice OB) - SUM(CN OB WHERE !CANCELLED)
-      // SCN post adjusts invoice OB by -1K AND the CN's own OB (-1K) is deducted.
-      // Net change from clean baseline = -2 * NOTE_AMOUNT (double-reduction by design).
-      const expected = supplierCleanBaseline - 2 * NOTE_AMOUNT;
+      // applySupplierCreditNote applies the CN to the referenced bill:
+      //   - invoice AmountPaid += NOTE_AMOUNT → invoice OB decreases by NOTE_AMOUNT
+      //   - CN status → APPLIED, CN OB → 0 (excluded from recalc as OB=0)
+      // Net change from clean baseline = -1 * NOTE_AMOUNT (single reduction, no double counting).
+      const expected = supplierCleanBaseline - NOTE_AMOUNT;
 
       console.log(`  [SCN POST] Supplier balance (clean baseline): ${supplierCleanBaseline} → ${balanceAfterPost} (expected ~${expected})`);
 

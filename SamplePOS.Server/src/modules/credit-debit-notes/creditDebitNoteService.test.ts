@@ -19,7 +19,7 @@
  *  - Returns-goods flag triggers inventory return GL (DR Inventory / CR COGS)
  */
 
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import type { Pool, PoolClient, QueryResult } from 'pg';
 
 // ============================================================
@@ -791,6 +791,24 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             issueDate: '2026-05-01',
         };
 
+        // postNote delegates bill-application to applySupplierCreditNote when referenceInvoiceId is set.
+        // Spy prevents real execution of that inner method in these postNote-focused tests.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let applySpy: any;
+        beforeEach(() => {
+            applySpy = jest.spyOn(supplierCreditDebitNoteService, 'applySupplierCreditNote')
+                .mockResolvedValue({
+                    creditNoteId: 'scn-uuid-1',
+                    totalApplied: 40000,
+                    residual: 0,
+                    status: 'APPLIED',
+                    allocations: [{ billId: 'sinv-001', amount: 40000 }],
+                });
+        });
+        afterEach(() => {
+            applySpy.mockRestore();
+        });
+
         it('calls recordSupplierCreditNoteToGL with correct supplier data', async () => {
             mockSupplierRepo.postSupplierNote.mockResolvedValue(draftSupplierCN);
 
@@ -803,16 +821,16 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             expect(glCall.totalAmount).toBe(40000);
         });
 
-        it('calls adjustSupplierInvoiceBalance with CREDIT direction', async () => {
+        it('calls applySupplierCreditNote with primaryBillId when referenceInvoiceId is set', async () => {
             mockSupplierRepo.postSupplierNote.mockResolvedValue(draftSupplierCN);
 
             await supplierCreditDebitNoteService.postNote(mockPool, 'scn-uuid-1');
 
-            expect(mockSupplierRepo.adjustSupplierInvoiceBalance).toHaveBeenCalledWith(
+            // postNote now delegates bill-application to applySupplierCreditNote (not direct adjustSupplierInvoiceBalance)
+            expect(applySpy).toHaveBeenCalledWith(
                 mockClient,
-                'sinv-001',
-                40000,
-                'CREDIT',
+                'scn-uuid-1',
+                { primaryBillId: 'sinv-001', allowFIFO: false },
             );
         });
 
@@ -1256,7 +1274,7 @@ describe('Credit/Debit Note — balance direction invariants', () => {
     /**
      * Supplier CN post is CREDIT, cancel is DEBIT.
      */
-    it('Supplier CN: post direction is CREDIT, cancel direction is DEBIT (net-zero invariant)', async () => {
+    it('Supplier CN: cancel direction is DEBIT (restores AP balance from CN application)', async () => {
         const noteId = 'scn-inv-1';
         const postedNote = {
             id: noteId, invoiceNumber: 'SCN-2026-0099', documentType: 'SUPPLIER_CREDIT_NOTE',
@@ -1265,18 +1283,27 @@ describe('Credit/Debit Note — balance direction invariants', () => {
             issueDate: '2026-05-01',
         };
 
-        mockSupplierRepo.postSupplierNote.mockResolvedValue(postedNote);
-        await supplierCreditDebitNoteService.postNote(mockPool, noteId);
-        const postCall = mockSupplierRepo.adjustSupplierInvoiceBalance.mock.calls[0] as unknown[];
-        expect(postCall[3]).toBe('CREDIT');
+        // postNote delegates bill-application to applySupplierCreditNote; spy it to avoid unmocked call chains
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const postSpy: any = jest.spyOn(supplierCreditDebitNoteService, 'applySupplierCreditNote')
+            .mockResolvedValue({ creditNoteId: noteId, totalApplied: 25000, residual: 0, status: 'APPLIED', allocations: [] });
+        try {
+            mockSupplierRepo.postSupplierNote.mockResolvedValue(postedNote);
+            await supplierCreditDebitNoteService.postNote(mockPool, noteId);
+            // Verify applySupplierCreditNote was called (the post-direction invariant)
+            expect(postSpy).toHaveBeenCalledWith(mockClient, noteId, { primaryBillId: 'sinv-x', allowFIFO: false });
 
-        jest.clearAllMocks();
-        mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedNote);
-        mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedNote, status: 'CANCELLED' });
-        mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
-        await supplierCreditDebitNoteService.cancelNote(mockPool, noteId, 'Test');
-        const cancelCall = mockSupplierRepo.adjustSupplierInvoiceBalance.mock.calls[0] as unknown[];
-        expect(cancelCall[3]).toBe('DEBIT');
+            jest.clearAllMocks();
+            mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedNote);
+            mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedNote, status: 'CANCELLED' });
+            mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
+            await supplierCreditDebitNoteService.cancelNote(mockPool, noteId, 'Test');
+            // Cancel reverses the AP balance with DEBIT direction (restores invoice OB)
+            const cancelCall = mockSupplierRepo.adjustSupplierInvoiceBalance.mock.calls[0] as unknown[];
+            expect(cancelCall[3]).toBe('DEBIT');
+        } finally {
+            postSpy.mockRestore();
+        }
     });
 
     /**

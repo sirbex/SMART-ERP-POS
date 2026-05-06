@@ -72,6 +72,7 @@ import {
     type PostingSource,
     type GovernanceJournalLine,
 } from './postingGovernanceService.js';
+import { scheduleGlRebuildJobs } from './glPeriodRebuildService.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -407,6 +408,10 @@ export class AccountingCore {
 
         const pool = dbPool || globalPool;
 
+        // Phase 3b: collect (accountId, year, period) for post-commit rebuild.
+        // Populated only when LEGACY_GL_PERIOD_WRITES !== 'true' AND no txClient.
+        const pendingRebuildJobs: Array<{ accountId: string; fiscalYear: number; fiscalPeriod: number }> = [];
+
         // If caller provided a transactional client, execute directly (atomic with caller).
         // Otherwise, start our own UnitOfWork transaction (backward compatible).
         const doWork = async (client: pg.PoolClient): Promise<JournalEntryResult> => {
@@ -597,26 +602,118 @@ export class AccountingCore {
                 const entryYear = parseInt(request.entryDate.substring(0, 4), 10);
                 const entryMonth = parseInt(request.entryDate.substring(5, 7), 10);
 
-                const upsertResult = await client.query(
-                    `INSERT INTO gl_period_balances
-                        (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
-                     SELECT $1, $2, $3, $4::numeric, $5::numeric, $4::numeric - $5::numeric, NOW()
-                     WHERE NOT EXISTS (
-                       SELECT 1 FROM financial_periods
-                       WHERE period_year = $2 AND period_month = $3
-                         AND "Status" IN ('CLOSED', 'LOCKED')
-                     )
-                     ON CONFLICT (account_id, fiscal_year, fiscal_period)
-                     DO UPDATE SET
-                        debit_total     = gl_period_balances.debit_total   + EXCLUDED.debit_total,
-                        credit_total    = gl_period_balances.credit_total  + EXCLUDED.credit_total,
-                        running_balance = (gl_period_balances.debit_total + EXCLUDED.debit_total) - (gl_period_balances.credit_total + EXCLUDED.credit_total),
-                        last_updated    = NOW()`,
-                    [account.Id, entryYear, entryMonth, line.debitAmount, line.creditAmount]
-                );
+                if (process.env.LEGACY_GL_PERIOD_WRITES === 'true') {
+                    // LEGACY escape hatch: inline incremental UPSERT (set env var to revert).
+                    const upsertResult = await client.query(
+                        `INSERT INTO gl_period_balances
+                            (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
+                         SELECT $1, $2, $3, $4::numeric, $5::numeric, $4::numeric - $5::numeric, NOW()
+                         WHERE NOT EXISTS (
+                           SELECT 1 FROM financial_periods
+                           WHERE period_year = $2 AND period_month = $3
+                             AND "Status" IN ('CLOSED', 'LOCKED')
+                         )
+                         ON CONFLICT (account_id, fiscal_year, fiscal_period)
+                         DO UPDATE SET
+                            debit_total     = gl_period_balances.debit_total   + EXCLUDED.debit_total,
+                            credit_total    = gl_period_balances.credit_total  + EXCLUDED.credit_total,
+                            running_balance = (gl_period_balances.debit_total + EXCLUDED.debit_total) - (gl_period_balances.credit_total + EXCLUDED.credit_total),
+                            last_updated    = NOW()`,
+                        [account.Id, entryYear, entryMonth, line.debitAmount, line.creditAmount]
+                    );
+                    if (upsertResult.rowCount === 0) {
+                        throw new PeriodLockedError(request.entryDate, 'LOCKED');
+                    }
+                } else if (txClient) {
+                    // txClient path: absolute recompute from ledger_entries inside the caller's
+                    // transaction (read-your-own-writes — sees uncommitted entries from same txClient).
+                    // NEVER incremental — recomputes the full period total from source of truth.
+                    await client.query(
+                        `INSERT INTO gl_period_balances
+                             (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
+                         SELECT
+                             $1, $2, $3,
+                             COALESCE(SUM(le."DebitAmount"),  0),
+                             COALESCE(SUM(le."CreditAmount"), 0),
+                             COALESCE(SUM(le."DebitAmount"),  0) - COALESCE(SUM(le."CreditAmount"), 0),
+                             NOW()
+                         FROM ledger_entries le
+                         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+                         WHERE le."AccountId" = $1
+                           AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = $2
+                           AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = $3
+                           AND lt."Status" IN ('POSTED', 'REVERSED')
+                         ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
+                             debit_total     = EXCLUDED.debit_total,
+                             credit_total    = EXCLUDED.credit_total,
+                             running_balance = EXCLUDED.running_balance,
+                             last_updated    = NOW()`,
+                        [account.Id, entryYear, entryMonth]
+                    );
+                } else {
+                    // Phase 3b path: collect for post-commit rebuild.
+                    // Primary period-lock guard is isPeriodOpen() above.
+                    pendingRebuildJobs.push({ accountId: account.Id, fiscalYear: entryYear, fiscalPeriod: entryMonth });
+                }
 
-                if (upsertResult.rowCount === 0) {
-                    throw new PeriodLockedError(request.entryDate, 'LOCKED');
+                // 9c. PHASE 3a SHADOW VERIFY
+                //     Set GL_PERIOD_BALANCES_SHADOW_VERIFY=true to enable.
+                //     READ-ONLY: never throws, never blocks the transaction.
+                //     Compares the gl_period_balances row we just wrote against
+                //     the ledger_entries SUM for the same account+period.
+                //     Logs warnings so drift can be observed before removing
+                //     the inline UPSERTs in Phase 3b.
+                if (process.env.GL_PERIOD_BALANCES_SHADOW_VERIFY === 'true') {
+                    try {
+                        const vr = await client.query<{
+                            le_debits: string; le_credits: string;
+                            gpb_debits: string; gpb_credits: string;
+                        }>(
+                            `SELECT
+                               COALESCE(SUM(le."DebitAmount"), 0)  AS le_debits,
+                               COALESCE(SUM(le."CreditAmount"), 0) AS le_credits,
+                               MAX(gpb.debit_total)                AS gpb_debits,
+                               MAX(gpb.credit_total)               AS gpb_credits
+                             FROM ledger_entries le
+                             JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+                             LEFT JOIN gl_period_balances gpb
+                               ON gpb.account_id = le."AccountId"
+                               AND gpb.fiscal_year  = $2
+                               AND gpb.fiscal_period = $3
+                             WHERE le."AccountId" = $1
+                               AND EXTRACT(YEAR  FROM lt."TransactionDate")::int = $2
+                               AND EXTRACT(MONTH FROM lt."TransactionDate")::int = $3
+                               AND lt."Status" = 'POSTED'`,
+                            [account.Id, entryYear, entryMonth]
+                        );
+                        const vRow = vr.rows[0];
+                        const leD = new Decimal(vRow?.le_debits ?? 0);
+                        const leC = new Decimal(vRow?.le_credits ?? 0);
+                        const gpbD = new Decimal(vRow?.gpb_debits ?? 0);
+                        const gpbC = new Decimal(vRow?.gpb_credits ?? 0);
+                        const driftD = leD.minus(gpbD).abs();
+                        const driftC = leC.minus(gpbC).abs();
+                        if (driftD.greaterThan('0.01') || driftC.greaterThan('0.01')) {
+                            logger.warn('[PHASE3a] gl_period_balances drift after postTransaction', {
+                                accountId: account.Id,
+                                fiscalYear: entryYear,
+                                fiscalPeriod: entryMonth,
+                                ledgerDebits: leD.toFixed(2),
+                                ledgerCredits: leC.toFixed(2),
+                                gpbDebits: gpbD.toFixed(2),
+                                gpbCredits: gpbC.toFixed(2),
+                                debitDrift: driftD.toFixed(2),
+                                creditDrift: driftC.toFixed(2),
+                                transactionId,
+                                transactionNumber,
+                            });
+                        }
+                    } catch (verifyErr) {
+                        logger.warn('[PHASE3a] gl_period_balances shadow verify error (non-fatal)', {
+                            accountId: account.Id,
+                            error: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+                        });
+                    }
                 }
             }
 
@@ -658,13 +755,15 @@ export class AccountingCore {
             };
         };
 
+        let journalResult: JournalEntryResult;
         try {
             if (txClient) {
                 // Atomic with caller's transaction (SAP LUW pattern)
-                return await doWork(txClient);
+                journalResult = await doWork(txClient);
+            } else {
+                // Backward-compatible: own transaction
+                journalResult = await UnitOfWork.run(pool, doWork);
             }
-            // Backward-compatible: own transaction
-            return await UnitOfWork.run(pool, doWork);
         } catch (error) {
             logger.error('Failed to create journal entry', {
                 error,
@@ -673,6 +772,14 @@ export class AccountingCore {
             });
             throw error;
         }
+
+        // Phase 3b: schedule post-commit rebuild for own-transaction path.
+        // txClient callers already wrote absolute values inside the txClient (above).
+        if (!txClient && pendingRebuildJobs.length > 0) {
+            scheduleGlRebuildJobs(pendingRebuildJobs, pool);
+        }
+
+        return journalResult;
     }
 
     // ===========================================================================
@@ -698,6 +805,9 @@ export class AccountingCore {
         txClient?: pg.PoolClient,
     ): Promise<JournalEntryResult> {
         const pool = dbPool || globalPool;
+
+        // Phase 3b: collect (accountId, year, period) for post-commit rebuild.
+        const pendingReversalRebuildJobs: Array<{ accountId: string; fiscalYear: number; fiscalPeriod: number }> = [];
 
         const doReversal = async (client: pg.PoolClient) => {
             // 1. Check idempotency
@@ -859,26 +969,109 @@ export class AccountingCore {
                 const revYear = parseInt(request.reversalDate.substring(0, 4), 10);
                 const revMonth = parseInt(request.reversalDate.substring(5, 7), 10);
 
-                const revUpsertResult = await client.query(
-                    `INSERT INTO gl_period_balances
-                            (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
-                         SELECT $1, $2, $3, $4::numeric, $5::numeric, $4::numeric - $5::numeric, NOW()
-                         WHERE NOT EXISTS (
-                           SELECT 1 FROM financial_periods
-                           WHERE period_year = $2 AND period_month = $3
-                             AND "Status" IN ('CLOSED', 'LOCKED')
-                         )
-                         ON CONFLICT (account_id, fiscal_year, fiscal_period)
-                         DO UPDATE SET
-                            debit_total     = gl_period_balances.debit_total   + EXCLUDED.debit_total,
-                            credit_total    = gl_period_balances.credit_total  + EXCLUDED.credit_total,
-                            running_balance = (gl_period_balances.debit_total + EXCLUDED.debit_total) - (gl_period_balances.credit_total + EXCLUDED.credit_total),
-                            last_updated    = NOW()`,
-                    [account.Id, revYear, revMonth, line.debitAmount, line.creditAmount]
-                );
+                if (process.env.LEGACY_GL_PERIOD_WRITES === 'true') {
+                    // LEGACY escape hatch: inline incremental UPSERT (set env var to revert).
+                    const revUpsertResult = await client.query(
+                        `INSERT INTO gl_period_balances
+                                (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
+                             SELECT $1, $2, $3, $4::numeric, $5::numeric, $4::numeric - $5::numeric, NOW()
+                             WHERE NOT EXISTS (
+                               SELECT 1 FROM financial_periods
+                               WHERE period_year = $2 AND period_month = $3
+                                 AND "Status" IN ('CLOSED', 'LOCKED')
+                             )
+                             ON CONFLICT (account_id, fiscal_year, fiscal_period)
+                             DO UPDATE SET
+                                debit_total     = gl_period_balances.debit_total   + EXCLUDED.debit_total,
+                                credit_total    = gl_period_balances.credit_total  + EXCLUDED.credit_total,
+                                running_balance = (gl_period_balances.debit_total + EXCLUDED.debit_total) - (gl_period_balances.credit_total + EXCLUDED.credit_total),
+                                last_updated    = NOW()`,
+                        [account.Id, revYear, revMonth, line.debitAmount, line.creditAmount]
+                    );
+                    if (revUpsertResult.rowCount === 0) {
+                        throw new PeriodLockedError(request.reversalDate, 'LOCKED');
+                    }
+                } else if (txClient) {
+                    // txClient path: absolute recompute from ledger_entries inside the caller's
+                    // transaction (read-your-own-writes — sees uncommitted reversal entries).
+                    await client.query(
+                        `INSERT INTO gl_period_balances
+                             (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
+                         SELECT
+                             $1, $2, $3,
+                             COALESCE(SUM(le."DebitAmount"),  0),
+                             COALESCE(SUM(le."CreditAmount"), 0),
+                             COALESCE(SUM(le."DebitAmount"),  0) - COALESCE(SUM(le."CreditAmount"), 0),
+                             NOW()
+                         FROM ledger_entries le
+                         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+                         WHERE le."AccountId" = $1
+                           AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = $2
+                           AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = $3
+                           AND lt."Status" IN ('POSTED', 'REVERSED')
+                         ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
+                             debit_total     = EXCLUDED.debit_total,
+                             credit_total    = EXCLUDED.credit_total,
+                             running_balance = EXCLUDED.running_balance,
+                             last_updated    = NOW()`,
+                        [account.Id, revYear, revMonth]
+                    );
+                } else {
+                    // Phase 3b path: collect for post-commit rebuild.
+                    pendingReversalRebuildJobs.push({ accountId: account.Id, fiscalYear: revYear, fiscalPeriod: revMonth });
+                }
 
-                if (revUpsertResult.rowCount === 0) {
-                    throw new PeriodLockedError(request.reversalDate, 'LOCKED');
+                // PHASE 3a SHADOW VERIFY (reverseTransaction mirror)
+                if (process.env.GL_PERIOD_BALANCES_SHADOW_VERIFY === 'true') {
+                    try {
+                        const vr = await client.query<{
+                            le_debits: string; le_credits: string;
+                            gpb_debits: string; gpb_credits: string;
+                        }>(
+                            `SELECT
+                               COALESCE(SUM(le."DebitAmount"), 0)  AS le_debits,
+                               COALESCE(SUM(le."CreditAmount"), 0) AS le_credits,
+                               MAX(gpb.debit_total)                AS gpb_debits,
+                               MAX(gpb.credit_total)               AS gpb_credits
+                             FROM ledger_entries le
+                             JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+                             LEFT JOIN gl_period_balances gpb
+                               ON gpb.account_id = le."AccountId"
+                               AND gpb.fiscal_year  = $2
+                               AND gpb.fiscal_period = $3
+                             WHERE le."AccountId" = $1
+                               AND EXTRACT(YEAR  FROM lt."TransactionDate")::int = $2
+                               AND EXTRACT(MONTH FROM lt."TransactionDate")::int = $3
+                               AND lt."Status" = 'POSTED'`,
+                            [account.Id, revYear, revMonth]
+                        );
+                        const vRow = vr.rows[0];
+                        const leD = new Decimal(vRow?.le_debits ?? 0);
+                        const leC = new Decimal(vRow?.le_credits ?? 0);
+                        const gpbD = new Decimal(vRow?.gpb_debits ?? 0);
+                        const gpbC = new Decimal(vRow?.gpb_credits ?? 0);
+                        const driftD = leD.minus(gpbD).abs();
+                        const driftC = leC.minus(gpbC).abs();
+                        if (driftD.greaterThan('0.01') || driftC.greaterThan('0.01')) {
+                            logger.warn('[PHASE3a] gl_period_balances drift after reverseTransaction', {
+                                accountId: account.Id,
+                                fiscalYear: revYear,
+                                fiscalPeriod: revMonth,
+                                ledgerDebits: leD.toFixed(2),
+                                ledgerCredits: leC.toFixed(2),
+                                gpbDebits: gpbD.toFixed(2),
+                                gpbCredits: gpbC.toFixed(2),
+                                debitDrift: driftD.toFixed(2),
+                                creditDrift: driftC.toFixed(2),
+                                transactionId,
+                            });
+                        }
+                    } catch (verifyErr) {
+                        logger.warn('[PHASE3a] gl_period_balances shadow verify error (non-fatal)', {
+                            accountId: account.Id,
+                            error: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+                        });
+                    }
                 }
             }
 
@@ -929,15 +1122,24 @@ export class AccountingCore {
             };
         };
 
+        let reversalResult: JournalEntryResult;
         try {
             if (txClient) {
-                return await doReversal(txClient);
+                reversalResult = await doReversal(txClient);
+            } else {
+                reversalResult = await UnitOfWork.run(pool, doReversal);
             }
-            return await UnitOfWork.run(pool, doReversal);
         } catch (error) {
             logger.error('Failed to reverse transaction', { error, request });
             throw error;
         }
+
+        // Phase 3b: schedule post-commit rebuild (own-transaction path only).
+        if (!txClient && pendingReversalRebuildJobs.length > 0) {
+            scheduleGlRebuildJobs(pendingReversalRebuildJobs, pool);
+        }
+
+        return reversalResult;
     }
 
     // ===========================================================================

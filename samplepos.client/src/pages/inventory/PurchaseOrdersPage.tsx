@@ -342,7 +342,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   useEffect(() => {
     createGuardRef.current = openCreateGuard({ cancellable: false, label: 'Create purchase order' });
     return () => { if (createGuardRef.current) { closeCreateGuard(createGuardRef.current.id); createGuardRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [supplierId, setSupplierId] = useState('');
@@ -839,7 +839,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
   useEffect(() => {
     editGuardRef.current = openEditGuard({ cancellable: false, label: 'Edit purchase order' });
     return () => { if (editGuardRef.current) { closeEditGuard(editGuardRef.current.id); editGuardRef.current = null; } };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [expectedDelivery, setExpectedDelivery] = useState(po.expectedDelivery || po.expected_delivery_date || '');
@@ -1196,7 +1196,7 @@ export default function PurchaseOrdersPage() {
       detailsGuardRef.current = openDetailsGuard({ cancellable: true, label: 'View purchase order' });
       return () => { if (detailsGuardRef.current) { closeDetailsGuard(detailsGuardRef.current.id); detailsGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDetailsModal]);
   const [selectedStatus, setSelectedStatus] = useState<POStatus | 'ALL'>('ALL');
   const [selectedSupplier, setSelectedSupplier] = useState('');

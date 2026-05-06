@@ -165,7 +165,7 @@ router.post('/heal-ap-drift', asyncHandler(async (req, res) => {
         message: result.action === 'no-op'
             ? `No AP drift detected (drift=${result.drift.toFixed(2)})`
             : `AP drift of ${result.drift.toFixed(2)} corrected via ${result.transactionNumber} `
-                + `(${result.action}) in ${result.durationMs}ms`,
+            + `(${result.action}) in ${result.durationMs}ms`,
     });
 }));
 

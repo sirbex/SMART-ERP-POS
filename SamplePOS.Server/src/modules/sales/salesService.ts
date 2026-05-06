@@ -1809,23 +1809,6 @@ export const salesService = {
           discountGiven: agg.discountGiven.toNumber(),
         }));
         await stateTablesRepo.batchUpsertProductDailySummary(client, stateDate, pdsItems);
-
-        // 1 query: batch inventory balances
-        const invItems = Array.from(invSummaryMap.entries()).map(([productId, qty]) => ({
-          productId,
-          quantity: qty.toNumber(),
-        }));
-        await stateTablesRepo.batchUpsertInventoryBalance(client, invItems, 'SOLD', stateDate);
-
-        // Customer balances for credit sales
-        if (sale.paymentMethod === 'CREDIT' && sale.customerId) {
-          await stateTablesRepo.upsertCustomerBalance(client, {
-            customerId: sale.customerId,
-            invoicedAmount: Money.toNumber(finalTotalAmount),
-            paidAmount: sale.amountPaid ?? 0,
-            invoiceDate: stateDate,
-          });
-        }
       } catch (stateError: unknown) {
         await client.query('ROLLBACK TO SAVEPOINT state_tables');
         logger.error('State table update failed — will be healed by reconciliation', {
@@ -2626,23 +2609,6 @@ export const salesService = {
           discountGiven: agg.discountGiven.toNumber(),
         }));
         await stateTablesRepo.batchDecrementProductDailySummary(client, voidDateStr, voidPdsItems);
-
-        // 1 query: batch restore inventory (void = RECEIVED)
-        const voidInvItems = Array.from(voidInvMap.entries()).map(([productId, qty]) => ({
-          productId,
-          quantity: qty.toNumber(),
-        }));
-        await stateTablesRepo.batchUpsertInventoryBalance(client, voidInvItems, 'RECEIVED', voidDateStr);
-
-        // Reverse customer balance for credit sales
-        if (sale.payment_method === 'CREDIT' && sale.customer_id) {
-          await stateTablesRepo.upsertCustomerBalance(client, {
-            customerId: sale.customer_id,
-            invoicedAmount: -Money.parseDb(sale.total_amount).toNumber(),
-            paidAmount: -Money.parseDb(sale.amount_paid ?? 0).toNumber(),
-            invoiceDate: voidDateStr,
-          });
-        }
       } catch (stateError: unknown) {
         await client.query('ROLLBACK TO SAVEPOINT void_state_tables');
         logger.error('State table void reversal failed — will be healed by reconciliation', {

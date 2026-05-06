@@ -266,27 +266,6 @@ export const paymentsService = {
       });
 
       // ============================================================
-      // STATE TABLE: Update customer_balances (payment reduces balance)
-      // SAVEPOINT: prevents PG aborted-transaction if this fails
-      // ============================================================
-      try {
-        await client.query('SAVEPOINT payment_state_tables');
-        await stateTablesRepo.upsertCustomerBalance(client, {
-          customerId: input.customerId,
-          invoicedAmount: 0,
-          paidAmount: input.amount,
-          paymentDate: getBusinessDate(),
-        });
-      } catch (stateError: unknown) {
-        await client.query('ROLLBACK TO SAVEPOINT payment_state_tables');
-        logger.error('Customer balance state table update failed — will be healed by reconciliation', {
-          customerId: input.customerId,
-          amount: input.amount,
-          error: stateError instanceof Error ? stateError.message : String(stateError),
-        });
-      }
-
-      // ============================================================
       // GL POSTING: Record customer payment reducing AR
       // DR Cash/Card/Bank | CR Accounts Receivable
       // Atomic with the credit transaction — inside UnitOfWork

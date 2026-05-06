@@ -216,7 +216,7 @@ export default function GoodsReceiptsPage() {
       detailsGuardRef.current = openGuard({ cancellable: true, label: 'Goods receipt details' });
       return () => { if (detailsGuardRef.current) { closeGuard(detailsGuardRef.current.id); detailsGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDetailsModal]);
 
   useEffect(() => {
@@ -224,7 +224,7 @@ export default function GoodsReceiptsPage() {
       createGuardRef.current = openGuard({ cancellable: true, label: 'Create goods receipt' });
       return () => { if (createGuardRef.current) { closeGuard(createGuardRef.current.id); createGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showCreateModal]);
 
   // Permission gating
@@ -258,7 +258,7 @@ export default function GoodsReceiptsPage() {
       returnGuardRef.current = openGuard({ cancellable: false, label: 'Return goods to supplier' });
       return () => { if (returnGuardRef.current) { closeGuard(returnGuardRef.current.id); returnGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showReturnModal]);
 
   const [returnReason, setReturnReason] = useState('');

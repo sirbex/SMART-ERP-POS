@@ -133,7 +133,7 @@ export default function InventoryAdjustmentsPage() {
       adjustGuardRef.current = openGuard({ cancellable: false, label: 'Stock adjustment' });
       return () => { if (adjustGuardRef.current) { closeGuard(adjustGuardRef.current.id); adjustGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAdjustModal]);
 
   useEffect(() => {
@@ -141,7 +141,7 @@ export default function InventoryAdjustmentsPage() {
       physicalCountGuardRef.current = openGuard({ cancellable: false, label: 'Physical stock count' });
       return () => { if (physicalCountGuardRef.current) { closeGuard(physicalCountGuardRef.current.id); physicalCountGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showPhysicalCountModal]);
   const [countedQuantities, setCountedQuantities] = useState<Record<string, string>>({});
   const [physicalCountReason, setPhysicalCountReason] = useState('Physical inventory count - ' + getBusinessDate());

@@ -1403,8 +1403,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
               key={key}
               onClick={() => handleTabChange(key)}
               className={`flex-shrink-0 flex items-center gap-1 px-2.5 sm:px-4 py-2 font-medium text-xs sm:text-sm whitespace-nowrap border-b-2 transition-colors ${activeTab === key
-                  ? 'text-blue-600 border-blue-600'
-                  : 'text-gray-500 border-transparent hover:text-gray-900 hover:border-gray-300'
+                ? 'text-blue-600 border-blue-600'
+                : 'text-gray-500 border-transparent hover:text-gray-900 hover:border-gray-300'
                 }`}
             >
               <span>{icon}</span>
@@ -2007,8 +2007,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                 key={p}
                                 onClick={() => setInvoicePage(p as number)}
                                 className={`px-2 py-1 text-xs border rounded ${invoicePage === p
-                                    ? 'bg-blue-600 text-white border-blue-600'
-                                    : 'border-gray-300 hover:bg-gray-100'
+                                  ? 'bg-blue-600 text-white border-blue-600'
+                                  : 'border-gray-300 hover:bg-gray-100'
                                   }`}
                               >
                                 {p}
@@ -2564,8 +2564,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                 key={p}
                                 onClick={() => setLedgerPage(p as number)}
                                 className={`px-2 py-1 text-xs border rounded ${ledgerPage === p
-                                    ? 'bg-blue-600 text-white border-blue-600'
-                                    : 'border-gray-300 hover:bg-gray-100'
+                                  ? 'bg-blue-600 text-white border-blue-600'
+                                  : 'border-gray-300 hover:bg-gray-100'
                                   }`}
                               >
                                 {p}

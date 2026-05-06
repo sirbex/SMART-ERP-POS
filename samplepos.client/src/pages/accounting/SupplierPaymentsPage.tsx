@@ -151,7 +151,7 @@ const SupplierPaymentsPage: React.FC = () => {
             paymentGuardRef.current = openGuard({ cancellable: false, label: 'Record supplier payment' });
             return () => { if (paymentGuardRef.current) { closeGuard(paymentGuardRef.current.id); paymentGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isPaymentModalOpen]);
 
     useEffect(() => {
@@ -159,7 +159,7 @@ const SupplierPaymentsPage: React.FC = () => {
             billGuardRef.current = openGuard({ cancellable: true, label: 'Record supplier bill' });
             return () => { if (billGuardRef.current) { closeGuard(billGuardRef.current.id); billGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isBillModalOpen]);
 
     useEffect(() => {
@@ -167,7 +167,7 @@ const SupplierPaymentsPage: React.FC = () => {
             allocationGuardRef.current = openGuard({ cancellable: false, label: 'Allocate payment' });
             return () => { if (allocationGuardRef.current) { closeGuard(allocationGuardRef.current.id); allocationGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isAllocationModalOpen]);
 
     const [selectedPayment, setSelectedPayment] = useState<SupplierPayment | null>(null);
@@ -418,7 +418,7 @@ const SupplierPaymentsPage: React.FC = () => {
             url.searchParams.delete('amount');
             window.history.replaceState({}, '', url.toString());
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const loadTabData = async () => {

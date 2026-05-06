@@ -18,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
+import { scheduleGlRebuildForTransaction } from '../../services/glPeriodRebuildService.js';
 
 // =============================================================================
 // TYPES
@@ -245,15 +246,19 @@ export const submitForApproval = async (
   }
 
   // Requires approval → park as DRAFT and reverse gl_period_balances atomically
-  return UnitOfWork.run(dbPool, async (client) => {
+  const parkResult = await UnitOfWork.run(dbPool, async (client) => {
     // Park transaction
     await client.query(
       `UPDATE ledger_transactions SET "Status" = 'DRAFT', "UpdatedAt" = NOW() WHERE "Id" = $1`,
       [transactionId]
     );
 
-    // Reverse gl_period_balances — amounts must not affect reports while parked
-    await reverseGlPeriodBalancesForTx(client, transactionId);
+    // Reverse gl_period_balances — amounts must not affect reports while parked.
+    // LEGACY path: inline UPDATE inside the transaction.
+    // Phase 3b path: post-commit rebuild (scheduled below after UnitOfWork commits).
+    if (process.env.LEGACY_GL_PERIOD_WRITES === 'true') {
+      await reverseGlPeriodBalancesForTx(client, transactionId);
+    }
 
     const requestResult = await client.query(
       `INSERT INTO je_approval_requests (id, transaction_id, requested_by, status, total_amount, approval_rule_id)
@@ -262,11 +267,20 @@ export const submitForApproval = async (
       [uuidv4(), transactionId, requestedBy, totalAmount, rule.id]
     );
 
-    logger.info('Journal entry submitted for approval — gl_period_balances reversed', {
+    logger.info('Journal entry submitted for approval — parked as DRAFT', {
       transactionId, amount: totalAmount, rule: rule.name, requiredRole: rule.requiredRole,
     });
     return normalizeRequest(requestResult.rows[0]);
   });
+
+  // Phase 3b: after the park transaction commits, rebuild affected period balances.
+  // The rebuild query excludes DRAFT transactions, so gl_period_balances will
+  // correctly omit this transaction's amounts without an explicit reversal.
+  if (process.env.LEGACY_GL_PERIOD_WRITES !== 'true') {
+    scheduleGlRebuildForTransaction(dbPool, transactionId);
+  }
+
+  return parkResult;
 };
 
 /**
@@ -280,7 +294,8 @@ export const reviewApproval = async (
 ): Promise<ApprovalRequest> => {
   const dbPool = pool || globalPool;
 
-  return UnitOfWork.run(dbPool, async (client) => {
+  let approvedTransactionId: string | null = null;
+  const reviewResult = await UnitOfWork.run(dbPool, async (client) => {
     // Lock the request
     const reqResult = await client.query(
       `SELECT * FROM je_approval_requests WHERE id = $1 FOR UPDATE`,
@@ -309,14 +324,29 @@ export const reviewApproval = async (
         `UPDATE ledger_transactions SET "Status" = 'POSTED', "UpdatedAt" = NOW() WHERE "Id" = $1`,
         [request.transactionId]
       );
-      // Re-apply gl_period_balances — was reversed when parked as DRAFT
-      await applyGlPeriodBalancesForTx(client, request.transactionId);
+      // Re-apply gl_period_balances — was reversed when parked as DRAFT.
+      // LEGACY path: inline INSERT inside the transaction.
+      // Phase 3b path: post-commit rebuild (scheduled below after UnitOfWork commits).
+      if (process.env.LEGACY_GL_PERIOD_WRITES === 'true') {
+        await applyGlPeriodBalancesForTx(client, request.transactionId);
+      } else {
+        approvedTransactionId = request.transactionId;
+      }
     }
-    // REJECTED transactions remain as DRAFT — gl_period_balances already reversed at parking
+    // REJECTED transactions remain as DRAFT — gl_period_balances already excluded via rebuild
 
     logger.info('Approval request reviewed', { requestId, decision: decision.action, reviewedBy });
     return normalizeRequest(updateResult.rows[0]);
   });
+
+  // Phase 3b: schedule post-commit rebuild for approved transaction.
+  // The rebuild query includes POSTED transactions, so gl_period_balances will
+  // correctly include this transaction's amounts now that it is POSTED.
+  if (approvedTransactionId && process.env.LEGACY_GL_PERIOD_WRITES !== 'true') {
+    scheduleGlRebuildForTransaction(dbPool, approvedTransactionId);
+  }
+
+  return reviewResult;
 };
 
 /**

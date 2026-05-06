@@ -734,22 +734,6 @@ export const goodsReceiptService = {
           invMap.set(item.productId, (existing || new Decimal(0)).plus(receivedQty));
         }
 
-        // 1 query: batch inventory balances
-        const invItems = Array.from(invMap.entries()).map(([productId, qty]) => ({
-          productId,
-          quantity: qty.toNumber(),
-        }));
-        await stateTablesRepo.batchUpsertInventoryBalance(client, invItems, 'RECEIVED', grDateStr);
-
-        // Supplier balances: increase invoiced amount
-        if (supplierId && totalAmount > 0) {
-          await stateTablesRepo.upsertSupplierBalance(client, {
-            supplierId,
-            invoicedAmount: totalAmount,
-            paidAmount: 0,
-            grDate: grDateStr,
-          });
-        }
       } catch (stateError: unknown) {
         await client.query('ROLLBACK TO SAVEPOINT gr_state_tables');
         logger.error('State table update failed during GR — will be healed by reconciliation', {

@@ -1302,16 +1302,24 @@ export async function healAPDrift(
 
     const lines = action === 'debit-ap'
         ? [
-            { accountCode: '2100',     debitAmount: absDrift, creditAmount: 0,
-              description: 'AP drift correction (reduce overstated liability)' },
-            { accountCode: offsetCode, debitAmount: 0,        creditAmount: absDrift,
-              description: 'AP drift correction (offset to GL adjustments)' },
+            {
+                accountCode: '2100', debitAmount: absDrift, creditAmount: 0,
+                description: 'AP drift correction (reduce overstated liability)'
+            },
+            {
+                accountCode: offsetCode, debitAmount: 0, creditAmount: absDrift,
+                description: 'AP drift correction (offset to GL adjustments)'
+            },
         ]
         : [
-            { accountCode: offsetCode, debitAmount: absDrift, creditAmount: 0,
-              description: 'AP drift correction (offset to GL adjustments)' },
-            { accountCode: '2100',     debitAmount: 0,        creditAmount: absDrift,
-              description: 'AP drift correction (recognise understated liability)' },
+            {
+                accountCode: offsetCode, debitAmount: absDrift, creditAmount: 0,
+                description: 'AP drift correction (offset to GL adjustments)'
+            },
+            {
+                accountCode: '2100', debitAmount: 0, creditAmount: absDrift,
+                description: 'AP drift correction (recognise understated liability)'
+            },
         ];
 
     const tx = await AccountingCore.createJournalEntry({

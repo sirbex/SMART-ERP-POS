@@ -92,7 +92,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             createGuardRef.current = openGuard({ cancellable: false, label: 'Create invoice' });
             return () => { if (createGuardRef.current) { closeGuard(createGuardRef.current.id); createGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isCreateModalOpen]);
 
     useEffect(() => {
@@ -100,7 +100,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             paymentGuardRef.current = openGuard({ cancellable: false, label: 'Record invoice payment' });
             return () => { if (paymentGuardRef.current) { closeGuard(paymentGuardRef.current.id); paymentGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isPaymentModalOpen]);
 
     useEffect(() => {
@@ -108,7 +108,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
             viewGuardRef.current = openGuard({ cancellable: true, label: 'View invoice details' });
             return () => { if (viewGuardRef.current) { closeGuard(viewGuardRef.current.id); viewGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isViewModalOpen]);
 
     const [selectedInvoice, setSelectedInvoice] = useState<ComprehensiveInvoice | null>(null);

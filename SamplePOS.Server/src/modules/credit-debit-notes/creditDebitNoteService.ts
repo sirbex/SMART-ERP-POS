@@ -725,7 +725,8 @@ export const supplierCreditDebitNoteService = {
             // 1. Get the note to validate it
             const noteData = await supplierCreditDebitNoteRepository.getSupplierNoteById(client, noteId);
             if (!noteData) throw new Error('Supplier note not found');
-            if (noteData.status !== 'POSTED') throw new Error('Only posted notes can be cancelled');
+            // Allow cancelling POSTED notes and APPLIED notes (CNs applied to a bill via applySupplierCreditNote)
+            if (noteData.status !== 'POSTED' && noteData.status !== 'APPLIED') throw new Error('Only posted notes can be cancelled');
 
             // 2. Cancel the note record
             const cancelled = await supplierCreditDebitNoteRepository.cancelSupplierNote(client, noteId);

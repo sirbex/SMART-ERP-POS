@@ -1000,7 +1000,7 @@ export const supplierCreditDebitNoteRepository = {
         const result = await client.query(
             `UPDATE supplier_invoices
        SET "Status" = 'CANCELLED', "UpdatedAt" = NOW()
-       WHERE "Id" = $1 AND "Status" = 'POSTED' AND document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')
+       WHERE "Id" = $1 AND "Status" IN ('POSTED', 'APPLIED') AND document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')
        RETURNING *`,
             [noteId]
         );

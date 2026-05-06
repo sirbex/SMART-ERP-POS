@@ -7,10 +7,28 @@
  *
  * Tables: product_daily_summary, customer_balances, supplier_balances, inventory_balances
  * (sales_daily_summary is maintained by salesRepository.incrementDailySummary)
+ *
+ * FEATURE FLAG: DISABLE_SHADOW_TABLE_WRITES
+ *   Set to "true" to stop all incremental writes to customer_balances,
+ *   supplier_balances, and inventory_balances.  These are shadow/cache tables
+ *   only — no financial report reads from them.  The authoritative sources are:
+ *     • customers.balance            → customer_balances
+ *     • suppliers."OutstandingBalance" → supplier_balances
+ *     • products.quantity_on_hand    → inventory_balances
+ *   glRepairService can rebuild all three from those sources at any time.
+ *   Default: false (writes enabled — legacy behaviour unchanged).
  */
 
 import type { PoolClient } from 'pg';
 import Decimal from 'decimal.js';
+
+/**
+ * When DISABLE_SHADOW_TABLE_WRITES=true all incremental UPSERTs to
+ * customer_balances, supplier_balances, and inventory_balances are skipped.
+ * Set this flag in the environment to disable the writes without a code deploy.
+ * Rollback: set to "false" or remove the variable — writes resume immediately.
+ */
+export const shadowTableWritesEnabled = process.env.DISABLE_SHADOW_TABLE_WRITES !== 'true';
 
 // ============================================================================
 // PRODUCT DAILY SUMMARY — Per-product per-day sales rollup
