@@ -447,11 +447,11 @@ export const getExpenseCategories = async (dbPool?: pg.Pool | pg.PoolClient, inc
         WHERE status != 'CANCELLED'
         GROUP BY category_id
       ) cnt ON cnt.category_id = ec.id
-      ${includeInactive ? '' : 'WHERE ec.is_active = true'}
-      ORDER BY ec.name
+      WHERE ($1::boolean = true OR ec.is_active = true)
+      ORDER BY ec.is_active DESC, ec.name
     `;
 
-    const result = await pool.query(query);
+    const result = await pool.query(query, [includeInactive]);
     return result.rows.map(row => ({
       id: row.id,
       name: row.name,
