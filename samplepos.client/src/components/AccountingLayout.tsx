@@ -339,7 +339,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
   );
 
   return (
-    <div className="h-full bg-gray-50 flex overflow-hidden">
+    <div className="h-full bg-gray-50 flex">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col w-64 bg-white border-r shadow-sm">
         {/* Module Header */}
@@ -381,7 +381,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
         {/* Top Header */}
         <header className="h-16 bg-white border-b shadow-sm flex items-center px-4 lg:px-6">
           {/* Mobile Menu Button */}
