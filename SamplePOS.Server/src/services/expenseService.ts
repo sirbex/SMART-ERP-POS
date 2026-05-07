@@ -428,9 +428,9 @@ export const markExpensePaid = async (
 /**
  * Get expense categories
  */
-export const getExpenseCategories = async (pool?: Pool) => {
+export const getExpenseCategories = async (includeInactive = false, pool?: Pool) => {
   try {
-    return await expenseRepository.getExpenseCategories(pool || globalPool);
+    return await expenseRepository.getExpenseCategories(pool || globalPool, includeInactive);
   } catch (error) {
     logger.error('Error in expense service getExpenseCategories', { error });
     throw new Error(`Failed to retrieve expense categories: ${(error as Error).message}`);

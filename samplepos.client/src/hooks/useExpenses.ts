@@ -297,6 +297,30 @@ const expenseApi = {
   },
 
   // Get payment accounts (cash/bank accounts for expense payment source)
+  getExpenseCategories: async (): Promise<{
+    id: string;
+    code: string;
+    name: string;
+    description?: string;
+    isActive: boolean;
+  }[]> => {
+    const response = await fetch(`${API_BASE}/categories`, {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('auth_token')}` }
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to fetch expense categories');
+    }
+    const result = await response.json();
+    return (result.data || []).map((c: { id: string; code: string; name: string; description?: string; is_active?: boolean; isActive?: boolean }) => ({
+      id: c.id,
+      code: c.code,
+      name: c.name,
+      description: c.description,
+      isActive: c.isActive ?? c.is_active ?? true,
+    }));
+  },
+
   getPaymentAccounts: async (): Promise<{
     id: string;
     code: string;
@@ -456,5 +480,13 @@ export const useExpensesSummary = (filter: ExpenseFilter = {}) => {
     queryKey: ['expenses-summary', filter],
     queryFn: () => expenseApi.getExpensesSummary(filter),
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+};
+
+export const useExpenseCategories = () => {
+  return useQuery({
+    queryKey: ['expense-categories'],
+    queryFn: expenseApi.getExpenseCategories,
+    staleTime: 30 * 60 * 1000, // 30 minutes
   });
 };

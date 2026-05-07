@@ -370,7 +370,8 @@ export const deleteExpenseDocument = asyncHandler(async (req, res) => {
  */
 export const getExpenseCategories = asyncHandler(async (req, res) => {
   const pool = req.tenantPool || globalPool;
-  const categories = await expenseService.getExpenseCategories(pool);
+  const includeInactive = req.query.includeInactive === 'true';
+  const categories = await expenseService.getExpenseCategories(includeInactive, pool);
 
   res.json({
     success: true,

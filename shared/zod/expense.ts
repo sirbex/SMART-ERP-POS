@@ -60,7 +60,8 @@ export const CreateExpenseSchema = z.object({
   expenseDate: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expense date must be in YYYY-MM-DD format'),
 
-  category: ExpenseCategorySchema,
+  // Accept any DB category code (not restricted to the TypeScript enum subset)
+  category: z.string().min(1, 'Category is required').max(100).trim(),
 
   categoryId: z.string().uuid('Invalid category ID').optional(),
 
@@ -229,7 +230,9 @@ export const CreateExpenseCategorySchema = z.object({
   description: z.string().max(500).trim().optional(),
 }).strict();
 
-export const UpdateExpenseCategorySchema = CreateExpenseCategorySchema.partial().strict();
+export const UpdateExpenseCategorySchema = CreateExpenseCategorySchema.extend({
+  isActive: z.boolean().optional(),
+}).partial().strict();
 
 // ── Approval / Rejection / Payment ──
 

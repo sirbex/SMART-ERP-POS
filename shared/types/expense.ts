@@ -91,7 +91,8 @@ export interface CreateExpenseData {
   description?: string;
   amount: number;
   expenseDate: string; // YYYY-MM-DD
-  category: ExpenseCategory;
+  category: string; // DB category code (e.g. 'OFFICE', 'TRAVEL')
+  categoryId?: string; // UUID of the expense_categories record
   vendor?: string;
   paymentMethod: PaymentMethod;
   receiptRequired?: boolean;

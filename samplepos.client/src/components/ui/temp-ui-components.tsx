@@ -133,19 +133,26 @@ export const Dialog: React.FC<{
   zIndex?: number;
 }> = ({ open, onOpenChange, children, zIndex }) => {
   if (!open) return null;
+  // Only close when the click lands directly on the backdrop element itself.
+  // Radix UI portals (Select, Popover) bubble React synthetic events through
+  // the virtual tree, so e.target !== e.currentTarget distinguishes portal
+  // clicks (which must NOT close the dialog) from true backdrop clicks.
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onOpenChange(false);
+  };
   // When a TransactionGuard is active, it owns the backdrop — just position panel above it
   if (zIndex !== undefined) {
     return (
-      <div className="fixed inset-0 flex items-center justify-center" style={{ zIndex }} onClick={() => onOpenChange(false)}>
-        <div className="bg-white rounded-lg shadow-lg max-w-md w-full m-4" onClick={e => e.stopPropagation()}>
+      <div className="fixed inset-0 flex items-center justify-center overflow-y-auto p-4" style={{ zIndex }} onClick={handleBackdropClick}>
+        <div className="bg-white rounded-lg shadow-xl w-auto max-w-full my-auto" onClick={e => e.stopPropagation()}>
           {children}
         </div>
       </div>
     );
   }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => onOpenChange(false)}>
-      <div className="bg-white rounded-lg shadow-lg max-w-md w-full m-4" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4 bg-black bg-opacity-50" onClick={handleBackdropClick}>
+      <div className="bg-white rounded-lg shadow-xl w-auto max-w-full my-auto" onClick={e => e.stopPropagation()}>
         {children}
       </div>
     </div>

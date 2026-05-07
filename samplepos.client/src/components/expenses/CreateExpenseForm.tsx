@@ -4,11 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { CreateExpenseSchema } from '@shared/zod/expense';
 import {
   CreateExpenseData,
-  EXPENSE_CATEGORIES,
   PAYMENT_METHODS,
   Expense,
 } from '@shared/types/expense';
-import { useCreateExpense, usePaymentAccounts } from '../../hooks/useExpenses';
+import { useCreateExpense, usePaymentAccounts, useExpenseCategories } from '../../hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -36,6 +35,7 @@ interface CreateExpenseFormProps {
 export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess, onCancel }) => {
   const createExpense = useCreateExpense();
   const { data: paymentAccounts = [], isLoading: accountsLoading } = usePaymentAccounts();
+  const { data: dbCategories = [], isLoading: categoriesLoading } = useExpenseCategories();
   const [uploadedDocuments] = useState<string[]>([]);
 
   const {
@@ -163,12 +163,12 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
                   render={({ field }) => (
                     <Select value={field.value ?? ''} onValueChange={field.onChange}>
                       <SelectTrigger className={errors.category ? 'border-red-500 h-9' : 'h-9'}>
-                        <SelectValue placeholder="Select category" />
+                        <SelectValue placeholder={categoriesLoading ? 'Loading...' : 'Select category'} />
                       </SelectTrigger>
                       <SelectContent>
-                        {Object.entries(EXPENSE_CATEGORIES).map(([value, label]) => (
-                          <SelectItem key={value} value={value}>
-                            {label}
+                        {dbCategories.map((cat) => (
+                          <SelectItem key={cat.id} value={cat.code}>
+                            {cat.name}
                           </SelectItem>
                         ))}
                       </SelectContent>

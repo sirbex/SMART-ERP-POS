@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Plus, Filter, Search, Download, FileText, Eye, CheckCircle, XCircle, Send, DollarSign, Wallet, Loader2, BarChart3 } from 'lucide-react';
-import { useExpenses, useSubmitExpense, useApproveExpense, useRejectExpense, useMarkAsPaid, useDeleteExpense, usePaymentAccounts } from '../../hooks/useExpenses';
+import { useExpenses, useSubmitExpense, useApproveExpense, useRejectExpense, useMarkAsPaid, useDeleteExpense, usePaymentAccounts, useExpenseCategories } from '../../hooks/useExpenses';
 import { ExpenseFilter, Expense } from '@shared/types/expense';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DatePicker } from '../../components/ui/date-picker';
 import { CreateExpenseForm } from '../../components/expenses/CreateExpenseForm';
 import { formatCurrency } from '../../utils/currency';
-import { EXPENSE_CATEGORIES, EXPENSE_STATUSES } from '@shared/types/expense';
+import { EXPENSE_STATUSES } from '@shared/types/expense';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Link } from 'react-router-dom';
@@ -75,6 +75,7 @@ const ExpensesPage: React.FC = () => {
 
   const { data, isLoading, error, refetch } = useExpenses(filter);
   const { data: paymentAccounts } = usePaymentAccounts();
+  const { data: dbCategories = [] } = useExpenseCategories();
 
   // Permission gating
   const canCreateExpense = useCanAccess([], ['expenses.create']);
@@ -323,14 +324,14 @@ const ExpensesPage: React.FC = () => {
               </SelectContent>
             </Select>
 
-            <Select onValueChange={(value) => handleFilterChange('category', value === 'all' ? undefined : value)}>
+            <Select onValueChange={(value) => handleFilterChange('category', value === 'all' ? undefined : value as ExpenseFilter['category'])}>
               <SelectTrigger>
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
-                {Object.entries(EXPENSE_CATEGORIES).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>{label}</SelectItem>
+                {dbCategories.map((cat) => (
+                  <SelectItem key={cat.id} value={cat.code}>{cat.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -391,7 +392,7 @@ const ExpensesPage: React.FC = () => {
                         </td>
                         <td className="py-3 px-4">
                           <span className="text-sm text-gray-600">
-                            {EXPENSE_CATEGORIES[expense.category]}
+                            {expense.categoryName || dbCategories.find(c => c.code === expense.category)?.name || expense.category}
                           </span>
                         </td>
                         <td className="py-3 px-4">
@@ -529,7 +530,7 @@ const ExpensesPage: React.FC = () => {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Category</label>
-                  <p className="text-gray-900 font-medium">{EXPENSE_CATEGORIES[selectedExpense.category] || selectedExpense.category}</p>
+                  <p className="text-gray-900 font-medium">{selectedExpense.categoryName || dbCategories.find(c => c.code === selectedExpense.category)?.name || selectedExpense.category}</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Date</label>

@@ -432,19 +432,36 @@ export const getPaymentAccounts = async (dbPool?: pg.Pool | pg.PoolClient) => {
 
 /**
  * Get expense categories
+ * @param includeInactive - when true, also returns inactive categories (admin use)
  */
-export const getExpenseCategories = async (dbPool?: pg.Pool | pg.PoolClient) => {
+export const getExpenseCategories = async (dbPool?: pg.Pool | pg.PoolClient, includeInactive = false) => {
   const pool = dbPool || globalPool;
   try {
     const query = `
-      SELECT id, name, description, code, is_active, created_at, updated_at
-      FROM expense_categories
-      WHERE is_active = true
-      ORDER BY name
+      SELECT ec.id, ec.name, ec.description, ec.code, ec.is_active, ec.created_at, ec.updated_at,
+             COALESCE(cnt.expense_count, 0)::int AS expense_count
+      FROM expense_categories ec
+      LEFT JOIN (
+        SELECT category_id, COUNT(*) AS expense_count
+        FROM expenses
+        WHERE status != 'CANCELLED'
+        GROUP BY category_id
+      ) cnt ON cnt.category_id = ec.id
+      ${includeInactive ? '' : 'WHERE ec.is_active = true'}
+      ORDER BY ec.name
     `;
 
     const result = await pool.query(query);
-    return result.rows;
+    return result.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      code: row.code,
+      description: row.description,
+      isActive: row.is_active,
+      expenseCount: row.expense_count,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
   } catch (error) {
     logger.error('Error in expenseRepository getExpenseCategories', { error });
     throw error;
@@ -942,25 +959,22 @@ const normalizeExpenseFromDb = (row: ExpenseDbRow): Expense => {
  */
 export const updateExpenseCategory = async (id: string, updateData: Record<string, unknown>, dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
-  const query = `
-    UPDATE expense_categories 
-    SET name = $2, code = $3, description = $4, updated_at = NOW()
-    WHERE id = $1 AND is_active = true
-    RETURNING *
-  `;
+
+  // Build dynamic SET clause to support partial updates including isActive toggle
+  const setClauses: string[] = ['updated_at = NOW()'];
+  const params: unknown[] = [id];
+  let idx = 2;
+
+  if (updateData.name !== undefined) { setClauses.push(`name = $${idx++}`); params.push(updateData.name); }
+  if (updateData.code !== undefined) { setClauses.push(`code = $${idx++}`); params.push((updateData.code as string).toUpperCase()); }
+  if (updateData.description !== undefined) { setClauses.push(`description = $${idx++}`); params.push((updateData.description as string) || null); }
+  if (updateData.isActive !== undefined) { setClauses.push(`is_active = $${idx++}`); params.push(updateData.isActive); }
+
+  const query = `UPDATE expense_categories SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`;
 
   try {
-    const result = await pool.query(query, [
-      id,
-      updateData.name,
-      (updateData.code as string).toUpperCase(),
-      (updateData.description as string) || null
-    ]);
-
-    if (result.rows.length === 0) {
-      return null;
-    }
-
+    const result = await pool.query(query, params);
+    if (result.rows.length === 0) return null;
     const row = result.rows[0];
     return {
       id: row.id,
