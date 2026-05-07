@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo } from 'react';
-import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors } from '../hooks/useTokenRefresh';
+import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessToken } from '../hooks/useTokenRefresh';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
 import type { UserRole } from '../types';
 
@@ -76,11 +76,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // ERP pattern: load user + permissions BEFORE rendering routes
     const initAuth = async () => {
       try {
-        const token = localStorage.getItem('auth_token');
+        let token = localStorage.getItem('auth_token');
         const savedUser = localStorage.getItem('user');
 
         if (token && savedUser) {
           const userData = JSON.parse(savedUser);
+
+          // ── PROACTIVE TOKEN REFRESH (Fix #1 + #4) ───────────────────────────
+          // initAuth() uses raw fetch() below which bypasses the axios interceptor.
+          // Refresh here first if the access token is expired or within 2 min of
+          // expiry so the profile validation gets a fresh token, not a 401.
+          if (navigator.onLine && (isTokenExpired() || willExpireInNext(2)) && getRefreshToken()) {
+            try {
+              await refreshAccessToken();
+              // Re-read the freshly stored token for the profile check below
+              token = localStorage.getItem('auth_token') || token;
+            } catch {
+              // Refresh failed (revoked/expired refresh token) — fall through;
+              // the profile check will return 401 and force a clean re-login.
+            }
+          }
+          // ────────────────────────────────────────────────────────────────────────
 
           // ── SERVER-SIDE TOKEN VALIDATION ─────────────────────────────────────
           // SECURITY: Never trust localStorage alone. If online, verify the token

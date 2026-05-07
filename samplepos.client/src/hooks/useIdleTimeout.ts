@@ -83,12 +83,19 @@ export function useIdleTimeout({
 
         // Track when the tab was last hidden so we can detect long absences
         let hiddenAt: number | null = null;
+        // Track when the user was last active across tab hide/show cycles (Fix #3).
+        // Using Date.now() at idle-timer start gives accurate total idle duration
+        // regardless of how many times the tab was hidden or shown.
+        let idleStartedAt = Date.now();
 
         // Start timers initially
         resetTimers();
 
         // Reset on any user activity
-        const handleActivity = () => resetTimers();
+        const handleActivity = () => {
+            idleStartedAt = Date.now();
+            resetTimers();
+        };
 
         for (const event of ACTIVITY_EVENTS) {
             window.addEventListener(event, handleActivity, { passive: true });
@@ -99,17 +106,14 @@ export function useIdleTimeout({
             if (document.visibilityState === 'hidden') {
                 hiddenAt = Date.now();
             } else if (document.visibilityState === 'visible') {
-                if (hiddenAt && Date.now() - hiddenAt >= timeoutMs) {
-                    // Tab was hidden longer than idle threshold → fire warning, give 60s grace
-                    onWarningRef.current?.();
-                    idleTimerRef.current = setTimeout(() => onIdleRef.current(), WARNING_BEFORE_MS);
-                } else if (hiddenAt) {
-                    // Tab was hidden briefly — subtract elapsed hidden time from timers
-                    // instead of resetting to zero (prevents indefinite session extension)
-                    const elapsed = Date.now() - hiddenAt;
-                    const remaining = timeoutMs - elapsed;
+                if (hiddenAt) {
+                    // Use TOTAL idle time (idle before hide + time spent hidden) so that
+                    // a user who was already inactive before hiding the tab is correctly
+                    // timed out when they return. The old code only counted hidden duration.
+                    const totalIdle = Date.now() - idleStartedAt;
+                    const remaining = timeoutMs - totalIdle;
                     if (remaining <= 0) {
-                        // Already past idle threshold while hidden
+                        // Already past (or at) idle threshold — warn then log out
                         onWarningRef.current?.();
                         idleTimerRef.current = setTimeout(() => onIdleRef.current(), WARNING_BEFORE_MS);
                     } else if (remaining <= WARNING_BEFORE_MS) {

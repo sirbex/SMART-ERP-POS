@@ -88,22 +88,87 @@ export function isTokenExpired(): boolean {
 }
 
 /**
- * Refresh the access token
+ * Check if token will expire within the given number of minutes.
+ * Used for proactive refresh on app boot (Fix #4).
  */
-async function refreshAccessToken(): Promise<TokenResponse> {
-    const refreshToken = getRefreshToken();
+export function willExpireInNext(minutes: number): boolean {
+    const expiryTime = localStorage.getItem(TOKEN_EXPIRY_KEY);
+    if (!expiryTime) return true;
+    return Date.now() >= parseInt(expiryTime, 10) - minutes * 60 * 1000;
+}
 
-    if (!refreshToken) {
-        throw new Error('No refresh token available');
+// ── Cross-tab refresh mutex (Fix #2) ─────────────────────────────────────────
+// Prevents two browser tabs from refreshing the same refresh token simultaneously,
+// which would trigger token-reuse detection and revoke the entire token family.
+const REFRESH_LOCK_KEY = 'refresh_lock';
+const REFRESH_LOCK_TTL = 5000; // ms — stale lock timeout
+
+async function waitForRefreshLock(): Promise<void> {
+    const maxWait = 6000;
+    const start = Date.now();
+    while (true) {
+        const lockTime = localStorage.getItem(REFRESH_LOCK_KEY);
+        const lockAge = lockTime ? Date.now() - parseInt(lockTime, 10) : Infinity;
+        if (lockAge >= REFRESH_LOCK_TTL) {
+            // Lock absent or stale — acquire it
+            localStorage.setItem(REFRESH_LOCK_KEY, Date.now().toString());
+            return;
+        }
+        if (Date.now() - start >= maxWait) {
+            // Waited too long — force-acquire to prevent deadlock
+            localStorage.setItem(REFRESH_LOCK_KEY, Date.now().toString());
+            return;
+        }
+        await new Promise<void>(resolve => setTimeout(resolve, 500));
     }
+}
 
-    const response = await axios.post(`${API_BASE}/refresh`, { refreshToken });
-    const data = response.data.data as TokenResponse;
+function releaseRefreshLock(): void {
+    localStorage.removeItem(REFRESH_LOCK_KEY);
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
-    // Store the new tokens
-    storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
+/**
+ * Refresh the access token.
+ * Exported so AuthContext.initAuth() can call it directly before the profile
+ * check (Fix #1), bypassing the axios interceptor which won't fire for raw fetch().
+ *
+ * Internally protected by a cross-tab localStorage mutex (Fix #2) so only one
+ * tab refreshes at a time.
+ */
+export async function refreshAccessToken(): Promise<TokenResponse> {
+    // Acquire cross-tab lock before doing anything
+    await waitForRefreshLock();
+    try {
+        // Re-check after acquiring lock — another tab may have already refreshed
+        // while we were waiting. If the token is now fresh, return it directly.
+        if (!isTokenExpired()) {
+            const currentToken = getAccessToken();
+            const currentRefresh = getRefreshToken();
+            if (currentToken && currentRefresh) {
+                const storedExpiry = localStorage.getItem(TOKEN_EXPIRY_KEY);
+                const expiresIn = storedExpiry
+                    ? Math.max(60, Math.floor((parseInt(storedExpiry, 10) - Date.now()) / 1000) + 60)
+                    : 840;
+                return { accessToken: currentToken, refreshToken: currentRefresh, expiresIn };
+            }
+        }
 
-    return data;
+        const refreshToken = getRefreshToken();
+        if (!refreshToken) {
+            throw new Error('No refresh token available');
+        }
+
+        const response = await axios.post(`${API_BASE}/refresh`, { refreshToken });
+        const data = response.data.data as TokenResponse;
+
+        // Store the new tokens
+        storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
+
+        return data;
+    } finally {
+        releaseRefreshLock();
+    }
 }
 
 // Track if we're currently refreshing to prevent multiple refresh calls
