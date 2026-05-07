@@ -99,6 +99,21 @@ class JobQueueService {
                 removeOnFail: 1000,  // Keep failures for audit
             },
         });
+
+        // GL projection events queue — processes gl_projection_events outbox table
+        // to keep gl_period_balances in sync without touching the sync request path.
+        // Repeating job fires every 30s; individual jobs also fired after each ledger commit.
+        this.createQueue('gl_events', {
+            defaultJobOptions: {
+                attempts: 3,
+                backoff: {
+                    type: 'exponential',
+                    delay: 10000, // 10s → 20s → 40s
+                },
+                removeOnComplete: 200,
+                removeOnFail: 500,
+            },
+        });
     }
 
     private createQueue(name: string, options: Bull.QueueOptions = {}) {

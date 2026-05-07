@@ -569,6 +569,38 @@ async function startServer() {
         });
       }
 
+      // Register GL period balance projection worker (requires Redis)
+      // Processes gl_projection_events outbox table to keep gl_period_balances in sync.
+      // A repeating job also sweeps for any PENDING events every 30s as a catch-all.
+      try {
+        import('./services/periodBalanceWorker.js')
+          .then(({ pollAndProcessPendingEvents }) => {
+            jobQueue.processQueue('gl_events', async (_job) => {
+              await pollAndProcessPendingEvents(pool);
+            });
+            // Repeating sweep — catches any events missed by the immediate path
+            const glQueue = jobQueue.getQueue('gl_events');
+            if (glQueue) {
+              glQueue.add(
+                { type: 'SWEEP_PENDING_EVENTS', payload: null, userId: 'system', timestamp: new Date().toISOString() },
+                { repeat: { every: 30000 }, jobId: 'gl-events-sweep' },
+              ).catch((err) => logger.warn('GL events sweep job registration failed', {
+                error: err instanceof Error ? err.message : String(err),
+              }));
+            }
+            logger.info('GL period balance projection worker registered');
+          })
+          .catch((err) => {
+            logger.warn('GL period balance projection worker not started', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          });
+      } catch (err) {
+        logger.warn('GL period balance projection worker not started (Redis may be offline)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
       // Register CSV import worker (requires Redis)
       try {
         import('./modules/import/importWorker.js')

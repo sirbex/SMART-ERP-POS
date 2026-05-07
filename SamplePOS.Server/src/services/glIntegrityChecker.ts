@@ -673,16 +673,16 @@ export class GLIntegrityChecker {
     const result = await pool.query(`
       WITH ledger_totals AS (
         SELECT
-          le."AccountId"                                        AS account_id,
-          EXTRACT(YEAR  FROM lt."TransactionDate")::INT         AS fiscal_year,
-          EXTRACT(MONTH FROM lt."TransactionDate")::INT         AS fiscal_period,
-          COALESCE(SUM(le."DebitAmount"),  0)                   AS le_debits,
-          COALESCE(SUM(le."CreditAmount"), 0)                   AS le_credits
+          le."AccountId"                                                          AS account_id,
+          EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT       AS fiscal_year,
+          EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT       AS fiscal_period,
+          COALESCE(SUM(le."DebitAmount"),  0)                                    AS le_debits,
+          COALESCE(SUM(le."CreditAmount"), 0)                                    AS le_credits
         FROM ledger_entries le
         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
         GROUP BY le."AccountId",
-                 EXTRACT(YEAR  FROM lt."TransactionDate")::INT,
-                 EXTRACT(MONTH FROM lt."TransactionDate")::INT
+                 EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT,
+                 EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT
       )
       SELECT
         a."AccountCode"    AS account_code,
@@ -1049,7 +1049,7 @@ export class GLIntegrityChecker {
       FROM supplier_invoices si
       WHERE si.deleted_at IS NULL
         AND COALESCE(si."OutstandingBalance", 0) > 0
-        AND UPPER(si."Status") NOT IN ('CANCELLED','VOID','VOIDED','DELETED')
+        AND UPPER(si."Status") NOT IN ('CANCELLED','VOID','VOIDED','DELETED','DRAFT')
         AND NOT EXISTS (
           SELECT 1 FROM ledger_transactions lt
           WHERE lt."ReferenceId" = si."Id"

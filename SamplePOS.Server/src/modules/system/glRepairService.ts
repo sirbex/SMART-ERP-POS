@@ -872,6 +872,11 @@ export async function rebuildPeriodBalances(
     try {
         await client.query('BEGIN');
 
+        // Pin the session to UTC so EXTRACT(YEAR/MONTH FROM TransactionDate)
+        // produces the same result regardless of the PostgreSQL server's default
+        // timezone or the calling session (e.g. psql in EAT/UTC+3).
+        await client.query("SET LOCAL timezone = 'UTC'");
+
         // 1. Snapshot how many rows currently exist (open periods only) so we
         //    can compute inserts vs updates after the upsert.
         const beforeCount = await client.query(
@@ -897,17 +902,17 @@ export async function rebuildPeriodBalances(
         const upsertRes = await client.query(
             `WITH fresh AS (
                SELECT
-                 le."AccountId"                                         AS account_id,
-                 EXTRACT(YEAR  FROM lt."TransactionDate")::INT          AS fiscal_year,
-                 EXTRACT(MONTH FROM lt."TransactionDate")::INT          AS fiscal_period,
-                 COALESCE(SUM(le."DebitAmount"),  0)                    AS debits,
-                 COALESCE(SUM(le."CreditAmount"), 0)                    AS credits
+                 le."AccountId"                                                              AS account_id,
+                 EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT            AS fiscal_year,
+                 EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT            AS fiscal_period,
+                 COALESCE(SUM(le."DebitAmount"),  0)                                        AS debits,
+                 COALESCE(SUM(le."CreditAmount"), 0)                                        AS credits
                FROM ledger_entries le
                JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
                WHERE lt."Status" IN ('POSTED', 'REVERSED')
                GROUP BY le."AccountId",
-                        EXTRACT(YEAR  FROM lt."TransactionDate")::INT,
-                        EXTRACT(MONTH FROM lt."TransactionDate")::INT
+                        EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT,
+                        EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT
              )
              INSERT INTO gl_period_balances
                  (account_id, fiscal_year, fiscal_period,
@@ -950,8 +955,8 @@ export async function rebuildPeriodBalances(
                  JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
                  WHERE le."AccountId" = gpb.account_id
                    AND lt."Status" IN ('POSTED', 'REVERSED')
-                   AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = gpb.fiscal_year
-                   AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = gpb.fiscal_period
+                   AND EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = gpb.fiscal_year
+                   AND EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = gpb.fiscal_period
                )`,
         );
         const orphansDeleted = orphanRes.rowCount ?? 0;

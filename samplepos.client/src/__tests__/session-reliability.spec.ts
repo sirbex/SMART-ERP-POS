@@ -30,7 +30,7 @@ vi.mock('axios', () => ({
     default: {
         post: vi.fn(),
         interceptors: {
-            request:  { use: vi.fn() },
+            request: { use: vi.fn() },
             response: { use: vi.fn() },
         },
     },
@@ -47,9 +47,9 @@ import {
 } from '../hooks/useTokenRefresh';
 
 // Mirror the private key constants from useTokenRefresh.ts
-const TOKEN_EXPIRY_KEY  = 'token_expiry';
-const REFRESH_LOCK_KEY  = 'refresh_lock';
-const ACCESS_TOKEN_KEY  = 'auth_token';
+const TOKEN_EXPIRY_KEY = 'token_expiry';
+const REFRESH_LOCK_KEY = 'refresh_lock';
+const ACCESS_TOKEN_KEY = 'auth_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 
 function setExpiry(offsetMs: number) {

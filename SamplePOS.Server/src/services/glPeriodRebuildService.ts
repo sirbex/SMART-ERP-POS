@@ -62,8 +62,8 @@ export async function rebuildSingleAccountPeriod(
          FROM ledger_entries le
          JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
          WHERE le."AccountId" = $1
-           AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = $2
-           AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = $3
+           AND EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = $2
+           AND EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = $3
            AND lt."Status" IN ('POSTED', 'REVERSED')`,
         [accountId, fiscalYear, fiscalPeriod],
     );
@@ -152,8 +152,8 @@ export function scheduleGlRebuildForTransaction(pool: pg.Pool, transactionId: st
             .query<{ AccountId: string; year: number; period: number }>(
                 `SELECT DISTINCT
                    le."AccountId",
-                   EXTRACT(YEAR  FROM lt."TransactionDate")::INT AS year,
-                   EXTRACT(MONTH FROM lt."TransactionDate")::INT AS period
+                   EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT AS year,
+                   EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT AS period
                  FROM ledger_entries le
                  JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
                  WHERE le."TransactionId" = $1`,

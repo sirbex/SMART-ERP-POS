@@ -73,6 +73,7 @@ import {
     type GovernanceJournalLine,
 } from './postingGovernanceService.js';
 import { scheduleGlRebuildJobs } from './glPeriodRebuildService.js';
+import { writeProjectionEvent, scheduleImmediateRebuild } from './periodBalanceWorker.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -651,8 +652,18 @@ export class AccountingCore {
                         [account.Id, entryYear, entryMonth]
                     );
                 } else {
-                    // Phase 3b path: collect for post-commit rebuild.
-                    // Primary period-lock guard is isPeriodOpen() above.
+                    // Phase 3b path: write durable outbox event INSIDE this transaction
+                    // (outbox pattern — commits atomically with the ledger entry).
+                    // The setImmediate fast path fires after commit for immediate projection.
+                    // The durable event guarantees delivery even on process crash.
+                    await writeProjectionEvent(
+                        client,
+                        account.Id,
+                        entryYear,
+                        entryMonth,
+                        transactionId,
+                        request.idempotencyKey,
+                    );
                     pendingRebuildJobs.push({ accountId: account.Id, fiscalYear: entryYear, fiscalPeriod: entryMonth });
                 }
 
@@ -775,8 +786,15 @@ export class AccountingCore {
 
         // Phase 3b: schedule post-commit rebuild for own-transaction path.
         // txClient callers already wrote absolute values inside the txClient (above).
+        // Two-path strategy:
+        //   1. scheduleGlRebuildJobs  — setImmediate fast path (usually fires < 5ms after response)
+        //   2. scheduleImmediateRebuild — polls gl_projection_events outbox (durable safety net)
+        // The outbox events were already committed to the DB inside the transaction above,
+        // so even if both async calls are skipped (process crash), the events remain PENDING
+        // and will be picked up by the next Bull gl_events cycle.
         if (!txClient && pendingRebuildJobs.length > 0) {
             scheduleGlRebuildJobs(pendingRebuildJobs, pool);
+            scheduleImmediateRebuild(pool);
         }
 
         return journalResult;
