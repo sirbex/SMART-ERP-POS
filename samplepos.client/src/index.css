@@ -58,3 +58,41 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SAP Fiori App Shell — Non-Scrolling Layout
+   html / body / #root are locked to the viewport.
+   ONLY .page-container scrolls. Nothing else.
+   ─────────────────────────────────────────────────────────────────────── */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Flex column shell: shellbar on top, app-body fills the rest */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Flex row body: sidenav + page-container side by side */
+.app-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative; /* containing block for mobile sidenav absolute overlay */
+  min-height: 0;      /* allow flex children to shrink below their content size */
+}
+
+/* The ONLY element in the entire app that may scroll */
+.page-container {
+  flex: 1;
+  overflow-y: auto;
+  min-width: 0; /* prevent horizontal overflow in flex context */
+}
