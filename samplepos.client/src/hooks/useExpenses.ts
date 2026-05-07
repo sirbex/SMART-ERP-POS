@@ -158,14 +158,14 @@ const expenseApi = {
   },
 
   // Approve expense
-  approveExpense: async (id: string, notes?: string): Promise<Expense> => {
+  approveExpense: async (id: string, comments?: string): Promise<Expense> => {
     const response = await fetch(`${API_BASE}/${id}/approve`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
       },
-      body: JSON.stringify({ notes })
+      body: JSON.stringify({ comments })
     });
 
     if (!response.ok) {

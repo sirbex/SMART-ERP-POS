@@ -517,7 +517,7 @@ function App() {
                   <Route
                     path="/accounting/expenses"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['expenses.read']} requiredFeature="accounting">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['expenses.read']} requiredFeature="accounting">
                         <AccountingLayout>
                           <ExpensesPage />
                         </AccountingLayout>

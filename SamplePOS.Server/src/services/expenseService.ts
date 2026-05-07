@@ -139,6 +139,7 @@ export const deleteExpense = async (id: string, userId: string, pool?: Pool) => 
 
 /**
  * Submit expense for approval (DRAFT -> PENDING_APPROVAL)
+ * Creates an approval record so approvers can see it in their queue.
  */
 export const submitExpense = async (id: string, userId: string, pool?: Pool) => {
   try {
@@ -157,13 +158,18 @@ export const submitExpense = async (id: string, userId: string, pool?: Pool) => 
       );
     }
 
-    // Update status to pending approval
-    const result = await expenseRepository.updateExpense(
-      id,
-      { status: 'PENDING_APPROVAL' },
-      dbPool
-    );
-    return result;
+    // Wrap status update + approval record in a single transaction
+    const expense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
+      const updated = await expenseRepository.updateExpense(
+        id,
+        { status: 'PENDING_APPROVAL' },
+        client
+      );
+      await expenseRepository.createApprovalRecord(id, userId, client);
+      return updated;
+    });
+
+    return expense;
   } catch (error) {
     logger.error('Error in expense service submitExpense', { error, id, userId });
     throw error;
@@ -195,7 +201,10 @@ export const approveExpense = async (
       });
     }
 
-    // Wrap status update + approval record in a single transaction
+    // ============================================================
+    // Wrap approval status update + GL posting in a single transaction
+    // so that APPROVED status and GL entry commit or rollback atomically.
+    // ============================================================
     const expense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
       // Update expense status
       const updated = await expenseRepository.updateExpense(
@@ -211,16 +220,9 @@ export const approveExpense = async (
       // Update approval record
       await expenseRepository.updateApprovalRecord(id, approverId, 'APPROVED', comments, client);
 
-      return updated;
-    });
-
-    // ============================================================
-    // GL POSTING: Record expense recognition on approval
-    // DR Expense (6xxx)  /  CR Cash (if paid) or AP (if unpaid)
-    // ============================================================
-    try {
-      // Check if expense was already paid at creation time
-      const paymentStatusResult = await dbPool.query(
+      // ── GL POSTING inside transaction ──────────────────────────
+      // DR Expense (6xxx)  /  CR Cash (if paid) or AP (if unpaid)
+      const paymentStatusResult = await client.query(
         'SELECT payment_status FROM expenses WHERE id = $1',
         [id]
       );
@@ -236,16 +238,12 @@ export const approveExpense = async (
           description: existingExpense.title || existingExpense.expenseNumber,
           isPaidAtApproval,
         },
-        dbPool
+        dbPool,
+        client
       );
-    } catch (glError) {
-      logger.error('GL posting failed for expense approval — will propagate error', {
-        expenseId: id,
-        expenseNumber: existingExpense.expenseNumber,
-        error: glError,
-      });
-      throw glError;
-    }
+
+      return updated;
+    });
 
     return expense;
   } catch (error) {
@@ -361,24 +359,42 @@ export const markExpensePaid = async (
     };
 
     // ============================================================
-    // CRITICAL: Wrap expense update + bank transaction in UnitOfWork
-    // Prevents PAID expense with missing bank record
+    // Wrap expense update + GL + bank transaction in a single UnitOfWork
+    // Prevents PAID status without GL entry or bank record
     // ============================================================
     const updatedExpense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
       const updated = await expenseRepository.updateExpense(id, updateData, client);
 
-      // ============================================================
-      // GL POSTING: Clear AP when approved expense is paid
-      // DR Accounts Payable (2100) / CR Cash or Bank
-      // Only post if expense was NOT already paid at approval
-      // (if it was, the approval GL already credited Cash directly)
-      // ============================================================
+      // ── GL POSTING inside transaction ──────────────────────────
+      // DR AP (2100) / CR Cash or Bank — only if approval credited AP
+      // (if expense was paid at approval, approval GL already credited Cash)
+      let paymentAccountCode: string | undefined;
+      if (paymentAccountId) {
+        const acctResult = await client.query(
+          'SELECT "AccountCode" FROM accounts WHERE "Id" = $1',
+          [paymentAccountId]
+        );
+        if (acctResult.rows.length > 0) {
+          paymentAccountCode = acctResult.rows[0].AccountCode;
+        }
+      }
 
-      // ============================================================
-      // BANKING INTEGRATION: Create bank transaction for paid expense
-      // Now inside the same transaction — if bank call fails, expense
-      // update is rolled back, preventing orphaned PAID status.
-      // ============================================================
+      const paymentDate = paymentData.paymentDate || getBusinessDate();
+
+      await glEntryService.recordExpensePaymentToGL(
+        {
+          expenseId: id,
+          expenseNumber: existingExpense.expenseNumber,
+          amount: existingExpense.amount,
+          paymentDate,
+          paymentAccountCode,
+        },
+        dbPool,
+        client
+      );
+
+      // ── BANKING INTEGRATION ────────────────────────────────────
+      // Create bank transaction for non-cash payments
       if (updated && existingExpense.paymentMethod !== 'CASH') {
         const bankTxn = await BankingService.createFromExpense(
           id,
@@ -401,44 +417,6 @@ export const markExpensePaid = async (
 
       return updated;
     });
-
-    // ============================================================
-    // GL POSTING: Clear AP when approved expense is paid
-    // DR AP (2100) / CR Cash or Bank — only if approval credited AP
-    // ============================================================
-    try {
-      // Resolve payment account code from UUID
-      let paymentAccountCode: string | undefined;
-      if (paymentAccountId) {
-        const acctResult = await dbPool.query(
-          'SELECT "AccountCode" FROM accounts WHERE "Id" = $1',
-          [paymentAccountId]
-        );
-        if (acctResult.rows.length > 0) {
-          paymentAccountCode = acctResult.rows[0].AccountCode;
-        }
-      }
-
-      const paymentDate = paymentData.paymentDate || getBusinessDate();
-
-      await glEntryService.recordExpensePaymentToGL(
-        {
-          expenseId: id,
-          expenseNumber: existingExpense.expenseNumber,
-          amount: existingExpense.amount,
-          paymentDate,
-          paymentAccountCode,
-        },
-        dbPool
-      );
-    } catch (glError) {
-      logger.error('GL posting failed for expense payment — will propagate error', {
-        expenseId: id,
-        expenseNumber: existingExpense.expenseNumber,
-        error: glError,
-      });
-      throw glError;
-    }
 
     return updatedExpense;
   } catch (error) {
@@ -552,50 +530,6 @@ const generateExpenseNumber = async (pool?: Pool): Promise<string> => {
     const month = bizDate.slice(5, 7);
     const timestamp = Date.now().toString().slice(-4);
     return `EXP-${year}${month}-${timestamp}`;
-  }
-};
-
-/**
- * Submit expense for approval
- */
-export const submitForApproval = async (id: string, userId: string, pool?: Pool) => {
-  try {
-    const dbPool = pool || globalPool;
-    const existingExpense = await expenseRepository.getExpenseById(id, dbPool);
-    if (!existingExpense) {
-      return null;
-    }
-
-    // Business rule: Only draft expenses can be submitted for approval
-    if (existingExpense.status !== 'DRAFT') {
-      throw new BusinessError(
-        'Cannot submit expense in current status for approval',
-        'ERR_EXPENSE_003',
-        { expenseId: id, currentStatus: existingExpense.status, requiredStatus: 'DRAFT' }
-      );
-    }
-
-    // Wrap status update + approval record creation in a single transaction
-    const expense = await UnitOfWork.run(dbPool, async (client: PoolClient) => {
-      // Update expense status
-      const updated = await expenseRepository.updateExpense(
-        id,
-        {
-          status: 'PENDING_APPROVAL',
-        },
-        client
-      );
-
-      // Create approval record
-      await expenseRepository.createApprovalRecord(id, userId, client);
-
-      return updated;
-    });
-
-    return expense;
-  } catch (error) {
-    logger.error('Error in expense service submitForApproval', { error, id, userId });
-    throw error;
   }
 };
 

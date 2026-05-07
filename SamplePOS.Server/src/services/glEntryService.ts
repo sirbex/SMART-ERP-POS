@@ -2228,7 +2228,7 @@ export interface ExpenseApprovalData {
  *   DR Expense (6xxx)       amount
  *   CR Accounts Payable (2100) amount
  */
-export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData, pool?: pg.Pool): Promise<void> {
+export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     const expenseAccountCode = mapExpenseCategoryToAccount(expense.categoryCode);
     const creditAccountCode = expense.isPaidAtApproval
@@ -2260,7 +2260,7 @@ export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData, po
       // When paid at approval, we credit Cash directly → must use EXPENSE_PAYMENT source
       // When not paid, we credit AP (liability) → PURCHASE_BILL is correct
       source: expense.isPaidAtApproval ? 'EXPENSE_PAYMENT' as const : 'PURCHASE_BILL' as const,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded expense approval to GL', {
       expenseId: expense.expenseId,
@@ -2294,7 +2294,7 @@ export interface ExpensePaymentData {
  *   DR Accounts Payable (2100) amount
  *   CR Cash / Bank (1010/1030) amount
  */
-export async function recordExpensePaymentToGL(payment: ExpensePaymentData, pool?: pg.Pool): Promise<void> {
+export async function recordExpensePaymentToGL(payment: ExpensePaymentData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
     const creditAccountCode = payment.paymentAccountCode || AccountCodes.CASH;
 
@@ -2321,7 +2321,7 @@ export async function recordExpensePaymentToGL(payment: ExpensePaymentData, pool
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE_PAYMENT-${payment.expenseId}`,
       source: 'EXPENSE_PAYMENT' as const,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded expense payment to GL', {
       expenseId: payment.expenseId,

@@ -36,9 +36,13 @@ export const getExpenses = asyncHandler(async (req, res) => {
     page = 1,
     limit = 20,
     status,
+    // Accept both snake_case (legacy) and camelCase (frontend hook)
     category_id,
+    categoryId,
     start_date,
+    startDate,
     end_date,
+    endDate,
     search
   } = req.query;
 
@@ -46,9 +50,9 @@ export const getExpenses = asyncHandler(async (req, res) => {
     page: parseInt(page as string),
     limit: parseInt(limit as string),
     status: status as string,
-    categoryId: category_id as string,
-    startDate: start_date as string,
-    endDate: end_date as string,
+    categoryId: (categoryId || category_id) as string,
+    startDate: (startDate || start_date) as string,
+    endDate: (endDate || end_date) as string,
     search: search as string
   };
 

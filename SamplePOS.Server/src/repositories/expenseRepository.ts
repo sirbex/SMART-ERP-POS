@@ -56,9 +56,13 @@ export const getExpenses = async (filters: ExpenseFilters, dbPool?: pg.Pool | pg
 
     // Add filters
     if (filters.status) {
+      // Explicit status filter — respect it exactly
       query += ` AND e.status = $${paramIndex}`;
       queryParams.push(filters.status);
       paramIndex++;
+    } else {
+      // No status filter: hide cancelled expenses from default list view
+      query += ` AND e.status != 'CANCELLED'`;
     }
 
     if (filters.categoryId) {
@@ -118,6 +122,8 @@ export const getExpenseCount = async (filters: ExpenseFilters, dbPool?: pg.Pool 
       query += ` AND e.status = $${paramIndex}`;
       queryParams.push(filters.status);
       paramIndex++;
+    } else {
+      query += ` AND e.status != 'CANCELLED'`;
     }
 
     if (filters.categoryId) {
