@@ -16,6 +16,7 @@ import {
   getSupplierOrders,
   getSupplierProducts,
   getSupplierLedger,
+  getSmartSupplierStatement,
 } from './supplierController.js';
 
 const router = Router();
@@ -29,6 +30,7 @@ router.get('/:id/performance', authenticate, getSupplierPerformance);
 router.get('/:id/orders', authenticate, getSupplierOrders);
 router.get('/:id/products', authenticate, getSupplierProducts);
 router.get('/:id/ledger', authenticate, getSupplierLedger);
+router.get('/:id/smart-statement', authenticate, getSmartSupplierStatement);
 
 // Modify routes - requires supplier permissions
 router.post('/', authenticate, requirePermission('suppliers.create'), createSupplier);

@@ -297,3 +297,16 @@ export const getSupplierLedger = asyncHandler(async (req: Request, res: Response
   const data = await cnDnReportService.getSupplierStatement(pool, supplierId, startDate, endDate);
   res.json({ success: true, data });
 });
+
+/**
+ * Get Smart Supplier Statement — business-document view (Tally/SAP/Odoo style)
+ * One row per business document; accounting internals (GR/IR clearing, corrections) hidden.
+ * GET /api/suppliers/:id/smart-statement?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+export const getSmartSupplierStatement = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id: supplierId } = UuidParamSchema.parse(req.params);
+  const { startDate, endDate } = LedgerQuerySchema.parse(req.query);
+  const data = await cnDnReportService.getSmartSupplierStatementData(pool, supplierId, startDate, endDate);
+  res.json({ success: true, data });
+});

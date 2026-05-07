@@ -119,6 +119,42 @@ export interface SupplierStatementData {
     entries: Array<SupplierStatementEntry & { balanceAfter: number }>;
 }
 
+// ── Smart Supplier Statement (Tally/SAP/Odoo business-document view) ──
+// One row per business document; no accounting internals exposed.
+export interface SmartStatementEntry {
+    date: string;
+    /** Human-readable business description — no accounting jargon */
+    particulars: string;
+    /** Voucher type label: GRN | Bill | Payment | Return | Credit Note | Debit Note */
+    vchType: string;
+    /** Human-readable document number (e.g., GR-2026-0047, PAY-000021) */
+    vchNo: string;
+    /** Liability increase — goods received / direct invoice raised */
+    debit: number;
+    /** Liability decrease — payment made / credit note / return */
+    credit: number;
+    /** Running cumulative balance after this entry */
+    balanceAfter: number;
+    /** Status badge shown to users */
+    itemStatus: 'Pending Bill' | 'Unpaid' | 'Paid' | 'Applied' | 'Voided' | 'Cancelled';
+    paymentMethod?: string;
+    /** UUID of the GL ledger_transaction — powers "View GL Journals" drilldown */
+    transactionId: string;
+    /** Raw reference type for internal filtering */
+    referenceType: string;
+    isReversed: boolean;
+}
+
+export interface SmartStatementData {
+    supplierId: string;
+    supplierName: string;
+    periodStart: string;
+    periodEnd: string;
+    openingBalance: number;
+    closingBalance: number;
+    entries: SmartStatementEntry[];
+}
+
 // ── Supplier Aging (Aged Payables) ──
 export interface SupplierAgingRow {
     supplierId: string;

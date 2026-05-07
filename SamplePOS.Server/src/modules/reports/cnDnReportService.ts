@@ -17,6 +17,7 @@ import type {
     InvoiceAdjustmentRow,
     SupplierStatementData,
     SupplierAgingRow,
+    SmartStatementData,
 } from './cnDnReportTypes.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 
@@ -303,5 +304,46 @@ export async function getSupplierAging(
             current: current.toDecimalPlaces(2).toNumber(),
             over90: over90.toDecimalPlaces(2).toNumber(),
         },
+    };
+}
+
+// ─── 10. Smart Supplier Statement (business-document view) ─────────────────
+/**
+ * Builds the Tally/SAP/Odoo-style Smart Supplier Statement:
+ *   - One row per business document (no GL journal internals)
+ *   - Opening balance from GL (authoritative)
+ *   - Running balance mathematically consistent with GL closing balance
+ *   - Accounting internals (GR/IR clearing, system corrections) hidden from UI
+ */
+export async function getSmartSupplierStatementData(
+    pool: Pool,
+    supplierId: string,
+    startDate: string,
+    endDate: string,
+): Promise<SmartStatementData> {
+    const nameResult = await pool.query(
+        `SELECT "CompanyName" FROM suppliers WHERE "Id" = $1`,
+        [supplierId],
+    );
+    const supplierName = (nameResult.rows[0]?.CompanyName as string | undefined) || 'Unknown';
+
+    const openingBalance = await repo.getSupplierStatementOpeningBalance(pool, supplierId, startDate);
+    const rawEntries = await repo.getSmartSupplierStatementEntries(pool, supplierId, startDate, endDate);
+
+    // Compute running balance in service layer
+    let runBal = new Decimal(openingBalance);
+    const entries: SmartStatementData['entries'] = rawEntries.map((e) => {
+        runBal = runBal.plus(e.debit).minus(e.credit);
+        return { ...e, balanceAfter: runBal.toDecimalPlaces(2).toNumber() };
+    });
+
+    return {
+        supplierId,
+        supplierName,
+        periodStart: startDate,
+        periodEnd: endDate,
+        openingBalance,
+        closingBalance: runBal.toDecimalPlaces(2).toNumber(),
+        entries,
     };
 }

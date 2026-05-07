@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
 import {
@@ -170,9 +170,10 @@ interface SupplierLedgerEntry {
   description: string;
   debit: number;
   credit: number;
-  itemStatus: 'Open' | 'Applied' | 'Credit Note' | 'Voided';
+  itemStatus: 'Open' | 'Applied' | 'Credit Note' | 'Voided' | 'Pending Bill' | 'Return' | 'Correction';
   paymentMethod?: string;
   balanceAfter: number;
+  accountCode?: string;
 }
 
 interface SupplierLedgerData {
@@ -183,6 +184,32 @@ interface SupplierLedgerData {
   openingBalance: number;
   closingBalance: number;
   entries: SupplierLedgerEntry[];
+}
+
+// Smart Supplier Statement — one business document per row
+interface SmartStatementEntry {
+  date: string;
+  particulars: string;
+  vchType: string;
+  vchNo: string;
+  debit: number;
+  credit: number;
+  balanceAfter: number;
+  itemStatus: 'Pending Bill' | 'Unpaid' | 'Paid' | 'Applied' | 'Voided' | 'Cancelled';
+  paymentMethod?: string;
+  transactionId: string;
+  referenceType: string;
+  isReversed: boolean;
+}
+
+interface SmartStatementData {
+  supplierId: string;
+  supplierName: string;
+  periodStart: string;
+  periodEnd: string;
+  openingBalance: number;
+  closingBalance: number;
+  entries: SmartStatementEntry[];
 }
 
 export default function SuppliersPage() {
@@ -983,15 +1010,25 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     d.setFullYear(d.getFullYear() - 1);
     return d.toLocaleDateString('en-CA');
   })();
+  // GL ledger state (used for "View GL Journals" drilldown modal)
   const [ledger, setLedger] = useState<SupplierLedgerData | null>(null);
   const [ledgerStartDate, setLedgerStartDate] = useState(defaultStart);
   const [ledgerEndDate, setLedgerEndDate] = useState(defaultEnd);
-  const [ledgerFilter, setLedgerFilter] = useState<'all' | 'Open' | 'Credit Note' | 'Applied' | 'Voided'>('all');
-  const [ledgerSearch, setLedgerSearch] = useState('');
-  const [ledgerPage, setLedgerPage] = useState(1);
+  const [ledgerFilter] = useState<'all'>('all');
   const LEDGER_PAGE_SIZE = 25;
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
+
+  // Smart Statement state (main supplier statement view)
+  const [smartLedger, setSmartLedger] = useState<SmartStatementData | null>(null);
+  const [smartLoading, setSmartLoading] = useState(false);
+  const [smartError, setSmartError] = useState<string | null>(null);
+  const [smartFilter, setSmartFilter] = useState<'all' | 'Pending Bill' | 'Unpaid' | 'Paid' | 'Applied' | 'Cancelled'>('all');
+  const [smartSearch, setSmartSearch] = useState('');
+  const [smartPage, setSmartPage] = useState(1);
+  const SMART_PAGE_SIZE = 25;
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [showGlModal, setShowGlModal] = useState(false);
 
   // Permission check for recording payments
   const canCreatePayment = useCanAccess([], ['suppliers.create']);
@@ -1107,31 +1144,34 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     return filteredInvoices.slice(start, start + INVOICE_PAGE_SIZE);
   }, [filteredInvoices, invoicePage, INVOICE_PAGE_SIZE]);
 
-  // Filtered + paginated ledger entries
-  const filteredLedgerEntries = useMemo(() => {
-    const entries = ledger?.entries ?? [];
-    let result = entries;
-    if (ledgerFilter !== 'all') {
-      result = result.filter((e) => e.itemStatus === ledgerFilter);
+  // GL ledger entries for the drilldown modal (unfiltered)
+  const filteredLedgerEntries = useMemo(() => ledger?.entries ?? [], [ledger, ledgerFilter]);
+  const ledgerTotalPages = Math.max(1, Math.ceil(filteredLedgerEntries.length / LEDGER_PAGE_SIZE));
+  const paginatedLedgerEntries = useMemo(() => filteredLedgerEntries.slice(0, LEDGER_PAGE_SIZE * 4), [filteredLedgerEntries, LEDGER_PAGE_SIZE]);
+
+  // Smart Statement filtered + paginated entries
+  const filteredSmartEntries = useMemo(() => {
+    let result = smartLedger?.entries ?? [];
+    if (smartFilter !== 'all') {
+      result = result.filter((e) => e.itemStatus === smartFilter);
     }
-    const q = ledgerSearch.trim().toLowerCase();
+    const q = smartSearch.trim().toLowerCase();
     if (q) {
       result = result.filter(
         (e) =>
-          (e.docNumber ?? '').toLowerCase().includes(q) ||
-          (e.reference ?? '').toLowerCase().includes(q) ||
-          (e.description ?? '').toLowerCase().includes(q) ||
-          (e.type ?? '').toLowerCase().includes(q),
+          e.vchNo.toLowerCase().includes(q) ||
+          e.particulars.toLowerCase().includes(q) ||
+          e.vchType.toLowerCase().includes(q),
       );
     }
     return result;
-  }, [ledger, ledgerFilter, ledgerSearch]);
+  }, [smartLedger, smartFilter, smartSearch]);
 
-  const ledgerTotalPages = Math.max(1, Math.ceil(filteredLedgerEntries.length / LEDGER_PAGE_SIZE));
-  const paginatedLedgerEntries = useMemo(() => {
-    const start = (ledgerPage - 1) * LEDGER_PAGE_SIZE;
-    return filteredLedgerEntries.slice(start, start + LEDGER_PAGE_SIZE);
-  }, [filteredLedgerEntries, ledgerPage, LEDGER_PAGE_SIZE]);
+  const smartTotalPages = Math.max(1, Math.ceil(filteredSmartEntries.length / SMART_PAGE_SIZE));
+  const paginatedSmartEntries = useMemo(() => {
+    const start = (smartPage - 1) * SMART_PAGE_SIZE;
+    return filteredSmartEntries.slice(start, start + SMART_PAGE_SIZE);
+  }, [filteredSmartEntries, smartPage, SMART_PAGE_SIZE]);
 
   const paymentTermInfo = PAYMENT_TERMS.find((t) => t.value === supplier.paymentTerms);
 
@@ -1232,9 +1272,10 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     if (tab === 'orders') loadOrders();
     if (tab === 'products') loadProducts();
     if (tab === 'invoices') loadInvoices();
-    if (tab === 'ledger') loadLedger(ledgerStartDate, ledgerEndDate);
+    if (tab === 'ledger') loadSmartLedger(ledgerStartDate, ledgerEndDate);
   };
 
+  // Loads raw GL journal entries — used only for the accountant drilldown modal
   const loadLedger = async (start: string, end: string) => {
     setLedgerLoading(true);
     setLedgerError(null);
@@ -1245,46 +1286,69 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
       if (data.success) {
         setLedger(data.data);
       } else {
-        setLedgerError(data.error || 'Failed to load ledger');
+        setLedgerError(data.error || 'Failed to load GL journals');
       }
     } catch (err) {
-      setLedgerError('Failed to load ledger statement');
+      setLedgerError('Failed to load GL journals');
       console.error('Failed to load ledger:', err);
     } finally {
       setLedgerLoading(false);
     }
   };
 
+  // Loads the Smart Supplier Statement (business-document view)
+  const loadSmartLedger = async (start: string, end: string) => {
+    setSmartLoading(true);
+    setSmartError(null);
+    try {
+      const { data } = await api.get(`/suppliers/${supplier.id}/smart-statement`, {
+        params: { startDate: start, endDate: end },
+      });
+      if (data.success) {
+        setSmartLedger(data.data);
+        setSmartPage(1);
+        setExpandedRows(new Set());
+      } else {
+        setSmartError(data.error || 'Failed to load statement');
+      }
+    } catch (err) {
+      setSmartError('Failed to load supplier statement');
+      console.error('Failed to load smart ledger:', err);
+    } finally {
+      setSmartLoading(false);
+    }
+  };
+
   const handleExportCSV = () => {
-    if (!ledger) return;
-    const filteredEntries = ledger.entries.filter(
-      (e) => ledgerFilter === 'all' || e.itemStatus === ledgerFilter,
-    );
+    if (!smartLedger) return;
+    const entries = smartFilter === 'all'
+      ? smartLedger.entries
+      : smartLedger.entries.filter((e) => e.itemStatus === smartFilter);
     const escapeCell = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
     const rows: string[] = [
-      [escapeCell(`Supplier Ledger Statement — ${ledger.supplierName}`)].join(','),
-      [escapeCell(`Period: ${ledger.periodStart} to ${ledger.periodEnd}`)].join(','),
+      [escapeCell(`Supplier Statement — ${smartLedger.supplierName}`)].join(','),
+      [escapeCell(`Period: ${smartLedger.periodStart} to ${smartLedger.periodEnd}`)].join(','),
       '',
-      ['Date', 'Doc No', 'Type', 'Reference', 'Description', 'Debit', 'Credit', 'Balance After', 'Status', 'Payment Method']
+      ['Date', 'Particulars', 'Vch Type', 'Vch No', 'Debit', 'Credit', 'Balance', 'Status', 'Payment Method']
         .map(escapeCell)
         .join(','),
-      [ledger.periodStart, 'Opening Balance', '', '', '', '', '', ledger.openingBalance, '', '']
+      [smartLedger.periodStart, 'Opening Balance', '', '', '', '', smartLedger.openingBalance, '', '']
         .map(escapeCell)
         .join(','),
-      ...filteredEntries.map((e) =>
-        [e.date, e.docNumber, e.type, e.reference, e.description, e.debit || '', e.credit || '', e.balanceAfter, e.itemStatus, e.paymentMethod || '']
+      ...entries.map((e) =>
+        [e.date, e.particulars, e.vchType, e.vchNo, e.debit || '', e.credit || '', e.balanceAfter, e.itemStatus, e.paymentMethod || '']
           .map(escapeCell)
           .join(','),
       ),
       '',
-      ['', 'Closing Balance', '', '', '', '', '', ledger.closingBalance, '', ''].map(escapeCell).join(','),
+      ['', 'Closing Balance', '', '', '', '', smartLedger.closingBalance, '', ''].map(escapeCell).join(','),
     ];
     const csv = rows.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `supplier-ledger-${ledger.supplierName.replace(/\s+/g, '-')}-${ledger.periodStart}-${ledger.periodEnd}.csv`;
+    a.download = `supplier-statement-${smartLedger.supplierName.replace(/\s+/g, '-')}-${smartLedger.periodStart}-${smartLedger.periodEnd}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1292,8 +1356,8 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   };
 
   const handleExportPDF = (): void => {
-    if (!ledger) return;
-    const supplierSlug = ledger.supplierName.replace(/\s+/g, '-');
+    if (!smartLedger) return;
+    const supplierSlug = smartLedger.supplierName.replace(/\s+/g, '-');
     const dateSuffix = `${ledgerStartDate || 'start'}-${ledgerEndDate || 'end'}`;
     const qs = new URLSearchParams();
     if (ledgerStartDate) qs.set('startDate', ledgerStartDate);
@@ -2360,12 +2424,11 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
             </div>
           )}
 
-          {/* ── Ledger Tab ── */}
+          {/* ── Smart Supplier Statement Tab ── */}
           {activeTab === 'ledger' && (
             <div>
-              {/* Date range + filter bar */}
-              <div className="space-y-3 mb-4">
-                {/* Row 1: date range + actions */}
+              {/* ── Date range + action bar ── */}
+              <div className="space-y-2 mb-4">
                 <div className="flex flex-wrap gap-2 items-end">
                   <div className="flex-1 min-w-[130px]">
                     <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
@@ -2386,147 +2449,232 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     />
                   </div>
                   <button
-                    onClick={() => loadLedger(ledgerStartDate, ledgerEndDate)}
-                    disabled={ledgerLoading}
+                    onClick={() => loadSmartLedger(ledgerStartDate, ledgerEndDate)}
+                    disabled={smartLoading}
                     className="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
                   >
-                    {ledgerLoading ? '⏳' : '🔍 Fetch'}
+                    {smartLoading ? '⏳ Loading…' : '🔍 Fetch'}
                   </button>
-                  {ledger && (
+                  {smartLedger && (
                     <>
-                      <button onClick={handleExportCSV} className="px-3 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700" title="Download CSV">⬇ CSV</button>
-                      <button onClick={handleExportPDF} className="px-3 py-1.5 bg-rose-600 text-white text-sm rounded-lg hover:bg-rose-700" title="Print / Save PDF">🖨 PDF</button>
+                      <button onClick={handleExportCSV} className="px-3 py-1.5 bg-emerald-600 text-white text-sm rounded-lg hover:bg-emerald-700 whitespace-nowrap" title="Download CSV">
+                        ⬇ CSV
+                      </button>
+                      <button onClick={handleExportPDF} className="px-3 py-1.5 bg-rose-600 text-white text-sm rounded-lg hover:bg-rose-700 whitespace-nowrap" title="Print / Save PDF">
+                        🖨 PDF
+                      </button>
+                      <button
+                        onClick={() => { setShowGlModal(true); if (!ledger) loadLedger(ledgerStartDate, ledgerEndDate); }}
+                        className="px-3 py-1.5 bg-slate-500 text-white text-sm rounded-lg hover:bg-slate-600 whitespace-nowrap"
+                        title="View raw GL journal entries (accountant view)"
+                      >
+                        📒 GL Journals
+                      </button>
                     </>
                   )}
                 </div>
-                {/* Row 2: status filter dropdown + search */}
                 <div className="flex flex-wrap gap-2 items-center">
                   <select
-                    value={ledgerFilter}
-                    onChange={(e) => { setLedgerFilter(e.target.value as typeof ledgerFilter); setLedgerPage(1); }}
+                    value={smartFilter}
+                    onChange={(e) => { setSmartFilter(e.target.value as typeof smartFilter); setSmartPage(1); }}
                     className="px-3 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                   >
                     <option value="all">All Statuses</option>
-                    <option value="Open">Open</option>
-                    <option value="Credit Note">Credit Note</option>
+                    <option value="Pending Bill">Pending Bill</option>
+                    <option value="Unpaid">Unpaid</option>
+                    <option value="Paid">Paid</option>
                     <option value="Applied">Applied</option>
-                    <option value="Voided">Voided</option>
+                    <option value="Cancelled">Cancelled</option>
                   </select>
                   <input
                     type="text"
-                    placeholder="Search doc #, ref, description..."
-                    value={ledgerSearch}
-                    onChange={(e) => { setLedgerSearch(e.target.value); setLedgerPage(1); }}
+                    placeholder="Search doc no, type, description…"
+                    value={smartSearch}
+                    onChange={(e) => { setSmartSearch(e.target.value); setSmartPage(1); }}
                     className="flex-1 min-w-[180px] px-3 py-1 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
 
-              {ledgerError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">
-                  {ledgerError}
-                </div>
+              {smartError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-4">{smartError}</div>
               )}
 
-              {!ledger && !ledgerLoading && (
+              {!smartLedger && !smartLoading && (
                 <div className="text-center py-12 text-gray-400 text-sm">
-                  Select a date range and click Fetch to load the ledger statement.
+                  Select a date range and click <strong>Fetch</strong> to load the supplier statement.
                 </div>
               )}
 
-              {ledger && (
+              {smartLedger && (
                 <>
-                  {/* Summary strip */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                    <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  {/* ── Summary strip ── */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                    <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-center">
                       <div className="text-xs text-gray-500 mb-1">Opening Balance</div>
-                      <div className={`text-sm font-bold ${ledger.openingBalance >= 0 ? 'text-red-700' : 'text-green-700'}`}>
-                        {formatCurrency(Math.abs(ledger.openingBalance))}
-                        {ledger.openingBalance < 0 ? ' (Cr)' : ''}
+                      <div className={`text-sm font-bold ${smartLedger.openingBalance > 0 ? 'text-red-700' : smartLedger.openingBalance < 0 ? 'text-green-700' : 'text-gray-700'}`}>
+                        {formatCurrency(Math.abs(smartLedger.openingBalance))}
+                        {smartLedger.openingBalance < 0 && <span className="text-xs font-normal ml-1">Cr</span>}
                       </div>
                     </div>
-                    <div className="bg-red-50 rounded-lg p-3 text-center">
-                      <div className="text-xs text-red-600 mb-1">Total Invoiced</div>
+                    <div className="bg-red-50 border border-red-100 rounded-xl p-3 text-center">
+                      <div className="text-xs text-red-500 mb-1">Total Debits</div>
                       <div className="text-sm font-bold text-red-800">
-                        {formatCurrency(ledger.entries.reduce((s, e) => s + e.debit, 0))}
+                        {formatCurrency(smartLedger.entries.reduce((s, e) => s + e.debit, 0))}
                       </div>
                     </div>
-                    <div className="bg-green-50 rounded-lg p-3 text-center">
-                      <div className="text-xs text-green-600 mb-1">Total Paid</div>
+                    <div className="bg-green-50 border border-green-100 rounded-xl p-3 text-center">
+                      <div className="text-xs text-green-600 mb-1">Total Credits</div>
                       <div className="text-sm font-bold text-green-800">
-                        {formatCurrency(ledger.entries.reduce((s, e) => s + e.credit, 0))}
+                        {formatCurrency(smartLedger.entries.reduce((s, e) => s + e.credit, 0))}
                       </div>
                     </div>
-                    <div className="bg-blue-50 rounded-lg p-3 text-center">
+                    <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
                       <div className="text-xs text-blue-600 mb-1">Closing Balance</div>
-                      <div className={`text-sm font-bold ${ledger.closingBalance >= 0 ? 'text-red-700' : 'text-green-700'}`}>
-                        {formatCurrency(Math.abs(ledger.closingBalance))}
-                        {ledger.closingBalance < 0 ? ' (Cr)' : ''}
+                      <div className={`text-sm font-bold ${smartLedger.closingBalance > 0 ? 'text-red-700' : smartLedger.closingBalance < 0 ? 'text-green-700' : 'text-gray-700'}`}>
+                        {formatCurrency(Math.abs(smartLedger.closingBalance))}
+                        {smartLedger.closingBalance < 0 && <span className="text-xs font-normal ml-1">Cr</span>}
                       </div>
                     </div>
                   </div>
 
-                  {/* Ledger Table */}
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200 text-sm">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Doc No</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
-                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Description</th>
-                          <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Debit</th>
-                          <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Credit</th>
-                          <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
-                          <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                  {/* ── Smart Statement Table ── */}
+                  <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
+                    <table className="min-w-full divide-y divide-gray-100 text-sm">
+                      <thead>
+                        <tr className="bg-gray-50">
+                          <th className="w-7 px-1"></th>
+                          <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Date</th>
+                          <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Particulars</th>
+                          <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden sm:table-cell whitespace-nowrap">Vch Type</th>
+                          <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Vch No</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Debit</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Credit</th>
+                          <th className="px-3 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell whitespace-nowrap">Balance</th>
+                          <th className="px-3 py-2.5 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-100">
                         {/* Opening balance row */}
-                        <tr className="bg-yellow-50 font-medium">
-                          <td className="px-3 py-2 text-xs text-gray-500">{ledger.periodStart}</td>
-                          <td colSpan={6} className="px-3 py-2 text-xs text-gray-500 italic">Opening Balance</td>
-                          <td className="px-3 py-2 text-right text-xs font-bold text-gray-800">{formatCurrency(ledger.openingBalance)}</td>
+                        <tr className="bg-amber-50 border-b border-amber-100">
+                          <td className="w-7 px-1"></td>
+                          <td className="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">{smartLedger.periodStart}</td>
+                          <td colSpan={5} className="px-3 py-2 text-xs text-gray-500 italic font-medium">Opening Balance</td>
+                          <td className="px-3 py-2 text-right text-xs font-bold text-gray-800 hidden md:table-cell whitespace-nowrap">
+                            {formatCurrency(smartLedger.openingBalance)}
+                          </td>
                           <td></td>
                         </tr>
-                        {paginatedLedgerEntries.map((entry, idx) => (
-                          <tr key={idx} className={`hover:bg-gray-50 ${entry.itemStatus === 'Voided' ? 'opacity-50 line-through' : ''}`}>
-                            <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{entry.date}</td>
-                            <td className="px-3 py-2 text-xs font-mono text-blue-700 whitespace-nowrap">{entry.docNumber || '—'}</td>
-                            <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
-                              {entry.type?.replace(/_/g, ' ')}
-                            </td>
-                            <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{entry.reference || '—'}</td>
-                            <td className="px-3 py-2 text-xs text-gray-500 hidden md:table-cell max-w-[180px] truncate">{entry.description || '—'}</td>
-                            <td className="px-3 py-2 text-right text-xs font-medium text-red-700">
-                              {entry.debit > 0 ? formatCurrency(entry.debit) : '—'}
-                            </td>
-                            <td className="px-3 py-2 text-right text-xs font-medium text-green-700">
-                              {entry.credit > 0 ? formatCurrency(entry.credit) : '—'}
-                            </td>
-                            <td className="px-3 py-2 text-right text-xs font-medium text-gray-800">
-                              {formatCurrency(entry.balanceAfter)}
-                            </td>
-                            <td className="px-3 py-2 text-center">
-                              <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${entry.itemStatus === 'Open' ? 'bg-red-100 text-red-700' :
-                                entry.itemStatus === 'Applied' ? 'bg-green-100 text-green-700' :
-                                  entry.itemStatus === 'Credit Note' ? 'bg-amber-100 text-amber-700' :
-                                    'bg-gray-100 text-gray-500'
-                                }`}>
-                                {entry.itemStatus}
-                              </span>
-                              {entry.itemStatus === 'Applied' && entry.paymentMethod && (
-                                <span className="ml-1 inline-flex px-1.5 py-0.5 rounded text-xs bg-blue-50 text-blue-600 font-medium">
-                                  {entry.paymentMethod.replace(/_/g, ' ')}
-                                </span>
+
+                        {paginatedSmartEntries.map((entry) => {
+                          const isExpanded = expandedRows.has(entry.transactionId);
+                          const voided = entry.isReversed;
+
+                          // Vch Type badge color
+                          const vchColor = entry.vchType === 'GRN' ? 'bg-blue-100 text-blue-700'
+                            : entry.vchType === 'Bill' ? 'bg-orange-100 text-orange-700'
+                              : entry.vchType === 'Payment' ? 'bg-green-100 text-green-700'
+                                : entry.vchType === 'Return' ? 'bg-purple-100 text-purple-700'
+                                  : entry.vchType === 'Credit Note' ? 'bg-teal-100 text-teal-700'
+                                    : entry.vchType === 'Debit Note' ? 'bg-amber-100 text-amber-700'
+                                      : 'bg-gray-100 text-gray-600';
+
+                          // Status badge color
+                          const statusColor = entry.itemStatus === 'Pending Bill' ? 'bg-yellow-100 text-yellow-700'
+                            : entry.itemStatus === 'Unpaid' ? 'bg-red-100 text-red-700'
+                              : entry.itemStatus === 'Paid' ? 'bg-green-100 text-green-700'
+                                : entry.itemStatus === 'Applied' ? 'bg-indigo-100 text-indigo-700'
+                                  : entry.itemStatus === 'Cancelled' ? 'bg-gray-100 text-gray-400'
+                                    : 'bg-gray-100 text-gray-500';
+
+                          return (
+                            <Fragment key={entry.transactionId}>
+                              <tr
+                                onClick={() => setExpandedRows((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(entry.transactionId)) next.delete(entry.transactionId);
+                                  else next.add(entry.transactionId);
+                                  return next;
+                                })}
+                                className={`cursor-pointer select-none transition-colors ${voided ? 'opacity-50' : ''} ${isExpanded ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+                              >
+                                <td className="w-7 px-1 py-2.5 text-center text-gray-400 text-xs">
+                                  {isExpanded ? '▾' : '▸'}
+                                </td>
+                                <td className="px-3 py-2.5 text-xs text-gray-600 whitespace-nowrap">{entry.date}</td>
+                                <td className="px-3 py-2.5 text-xs text-gray-800 max-w-[180px]">
+                                  <span className={voided ? 'line-through text-gray-400' : ''}>{entry.particulars}</span>
+                                </td>
+                                <td className="px-3 py-2.5 hidden sm:table-cell">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${vchColor}`}>
+                                    {entry.vchType}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2.5 text-xs font-mono text-blue-700 whitespace-nowrap">{entry.vchNo || '—'}</td>
+                                <td className="px-3 py-2.5 text-right text-xs font-semibold text-red-700 whitespace-nowrap tabular-nums">
+                                  {entry.debit > 0 ? formatCurrency(entry.debit) : <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-xs font-semibold text-green-700 whitespace-nowrap tabular-nums">
+                                  {entry.credit > 0 ? formatCurrency(entry.credit) : <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-3 py-2.5 text-right text-xs font-bold text-gray-800 whitespace-nowrap tabular-nums hidden md:table-cell">
+                                  {formatCurrency(entry.balanceAfter)}
+                                </td>
+                                <td className="px-3 py-2.5 text-center">
+                                  <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>
+                                    {entry.itemStatus}
+                                  </span>
+                                </td>
+                              </tr>
+
+                              {/* Expanded detail row */}
+                              {isExpanded && (
+                                <tr className="bg-blue-50 border-b border-blue-100">
+                                  <td></td>
+                                  <td colSpan={8} className="px-5 py-3">
+                                    <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-600">
+                                      <span>
+                                        <span className="font-medium text-gray-500">Document:</span>{' '}
+                                        <span className="font-mono text-gray-700">{entry.vchNo || '—'}</span>
+                                      </span>
+                                      {entry.paymentMethod && (
+                                        <span>
+                                          <span className="font-medium text-gray-500">Payment via:</span>{' '}
+                                          <span className="text-gray-700">{entry.paymentMethod.replace(/_/g, ' ')}</span>
+                                        </span>
+                                      )}
+                                      <span className="md:hidden">
+                                        <span className="font-medium text-gray-500">Balance after:</span>{' '}
+                                        <span className="font-bold text-gray-800">{formatCurrency(entry.balanceAfter)}</span>
+                                      </span>
+                                      <span className="sm:hidden">
+                                        <span className="font-medium text-gray-500">Type:</span>{' '}
+                                        <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${vchColor}`}>{entry.vchType}</span>
+                                      </span>
+                                    </div>
+                                  </td>
+                                </tr>
                               )}
+                            </Fragment>
+                          );
+                        })}
+
+                        {/* Closing balance row */}
+                        {filteredSmartEntries.length > 0 && smartPage === smartTotalPages && (
+                          <tr className="bg-gray-100 border-t border-gray-200">
+                            <td className="w-7 px-1"></td>
+                            <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{smartLedger.periodEnd}</td>
+                            <td colSpan={5} className="px-3 py-2.5 text-xs text-gray-600 italic font-medium">Closing Balance</td>
+                            <td className="px-3 py-2.5 text-right text-xs font-bold text-gray-900 hidden md:table-cell whitespace-nowrap">
+                              {formatCurrency(smartLedger.closingBalance)}
                             </td>
+                            <td></td>
                           </tr>
-                        ))}
-                        {filteredLedgerEntries.length === 0 && (
+                        )}
+
+                        {filteredSmartEntries.length === 0 && (
                           <tr>
-                            <td colSpan={9} className="px-3 py-8 text-center text-gray-400 text-sm">
+                            <td colSpan={9} className="px-4 py-10 text-center text-gray-400 text-sm">
                               No entries match the selected filter.
                             </td>
                           </tr>
@@ -2535,22 +2683,16 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     </table>
                   </div>
 
-                  {/* Pagination */}
-                  {ledgerTotalPages > 1 && (
-                    <div className="flex items-center justify-between pt-2 border-t border-gray-200 mt-2">
+                  {/* ── Pagination ── */}
+                  {smartTotalPages > 1 && (
+                    <div className="flex items-center justify-between pt-3 border-t border-gray-200 mt-2">
                       <span className="text-xs text-gray-500">
-                        Showing {Math.min((ledgerPage - 1) * LEDGER_PAGE_SIZE + 1, filteredLedgerEntries.length)}–{Math.min(ledgerPage * LEDGER_PAGE_SIZE, filteredLedgerEntries.length)} of {filteredLedgerEntries.length}
+                        {Math.min((smartPage - 1) * SMART_PAGE_SIZE + 1, filteredSmartEntries.length)}–{Math.min(smartPage * SMART_PAGE_SIZE, filteredSmartEntries.length)} of {filteredSmartEntries.length}
                       </span>
                       <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => setLedgerPage((p) => Math.max(1, p - 1))}
-                          disabled={ledgerPage === 1}
-                          className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          ‹ Prev
-                        </button>
-                        {Array.from({ length: ledgerTotalPages }, (_, i) => i + 1)
-                          .filter((p) => p === 1 || p === ledgerTotalPages || Math.abs(p - ledgerPage) <= 1)
+                        <button onClick={() => setSmartPage((p) => Math.max(1, p - 1))} disabled={smartPage === 1} className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">‹ Prev</button>
+                        {Array.from({ length: smartTotalPages }, (_, i) => i + 1)
+                          .filter((p) => p === 1 || p === smartTotalPages || Math.abs(p - smartPage) <= 1)
                           .reduce<(number | '...')[]>((acc, p, idx, arr) => {
                             if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...');
                             acc.push(p);
@@ -2558,31 +2700,103 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                           }, [])
                           .map((p, i) =>
                             p === '...' ? (
-                              <span key={`ellipsis-${i}`} className="px-1 text-xs text-gray-400">…</span>
+                              <span key={`ell-${i}`} className="px-1 text-xs text-gray-400">…</span>
                             ) : (
-                              <button
-                                key={p}
-                                onClick={() => setLedgerPage(p as number)}
-                                className={`px-2 py-1 text-xs border rounded ${ledgerPage === p
-                                  ? 'bg-blue-600 text-white border-blue-600'
-                                  : 'border-gray-300 hover:bg-gray-100'
-                                  }`}
-                              >
-                                {p}
-                              </button>
+                              <button key={p} onClick={() => setSmartPage(p as number)} className={`px-2 py-1 text-xs border rounded ${smartPage === p ? 'bg-blue-600 text-white border-blue-600' : 'border-gray-300 hover:bg-gray-100'}`}>{p}</button>
                             )
                           )}
-                        <button
-                          onClick={() => setLedgerPage((p) => Math.min(ledgerTotalPages, p + 1))}
-                          disabled={ledgerPage === ledgerTotalPages}
-                          className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          Next ›
-                        </button>
+                        <button onClick={() => setSmartPage((p) => Math.min(smartTotalPages, p + 1))} disabled={smartPage === smartTotalPages} className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed">Next ›</button>
                       </div>
                     </div>
                   )}
                 </>
+              )}
+
+              {/* ── GL Journals Modal (accountant drilldown) ── */}
+              {showGlModal && (
+                <div
+                  className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]"
+                  onClick={() => setShowGlModal(false)}
+                >
+                  <div
+                    className="bg-white rounded-xl shadow-2xl p-4 sm:p-6 max-w-5xl w-full mx-3 max-h-[85vh] flex flex-col"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="flex justify-between items-center mb-3">
+                      <div>
+                        <h4 className="text-base font-bold text-gray-900">GL Journal Entries</h4>
+                        <p className="text-xs text-gray-500 mt-0.5">Raw accounting view — accounts 2100 (AP) + 2150 (GR/IR Clearing)</p>
+                      </div>
+                      <button onClick={() => setShowGlModal(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none ml-4">×</button>
+                    </div>
+
+                    {ledgerLoading && <div className="text-center py-8 text-gray-400 text-sm">Loading GL journals…</div>}
+                    {ledgerError && <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 mb-3">{ledgerError}</div>}
+
+                    {ledger && (
+                      <div className="overflow-auto flex-1 rounded-lg border border-gray-200">
+                        <table className="min-w-full divide-y divide-gray-200 text-xs">
+                          <thead className="bg-gray-50 sticky top-0">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Date</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Txn #</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Type</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide">Reference</th>
+                              <th className="px-3 py-2 text-left font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Description</th>
+                              <th className="px-3 py-2 text-center font-semibold text-gray-500 uppercase tracking-wide">Acct</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wide">Debit</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wide">Credit</th>
+                              <th className="px-3 py-2 text-right font-semibold text-gray-500 uppercase tracking-wide">Balance</th>
+                              <th className="px-3 py-2 text-center font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-100">
+                            <tr className="bg-amber-50">
+                              <td className="px-3 py-1.5 text-gray-500">{ledger.periodStart}</td>
+                              <td colSpan={7} className="px-3 py-1.5 italic text-gray-500">Opening Balance</td>
+                              <td className="px-3 py-1.5 text-right font-bold text-gray-800">{formatCurrency(ledger.openingBalance)}</td>
+                              <td></td>
+                            </tr>
+                            {paginatedLedgerEntries.map((entry, idx) => (
+                              <tr key={idx} className={`${entry.itemStatus === 'Voided' ? 'opacity-40 line-through' : 'hover:bg-gray-50'}`}>
+                                <td className="px-3 py-1.5 whitespace-nowrap text-gray-600">{entry.date}</td>
+                                <td className="px-3 py-1.5 font-mono text-blue-700 whitespace-nowrap">{entry.docNumber || '—'}</td>
+                                <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap">{entry.type?.replace(/_/g, ' ')}</td>
+                                <td className="px-3 py-1.5 text-gray-600 whitespace-nowrap">{entry.reference || '—'}</td>
+                                <td className="px-3 py-1.5 text-gray-500 max-w-[200px] truncate hidden lg:table-cell">{entry.description || '—'}</td>
+                                <td className="px-3 py-1.5 text-center">
+                                  <span className={`inline-flex px-1.5 py-0.5 rounded text-xs font-mono font-medium ${entry.accountCode === '2100' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
+                                    {entry.accountCode}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-1.5 text-right font-medium text-red-700 tabular-nums">
+                                  {entry.debit > 0 ? formatCurrency(entry.debit) : '—'}
+                                </td>
+                                <td className="px-3 py-1.5 text-right font-medium text-green-700 tabular-nums">
+                                  {entry.credit > 0 ? formatCurrency(entry.credit) : '—'}
+                                </td>
+                                <td className="px-3 py-1.5 text-right font-bold text-gray-800 tabular-nums">{formatCurrency(entry.balanceAfter)}</td>
+                                <td className="px-3 py-1.5 text-center">
+                                  <span className={`inline-flex px-1.5 py-0.5 rounded-full text-xs font-medium ${entry.itemStatus === 'Open' ? 'bg-red-100 text-red-700' : entry.itemStatus === 'Applied' ? 'bg-green-100 text-green-700' : entry.itemStatus === 'Voided' ? 'bg-gray-100 text-gray-400' : 'bg-amber-100 text-amber-700'}`}>
+                                    {entry.itemStatus}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-200">
+                      <span className="text-xs text-gray-400">{ledger ? `${ledger.entries.length} GL entries` : ''}</span>
+                      {ledgerTotalPages > 1 && (
+                        <span className="text-xs text-gray-400">Showing first {paginatedLedgerEntries.length} entries</span>
+                      )}
+                      <button onClick={() => setShowGlModal(false)} className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200">Close</button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           )}

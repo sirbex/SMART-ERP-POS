@@ -58,7 +58,7 @@ import {
 } from './bodies/paymentVoucherBody.js';
 import { getCustomerStatement } from '../customers/customerService.js';
 import { findCustomerById } from '../customers/customerRepository.js';
-import { getSupplierStatement } from '../reports/cnDnReportService.js';
+import { getSmartSupplierStatementData } from '../reports/cnDnReportService.js';
 import {
     getSupplierPaymentById,
 } from '../supplier-payments/supplierPaymentService.js';
@@ -835,7 +835,7 @@ async function renderSupplierStatement(
     if (!req.startDate || !req.endDate) {
         throw new Error('startDate and endDate query parameters are required for SUPPLIER_STATEMENT');
     }
-    const stmt = await getSupplierStatement(pool, req.id, req.startDate, req.endDate);
+    const stmt = await getSmartSupplierStatementData(pool, req.id, req.startDate, req.endDate);
 
     // Resolve supplier contact details
     const sr = await pool.query(
@@ -865,9 +865,9 @@ async function renderSupplierStatement(
         closingBalance: stmt.closingBalance,
         entries: stmt.entries.map(e => ({
             date: e.date,
-            type: e.type,
-            reference: e.reference ?? null,
-            description: e.description ?? null,
+            type: e.vchType,
+            reference: e.vchNo ?? null,
+            description: e.particulars ?? null,
             debit: e.debit,
             credit: e.credit,
             balanceAfter: e.balanceAfter,

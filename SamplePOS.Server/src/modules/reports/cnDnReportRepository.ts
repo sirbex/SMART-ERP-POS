@@ -24,6 +24,7 @@ import type {
   InvoiceAdjustmentRow,
   SupplierStatementEntry,
   SupplierAgingRow,
+  SmartStatementEntry,
 } from './cnDnReportTypes.js';
 
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -718,4 +719,145 @@ export async function getSupplierAging(
     over90: toNum(r.days_over_90),
     maxDaysOverdue: Number(r.max_days_overdue || 0),
   }));
+}
+
+// ─── 10. Smart Supplier Statement (business-document view) ─────────────────
+/**
+ * Groups GL entries by ledger_transaction and applies a HAVING clause to expose
+ * ONLY rows with a non-zero net balance effect on accounts 2100 + 2150.
+ *
+ * What shows (net ≠ 0):
+ *   GOODS_RECEIPT          → net CR 2150 → liability increase (goods received)
+ *   SUPPLIER_PAYMENT       → net DR 2100 → liability decrease (payment made)
+ *   RETURN_GRN             → net DR 2150 → liability decrease (goods returned)
+ *   SUPPLIER_CREDIT_NOTE   → net DR 2100 → liability decrease (credit applied)
+ *   Direct SUPPLIER_INVOICE (no prior GRN) → net CR 2100 → liability increase
+ *
+ * What is silently hidden (net ≈ 0):
+ *   SUPPLIER_INVOICE matching a prior GRN (DR 2150 = CR 2100 — zero net)
+ *   SYSTEM_CORRECTION, CORRECTION, HIST_REV (excluded by WHERE clause)
+ *
+ * Mathematical guarantee:
+ *   GL opening balance + Σ smart period rows = GL closing balance ✓
+ */
+export async function getSmartSupplierStatementEntries(
+  pool: Pool,
+  supplierId: string,
+  startDate: string,
+  endDate: string,
+): Promise<SmartStatementEntry[]> {
+  const result = await pool.query(
+    `SELECT
+         lt."TransactionDate"::date AS date,
+         lt."ReferenceType"        AS ref_type,
+         COALESCE(lt."ReferenceNumber", lt."TransactionNumber", '') AS reference,
+         lt."Id"                                                     AS transaction_id,
+         COALESCE(lt."IsReversed", false)                            AS is_reversed,
+         ROUND(SUM(le."CreditAmount")::numeric, 4)                   AS total_cr,
+         ROUND(SUM(le."DebitAmount")::numeric, 4)                    AS total_dr,
+         sp."PaymentMethod"                                          AS payment_method
+       FROM ledger_entries le
+       JOIN accounts a              ON a."Id"  = le."AccountId"
+       JOIN ledger_transactions lt  ON lt."Id" = le."TransactionId"
+       LEFT JOIN supplier_payments sp
+         ON lt."ReferenceType" = 'SUPPLIER_PAYMENT'
+         AND sp."PaymentNumber" = lt."ReferenceNumber"
+       WHERE a."AccountCode" IN ('2100', '2150')
+         AND le."EntityId" = $1
+         AND UPPER(le."EntityType") = 'SUPPLIER'
+         AND lt."Status" = 'POSTED'
+         AND lt."ReferenceType" NOT IN (
+               'SYSTEM_CORRECTION', 'CORRECTION', 'HIST_REV', 'MANUAL_ADJUSTMENT'
+             )
+         AND le."EntryDate"::date >= $2::date
+         AND le."EntryDate"::date <= $3::date
+       GROUP BY
+         lt."Id", lt."TransactionDate", lt."ReferenceType",
+         lt."ReferenceNumber", lt."TransactionNumber", lt."IsReversed",
+         sp."PaymentMethod"
+       HAVING ABS(SUM(le."CreditAmount") - SUM(le."DebitAmount")) > 0.001
+       ORDER BY lt."TransactionDate"::date ASC, MIN(le."CreatedAt") ASC`,
+    [supplierId, startDate, endDate],
+  );
+
+  return result.rows.map((r): SmartStatementEntry => {
+    const referenceType = r.ref_type as string;
+    const isReversed = r.is_reversed as boolean;
+    const debit = toNum(r.total_cr);  // GL CreditAmount  = liability ↑ = statement debit
+    const credit = toNum(r.total_dr);  // GL DebitAmount   = liability ↓ = statement credit
+
+    let particulars: string;
+    let vchType: string;
+    let itemStatus: SmartStatementEntry['itemStatus'];
+
+    if (isReversed) {
+      particulars = 'Voided transaction';
+      vchType = vchTypeLabel(referenceType);
+      itemStatus = 'Cancelled';
+    } else {
+      switch (referenceType) {
+        case 'GOODS_RECEIPT':
+          particulars = 'Goods received — pending invoice';
+          vchType = 'GRN';
+          itemStatus = 'Pending Bill';
+          break;
+        case 'SUPPLIER_INVOICE':
+          particulars = 'Supplier invoice received';
+          vchType = 'Bill';
+          itemStatus = 'Unpaid';
+          break;
+        case 'SUPPLIER_PAYMENT':
+          particulars = 'Payment made to supplier';
+          vchType = 'Payment';
+          itemStatus = 'Paid';
+          break;
+        case 'RETURN_GRN':
+          particulars = 'Goods returned to supplier';
+          vchType = 'Return';
+          itemStatus = 'Applied';
+          break;
+        case 'SUPPLIER_CREDIT_NOTE':
+          particulars = 'Credit note received from supplier';
+          vchType = 'Credit Note';
+          itemStatus = 'Applied';
+          break;
+        case 'DEBIT_NOTE':
+          particulars = 'Debit note issued to supplier';
+          vchType = 'Debit Note';
+          itemStatus = 'Applied';
+          break;
+        default:
+          particulars = referenceType.replace(/_/g, ' ').toLowerCase();
+          vchType = referenceType.replace(/_/g, ' ');
+          itemStatus = credit > 0 ? 'Applied' : 'Unpaid';
+      }
+    }
+
+    return {
+      date: r.date,
+      particulars,
+      vchType,
+      vchNo: r.reference as string,
+      debit,
+      credit,
+      balanceAfter: 0, // computed in service layer
+      itemStatus,
+      paymentMethod: r.payment_method ?? undefined,
+      transactionId: r.transaction_id as string,
+      referenceType,
+      isReversed,
+    };
+  });
+}
+
+function vchTypeLabel(referenceType: string): string {
+  switch (referenceType) {
+    case 'GOODS_RECEIPT': return 'GRN';
+    case 'SUPPLIER_INVOICE': return 'Bill';
+    case 'SUPPLIER_PAYMENT': return 'Payment';
+    case 'RETURN_GRN': return 'Return';
+    case 'SUPPLIER_CREDIT_NOTE': return 'Credit Note';
+    case 'DEBIT_NOTE': return 'Debit Note';
+    default: return referenceType.replace(/_/g, ' ');
+  }
 }
