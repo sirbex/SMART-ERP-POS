@@ -1236,12 +1236,13 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
   };
 
   const loadInvoiceDetails = async (invoiceId: string) => {
+    setSelectedInvoice(invoiceId);
+    setInvoiceDetails(null);
     setLoadingInvoiceDetails(true);
     try {
       const { data } = await api.get(`/supplier-payments/invoices/${invoiceId}/details`);
       if (data.success) {
         setInvoiceDetails(data.data);
-        setSelectedInvoice(invoiceId);
       }
     } catch (error) {
       console.error('Failed to load invoice details:', error);
@@ -1263,6 +1264,15 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
     } finally {
       setDownloadingPdf(null);
     }
+  };
+
+  const handleInlineInvoiceToggle = async (invoiceId: string) => {
+    if (selectedInvoice === invoiceId) {
+      setSelectedInvoice(null);
+      setInvoiceDetails(null);
+      return;
+    }
+    await loadInvoiceDetails(invoiceId);
   };
 
   // Load data when tab changes
@@ -1964,7 +1974,7 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {filteredInvoices.length === 0 ? (
-                          <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-500">No invoices match your search.</td></tr>
+                          <tr><td colSpan={canCreatePayment ? 11 : 9} className="px-4 py-8 text-center text-sm text-gray-500">No invoices match your search.</td></tr>
                         ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
                           const total = Number(inv.totalAmount || 0);
                           const paid = Number(inv.amountPaid || 0);
@@ -1979,63 +1989,198 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                                 : inv.status === 'Pending'
                                   ? 'bg-blue-100 text-blue-800'
                                   : 'bg-gray-100 text-gray-800';
+                          const isExpanded = selectedInvoice === inv.id;
                           return (
-                            <tr key={inv.id} className={checked ? 'bg-purple-50' : 'hover:bg-gray-50'}>
-                              {canCreatePayment && (
-                                <td className="px-3 py-3 text-center">
-                                  {payable && (
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={() => toggleMultiRow(inv)}
-                                      className="w-4 h-4 accent-purple-600 cursor-pointer"
-                                      title="Select for payment"
-                                    />
-                                  )}
-                                </td>
-                              )}
-                              <td className="px-4 py-3 text-sm font-medium text-blue-600">{inv.invoiceNumber}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{inv.supplierInvoiceNumber || '-'}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
-                              <td className="px-4 py-3 text-sm text-gray-600">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}</td>
-                              <td className="px-4 py-3">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>{inv.status}</span>
-                              </td>
-                              <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
-                              <td className="px-4 py-3 text-sm text-right text-green-600">{formatCurrency(paid)}</td>
-                              <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
-                                {balance > 0 ? formatCurrency(balance) : balance < 0 ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span> : <span className="text-green-600">Paid</span>}
-                              </td>
-                              {canCreatePayment && (
-                                <td className="px-4 py-3 text-right">
-                                  {checked && (
-                                    <div className="flex items-center gap-1 justify-end">
+                            <Fragment key={inv.id}>
+                              <tr
+                                onClick={() => handleInlineInvoiceToggle(inv.id)}
+                                className={`${checked ? 'bg-purple-50' : 'hover:bg-gray-50'} cursor-pointer ${isExpanded ? 'bg-blue-50/40' : ''}`}
+                              >
+                                {canCreatePayment && (
+                                  <td className="px-3 py-3 text-center">
+                                    {payable && (
                                       <input
-                                        type="number"
-                                        value={multiSelected.get(inv.id) ?? ''}
-                                        onChange={(e) => setMultiAmount(inv.id, e.target.value)}
-                                        className="w-28 border border-purple-300 rounded px-2 py-1 text-xs text-right focus:ring-1 focus:ring-purple-500"
-                                        min="0.01"
-                                        max={balance}
-                                        step="0.01"
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => toggleMultiRow(inv)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="w-4 h-4 accent-purple-600 cursor-pointer"
+                                        title="Select for payment"
                                       />
-                                      <button
-                                        type="button"
-                                        onClick={() => setMultiAmount(inv.id, balance.toString())}
-                                        className="text-xs text-purple-600 hover:text-purple-800 underline whitespace-nowrap"
-                                      >Full</button>
-                                    </div>
-                                  )}
+                                    )}
+                                  </td>
+                                )}
+                                <td className="px-4 py-3 text-sm font-medium text-blue-600">{inv.invoiceNumber}</td>
+                                <td className="px-4 py-3 text-sm text-gray-600">{inv.supplierInvoiceNumber || '-'}</td>
+                                <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-600">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>{inv.status}</span>
                                 </td>
+                                <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
+                                <td className="px-4 py-3 text-sm text-right text-green-600">{formatCurrency(paid)}</td>
+                                <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
+                                  {balance > 0 ? formatCurrency(balance) : balance < 0 ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span> : <span className="text-green-600">Paid</span>}
+                                </td>
+                                {canCreatePayment && (
+                                  <td className="px-4 py-3 text-right">
+                                    {checked && (
+                                      <div className="flex items-center gap-1 justify-end">
+                                        <input
+                                          type="number"
+                                          value={multiSelected.get(inv.id) ?? ''}
+                                          onChange={(e) => setMultiAmount(inv.id, e.target.value)}
+                                          onClick={(e) => e.stopPropagation()}
+                                          className="w-28 border border-purple-300 rounded px-2 py-1 text-xs text-right focus:ring-1 focus:ring-purple-500"
+                                          min="0.01"
+                                          max={balance}
+                                          step="0.01"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setMultiAmount(inv.id, balance.toString());
+                                          }}
+                                          className="text-xs text-purple-600 hover:text-purple-800 underline whitespace-nowrap"
+                                        >Full</button>
+                                      </div>
+                                    )}
+                                  </td>
+                                )}
+                                <td className="px-4 py-3 text-center">
+                                  <div className="flex items-center justify-center gap-1">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleInlineInvoiceToggle(inv.id);
+                                      }}
+                                      className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
+                                      title={isExpanded ? 'Hide Details' : 'View Details'}
+                                    >
+                                      {isExpanded ? '▾ Hide' : '▸ View'}
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDownloadPdf(inv.id, inv.invoiceNumber);
+                                      }}
+                                      disabled={downloadingPdf === inv.id}
+                                      className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors disabled:opacity-50"
+                                      title="Download PDF"
+                                    >{downloadingPdf === inv.id ? '⏳' : '📄'} PDF</button>
+                                    {balance > 0 && !['Cancelled', 'CANCELLED', 'DRAFT'].includes(inv.status || '') && <button onClick={(e) => {
+                                      e.stopPropagation();
+                                      openPayModal(inv);
+                                    }} className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors font-semibold" title="Record Payment">💰 Pay</button>}
+                                  </div>
+                                </td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="bg-blue-50/30">
+                                  <td colSpan={canCreatePayment ? 11 : 9} className="px-4 py-4">
+                                    {loadingInvoiceDetails ? (
+                                      <div className="text-sm text-gray-600">Loading details...</div>
+                                    ) : invoiceDetails ? (
+                                      <div className="border border-blue-200 rounded-lg overflow-hidden bg-white">
+                                        <div className="bg-blue-50 px-4 py-3 flex justify-between items-center">
+                                          <div>
+                                            <h4 className="text-base font-semibold text-gray-900">
+                                              {invoiceDetails.invoice.invoiceNumber}
+                                              {invoiceDetails.invoice.supplierInvoiceNumber && (
+                                                <span className="ml-2 text-xs font-normal text-gray-500">
+                                                  (Ref: {invoiceDetails.invoice.supplierInvoiceNumber})
+                                                </span>
+                                              )}
+                                            </h4>
+                                            <p className="text-xs text-gray-600">
+                                              {formatDisplayDate(invoiceDetails.invoice.invoiceDate)}
+                                              {invoiceDetails.invoice.dueDate && ` | Due: ${formatDisplayDate(invoiceDetails.invoice.dueDate)}`}
+                                            </p>
+                                          </div>
+                                          <button
+                                            onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
+                                            disabled={downloadingPdf === inv.id}
+                                            className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
+                                          >
+                                            {downloadingPdf === inv.id ? '⏳ Generating...' : '📄 Export PDF'}
+                                          </button>
+                                        </div>
+                                        <div className="p-4 space-y-4">
+                                          {invoiceDetails.lineItems && invoiceDetails.lineItems.length > 0 ? (
+                                            <div>
+                                              <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Line Items</h5>
+                                              <table className="min-w-full divide-y divide-gray-200 text-xs">
+                                                <thead className="bg-gray-50">
+                                                  <tr>
+                                                    <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">#</th>
+                                                    <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">Product/Service</th>
+                                                    <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">Description</th>
+                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Qty</th>
+                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Unit Cost</th>
+                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Total</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-100">
+                                                  {invoiceDetails.lineItems.map((item: InvoiceLineItem, idx: number) => (
+                                                    <tr key={item.id || idx} className="hover:bg-gray-50">
+                                                      <td className="px-3 py-2 text-gray-500">{item.lineNumber || idx + 1}</td>
+                                                      <td className="px-3 py-2 font-medium text-gray-900">{item.productName}</td>
+                                                      <td className="px-3 py-2 text-gray-600">{item.description || '-'}</td>
+                                                      <td className="px-3 py-2 text-right text-gray-900">{item.quantity} {item.unitOfMeasure || ''}</td>
+                                                      <td className="px-3 py-2 text-right text-gray-900">{formatCurrency(item.unitCost)}</td>
+                                                      <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatCurrency(item.lineTotal)}</td>
+                                                    </tr>
+                                                  ))}
+                                                </tbody>
+                                                <tfoot className="bg-gray-50">
+                                                  <tr>
+                                                    <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Subtotal:</td>
+                                                    <td className="px-3 py-2 text-right font-bold text-gray-900">{formatCurrency(Number(invoiceDetails.invoice.subtotal || invoiceDetails.invoice.totalAmount || 0))}</td>
+                                                  </tr>
+                                                  {Number(invoiceDetails.invoice.taxAmount || 0) > 0 && (
+                                                    <tr>
+                                                      <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Tax:</td>
+                                                      <td className="px-3 py-2 text-right font-bold text-gray-900">{formatCurrency(Number(invoiceDetails.invoice.taxAmount))}</td>
+                                                    </tr>
+                                                  )}
+                                                  <tr className="border-t-2 border-gray-300">
+                                                    <td colSpan={5} className="px-3 py-2 text-right font-bold text-gray-900">Total:</td>
+                                                    <td className="px-3 py-2 text-right font-bold text-blue-600">{formatCurrency(Number(invoiceDetails.invoice.totalAmount || 0))}</td>
+                                                  </tr>
+                                                </tfoot>
+                                              </table>
+                                            </div>
+                                          ) : (
+                                            <div className="text-xs text-gray-500 italic">No line items recorded for this invoice.</div>
+                                          )}
+
+                                          {invoiceDetails.allocations && invoiceDetails.allocations.length > 0 && (
+                                            <div>
+                                              <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Payment History</h5>
+                                              <div className="space-y-2">
+                                                {invoiceDetails.allocations.map((alloc: InvoiceAllocation) => (
+                                                  <div key={alloc.id} className="flex justify-between items-center bg-green-50 rounded-lg px-3 py-2">
+                                                    <div>
+                                                      <span className="font-medium text-gray-900 text-xs">{alloc.paymentNumber}</span>
+                                                      <span className="ml-2 text-xs text-gray-500">{formatDisplayDate(alloc.allocationDate)}</span>
+                                                      <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded text-gray-600">{alloc.paymentMethod}</span>
+                                                    </div>
+                                                    <span className="font-bold text-green-700 text-xs">{formatCurrency(alloc.amountAllocated)}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="text-sm text-gray-500">No details found for this invoice.</div>
+                                    )}
+                                  </td>
+                                </tr>
                               )}
-                              <td className="px-4 py-3 text-center">
-                                <div className="flex items-center justify-center gap-1">
-                                  <button onClick={() => loadInvoiceDetails(inv.id)} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors" title="View Details">👁️ View</button>
-                                  <button onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)} disabled={downloadingPdf === inv.id} className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors disabled:opacity-50" title="Download PDF">{downloadingPdf === inv.id ? '⏳' : '📄'} PDF</button>
-                                  {balance > 0 && !['Cancelled', 'CANCELLED', 'DRAFT'].includes(inv.status || '') && <button onClick={() => openPayModal(inv)} className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors font-semibold" title="Record Payment">💰 Pay</button>}
-                                </div>
-                              </td>
-                            </tr>
+                            </Fragment>
                           );
                         })}
                       </tbody>
@@ -2196,225 +2341,6 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                     </div>
                   )}
 
-                  {/* Invoice Detail Panel */}
-                  {selectedInvoice && invoiceDetails && (
-                    <div className="mt-4 border-2 border-blue-200 rounded-lg overflow-hidden">
-                      <div className="bg-blue-50 px-6 py-4 flex justify-between items-center">
-                        <div>
-                          <h4 className="text-lg font-semibold text-gray-900">
-                            {invoiceDetails.invoice.invoiceNumber}
-                            {invoiceDetails.invoice.supplierInvoiceNumber && (
-                              <span className="ml-2 text-sm font-normal text-gray-500">
-                                (Ref: {invoiceDetails.invoice.supplierInvoiceNumber})
-                              </span>
-                            )}
-                          </h4>
-                          <p className="text-sm text-gray-600">
-                            {formatDisplayDate(invoiceDetails.invoice.invoiceDate)}
-                            {invoiceDetails.invoice.dueDate &&
-                              ` | Due: ${formatDisplayDate(invoiceDetails.invoice.dueDate)}`}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() =>
-                              handleDownloadPdf(
-                                selectedInvoice,
-                                invoiceDetails.invoice.invoiceNumber
-                              )
-                            }
-                            disabled={downloadingPdf === selectedInvoice}
-                            className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-1"
-                          >
-                            {downloadingPdf === selectedInvoice
-                              ? '⏳ Generating...'
-                              : '📄 Download PDF'}
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedInvoice(null);
-                              setInvoiceDetails(null);
-                            }}
-                            className="text-gray-400 hover:text-gray-600 text-xl"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-
-                      {loadingInvoiceDetails ? (
-                        <div className="p-6 text-center text-gray-600">Loading details...</div>
-                      ) : (
-                        <div className="p-6 space-y-6">
-                          {/* Line Items */}
-                          {invoiceDetails.lineItems && invoiceDetails.lineItems.length > 0 ? (
-                            <div>
-                              <h5 className="text-sm font-semibold text-gray-700 mb-3">
-                                Line Items
-                              </h5>
-                              <table className="min-w-full divide-y divide-gray-200 text-sm">
-                                <thead className="bg-gray-50">
-                                  <tr>
-                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                                      #
-                                    </th>
-                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                                      Product/Service
-                                    </th>
-                                    <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                                      Description
-                                    </th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                                      Qty
-                                    </th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                                      Unit Cost
-                                    </th>
-                                    <th className="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">
-                                      Total
-                                    </th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                  {invoiceDetails.lineItems.map(
-                                    (item: InvoiceLineItem, idx: number) => (
-                                      <tr key={item.id || idx} className="hover:bg-gray-50">
-                                        <td className="px-3 py-2 text-gray-500">
-                                          {item.lineNumber || idx + 1}
-                                        </td>
-                                        <td className="px-3 py-2 font-medium text-gray-900">
-                                          {item.productName}
-                                        </td>
-                                        <td className="px-3 py-2 text-gray-600">
-                                          {item.description || '-'}
-                                        </td>
-                                        <td className="px-3 py-2 text-right text-gray-900">
-                                          {item.quantity} {item.unitOfMeasure || ''}
-                                        </td>
-                                        <td className="px-3 py-2 text-right text-gray-900">
-                                          {formatCurrency(item.unitCost)}
-                                        </td>
-                                        <td className="px-3 py-2 text-right font-semibold text-gray-900">
-                                          {formatCurrency(item.lineTotal)}
-                                        </td>
-                                      </tr>
-                                    )
-                                  )}
-                                </tbody>
-                                <tfoot className="bg-gray-50">
-                                  <tr>
-                                    <td
-                                      colSpan={5}
-                                      className="px-3 py-2 text-right font-semibold text-gray-700"
-                                    >
-                                      Subtotal:
-                                    </td>
-                                    <td className="px-3 py-2 text-right font-bold text-gray-900">
-                                      {formatCurrency(
-                                        Number(
-                                          invoiceDetails.invoice.subtotal ||
-                                          invoiceDetails.invoice.totalAmount ||
-                                          0
-                                        )
-                                      )}
-                                    </td>
-                                  </tr>
-                                  {Number(invoiceDetails.invoice.taxAmount || 0) > 0 && (
-                                    <tr>
-                                      <td
-                                        colSpan={5}
-                                        className="px-3 py-2 text-right font-semibold text-gray-700"
-                                      >
-                                        Tax:
-                                      </td>
-                                      <td className="px-3 py-2 text-right font-bold text-gray-900">
-                                        {formatCurrency(Number(invoiceDetails.invoice.taxAmount))}
-                                      </td>
-                                    </tr>
-                                  )}
-                                  <tr className="border-t-2 border-gray-300">
-                                    <td
-                                      colSpan={5}
-                                      className="px-3 py-2 text-right font-bold text-gray-900"
-                                    >
-                                      Total:
-                                    </td>
-                                    <td className="px-3 py-2 text-right font-bold text-blue-600 text-lg">
-                                      {formatCurrency(
-                                        Number(invoiceDetails.invoice.totalAmount || 0)
-                                      )}
-                                    </td>
-                                  </tr>
-                                </tfoot>
-                              </table>
-                            </div>
-                          ) : (
-                            <div className="text-sm text-gray-500 italic">
-                              No line items recorded for this invoice.
-                            </div>
-                          )}
-
-                          {/* Payments */}
-                          {invoiceDetails.allocations && invoiceDetails.allocations.length > 0 && (
-                            <div>
-                              <h5 className="text-sm font-semibold text-gray-700 mb-3">
-                                Payment History
-                              </h5>
-                              <div className="space-y-2">
-                                {invoiceDetails.allocations.map((alloc: InvoiceAllocation) => (
-                                  <div
-                                    key={alloc.id}
-                                    className="flex justify-between items-center bg-green-50 rounded-lg px-4 py-3"
-                                  >
-                                    <div>
-                                      <span className="font-medium text-gray-900">
-                                        {alloc.paymentNumber}
-                                      </span>
-                                      <span className="ml-2 text-sm text-gray-500">
-                                        {formatDisplayDate(alloc.allocationDate)}
-                                      </span>
-                                      <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded text-gray-600">
-                                        {alloc.paymentMethod}
-                                      </span>
-                                    </div>
-                                    <span className="font-bold text-green-700">
-                                      {formatCurrency(alloc.amountAllocated)}
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="mt-3 flex justify-between items-center pt-3 border-t border-gray-200">
-                                <span className="font-semibold text-gray-700">Total Paid:</span>
-                                <span className="font-bold text-green-600 text-lg">
-                                  {formatCurrency(Number(invoiceDetails.invoice.amountPaid || 0))}
-                                </span>
-                              </div>
-                              {Number(invoiceDetails.invoice.outstandingBalance || 0) > 0 && (
-                                <div className="flex justify-between items-center mt-1">
-                                  <span className="font-semibold text-gray-700">Balance Due:</span>
-                                  <span className="font-bold text-red-600 text-lg">
-                                    {formatCurrency(
-                                      Number(invoiceDetails.invoice.outstandingBalance)
-                                    )}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Notes */}
-                          {invoiceDetails.invoice.notes && (
-                            <div>
-                              <h5 className="text-sm font-semibold text-gray-700 mb-1">Notes</h5>
-                              <p className="text-sm text-gray-600">
-                                {invoiceDetails.invoice.notes}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div className="text-center py-12 text-gray-500">

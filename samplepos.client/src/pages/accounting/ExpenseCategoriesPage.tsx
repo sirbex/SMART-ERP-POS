@@ -286,8 +286,8 @@ export const ExpenseCategoriesPage: React.FC = () => {
             <p className="text-gray-600">Manage expense categories and classifications</p>
           </div>
         </div>
-        
-        <Button 
+
+        <Button
           onClick={() => setIsCreateModalOpen(true)}
           className="flex items-center gap-2"
         >

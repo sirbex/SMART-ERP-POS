@@ -318,13 +318,13 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
               watchedCategory === 'EQUIPMENT' ||
               watchedCategory === 'MAINTENANCE' ||
               (watchedAmount && watchedAmount > 50)) && (
-              <Alert className="py-2">
-                <Receipt className="h-4 w-4" />
-                <AlertDescription className="text-xs">
-                  Receipt required for this category/amount
-                </AlertDescription>
-              </Alert>
-            )}
+                <Alert className="py-2">
+                  <Receipt className="h-4 w-4" />
+                  <AlertDescription className="text-xs">
+                    Receipt required for this category/amount
+                  </AlertDescription>
+                </Alert>
+              )}
 
             {/* Document Upload (compact) */}
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center bg-gray-50">

@@ -86,13 +86,16 @@ body,
   flex: 1;
   display: flex;
   overflow: hidden;
-  position: relative; /* containing block for mobile sidenav absolute overlay */
-  min-height: 0;      /* allow flex children to shrink below their content size */
+  position: relative;
+  /* containing block for mobile sidenav absolute overlay */
+  min-height: 0;
+  /* allow flex children to shrink below their content size */
 }
 
 /* The ONLY element in the entire app that may scroll */
 .page-container {
   flex: 1;
   overflow-y: auto;
-  min-width: 0; /* prevent horizontal overflow in flex context */
+  min-width: 0;
+  /* prevent horizontal overflow in flex context */
 }

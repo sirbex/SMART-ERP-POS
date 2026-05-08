@@ -160,11 +160,10 @@ export default function Layout({ children }: LayoutProps) {
                 <li key={item.path}>
                   <Link
                     to={item.path}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                      isActive(item.path)
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${isActive(item.path)
                         ? 'bg-blue-50 text-blue-700 font-bold'
                         : 'text-gray-700 hover:bg-gray-100 font-semibold'
-                    }`}
+                      }`}
                     title={!sidebarOpen && isDesktop ? item.name : undefined}
                     onClick={() => {
                       if (!isDesktop) setSidebarOpen(false);
@@ -195,18 +194,16 @@ export default function Layout({ children }: LayoutProps) {
             </div>
             <Link
               to="/my/quick-login"
-              className={`${
-                sidebarOpen || !isDesktop ? 'w-full flex items-center gap-2' : 'w-10 justify-center flex'
-              } mt-3 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors`}
+              className={`${sidebarOpen || !isDesktop ? 'w-full flex items-center gap-2' : 'w-10 justify-center flex'
+                } mt-3 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors`}
               title={!sidebarOpen && isDesktop ? 'Quick Login Setup' : undefined}
             >
               {sidebarOpen || !isDesktop ? '🔑 Quick Login Setup' : '🔑'}
             </Link>
             <button
               onClick={handleLogout}
-              className={`${
-                sidebarOpen || !isDesktop ? 'w-full' : 'w-10'
-              } mt-3 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors`}
+              className={`${sidebarOpen || !isDesktop ? 'w-full' : 'w-10'
+                } mt-3 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors`}
               title={!sidebarOpen && isDesktop ? 'Logout' : undefined}
             >
               {sidebarOpen || !isDesktop ? 'Logout' : '🚪'}

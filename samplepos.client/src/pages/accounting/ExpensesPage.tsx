@@ -40,7 +40,7 @@ const ExpensesPage: React.FC = () => {
       createGuardRef.current = openGuard({ cancellable: true, label: 'Create expense' });
       return () => { if (createGuardRef.current) { closeGuard(createGuardRef.current.id); createGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCreateModalOpen]);
 
   useEffect(() => {
@@ -48,7 +48,7 @@ const ExpensesPage: React.FC = () => {
       viewGuardRef.current = openGuard({ cancellable: true, label: 'View expense' });
       return () => { if (viewGuardRef.current) { closeGuard(viewGuardRef.current.id); viewGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedExpense]);
 
   useEffect(() => {
@@ -56,7 +56,7 @@ const ExpensesPage: React.FC = () => {
       rejectGuardRef.current = openGuard({ cancellable: false, label: 'Reject expense' });
       return () => { if (rejectGuardRef.current) { closeGuard(rejectGuardRef.current.id); rejectGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rejectDialogOpen]);
 
   useEffect(() => {
@@ -64,7 +64,7 @@ const ExpensesPage: React.FC = () => {
       paymentGuardRef.current = openGuard({ cancellable: false, label: 'Mark expense as paid' });
       return () => { if (paymentGuardRef.current) { closeGuard(paymentGuardRef.current.id); paymentGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paymentDialogOpen]);
   const [selectedPaymentAccountId, setSelectedPaymentAccountId] = useState<string>('');
   const [filter, setFilter] = useState<ExpenseFilter>({
