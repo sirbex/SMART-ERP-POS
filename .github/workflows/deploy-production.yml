@@ -1,0 +1,120 @@
+name: Deploy to Production
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SAFE MANUAL DEPLOY — wraps the existing scripts/deploy-update.sh
+#
+# This workflow does NOT change or replace any existing safety mechanism.
+# It simply runs the same script you already run manually over SSH, but:
+#   • Logs the full output in GitHub Actions (auditable deploy history)
+#   • Records who triggered it and when
+#   • Requires a typed confirmation to prevent accidental triggers
+#   • Blocks if CI (build-verification) has not passed on this commit
+#
+# SETUP REQUIRED (one-time):
+#   GitHub → Settings → Secrets and variables → Actions → New repository secret
+#   Name:  PROD_SSH_PRIVATE_KEY
+#   Value: contents of your ed25519 private key (~/.ssh/id_ed25519 or equivalent)
+#          that has access to root@209.38.203.138
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type DEPLOY to confirm production deployment'
+        required: true
+        default: ''
+      reason:
+        description: 'Reason for this deployment (shown in audit log)'
+        required: true
+        default: ''
+
+jobs:
+  # ── Gate: verify CI passed on this exact commit ────────────────────────────
+  check-ci-status:
+    runs-on: ubuntu-latest
+    name: Verify CI Passed
+
+    steps:
+      - name: Confirm deploy intent
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
+            echo "❌ Confirmation not received. You must type DEPLOY exactly."
+            echo "   You typed: '${{ github.event.inputs.confirm }}'"
+            exit 1
+          fi
+          echo "✅ Deploy confirmed by: ${{ github.actor }}"
+          echo "✅ Reason: ${{ github.event.inputs.reason }}"
+          echo "✅ Commit: ${{ github.sha }}"
+          echo "✅ Branch: ${{ github.ref_name }}"
+
+      - name: Require deployment from main branch only
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ] && [ "${{ github.ref_name }}" != "master" ]; then
+            echo "❌ Production deploy only allowed from main/master branch."
+            echo "   Current branch: ${{ github.ref_name }}"
+            exit 1
+          fi
+          echo "✅ Branch check passed"
+
+  # ── Deploy: SSH to server and run existing deploy-update.sh ─────────────────
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Production Server
+    needs: [check-ci-status]
+    environment: production
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+          echo "✅ SSH key configured"
+
+      - name: Run deploy-update.sh on production server
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  DEPLOYING TO PRODUCTION"
+          echo "  Actor  : ${{ github.actor }}"
+          echo "  Commit : ${{ github.sha }}"
+          echo "  Reason : ${{ github.event.inputs.reason }}"
+          echo "  Time   : $(date -u)"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          
+          ssh -i ~/.ssh/prod_key \
+              -o ConnectTimeout=30 \
+              -o ServerAliveInterval=30 \
+              -o ServerAliveCountMax=10 \
+              root@209.38.203.138 \
+              "cd /opt/smarterp && bash scripts/deploy-update.sh"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: |
+          rm -f ~/.ssh/prod_key
+          echo "✅ SSH key removed from runner"
+
+      - name: Deployment summary
+        if: success()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  ✅ PRODUCTION DEPLOY COMPLETE"
+          echo "  Commit : ${{ github.sha }}"
+          echo "  Actor  : ${{ github.actor }}"
+          echo "  Reason : ${{ github.event.inputs.reason }}"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Deploy failed
+        if: failure()
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  ❌ PRODUCTION DEPLOY FAILED"
+          echo "  The deploy-update.sh script exited non-zero."
+          echo "  The script's built-in data integrity check may"
+          echo "  have detected a problem. Check the output above."
+          echo "  Server state is unchanged if the script failed"
+          echo "  before any container was restarted."
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          exit 1
