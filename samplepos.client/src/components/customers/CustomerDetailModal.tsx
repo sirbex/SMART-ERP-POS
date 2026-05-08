@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import Decimal from 'decimal.js';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import { useCustomer, useCustomerSummary, useUpdateCustomer, useToggleCustomerActive, useDeleteCustomer, useCustomerStatement, useInvoices, useRecordInvoicePayment } from '../../hooks/useApi';
 import { formatCurrency } from '../../utils/currency';
 import { downloadFile } from '../../utils/download';
+import { api } from '../../utils/api';
 import { DatePicker } from '../ui/date-picker';
 import CustomerDeposits from './CustomerDeposits';
 import { AxiosError } from 'axios';
@@ -67,6 +68,36 @@ interface InvoiceRow {
     notes?: string;
 }
 
+interface InvoiceDetailItem {
+    id: string;
+    productName?: string | null;
+    quantity?: number | string;
+    unitPrice?: number | string;
+    lineTotal?: number | string;
+    unitCost?: number | string;
+}
+
+interface InvoiceDetailPayment {
+    id: string;
+    amount?: number | string;
+    paymentMethod?: string;
+    paymentDate?: string;
+    referenceNumber?: string;
+    notes?: string;
+    createdAt?: string;
+}
+
+interface InvoiceDetailResponse {
+    invoice: InvoiceRow & {
+        subtotal?: number | string;
+        taxAmount?: number | string;
+        amountPaid?: number | string;
+        amount_paid?: number | string;
+    };
+    items: InvoiceDetailItem[];
+    payments: InvoiceDetailPayment[];
+}
+
 interface StatementResponse {
     openingBalance?: number | string;
     closingBalance?: number | string;
@@ -119,6 +150,10 @@ export default function CustomerDetailModal({
     const [payMethod, setPayMethod] = useState<string>('CASH');
     const [payRefNum, setPayRefNum] = useState('');
     const [payNotes, setPayNotes] = useState('');
+    const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
+    const [expandedInvoiceDetails, setExpandedInvoiceDetails] = useState<InvoiceDetailResponse | null>(null);
+    const [loadingExpandedInvoiceId, setLoadingExpandedInvoiceId] = useState<string | null>(null);
+    const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
 
     // Statement state
     const [stmtStart, setStmtStart] = useState<string>('');
@@ -165,6 +200,9 @@ export default function CustomerDetailModal({
             setInvoicePage(1);
             setPaymentOpen(false);
             setSelectedInvoice(null);
+            setExpandedInvoiceId(null);
+            setExpandedInvoiceDetails(null);
+            setLoadingExpandedInvoiceId(null);
         }
     }, [isOpen, customerId, initialTab]);
 
@@ -223,6 +261,39 @@ export default function CustomerDetailModal({
         } catch (err: unknown) {
             const axErr = err instanceof AxiosError ? err.response?.data?.error : undefined;
             alert(axErr || (err instanceof Error ? err.message : 'Failed to delete customer'));
+        }
+    };
+
+    const toggleInvoiceInlineDetails = async (invoiceId: string) => {
+        if (expandedInvoiceId === invoiceId) {
+            setExpandedInvoiceId(null);
+            setExpandedInvoiceDetails(null);
+            return;
+        }
+
+        setExpandedInvoiceId(invoiceId);
+        setExpandedInvoiceDetails(null);
+        setLoadingExpandedInvoiceId(invoiceId);
+        try {
+            const response = await api.invoices.getById(invoiceId);
+            if (response.data.success) {
+                setExpandedInvoiceDetails(response.data.data as InvoiceDetailResponse);
+            }
+        } catch (error) {
+            console.error('Failed to load invoice details:', error);
+        } finally {
+            setLoadingExpandedInvoiceId(null);
+        }
+    };
+
+    const handleDownloadInvoicePdf = async (invoiceId: string, invoiceNumber: string) => {
+        setDownloadingPdfId(invoiceId);
+        try {
+            await downloadFile(`/documents/INVOICE/${invoiceId}`, `invoice-${invoiceNumber}.pdf`);
+        } catch (error) {
+            alert(`PDF export failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        } finally {
+            setDownloadingPdfId(null);
         }
     };
 
@@ -434,13 +505,15 @@ export default function CustomerDetailModal({
                                                         const total = Number(inv.totalAmount || inv.total_amount || 0);
                                                         const paid = Number(inv.amountPaid || inv.amount_paid || 0);
                                                         const outstanding = new Decimal(total).minus(paid).toNumber();
+                                                        const invoiceNo = String(inv.invoiceNumber || inv.invoice_number || inv.id);
                                                         const status = (inv.status || '').toUpperCase();
                                                         const statusLabel = status === 'PARTIALLYPAID' || status === 'PARTIALLY_PAID' ? 'Partial' : status === 'PAID' ? 'Paid' : status === 'UNPAID' ? 'Unpaid' : inv.status;
                                                         const statusColor = status === 'PAID' ? 'bg-green-100 text-green-800' : (status.includes('PARTIAL') ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');
+                                                        const isExpanded = expandedInvoiceId === inv.id;
                                                         return (
                                                             <div key={inv.id} className="border border-gray-200 rounded-lg p-3">
                                                                 <div className="flex items-center justify-between mb-2">
-                                                                    <span className="text-sm font-medium text-gray-900">{inv.invoiceNumber || inv.invoice_number}</span>
+                                                                    <span className="text-sm font-medium text-gray-900">{invoiceNo}</span>
                                                                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor}`}>{statusLabel}</span>
                                                                 </div>
                                                                 <div className="text-xs text-gray-500 mb-2">
@@ -460,6 +533,42 @@ export default function CustomerDetailModal({
                                                                         <div className="font-semibold text-red-600">{formatCurrency(outstanding)}</div>
                                                                     </div>
                                                                 </div>
+                                                                <div className="flex gap-2 mb-2">
+                                                                    <button
+                                                                        onClick={() => toggleInvoiceInlineDetails(inv.id)}
+                                                                        className="flex-1 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                                                                    >
+                                                                        {isExpanded ? 'Hide Items' : 'View Items'}
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => handleDownloadInvoicePdf(inv.id, invoiceNo)}
+                                                                        disabled={downloadingPdfId === inv.id}
+                                                                        className="flex-1 py-1.5 text-xs bg-green-50 text-green-700 rounded-lg hover:bg-green-100 disabled:opacity-50"
+                                                                    >
+                                                                        {downloadingPdfId === inv.id ? 'Generating...' : 'Export PDF'}
+                                                                    </button>
+                                                                </div>
+                                                                {isExpanded && (
+                                                                    <div className="mt-2 border border-blue-200 rounded-lg p-2 bg-blue-50/30">
+                                                                        {loadingExpandedInvoiceId === inv.id ? (
+                                                                            <div className="text-xs text-gray-600">Loading invoice items...</div>
+                                                                        ) : expandedInvoiceDetails?.items?.length ? (
+                                                                            <div className="space-y-2">
+                                                                                {expandedInvoiceDetails.items.map((item: InvoiceDetailItem, idx: number) => (
+                                                                                    <div key={item.id || `${inv.id}-item-${idx}`} className="flex items-center justify-between text-xs">
+                                                                                        <div>
+                                                                                            <div className="font-medium text-gray-900">{item.productName || 'Item'}</div>
+                                                                                            <div className="text-gray-500">Qty: {item.quantity || 0}</div>
+                                                                                        </div>
+                                                                                        <div className="font-semibold text-gray-900">{formatCurrency(Number(item.lineTotal || 0))}</div>
+                                                                                    </div>
+                                                                                ))}
+                                                                            </div>
+                                                                        ) : (
+                                                                            <div className="text-xs text-gray-500">No line items found.</div>
+                                                                        )}
+                                                                    </div>
+                                                                )}
                                                                 {status !== 'PAID' && outstanding > 0 && (
                                                                     <button
                                                                         onClick={() => {
@@ -499,35 +608,134 @@ export default function CustomerDetailModal({
                                                                 const total = Number(inv.totalAmount || inv.total_amount || 0);
                                                                 const paid = Number(inv.amountPaid || inv.amount_paid || 0);
                                                                 const outstanding = new Decimal(total).minus(paid).toNumber();
+                                                                const invoiceNo = String(inv.invoiceNumber || inv.invoice_number || inv.id);
                                                                 const status = (inv.status || '').toUpperCase();
                                                                 const statusLabel = status === 'PARTIALLYPAID' || status === 'PARTIALLY_PAID' ? 'Partial' : status === 'PAID' ? 'Paid' : status === 'UNPAID' ? 'Unpaid' : inv.status;
                                                                 const statusColor = status === 'PAID' ? 'bg-green-100 text-green-800' : (status.includes('PARTIAL') ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800');
+                                                                const isExpanded = expandedInvoiceId === inv.id;
                                                                 return (
-                                                                    <tr key={inv.id} className="hover:bg-gray-50">
-                                                                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{inv.invoiceNumber || inv.invoice_number}</td>
-                                                                        <td className="px-4 py-3 text-sm text-gray-600">{inv.issueDate || inv.issue_date ? new Date(String(inv.issueDate || inv.issue_date)).toLocaleDateString() : '-'}</td>
-                                                                        <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(total)}</td>
-                                                                        <td className="px-4 py-3 text-sm text-right text-gray-600">{formatCurrency(paid)}</td>
-                                                                        <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">{formatCurrency(outstanding)}</td>
-                                                                        <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColor}`}>{statusLabel}</span></td>
-                                                                        <td className="px-4 py-3 text-right">
-                                                                            {status !== 'PAID' && outstanding > 0 && (
-                                                                                <button
-                                                                                    onClick={() => {
-                                                                                        setSelectedInvoice({ ...inv, outstanding });
-                                                                                        setPayAmount('');
-                                                                                        setPayMethod('CASH');
-                                                                                        setPayRefNum('');
-                                                                                        setPayNotes('');
-                                                                                        setPaymentOpen(true);
-                                                                                    }}
-                                                                                    className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
-                                                                                >
-                                                                                    Receive Payment
-                                                                                </button>
-                                                                            )}
-                                                                        </td>
-                                                                    </tr>
+                                                                    <Fragment key={inv.id}>
+                                                                        <tr key={inv.id} onClick={() => toggleInvoiceInlineDetails(inv.id)} className={`hover:bg-gray-50 cursor-pointer ${isExpanded ? 'bg-blue-50/40' : ''}`}>
+                                                                            <td className="px-4 py-3 text-sm font-medium text-gray-900">{invoiceNo}</td>
+                                                                            <td className="px-4 py-3 text-sm text-gray-600">{inv.issueDate || inv.issue_date ? new Date(String(inv.issueDate || inv.issue_date)).toLocaleDateString() : '-'}</td>
+                                                                            <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(total)}</td>
+                                                                            <td className="px-4 py-3 text-sm text-right text-gray-600">{formatCurrency(paid)}</td>
+                                                                            <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">{formatCurrency(outstanding)}</td>
+                                                                            <td className="px-4 py-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColor}`}>{statusLabel}</span></td>
+                                                                            <td className="px-4 py-3 text-right">
+                                                                                <div className="flex justify-end gap-2">
+                                                                                    <button
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            toggleInvoiceInlineDetails(inv.id);
+                                                                                        }}
+                                                                                        className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                                                                                    >
+                                                                                        {isExpanded ? 'Hide' : 'View'}
+                                                                                    </button>
+                                                                                    <button
+                                                                                        onClick={(e) => {
+                                                                                            e.stopPropagation();
+                                                                                            handleDownloadInvoicePdf(inv.id, invoiceNo);
+                                                                                        }}
+                                                                                        disabled={downloadingPdfId === inv.id}
+                                                                                        className="px-3 py-1.5 text-sm bg-green-50 text-green-700 rounded-lg hover:bg-green-100 disabled:opacity-50"
+                                                                                    >
+                                                                                        {downloadingPdfId === inv.id ? 'Generating...' : 'PDF'}
+                                                                                    </button>
+                                                                                    {status !== 'PAID' && outstanding > 0 && (
+                                                                                        <button
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                setSelectedInvoice({ ...inv, outstanding });
+                                                                                                setPayAmount('');
+                                                                                                setPayMethod('CASH');
+                                                                                                setPayRefNum('');
+                                                                                                setPayNotes('');
+                                                                                                setPaymentOpen(true);
+                                                                                            }}
+                                                                                            className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                                                                                        >
+                                                                                            Receive Payment
+                                                                                        </button>
+                                                                                    )}
+                                                                                </div>
+                                                                            </td>
+                                                                        </tr>
+                                                                        {isExpanded && (
+                                                                            <tr className="bg-blue-50/20">
+                                                                                <td colSpan={7} className="px-4 py-4">
+                                                                                    {loadingExpandedInvoiceId === inv.id ? (
+                                                                                        <div className="text-sm text-gray-600">Loading invoice details...</div>
+                                                                                    ) : expandedInvoiceDetails ? (
+                                                                                        <div className="border border-blue-200 rounded-lg overflow-hidden bg-white">
+                                                                                            <div className="bg-blue-50 px-4 py-3 flex items-center justify-between">
+                                                                                                <div>
+                                                                                                    <div className="text-sm font-semibold text-gray-900">{invoiceNo}</div>
+                                                                                                    <div className="text-xs text-gray-600">Items and payment history</div>
+                                                                                                </div>
+                                                                                                <button
+                                                                                                    onClick={() => handleDownloadInvoicePdf(inv.id, invoiceNo)}
+                                                                                                    disabled={downloadingPdfId === inv.id}
+                                                                                                    className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                                                                                                >
+                                                                                                    {downloadingPdfId === inv.id ? 'Generating...' : 'Export PDF'}
+                                                                                                </button>
+                                                                                            </div>
+                                                                                            <div className="p-4 space-y-4">
+                                                                                                {expandedInvoiceDetails.items && expandedInvoiceDetails.items.length > 0 ? (
+                                                                                                    <div>
+                                                                                                        <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Line Items</h4>
+                                                                                                        <table className="min-w-full divide-y divide-gray-200 text-xs">
+                                                                                                            <thead className="bg-gray-50">
+                                                                                                                <tr>
+                                                                                                                    <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">Item</th>
+                                                                                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Qty</th>
+                                                                                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Unit Price</th>
+                                                                                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Total</th>
+                                                                                                                </tr>
+                                                                                                            </thead>
+                                                                                                            <tbody className="divide-y divide-gray-100">
+                                                                                                                {expandedInvoiceDetails.items.map((item: InvoiceDetailItem, idx: number) => (
+                                                                                                                    <tr key={item.id || `${inv.id}-detail-item-${idx}`}>
+                                                                                                                        <td className="px-3 py-2 text-gray-900 font-medium">{item.productName || 'Item'}</td>
+                                                                                                                        <td className="px-3 py-2 text-right text-gray-700">{Number(item.quantity || 0)}</td>
+                                                                                                                        <td className="px-3 py-2 text-right text-gray-700">{formatCurrency(Number(item.unitPrice || 0))}</td>
+                                                                                                                        <td className="px-3 py-2 text-right text-gray-900 font-semibold">{formatCurrency(Number(item.lineTotal || 0))}</td>
+                                                                                                                    </tr>
+                                                                                                                ))}
+                                                                                                            </tbody>
+                                                                                                        </table>
+                                                                                                    </div>
+                                                                                                ) : (
+                                                                                                    <div className="text-xs text-gray-500">No line items found for this invoice.</div>
+                                                                                                )}
+
+                                                                                                {expandedInvoiceDetails.payments && expandedInvoiceDetails.payments.length > 0 && (
+                                                                                                    <div>
+                                                                                                        <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Payments</h4>
+                                                                                                        <div className="space-y-2">
+                                                                                                            {expandedInvoiceDetails.payments.map((payment: InvoiceDetailPayment, idx: number) => (
+                                                                                                                <div key={payment.id || `${inv.id}-payment-${idx}`} className="flex items-center justify-between text-xs bg-green-50 px-3 py-2 rounded-lg">
+                                                                                                                    <div className="text-gray-700">
+                                                                                                                        <span className="font-medium">{payment.paymentMethod || 'Payment'}</span>
+                                                                                                                        {payment.referenceNumber && <span className="ml-2 text-gray-500">Ref: {payment.referenceNumber}</span>}
+                                                                                                                    </div>
+                                                                                                                    <div className="font-semibold text-green-700">{formatCurrency(Number(payment.amount || 0))}</div>
+                                                                                                                </div>
+                                                                                                            ))}
+                                                                                                        </div>
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    ) : (
+                                                                                        <div className="text-sm text-gray-500">Unable to load invoice details.</div>
+                                                                                    )}
+                                                                                </td>
+                                                                            </tr>
+                                                                        )}
+                                                                    </Fragment>
                                                                 );
                                                             })}
                                                         </tbody>
