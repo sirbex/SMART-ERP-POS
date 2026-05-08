@@ -71,9 +71,13 @@ interface InvoiceRow {
 interface InvoiceDetailItem {
     id: string;
     productName?: string | null;
+    product_name?: string | null;
     quantity?: number | string;
     unitPrice?: number | string;
+    unit_price?: number | string;
     lineTotal?: number | string;
+    line_total?: number | string;
+    total_price?: number | string;
     unitCost?: number | string;
 }
 
@@ -277,7 +281,46 @@ export default function CustomerDetailModal({
         try {
             const response = await api.invoices.getById(invoiceId);
             if (response.data.success) {
-                setExpandedInvoiceDetails(response.data.data as InvoiceDetailResponse);
+                const payload = response.data.data as InvoiceDetailResponse & {
+                    lineItems?: InvoiceDetailItem[];
+                    saleItems?: InvoiceDetailItem[];
+                };
+
+                let normalizedItems: InvoiceDetailItem[] = Array.isArray(payload.items)
+                    ? payload.items
+                    : Array.isArray(payload.lineItems)
+                        ? payload.lineItems
+                        : Array.isArray(payload.saleItems)
+                            ? payload.saleItems
+                            : [];
+
+                if (normalizedItems.length === 0) {
+                    const saleId = (payload.invoice as { saleId?: string; sale_id?: string })?.saleId
+                        || (payload.invoice as { saleId?: string; sale_id?: string })?.sale_id;
+
+                    if (saleId) {
+                        try {
+                            const saleResponse = await api.sales.getById(String(saleId));
+                            const saleData = saleResponse.data.data as {
+                                items?: InvoiceDetailItem[];
+                                saleItems?: InvoiceDetailItem[];
+                            };
+                            normalizedItems = Array.isArray(saleData?.items)
+                                ? saleData.items
+                                : Array.isArray(saleData?.saleItems)
+                                    ? saleData.saleItems
+                                    : [];
+                        } catch (saleError) {
+                            console.error('Failed to load fallback sale items:', saleError);
+                        }
+                    }
+                }
+
+                setExpandedInvoiceDetails({
+                    ...payload,
+                    items: normalizedItems,
+                    payments: Array.isArray(payload.payments) ? payload.payments : [],
+                });
             }
         } catch (error) {
             console.error('Failed to load invoice details:', error);
@@ -557,10 +600,10 @@ export default function CustomerDetailModal({
                                                                                 {expandedInvoiceDetails.items.map((item: InvoiceDetailItem, idx: number) => (
                                                                                     <div key={item.id || `${inv.id}-item-${idx}`} className="flex items-center justify-between text-xs">
                                                                                         <div>
-                                                                                            <div className="font-medium text-gray-900">{item.productName || 'Item'}</div>
+                                                                                            <div className="font-medium text-gray-900">{item.productName || item.product_name || 'Item'}</div>
                                                                                             <div className="text-gray-500">Qty: {item.quantity || 0}</div>
                                                                                         </div>
-                                                                                        <div className="font-semibold text-gray-900">{formatCurrency(Number(item.lineTotal || 0))}</div>
+                                                                                        <div className="font-semibold text-gray-900">{formatCurrency(Number(item.lineTotal || item.line_total || item.total_price || 0))}</div>
                                                                                     </div>
                                                                                 ))}
                                                                             </div>
@@ -698,10 +741,10 @@ export default function CustomerDetailModal({
                                                                                                             <tbody className="divide-y divide-gray-100">
                                                                                                                 {expandedInvoiceDetails.items.map((item: InvoiceDetailItem, idx: number) => (
                                                                                                                     <tr key={item.id || `${inv.id}-detail-item-${idx}`}>
-                                                                                                                        <td className="px-3 py-2 text-gray-900 font-medium">{item.productName || 'Item'}</td>
+                                                                                                                        <td className="px-3 py-2 text-gray-900 font-medium">{item.productName || item.product_name || 'Item'}</td>
                                                                                                                         <td className="px-3 py-2 text-right text-gray-700">{Number(item.quantity || 0)}</td>
-                                                                                                                        <td className="px-3 py-2 text-right text-gray-700">{formatCurrency(Number(item.unitPrice || 0))}</td>
-                                                                                                                        <td className="px-3 py-2 text-right text-gray-900 font-semibold">{formatCurrency(Number(item.lineTotal || 0))}</td>
+                                                                                                                        <td className="px-3 py-2 text-right text-gray-700">{formatCurrency(Number(item.unitPrice || item.unit_price || 0))}</td>
+                                                                                                                        <td className="px-3 py-2 text-right text-gray-900 font-semibold">{formatCurrency(Number(item.lineTotal || item.line_total || item.total_price || 0))}</td>
                                                                                                                     </tr>
                                                                                                                 ))}
                                                                                                             </tbody>
