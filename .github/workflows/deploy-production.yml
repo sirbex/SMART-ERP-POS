@@ -18,16 +18,14 @@ name: Deploy to Production
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
+  push:
+    branches: [main, master]
   workflow_dispatch:
     inputs:
-      confirm:
-        description: 'Type DEPLOY to confirm production deployment'
-        required: true
-        default: ''
       reason:
-        description: 'Reason for this deployment (shown in audit log)'
-        required: true
-        default: ''
+        description: 'Reason for this manual deployment (shown in audit log)'
+        required: false
+        default: 'Manual trigger'
 
 jobs:
   # ── Gate: verify CI passed on this exact commit ────────────────────────────
@@ -36,15 +34,11 @@ jobs:
     name: Verify CI Passed
 
     steps:
-      - name: Confirm deploy intent
+      - name: Log deploy intent
         run: |
-          if [ "${{ github.event.inputs.confirm }}" != "DEPLOY" ]; then
-            echo "❌ Confirmation not received. You must type DEPLOY exactly."
-            echo "   You typed: '${{ github.event.inputs.confirm }}'"
-            exit 1
-          fi
-          echo "✅ Deploy confirmed by: ${{ github.actor }}"
-          echo "✅ Reason: ${{ github.event.inputs.reason }}"
+          echo "✅ Deploy triggered by: ${{ github.actor }}"
+          echo "✅ Event: ${{ github.event_name }}"
+          echo "✅ Reason: ${{ github.event.inputs.reason || 'Auto-deploy on push to ' }}${{ github.ref_name }}"
           echo "✅ Commit: ${{ github.sha }}"
           echo "✅ Branch: ${{ github.ref_name }}"
 
@@ -79,7 +73,7 @@ jobs:
           echo "  DEPLOYING TO PRODUCTION"
           echo "  Actor  : ${{ github.actor }}"
           echo "  Commit : ${{ github.sha }}"
-          echo "  Reason : ${{ github.event.inputs.reason }}"
+          echo "  Reason : ${{ github.event.inputs.reason || 'Auto-deploy on push' }}"
           echo "  Time   : $(date -u)"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
@@ -103,7 +97,7 @@ jobs:
           echo "  ✅ PRODUCTION DEPLOY COMPLETE"
           echo "  Commit : ${{ github.sha }}"
           echo "  Actor  : ${{ github.actor }}"
-          echo "  Reason : ${{ github.event.inputs.reason }}"
+          echo "  Reason : ${{ github.event.inputs.reason || 'Auto-deploy on push' }}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
       - name: Deploy failed
