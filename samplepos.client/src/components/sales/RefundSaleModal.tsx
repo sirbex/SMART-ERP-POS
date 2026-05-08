@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../../utils/api';
 import { extractApiError } from '../../utils/extractApiError';
 import { formatCurrency } from '../../utils/currency';
@@ -177,7 +178,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
 
     // Success state
     if (successResult) {
-        return (
+        return createPortal(
             <div
                 className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
                 style={{ zIndex: guardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
@@ -221,11 +222,12 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                         </button>
                     </div>
                 </div>
-            </div>
+            </div>,
+            document.body
         );
     }
 
-    return (
+    return createPortal(
         <div
             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
             style={{ zIndex: guardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
@@ -442,6 +444,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                     )}
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }
