@@ -690,8 +690,8 @@ export async function createInvoice(
         `INSERT INTO supplier_invoices (
        "Id", "SupplierInvoiceNumber", "InternalReferenceNumber", "SupplierId", "InvoiceDate", "DueDate",
        "Subtotal", "TaxAmount", "TotalAmount", "AmountPaid", "OutstandingBalance",
-       "Status", "CurrencyCode", "Notes", grn_computed_total, variance_reason, "CreatedAt", "UpdatedAt"
-     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 0, $8, $10, $9, $11, $12, $13, NOW(), NOW())
+       "Status", "CurrencyCode", "Notes", "CreatedAt", "UpdatedAt"
+     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 0, $8, $10, $9, $11, NOW(), NOW())
      RETURNING
        "Id" as id,
        "SupplierInvoiceNumber" as "invoiceNumber",
@@ -706,8 +706,6 @@ export async function createInvoice(
        "OutstandingBalance" as "outstandingBalance",
        "Status" as status,
        "Notes" as notes,
-       grn_computed_total as "grnComputedTotal",
-       variance_reason as "varianceReason",
        "CreatedAt" as "createdAt",
        "UpdatedAt" as "updatedAt"`,
         [
@@ -722,8 +720,6 @@ export async function createInvoice(
             currencyCode,
             initialStatus,
             data.notes || null,
-            data.grnComputedTotal ?? null,
-            data.varianceReason ?? null,
         ]
     );
 

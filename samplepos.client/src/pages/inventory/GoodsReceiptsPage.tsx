@@ -591,8 +591,11 @@ export default function GoodsReceiptsPage() {
       // Skip if GR is already finalized — backend rejects item updates on
       // COMPLETED/FINALIZED GRs ("Cannot update items of a finalized goods
       // receipt"), and there is nothing to save anyway.
-      const grStatus = (selectedGR?.status || '').toUpperCase();
-      const grAlreadyFinalized = grStatus === 'COMPLETED' || grStatus === 'FINALIZED';
+      // Prefer fresh status from the detail query over the potentially-stale
+      // list-row state (selectedGR) so a retry after a failed bill creation
+      // does not hit the backend with stale DRAFT status.
+      const freshStatus = (grDetail?.gr?.status || selectedGR?.status || '').toUpperCase();
+      const grAlreadyFinalized = freshStatus === 'COMPLETED' || freshStatus === 'FINALIZED';
       if (batchItems.length > 0 && !grAlreadyFinalized) {
         await api.goodsReceipts.batchUpdateItems(id, batchItems);
       }
@@ -601,6 +604,10 @@ export default function GoodsReceiptsPage() {
       await detailsQuery.refetch();
 
       const response = await finalizeMutation.mutateAsync(id);
+
+      // Mark selectedGR as COMPLETED immediately so the Finalize button
+      // disappears and the stale-status guard fires correctly on any retry.
+      setSelectedGR(prev => prev ? { ...prev, status: 'COMPLETED' } : prev);
 
       // Invalidate stock levels once (not per-item)
       queryClient.invalidateQueries({ queryKey: inventoryKeys.stockLevels() });
