@@ -856,14 +856,34 @@ export interface SupplierInvoiceGLData {
   invoiceId: string;
   invoiceNumber: string;   // SBILL-YYYY-NNNN
   invoiceDate: string;     // YYYY-MM-DD
+  /**
+   * Supplier-reported total = the Accounts Payable credit amount.
+   * For no-variance invoices this equals grnComputedTotal.
+   * For variance invoices AP = supplier total; GR/IR = grnComputedTotal.
+   */
   totalAmount: number;
   supplierId: string;
   supplierName: string;
   /**
    * true  → GR-linked invoice: DR GR/IR Clearing (2150) / CR AP (2100)
-   * false → Standalone invoice (no GR): DR Inventory (1300) / CR AP (2100)
+   * false → Standalone invoice (no GR): DR General Expense (6900) / CR AP (2100)
    */
   hasGrReference: boolean;
+  /**
+   * Variance support — only set when supplier-reported total ≠ GRN computed total.
+   *
+   * grnComputedTotal: the amount GR/IR clearing was debited when GRN was received.
+   * varianceAmount  : grnComputedTotal − totalAmount (positive = supplier billed less).
+   * varianceReason  : audit metadata stored on the invoice.
+   *
+   * When set, the GL entry becomes 3 lines:
+   *   DR GR/IR Clearing (2150)   grnComputedTotal
+   *   CR Accounts Payable (2100) totalAmount        (what we owe supplier)
+   *   CR Price Variance (5020)   varianceAmount     (positive = credit; negative = debit)
+   */
+  grnComputedTotal?: number;
+  varianceAmount?: number;
+  varianceReason?: string;
 }
 
 export interface ReturnGrnGLData {
@@ -946,14 +966,11 @@ export async function recordSupplierInvoiceToGL(
   pool?: pg.Pool,
   txClient?: pg.PoolClient,
 ): Promise<void> {
-  // PATH A: GR-linked → DR GR/IR Clearing / CR AP
+  // PATH A: GR-linked → DR GR/IR Clearing / CR AP  (2 or 3 lines)
   // PATH B: Standalone → DR General Expense / CR AP (NEVER Inventory)
   const debitAccountCode = data.hasGrReference
     ? AccountCodes.GRIR_CLEARING
     : AccountCodes.GENERAL_EXPENSE;
-  const debitDescription = data.hasGrReference
-    ? `Clear GRN/IR — Invoice ${data.invoiceNumber}`
-    : `Expense (no GR) — Invoice ${data.invoiceNumber}`;
   const path = data.hasGrReference ? 'GR-linked (GRIR → AP)' : 'standalone (Expense → AP)';
   if (!data.hasGrReference) {
     logger.warn('Supplier invoice posted as standalone expense — no GR reference found', {
@@ -963,6 +980,82 @@ export async function recordSupplierInvoiceToGL(
     });
   }
 
+  // ── Variance path (3-line GR-linked entry) ─────────────────────────────────
+  // When a GR-linked invoice has a variance (supplier reported ≠ GRN computed):
+  //   DR GR/IR Clearing (2150)   grnComputedTotal  ← fully clears GR/IR to zero
+  //   CR Accounts Payable (2100) totalAmount        ← what we actually owe supplier
+  //   CR/DR Price Variance (5020) varianceAmount    ← absorbs the difference
+  //
+  // Inventory value is NEVER touched — it was set correctly when the GRN was received.
+  // ──────────────────────────────────────────────────────────────────────────────
+  const hasVariance =
+    data.hasGrReference &&
+    data.grnComputedTotal !== undefined &&
+    data.varianceAmount !== undefined &&
+    Math.abs(data.varianceAmount) > 0.005;
+
+  if (hasVariance) {
+    const grnComputedTotal = data.grnComputedTotal as number;
+    const varianceAmount = data.varianceAmount as number;
+    // varianceAmount > 0 → supplier billed less → CR Price Variance (favorable)
+    // varianceAmount < 0 → supplier billed more → DR Price Variance (unfavorable)
+    const varianceCreditAmount = varianceAmount > 0 ? varianceAmount : 0;
+    const varianceDebitAmount  = varianceAmount < 0 ? Math.abs(varianceAmount) : 0;
+
+    try {
+      await AccountingCore.createJournalEntry({
+        entryDate: data.invoiceDate,
+        description: `Supplier Invoice: ${data.invoiceNumber} — ${data.supplierName} [3-way match, variance: ${data.varianceReason ?? 'PRICE_VARIANCE'}]`,
+        referenceType: 'SUPPLIER_INVOICE',
+        referenceId: data.invoiceId,
+        referenceNumber: data.invoiceNumber,
+        lines: [
+          {
+            accountCode: AccountCodes.GRIR_CLEARING,
+            description: `Clear GRN/IR — Invoice ${data.invoiceNumber} (GRN value ${grnComputedTotal})`,
+            debitAmount: grnComputedTotal,
+            creditAmount: 0,
+            entityType: 'supplier',
+            entityId: data.supplierId,
+          },
+          {
+            accountCode: AccountCodes.ACCOUNTS_PAYABLE,
+            description: `Payable to ${data.supplierName}: ${data.invoiceNumber}`,
+            debitAmount: 0,
+            creditAmount: data.totalAmount,
+            entityType: 'supplier',
+            entityId: data.supplierId,
+          },
+          {
+            accountCode: AccountCodes.PRICE_VARIANCE,
+            description: `Invoice variance (${data.varianceReason ?? 'PRICE_VARIANCE'}): ${data.invoiceNumber}`,
+            debitAmount: varianceDebitAmount,
+            creditAmount: varianceCreditAmount,
+            entityType: 'supplier',
+            entityId: data.supplierId,
+          },
+        ],
+        userId: SYSTEM_USER_ID,
+        idempotencyKey: `SUPPLIER_INVOICE-${data.invoiceId}`,
+        source: 'PURCHASE_BILL' as const,
+      }, pool, txClient);
+
+      logger.info('Recorded supplier invoice to GL (GR-linked, 3-line variance)', {
+        invoiceId: data.invoiceId,
+        invoiceNumber: data.invoiceNumber,
+        grnComputedTotal,
+        apAmount: data.totalAmount,
+        varianceAmount,
+        varianceReason: data.varianceReason,
+      });
+    } catch (error: unknown) {
+      logger.error('Failed to record supplier invoice to GL (variance path)', { error, data });
+      throw new Error(`[GL_ERROR] GL posting failed for supplier invoice ${data.invoiceNumber}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return;
+  }
+
+  // ── Standard 2-line path ──────────────────────────────────────────────────
   try {
     await AccountingCore.createJournalEntry({
       entryDate: data.invoiceDate,
@@ -973,7 +1066,9 @@ export async function recordSupplierInvoiceToGL(
       lines: [
         {
           accountCode: debitAccountCode,
-          description: debitDescription,
+          description: data.hasGrReference
+            ? `Clear GRN/IR — Invoice ${data.invoiceNumber}`
+            : `Expense (no GR) — Invoice ${data.invoiceNumber}`,
           debitAmount: data.totalAmount,
           creditAmount: 0,
           entityType: 'supplier',

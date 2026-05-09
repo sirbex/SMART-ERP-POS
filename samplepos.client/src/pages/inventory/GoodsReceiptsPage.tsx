@@ -33,7 +33,7 @@ import { ProcurementProductSearch } from '../../components/inventory/shared';
 import type { ProcurementProduct } from '../../components/inventory/shared';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import { inventoryKeys } from '../../hooks/useInventory';
-// DatePicker removed — GR uses native date input for keyboard-driven receiving
+import { DatePicker } from '../../components/ui/date-picker';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -198,15 +198,75 @@ interface GRDetailData {
   productUomsMap?: Record<string, ProductUomEntry[]>;
 }
 
+// ── Date range helpers (same pattern as StockMovementsPage) ───────────────
+type DateRangePreset = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
+
+const formatLocalDate = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getDateRange = (preset: DateRangePreset): { start: string; end: string } => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  switch (preset) {
+    case 'today':
+      return { start: formatLocalDate(today), end: formatLocalDate(today) };
+    case 'yesterday': {
+      const y = new Date(today); y.setDate(y.getDate() - 1);
+      return { start: formatLocalDate(y), end: formatLocalDate(y) };
+    }
+    case 'this_week': {
+      const ws = new Date(today); ws.setDate(today.getDate() - today.getDay());
+      const we = new Date(ws); we.setDate(ws.getDate() + 6);
+      return { start: formatLocalDate(ws), end: formatLocalDate(we) };
+    }
+    case 'last_week': {
+      const lws = new Date(today); lws.setDate(today.getDate() - today.getDay() - 7);
+      const lwe = new Date(lws); lwe.setDate(lws.getDate() + 6);
+      return { start: formatLocalDate(lws), end: formatLocalDate(lwe) };
+    }
+    case 'this_month': {
+      const ms = new Date(now.getFullYear(), now.getMonth(), 1);
+      const me = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return { start: formatLocalDate(ms), end: formatLocalDate(me) };
+    }
+    case 'last_month': {
+      const lms = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lme = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { start: formatLocalDate(lms), end: formatLocalDate(lme) };
+    }
+    case 'custom':
+    default:
+      return { start: '', end: '' };
+  }
+};
+
 export default function GoodsReceiptsPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('custom');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [selectedGR, setSelectedGR] = useState<GRRow | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
   // ── Transaction Guard ──────────────────────────────────────────────────
   const { openGuard, closeGuard } = useTransactionGuard();
+
+  // Debounce search (300ms)
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Reset page when search/dates change
+  useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter, startDate, endDate]);
   const detailsGuardRef = useRef<GuardHandle | null>(null);
   const createGuardRef = useRef<GuardHandle | null>(null);
   const returnGuardRef = useRef<GuardHandle | null>(null);
@@ -236,8 +296,13 @@ export default function GoodsReceiptsPage() {
   const [billPrompt, setBillPrompt] = useState<{
     grId: string;
     grNumber: string;
-    total: number;
+    total: number;         // GRN computed total (read-only, authoritative)
     supplierName: string;
+    // User-editable fields for the supplier bill
+    supplierInvoiceNumber: string;
+    invoiceDate: string;
+    supplierReportedTotal: string; // empty string = not provided
+    varianceReason: '' | 'SUPPLIER_DISCOUNT' | 'ROUNDING_DIFFERENCE' | 'PRICE_VARIANCE' | 'EDIT_LINE_PRICES';
   } | null>(null);
   const [billPromptLoading, setBillPromptLoading] = useState(false);
   const [baseline, setBaseline] = useState<'PO' | 'PRODUCT'>('PO');
@@ -321,6 +386,9 @@ export default function GoodsReceiptsPage() {
     page,
     limit,
     status: statusFilter || undefined,
+    search: debouncedSearch || undefined,
+    startDate: startDate || undefined,
+    endDate: endDate || undefined,
   });
 
   const finalizeMutation = useFinalizeGoodsReceipt();
@@ -351,7 +419,7 @@ export default function GoodsReceiptsPage() {
   // PDF Export for Goods Receipt — direct authenticated download (same pattern as Customer statement)
   const handleExportGRPDF = (gr: GRRow, _grItems: GRItemRow[]): void => {
     void _grItems;
-    const grNumber = (gr as unknown as Record<string, unknown>).receipt_number as string || gr.receiptNumber || gr.id;
+    const grNumber = gr.grNumber || (gr as unknown as Record<string, unknown>).receipt_number as string || gr.receiptNumber || gr.id;
     downloadFile(`/documents/GOODS_RECEIPT/${gr.id}`, `gr-${grNumber}.pdf`).catch((err: Error) => {
       alert(`PDF export failed: ${err.message}`);
     });
@@ -571,7 +639,7 @@ export default function GoodsReceiptsPage() {
           const cost = Number(edits.unitCost ?? it.unitCost ?? it.unit_cost ?? 0);
           return sum + qty * cost;
         }, 0);
-        const grNumber = selectedGR?.receiptNumber || selectedGR?.receipt_number || '';
+        const grNumber = selectedGR?.grNumber || selectedGR?.receiptNumber || selectedGR?.receipt_number || '';
         const alreadyBilled =
           ((grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '').length > 0;
         const supplierName =
@@ -582,7 +650,16 @@ export default function GoodsReceiptsPage() {
           '';
         if (grTotal > 0 && !alreadyBilled) {
           // Open designed modal (not browser confirm) — see post-finalize modal below.
-          setBillPrompt({ grId: id, grNumber, total: grTotal, supplierName });
+          setBillPrompt({
+            grId: id,
+            grNumber,
+            total: grTotal,
+            supplierName,
+            supplierInvoiceNumber: grNumber ? `INV-${grNumber}` : '',
+            invoiceDate: new Date().toLocaleDateString('en-CA'),
+            supplierReportedTotal: '',
+            varianceReason: '',
+          });
         }
       } catch {
         // Non-fatal: finalize already succeeded, bill prompt is opportunistic.
@@ -830,9 +907,24 @@ export default function GoodsReceiptsPage() {
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-        <div className="flex gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {/* Search */}
           <div>
-            <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Search
+            </label>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="GRN, PO number, supplier..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          {/* Status */}
+          <div>
+            <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-2">
               Status
             </label>
             <select
@@ -842,13 +934,72 @@ export default function GoodsReceiptsPage() {
                 setStatusFilter(e.target.value);
                 setPage(1);
               }}
-              className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
-              <option value="">All</option>
+              <option value="">All Statuses</option>
               <option value="DRAFT">Draft</option>
-              <option value="FINALIZED">Finalized</option>
+              <option value="COMPLETED">Completed</option>
               <option value="CANCELLED">Cancelled</option>
             </select>
+          </div>
+
+          {/* Date Range Preset */}
+          <div>
+            <label htmlFor="grn-date-preset" className="block text-sm font-medium text-gray-700 mb-2">
+              Date Range
+            </label>
+            <select
+              id="grn-date-preset"
+              value={dateRangePreset}
+              onChange={(e) => {
+                const preset = e.target.value as DateRangePreset;
+                setDateRangePreset(preset);
+                const range = getDateRange(preset);
+                setStartDate(range.start);
+                setEndDate(range.end);
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="custom">All Dates</option>
+              <option value="today">📅 Today</option>
+              <option value="yesterday">📅 Yesterday</option>
+              <option value="this_week">📅 This Week</option>
+              <option value="last_week">📅 Last Week</option>
+              <option value="this_month">📅 This Month</option>
+              <option value="last_month">📅 Last Month</option>
+            </select>
+          </div>
+
+          {/* Start Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Start Date
+            </label>
+            <DatePicker
+              value={startDate}
+              onChange={(date) => {
+                setStartDate(date);
+                setDateRangePreset('custom');
+              }}
+              placeholder="Select start date"
+              maxDate={endDate ? new Date(endDate) : undefined}
+            />
+          </div>
+
+          {/* End Date */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              End Date
+            </label>
+            <DatePicker
+              value={endDate}
+              onChange={(date) => {
+                setEndDate(date);
+                setDateRangePreset('custom');
+              }}
+              placeholder="Select end date"
+              minDate={startDate ? new Date(startDate) : undefined}
+            />
           </div>
         </div>
       </div>
@@ -905,7 +1056,7 @@ export default function GoodsReceiptsPage() {
                   goodsReceipts.map((gr: GRRow) => (
                     <tr key={gr.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {gr.receiptNumber || gr.receipt_number}
+                        {gr.grNumber || gr.receiptNumber || gr.receipt_number}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         {gr.poNumber || gr.po_number || '-'}
@@ -984,7 +1135,7 @@ export default function GoodsReceiptsPage() {
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="text-2xl font-bold text-gray-900">
-                    {selectedGR.receiptNumber || selectedGR.receipt_number}
+                    {selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number}
                   </h3>
                   <p className="text-gray-600 mt-1">
                     PO: {selectedGR.poNumber || selectedGR.po_number} | Supplier:{' '}
@@ -1281,7 +1432,7 @@ export default function GoodsReceiptsPage() {
                     </button>
                     {(grDetail?.gr?.supplierId || selectedGR.supplierId) && (() => {
                       const grId = selectedGR.id || (selectedGR as { gr_id?: string }).gr_id || '';
-                      const grNumber = selectedGR.receiptNumber || selectedGR.receipt_number || '';
+                      const grNumber = selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || '';
                       const existingBillNum = (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
                       const totalVal = items.reduce((sum, it) => {
                         const qty = Number(it.receivedQuantity ?? it.received_quantity ?? 0);
@@ -1314,6 +1465,7 @@ export default function GoodsReceiptsPage() {
                         if (!ok) return;
                         setCreatingBillForGR(grId);
                         try {
+                          // One-click uses GRN-computed total only (no variance input from this button)
                           const { data } = await api.post('/supplier-payments/invoices/from-grn', { grnId: grId });
                           if (!data.success) throw new Error(data.error || 'Failed to create bill');
                           const dataObj = data.data as { invoice?: Record<string, unknown>; invoiceNumber?: string; SupplierInvoiceNumber?: string } | undefined;
@@ -1366,7 +1518,7 @@ export default function GoodsReceiptsPage() {
                 <div>
                   <h3 className="text-xl font-bold text-gray-900">Return to Supplier</h3>
                   <p className="text-gray-600 mt-1">
-                    GR: {selectedGR.receiptNumber || selectedGR.receipt_number || selectedGR.grNumber || selectedGR.gr_number}
+                    GR: {selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || selectedGR.gr_number}
                     {' — '}
                     {selectedGR.supplierName || selectedGR.supplier_name}
                   </p>
@@ -1510,123 +1662,249 @@ export default function GoodsReceiptsPage() {
         </div>
       )}
 
-      {/* Post-Finalize: Create Supplier Bill Prompt (designed modal) */}
-      {billPrompt && (
-        <div
-          className="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-          style={{ zIndex: (detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL) + 1 }}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="bill-prompt-title"
-        >
+      {/* Post-Finalize: Create Supplier Bill Prompt (variance-aware ERP modal) */}
+      {billPrompt && (() => {
+        // Derive variance state from current form values
+        const supplierTotalNum = billPrompt.supplierReportedTotal !== ''
+          ? parseFloat(billPrompt.supplierReportedTotal)
+          : NaN;
+        const hasSupplierTotal = !isNaN(supplierTotalNum) && supplierTotalNum > 0;
+        const varianceDiff = hasSupplierTotal
+          ? Math.round((billPrompt.total - supplierTotalNum) * 100) / 100
+          : 0;
+        const hasVariance = hasSupplierTotal && Math.abs(varianceDiff) > 0.005;
+        const needsVarianceReason = hasVariance && !billPrompt.varianceReason;
+        const isEditLinePrices = billPrompt.varianceReason === 'EDIT_LINE_PRICES';
+        const canSubmit = !needsVarianceReason && !isEditLinePrices;
+
+        return (
           <div
-            className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+            style={{ zIndex: (detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL) + 1 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bill-prompt-title"
           >
-            {/* Header — green success accent (this is a positive workflow, not an error) */}
-            <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-5 text-white">
-              <div className="flex items-center gap-3">
-                <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <div>
-                  <h3 id="bill-prompt-title" className="text-lg font-bold">Goods Receipt Finalized</h3>
-                  <p className="text-emerald-50 text-sm">{billPrompt.grNumber} is now in stock</p>
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="bg-gradient-to-r from-emerald-500 to-emerald-600 px-6 py-5 text-white">
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 id="bill-prompt-title" className="text-lg font-bold">Goods Receipt Finalized</h3>
+                    <p className="text-emerald-50 text-sm">{billPrompt.grNumber} is now in stock</p>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Body */}
-            <div className="px-6 py-5">
-              <p className="text-gray-800 font-semibold text-base mb-1">
-                Create supplier bill now?
-              </p>
-              <p className="text-gray-600 text-sm mb-4">
-                The bill will be built automatically from this Goods Receipt — no typing required.
-              </p>
+              {/* Body */}
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-gray-800 font-semibold text-base">Create supplier bill now?</p>
 
-              <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-2 text-sm">
-                {billPrompt.supplierName && (
+                {/* Computed total — read-only, always from GRN */}
+                <div className="bg-gray-50 rounded-lg border border-gray-200 p-4 space-y-2 text-sm">
+                  {billPrompt.supplierName && (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Supplier</span>
+                      <span className="font-medium text-gray-900">{billPrompt.supplierName}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Supplier</span>
-                    <span className="font-medium text-gray-900">{billPrompt.supplierName}</span>
+                    <span className="text-gray-500">Goods Receipt</span>
+                    <span className="font-mono font-medium text-gray-900">{billPrompt.grNumber}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-gray-200 pt-2">
+                    <span className="text-gray-700 font-semibold">Computed bill amount</span>
+                    <span className="font-bold text-emerald-700 text-base">{formatCurrency(billPrompt.total)}</span>
+                  </div>
+                  <p className="text-xs text-gray-400">Derived from GRN quantities × unit costs. Read-only.</p>
+                </div>
+
+                {/* Supplier Invoice Number */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Supplier Invoice Number
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    value={billPrompt.supplierInvoiceNumber}
+                    onChange={(e) => setBillPrompt(prev => prev ? { ...prev, supplierInvoiceNumber: e.target.value } : prev)}
+                    placeholder={billPrompt.grNumber}
+                  />
+                </div>
+
+                {/* Invoice Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Invoice Date
+                  </label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    value={billPrompt.invoiceDate}
+                    onChange={(e) => setBillPrompt(prev => prev ? { ...prev, invoiceDate: e.target.value } : prev)}
+                  />
+                </div>
+
+                {/* Supplier Reported Total (reference) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Supplier Invoice Total <span className="font-normal text-gray-400">(from paper invoice, optional)</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    value={billPrompt.supplierReportedTotal}
+                    onChange={(e) => setBillPrompt(prev => prev ? {
+                      ...prev,
+                      supplierReportedTotal: e.target.value,
+                      varianceReason: '',   // reset reason when total changes
+                    } : prev)}
+                    placeholder="Leave blank if same as computed"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">
+                    If different from computed amount, you will need to select a variance reason.
+                  </p>
+                </div>
+
+                {/* Variance alert + reason picker */}
+                {hasVariance && (
+                  <div className={`rounded-lg border p-4 space-y-3 ${isEditLinePrices ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'}`}>
+                    <div className="flex items-start gap-2">
+                      <svg className={`w-5 h-5 flex-shrink-0 mt-0.5 ${isEditLinePrices ? 'text-red-500' : 'text-amber-600'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                      </svg>
+                      <div>
+                        <p className={`text-sm font-semibold ${isEditLinePrices ? 'text-red-800' : 'text-amber-800'}`}>
+                          Invoice total differs from received value by{' '}
+                          <span className="font-mono">{formatCurrency(Math.abs(varianceDiff))}</span>
+                          {varianceDiff > 0 ? ' (supplier billed less)' : ' (supplier billed more)'}
+                        </p>
+                        {isEditLinePrices && (
+                          <p className="text-xs text-red-700 mt-1">
+                            Correct the unit costs on GR {billPrompt.grNumber} first, then re-create this bill.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-amber-800 mb-1">
+                        Select variance reason to continue
+                      </label>
+                      <select
+                        className="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-amber-500"
+                        value={billPrompt.varianceReason}
+                        onChange={(e) => setBillPrompt(prev => prev ? {
+                          ...prev,
+                          varianceReason: e.target.value as typeof billPrompt.varianceReason
+                        } : prev)}
+                      >
+                        <option value="">— Select reason —</option>
+                        <option value="SUPPLIER_DISCOUNT">Supplier Discount — supplier gave a discount</option>
+                        <option value="ROUNDING_DIFFERENCE">Rounding Difference — minor rounding (≤ 1 UGX)</option>
+                        <option value="PRICE_VARIANCE">Price Variance — supplier invoiced at different price</option>
+                        <option value="EDIT_LINE_PRICES">Edit Line Prices — I entered wrong costs on the GRN</option>
+                      </select>
+                    </div>
+
+                    {!isEditLinePrices && billPrompt.varianceReason && (
+                      <div className="text-xs text-amber-700 bg-amber-100 rounded p-2">
+                        <strong>GL impact:</strong>{' '}
+                        DR GR/IR Clearing (2150) {formatCurrency(billPrompt.total)} &nbsp;/&nbsp;
+                        CR Accounts Payable (2100) {formatCurrency(supplierTotalNum)} &nbsp;/&nbsp;
+                        {varianceDiff > 0 ? 'CR' : 'DR'} Price Variance (5020) {formatCurrency(Math.abs(varianceDiff))}
+                      </div>
+                    )}
                   </div>
                 )}
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Goods Receipt</span>
-                  <span className="font-mono font-medium text-gray-900">{billPrompt.grNumber}</span>
-                </div>
-                <div className="flex justify-between border-t border-gray-200 pt-2">
-                  <span className="text-gray-700 font-semibold">Bill amount</span>
-                  <span className="font-bold text-emerald-700 text-base">
-                    {formatCurrency(billPrompt.total)}
-                  </span>
-                </div>
-              </div>
 
-              <div className="mt-4 px-3 py-2 bg-blue-50 border border-blue-100 rounded text-xs text-blue-800">
-                <strong>GL impact:</strong> DR GR/IR Clearing (2150) &nbsp;/&nbsp; CR Accounts Payable (2100)
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-3 justify-end">
-              <button
-                type="button"
-                disabled={billPromptLoading}
-                onClick={() => setBillPrompt(null)}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-              >
-                Skip for now
-              </button>
-              <button
-                type="button"
-                disabled={billPromptLoading}
-                onClick={async () => {
-                  if (!billPrompt) return;
-                  setBillPromptLoading(true);
-                  setCreatingBillForGR(billPrompt.grId);
-                  try {
-                    const { data } = await api.post('/supplier-payments/invoices/from-grn', { grnId: billPrompt.grId });
-                    if (!data.success) throw new Error(data.error || 'Failed to create bill');
-                    const dataObj = data.data as { invoice?: Record<string, unknown>; invoiceNumber?: string; SupplierInvoiceNumber?: string } | undefined;
-                    const inv = dataObj?.invoice ?? dataObj;
-                    const invNum = (inv?.invoiceNumber as string | undefined) || (inv?.SupplierInvoiceNumber as string | undefined) || '';
-                    setBillPrompt(null);
-                    await detailsQuery.refetch();
-                    alert(`✅ Supplier bill ${invNum} created from ${billPrompt.grNumber}.`);
-                  } catch (billErr: unknown) {
-                    handleApiError(billErr, { fallback: 'Failed to create supplier bill' });
-                  } finally {
-                    setBillPromptLoading(false);
-                    setCreatingBillForGR(null);
-                  }
-                }}
-                className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 flex items-center gap-2"
-              >
-                {billPromptLoading ? (
-                  <>
-                    <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Creating bill…
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    Create supplier bill
-                  </>
+                {!hasVariance && (
+                  <div className="mt-1 px-3 py-2 bg-blue-50 border border-blue-100 rounded text-xs text-blue-800">
+                    <strong>GL impact:</strong> DR GR/IR Clearing (2150) &nbsp;/&nbsp; CR Accounts Payable (2100)
+                  </div>
                 )}
-              </button>
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex gap-3 justify-end">
+                <button
+                  type="button"
+                  disabled={billPromptLoading}
+                  onClick={() => setBillPrompt(null)}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Skip for now
+                </button>
+                <button
+                  type="button"
+                  disabled={billPromptLoading || !canSubmit}
+                  title={!canSubmit ? (needsVarianceReason ? 'Select a variance reason to continue' : 'Fix GRN costs first') : undefined}
+                  onClick={async () => {
+                    if (!billPrompt) return;
+                    setBillPromptLoading(true);
+                    setCreatingBillForGR(billPrompt.grId);
+                    try {
+                      const body: Record<string, unknown> = {
+                        grnId: billPrompt.grId,
+                        supplierInvoiceNumber: billPrompt.supplierInvoiceNumber || undefined,
+                        invoiceDate: billPrompt.invoiceDate || undefined,
+                      };
+                      if (hasSupplierTotal) {
+                        body.supplierReportedTotal = supplierTotalNum;
+                        if (billPrompt.varianceReason) {
+                          body.varianceReason = billPrompt.varianceReason;
+                        }
+                      }
+                      const { data } = await api.post('/supplier-payments/invoices/from-grn', body);
+                      if (!data.success) throw new Error(data.error || 'Failed to create bill');
+                      const dataObj = data.data as { invoice?: Record<string, unknown>; invoiceNumber?: string; SupplierInvoiceNumber?: string } | undefined;
+                      const inv = dataObj?.invoice ?? dataObj;
+                      const invNum = (inv?.invoiceNumber as string | undefined) || (inv?.SupplierInvoiceNumber as string | undefined) || '';
+                      setBillPrompt(null);
+                      await detailsQuery.refetch();
+                      alert(`✅ Supplier bill ${invNum} created from ${billPrompt.grNumber}.`);
+                    } catch (billErr: unknown) {
+                      handleApiError(billErr, { fallback: 'Failed to create supplier bill' });
+                    } finally {
+                      setBillPromptLoading(false);
+                      setCreatingBillForGR(null);
+                    }
+                  }}
+                  className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {billPromptLoading ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      Creating bill…
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      Create supplier bill
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Cost Alerts Modal */}
       {showAlertsModal && costAlerts.length > 0 && (

@@ -59,6 +59,9 @@ const ListGRsQuerySchema = z.object({
     .transform((val) => (val ? parseInt(val) : 50)),
   status: z.enum(['DRAFT', 'COMPLETED', 'CANCELLED']).optional(),
   purchaseOrderId: z.string().uuid().optional(),
+  search: z.string().optional(),
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
 const UpdateGRItemSchema = z
@@ -245,6 +248,9 @@ export const goodsReceiptController = {
     const result = await goodsReceiptService.listGRs(pool, query.page, query.limit, {
       status: query.status,
       purchaseOrderId: query.purchaseOrderId,
+      search: query.search,
+      startDate: query.startDate,
+      endDate: query.endDate,
     });
 
     res.json({

@@ -804,7 +804,7 @@ export const goodsReceiptService = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; purchaseOrderId?: string }
+    filters?: { status?: string; purchaseOrderId?: string; search?: string; startDate?: string; endDate?: string }
   ): Promise<ListGRsResult> {
     return goodsReceiptRepository.listGRs(pool, page, limit, filters);
   },

@@ -101,6 +101,21 @@ const CreateInvoiceFromGRNSchema = z.object({
     invoiceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     notes: z.string().optional(),
+    /**
+     * Total printed on the supplier's physical invoice.
+     * REFERENCE only — never used to back-calculate line costs.
+     * When present and it differs from the GRN computed total, varianceReason is required.
+     */
+    supplierReportedTotal: z.number().positive().optional(),
+    /**
+     * Why the supplier total differs from the GRN computed total.
+     * Required when supplierReportedTotal is present and variance > 0.005.
+     * 'EDIT_LINE_PRICES' causes the system to reject posting with a message
+     * to fix the GRN costs first.
+     */
+    varianceReason: z
+        .enum(['SUPPLIER_DISCOUNT', 'ROUNDING_DIFFERENCE', 'PRICE_VARIANCE', 'EDIT_LINE_PRICES'])
+        .optional(),
 });
 const CreateAllocationSchema = z.object({
     supplierPaymentId: z.string().uuid(),
@@ -798,7 +813,15 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
             const validated = CreateInvoiceFromGRNSchema.parse(req.body);
             const invoice = await supplierPaymentService.createInvoiceFromGRN(
                 p(req),
-                validated,
+                {
+                    grnId: validated.grnId,
+                    supplierInvoiceNumber: validated.supplierInvoiceNumber,
+                    invoiceDate: validated.invoiceDate,
+                    dueDate: validated.dueDate,
+                    notes: validated.notes,
+                    supplierReportedTotal: validated.supplierReportedTotal,
+                    varianceReason: validated.varianceReason,
+                },
                 req.user?.id,
             );
             res.status(201).json({ success: true, data: invoice });

@@ -15,6 +15,7 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { AccountingCore } from '../../services/accountingCore.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
+import { PricingEngine } from '../../utils/pricingEngine.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -47,6 +48,23 @@ export interface CreateSupplierInvoiceInput {
      * via the existing InternalReferenceNumber detection.
      */
     grnIds?: string[];
+    /**
+     * PricingEngine-computed total from the linked GRN.
+     * Stored for audit trail and used in variance GL posting.
+     * Internal — set by createInvoiceFromGRN, not by UI input.
+     */
+    grnComputedTotal?: number;
+    /**
+     * Variance reason when supplier-reported total ≠ GRN computed total.
+     * Internal — set by createInvoiceFromGRN after variance enforcement.
+     */
+    varianceReason?: string;
+    /**
+     * Override invoice TotalAmount (used when supplier-reported total differs from computed).
+     * Internal — set by createInvoiceFromGRN. When set, AP = this amount; GR/IR = grnComputedTotal.
+     * @internal
+     */
+    _overrideTotalAmount?: number;
 }
 
 export interface AllocatePaymentInput {
@@ -469,13 +487,21 @@ export async function createSupplierInvoice(
     userId?: string
 ) {
     return UnitOfWork.run(pool, async (client) => {
-        // Calculate totals from line items using Decimal.js for precision
+        // Calculate subtotal from line items using Decimal.js for precision
         const subtotal = data.lineItems.reduce(
             (sum, item) => sum.plus(new Decimal(item.quantity).times(new Decimal(item.unitPrice))),
             new Decimal(0)
         );
         const taxAmount = new Decimal(0); // Can be calculated if tax logic is needed
-        const totalAmount = subtotal.plus(taxAmount);
+
+        // RULE: When _overrideTotalAmount is provided (set by createInvoiceFromGRN after
+        // variance enforcement), use it as the AP amount (supplier reported total).
+        // Otherwise totalAmount = computed subtotal. This ensures that:
+        //   - For variance invoices: AP = supplier total, GR/IR cleared at grnComputedTotal
+        //   - For normal invoices:   AP = computed total (same as GR/IR)
+        const totalAmount = data._overrideTotalAmount !== undefined
+            ? new Decimal(data._overrideTotalAmount)
+            : subtotal.plus(taxAmount);
 
         // Default dueDate to invoiceDate + 30 days when not provided (DueDate is NOT NULL in DB)
         const resolvedDueDate = data.dueDate || (() => {
@@ -493,6 +519,8 @@ export async function createSupplierInvoice(
             taxAmount: taxAmount.toNumber(),
             totalAmount: totalAmount.toNumber(),
             notes: data.notes,
+            grnComputedTotal: data.grnComputedTotal,
+            varianceReason: data.varianceReason,
         });
 
         // Persist line items into supplier_invoice_line_items
@@ -568,6 +596,29 @@ export interface CreateInvoiceFromGRNInput {
     /** Optional invoice date; defaults to GR received_date. */
     invoiceDate?: string;
     notes?: string;
+    /**
+     * The total printed on the supplier's physical invoice.
+     *
+     * ACCOUNTING RULE:
+     *   - This field is a REFERENCE only. It never alters line quantities, unit costs,
+     *     or inventory valuation — those are always derived from GRN data.
+     *   - When provided and it differs from the GRN computed total by more than 0.005,
+     *     the system blocks posting and requires a varianceReason.
+     *   - When a valid varianceReason is supplied, the system posts a 3-line GL entry:
+     *       DR GR/IR (2150)         grnComputedTotal   ← fully clears clearing account
+     *       CR Accounts Payable     supplierReportedTotal ← what we owe supplier
+     *       CR/DR Price Variance    difference         ← absorbs the mismatch
+     */
+    supplierReportedTotal?: number;
+    /**
+     * Why the supplier-reported total differs from the GRN computed total.
+     * Required when |supplierReportedTotal − grnComputedTotal| > 0.005.
+     *
+     * 'EDIT_LINE_PRICES' is NOT a posting reason — it instructs the user to
+     * correct the GRN line costs before billing. The system rejects posting
+     * when this is the selected reason.
+     */
+    varianceReason?: 'SUPPLIER_DISCOUNT' | 'ROUNDING_DIFFERENCE' | 'PRICE_VARIANCE' | 'EDIT_LINE_PRICES';
 }
 
 /**
@@ -625,18 +676,64 @@ export async function createInvoiceFromGRN(
         );
     }
 
-    // Build line items from received non-bonus items (Decimal.js precision)
-    const lineItems = items
-        .filter((it) => !it.isBonus)
-        .map((it) => ({
-            productName: it.productName || 'Item',
-            description: it.batchNumber ? `Batch ${it.batchNumber}` : undefined,
-            quantity: new Decimal(it.receivedQuantity).toNumber(),
-            unitPrice: new Decimal(it.unitCost).toNumber(),
-        }));
+    // Build line items from received non-bonus items.
+    // RULE: Totals are derived exclusively from GRN quantities × unit costs.
+    //       The supplier-reported total is a REFERENCE field only.
+    const billableItems = items.filter((it) => !it.isBonus);
+    const lineItems = billableItems.map((it) => ({
+        productName: it.productName || 'Item',
+        description: it.batchNumber ? `Batch ${it.batchNumber}` : undefined,
+        quantity: new Decimal(it.receivedQuantity).toNumber(),
+        unitPrice: new Decimal(it.unitCost).toNumber(),
+    }));
 
     if (lineItems.length === 0) {
         throw new ValidationError(`GR ${gr.grNumber} has no billable (non-bonus) items`);
+    }
+
+    // ── PricingEngine: compute authoritative document total ──────────────────
+    // This is the only source of truth. UI computed totals are not trusted.
+    const grnComputedTotal = PricingEngine.calculateDocumentTotal(
+        billableItems.map((it) => ({
+            quantity: it.receivedQuantity,
+            unitCost: it.unitCost,
+        })),
+    );
+
+    // ── Variance enforcement ────────────────────────────────────────────────
+    // If caller provided a supplier-reported total and it differs from computed:
+    //   - Block posting if no variance reason supplied
+    //   - Block posting if reason is EDIT_LINE_PRICES (instructs user to fix GRN)
+    //   - Otherwise proceed with 3-line GL entry
+    let resolvedInvoiceTotal = grnComputedTotal;
+    let resolvedVarianceReason: string | undefined;
+
+    if (input.supplierReportedTotal !== undefined) {
+        const supplierTotal = new Decimal(input.supplierReportedTotal);
+        const variance = PricingEngine.calculateVariance(grnComputedTotal, supplierTotal);
+
+        if (PricingEngine.hasVariance(grnComputedTotal, supplierTotal)) {
+            // Variance exists — must have an actionable reason
+            if (!input.varianceReason) {
+                throw new ValidationError(
+                    `Invoice total differs from received value by UGX ${variance.abs().toFixed(2)}. ` +
+                    `Select a variance reason to continue: SUPPLIER_DISCOUNT, ROUNDING_DIFFERENCE, or PRICE_VARIANCE. ` +
+                    `If costs were entered incorrectly, select EDIT_LINE_PRICES and correct the GRN first.`,
+                );
+            }
+            if (input.varianceReason === 'EDIT_LINE_PRICES') {
+                throw new ValidationError(
+                    `Variance of UGX ${variance.abs().toFixed(2)} detected. ` +
+                    `Please correct the unit costs on Goods Receipt ${gr.grNumber} and then re-create this bill.`,
+                );
+            }
+            // Variance is acknowledged and has an accounting reason
+            // Invoice TotalAmount = supplier reported total (AP credit amount)
+            // GR/IR will be debited at grnComputedTotal (3-line entry)
+            resolvedInvoiceTotal = supplierTotal;
+            resolvedVarianceReason = input.varianceReason;
+        }
+        // else: supplier total matches computed total within tolerance — no special handling
     }
 
     const invoiceDate = input.invoiceDate || normalizeToDateOnly(gr.receivedDate as unknown as string | Date);
@@ -646,18 +743,23 @@ export async function createInvoiceFromGRN(
         pool,
         {
             supplierId,
-            // Use GR number as the internal reference so postInvoiceToGL routes via GR/IR (2150)
             supplierInvoiceNumber: input.supplierInvoiceNumber || grNumber,
             invoiceDate,
             dueDate: input.dueDate,
             notes: input.notes || `Bill for Goods Receipt ${grNumber}`,
             lineItems,
             grnIds: [input.grnId],
+            // Variance metadata stored on the invoice for audit trail
+            grnComputedTotal: grnComputedTotal.toNumber(),
+            varianceReason: resolvedVarianceReason,
+            // Override totalAmount when there is an acknowledged variance
+            _overrideTotalAmount: resolvedInvoiceTotal.toNumber(),
         },
         userId,
     );
 
-    // Post immediately so the GR/IR Clearing (2150) is cleared and AP (2100) recognized
+    // Post immediately so GR/IR Clearing (2150) is cleared and AP (2100) recognized.
+    // The variance data is read from the invoice record inside postInvoiceToGL.
     await postInvoiceToGL(pool, created.id);
 
     return created;
@@ -677,6 +779,7 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
                     TO_CHAR(si."InvoiceDate", 'YYYY-MM-DD') AS "InvoiceDate",
                     si."TotalAmount", si.is_posted_to_gl, si."Status", si.deleted_at,
                     si.document_type, si."InternalReferenceNumber",
+                    si.grn_computed_total, si.variance_reason,
                     s."CompanyName" AS supplier_name
              FROM supplier_invoices si
              LEFT JOIN suppliers s ON s."Id" = si."SupplierId"
@@ -713,14 +816,8 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
         }
 
         // Determine routing path:
-        //   GR-linked invoice → DR GR/IR Clearing (2150) / CR AP (2100)
-        //   Standalone invoice → DR General Expense (6900) / CR AP (2100)
-        //
-        // An invoice is GR-linked when InternalReferenceNumber points to a
-        // completed GR (starts with "GR-"). Standalone bills (services, ad-hoc
-        // purchases) post to expense — NEVER to Inventory (1300), because no
-        // GR fed the physical batch subledger and routing them to inventory
-        // creates a permanent GL-vs-subledger drift.
+        //   GR-linked invoice → DR GR/IR Clearing (2150) / CR AP (2100)  [2-line or 3-line]
+        //   Standalone invoice → DR General Expense (6900) / CR AP (2100) [always 2-line]
         const grRef = (inv.InternalReferenceNumber || '').trim();
         const hasGrReference = grRef.startsWith('GR-') &&
             (await client.query(
@@ -728,7 +825,25 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
                 [grRef],
             )).rows.length > 0;
 
-        // Post GL
+        // ── Variance data ──────────────────────────────────────────────────────
+        // grn_computed_total: PricingEngine total at GRN receipt time (stored on invoice).
+        // When it differs from TotalAmount (supplier AP amount), post a 3-line entry
+        // so GR/IR is cleared at the full GRN value, AP is set to supplier amount,
+        // and the delta goes to Price Variance (5020).
+        let grnComputedTotal: number | undefined;
+        let varianceAmount: number | undefined;
+        const varianceReason: string | undefined = inv.variance_reason || undefined;
+
+        if (hasGrReference && inv.grn_computed_total !== null && inv.grn_computed_total !== undefined) {
+            const computedTotal = new Decimal(inv.grn_computed_total).toNumber();
+            const variance = new Decimal(computedTotal).minus(totalAmount);
+            if (variance.abs().greaterThan(0.005)) {
+                grnComputedTotal = computedTotal;
+                varianceAmount = variance.toDecimalPlaces(2).toNumber();
+            }
+        }
+
+        // Post GL (2-line standard or 3-line variance)
         await glEntryService.recordSupplierInvoiceToGL(
             {
                 invoiceId: inv.Id,
@@ -738,6 +853,9 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
                 supplierId: inv.SupplierId,
                 supplierName: inv.supplier_name || 'Unknown Supplier',
                 hasGrReference,
+                grnComputedTotal,
+                varianceAmount,
+                varianceReason,
             },
             undefined,
             client,

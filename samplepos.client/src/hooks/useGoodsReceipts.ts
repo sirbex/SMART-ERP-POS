@@ -17,6 +17,9 @@ export function useGoodsReceipts(params?: {
   limit?: number;
   status?: string;
   purchaseOrderId?: string;
+  search?: string;
+  startDate?: string;
+  endDate?: string;
 }) {
   return useQuery({
     queryKey: GOODS_RECEIPTS_KEYS.list(params || {}),

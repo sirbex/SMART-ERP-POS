@@ -463,7 +463,7 @@ export const goodsReceiptRepository = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; purchaseOrderId?: string }
+    filters?: { status?: string; purchaseOrderId?: string; search?: string; startDate?: string; endDate?: string }
   ): Promise<{ grs: GoodsReceipt[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
@@ -480,10 +480,33 @@ export const goodsReceiptRepository = {
       values.push(filters.purchaseOrderId);
     }
 
+    if (filters?.search) {
+      const searchParam = `%${filters.search}%`;
+      whereClauses.push(
+        `(gr.receipt_number ILIKE $${paramIndex} OR po.order_number ILIKE $${paramIndex} OR s."CompanyName" ILIKE $${paramIndex})`
+      );
+      values.push(searchParam);
+      paramIndex++;
+    }
+
+    if (filters?.startDate) {
+      whereClauses.push(`gr.received_date::date >= $${paramIndex++}`);
+      values.push(filters.startDate);
+    }
+
+    if (filters?.endDate) {
+      whereClauses.push(`gr.received_date::date <= $${paramIndex++}`);
+      values.push(filters.endDate);
+    }
+
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM goods_receipts gr ${whereClause}`,
+      `SELECT COUNT(*)
+       FROM goods_receipts gr
+       LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
+       LEFT JOIN suppliers s ON po.supplier_id = s."Id"
+       ${whereClause}`,
       values
     );
 

@@ -470,7 +470,7 @@ export const api = {
 
   // Goods Receipts
   goodsReceipts: {
-    list: (params?: { page?: number; limit?: number; status?: string; purchaseOrderId?: string }) =>
+    list: (params?: { page?: number; limit?: number; status?: string; purchaseOrderId?: string; search?: string; startDate?: string; endDate?: string }) =>
       apiClient.get<ApiResponse>('goods-receipts', { params }),
     getById: (id: string) => apiClient.get<ApiResponse>(`goods-receipts/${id}`),
     create: (data: CreateGoodsReceiptInput) => apiClient.post<ApiResponse>('goods-receipts', data),

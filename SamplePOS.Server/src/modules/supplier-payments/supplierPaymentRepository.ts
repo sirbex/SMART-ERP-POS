@@ -665,6 +665,10 @@ export async function createInvoice(
         notes?: string;
         currencyCode?: string;
         initialStatus?: string;
+        /** PricingEngine-computed total from linked GRN. NULL for standalone invoices. */
+        grnComputedTotal?: number;
+        /** Why supplier total differs from GRN computed total. NULL when no variance. */
+        varianceReason?: string;
     }
 ): Promise<SupplierInvoice> {
     // Generate invoice number using SQL CURRENT_DATE for timezone consistency
@@ -685,10 +689,10 @@ export async function createInvoice(
     const result = await client.query(
         `INSERT INTO supplier_invoices (
        "Id", "SupplierInvoiceNumber", "InternalReferenceNumber", "SupplierId", "InvoiceDate", "DueDate",
-       "Subtotal", "TaxAmount", "TotalAmount", "AmountPaid", "OutstandingBalance", 
-       "Status", "CurrencyCode", "Notes", "CreatedAt", "UpdatedAt"
-     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 0, $8, $10, $9, $11, NOW(), NOW())
-     RETURNING 
+       "Subtotal", "TaxAmount", "TotalAmount", "AmountPaid", "OutstandingBalance",
+       "Status", "CurrencyCode", "Notes", grn_computed_total, variance_reason, "CreatedAt", "UpdatedAt"
+     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 0, $8, $10, $9, $11, $12, $13, NOW(), NOW())
+     RETURNING
        "Id" as id,
        "SupplierInvoiceNumber" as "invoiceNumber",
        "InternalReferenceNumber" as "supplierInvoiceNumber",
@@ -702,6 +706,8 @@ export async function createInvoice(
        "OutstandingBalance" as "outstandingBalance",
        "Status" as status,
        "Notes" as notes,
+       grn_computed_total as "grnComputedTotal",
+       variance_reason as "varianceReason",
        "CreatedAt" as "createdAt",
        "UpdatedAt" as "updatedAt"`,
         [
@@ -715,7 +721,9 @@ export async function createInvoice(
             data.totalAmount,
             currencyCode,
             initialStatus,
-            data.notes || null
+            data.notes || null,
+            data.grnComputedTotal ?? null,
+            data.varianceReason ?? null,
         ]
     );
 
