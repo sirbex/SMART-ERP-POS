@@ -93,109 +93,102 @@ export default function CategoriesPage() {
   const [formData, setFormData] = useState<CreateProductCategoryInput>({ name: '', description: '' });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
-  // ── Odoo-style Merge State ──
+  // ── Merge State (Shopify/HubSpot-style checkbox + survivor) ──
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showMergeDialog, setShowMergeDialog] = useState(false);
-  const [mergeSources, setMergeSources] = useState<ProductCategory[]>([]); // chips: categories to delete
-  const [mergeTarget, setMergeTarget] = useState<ProductCategory | null>(null); // the category to keep
-  const [sourceInput, setSourceInput] = useState('');
-  const [targetInput, setTargetInput] = useState('');
-  const [showSourceDrop, setShowSourceDrop] = useState(false);
-  const [showTargetDrop, setShowTargetDrop] = useState(false);
+  const [survivorId, setSurvivorId] = useState<string>('');
+  const [mergeDialogSearch, setMergeDialogSearch] = useState('');
   const [mergeProgress, setMergeProgress] = useState<string | null>(null);
-  const sourceRef = useRef<HTMLDivElement>(null);
-  const targetRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdowns on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (sourceRef.current && !sourceRef.current.contains(e.target as Node)) setShowSourceDrop(false);
-      if (targetRef.current && !targetRef.current.contains(e.target as Node)) setShowTargetDrop(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+  // Categories shown in the merge dialog (searchable full list)
+  const mergeDialogCategories = useMemo(() => {
+    const q = mergeDialogSearch.toLowerCase().trim();
+    return allCategories
+      .filter(c => !q || c.name.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [allCategories, mergeDialogSearch]);
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   }, []);
 
-  const openMerge = useCallback((cat: ProductCategory) => {
-    setMergeSources([cat]);
-    setMergeTarget(null);
-    setSourceInput('');
-    setTargetInput('');
-    setMergeProgress(null);
-    setShowMergeDialog(true);
-  }, []);
+  const toggleSelectAll = useCallback(() => {
+    if (categories.every(c => selectedIds.has(c.id))) {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        categories.forEach(c => next.delete(c.id));
+        return next;
+      });
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev);
+        categories.forEach(c => next.add(c.id));
+        return next;
+      });
+    }
+  }, [categories, selectedIds]);
 
-  const openFreshMerge = useCallback(() => {
-    setMergeSources([]);
-    setMergeTarget(null);
-    setSourceInput('');
-    setTargetInput('');
-    setMergeProgress(null);
-    setShowMergeDialog(true);
-  }, []);
+  const allOnPageSelected = categories.length > 0 && categories.every(c => selectedIds.has(c.id));
+  const someOnPageSelected = categories.some(c => selectedIds.has(c.id)) && !allOnPageSelected;
 
   const closeMerge = useCallback(() => {
     setShowMergeDialog(false);
-    setMergeSources([]);
-    setMergeTarget(null);
-    setSourceInput('');
-    setTargetInput('');
+    setSurvivorId('');
+    setMergeDialogSearch('');
     setMergeProgress(null);
   }, []);
 
-  const sourceDropOptions = useMemo(() => {
-    const excludedIds = new Set([
-      ...mergeSources.map(s => s.id),
-      ...(mergeTarget ? [mergeTarget.id] : []),
-    ]);
-    const q = sourceInput.toLowerCase().trim();
-    return allCategories
-      .filter(c => !excludedIds.has(c.id) && (!q || c.name.toLowerCase().includes(q)))
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, 12);
-  }, [allCategories, mergeSources, mergeTarget, sourceInput]);
+  // Checked cats in the dialog (includes pre-selected from table)
+  const [dialogCheckedIds, setDialogCheckedIds] = useState<Set<string>>(new Set());
 
-  const targetDropOptions = useMemo(() => {
-    const excludedIds = new Set(mergeSources.map(s => s.id));
-    const q = targetInput.toLowerCase().trim();
-    return allCategories
-      .filter(c => !excludedIds.has(c.id) && (!q || c.name.toLowerCase().includes(q)))
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, 12);
-  }, [allCategories, mergeSources, targetInput]);
-
-  const addSource = useCallback((cat: ProductCategory) => {
-    setMergeSources(prev => prev.find(s => s.id === cat.id) ? prev : [...prev, cat]);
-    setSourceInput('');
-    setShowSourceDrop(false);
+  const openMergeDialog = useCallback((preselect: Set<string>) => {
+    setDialogCheckedIds(new Set(preselect));
+    setSurvivorId(preselect.size === 1 ? [...preselect][0] : '');
+    setMergeDialogSearch('');
+    setMergeProgress(null);
+    setShowMergeDialog(true);
   }, []);
 
-  const removeSource = useCallback((id: string) => {
-    setMergeSources(prev => prev.filter(s => s.id !== id));
-  }, []);
-
-  const selectTarget = useCallback((cat: ProductCategory) => {
-    setMergeTarget(cat);
-    setTargetInput(cat.name);
-    setShowTargetDrop(false);
+  const toggleDialogCheck = useCallback((id: string) => {
+    setDialogCheckedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+        // if survivor was this one, clear survivor
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
   }, []);
 
   const handleMerge = useCallback(async () => {
-    if (!mergeTarget || mergeSources.length === 0) return;
+    if (!survivorId || dialogCheckedIds.size < 2) return;
+    const sources = [...dialogCheckedIds].filter(id => id !== survivorId);
+    const survivorCat = allCategories.find(c => c.id === survivorId);
+    if (!survivorCat) return;
     let totalMoved = 0;
     try {
-      for (let i = 0; i < mergeSources.length; i++) {
-        const src = mergeSources[i];
-        setMergeProgress(`Merging ${i + 1} of ${mergeSources.length}: "${src.name}"…`);
-        const result = await mergeMutation.mutateAsync({ targetId: mergeTarget.id, sourceId: src.id });
+      for (let i = 0; i < sources.length; i++) {
+        const srcId = sources[i];
+        const srcCat = allCategories.find(c => c.id === srcId);
+        setMergeProgress(`Merging ${i + 1} of ${sources.length}: "${srcCat?.name ?? srcId}"…`);
+        const result = await mergeMutation.mutateAsync({ targetId: survivorId, sourceId: srcId });
         totalMoved += result.movedProducts ?? 0;
       }
-      toast.success(`Merged ${mergeSources.length} categor${mergeSources.length > 1 ? 'ies' : 'y'} into "${mergeTarget.name}" — ${totalMoved} products moved`);
+      toast.success(`Merged ${sources.length} categor${sources.length > 1 ? 'ies' : 'y'} into "${survivorCat.name}" — ${totalMoved} products moved`);
+      setSelectedIds(new Set());
+      setDialogCheckedIds(new Set());
       closeMerge();
     } catch (err: unknown) {
       setMergeProgress(null);
       toast.error(extractApiError(err, 'Merge failed'));
     }
-  }, [mergeSources, mergeTarget, mergeMutation, closeMerge]);
+  }, [survivorId, dialogCheckedIds, allCategories, mergeMutation, closeMerge]);
 
   // ── Form Handlers ──
   const openCreate = useCallback(() => {
@@ -287,11 +280,16 @@ export default function CategoriesPage() {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={openFreshMerge}
-              className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium"
+              onClick={() => openMergeDialog(selectedIds.size >= 2 ? selectedIds : new Set())}
+              className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-medium flex items-center gap-1.5"
               title="Merge duplicate categories"
             >
               ⇄ Merge Categories
+              {selectedIds.size >= 2 && (
+                <span className="bg-white text-orange-600 rounded-full text-xs font-bold px-1.5 py-0.5 leading-none">
+                  {selectedIds.size}
+                </span>
+              )}
             </button>
             <button
               onClick={openCreate}
@@ -354,10 +352,21 @@ export default function CategoriesPage() {
             </p>
           </div>
         ) : (
+          <>
           <div className="border rounded-lg overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-gray-50">
+                  <TableHead className="w-10">
+                    <input
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      ref={el => { if (el) el.indeterminate = someOnPageSelected; }}
+                      onChange={toggleSelectAll}
+                      className="rounded border-gray-300 accent-orange-500 cursor-pointer"
+                      aria-label="Select all on this page"
+                    />
+                  </TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Status</TableHead>
@@ -366,48 +375,91 @@ export default function CategoriesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {categories.map(cat => (
-                  <TableRow key={cat.id} className={!cat.isActive ? 'opacity-50' : ''}>
-                    <TableCell className="font-medium">{cat.name}</TableCell>
-                    <TableCell className="text-sm text-gray-500 max-w-xs truncate">
-                      {cat.description || <span className="italic text-gray-300">No description</span>}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={cat.isActive ? 'default' : 'secondary'}>
-                        {cat.isActive ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm text-gray-500">
-                      {formatTimestampDate(cat.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-right space-x-2">
-                      <button
-                        onClick={() => handleToggleActive(cat)}
-                        disabled={pendingToggleId === cat.id}
-                        className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
-                        title={cat.isActive ? 'Deactivate' : 'Activate'}
-                      >
-                        {pendingToggleId === cat.id ? '⏳' : cat.isActive ? '⏸' : '▶'}
-                      </button>
-                      <button
-                        onClick={() => openEdit(cat)}
-                        className="text-xs text-blue-600 hover:text-blue-800"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => openMerge(cat)}
-                        className="text-xs text-orange-600 hover:text-orange-800"
-                        title="Merge this category into another"
-                      >
-                        Merge
-                      </button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {categories.map(cat => {
+                  const isChecked = selectedIds.has(cat.id);
+                  return (
+                    <TableRow
+                      key={cat.id}
+                      className={[
+                        !cat.isActive ? 'opacity-60' : '',
+                        isChecked ? 'bg-orange-50 border-l-4 border-l-orange-400' : 'hover:bg-gray-50',
+                      ].join(' ')}
+                    >
+                      <TableCell className="w-10">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => toggleSelect(cat.id)}
+                          className="rounded border-gray-300 accent-orange-500 cursor-pointer"
+                          aria-label={`Select ${cat.name}`}
+                        />
+                      </TableCell>
+                      <TableCell className="font-medium">{cat.name}</TableCell>
+                      <TableCell className="text-sm text-gray-500 max-w-xs truncate">
+                        {cat.description || <span className="italic text-gray-300">No description</span>}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={cat.isActive ? 'default' : 'secondary'}>
+                          {cat.isActive ? 'Active' : 'Inactive'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-gray-500">
+                        {formatTimestampDate(cat.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-right space-x-2">
+                        <button
+                          onClick={() => handleToggleActive(cat)}
+                          disabled={pendingToggleId === cat.id}
+                          className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                          title={cat.isActive ? 'Deactivate' : 'Activate'}
+                        >
+                          {pendingToggleId === cat.id ? '⏳' : cat.isActive ? '⏸' : '▶'}
+                        </button>
+                        <button
+                          onClick={() => openEdit(cat)}
+                          className="text-xs text-blue-600 hover:text-blue-800"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => openMergeDialog(new Set([cat.id]))}
+                          className="text-xs text-orange-600 hover:text-orange-800"
+                          title="Merge this category"
+                        >
+                          Merge
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
+
+          {/* Floating Selection Bar - appears when 1+ rows checked */}
+          {selectedIds.size > 0 && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-gray-900 text-white rounded-full px-5 py-3 shadow-2xl text-sm font-medium animate-in slide-in-from-bottom-4">
+              <span className="bg-orange-500 text-white rounded-full text-xs font-bold w-5 h-5 flex items-center justify-center">
+                {selectedIds.size}
+              </span>
+              <span>{selectedIds.size} categor{selectedIds.size > 1 ? 'ies' : 'y'} selected</span>
+              <div className="w-px h-4 bg-gray-600" />
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => openMergeDialog(selectedIds)}
+                disabled={selectedIds.size < 2}
+                className="bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full px-4 py-1.5 text-sm font-semibold transition-colors"
+              >
+                ⇄ Merge {selectedIds.size} Categories
+              </button>
+            </div>
+          )}
+          </>
         )}
 
         {/* Pagination */}
@@ -497,148 +549,151 @@ export default function CategoriesPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Merge Modal — Odoo-style */}
+        {/* Merge Dialog — Shopify/HubSpot-style checkbox list + survivor radio */}
         <Dialog open={showMergeDialog} onOpenChange={() => closeMerge()}>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
+          <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+            <DialogHeader className="flex-shrink-0">
               <DialogTitle className="flex items-center gap-2">
-                <span className="text-orange-500">⇄</span> Merge Categories
+                <span className="text-orange-500 text-lg">⇄</span>
+                Merge Categories
               </DialogTitle>
+              <p className="text-xs text-gray-400 mt-1">
+                Tick the categories to consolidate. Pick one as the <strong>survivor</strong> — the rest will be permanently deleted.
+              </p>
             </DialogHeader>
 
-            <div className="space-y-5 py-2">
+            {/* Search */}
+            <div className="flex-shrink-0 relative mt-2">
+              <span className="absolute left-3 top-2.5 text-gray-400 text-sm">🔍</span>
+              <input
+                type="text"
+                value={mergeDialogSearch}
+                onChange={e => setMergeDialogSearch(e.target.value)}
+                placeholder="Search categories…"
+                className="w-full border rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-200"
+                autoFocus
+              />
+            </div>
 
-              {/* SOURCE CHIPS */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                  Merge these (will be deleted) <span className="text-red-400">*</span>
-                </label>
-                <div className="min-h-[44px] border rounded-lg p-2 flex flex-wrap gap-1.5 bg-gray-50">
-                  {mergeSources.map(s => (
-                    <span
-                      key={s.id}
-                      className="inline-flex items-center gap-1 bg-orange-100 text-orange-800 border border-orange-200 rounded-md px-2.5 py-1 text-sm font-medium"
-                    >
-                      {s.name}
-                      <button
-                        onClick={() => removeSource(s.id)}
-                        className="ml-0.5 text-orange-400 hover:text-orange-700 text-xs font-bold leading-none"
-                        title="Remove"
-                      >✕</button>
-                    </span>
-                  ))}
-                  {/* Inline search input */}
-                  <div ref={sourceRef} className="relative flex-1 min-w-[160px]">
-                    <input
-                      type="text"
-                      value={sourceInput}
-                      onChange={e => { setSourceInput(e.target.value); setShowSourceDrop(true); }}
-                      onFocus={() => setShowSourceDrop(true)}
-                      placeholder={mergeSources.length === 0 ? 'Type to search categories…' : 'Add another…'}
-                      className="w-full bg-transparent border-none outline-none text-sm py-1 px-1 placeholder-gray-400"
-                    />
-                    {showSourceDrop && sourceDropOptions.length > 0 && (
-                      <div className="absolute top-full left-0 z-50 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
-                        {sourceDropOptions.map(c => (
-                          <button
-                            key={c.id}
-                            onMouseDown={e => { e.preventDefault(); addSource(c); }}
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-orange-50 hover:text-orange-800 border-b last:border-b-0"
-                          >
-                            {c.name}
-                            {!c.isActive && <span className="ml-2 text-xs text-gray-400">(inactive)</span>}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    {showSourceDrop && sourceInput.trim() && sourceDropOptions.length === 0 && (
-                      <div className="absolute top-full left-0 z-50 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-sm text-gray-400 text-center">
-                        No categories found
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* ARROW */}
-              <div className="flex items-center gap-3">
-                <div className="flex-1 border-t border-dashed border-gray-200" />
-                <div className="text-2xl text-gray-300">↓</div>
-                <div className="flex-1 border-t border-dashed border-gray-200" />
-              </div>
-
-              {/* TARGET COMBOBOX */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                  Into this (will be kept) <span className="text-red-400">*</span>
-                </label>
-                <div ref={targetRef} className="relative">
-                  <input
-                    type="text"
-                    value={targetInput}
-                    onChange={e => {
-                      setTargetInput(e.target.value);
-                      setMergeTarget(null);
-                      setShowTargetDrop(true);
-                    }}
-                    onFocus={() => setShowTargetDrop(true)}
-                    placeholder="Type to search target category…"
-                    className={`w-full border rounded-lg px-3 py-2.5 text-sm outline-none focus:ring-2 transition ${
-                      mergeTarget
-                        ? 'border-emerald-400 bg-emerald-50 text-emerald-800 font-medium focus:ring-emerald-200'
-                        : 'border-gray-300 bg-white focus:ring-blue-200 focus:border-blue-400'
-                    }`}
-                  />
-                  {mergeTarget && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-500 text-sm">✓</span>
-                  )}
-                  {showTargetDrop && targetDropOptions.length > 0 && (
-                    <div className="absolute top-full left-0 z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
-                      {targetDropOptions.map(c => (
-                        <button
-                          key={c.id}
-                          onMouseDown={e => { e.preventDefault(); selectTarget(c); }}
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b last:border-b-0 ${
-                            mergeTarget?.id === c.id ? 'bg-blue-50 text-blue-700 font-medium' : ''
-                          }`}
+            {/* Category list with checkboxes */}
+            <div className="flex-1 overflow-y-auto border rounded-lg min-h-0 mt-2">
+              {mergeDialogCategories.length === 0 ? (
+                <p className="text-center text-gray-400 text-sm py-8">No categories found</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-gray-50 border-b z-10">
+                    <tr>
+                      <th className="w-10 px-3 py-2">
+                        <input
+                          type="checkbox"
+                          checked={mergeDialogCategories.length > 0 && mergeDialogCategories.every(c => dialogCheckedIds.has(c.id))}
+                          ref={el => { if (el) el.indeterminate = mergeDialogCategories.some(c => dialogCheckedIds.has(c.id)) && !mergeDialogCategories.every(c => dialogCheckedIds.has(c.id)); }}
+                          onChange={() => {
+                            const allChecked = mergeDialogCategories.every(c => dialogCheckedIds.has(c.id));
+                            setDialogCheckedIds(prev => {
+                              const next = new Set(prev);
+                              mergeDialogCategories.forEach(c => allChecked ? next.delete(c.id) : next.add(c.id));
+                              return next;
+                            });
+                          }}
+                          className="rounded border-gray-300 accent-orange-500 cursor-pointer"
+                        />
+                      </th>
+                      <th className="text-left px-3 py-2 font-semibold text-gray-600">Category</th>
+                      <th className="text-left px-3 py-2 font-semibold text-gray-600">Status</th>
+                      <th className="w-28 px-3 py-2 text-center font-semibold text-emerald-700">Survivor ★</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mergeDialogCategories.map(cat => {
+                      const isChecked = dialogCheckedIds.has(cat.id);
+                      const isSurvivor = survivorId === cat.id;
+                      return (
+                        <tr
+                          key={cat.id}
+                          onClick={() => toggleDialogCheck(cat.id)}
+                          className={[
+                            'border-b cursor-pointer transition-colors',
+                            isSurvivor ? 'bg-emerald-50' : isChecked ? 'bg-orange-50' : 'hover:bg-gray-50',
+                          ].join(' ')}
                         >
-                          {c.name}
-                          {!c.isActive && <span className="ml-2 text-xs text-gray-400">(inactive)</span>}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {showTargetDrop && targetInput.trim() && targetDropOptions.length === 0 && (
-                    <div className="absolute top-full left-0 z-50 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-sm text-gray-400 text-center">
-                      No categories found
-                    </div>
-                  )}
-                </div>
-              </div>
+                          <td className="px-3 py-2.5" onClick={e => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleDialogCheck(cat.id)}
+                              className="rounded border-gray-300 accent-orange-500 cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={`font-medium ${
+                              isSurvivor ? 'text-emerald-700' : isChecked ? 'text-orange-700' : 'text-gray-800'
+                            }`}>
+                              {cat.name}
+                            </span>
+                            {isSurvivor && (
+                              <span className="ml-2 text-xs bg-emerald-100 text-emerald-700 rounded-full px-2 py-0.5 font-semibold">Keep</span>
+                            )}
+                            {isChecked && !isSurvivor && (
+                              <span className="ml-2 text-xs bg-orange-100 text-orange-600 rounded-full px-2 py-0.5">Delete</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              cat.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                            }`}>
+                              {cat.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-center" onClick={e => e.stopPropagation()}>
+                            {isChecked && (
+                              <input
+                                type="radio"
+                                name="survivor"
+                                checked={isSurvivor}
+                                onChange={() => setSurvivorId(cat.id)}
+                                className="accent-emerald-600 cursor-pointer w-4 h-4"
+                                title="This category survives — all others are deleted"
+                              />
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
 
-              {/* SUMMARY / WARNING */}
-              {mergeSources.length > 0 && mergeTarget && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
-                  <p className="text-amber-800 font-medium mb-1">⚠️ This action cannot be undone</p>
-                  <p className="text-amber-700">
-                    All products from{' '}
-                    <strong>{mergeSources.map(s => `"${s.name}"`).join(', ')}</strong>{' '}
-                    will be moved to <strong>"{mergeTarget.name}"</strong>.
-                    {mergeSources.length > 1 ? ` ${mergeSources.length} categories` : ' The source category'} will be permanently deleted.
-                  </p>
+            {/* Summary strip */}
+            <div className="flex-shrink-0 mt-3 space-y-2">
+              {dialogCheckedIds.size >= 2 && !survivorId && (
+                <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span>⚠️</span>
+                  <span>Pick the <strong>Survivor ★</strong> — click a radio button on the category to keep.</span>
                 </div>
               )}
-
-              {/* PROGRESS */}
+              {dialogCheckedIds.size >= 2 && survivorId && !mergeProgress && (
+                <div className="text-sm text-gray-600 bg-gray-50 border rounded-lg px-3 py-2">
+                  <span className="text-emerald-700 font-semibold">★ Keeping:</span>{' '}
+                  {allCategories.find(c => c.id === survivorId)?.name}
+                  {'  '}
+                  <span className="text-orange-600 font-semibold">✕ Deleting:</span>{' '}
+                  {[...dialogCheckedIds].filter(id => id !== survivorId).map(id => allCategories.find(c => c.id === id)?.name).filter(Boolean).join(', ')}
+                </div>
+              )}
               {mergeProgress && (
-                <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
                   <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full flex-shrink-0" />
                   {mergeProgress}
                 </div>
               )}
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="flex-shrink-0">
+              <span className="text-xs text-gray-400 mr-auto">
+                {dialogCheckedIds.size} selected
+              </span>
               <button
                 onClick={closeMerge}
                 disabled={mergeMutation.isPending}
@@ -648,12 +703,12 @@ export default function CategoriesPage() {
               </button>
               <button
                 onClick={handleMerge}
-                disabled={!mergeTarget || mergeSources.length === 0 || mergeMutation.isPending}
-                className="px-4 py-2 bg-orange-600 text-white rounded-md text-sm hover:bg-orange-700 disabled:opacity-50 font-medium"
+                disabled={dialogCheckedIds.size < 2 || !survivorId || mergeMutation.isPending}
+                className="px-4 py-2 bg-orange-600 text-white rounded-md text-sm hover:bg-orange-700 disabled:opacity-50 font-semibold"
               >
                 {mergeMutation.isPending
                   ? 'Merging…'
-                  : `Merge & Delete ${mergeSources.length > 1 ? `${mergeSources.length} Sources` : 'Source'}`}
+                  : `Merge & Keep "${allCategories.find(c => c.id === survivorId)?.name ?? '…'}"`}
               </button>
             </DialogFooter>
           </DialogContent>
