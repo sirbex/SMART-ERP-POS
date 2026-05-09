@@ -13,6 +13,7 @@ import {
   useCategories,
   useCreateCategory,
   useUpdateCategory,
+  useMergeCategory,
 } from '../../hooks/usePricing';
 import {
   Table,
@@ -77,6 +78,11 @@ export default function CategoriesPage() {
   // ── Mutations ──
   const createMutation = useCreateCategory();
   const updateMutation = useUpdateCategory();
+  const mergeMutation = useMergeCategory();
+
+  // Fetch all categories (no pagination) for merge target dropdown
+  const { data: allCategoriesData } = useCategories({ limit: 500 });
+  const allCategories = allCategoriesData?.data ?? [];
 
   // ── Per-item loading (UX2) ──
   const [pendingToggleId, setPendingToggleId] = useState<string | null>(null);
@@ -86,6 +92,42 @@ export default function CategoriesPage() {
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null);
   const [formData, setFormData] = useState<CreateProductCategoryInput>({ name: '', description: '' });
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
+  // ── Merge Modal State ──
+  const [mergingSource, setMergingSource] = useState<ProductCategory | null>(null);
+  const [mergeTargetId, setMergeTargetId] = useState<string>('');
+  const [mergeSearch, setMergeSearch] = useState<string>('');
+
+  const openMerge = useCallback((cat: ProductCategory) => {
+    setMergingSource(cat);
+    setMergeTargetId('');
+    setMergeSearch('');
+  }, []);
+
+  const closeMerge = useCallback(() => {
+    setMergingSource(null);
+    setMergeTargetId('');
+    setMergeSearch('');
+  }, []);
+
+  const mergeTargetOptions = useMemo(() => {
+    if (!mergingSource) return [];
+    const q = mergeSearch.toLowerCase();
+    return allCategories.filter(
+      c => c.id !== mergingSource.id && c.name.toLowerCase().includes(q)
+    ).sort((a, b) => a.name.localeCompare(b.name));
+  }, [allCategories, mergingSource, mergeSearch]);
+
+  const handleMerge = useCallback(async () => {
+    if (!mergingSource || !mergeTargetId) return;
+    try {
+      const result = await mergeMutation.mutateAsync({ targetId: mergeTargetId, sourceId: mergingSource.id });
+      toast.success(`Merged "${mergingSource.name}" — ${result.movedProducts} products moved`);
+      closeMerge();
+    } catch (err: unknown) {
+      toast.error(extractApiError(err, 'Merge failed'));
+    }
+  }, [mergingSource, mergeTargetId, mergeMutation, closeMerge]);
 
   // ── Form Handlers ──
   const openCreate = useCallback(() => {
@@ -276,6 +318,13 @@ export default function CategoriesPage() {
                       >
                         Edit
                       </button>
+                      <button
+                        onClick={() => openMerge(cat)}
+                        className="text-xs text-orange-600 hover:text-orange-800"
+                        title="Merge this category into another"
+                      >
+                        Merge
+                      </button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -366,6 +415,77 @@ export default function CategoriesPage() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 {isMutating ? 'Saving...' : editingCategory ? 'Update' : 'Create'}
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Merge Modal */}
+        <Dialog open={!!mergingSource} onOpenChange={() => closeMerge()}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Merge Category</DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div className="bg-orange-50 border border-orange-200 rounded-md p-3 text-sm text-orange-800">
+                <p className="font-medium">"{mergingSource?.name}"</p>
+                <p className="mt-1 text-xs text-orange-600">
+                  All products in this category will be moved to the selected target, then this category will be deleted.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Merge into <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={mergeSearch}
+                  onChange={e => { setMergeSearch(e.target.value); setMergeTargetId(''); }}
+                  placeholder="Search target category..."
+                  className="w-full border rounded-md px-3 py-2 text-sm mb-2"
+                  autoFocus
+                />
+                <div className="border rounded-md max-h-48 overflow-y-auto">
+                  {mergeTargetOptions.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-3 text-center">No categories found</p>
+                  ) : (
+                    mergeTargetOptions.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => setMergeTargetId(c.id)}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b last:border-b-0 ${
+                          mergeTargetId === c.id ? 'bg-blue-50 text-blue-700 font-medium' : ''
+                        }`}
+                      >
+                        {c.name}
+                        {!c.isActive && <span className="ml-2 text-xs text-gray-400">(inactive)</span>}
+                      </button>
+                    ))
+                  )}
+                </div>
+                {mergeTargetId && (
+                  <p className="text-xs text-blue-600 mt-1">
+                    ✓ Selected: {allCategories.find(c => c.id === mergeTargetId)?.name}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <button
+                onClick={closeMerge}
+                className="px-4 py-2 border rounded-md text-sm hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMerge}
+                disabled={!mergeTargetId || mergeMutation.isPending}
+                className="px-4 py-2 bg-orange-600 text-white rounded-md text-sm hover:bg-orange-700 disabled:opacity-50"
+              >
+                {mergeMutation.isPending ? 'Merging...' : 'Merge & Delete Source'}
               </button>
             </DialogFooter>
           </DialogContent>

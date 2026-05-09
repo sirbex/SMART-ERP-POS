@@ -88,6 +88,17 @@ export function useUpdateCategory() {
   });
 }
 
+export function useMergeCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ targetId, sourceId }: { targetId: string; sourceId: string }) =>
+      pricingApi.mergeCategory(targetId, sourceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: pricingKeys.categories() });
+    },
+  });
+}
+
 // ============================================================================
 // Price Rules
 // ============================================================================

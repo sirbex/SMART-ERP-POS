@@ -141,6 +141,19 @@ export const updateCategory = asyncHandler(async (req: Request, res: Response) =
     res.json({ success: true, data: category, message: 'Category updated' });
 });
 
+/**
+ * POST /api/pricing/categories/:targetId/merge
+ * Body: { sourceId: string }
+ * Moves all products + price_rules from sourceId → targetId, then deletes sourceId.
+ */
+export const mergeCategory = asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const { id: targetId } = UuidParamSchema.parse(req.params);
+    const { sourceId } = z.object({ sourceId: z.string().uuid() }).parse(req.body);
+    const result = await pricingEngine.mergeCategories(pool, targetId, sourceId);
+    res.json({ success: true, data: result, message: `Merged into category (${result.movedProducts} products moved)` });
+});
+
 // ============================================================================
 // PRICE RULES
 // ============================================================================

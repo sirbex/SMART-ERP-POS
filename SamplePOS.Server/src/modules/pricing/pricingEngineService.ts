@@ -608,6 +608,35 @@ export async function updateCategory(
     return normaliseProductCategory(row);
 }
 
+/**
+ * Merge sourceId category into targetId.
+ * All products and price_rules referencing sourceId are moved to targetId,
+ * then the source category is deleted.
+ */
+export async function mergeCategories(
+    pool: Pool | PoolClient,
+    targetId: string,
+    sourceId: string,
+): Promise<{ movedProducts: number }> {
+    if (targetId === sourceId) {
+        throw new ConflictError('Cannot merge a category into itself');
+    }
+    const target = await repo.getCategoryById(pool, targetId);
+    if (!target) throw new NotFoundError(`Target category ${targetId}`);
+    const source = await repo.getCategoryById(pool, sourceId);
+    if (!source) throw new NotFoundError(`Source category ${sourceId}`);
+
+    const movedProducts = await repo.mergeCategories(pool, targetId, sourceId);
+    logger.info('Product categories merged', {
+        targetId,
+        targetName: target.name,
+        sourceId,
+        sourceName: source.name,
+        movedProducts,
+    });
+    return { movedProducts };
+}
+
 // ============================================================================
 // PRICE RULES CRUD
 // ============================================================================

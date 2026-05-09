@@ -82,6 +82,11 @@ export const pricingApi = {
     return response.data.data;
   },
 
+  async mergeCategory(targetId: string, sourceId: string): Promise<{ movedProducts: number }> {
+    const response = await apiClient.post(`/pricing/categories/${targetId}/merge`, { sourceId });
+    return response.data.data;
+  },
+
   // ── Price Rules ──────────────────────────────────────
 
   async listRules(filters?: PriceRuleFilters): Promise<PaginatedResponse<PriceRule>> {

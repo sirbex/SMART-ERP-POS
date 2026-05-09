@@ -190,6 +190,45 @@ export async function updateCategory(
     return res.rows[0] ?? null;
 }
 
+/**
+ * Merge sourceId category into targetId:
+ * 1. Reassign all products (FK + denormalized text column)
+ * 2. Reassign all price_rules
+ * 3. Delete the source category
+ * Returns the number of products moved.
+ */
+export async function mergeCategories(
+    client: Pool | PoolClient,
+    targetId: string,
+    sourceId: string,
+): Promise<number> {
+    // Fetch target name for the denormalized products.category column
+    const tgtRes = await client.query(
+        `SELECT name FROM product_categories WHERE id = $1`,
+        [targetId],
+    );
+    const targetName: string = tgtRes.rows[0]?.name ?? '';
+
+    // Reassign products
+    const prodRes = await client.query(
+        `UPDATE products
+         SET category_id = $1, category = $2
+         WHERE category_id = $3`,
+        [targetId, targetName, sourceId],
+    );
+
+    // Reassign price_rules (avoid ON DELETE CASCADE wiping them)
+    await client.query(
+        `UPDATE price_rules SET category_id = $1 WHERE category_id = $2`,
+        [targetId, sourceId],
+    );
+
+    // Delete the now-empty source category
+    await client.query(`DELETE FROM product_categories WHERE id = $1`, [sourceId]);
+
+    return prodRes.rowCount ?? 0;
+}
+
 // ============================================================================
 // PRICE RULES CRUD
 // ============================================================================

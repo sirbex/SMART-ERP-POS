@@ -15,6 +15,7 @@ import {
     getCategoryById,
     createCategory,
     updateCategory,
+    mergeCategory,
     listPriceRules,
     getPriceRuleById,
     createPriceRule,
@@ -40,6 +41,7 @@ router.get('/categories', authenticate, listCategories);
 router.get('/categories/:id', authenticate, getCategoryById);
 router.post('/categories', authenticate, requirePermission('pricing.manage'), createCategory);
 router.put('/categories/:id', authenticate, requirePermission('pricing.manage'), updateCategory);
+router.post('/categories/:id/merge', authenticate, requirePermission('pricing.manage'), mergeCategory);
 
 // ── Price Rules ──
 router.get('/rules', authenticate, listPriceRules);
