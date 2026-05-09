@@ -76,12 +76,16 @@ export interface ProductHistoryItem {
     paymentReceived?: number;
     changeAmount?: number;
     totalAmount?: number;
+    batchStatus?: string;
+    batchRemainingQty?: number;
 
     // Stock movement fields
     movementId?: string;
     referenceType?: string;
     referenceId?: string;
     notes?: string;
+    // Actor — the user who performed this action
+    actorName?: string;
   };
 }
 
@@ -239,4 +243,37 @@ export function formatHistoryReference(item: ProductHistoryItem): string {
     default:
       return ref.notes || ref.referenceType || '';
   }
+}
+
+/**
+ * Get the actor (user) name and label for a history event
+ */
+export function getHistoryActor(item: ProductHistoryItem): { label: string; name: string } | null {
+  const labels: Record<ProductHistoryType, string> = {
+    GOODS_RECEIPT: 'Received by',
+    SALE: 'Sold by',
+    ADJUSTMENT_IN: 'Adjusted by',
+    ADJUSTMENT_OUT: 'Adjusted by',
+    TRANSFER_IN: 'Transferred by',
+    TRANSFER_OUT: 'Transferred by',
+    RETURN: 'Returned by',
+    DAMAGE: 'Recorded by',
+    EXPIRY: 'Recorded by',
+    OPENING_BALANCE: 'Set by',
+  };
+
+  let name: string | undefined;
+  switch (item.type) {
+    case 'GOODS_RECEIPT':
+      name = item.reference?.receivedByName;
+      break;
+    case 'SALE':
+      name = item.reference?.soldByName;
+      break;
+    default:
+      name = item.reference?.actorName;
+  }
+
+  if (!name) return null;
+  return { label: labels[item.type] ?? 'By', name };
 }

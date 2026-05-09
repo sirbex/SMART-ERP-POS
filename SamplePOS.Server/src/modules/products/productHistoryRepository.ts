@@ -43,8 +43,8 @@ export const productHistoryRepository = {
         ROUND(gri.received_quantity::numeric, 2) AS quantity_change,
         ROUND(gri.cost_price::numeric, 2) AS unit_cost,
         ROUND((gri.received_quantity * gri.cost_price)::numeric, 2) AS total_cost,
-        gri.batch_number,
-        gri.expiry_date,
+        COALESCE(gri.batch_number, ib.batch_number) AS batch_number,
+        COALESCE(gri.expiry_date, ib.expiry_date) AS expiry_date,
         gr.id AS gr_id,
         gr.receipt_number AS gr_number,
         gr.status AS gr_status,
@@ -61,7 +61,9 @@ export const productHistoryRepository = {
         ROUND((gri.cost_price - COALESCE(poi.po_unit_price, gri.cost_price))::numeric, 2) AS cost_variance,
         gri.uom_id,
         uoms.name AS uom_name,
-        uoms.symbol AS uom_symbol
+        uoms.symbol AS uom_symbol,
+        ib.status AS batch_status,
+        ROUND(ib.remaining_quantity::numeric, 2) AS batch_remaining_qty
       FROM goods_receipt_items gri
       JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
       LEFT JOIN purchase_orders po ON po.id = gr.purchase_order_id
@@ -69,6 +71,7 @@ export const productHistoryRepository = {
       LEFT JOIN users u ON u.id = gr.received_by_id
       LEFT JOIN poi ON poi.purchase_order_id = gr.purchase_order_id AND poi.product_id = gri.product_id
       LEFT JOIN uoms ON uoms.id = gri.uom_id
+      LEFT JOIN inventory_batches ib ON ib.goods_receipt_item_id = gri.id
       WHERE ${where.join(' AND ')}
       ORDER BY gri.created_at DESC`;
 
@@ -115,12 +118,17 @@ export const productHistoryRepository = {
         ROUND(s.total_amount::numeric, 2) AS total_amount,
         si.uom_id,
         uoms.name AS uom_name,
-        uoms.symbol AS uom_symbol
+        uoms.symbol AS uom_symbol,
+        ib.batch_number,
+        ib.expiry_date,
+        ib.status AS batch_status,
+        ROUND(ib.remaining_quantity::numeric, 2) AS batch_remaining_qty
       FROM sale_items si
       JOIN sales s ON s.id = si.sale_id
       LEFT JOIN customers c ON c.id = s.customer_id
       LEFT JOIN users u ON u.id = s.cashier_id
       LEFT JOIN uoms ON uoms.id = si.uom_id
+      LEFT JOIN inventory_batches ib ON ib.id = si.batch_id
       WHERE ${where.join(' AND ')}
       ORDER BY si.created_at DESC`;
 
@@ -169,10 +177,12 @@ export const productHistoryRepository = {
         sm.notes,
         sm.uom_id,
         uoms.name AS uom_name,
-        uoms.symbol AS uom_symbol
+        uoms.symbol AS uom_symbol,
+        COALESCE(u.full_name, u.email) AS actor_name
       FROM stock_movements sm
       LEFT JOIN inventory_batches b ON b.id = sm.batch_id
       LEFT JOIN uoms ON uoms.id = sm.uom_id
+      LEFT JOIN users u ON u.id = sm.created_by_id
       WHERE ${where.join(' AND ')}
       ORDER BY sm.created_at DESC`;
 

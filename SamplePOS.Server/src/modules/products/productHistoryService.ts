@@ -77,6 +77,8 @@ export const productHistoryService = {
           poUnitPrice: r.po_unit_price ?? undefined,
           qtyVariance: r.qty_variance ?? undefined,
           costVariance: r.cost_variance ?? undefined,
+          batchStatus: r.batch_status ?? undefined,
+          batchRemainingQty: r.batch_remaining_qty != null ? new Decimal(r.batch_remaining_qty).toNumber() : undefined,
         },
       });
     }
@@ -89,6 +91,8 @@ export const productHistoryService = {
         unitPrice: r.unit_price ?? undefined,
         lineTotal: r.line_total ?? undefined,
         unitCost: r.cost_price ?? undefined,
+        batchNumber: r.batch_number ?? null,
+        expiryDate: r.expiry_date ?? null,
         uomId: r.uom_id ?? undefined,
         uomName: r.uom_name ?? undefined,
         uomSymbol: r.uom_symbol ?? undefined,
@@ -103,6 +107,8 @@ export const productHistoryService = {
           paymentReceived: r.payment_received ?? undefined,
           changeAmount: r.change_amount ?? undefined,
           totalAmount: r.total_amount ?? undefined,
+          batchStatus: r.batch_status ?? undefined,
+          batchRemainingQty: r.batch_remaining_qty != null ? new Decimal(r.batch_remaining_qty).toNumber() : undefined,
         },
       });
     }
@@ -122,6 +128,7 @@ export const productHistoryService = {
           referenceType: r.reference_type ?? undefined,
           referenceId: r.reference_id ?? undefined,
           notes: r.notes ?? undefined,
+          actorName: r.actor_name ?? undefined,
         },
       } as unknown as ProductHistoryItem);
     }

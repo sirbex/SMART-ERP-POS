@@ -19,6 +19,7 @@ import {
   formatQuantityChange,
   isExpiringSoon,
   formatHistoryReference,
+  getHistoryActor,
   type ProductHistoryType
 } from '../../hooks/useProductHistory';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
@@ -1699,6 +1700,7 @@ export default function ProductsPage() {
                   {historyData.items.map((item, idx) => {
                     const variant = getHistoryTypeVariant(item.type);
                     const expiring = isExpiringSoon(item.expiryDate);
+                    const actor = getHistoryActor(item);
 
                     return (
                       <div
@@ -1712,6 +1714,17 @@ export default function ProductsPage() {
                               <span className={`px-2 py-1 rounded text-xs font-medium ${variant.bgColor} ${variant.color}`}>
                                 {variant.label}
                               </span>
+
+                              {/* Actor chip — who performed this action */}
+                              {actor && (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-slate-100 text-slate-700">
+                                  <svg className="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                                    <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                                  </svg>
+                                  <span className="text-slate-500">{actor.label}:</span>
+                                  <span className="font-semibold">{actor.name}</span>
+                                </span>
+                              )}
 
                               {item.batchNumber && (
                                 <span className="px-2 py-1 rounded text-xs font-medium bg-purple-100 text-purple-700">
@@ -1790,6 +1803,15 @@ export default function ProductsPage() {
                                       <span className="text-gray-500">Cost Var:</span> {formatCurrency(item.reference.costVariance)}
                                     </div>
                                   )}
+                                  {item.batchNumber && (
+                                    <div><span className="text-gray-500">Batch #:</span> <span className="font-medium text-purple-700">{item.batchNumber}</span></div>
+                                  )}
+                                  {item.reference.batchStatus && (
+                                    <div><span className="text-gray-500">Batch Status:</span> {item.reference.batchStatus}</div>
+                                  )}
+                                  {typeof item.reference.batchRemainingQty === 'number' && (
+                                    <div><span className="text-gray-500">Batch Remaining:</span> {item.reference.batchRemainingQty} {item.uomName || fallbackUom}</div>
+                                  )}
                                 </div>
                               );
                             })()}
@@ -1810,6 +1832,43 @@ export default function ProductsPage() {
                                 )}
                                 {typeof item.reference.changeAmount === 'number' && (
                                   <div><span className="text-gray-500">Change:</span> {formatCurrency(item.reference.changeAmount)}</div>
+                                )}
+                                {item.batchNumber && (
+                                  <div><span className="text-gray-500">Batch:</span> <span className="font-medium text-purple-700">{item.batchNumber}</span></div>
+                                )}
+                                {item.expiryDate && (
+                                  <div className={isExpiringSoon(item.expiryDate) ? 'text-red-700 font-medium' : ''}>
+                                    <span className="text-gray-500">Expiry:</span> {formatDisplayDate(item.expiryDate)}
+                                  </div>
+                                )}
+                                {item.reference.batchStatus && (
+                                  <div><span className="text-gray-500">Batch Status:</span> {item.reference.batchStatus}</div>
+                                )}
+                                {typeof item.reference.batchRemainingQty === 'number' && (
+                                  <div><span className="text-gray-500">Batch Remaining:</span> {item.reference.batchRemainingQty}</div>
+                                )}
+                              </div>
+                            )}
+
+                            {/* Stock Movement Details (adjustments, transfers, returns, etc.) */}
+                            {item.reference && !['GOODS_RECEIPT', 'SALE'].includes(item.type) && (
+                              <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs text-gray-600">
+                                {item.batchNumber && (
+                                  <div><span className="text-gray-500">Batch:</span> <span className="font-medium text-purple-700">{item.batchNumber}</span></div>
+                                )}
+                                {item.expiryDate && (
+                                  <div className={isExpiringSoon(item.expiryDate) ? 'text-red-700 font-medium' : ''}>
+                                    <span className="text-gray-500">Expiry:</span> {formatDisplayDate(item.expiryDate)}
+                                  </div>
+                                )}
+                                {item.reference.referenceType && (
+                                  <div><span className="text-gray-500">Ref Type:</span> {item.reference.referenceType}</div>
+                                )}
+                                {item.reference.referenceId && (
+                                  <div><span className="text-gray-500">Ref ID:</span> {item.reference.referenceId.slice(0, 8)}…</div>
+                                )}
+                                {item.reference.notes && (
+                                  <div className="col-span-2 md:col-span-4"><span className="text-gray-500">Notes:</span> {item.reference.notes}</div>
                                 )}
                               </div>
                             )}

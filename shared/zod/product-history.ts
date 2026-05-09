@@ -48,6 +48,11 @@ export const ProductHistoryReferenceSchema = z.object({
   referenceType: z.string().optional(),
   referenceId: z.string().optional(),
   notes: z.string().optional(),
+  // Actor — user who performed this action (for all movement types)
+  actorName: z.string().optional(),
+  // Batch context on sale items
+  batchStatus: z.string().optional(),
+  batchRemainingQty: z.number().optional(),
 }).strict();
 
 export const ProductHistoryItemSchema = z.object({
