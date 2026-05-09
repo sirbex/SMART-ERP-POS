@@ -11,6 +11,7 @@ import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import Layout from '../../components/Layout';
 import {
   useCategories,
+  useAllCategories,
   useCreateCategory,
   useUpdateCategory,
   useMergeCategory,
@@ -80,9 +81,14 @@ export default function CategoriesPage() {
   const updateMutation = useUpdateCategory();
   const mergeMutation = useMergeCategory();
 
-  // Fetch all categories (no pagination) for merge dropdowns
-  const { data: allCategoriesData } = useCategories({ limit: 500 });
-  const allCategories = allCategoriesData?.data ?? [];
+  // Fetch all categories (staleTime:0) so the merge dialog always has current data.
+  // Falls back to the current visible page while loading, so the list is never empty.
+  const { data: allCategoriesData } = useAllCategories();
+  const allCategories = useMemo(() => {
+    const fromAll = allCategoriesData?.data ?? [];
+    if (fromAll.length > 0) return fromAll;
+    return categories; // fallback: current page data (user selected from here anyway)
+  }, [allCategoriesData, categories]);
 
   // ── Per-item loading (UX2) ──
   const [pendingToggleId, setPendingToggleId] = useState<string | null>(null);

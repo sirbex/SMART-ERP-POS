@@ -58,6 +58,15 @@ export function useCategories(filters: CategoryFilters = {}) {
   });
 }
 
+/** Fetches all categories with staleTime:0 — always current data for merge dialog */
+export function useAllCategories() {
+  return useQuery({
+    queryKey: [...pricingKeys.categories(), 'all'] as const,
+    queryFn: () => pricingApi.listCategories({ limit: 500 }),
+    staleTime: 0,
+  });
+}
+
 export function useCategoryDetail(id: string) {
   return useQuery({
     queryKey: pricingKeys.categoryDetail(id),
