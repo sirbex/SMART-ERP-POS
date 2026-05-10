@@ -17,10 +17,11 @@ const roundingMap: Record<RoundingMode, number> = {
 };
 
 /**
- * Compute MUoM-derived unit costs and selling prices from a base cost (e.g., carton cost).
+ * Compute MUoM-derived unit costs and selling prices from a base-unit cost.
  *
  * Conventions:
- * - Each unit factor is a fraction of the base UoM (carton). costForUnit = baseCost * factor.
+ * - Each factor is the number of base units represented by the display UoM.
+ *   Example: base TABLET, PACKET factor 12 => packetCost = baseCost * 12.
  * - Selling price = unitCost * (priceMultiplierOverride ?? defaultMultiplier).
  * - If a priceOverride is provided, it takes precedence and usedMultiplier is reported as 1.
  * - Values are rounded to currencyDecimals with roundingMode (UGX default: 0 decimals, HALF_UP).
@@ -82,28 +83,28 @@ export function computeUomPrices(input: ComputeUomPricesInput): ComputeUomPrices
 }
 
 /**
- * Helper for defining common carton-based MUoMs using counts.
- * Provide counts of components per carton to derive fractional factors automatically.
+ * Helper for defining common pack hierarchies using the smallest stock unit as base.
  *
  * Example:
- * makeCartonUoms({ cartons: 1, halfCartons: 2, boxesPerCarton: 10, piecesPerCarton: 120 })
- * returns factors: CARTON(1), HALF_CARTON(0.5), BOX(0.1), PIECE(1/120)
+ * makeCartonUoms({ includeHalfCarton: true, boxesPerCarton: 10, piecesPerCarton: 120 })
+ * returns factors: PIECE(1), BOX(12), HALF_CARTON(60), CARTON(120)
  */
 export function makeCartonUoms(options: {
   includeHalfCarton?: boolean;
-  boxesPerCarton?: number; // e.g., 10 boxes in a carton => factor 0.1
-  piecesPerCarton?: number; // e.g., 120 pieces in a carton => factor 1/120
+  boxesPerCarton?: number; // e.g., 10 boxes in a carton
+  piecesPerCarton?: number; // e.g., 120 pieces in a carton
 }) {
   const result: { name: string; factor: number }[] = [];
-  result.push({ name: 'CARTON', factor: 1 });
-  if (options.includeHalfCarton) {
-    result.push({ name: 'HALF_CARTON', factor: 0.5 });
-  }
+  const piecesPerCarton = options.piecesPerCarton && options.piecesPerCarton > 0
+    ? options.piecesPerCarton
+    : 1;
+  result.push({ name: 'PIECE', factor: 1 });
   if (options.boxesPerCarton && options.boxesPerCarton > 0) {
-    result.push({ name: 'BOX', factor: 1 / options.boxesPerCarton });
+    result.push({ name: 'BOX', factor: piecesPerCarton / options.boxesPerCarton });
   }
-  if (options.piecesPerCarton && options.piecesPerCarton > 0) {
-    result.push({ name: 'PIECE', factor: 1 / options.piecesPerCarton });
+  if (options.includeHalfCarton) {
+    result.push({ name: 'HALF_CARTON', factor: piecesPerCarton / 2 });
   }
+  result.push({ name: 'CARTON', factor: piecesPerCarton });
   return result;
 }

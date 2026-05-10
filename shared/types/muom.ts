@@ -1,6 +1,6 @@
 // Multi-Unit of Measure (MUoM) shared types
-// These types define a simple, systematic way to derive unit costs and selling prices
-// for multiple units of measure based on the cost of a whole carton (or any chosen base UoM).
+// Canonical rule: factors are always stored from larger unit to smaller/base unit.
+// Example: 1 PACKET = 12 TABLET, so PACKET factor = 12 while TABLET = 1.
 
 export type RoundingMode =
   | 'ROUND_HALF_UP'
@@ -9,20 +9,19 @@ export type RoundingMode =
   | 'ROUND_UP'
   | 'ROUND_DOWN';
 
-// Defines an individual UoM for a product, expressed as a fraction of the base UoM.
-// Example: if base is CARTON then:
-// - CARTON factor = 1
-// - HALF_CARTON factor = 0.5
-// - BOX factor = 0.1 (if 10 boxes per carton)
-// - PIECE factor = 1/120 (if 120 pieces per carton)
+// Defines an individual UoM for a product, expressed as its factor to the base UoM.
+// Example: if base is TABLET then:
+// - TABLET factor = 1
+// - BOX factor = 12
+// - CARTON factor = 120
 export interface MuoMUnit {
   // Link to UoM master record (shared/zod/uom.ts) if available
   uomId?: string;
   // Human-friendly label when uomId is not present
   name?: string;
 
-  // Fraction of the base UoM represented by this unit. Must be > 0.
-  // costForThisUom = baseCartonCost * factor
+  // Count of base units represented by this display UoM. Must be >= 1.
+  // costForThisUom = baseUnitCost * factor
   factor: number;
 
   // Optional per-UoM multiplier applied on cost to derive selling price.
@@ -33,18 +32,18 @@ export interface MuoMUnit {
   // If present, this price takes precedence over calculated price.
   priceOverride?: number | null;
 
-  // If present, this cost takes precedence over calculated cost (baseCost * factor).
+  // If present, this cost takes precedence over calculated cost (baseUnitCost * factor).
   costOverride?: number | null;
 }
 
 export interface ComputeUomPricesInput {
-  // The cost of ONE base UoM (e.g., cost of a whole carton)
+  // The cost of ONE base UoM (e.g., one tablet / one piece)
   baseCost: number; // currency amount
 
-  // A display name for the base UoM (e.g., 'CARTON') — optional helper for reporting
+  // A display name for the base UoM (e.g., 'TABLET') — optional helper for reporting
   baseUomName?: string;
 
-  // UoMs defined as fractions of the base
+  // UoMs defined by their larger->base factor
   units: MuoMUnit[];
 
   // Default multiplier applied when a unit does not specify an override.
@@ -59,7 +58,7 @@ export interface ComputeUomPricesInput {
 export interface UomPriceRow {
   uomId?: string;
   name?: string;
-  factor: number; // fraction of base
+  factor: number; // larger/display unit -> base factor
   unitCost: number; // derived cost for this UoM
   sellingPrice: number; // final price after multiplier/override
   usedMultiplier: number; // the multiplier that produced sellingPrice (or 1 if override used)

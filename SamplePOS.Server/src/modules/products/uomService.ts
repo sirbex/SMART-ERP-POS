@@ -6,9 +6,144 @@ import * as repo from './uomRepository.js';
 import * as auditService from '../audit/auditService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import { pool as globalPool } from '../../db/pool.js';
-import { ConflictError } from '../../middleware/errorHandler.js';
+import { ConflictError, ValidationError } from '../../middleware/errorHandler.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import type pg from 'pg';
+import {
+  assertCanonicalUomGraph,
+  canonicalizeUomName,
+  resolveFactorToBase,
+  type ItemUomConversion,
+} from './uomGraphService.js';
+
+type Queryable = pg.Pool | pg.PoolClient;
+
+async function assertNoCanonicalDuplicateMeaning(
+  productId: string,
+  uomId: string,
+  db: Queryable,
+  currentProductUomId?: string,
+): Promise<void> {
+  const targetUom = await repo.getUomById(uomId, db);
+  if (!targetUom) {
+    throw new ValidationError('Selected unit of measure does not exist.');
+  }
+
+  const targetCanonical = canonicalizeUomName(targetUom.name);
+  const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  const duplicate = productUoms.find((uom) => {
+    if (currentProductUomId && uom.id === currentProductUomId) return false;
+    return canonicalizeUomName(uom.uomName) === targetCanonical;
+  });
+
+  if (duplicate) {
+    throw new ConflictError(
+      `Unit ${targetUom.name} duplicates existing canonical unit ${duplicate.uomName}. Use the canonical unit instead.`,
+    );
+  }
+}
+
+async function syncCanonicalConversion(
+  productId: string,
+  uomId: string,
+  conversionFactor: number,
+  isDefault: boolean,
+  db: Queryable,
+): Promise<void> {
+  const currentBaseUomId = await repo.getProductBaseUomId(productId, db);
+
+  if (isDefault) {
+    if (currentBaseUomId && currentBaseUomId !== uomId) {
+      throw new ConflictError(
+        'Changing the base stock UoM is blocked by canonical MUoM rules. Create a new item instead of rebasing a live item.',
+      );
+    }
+
+    if (!currentBaseUomId) {
+      await repo.setProductBaseUomId(productId, uomId, db);
+    }
+
+    await repo.deleteItemUomConversionBySource(productId, uomId, db);
+    return;
+  }
+
+  const baseUomId = currentBaseUomId;
+  if (!baseUomId) {
+    throw new ValidationError('Item must have a base stock UoM before adding canonical conversions.');
+  }
+
+  const existingConversions = await repo.listItemUomConversions(productId, db);
+  const nextConversions: ItemUomConversion[] = existingConversions
+    .filter((conversion) => conversion.fromUomId !== uomId)
+    .map((conversion) => ({
+      itemId: conversion.itemId,
+      fromUomId: conversion.fromUomId,
+      toUomId: conversion.toUomId,
+      factor: conversion.factor,
+      isCanonical: conversion.isCanonical,
+    }));
+
+  nextConversions.push({
+    itemId: productId,
+    fromUomId: uomId,
+    toUomId: baseUomId,
+    factor: conversionFactor,
+    isCanonical: true,
+  });
+
+  assertCanonicalUomGraph(baseUomId, nextConversions);
+
+  await repo.upsertItemUomConversion(
+    {
+      itemId: productId,
+      fromUomId: uomId,
+      toUomId: baseUomId,
+      factor: conversionFactor,
+      isCanonical: true,
+    },
+    db,
+  );
+}
+
+export async function resolveCanonicalProductUom(
+  productId: string,
+  selectedUomId: string | null | undefined,
+  db: Queryable,
+): Promise<{ baseUomId: string | null; conversionFactor: number }> {
+  const baseUomId = await repo.getProductBaseUomId(productId, db);
+  if (!baseUomId) {
+    return { baseUomId: null, conversionFactor: 1 };
+  }
+
+  if (!selectedUomId || selectedUomId === baseUomId) {
+    return { baseUomId, conversionFactor: 1 };
+  }
+
+  const canonicalConversions = await repo.listItemUomConversions(productId, db);
+  const conversions: ItemUomConversion[] = canonicalConversions.length > 0
+    ? canonicalConversions.map((conversion) => ({
+        itemId: conversion.itemId,
+        fromUomId: conversion.fromUomId,
+        toUomId: conversion.toUomId,
+        factor: conversion.factor,
+        isCanonical: conversion.isCanonical,
+      }))
+    : (await repo.listProductUoms(productId, db as pg.Pool))
+        .filter((uom) => !uom.isDefault)
+        .map((uom) => ({
+          itemId: productId,
+          fromUomId: uom.uomId,
+          toUomId: baseUomId,
+          factor: uom.conversionFactor,
+          isCanonical: true,
+        }));
+
+  const resolved = resolveFactorToBase(baseUomId, selectedUomId, conversions);
+  return {
+    baseUomId,
+    conversionFactor: resolved.factorToBase.toNumber(),
+  };
+}
 
 export async function listMasterUoms(dbPool?: pg.Pool) {
   return repo.listUoms(dbPool);
@@ -16,15 +151,28 @@ export async function listMasterUoms(dbPool?: pg.Pool) {
 
 export async function createMasterUom(input: unknown, dbPool?: pg.Pool) {
   const data = UomSchema.parse(input);
-  return repo.createUom({ name: data.name, symbol: data.symbol ?? null, type: data.type }, dbPool);
+  const canonicalName = canonicalizeUomName(data.name);
+  const existing = await repo.listUoms(dbPool);
+  if (existing.some((uom) => canonicalizeUomName(uom.name) === canonicalName)) {
+    throw new ConflictError(`Canonical UoM ${canonicalName} already exists.`);
+  }
+  return repo.createUom({ name: canonicalName, symbol: data.symbol ?? null, type: data.type }, dbPool);
 }
 
 export async function updateMasterUom(id: string, input: unknown, dbPool?: pg.Pool) {
   const data = UomSchema.partial().parse(input);
+  const normalizedName = data.name ? canonicalizeUomName(data.name) : undefined;
+  if (normalizedName) {
+    const existing = await repo.listUoms(dbPool);
+    const conflict = existing.find((uom) => uom.id !== id && canonicalizeUomName(uom.name) === normalizedName);
+    if (conflict) {
+      throw new ConflictError(`Canonical UoM ${normalizedName} already exists.`);
+    }
+  }
   return repo.updateUom(
     id,
     {
-      name: data.name,
+      name: normalizedName,
       symbol: data.symbol,
       type: data.type,
     },
@@ -118,6 +266,8 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
   const pool = dbPool || globalPool;
   const data = ProductUomSchema.parse(input);
 
+  await assertNoCanonicalDuplicateMeaning(data.productId, data.uomId, pool);
+
   if (data.isDefault) {
     await repo.unsetDefaultForProduct(data.productId, dbPool);
   }
@@ -140,6 +290,14 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
       costOverride,
     },
     dbPool
+  );
+
+  await syncCanonicalConversion(
+    data.productId,
+    data.uomId,
+    data.conversionFactor,
+    data.isDefault ?? false,
+    pool,
   );
 
   // Log price override if set
@@ -193,6 +351,12 @@ export async function updateProductUom(
   const pool = dbPool || globalPool;
   // Use the update-specific schema that doesn't require productId/uomId
   const parsed = ProductUomUpdateSchema.parse(payload);
+  const existing = await repo.getProductUomById(id, pool);
+  if (!existing) {
+    return null;
+  }
+
+  await assertNoCanonicalDuplicateMeaning(existing.productId, existing.uomId, pool, id);
 
   // Safeguard: clear redundant overrides (same logic as addProductUom)
   let costOverride = parsed.costOverride;
@@ -200,19 +364,20 @@ export async function updateProductUom(
 
   if (costOverride !== undefined || priceOverride !== undefined) {
     // Look up the existing product_uom to get productId and conversionFactor
-    const existing = await repo.getProductUomById(id, pool);
-    if (existing) {
-      const factor = parsed.conversionFactor ?? parseFloat(existing.conversionFactor);
-      const cleared = await clearRedundantOverrides(
-        pool,
-        existing.productId,
-        factor,
-        costOverride ?? null,
-        priceOverride ?? null,
-      );
-      costOverride = cleared.costOverride;
-      priceOverride = cleared.priceOverride;
-    }
+    const factor = parsed.conversionFactor ?? parseFloat(existing.conversionFactor);
+    const cleared = await clearRedundantOverrides(
+      pool,
+      existing.productId,
+      factor,
+      costOverride ?? null,
+      priceOverride ?? null,
+    );
+    costOverride = cleared.costOverride;
+    priceOverride = cleared.priceOverride;
+  }
+
+  if (parsed.isDefault) {
+    await repo.unsetDefaultForProduct(existing.productId, dbPool);
   }
 
   const result = await repo.updateProductUom(
@@ -227,9 +392,31 @@ export async function updateProductUom(
     dbPool
   );
 
+  if (result) {
+    await syncCanonicalConversion(
+      result.productId,
+      result.uomId,
+      parsed.conversionFactor ?? parseFloat(result.conversionFactor),
+      parsed.isDefault ?? result.isDefault,
+      pool,
+    );
+  }
+
   return result;
 }
 
 export async function removeProductUom(id: string, dbPool?: pg.Pool) {
+  const pool = dbPool || globalPool;
+  const existing = await repo.getProductUomById(id, pool);
+  if (!existing) {
+    return false;
+  }
+
+  const baseUomId = await repo.getProductBaseUomId(existing.productId, pool);
+  if (existing.isDefault || baseUomId === existing.uomId) {
+    throw new ConflictError('Cannot remove the canonical base stock UoM from an item.');
+  }
+
+  await repo.deleteItemUomConversionBySource(existing.productId, existing.uomId, pool);
   return repo.deleteProductUom(id, dbPool);
 }

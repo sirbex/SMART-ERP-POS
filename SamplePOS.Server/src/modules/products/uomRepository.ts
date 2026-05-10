@@ -2,6 +2,8 @@
 import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 
+type Queryable = pg.Pool | pg.PoolClient;
+
 export type DbUom = {
   id: string;
   name: string;
@@ -24,6 +26,15 @@ export type DbProductUom = {
   updatedAt: string;
 };
 
+export type DbItemUomConversion = {
+  id: string;
+  itemId: string;
+  fromUomId: string;
+  toUomId: string;
+  factor: string;
+  isCanonical: boolean;
+};
+
 export async function listUoms(dbPool?: pg.Pool): Promise<DbUom[]> {
   const pool = dbPool || globalPool;
   const res = await pool.query(`SELECT id, name, symbol, type FROM uoms ORDER BY name ASC`);
@@ -43,6 +54,15 @@ export async function createUom(data: {
     [data.name, data.symbol ?? null, data.type ?? null]
   );
   return res.rows[0];
+}
+
+export async function getUomById(id: string, db?: Queryable): Promise<DbUom | null> {
+  const pool = db || globalPool;
+  const res = await pool.query(
+    `SELECT id, name, symbol, type FROM uoms WHERE id = $1`,
+    [id],
+  );
+  return res.rows[0] ?? null;
 }
 
 export async function updateUom(id: string, data: {
@@ -144,6 +164,93 @@ export async function listProductUoms(productId: string, dbPool?: pg.Pool): Prom
     [productId]
   );
   return res.rows;
+}
+
+export async function getProductBaseUomId(productId: string, db?: Queryable): Promise<string | null> {
+  const pool = db || globalPool;
+  const res = await pool.query(
+    `SELECT COALESCE(base_uom_id, (
+        SELECT pu.uom_id
+        FROM product_uoms pu
+        WHERE pu.product_id = products.id AND pu.is_default = true
+        LIMIT 1
+      )) AS "baseUomId"
+     FROM products
+     WHERE id = $1`,
+    [productId],
+  );
+  return res.rows[0]?.baseUomId ?? null;
+}
+
+export async function setProductBaseUomId(productId: string, uomId: string, db?: Queryable): Promise<void> {
+  const pool = db || globalPool;
+  await pool.query(
+    `UPDATE products
+     SET base_uom_id = $2
+     WHERE id = $1`,
+    [productId, uomId],
+  );
+}
+
+export async function listItemUomConversions(itemId: string, db?: Queryable): Promise<DbItemUomConversion[]> {
+  const pool = db || globalPool;
+  const res = await pool.query(
+    `SELECT
+       id,
+       item_id AS "itemId",
+       from_uom_id AS "fromUomId",
+       to_uom_id AS "toUomId",
+       factor::text AS factor,
+       is_canonical AS "isCanonical"
+     FROM item_uom_conversions
+     WHERE item_id = $1
+     ORDER BY from_uom_id ASC`,
+    [itemId],
+  );
+  return res.rows;
+}
+
+export async function upsertItemUomConversion(data: {
+  itemId: string;
+  fromUomId: string;
+  toUomId: string;
+  factor: number;
+  isCanonical?: boolean;
+}, db?: Queryable): Promise<DbItemUomConversion> {
+  const pool = db || globalPool;
+  const res = await pool.query(
+    `INSERT INTO item_uom_conversions (
+       item_id, from_uom_id, to_uom_id, factor, is_canonical
+     ) VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (item_id, from_uom_id)
+     DO UPDATE SET
+       to_uom_id = EXCLUDED.to_uom_id,
+       factor = EXCLUDED.factor,
+       is_canonical = EXCLUDED.is_canonical,
+       updated_at = CURRENT_TIMESTAMP
+     RETURNING
+       id,
+       item_id AS "itemId",
+       from_uom_id AS "fromUomId",
+       to_uom_id AS "toUomId",
+       factor::text AS factor,
+       is_canonical AS "isCanonical"`,
+    [data.itemId, data.fromUomId, data.toUomId, data.factor, data.isCanonical ?? true],
+  );
+  return res.rows[0];
+}
+
+export async function deleteItemUomConversionBySource(
+  itemId: string,
+  fromUomId: string,
+  db?: Queryable,
+): Promise<void> {
+  const pool = db || globalPool;
+  await pool.query(
+    `DELETE FROM item_uom_conversions
+     WHERE item_id = $1 AND from_uom_id = $2`,
+    [itemId, fromUomId],
+  );
 }
 
 export async function createProductUom(data: {
