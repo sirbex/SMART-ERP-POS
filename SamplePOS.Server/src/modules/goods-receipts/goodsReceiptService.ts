@@ -28,6 +28,8 @@ import {
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../../utils/dateRange.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
+import { resolveCanonicalProductUom } from '../products/uomService.js';
+import { PricingEngine } from '../../utils/pricingEngine.js';
 
 // Alert shape consumed by controller for finalize response
 export interface CostPriceChangeAlert {
@@ -261,30 +263,12 @@ export const goodsReceiptService = {
         // BR-INV-009: Check if receiving would exceed max stock
         await InventoryBusinessRules.validateMaxStockLevel(client, it.productId, receivedQty);
 
-        // SAP UoM snapshot: resolve base UoM and conversion factor
-        let grBaseQty: number | null = null;
-        let grBaseUomId: string | null = null;
-        let grConversionFactor = 1;
-
-        const puRes = await client.query(
-          `SELECT pu.uom_id, pu.conversion_factor, pu.is_default
-           FROM product_uoms pu
-           WHERE pu.product_id = $1`,
-          [it.productId]
+        const { baseUomId: grBaseUomId, conversionFactor: grConversionFactor } = await resolveCanonicalProductUom(
+          it.productId,
+          it.uomId,
+          client,
         );
-        const defaultPu = puRes.rows.find((r: { is_default: boolean }) => r.is_default);
-        grBaseUomId = defaultPu?.uom_id || null;
-
-        if (it.uomId && grBaseUomId && it.uomId !== grBaseUomId) {
-          const selectedPu = puRes.rows.find((r: { uom_id: string }) => r.uom_id === it.uomId);
-          if (selectedPu) {
-            grConversionFactor = Number(selectedPu.conversion_factor) || 1;
-            grBaseQty = new Decimal(receivedQty).times(grConversionFactor).toNumber();
-          }
-        } else {
-          grBaseQty = receivedQty;
-          grConversionFactor = 1;
-        }
+        const grBaseQty = PricingEngine.calculateBaseQuantity(receivedQty, grConversionFactor).toNumber();
 
         itemsToInsert.push({
           goodsReceiptId: gr.id,
@@ -438,10 +422,10 @@ export const goodsReceiptService = {
         // Inventory batches, cost layers, and product valuation MUST store
         // quantities in base units and costs per base unit.
         // Example: 10 BOX × 100 (factor) = 1000 pieces, cost 1200/BOX → 12/pc
-        const baseQty = new Decimal(receivedQty).times(finConversionFactor).toNumber();
+        const baseQty = PricingEngine.calculateBaseQuantity(receivedQty, finConversionFactor).toNumber();
         const baseCostPerUnit: number = isBonus
           ? 0
-          : new Decimal(unitCost).div(finConversionFactor).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+          : PricingEngine.normalizeDisplayUnitCost(unitCost, finConversionFactor).toNumber();
 
         // Generate human-readable batch number: BATCH-YYYYMMDD-001
         let batchNumber: string = item.batchNumber ?? '';
@@ -597,10 +581,10 @@ export const goodsReceiptService = {
             try {
               // Normalize to base-unit cost before storing
               const itemConvFactor = Number(item.conversionFactor) || 1;
-              const supplierBaseCost = new Decimal(Money.parseDb(item.unitCost).toString())
-                .div(itemConvFactor)
-                .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
-                .toNumber();
+              const supplierBaseCost = PricingEngine.normalizeDisplayUnitCost(
+                Money.parseDb(item.unitCost).toString(),
+                itemConvFactor,
+              ).toNumber();
               await supplierProductPriceRepository.upsertSupplierPrice(
                 client,
                 supplierId,

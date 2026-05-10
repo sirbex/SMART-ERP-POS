@@ -35,6 +35,8 @@ import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
+import { resolveCanonicalProductUom } from '../products/uomService.js';
+import { PricingEngine } from '../../utils/pricingEngine.js';
 
 export interface CreateReturnGrnInput {
     grnId: string;
@@ -102,20 +104,16 @@ export const returnGrnService = {
             for (const line of input.lines) {
                 if (line.quantity <= 0) throw new Error('Return quantity must be positive');
 
-                // Look up conversion factor for UoM (default 1 = base unit)
-                let conversionFactor = 1;
-                if (line.uomId) {
-                    const cfResult = await client.query(
-                        `SELECT conversion_factor FROM product_uoms WHERE product_id = $1 AND uom_id = $2`,
-                        [line.productId, line.uomId]
-                    );
-                    if (cfResult.rows.length > 0) {
-                        conversionFactor = Number(cfResult.rows[0].conversion_factor) || 1;
-                    }
-                }
-                const baseQuantity = Money.toNumber(
-                    Money.multiply(Money.parseDb(line.quantity), Money.parseDb(conversionFactor))
+                const { conversionFactor } = await resolveCanonicalProductUom(
+                    line.productId,
+                    line.uomId || null,
+                    client,
                 );
+
+                const baseQuantity = PricingEngine.calculateBaseQuantity(
+                    line.quantity,
+                    conversionFactor,
+                ).toNumber();
 
                 const lineTotal = Money.toNumber(
                     Money.multiply(Money.parseDb(baseQuantity), Money.parseDb(line.unitCost))

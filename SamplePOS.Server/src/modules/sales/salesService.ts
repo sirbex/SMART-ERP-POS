@@ -37,6 +37,7 @@ import { syncProductQuantity } from '../../utils/inventorySync.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getFinalPricesBulk, type ResolvedPrice } from '../pricing/pricingEngineService.js';
 import { detectCogsDrift } from '../../utils/cogsDriftGuard.js';
+import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
 
 export interface SaleItemInput {
   productId: string;
@@ -368,11 +369,10 @@ export const salesService = {
           baseUnit = defaultUom?.symbol || 'PIECE';
           snapshotBaseUomId = defaultUom?.uom_id || null; // Capture base UoM ID at posting time
 
-          // SAP-like: Use uomId (product_uoms.id) for deterministic conversion lookup
-          // Fallback to string matching on UoM name/symbol for backward compatibility
+          // Use selected UoM -> base UoM canonical path to compute factor-to-base.
           let convMatch: ProductUomRow | undefined;
           if (item.uomId) {
-            convMatch = productUoms.find((r: ProductUomRow) => r.id === item.uomId);
+            convMatch = productUoms.find((r: ProductUomRow) => r.id === item.uomId || r.uom_id === item.uomId);
           }
           if (!convMatch && selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
             convMatch = productUoms.find((r: ProductUomRow) => {
@@ -382,14 +382,25 @@ export const salesService = {
               return name === want || (symbol && symbol === want);
             });
           }
-          if (convMatch && !convMatch.is_default) {
-            const factor = new Decimal(convMatch.conversion_factor || 1);
-            baseQty = new Decimal(item.quantity).times(factor);
-            snapshotConversionFactor = factor; // Capture conversion factor at posting time
-            snapshotSellingUomId = convMatch.uom_id; // Capture uoms.id for the selling UoM
-          } else if (convMatch) {
-            // Matched by uomId but it IS the default (base) UoM — no conversion needed
-            snapshotSellingUomId = convMatch.uom_id;
+
+          const selectedMasterUomId = convMatch?.uom_id || null;
+          if (snapshotBaseUomId && selectedMasterUomId && selectedMasterUomId !== snapshotBaseUomId) {
+            const conversions: ItemUomConversion[] = productUoms
+              .filter((r: ProductUomRow) => !r.is_default)
+              .map((r: ProductUomRow) => ({
+                itemId: item.productId,
+                fromUomId: r.uom_id,
+                toUomId: snapshotBaseUomId as string,
+                factor: r.conversion_factor || '1',
+                isCanonical: true,
+              }));
+
+            const resolved = resolveFactorToBase(snapshotBaseUomId, selectedMasterUomId, conversions);
+            snapshotConversionFactor = resolved.factorToBase;
+            baseQty = new Decimal(item.quantity).times(snapshotConversionFactor);
+            snapshotSellingUomId = selectedMasterUomId;
+          } else if (selectedMasterUomId) {
+            snapshotSellingUomId = selectedMasterUomId;
           }
 
           logger.info('UoM conversion resolved', {
@@ -989,42 +1000,39 @@ export const salesService = {
         let baseUnit = 'PIECE';
         let deductConversionFactor = new Decimal(1); // SAP UoM snapshot for stock movements
         let deductBaseUomId: string | null = null; // SAP UoM snapshot for stock movements
-        // Get base unit from default product_uom
-        const productBaseRes = await client.query(
-          `SELECT u.symbol, u.id AS uom_id
-           FROM product_uoms pu
-           JOIN uoms u ON u.id = pu.uom_id
-           WHERE pu.product_id = $1 AND pu.is_default = true
-           LIMIT 1`,
-          [item.productId]
-        );
-        baseUnit = productBaseRes.rows[0]?.symbol || 'PIECE';
-        deductBaseUomId = productBaseRes.rows[0]?.uom_id || null;
 
-        // SAP-like: Use uomId (product_uoms.id) for deterministic conversion lookup
-        const conv = await client.query(
-          `SELECT pu.id, pu.conversion_factor, pu.is_default, u.name, u.symbol
-           FROM product_uoms pu
-           JOIN uoms u ON u.id = pu.uom_id
-           WHERE pu.product_id = $1`,
-          [item.productId]
-        );
-        let deductMatch: Record<string, unknown> | undefined;
+        const productUoms = uomsMap.get(item.productId) || [];
+        const defaultUom = productUoms.find((u) => u.is_default);
+        baseUnit = defaultUom?.symbol || 'PIECE';
+        deductBaseUomId = defaultUom?.uom_id || null;
+
+        let deductMatch: ProductUomRow | undefined;
         if (item.uomId) {
-          deductMatch = conv.rows.find((r: Record<string, unknown>) => r.id === item.uomId);
+          deductMatch = productUoms.find((r: ProductUomRow) => r.id === item.uomId || r.uom_id === item.uomId);
         }
         if (!deductMatch && selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
-          deductMatch = conv.rows.find((r: Record<string, unknown>) => {
+          deductMatch = productUoms.find((r: ProductUomRow) => {
             const name = (r.name || '').toString().toUpperCase();
             const symbol = (r.symbol || '').toString().toUpperCase();
             const want = selectedUom.toUpperCase();
             return name === want || (symbol && symbol === want);
           });
         }
-        if (deductMatch && !deductMatch.is_default) {
-          const factor = new Decimal(Number(deductMatch.conversion_factor) || 1);
-          baseQty = new Decimal(item.quantity).times(factor);
-          deductConversionFactor = factor;
+
+        const selectedMasterUomId = deductMatch?.uom_id || null;
+        if (deductBaseUomId && selectedMasterUomId && selectedMasterUomId !== deductBaseUomId) {
+          const conversions: ItemUomConversion[] = productUoms
+            .filter((r: ProductUomRow) => !r.is_default)
+            .map((r: ProductUomRow) => ({
+              itemId: item.productId,
+              fromUomId: r.uom_id,
+              toUomId: deductBaseUomId as string,
+              factor: r.conversion_factor || '1',
+              isCanonical: true,
+            }));
+          const resolved = resolveFactorToBase(deductBaseUomId, selectedMasterUomId, conversions);
+          deductConversionFactor = resolved.factorToBase;
+          baseQty = new Decimal(item.quantity).times(deductConversionFactor);
         }
         // Get product costing method again
         const productResult = await client.query(

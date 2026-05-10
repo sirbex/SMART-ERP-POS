@@ -1,8 +1,8 @@
 /**
  * Reusable UoM Selector Component
  *
- * Follows the ERP pattern for purchase UOM pricing:
- * Unit cost = baseCost × conversionFactor (or costOverride if set).
+ * Follows the canonical ERP MUoM rule:
+ * Display unit cost = base-unit cost × factorToBase (or costOverride if set).
  *
  * Cost is computed LOCALLY and synchronously via computeUnitCost(),
  * never derived from an async server-side displayCost. This ensures
@@ -51,9 +51,13 @@ export function UomSelector({
   // Keep a stable ref to onChange to avoid triggering useEffect on every render
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const baseUomLabel = useMemo(() => {
+    const baseUom = uoms.find((u) => u.isDefault) || uoms[0];
+    return baseUom ? (baseUom.uomSymbol || baseUom.uomName) : 'Base';
+  }, [uoms]);
 
-  // ERP pattern: when server UOM data loads with a pre-selected UOM,
-  // ensure the parent's cost reflects baseCost × factor, computed locally.
+  // When server UOM data loads with a pre-selected UOM,
+  // ensure the parent's displayed cost reflects baseCost × factor, computed locally.
   useEffect(() => {
     if (uoms.length === 0 || !selectedUomId) return;
     // Only fire once per UOM selection to avoid infinite loops
@@ -65,7 +69,7 @@ export function UomSelector({
 
     syncedUomRef.current = selectedUomId;
 
-    // Cost = baseCost × factor (or costOverride if set)
+    // Display cost = baseCost × factor (or costOverride if set)
     // CRITICAL: Return selected.uomId (master uoms.id), NOT selected.id (product_uoms.id)
     // purchase_order_items.uom_id FK references uoms(id)
     onChangeRef.current({
@@ -99,7 +103,7 @@ export function UomSelector({
     const selected = uoms.find(u => u.uomId === value || u.id === value);
     if (!selected) return;
 
-    // Cost = baseCost × factor (or costOverride if set)
+    // Display cost = baseCost × factor (or costOverride if set)
     // CRITICAL: Return selected.uomId (master uoms.id), NOT selected.id (product_uoms.id)
     // purchase_order_items.uom_id FK references uoms(id)
     onChange({
@@ -122,7 +126,9 @@ export function UomSelector({
       <option value="">Base UoM</option>
       {uoms.map((u) => (
         <option key={u.uomId} value={u.uomId}>
-          {u.uomSymbol || u.uomName} × {parseFloat(u.conversionFactor).toString()}
+          {u.isDefault
+            ? `${u.uomSymbol || u.uomName} (Base)`
+            : `1 ${u.uomSymbol || u.uomName} = ${parseFloat(u.conversionFactor).toString()} ${baseUomLabel}`}
         </option>
       ))}
     </select>

@@ -17,6 +17,8 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
+import { resolveCanonicalProductUom } from '../products/uomService.js';
+import { PricingEngine } from '../../utils/pricingEngine.js';
 
 export interface CreatePOInput {
   supplierId: string;
@@ -161,35 +163,19 @@ export const purchaseOrderService = {
       const po = await purchaseOrderRepository.createPO(client, poData);
 
       // Create PO items with Decimal precision
-      // SAP UoM snapshot: resolve base UoM and conversion factor for each item
       const poItems: CreatePOItemData[] = [];
       for (const item of input.items) {
-        let baseQty: number | null = null;
-        let baseUomId: string | null = null;
-        let conversionFactor = 1;
-
-        // Resolve UoM snapshot from product_uoms
-        const puRes = await client.query(
-          `SELECT pu.uom_id, pu.conversion_factor, pu.is_default
-           FROM product_uoms pu
-           WHERE pu.product_id = $1`,
-          [item.productId]
+        const { baseUomId, conversionFactor } = await resolveCanonicalProductUom(
+          item.productId,
+          item.uomId,
+          client,
         );
-        const defaultPu = puRes.rows.find((r: { is_default: boolean }) => r.is_default);
-        baseUomId = defaultPu?.uom_id || null;
-
-        if (item.uomId && baseUomId && item.uomId !== baseUomId) {
-          // Non-base UoM selected — find conversion factor
-          const selectedPu = puRes.rows.find((r: { uom_id: string }) => r.uom_id === item.uomId);
-          if (selectedPu) {
-            conversionFactor = Number(selectedPu.conversion_factor) || 1;
-            baseQty = new Decimal(item.quantity).times(conversionFactor).toNumber();
-          }
-        } else {
-          // Base UoM or no UoM — quantity IS base quantity
-          baseQty = item.quantity;
-          conversionFactor = 1;
-        }
+        const baseQty = PricingEngine.calculateBaseQuantity(item.quantity, conversionFactor).toNumber();
+        const baseUnitCost = PricingEngine.normalizeDisplayUnitCost(item.unitCost, conversionFactor);
+        const canonicalLineTotal = PricingEngine.calculateDocumentLineFromBase(
+          baseQty,
+          baseUnitCost.toNumber(),
+        ).toNumber();
 
         poItems.push({
           purchaseOrderId: po.id,
@@ -197,7 +183,7 @@ export const purchaseOrderService = {
           productName: item.productName,
           quantity: item.quantity,
           unitCost: Money.toNumber(new Decimal(item.unitCost)), // Bank-grade precision
-          lineTotal: item.lineTotal != null ? Money.toNumber(new Decimal(item.lineTotal)) : undefined,
+          lineTotal: item.lineTotal != null ? Money.toNumber(new Decimal(item.lineTotal)) : canonicalLineTotal,
           uomId: item.uomId || null,
           baseQty,
           baseUomId,
@@ -297,29 +283,17 @@ export const purchaseOrderService = {
 
         const poItems: CreatePOItemData[] = [];
         for (const item of input.items) {
-          let baseQty: number | null = null;
-          let baseUomId: string | null = null;
-          let conversionFactor = 1;
-
-          const puRes = await client.query(
-            `SELECT pu.uom_id, pu.conversion_factor, pu.is_default
-             FROM product_uoms pu
-             WHERE pu.product_id = $1`,
-            [item.productId]
+          const { baseUomId, conversionFactor } = await resolveCanonicalProductUom(
+            item.productId,
+            item.uomId,
+            client,
           );
-          const defaultPu = puRes.rows.find((r: { is_default: boolean }) => r.is_default);
-          baseUomId = defaultPu?.uom_id || null;
-
-          if (item.uomId && baseUomId && item.uomId !== baseUomId) {
-            const selectedPu = puRes.rows.find((r: { uom_id: string }) => r.uom_id === item.uomId);
-            if (selectedPu) {
-              conversionFactor = Number(selectedPu.conversion_factor) || 1;
-              baseQty = new Decimal(item.quantity).times(conversionFactor).toNumber();
-            }
-          } else {
-            baseQty = item.quantity;
-            conversionFactor = 1;
-          }
+          const baseQty = PricingEngine.calculateBaseQuantity(item.quantity, conversionFactor).toNumber();
+          const baseUnitCost = PricingEngine.normalizeDisplayUnitCost(item.unitCost, conversionFactor);
+          const canonicalLineTotal = PricingEngine.calculateDocumentLineFromBase(
+            baseQty,
+            baseUnitCost.toNumber(),
+          ).toNumber();
 
           poItems.push({
             purchaseOrderId: id,
@@ -327,7 +301,7 @@ export const purchaseOrderService = {
             productName: item.productName,
             quantity: item.quantity,
             unitCost: Money.toNumber(new Decimal(item.unitCost)),
-            lineTotal: item.lineTotal != null ? Money.toNumber(new Decimal(item.lineTotal)) : undefined,
+            lineTotal: item.lineTotal != null ? Money.toNumber(new Decimal(item.lineTotal)) : canonicalLineTotal,
             uomId: item.uomId || null,
             baseQty,
             baseUomId,

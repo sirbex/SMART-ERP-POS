@@ -8,6 +8,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
+import { PricingEngine } from '../../utils/pricingEngine.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -1002,7 +1003,7 @@ export async function createInvoiceLineItems(
 ): Promise<void> {
     for (let i = 0; i < lineItems.length; i++) {
         const item = lineItems[i];
-        const lineTotal = new Decimal(item.quantity).times(item.unitCost).toNumber();
+        const lineTotal = PricingEngine.calculateLineTotal(item.quantity, item.unitCost).toNumber();
         const taxAmt = item.taxAmount ?? 0;
         const lineTotalIncTax = new Decimal(lineTotal).plus(taxAmt).toNumber();
 

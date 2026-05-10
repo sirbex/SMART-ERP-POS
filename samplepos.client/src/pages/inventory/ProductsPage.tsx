@@ -1434,7 +1434,9 @@ export default function ProductsPage() {
                               </td>
                               <td className="px-3 py-2 text-gray-600">{symbol || '-'}</td>
                               <td className="px-3 py-2 text-right text-gray-900">
-                                {parseFloat(uom.conversionFactor).toFixed(1)}
+                                {uom.isDefault
+                                  ? 'Base'
+                                  : `1 ${symbol || name} = ${parseFloat(uom.conversionFactor).toString()} ${productUoms[0]?.uomSymbol || productUoms[0]?.uomName || 'Base'}`}
                               </td>
                               <td className="px-3 py-2 text-center">
                                 {uom.isDefault ? (
@@ -1978,11 +1980,12 @@ export default function ProductsPage() {
                   </label>
                   <input
                     type="number"
-                    step="0.1"
+                    min="1"
+                    step="any"
                     value={uomFormData.conversionFactor}
                     onChange={(e) => setUomFormData({ ...uomFormData, conversionFactor: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                    placeholder="1.0"
+                    placeholder="12"
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     How many base units = 1 of this unit
@@ -2048,6 +2051,9 @@ export default function ProductsPage() {
                 return (
                   <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
                     <div className="text-xs text-gray-600">
+                      <span className="font-medium">Conversion:</span> 1 selected unit = {factor} {baseUomName}
+                    </div>
+                    <div className="text-xs text-gray-600">
                       <span className="font-medium">Auto cost:</span> {formatCurrency(row.unitCost)}
                     </div>
                     <div className="text-xs text-gray-600">
@@ -2055,7 +2061,7 @@ export default function ProductsPage() {
                       <span className="text-gray-500">(markup {markupPct}%)</span>
                     </div>
                     <div className="text-[11px] text-gray-500 mt-1">
-                      Uses base {baseUomName} cost × factor ({parseFloat(factor.toString()).toFixed(1)}). Override fields above take precedence.
+                      Uses base {baseUomName} cost × factor ({parseFloat(factor.toString()).toString()}). Override fields above take precedence.
                     </div>
                   </div>
                 );

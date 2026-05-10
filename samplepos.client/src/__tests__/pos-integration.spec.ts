@@ -7,11 +7,11 @@ describe('POS Module - Integration Tests', () => {
   describe('Price Engine Integration', () => {
     it('should calculate correct prices for multi-UoM product', () => {
       const result = computeUomPrices({
-        baseCost: 12000, // UGX per carton
+        baseCost: 100, // UGX per piece/tablet
         units: [
-          { uomId: 'carton', name: 'Carton', factor: 1 },
-          { uomId: 'box', name: 'Box', factor: 0.1 },
-          { uomId: 'piece', name: 'Piece', factor: 1/120 },
+          { uomId: 'piece', name: 'Piece', factor: 1 },
+          { uomId: 'box', name: 'Box', factor: 12 },
+          { uomId: 'carton', name: 'Carton', factor: 120 },
         ],
         defaultMultiplier: 1.2,
         currencyDecimals: 0,
@@ -19,26 +19,26 @@ describe('POS Module - Integration Tests', () => {
       });
 
       expect(result.rows).toHaveLength(3);
-      expect(result.rows[0].unitCost).toBe(12000);
-      expect(result.rows[0].sellingPrice).toBe(14400); // 12000 * 1.2
-      expect(result.rows[1].unitCost).toBe(1200); // 12000 * 0.1
+      expect(result.rows[0].unitCost).toBe(100);
+      expect(result.rows[0].sellingPrice).toBe(120); // 100 * 1.2
+      expect(result.rows[1].unitCost).toBe(1200); // 100 * 12
       expect(result.rows[1].sellingPrice).toBe(1440); // 1200 * 1.2
-      expect(result.rows[2].unitCost).toBe(100); // 12000 / 120
-      expect(result.rows[2].sellingPrice).toBe(120); // 100 * 1.2
+      expect(result.rows[2].unitCost).toBe(12000); // 100 * 120
+      expect(result.rows[2].sellingPrice).toBe(14400); // 12000 * 1.2
     });
 
     it('should handle price override correctly', () => {
       const result = computeUomPrices({
-        baseCost: 12000,
+        baseCost: 100,
         units: [
-          { uomId: 'piece', name: 'Piece', factor: 1/120, priceOverride: 150 },
+          { uomId: 'packet', name: 'Packet', factor: 12, priceOverride: 1500 },
         ],
         defaultMultiplier: 1.2,
         currencyDecimals: 0,
         roundingMode: 'ROUND_HALF_UP',
       });
 
-      expect(result.rows[0].sellingPrice).toBe(150);
+      expect(result.rows[0].sellingPrice).toBe(1500);
     });
   });
 

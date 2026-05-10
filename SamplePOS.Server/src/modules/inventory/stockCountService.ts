@@ -19,6 +19,8 @@ import { StockMovementHandler } from './stockMovementHandler.js';
 import { inventoryRepository } from './inventoryRepository.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { resolveCanonicalProductUom } from '../products/uomService.js';
+import { PricingEngine } from '../../utils/pricingEngine.js';
 
 export const stockCountService = {
   /**
@@ -265,12 +267,13 @@ export const stockCountService = {
       return quantity;
     }
 
-    // Look up UOM conversion factor
+    // Resolve selected UoM by symbol and normalize through canonical graph.
     const uomResult = await client.query(
-      `SELECT pu.conversion_factor 
+      `SELECT u.id
        FROM product_uoms pu
        JOIN uoms u ON pu.uom_id = u.id
-       WHERE pu.product_id = $1 AND u.symbol = $2`,
+       WHERE pu.product_id = $1 AND u.symbol = $2
+       LIMIT 1`,
       [productId, uom]
     );
 
@@ -278,8 +281,12 @@ export const stockCountService = {
       throw new Error(`UOM ${uom} not found for product ${productId}`);
     }
 
-    const conversionFactor = Number(uomResult.rows[0].conversion_factor);
-    return new Decimal(quantity).times(conversionFactor).toNumber();
+    const { conversionFactor } = await resolveCanonicalProductUom(
+      productId,
+      uomResult.rows[0].id,
+      client,
+    );
+    return PricingEngine.calculateBaseQuantity(quantity, conversionFactor).toNumber();
   },
 
   /**
