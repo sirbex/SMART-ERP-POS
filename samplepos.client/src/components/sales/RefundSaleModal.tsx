@@ -58,7 +58,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
     useEffect(() => {
         guardRef.current = openGuard({ cancellable: false, label: 'Process sale refund/return' });
         return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Build refundable items list

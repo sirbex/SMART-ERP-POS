@@ -359,112 +359,112 @@ export default function CategoriesPage() {
           </div>
         ) : (
           <>
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gray-50">
-                  <TableHead className="w-10">
-                    <input
-                      type="checkbox"
-                      checked={allOnPageSelected}
-                      ref={el => { if (el) el.indeterminate = someOnPageSelected; }}
-                      onChange={toggleSelectAll}
-                      className="rounded border-gray-300 accent-orange-500 cursor-pointer"
-                      aria-label="Select all on this page"
-                    />
-                  </TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {categories.map(cat => {
-                  const isChecked = selectedIds.has(cat.id);
-                  return (
-                    <TableRow
-                      key={cat.id}
-                      className={[
-                        !cat.isActive ? 'opacity-60' : '',
-                        isChecked ? 'bg-orange-50 border-l-4 border-l-orange-400' : 'hover:bg-gray-50',
-                      ].join(' ')}
-                    >
-                      <TableCell className="w-10">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => toggleSelect(cat.id)}
-                          className="rounded border-gray-300 accent-orange-500 cursor-pointer"
-                          aria-label={`Select ${cat.name}`}
-                        />
-                      </TableCell>
-                      <TableCell className="font-medium">{cat.name}</TableCell>
-                      <TableCell className="text-sm text-gray-500 max-w-xs truncate">
-                        {cat.description || <span className="italic text-gray-300">No description</span>}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={cat.isActive ? 'default' : 'secondary'}>
-                          {cat.isActive ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-500">
-                        {formatTimestampDate(cat.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right space-x-2">
-                        <button
-                          onClick={() => handleToggleActive(cat)}
-                          disabled={pendingToggleId === cat.id}
-                          className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
-                          title={cat.isActive ? 'Deactivate' : 'Activate'}
-                        >
-                          {pendingToggleId === cat.id ? '⏳' : cat.isActive ? '⏸' : '▶'}
-                        </button>
-                        <button
-                          onClick={() => openEdit(cat)}
-                          className="text-xs text-blue-600 hover:text-blue-800"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => openMergeDialog(new Set([cat.id]))}
-                          className="text-xs text-orange-600 hover:text-orange-800"
-                          title="Merge this category"
-                        >
-                          Merge
-                        </button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-
-          {/* Floating Selection Bar - appears when 1+ rows checked */}
-          {selectedIds.size > 0 && (
-            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-gray-900 text-white rounded-full px-5 py-3 shadow-2xl text-sm font-medium animate-in slide-in-from-bottom-4">
-              <span className="bg-orange-500 text-white rounded-full text-xs font-bold w-5 h-5 flex items-center justify-center">
-                {selectedIds.size}
-              </span>
-              <span>{selectedIds.size} categor{selectedIds.size > 1 ? 'ies' : 'y'} selected</span>
-              <div className="w-px h-4 bg-gray-600" />
-              <button
-                onClick={() => setSelectedIds(new Set())}
-                className="text-gray-400 hover:text-white transition-colors"
-              >
-                Clear
-              </button>
-              <button
-                onClick={() => openMergeDialog(selectedIds)}
-                disabled={selectedIds.size < 2}
-                className="bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full px-4 py-1.5 text-sm font-semibold transition-colors"
-              >
-                ⇄ Merge {selectedIds.size} Categories
-              </button>
+            <div className="border rounded-lg overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-gray-50">
+                    <TableHead className="w-10">
+                      <input
+                        type="checkbox"
+                        checked={allOnPageSelected}
+                        ref={el => { if (el) el.indeterminate = someOnPageSelected; }}
+                        onChange={toggleSelectAll}
+                        className="rounded border-gray-300 accent-orange-500 cursor-pointer"
+                        aria-label="Select all on this page"
+                      />
+                    </TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Created</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {categories.map(cat => {
+                    const isChecked = selectedIds.has(cat.id);
+                    return (
+                      <TableRow
+                        key={cat.id}
+                        className={[
+                          !cat.isActive ? 'opacity-60' : '',
+                          isChecked ? 'bg-orange-50 border-l-4 border-l-orange-400' : 'hover:bg-gray-50',
+                        ].join(' ')}
+                      >
+                        <TableCell className="w-10">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleSelect(cat.id)}
+                            className="rounded border-gray-300 accent-orange-500 cursor-pointer"
+                            aria-label={`Select ${cat.name}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium">{cat.name}</TableCell>
+                        <TableCell className="text-sm text-gray-500 max-w-xs truncate">
+                          {cat.description || <span className="italic text-gray-300">No description</span>}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={cat.isActive ? 'default' : 'secondary'}>
+                            {cat.isActive ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-500">
+                          {formatTimestampDate(cat.createdAt)}
+                        </TableCell>
+                        <TableCell className="text-right space-x-2">
+                          <button
+                            onClick={() => handleToggleActive(cat)}
+                            disabled={pendingToggleId === cat.id}
+                            className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                            title={cat.isActive ? 'Deactivate' : 'Activate'}
+                          >
+                            {pendingToggleId === cat.id ? '⏳' : cat.isActive ? '⏸' : '▶'}
+                          </button>
+                          <button
+                            onClick={() => openEdit(cat)}
+                            className="text-xs text-blue-600 hover:text-blue-800"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => openMergeDialog(new Set([cat.id]))}
+                            className="text-xs text-orange-600 hover:text-orange-800"
+                            title="Merge this category"
+                          >
+                            Merge
+                          </button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
             </div>
-          )}
+
+            {/* Floating Selection Bar - appears when 1+ rows checked */}
+            {selectedIds.size > 0 && (
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-gray-900 text-white rounded-full px-5 py-3 shadow-2xl text-sm font-medium animate-in slide-in-from-bottom-4">
+                <span className="bg-orange-500 text-white rounded-full text-xs font-bold w-5 h-5 flex items-center justify-center">
+                  {selectedIds.size}
+                </span>
+                <span>{selectedIds.size} categor{selectedIds.size > 1 ? 'ies' : 'y'} selected</span>
+                <div className="w-px h-4 bg-gray-600" />
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  className="text-gray-400 hover:text-white transition-colors"
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={() => openMergeDialog(selectedIds)}
+                  disabled={selectedIds.size < 2}
+                  className="bg-orange-500 hover:bg-orange-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-full px-4 py-1.5 text-sm font-semibold transition-colors"
+                >
+                  ⇄ Merge {selectedIds.size} Categories
+                </button>
+              </div>
+            )}
           </>
         )}
 
@@ -632,9 +632,8 @@ export default function CategoriesPage() {
                             />
                           </td>
                           <td className="px-3 py-2.5">
-                            <span className={`font-medium ${
-                              isSurvivor ? 'text-emerald-700' : isChecked ? 'text-orange-700' : 'text-gray-800'
-                            }`}>
+                            <span className={`font-medium ${isSurvivor ? 'text-emerald-700' : isChecked ? 'text-orange-700' : 'text-gray-800'
+                              }`}>
                               {cat.name}
                             </span>
                             {isSurvivor && (
@@ -645,9 +644,8 @@ export default function CategoriesPage() {
                             )}
                           </td>
                           <td className="px-3 py-2.5">
-                            <span className={`text-xs px-2 py-0.5 rounded-full ${
-                              cat.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                            }`}>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${cat.isActive ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                              }`}>
                               {cat.isActive ? 'Active' : 'Inactive'}
                             </span>
                           </td>

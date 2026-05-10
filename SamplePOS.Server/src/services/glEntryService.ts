@@ -1000,7 +1000,7 @@ export async function recordSupplierInvoiceToGL(
     // varianceAmount > 0 → supplier billed less → CR Price Variance (favorable)
     // varianceAmount < 0 → supplier billed more → DR Price Variance (unfavorable)
     const varianceCreditAmount = varianceAmount > 0 ? varianceAmount : 0;
-    const varianceDebitAmount  = varianceAmount < 0 ? Math.abs(varianceAmount) : 0;
+    const varianceDebitAmount = varianceAmount < 0 ? Math.abs(varianceAmount) : 0;
 
     try {
       await AccountingCore.createJournalEntry({

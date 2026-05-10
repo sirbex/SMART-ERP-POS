@@ -236,8 +236,10 @@ describe('DEEP: Orphan & Ghost Feature Detection', () => {
         const KNOWN_NON_ROUTE_FEATURES = [
             'api_access',
             'basic_reports',
+            'crm',
             'custom_domain',
             'edge_sync',
+            'pricing',
             'priority_support',
         ];
 
@@ -317,7 +319,7 @@ describe('DEEP: Plan Hierarchy Strict Superset', () => {
         const pro = new Set(PLAN_LIMITS.PROFESSIONAL.features);
         const added = [...pro].filter(f => !starter.has(f));
 
-        expect(added.sort()).toEqual(['accounting', 'edge_sync', 'purchase_orders'].sort());
+        expect(added.sort()).toEqual(['accounting', 'crm', 'edge_sync', 'pricing', 'purchase_orders'].sort());
     });
 
     it('PROFESSIONAL → ENTERPRISE adds: api_access, custom_domain, priority_support', () => {

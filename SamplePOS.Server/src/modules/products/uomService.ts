@@ -122,21 +122,21 @@ export async function resolveCanonicalProductUom(
   const canonicalConversions = await repo.listItemUomConversions(productId, db);
   const conversions: ItemUomConversion[] = canonicalConversions.length > 0
     ? canonicalConversions.map((conversion) => ({
-        itemId: conversion.itemId,
-        fromUomId: conversion.fromUomId,
-        toUomId: conversion.toUomId,
-        factor: conversion.factor,
-        isCanonical: conversion.isCanonical,
-      }))
+      itemId: conversion.itemId,
+      fromUomId: conversion.fromUomId,
+      toUomId: conversion.toUomId,
+      factor: conversion.factor,
+      isCanonical: conversion.isCanonical,
+    }))
     : (await repo.listProductUoms(productId, db as pg.Pool))
-        .filter((uom) => !uom.isDefault)
-        .map((uom) => ({
-          itemId: productId,
-          fromUomId: uom.uomId,
-          toUomId: baseUomId,
-          factor: uom.conversionFactor,
-          isCanonical: true,
-        }));
+      .filter((uom) => !uom.isDefault)
+      .map((uom) => ({
+        itemId: productId,
+        fromUomId: uom.uomId,
+        toUomId: baseUomId,
+        factor: uom.conversionFactor,
+        isCanonical: true,
+      }));
 
   const resolved = resolveFactorToBase(baseUomId, selectedUomId, conversions);
   return {

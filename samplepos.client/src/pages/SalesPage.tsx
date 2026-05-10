@@ -1576,11 +1576,13 @@ function OrderedByView({ groups, startDate, endDate }: OrderedByViewProps) {
                     {expandedOrders.map((o) => {
                       const st = String(o.status || '');
                       const statusColor = st === 'COMPLETED' ? 'text-green-600' : st === 'CANCELLED' ? 'text-red-600' : 'text-yellow-600';
+                      const orderDate = formatDisplayDate(String(o.orderDate || o.order_date || ''));
+                      const orderTime = formatDisplayTime(String(o.createdAt || o.created_at || ''));
                       return (
                         <tr key={String(o.id)} className="border-t border-gray-100">
                           <td className="py-2 font-medium text-blue-600">{String(o.orderNumber || '')}</td>
                           <td className="py-2">{String(o.customerName || 'Walk-in')}</td>
-                          <td className="py-2">{String(o.orderDate || '')}</td>
+                          <td className="py-2">{orderTime !== 'N/A' ? `${orderDate} ${orderTime}` : orderDate}</td>
                           <td className={`py-2 font-medium ${statusColor}`}>{st}</td>
                           <td className="py-2 text-right font-medium">{formatCurrency(Number(o.totalAmount || 0))}</td>
                           <td className="py-2 text-gray-500 text-xs">{st === 'CANCELLED' ? String(o.cancelReason || '-') : ''}</td>
