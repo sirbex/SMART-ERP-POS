@@ -1446,7 +1446,7 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
                     <tr>
                       <th className="text-left pb-2">Sale #</th>
                       <th className="text-left pb-2">Customer</th>
-                      <th className="text-left pb-2">Date</th>
+                      <th className="text-left pb-2">Date & Time</th>
                       <th className="text-left pb-2">Time</th>
                       <th className="text-right pb-2">Amount</th>
                       <th className="text-right pb-2">Actions</th>
@@ -1566,7 +1566,7 @@ function OrderedByView({ groups, startDate, endDate }: OrderedByViewProps) {
                     <tr>
                       <th className="text-left pb-2">Order #</th>
                       <th className="text-left pb-2">Customer</th>
-                      <th className="text-left pb-2">Date</th>
+                      <th className="text-left pb-2">Date & Time</th>
                       <th className="text-left pb-2">Status</th>
                       <th className="text-right pb-2">Amount</th>
                       <th className="text-left pb-2">Cancel Reason</th>
