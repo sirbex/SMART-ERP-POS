@@ -201,7 +201,17 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
       // This ensures DR = CR (balanced GL entry)
       // ============================================================
       const grossTotal = Money.add(grossInventoryRevenue, grossServiceRevenue);
-      const discountAmount = Money.subtract(grossTotal, sale.totalAmount);
+      // BUG FIX: Discount must be calculated against the pretax subtotal, not the
+      // tax-inclusive totalAmount. Using totalAmount causes the "discount" to absorb
+      // the tax amount too, which overstates inventoryRevenue by taxAmount. When the
+      // Tax Payable line is then added, total credits exceed total debits by exactly
+      // taxAmount → DoubleEntryViolationError → the entire sale posting throws.
+      // Fix: subtract known tax from totalAmount first to get the pretax base.
+      const knownTax = Money.parseDb(sale.taxAmount ?? 0);
+      const pretaxBase = knownTax.greaterThan(0)
+        ? Money.subtract(Money.parseDb(sale.totalAmount), knownTax)
+        : Money.parseDb(sale.totalAmount);
+      const discountAmount = Money.subtract(grossTotal, pretaxBase);
 
       // Net revenue after proportional discount allocation
       inventoryRevenue = grossInventoryRevenue;
@@ -253,7 +263,18 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
     // Convert Decimal values to numbers at the boundary for JournalLine interface
     const invRevenueNum = inventoryRevenue.toNumber();
     const svcRevenueNum = serviceRevenue.toNumber();
-    const invCostNum = inventoryCost.toNumber();
+    let invCostNum = inventoryCost.toNumber();
+    // Fallback: when all sale items had unitCost=0 (e.g. items were loaded without
+    // cost data), inventoryCost stays 0 and shouldPostCogs=false would silently skip
+    // the COGS/Inventory journal. Use sale.costAmount as a fallback so COGS is always
+    // posted when the sale record itself carries a non-zero cost.
+    if (invCostNum === 0 && Money.parseDb(sale.costAmount ?? 0).greaterThan(0)) {
+      invCostNum = Money.parseDb(sale.costAmount!).toNumber();
+      logger.warn('COGS fallback: item-level costs are 0, using sale.costAmount for COGS journal', {
+        saleNumber: sale.saleNumber,
+        costAmount: sale.costAmount,
+      });
+    }
 
     // Create ledger entries for revenue recognition and COGS
     const ledgerLines: JournalLine[] = [];
