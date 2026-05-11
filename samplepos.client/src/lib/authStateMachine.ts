@@ -42,7 +42,7 @@ export function setAuthState(next: AuthStateValue): void {
 
     // Notify subscribers
     _listeners.forEach(fn => {
-        try { fn(next, prev); } catch { /* never let a subscriber crash the state machine */ }
+        try { fn(next, prev); } catch (err) { console.error('[authStateMachine] subscriber threw:', err); }
     });
 
     // Flush waiters

@@ -74,7 +74,8 @@ function loadQueue(): QueuedRequest[] {
         const all: QueuedRequest[] = JSON.parse(raw);
         const cutoff = Date.now() - MAX_AGE_MS;
         return all.filter(r => r.timestamp > cutoff);
-    } catch {
+    } catch (err) {
+        console.error('[offlineRequestQueue] queue corrupt — discarding all entries:', err);
         return [];
     }
 }
@@ -82,8 +83,8 @@ function loadQueue(): QueuedRequest[] {
 function saveQueue(queue: QueuedRequest[]): void {
     try {
         localStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
-    } catch {
-        // localStorage full — silently skip persistence
+    } catch (err) {
+        console.warn('[offlineRequestQueue] localStorage full — queue not persisted:', err);
     }
 }
 
@@ -164,8 +165,8 @@ export async function flushOfflineQueue(axiosInstance: AxiosInstance): Promise<v
             });
             // Success — remove from queue
             dequeueOfflineRequest(req.id);
-        } catch {
-            // Leave in queue for next flush — stop here to preserve order
+        } catch (err) {
+            console.warn('[offlineRequestQueue] flush failed for', req.id, '— will retry on next flush:', err);
             break;
         }
     }

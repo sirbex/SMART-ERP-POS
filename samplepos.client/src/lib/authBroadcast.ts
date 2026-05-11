@@ -42,7 +42,7 @@ function _getChannel(): BroadcastChannel | null {
 
 function _dispatch(event: AuthBroadcastEvent): void {
     _handlers.forEach(fn => {
-        try { fn(event); } catch { /* never let a handler crash the bus */ }
+        try { fn(event); } catch (err) { console.error('[authBroadcast] handler threw:', err); }
     });
 }
 
@@ -61,7 +61,7 @@ export function broadcastAuthEvent(event: AuthBroadcastEvent): void {
             STORAGE_KEY,
             JSON.stringify({ ...event, _ts: Date.now() })
         );
-    } catch { /* storage full — ignore */ }
+    } catch (err) { console.warn('[authBroadcast] localStorage full — storage fallback not written:', err); }
 }
 
 /**
@@ -91,7 +91,7 @@ export function setupAuthBroadcastListener(): () => void {
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { _ts: _ignored, ...event } = payload;
             _dispatch(event as AuthBroadcastEvent);
-        } catch { /* malformed payload */ }
+        } catch (err) { console.warn('[authBroadcast] malformed storage payload, ignoring:', err); }
     };
 
     window.addEventListener('storage', onStorage);
