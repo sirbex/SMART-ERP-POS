@@ -15,6 +15,8 @@ import {
   clearTokens,
   refreshAccessToken,
 } from '../hooks/useTokenRefresh';
+import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
+import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
 import type {
   CreateProductInput,
   UpdateProductInput,
@@ -82,8 +84,11 @@ apiClient.interceptors.request.use(
       return config;
     }
 
-    // Pre-emptively refresh expired token (skip when offline)
-    if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
+    // If a refresh is already in-flight, freeze this request until it completes.
+    // This prevents sending a stale token while another request is mid-refresh.
+    if (getAuthState() === 'REFRESHING') {
+      try { await waitForAuthenticated(); } catch { /* EXPIRED — response interceptor handles */ }
+    } else if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
       try {
         await refreshAccessToken();
       } catch {
@@ -143,6 +148,22 @@ apiClient.interceptors.response.use(
       status: error.response?.status,
       data: error.response?.data,
     });
+
+    // ── Offline: enqueue mutations for later replay ──
+    const isNetworkFailure = !error.response && !navigator.onLine;
+    if (isNetworkFailure && error.config) {
+      const cfg = error.config as InternalAxiosRequestConfig & { headers: Record<string, string> };
+      const idempotencyKey = cfg.headers?.['X-Idempotency-Key'] as string | undefined;
+      if (idempotencyKey) {
+        enqueueOfflineRequest({
+          method: cfg.method ?? 'POST',
+          url: cfg.url ?? '',
+          data: cfg.data ? JSON.parse(cfg.data as string) : undefined,
+          contentType: (cfg.headers?.['Content-Type'] as string) ?? 'application/json',
+          idempotencyKey,
+        });
+      }
+    }
 
     // Handle specific error cases
     if (error.response?.status === 401) {

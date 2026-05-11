@@ -1,7 +1,9 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo } from 'react';
-import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessToken } from '../hooks/useTokenRefresh';
+import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessToken, resetAuthState } from '../hooks/useTokenRefresh';
 import { apiClient } from '../utils/api';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
+import { setupAuthBroadcastListener, onAuthBroadcast, broadcastAuthEvent } from '../lib/authBroadcast';
+import { setupOfflineQueueAutoFlush } from '../lib/offlineRequestQueue';
 import type { AxiosError } from 'axios';
 import type { UserRole } from '../types';
 
@@ -170,9 +172,31 @@ export function AuthProvider({ children }: AuthProviderProps) {
     window.addEventListener('storage', handleStorageChange);
     window.addEventListener('auth-changed', handleAuthChange);
 
+    // ── Multi-tab broadcast: react to auth events from other tabs ──
+    const cleanupBroadcastListener = setupAuthBroadcastListener();
+    const unsubscribeBroadcast = onAuthBroadcast((event) => {
+      if (event.type === 'LOGOUT' || event.type === 'SESSION_EXPIRED') {
+        // Another tab logged out or session expired — mirror it here without re-broadcasting
+        clearTokens();
+        setUser(null);
+        setIsAuthenticated(false);
+        setPermissionKeys([]);
+        if (window.location.pathname !== '/login') {
+          if (event.type === 'SESSION_EXPIRED') sessionStorage.setItem('session_expired', '1');
+          window.location.href = '/login';
+        }
+      }
+    });
+
+    // ── Offline queue: auto-flush pending mutations when connectivity returns ──
+    const cleanupOfflineQueue = setupOfflineQueueAutoFlush(apiClient);
+
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('auth-changed', handleAuthChange);
+      cleanupBroadcastListener();
+      unsubscribeBroadcast();
+      cleanupOfflineQueue();
     };
   }, []);
 
@@ -200,6 +224,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // NOW set authenticated — routes will render with permissions already loaded
     setUser(userData);
     setIsAuthenticated(true);
+    resetAuthState();
 
     // Notify other tabs/components
     window.dispatchEvent(new Event('auth-changed'));
@@ -231,6 +256,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
           credentials: 'include',
         }).catch(() => { /* best-effort — don't block local cleanup */ });
       }
+
+      // Broadcast to other tabs before clearing tokens
+      broadcastAuthEvent({ type: 'LOGOUT' });
 
       // Clear all tokens using the single authority (also removes user + rbac_permissions)
       clearTokens();

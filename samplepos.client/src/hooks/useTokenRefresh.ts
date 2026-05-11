@@ -10,6 +10,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { setAuthState, getAuthState, waitForAuthenticated, resetAuthState } from '../lib/authStateMachine';
+import { broadcastAuthEvent } from '../lib/authBroadcast';
+
+export { resetAuthState };
 
 const API_BASE = '/api/auth/token';
 
@@ -173,21 +177,45 @@ export async function refreshAccessToken(): Promise<void> {
     }
 }
 
-// ── In-process refresh deduplication ─────────────────────────────────────────
+// ── In-process refresh deduplication + state machine ────────────────────────
 // Prevents multiple concurrent requests within the SAME tab from each calling
 // refreshAccessToken() simultaneously. The cross-tab lock handles cross-tab.
 // Together they ensure exactly ONE network call reaches /auth/token at any time.
+//
+// State machine transitions:
+//   → REFRESHING  when a refresh starts
+//   → AUTHENTICATED when it succeeds (unblocks all waiters)
+//   → EXPIRED when it fails with a server 4xx (rejects all waiters)
+//   stays AUTHENTICATED on network error (offline — keep tokens, retry later)
 let _inProcessRefresh: Promise<void> | null = null;
 
 /**
  * Refresh once, deduplicating concurrent in-tab callers.
- * Returns the shared promise so all callers await the same request.
+ * Drives the auth state machine and emits cross-tab broadcasts.
  */
 function _refreshOnce(): Promise<void> {
     if (!_inProcessRefresh) {
-        _inProcessRefresh = refreshAccessToken().finally(() => {
-            _inProcessRefresh = null;
-        });
+        setAuthState('REFRESHING');
+        _inProcessRefresh = refreshAccessToken()
+            .then(() => {
+                setAuthState('AUTHENTICATED');
+                broadcastAuthEvent({ type: 'TOKEN_REFRESH' });
+            })
+            .catch((err: unknown) => {
+                // Network error → keep AUTHENTICATED so requests can retry later
+                const isNetworkError = err instanceof Error &&
+                    (!('response' in err) || (err as AxiosError).response == null);
+                if (navigator.onLine && !isNetworkError) {
+                    setAuthState('EXPIRED');
+                    broadcastAuthEvent({ type: 'SESSION_EXPIRED' });
+                } else {
+                    setAuthState('AUTHENTICATED');
+                }
+                throw err;
+            })
+            .finally(() => {
+                _inProcessRefresh = null;
+            });
     }
     return _inProcessRefresh;
 }
@@ -222,6 +250,7 @@ export function build401Handler(
                         (!('response' in refreshError) || (refreshError as AxiosError).response == null);
                     if (navigator.onLine && !isNetworkError) {
                         clearTokens();
+                        broadcastAuthEvent({ type: 'LOGOUT' });
                         sessionStorage.setItem('session_expired', '1');
                         if (window.location.pathname !== '/login') {
                             window.location.href = '/login';
@@ -232,6 +261,7 @@ export function build401Handler(
             }
             // No refresh token — clear and redirect
             clearTokens();
+            broadcastAuthEvent({ type: 'LOGOUT' });
             sessionStorage.setItem('session_expired', '1');
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';
@@ -264,7 +294,11 @@ export function attachAuthInterceptors(
                 return config;
             }
 
-            if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
+            // If a refresh is already in-flight (from another request's 401),
+            // freeze here until it completes — avoids sending a stale token.
+            if (getAuthState() === 'REFRESHING') {
+                try { await waitForAuthenticated(); } catch { /* session expired — 401 handler will redirect */ }
+            } else if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
                 try { await _refreshOnce(); } catch { /* handled in response interceptor */ }
             }
 
@@ -301,7 +335,9 @@ export function setupAxiosInterceptors(): void {
                 return config;
             }
 
-            if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
+            if (getAuthState() === 'REFRESHING') {
+                try { await waitForAuthenticated(); } catch { /* session expired — 401 handler will redirect */ }
+            } else if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
                 try { await _refreshOnce(); } catch { /* handled in response interceptor */ }
             }
 
