@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { clearTokens } from './useTokenRefresh';
 import {
   Expense,
   CreateExpenseData,
@@ -135,8 +136,7 @@ const expenseApi = {
 
     // Check for missing, null, undefined, or literal string "undefined"
     if (!token || token === 'undefined' || token === 'null' || token.length < 20) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('user');
+      clearTokens();
       localStorage.removeItem('auth-store');
       throw new Error('Session expired. Please log in again.');
     }

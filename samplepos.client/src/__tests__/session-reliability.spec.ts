@@ -168,11 +168,11 @@ describe('Fix #2 — Cross-tab refresh mutex', () => {
         storeTokens('tab-token', 'tab-refresh', 900);
 
         // Fire two sequential (not truly parallel in single thread) calls
-        const r1 = await refreshAccessToken();
-        const r2 = await refreshAccessToken();
+        await refreshAccessToken();
+        await refreshAccessToken();
 
-        expect(r1.accessToken).toBe('tab-token');
-        expect(r2.accessToken).toBe('tab-token');
+        // Both calls preserve the already-fresh token — no network call needed
+        expect(getAccessToken()).toBe('tab-token');
         // Lock must be released after both complete
         expect(localStorage.getItem(REFRESH_LOCK_KEY)).toBeNull();
     });

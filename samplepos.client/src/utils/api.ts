@@ -13,7 +13,7 @@ import {
   getRefreshToken,
   getAccessToken,
   clearTokens,
-  storeTokens,
+  refreshAccessToken,
 } from '../hooks/useTokenRefresh';
 import type {
   CreateProductInput,
@@ -74,18 +74,6 @@ export const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Token refresh state (shared across interceptors on this instance)
-let _isRefreshing = false;
-let _refreshPromise: Promise<void> | null = null;
-
-async function _doRefresh(): Promise<void> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) throw new Error('No refresh token');
-  const res = await axios.post(`${API_BASE_URL.replace(/\/api$/, '/api')}/auth/token/refresh`, { refreshToken });
-  const data = res.data.data;
-  storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
-}
-
 // Request Interceptor - Add auth token + refresh if expired
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
@@ -94,16 +82,12 @@ apiClient.interceptors.request.use(
       return config;
     }
 
-    // Refresh expired token (skip when offline)
+    // Pre-emptively refresh expired token (skip when offline)
     if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
-      if (!_isRefreshing) {
-        _isRefreshing = true;
-        _refreshPromise = _doRefresh().finally(() => { _isRefreshing = false; _refreshPromise = null; });
-      }
       try {
-        await _refreshPromise;
+        await refreshAccessToken();
       } catch {
-        // Refresh failed while online — don't clear tokens here, response interceptor handles it
+        // Refresh failed while online — response interceptor handles the resulting 401
       }
     }
 
@@ -168,18 +152,11 @@ apiClient.interceptors.response.use(
       }
 
       // Try to refresh once on 401 (if we haven't already retried this request).
-      // Use the shared _isRefreshing/_refreshPromise so concurrent 401s from
-      // multiple in-flight requests all await ONE refresh — not N separate rotations
-      // which would trigger the backend's token-reuse detection.
       const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
       if (originalRequest && !originalRequest._retry && getRefreshToken()) {
         originalRequest._retry = true;
         try {
-          if (!_isRefreshing) {
-            _isRefreshing = true;
-            _refreshPromise = _doRefresh().finally(() => { _isRefreshing = false; _refreshPromise = null; });
-          }
-          await _refreshPromise;
+          await refreshAccessToken();
           const token = getAccessToken();
           if (token && originalRequest.headers) {
             originalRequest.headers.Authorization = `Bearer ${token}`;
@@ -202,7 +179,6 @@ apiClient.interceptors.response.use(
 
       if (hasAuthData) {
         clearTokens();
-        localStorage.removeItem('user');
 
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';

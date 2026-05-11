@@ -14,6 +14,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User } from '../types';
 import { STORAGE_KEYS, USER_ROLES } from '../utils/constants';
+import { clearTokens } from '../hooks/useTokenRefresh';
 
 export interface AuthTokens {
   accessToken: string;
@@ -129,9 +130,8 @@ export const useAuthStore = create<AuthStore>()(
           isAuthenticated: false
         });
 
-        // Clear from localStorage
-        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-        localStorage.removeItem(STORAGE_KEYS.USER);
+        // Use clearTokens() as the single authority for removing all auth state
+        clearTokens();
       },
 
       /**
@@ -286,8 +286,7 @@ export const useAuthStore = create<AuthStore>()(
           isAuthenticated: false,
           error: null,
         });
-        localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-        localStorage.removeItem(STORAGE_KEYS.USER);
+        clearTokens();
       },
 
       /**

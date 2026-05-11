@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo } from 'react';
 import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessToken } from '../hooks/useTokenRefresh';
+import { apiClient } from '../utils/api';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
+import type { AxiosError } from 'axios';
 import type { UserRole } from '../types';
 
 interface User {
@@ -103,34 +105,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // is still valid with the server before granting frontend access.
           // This prevents: expired sessions, revoked accounts, spoofed localStorage.
           if (navigator.onLine) {
-            const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
             try {
-              const validationRes = await fetch(`${baseUrl}/auth/profile`, {
-                headers: { Authorization: `Bearer ${token}` },
-              });
-              if (validationRes.status === 401 || validationRes.status === 403) {
-                // Token is invalid/expired/revoked — force re-login
-                localStorage.removeItem('auth_token');
-                localStorage.removeItem('user');
-                localStorage.removeItem('rbac_permissions');
-                localStorage.removeItem('refresh_token');
-                localStorage.removeItem('token_expiry');
-                return; // isLoading set to false in finally
-              }
+              const validationRes = await apiClient.get('/auth/profile');
               // 200: sync role/id from server to prevent localStorage role spoofing
-              if (validationRes.ok) {
-                const json = await validationRes.json();
-                if (json.success && json.data) {
-                  userData.id = json.data.id ?? userData.id;
-                  userData.email = json.data.email ?? userData.email;
-                  userData.fullName = json.data.fullName ?? json.data.full_name ?? userData.fullName;
-                  userData.role = json.data.role ?? userData.role;
-                  localStorage.setItem('user', JSON.stringify(userData));
-                }
+              if (validationRes.data?.success && validationRes.data?.data) {
+                const serverUser = validationRes.data.data;
+                userData.id = serverUser.id ?? userData.id;
+                userData.email = serverUser.email ?? userData.email;
+                userData.fullName = serverUser.fullName ?? serverUser.full_name ?? userData.fullName;
+                userData.role = serverUser.role ?? userData.role;
+                localStorage.setItem('user', JSON.stringify(userData));
               }
-              // Any other non-401/403 status (e.g. 500 server error) → allow cached access
-            } catch {
-              // Network error (fetch threw) — server unreachable, allow cached access
+            } catch (err) {
+              const status = (err as AxiosError)?.response?.status;
+              if (status === 401 || status === 403) {
+                // Token is invalid/revoked — interceptor already called clearTokens().
+                // Just bail out of initAuth so we don't set isAuthenticated.
+                return;
+              }
+              // Network error or 5xx — allow cached access (offline support)
             }
           }
           // ─────────────────────────────────────────────────────────────────────
@@ -153,10 +146,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
       } catch (error) {
         console.error('Error initializing auth:', error);
-        // Clear corrupted auth data
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user');
-        localStorage.removeItem('rbac_permissions');
+        // Clear corrupted auth data using the single authority
+        clearTokens();
       } finally {
         setIsLoading(false);
       }
@@ -241,10 +232,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }).catch(() => { /* best-effort — don't block local cleanup */ });
       }
 
-      // Clear all tokens using the new system
+      // Clear all tokens using the single authority (also removes user + rbac_permissions)
       clearTokens();
-      localStorage.removeItem('user');
-      localStorage.removeItem('rbac_permissions');
       setUser(null);
       setIsAuthenticated(false);
       setPermissionKeys([]);

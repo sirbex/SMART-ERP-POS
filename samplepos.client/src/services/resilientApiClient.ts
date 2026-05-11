@@ -1,4 +1,5 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
+import { clearTokens } from '../hooks/useTokenRefresh';
 import logger from '../utils/logger';
 
 /**
@@ -97,8 +98,7 @@ class ResilientApiClient {
     }
 
     private handleUnauthorized() {
-        localStorage.removeItem('auth_token');
-        localStorage.removeItem('user');
+        clearTokens();
         window.location.href = '/login';
     }
 

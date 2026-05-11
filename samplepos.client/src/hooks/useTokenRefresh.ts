@@ -70,12 +70,16 @@ export function getRefreshToken(): string | null {
 }
 
 /**
- * Clear all tokens
+ * Clear ALL authentication state — the single place allowed to do this.
+ * Removes tokens, user, permissions, and the cross-tab refresh lock.
  */
 export function clearTokens() {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     localStorage.removeItem(TOKEN_EXPIRY_KEY);
+    localStorage.removeItem('user');
+    localStorage.removeItem('rbac_permissions');
+    localStorage.removeItem(REFRESH_LOCK_KEY);
 }
 
 /**
@@ -136,22 +140,23 @@ function releaseRefreshLock(): void {
  * Internally protected by a cross-tab localStorage mutex (Fix #2) so only one
  * tab refreshes at a time.
  */
-export async function refreshAccessToken(): Promise<TokenResponse> {
+/**
+ * Refresh the access token — the ONLY place in the app allowed to call /auth/token.
+ *
+ * Protected by a cross-tab localStorage mutex so only one tab refreshes at a time.
+ * After acquiring the lock it re-checks: if another tab already refreshed while
+ * we were waiting, it returns immediately without making a network request.
+ *
+ * Throws on genuine auth rejection (expired/revoked refresh token).
+ * Does NOT throw on network errors — callers must handle offline gracefully.
+ */
+export async function refreshAccessToken(): Promise<void> {
     // Acquire cross-tab lock before doing anything
     await waitForRefreshLock();
     try {
-        // Re-check after acquiring lock — another tab may have already refreshed
-        // while we were waiting. If the token is now fresh, return it directly.
+        // Re-check after acquiring lock — another tab may have already refreshed.
         if (!isTokenExpired()) {
-            const currentToken = getAccessToken();
-            const currentRefresh = getRefreshToken();
-            if (currentToken && currentRefresh) {
-                const storedExpiry = localStorage.getItem(TOKEN_EXPIRY_KEY);
-                const expiresIn = storedExpiry
-                    ? Math.max(60, Math.floor((parseInt(storedExpiry, 10) - Date.now()) / 1000) + 60)
-                    : 840;
-                return { accessToken: currentToken, refreshToken: currentRefresh, expiresIn };
-            }
+            return; // Token is still fresh — nothing to do.
         }
 
         const refreshToken = getRefreshToken();
@@ -162,27 +167,93 @@ export async function refreshAccessToken(): Promise<TokenResponse> {
         const response = await axios.post(`${API_BASE}/refresh`, { refreshToken });
         const data = response.data.data as TokenResponse;
 
-        // Store the new tokens
         storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
-
-        return data;
     } finally {
         releaseRefreshLock();
     }
 }
 
-// Track if we're currently refreshing to prevent multiple refresh calls
-let isRefreshing = false;
-let refreshPromise: Promise<TokenResponse> | null = null;
+// ── In-process refresh deduplication ─────────────────────────────────────────
+// Prevents multiple concurrent requests within the SAME tab from each calling
+// refreshAccessToken() simultaneously. The cross-tab lock handles cross-tab.
+// Together they ensure exactly ONE network call reaches /auth/token at any time.
+let _inProcessRefresh: Promise<void> | null = null;
 
 /**
- * Axios request interceptor - adds auth header and refreshes token if needed
+ * Refresh once, deduplicating concurrent in-tab callers.
+ * Returns the shared promise so all callers await the same request.
  */
-export function setupAxiosInterceptors() {
-    // Request interceptor
-    axios.interceptors.request.use(
+function _refreshOnce(): Promise<void> {
+    if (!_inProcessRefresh) {
+        _inProcessRefresh = refreshAccessToken().finally(() => {
+            _inProcessRefresh = null;
+        });
+    }
+    return _inProcessRefresh;
+}
+
+/**
+ * Build a standardised 401 response handler for any axios instance.
+ * On 401: refresh once (via _refreshOnce) then retry the original request.
+ * On genuine auth failure: clear tokens and redirect to /login.
+ * On network error: preserve tokens (offline support).
+ */
+export function build401Handler(
+    instance: ReturnType<typeof axios.create> | typeof axios
+) {
+    return async (error: AxiosError): Promise<unknown> => {
+        const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+
+        if (error.response?.status === 401 && !originalRequest?._retry) {
+            if (!navigator.onLine) return Promise.reject(error);
+
+            originalRequest._retry = true;
+
+            if (getRefreshToken()) {
+                try {
+                    await _refreshOnce();
+                    const token = getAccessToken();
+                    if (token && originalRequest.headers) {
+                        originalRequest.headers.Authorization = `Bearer ${token}`;
+                    }
+                    return (instance as typeof axios)(originalRequest);
+                } catch (refreshError) {
+                    const isNetworkError = refreshError instanceof Error &&
+                        (!('response' in refreshError) || (refreshError as AxiosError).response == null);
+                    if (navigator.onLine && !isNetworkError) {
+                        clearTokens();
+                        sessionStorage.setItem('session_expired', '1');
+                        if (window.location.pathname !== '/login') {
+                            window.location.href = '/login';
+                        }
+                    }
+                    return Promise.reject(refreshError);
+                }
+            }
+            // No refresh token — clear and redirect
+            clearTokens();
+            sessionStorage.setItem('session_expired', '1');
+            if (window.location.pathname !== '/login') {
+                window.location.href = '/login';
+            }
+        }
+
+        return Promise.reject(error);
+    };
+}
+
+/**
+ * Attach standard auth interceptors to any axios instance.
+ * Request: attach token + pre-emptive refresh if expired.
+ * Response: 401 → refresh once → retry, auth failure → logout.
+ */
+export function attachAuthInterceptors(
+    instance: ReturnType<typeof axios.create>,
+    opts?: { extraRequestHeaders?: (config: InternalAxiosRequestConfig) => void }
+): void {
+    // ── Request: attach token, pre-emptively refresh if about to expire ──
+    instance.interceptors.request.use(
         async (config: InternalAxiosRequestConfig) => {
-            // Skip auth for public routes
             if (
                 config.url?.includes('/login') ||
                 config.url?.includes('/register') ||
@@ -193,94 +264,57 @@ export function setupAxiosInterceptors() {
                 return config;
             }
 
-            // Check if token needs refresh
-            if (isTokenExpired() && getRefreshToken()) {
-                // Skip refresh when offline — use existing token (server won't see it anyway)
-                if (!navigator.onLine) {
-                    const token = getAccessToken();
-                    if (token) {
-                        config.headers.Authorization = `Bearer ${token}`;
-                    }
-                    return config;
-                }
-
-                if (!isRefreshing) {
-                    isRefreshing = true;
-                    refreshPromise = refreshAccessToken()
-                        .finally(() => {
-                            isRefreshing = false;
-                            refreshPromise = null;
-                        });
-                }
-
-                try {
-                    await refreshPromise;
-                } catch (error) {
-                    // Only force logout if the server explicitly rejected the refresh
-                    // (has a response). Network errors should preserve tokens for offline use.
-                    const isNetworkError = error instanceof Error &&
-                        (!('response' in error) || (error as AxiosError).response == null);
-                    if (navigator.onLine && !isNetworkError) {
-                        clearTokens();
-                        window.location.href = '/login';
-                    }
-                    throw error;
-                }
+            if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
+                try { await _refreshOnce(); } catch { /* handled in response interceptor */ }
             }
 
-            // Add current access token to request
             const token = getAccessToken();
-            if (token) {
-                config.headers.Authorization = `Bearer ${token}`;
-            }
-
+            if (token) config.headers.Authorization = `Bearer ${token}`;
+            opts?.extraRequestHeaders?.(config);
             return config;
         },
         (error) => Promise.reject(error)
     );
 
-    // Response interceptor - handle 401 errors
-    axios.interceptors.response.use(
+    // ── Response: 401 → refresh once → retry ──
+    instance.interceptors.response.use(
         (response) => response,
-        async (error: AxiosError) => {
-            const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+        build401Handler(instance)
+    );
+}
 
-            // If 401 and not already retried, try to refresh
-            if (error.response?.status === 401 && !originalRequest._retry) {
-                // Don't attempt refresh or force logout when offline
-                if (!navigator.onLine) {
-                    return Promise.reject(error);
-                }
-
-                originalRequest._retry = true;
-
-                const refreshToken = getRefreshToken();
-                if (refreshToken) {
-                    try {
-                        await refreshAccessToken();
-
-                        // Retry the original request with new token
-                        const token = getAccessToken();
-                        if (token) {
-                            originalRequest.headers.Authorization = `Bearer ${token}`;
-                        }
-                        return axios(originalRequest);
-                    } catch (refreshError) {
-                        // Only force logout if the server explicitly rejected the token
-                        // (has a response). Network errors preserve tokens for offline use.
-                        const isNetworkError = refreshError instanceof Error &&
-                            (!('response' in refreshError) || (refreshError as AxiosError).response == null);
-                        if (navigator.onLine && !isNetworkError) {
-                            clearTokens();
-                            window.location.href = '/login';
-                        }
-                        return Promise.reject(refreshError);
-                    }
-                }
+/**
+ * Setup interceptors on the global axios instance.
+ * Called once from AuthContext on app boot.
+ */
+export function setupAxiosInterceptors(): void {
+    // Request interceptor on global axios
+    axios.interceptors.request.use(
+        async (config: InternalAxiosRequestConfig) => {
+            if (
+                config.url?.includes('/login') ||
+                config.url?.includes('/register') ||
+                config.url?.includes('/token/refresh') ||
+                config.url?.includes('/token/config') ||
+                config.url?.includes('/password/policy')
+            ) {
+                return config;
             }
 
-            return Promise.reject(error);
-        }
+            if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
+                try { await _refreshOnce(); } catch { /* handled in response interceptor */ }
+            }
+
+            const token = getAccessToken();
+            if (token) config.headers.Authorization = `Bearer ${token}`;
+            return config;
+        },
+        (error) => Promise.reject(error)
+    );
+
+    axios.interceptors.response.use(
+        (response) => response,
+        build401Handler(axios)
     );
 }
 

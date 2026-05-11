@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { attachAuthInterceptors } from '../hooks/useTokenRefresh';
 import type {
   User,
   Product,
@@ -39,114 +40,7 @@ export const accountingApi = axios.create({
   },
 });
 
-// ── Token refresh helpers (shared with useTokenRefresh.ts storage keys) ──
-const ACCESS_TOKEN_KEY = 'auth_token';
-const REFRESH_TOKEN_KEY = 'refresh_token';
-const TOKEN_EXPIRY_KEY = 'token_expiry';
-
-function _getAccessToken(): string | null { return localStorage.getItem(ACCESS_TOKEN_KEY); }
-function _getRefreshToken(): string | null { return localStorage.getItem(REFRESH_TOKEN_KEY); }
-function _isTokenExpired(): boolean {
-  const exp = localStorage.getItem(TOKEN_EXPIRY_KEY);
-  if (!exp) return false; // no expiry recorded → trust existing token
-  return Date.now() >= parseInt(exp, 10);
-}
-function _storeTokens(accessToken: string, refreshToken: string, expiresIn: number) {
-  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-  localStorage.setItem(TOKEN_EXPIRY_KEY, (Date.now() + (expiresIn - 60) * 1000).toString());
-}
-function _clearTokensAndRedirect() {
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
-  localStorage.removeItem(TOKEN_EXPIRY_KEY);
-  localStorage.removeItem('user');
-  localStorage.removeItem('rbac_permissions');
-  sessionStorage.setItem('session_expired', '1');
-  if (window.location.pathname !== '/login') {
-    window.location.href = '/login';
-  }
-}
-
-let _refreshing = false;
-let _refreshPromise: Promise<void> | null = null;
-
-async function _doTokenRefresh(): Promise<void> {
-  const rt = _getRefreshToken();
-  if (!rt) throw new Error('No refresh token');
-  const res = await axios.post(API_BASE_URL + '/auth/token/refresh', { refreshToken: rt });
-  const d = res.data.data;
-  _storeTokens(d.accessToken, d.refreshToken, d.expiresIn);
-}
-
-/**
- * Attach token-refresh-aware interceptors to an axios instance.
- * On 401 → retry once with refreshed token. Only redirect to /login
- * if refresh itself fails.
- */
-function attachAuthInterceptors(instance: ReturnType<typeof axios.create>, opts?: { extraRequestHeaders?: (config: import('axios').InternalAxiosRequestConfig) => void }) {
-  // ── Request: attach token, pre-emptively refresh if expired ──
-  instance.interceptors.request.use(async (config) => {
-    // Skip auth for login / refresh endpoints
-    if (config.url?.includes('/login') || config.url?.includes('/token/refresh')) {
-      return config;
-    }
-
-    // Pre-emptive refresh if token is about to expire
-    if (_isTokenExpired() && _getRefreshToken() && navigator.onLine) {
-      if (!_refreshing) {
-        _refreshing = true;
-        _refreshPromise = _doTokenRefresh().finally(() => { _refreshing = false; _refreshPromise = null; });
-      }
-      try { await _refreshPromise; } catch { /* handled in response interceptor */ }
-    }
-
-    const token = _getAccessToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    opts?.extraRequestHeaders?.(config);
-    return config;
-  });
-
-  // ── Response: on 401, try refresh once then retry ──
-  instance.interceptors.response.use(
-    (response) => response,
-    async (error) => {
-      const original = error.config as import('axios').InternalAxiosRequestConfig & { _retry?: boolean };
-
-      if (error.response?.status === 401 && !original?._retry) {
-        if (!navigator.onLine) return Promise.reject(error);
-
-        original._retry = true;
-        const rt = _getRefreshToken();
-        if (rt) {
-          try {
-            await _doTokenRefresh();
-            const token = _getAccessToken();
-            if (token && original.headers) {
-              original.headers.Authorization = `Bearer ${token}`;
-            }
-            return instance(original);
-          } catch {
-            _clearTokensAndRedirect();
-            return Promise.reject(error);
-          }
-        }
-        // No refresh token at all → redirect
-        _clearTokensAndRedirect();
-      }
-
-      if (error.response?.status === 403) {
-        const msg = error.response.data?.error || 'You do not have permission to perform this action';
-        window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
-      }
-      return Promise.reject(error);
-    }
-  );
-}
-
-// Attach interceptors to both API instances
+// Attach interceptors to both API instances using the single canonical authority
 attachAuthInterceptors(api);
 attachAuthInterceptors(accountingApi, {
   extraRequestHeaders: (config) => {
