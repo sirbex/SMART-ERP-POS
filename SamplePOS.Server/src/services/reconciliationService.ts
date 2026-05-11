@@ -98,8 +98,15 @@ export class ReconciliationService {
             }));
 
             const glBalance = items.find((i) => i.source === 'GL_BALANCE')?.amount || 0;
+            const storedBalance = items.find((i) => i.source === 'STORED_BALANCE')?.amount ?? glBalance;
+            const storedDiff = new Decimal(glBalance).minus(storedBalance).toNumber();
+
+            // Only DISCREPANCY/ACTION_REQUIRED items (not INFO) affect reconciliation status.
+            // Cash has no subledger — INFO items are breakdowns only.
             const hasDiscrepancy = items.some(
-                (i) => i.status === 'DISCREPANCY' || i.status === 'ACTION_REQUIRED'
+                (i) =>
+                    (i.status === 'DISCREPANCY' || i.status === 'ACTION_REQUIRED') &&
+                    i.source !== 'GL_BALANCE'
             );
 
             const recommendations: string[] = [];
@@ -107,6 +114,11 @@ export class ReconciliationService {
                 recommendations.push('Review all cash transactions for the period');
                 recommendations.push('Verify no manual cash adjustments were made outside the system');
                 recommendations.push('Check for unreported cash receipts or payments');
+                if (Math.abs(storedDiff) > 1) {
+                    recommendations.push(
+                        'accounts.CurrentBalance for 1010 has drifted from the computed GL — run a balance resync'
+                    );
+                }
             }
 
             return {
@@ -114,9 +126,11 @@ export class ReconciliationService {
                 accountCode: '1010',
                 asOfDate: date,
                 generatedAt: new Date().toISOString(),
+                // Cash has no subledger; GL is the source of truth.
+                // subledgerBalance = storedBalance so the header diff reflects any cache drift.
                 glBalance,
-                subledgerBalance: glBalance, // Cash has no subledger
-                difference: 0,
+                subledgerBalance: storedBalance,
+                difference: storedDiff,
                 status: hasDiscrepancy ? 'DISCREPANCY' : 'RECONCILED',
                 items,
                 recommendations,
