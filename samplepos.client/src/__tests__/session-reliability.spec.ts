@@ -22,7 +22,7 @@ const localStorageMock = {
     clear: () => { Object.keys(_store).forEach(k => delete _store[k]); },
 };
 // Inject mock globally BEFORE any module loads localStorage
-// @ts-ignore
+// @ts-expect-error — override read-only global in test environment
 global.localStorage = localStorageMock;
 
 // ── Mock axios BEFORE importing useTokenRefresh ─────────────────────────────
