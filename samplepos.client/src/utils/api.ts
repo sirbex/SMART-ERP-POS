@@ -167,12 +167,19 @@ apiClient.interceptors.response.use(
         return Promise.reject(error);
       }
 
-      // Try to refresh once on 401 (if we haven't already retried this request)
+      // Try to refresh once on 401 (if we haven't already retried this request).
+      // Use the shared _isRefreshing/_refreshPromise so concurrent 401s from
+      // multiple in-flight requests all await ONE refresh — not N separate rotations
+      // which would trigger the backend's token-reuse detection.
       const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
       if (originalRequest && !originalRequest._retry && getRefreshToken()) {
         originalRequest._retry = true;
         try {
-          await _doRefresh();
+          if (!_isRefreshing) {
+            _isRefreshing = true;
+            _refreshPromise = _doRefresh().finally(() => { _isRefreshing = false; _refreshPromise = null; });
+          }
+          await _refreshPromise;
           const token = getAccessToken();
           if (token && originalRequest.headers) {
             originalRequest.headers.Authorization = `Bearer ${token}`;
