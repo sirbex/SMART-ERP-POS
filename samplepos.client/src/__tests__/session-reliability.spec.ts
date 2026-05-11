@@ -726,7 +726,6 @@ describe('authBroadcast — in-process handler dispatch', () => {
         // Simulate what setupAuthBroadcastListener's storage listener does —
         // manually call the private _dispatch equivalent by writing to storage
         // and triggering the storage handler inline
-        const payload = JSON.stringify({ type: 'SESSION_EXPIRED', _ts: Date.now() });
         // The storage fallback parses and dispatches via onStorage
         // We simulate by importing and testing the internals are wired:
         // dispatch happens when storageEvent.key === 'smarterp_auth_event'
