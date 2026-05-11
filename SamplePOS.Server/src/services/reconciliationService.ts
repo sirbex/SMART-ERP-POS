@@ -302,8 +302,11 @@ export class ReconciliationService {
         const date = asOfDate || getBusinessDate();
 
         try {
-            // GL-driven reconciliation: compare total AP balance from GL entries
-            // vs sum of per-supplier GL AP balances vs account stored balance.
+            // GL-driven reconciliation: compare supplier-scoped AP GL balance
+            // vs suppliers table (subledger) vs account stored balance.
+            // Account 2100 also holds non-supplier payables (expense accruals for
+            // airtime, allowances, fuel, etc.) which are legitimate AP entries but
+            // NOT supplier invoices — these are shown as INFO, not discrepancies.
             const result = await this.pool.query(
                 `
                 WITH gl_total AS (
@@ -315,7 +318,7 @@ export class ReconciliationService {
                       AND lt."TransactionDate"::DATE <= $1
                       AND lt."Status" = 'POSTED'
                 ),
-                gl_per_supplier AS (
+                gl_supplier AS (
                     SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS balance
                     FROM ledger_entries le
                     JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
@@ -325,42 +328,72 @@ export class ReconciliationService {
                       AND lt."TransactionDate"::DATE <= $1
                       AND lt."Status" = 'POSTED'
                 ),
+                supplier_table AS (
+                    SELECT COALESCE(SUM("OutstandingBalance"), 0) AS balance
+                    FROM suppliers
+                ),
                 stored_balance AS (
                     SELECT COALESCE("CurrentBalance", 0) AS balance
                     FROM accounts
                     WHERE "AccountCode" = '2100'
                 )
                 SELECT
-                    gt.balance AS gl_balance,
-                    gps.balance AS supplier_gl_balance,
-                    sb.balance AS stored_balance
-                FROM gl_total gt, gl_per_supplier gps, stored_balance sb
+                    gt.balance  AS gl_balance,
+                    gs.balance  AS supplier_gl_balance,
+                    st.balance  AS supplier_table_balance,
+                    sb.balance  AS stored_balance
+                FROM gl_total gt, gl_supplier gs, supplier_table st, stored_balance sb
             `,
                 [date]
             );
 
-            const row = result.rows[0] || { gl_balance: 0, supplier_gl_balance: 0, stored_balance: 0 };
+            const row = result.rows[0] || {
+                gl_balance: 0,
+                supplier_gl_balance: 0,
+                supplier_table_balance: 0,
+                stored_balance: 0,
+            };
             const glBalance = parseFloat(row.gl_balance || '0');
             const supplierGlBalance = parseFloat(row.supplier_gl_balance || '0');
+            const supplierTableBalance = parseFloat(row.supplier_table_balance || '0');
             const storedBalance = parseFloat(row.stored_balance || '0');
+            const expenseAccruals = new Decimal(glBalance).minus(supplierGlBalance).toNumber();
 
             const items: ReconciliationItem[] = [
                 {
                     source: 'GL_AP_BALANCE',
-                    description: 'Accounts Payable (2100) balance from General Ledger entries',
+                    description: 'Accounts Payable (2100) total balance from General Ledger',
                     amount: glBalance,
                     difference: 0,
                     status: 'BASE' as ReconciliationItem['status'],
                     details: null,
                 },
                 {
-                    source: 'SUPPLIER_BALANCE',
-                    description: 'Sum of per-supplier AP balances from General Ledger',
+                    source: 'NON_SUPPLIER_AP',
+                    description:
+                        'Non-supplier AP entries in account 2100 (expense accruals: airtime, allowances, fuel, etc.)',
+                    amount: expenseAccruals,
+                    difference: 0,
+                    status: 'INFO' as ReconciliationItem['status'],
+                    details: null,
+                },
+                {
+                    source: 'SUPPLIER_AP_GL',
+                    description: 'Supplier-only AP balance from General Ledger (EntityType = SUPPLIER)',
                     amount: supplierGlBalance,
-                    difference: new Decimal(glBalance).minus(supplierGlBalance).toNumber(),
-                    status: Math.abs(glBalance - supplierGlBalance) < 0.01
-                        ? ('MATCHED' as ReconciliationItem['status'])
-                        : ('DISCREPANCY' as ReconciliationItem['status']),
+                    difference: 0,
+                    status: 'BASE' as ReconciliationItem['status'],
+                    details: null,
+                },
+                {
+                    source: 'SUPPLIER_BALANCE',
+                    description: 'Sum of per-supplier outstanding balances (suppliers table)',
+                    amount: supplierTableBalance,
+                    difference: new Decimal(supplierGlBalance).minus(supplierTableBalance).toNumber(),
+                    status:
+                        Math.abs(supplierGlBalance - supplierTableBalance) < 0.01
+                            ? ('MATCHED' as ReconciliationItem['status'])
+                            : ('DISCREPANCY' as ReconciliationItem['status']),
                     details: null,
                 },
                 {
@@ -368,9 +401,10 @@ export class ReconciliationService {
                     description: 'Account CurrentBalance stored on accounts table',
                     amount: storedBalance,
                     difference: new Decimal(glBalance).minus(storedBalance).toNumber(),
-                    status: Math.abs(glBalance - storedBalance) < 0.01
-                        ? ('MATCHED' as ReconciliationItem['status'])
-                        : ('DISCREPANCY' as ReconciliationItem['status']),
+                    status:
+                        Math.abs(glBalance - storedBalance) < 0.01
+                            ? ('MATCHED' as ReconciliationItem['status'])
+                            : ('DISCREPANCY' as ReconciliationItem['status']),
                     details: null,
                 },
             ];
@@ -390,9 +424,11 @@ export class ReconciliationService {
                 accountCode: '2100',
                 asOfDate: date,
                 generatedAt: new Date().toISOString(),
-                glBalance,
-                subledgerBalance: supplierGlBalance,
-                difference: new Decimal(glBalance).minus(supplierGlBalance).toNumber(),
+                // Use supplier-scoped GL vs supplier table — consistent with fn_full_reconciliation_report.
+                // The full GL_AP_BALANCE (which includes expense accruals) is visible in the items list.
+                glBalance: supplierGlBalance,
+                subledgerBalance: supplierTableBalance,
+                difference: new Decimal(supplierGlBalance).minus(supplierTableBalance).toNumber(),
                 status: hasDiscrepancy ? 'DISCREPANCY' : 'RECONCILED',
                 items,
                 recommendations,
