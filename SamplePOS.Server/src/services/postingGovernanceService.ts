@@ -198,14 +198,21 @@ export class PostingGovernanceService {
 
             // ------------------------------------------------------------------
             // Rule C: allowManualPosting = false + source = MANUAL_JOURNAL → block
+            //
+            // Exception: CASH-tagged accounts may be DEBITED via MANUAL_JOURNAL to
+            // support capital investment and owner cash injection (Dr Cash / Cr Equity).
+            // Crediting cash is separately and more strictly protected by Rule D.
             // ------------------------------------------------------------------
             if (!account.allowManualPosting && source === 'MANUAL_JOURNAL') {
-                throw new PostingGovernanceError(
-                    `Account ${account.accountCode} (${account.accountName}) does not allow manual journal entries. ` +
-                    `This account is system-controlled. Use the appropriate module to post to it.`,
-                    'GOV_RULE_C_NO_MANUAL_POSTING',
-                    { accountCode: account.accountCode, systemAccountTag: account.systemAccountTag }
-                );
+                const isCashDebitOnly = account.systemAccountTag === 'CASH' && isDebit && !isCredit;
+                if (!isCashDebitOnly) {
+                    throw new PostingGovernanceError(
+                        `Account ${account.accountCode} (${account.accountName}) does not allow manual journal entries. ` +
+                        `This account is system-controlled. Use the appropriate module to post to it.`,
+                        'GOV_RULE_C_NO_MANUAL_POSTING',
+                        { accountCode: account.accountCode, systemAccountTag: account.systemAccountTag }
+                    );
+                }
             }
         }
 

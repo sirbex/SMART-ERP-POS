@@ -237,7 +237,9 @@ describe('PostingGovernanceService', () => {
     // RULE B: Source not in allowedSources
     // --------------------------------------------------------------------------
     describe('Rule B — Source not in allowedSources', () => {
-        it('blocks posting to Cash (1010) from MANUAL_JOURNAL when allowedSources is set', () => {
+        it('allows MANUAL_JOURNAL to DEBIT Cash (1010) — capital investment exception in Rule C', () => {
+            // Rule C exempts CASH-tagged debit-only lines so owner capital injection works.
+            // Rule B is skipped for MANUAL_JOURNAL (deferred to Rule C per code comment).
             const req = makeRequest(
                 'MANUAL_JOURNAL',
                 [
@@ -246,8 +248,7 @@ describe('PostingGovernanceService', () => {
                 ],
                 [cashAccount, revenueAccount]
             );
-            // Rule B or C will fire — both result in PostingGovernanceError
-            expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
 
         it('blocks PURCHASE_BILL from posting to Cash (not in its allowedSources)', () => {
@@ -278,6 +279,49 @@ describe('PostingGovernanceService', () => {
             );
             expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
             expect(() => PostingGovernanceService.validate(req)).toThrow('GOV_RULE_C_NO_MANUAL_POSTING');
+        });
+
+        it('allows MANUAL_JOURNAL to DEBIT cash (capital investment: Dr Cash / Cr Equity)', () => {
+            const equityAccount = makeAccount({
+                accountCode: '3200',
+                accountName: 'Owner Capital',
+                accountType: 'EQUITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: true,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const req = makeRequest(
+                'MANUAL_JOURNAL',
+                [
+                    { accountCode: '1010', debitAmount: 1000000, creditAmount: 0 },
+                    { accountCode: '3200', debitAmount: 0, creditAmount: 1000000 },
+                ],
+                [cashAccount, equityAccount]
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('still blocks MANUAL_JOURNAL to CREDIT cash (Rule D handles cash-out)', () => {
+            const equityAccount = makeAccount({
+                accountCode: '3200',
+                accountName: 'Owner Drawings',
+                accountType: 'EQUITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: true,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const req = makeRequest(
+                'MANUAL_JOURNAL',
+                [
+                    { accountCode: '3200', debitAmount: 500000, creditAmount: 0 },
+                    { accountCode: '1010', debitAmount: 0, creditAmount: 500000 },
+                ],
+                [equityAccount, cashAccount]
+            );
+            // Rule A blocks credit-only line on debit-normal system account first
+            expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
         });
 
         it('allows MANUAL_JOURNAL to accounts where allowManualPosting=true', () => {
