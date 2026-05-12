@@ -168,9 +168,15 @@ export default function AssetAccountingPage() {
   });
 
   // ─── Asset Form State ─────────────────────────────────────────────
-  const [assetForm, setAssetForm] = useState({
+  const [assetForm, setAssetForm] = useState<{
+    name: string; categoryId: string; acquisitionDate: string; acquisitionCost: string;
+    salvageValue: string; description: string; location: string; serialNumber: string;
+    registrationMode: 'PURCHASE' | 'OPENING';
+    paymentMethod: 'CASH' | 'BANK' | 'AP';
+  }>({
     name: '', categoryId: '', acquisitionDate: '', acquisitionCost: '',
     salvageValue: '0', description: '', location: '', serialNumber: '',
+    registrationMode: 'PURCHASE',
     paymentMethod: 'CASH',
   });
 
@@ -234,9 +240,11 @@ export default function AssetAccountingPage() {
       description: assetForm.description || undefined,
       location: assetForm.location || undefined,
       serialNumber: assetForm.serialNumber || undefined,
-      paymentMethod: assetForm.paymentMethod,
+      mode: assetForm.registrationMode,
+      // Only pass paymentMethod for PURCHASE — never for OPENING.
+      ...(assetForm.registrationMode === 'PURCHASE' && { paymentMethod: assetForm.paymentMethod }),
     });
-    setAssetForm({ name: '', categoryId: '', acquisitionDate: '', acquisitionCost: '', salvageValue: '0', description: '', location: '', serialNumber: '', paymentMethod: 'CASH' });
+    setAssetForm({ name: '', categoryId: '', acquisitionDate: '', acquisitionCost: '', salvageValue: '0', description: '', location: '', serialNumber: '', registrationMode: 'PURCHASE', paymentMethod: 'CASH' });
     setShowAssetForm(false);
   };
 
@@ -504,6 +512,47 @@ export default function AssetAccountingPage() {
               {/* Financial */}
               <fieldset className="border border-green-100 bg-green-50/30 rounded-lg p-4">
                 <legend className="text-sm font-semibold text-green-700 px-2">Financial Details</legend>
+
+                {/* ── Registration Mode ──────────────────────────────────────── */}
+                <div className="mb-4">
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Registration Mode *</label>
+                  <div className="flex gap-4">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="radio" name="registrationMode" value="PURCHASE"
+                        checked={assetForm.registrationMode === 'PURCHASE'}
+                        onChange={() => setAssetForm({ ...assetForm, registrationMode: 'PURCHASE' })}
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <div className="text-sm font-medium text-gray-800">New Asset Purchase</div>
+                        <div className="text-xs text-gray-500">Asset is being bought now. Credits Cash, Bank, or Accounts Payable.</div>
+                      </div>
+                    </label>
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="radio" name="registrationMode" value="OPENING"
+                        checked={assetForm.registrationMode === 'OPENING'}
+                        onChange={() => setAssetForm({ ...assetForm, registrationMode: 'OPENING' })}
+                        className="mt-0.5"
+                      />
+                      <div>
+                        <div className="text-sm font-medium text-gray-800">Opening Asset (pre-ERP)</div>
+                        <div className="text-xs text-gray-500">Asset existed before ERP go-live. Credits Opening Balance Equity — Cash is not affected.</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Opening mode info banner */}
+                {assetForm.registrationMode === 'OPENING' && (
+                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                    <strong>Opening Balance mode:</strong> This asset existed before your ERP go-live date.
+                    The acquisition will credit <strong>Opening Balance Equity (3050)</strong> — not Cash or Payables.
+                    No payment is recorded; this is a balance sheet state declaration.
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <FormField label="Acquisition Date *" type="date" value={assetForm.acquisitionDate}
                     onChange={v => setAssetForm({ ...assetForm, acquisitionDate: v })} required />
@@ -511,15 +560,25 @@ export default function AssetAccountingPage() {
                     onChange={v => setAssetForm({ ...assetForm, acquisitionCost: v })} required />
                   <FormField label="Salvage Value" type="number" min={0} step="0.01" placeholder="0.00" value={assetForm.salvageValue}
                     onChange={v => setAssetForm({ ...assetForm, salvageValue: v })} />
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method *</label>
-                    <select value={assetForm.paymentMethod}
-                      onChange={e => setAssetForm({ ...assetForm, paymentMethod: e.target.value })}
-                      className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                      <option value="CASH">Cash (CR 1000)</option>
-                      <option value="AP">Accounts Payable (CR 2000)</option>
-                    </select>
-                  </div>
+                  {/* Payment Method — PURCHASE mode only */}
+                  {assetForm.registrationMode === 'PURCHASE' ? (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method *</label>
+                      <select value={assetForm.paymentMethod}
+                        onChange={e => setAssetForm({ ...assetForm, paymentMethod: e.target.value as 'CASH' | 'BANK' | 'AP' })}
+                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="CASH">Cash (CR 1010 – Cash)</option>
+                        <option value="BANK">Bank Transfer (CR 1010 – Cash)</option>
+                        <option value="AP">Accounts Payable (CR 2100 – AP)</option>
+                      </select>
+                    </div>
+                  ) : (
+                    <div className="flex items-end">
+                      <div className="w-full px-3 py-2 border border-blue-200 bg-blue-50 rounded-lg text-sm text-blue-700 font-medium">
+                        CR: 3050 – Opening Balance Equity
+                      </div>
+                    </div>
+                  )}
                 </div>
               </fieldset>
 
@@ -548,7 +607,12 @@ export default function AssetAccountingPage() {
                         </tr>
                         <tr>
                           <td className="py-1 font-mono text-gray-700">
-                            {assetForm.paymentMethod === 'CASH' ? getAccountLabel('1000') : getAccountLabel('2000')}
+                            {assetForm.registrationMode === 'OPENING'
+                              ? <span className="text-blue-700">3050 – Opening Balance Equity</span>
+                              : assetForm.paymentMethod === 'AP'
+                                ? getAccountLabel('2100')
+                                : getAccountLabel('1010')
+                            }
                           </td>
                           <td className="py-1 text-right">—</td>
                           <td className="py-1 text-right font-mono text-green-600">{formatCurrency(parseFloat(assetForm.acquisitionCost) || 0)}</td>
@@ -556,6 +620,9 @@ export default function AssetAccountingPage() {
                       </tbody>
                     </table>
                   </div>
+                  {assetForm.registrationMode === 'OPENING' && (
+                    <p className="mt-2 text-xs text-blue-600">Cash balance is unaffected — this is an opening balance entry.</p>
+                  )}
                 </div>
               )}
 

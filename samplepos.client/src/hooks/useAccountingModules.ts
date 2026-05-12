@@ -406,7 +406,11 @@ export function useCreateAsset() {
     mutationFn: (data: {
       name: string; categoryId: string; acquisitionDate: string; acquisitionCost: number;
       description?: string; salvageValue?: number; usefulLifeMonths?: number;
-      depreciationMethod?: string; depreciationStartDate?: string; paymentMethod?: string;
+      depreciationMethod?: string; depreciationStartDate?: string;
+      /** PURCHASE = bought now (requires paymentMethod). OPENING = pre-ERP (no paymentMethod). */
+      mode: 'PURCHASE' | 'OPENING';
+      /** Required when mode=PURCHASE. Must be omitted when mode=OPENING. */
+      paymentMethod?: 'CASH' | 'BANK' | 'AP';
       location?: string; serialNumber?: string;
     }) =>
       api.assets.create(data),

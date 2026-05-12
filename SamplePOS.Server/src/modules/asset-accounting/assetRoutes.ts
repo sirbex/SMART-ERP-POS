@@ -70,13 +70,22 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
 
 router.post('/', authenticate, requirePermission('accounting.manage'), asyncHandler(async (req, res) => {
   const userId = req.user!.id;
-  const { name, categoryId, acquisitionDate, acquisitionCost } = req.body;
+  const { name, categoryId, acquisitionDate, acquisitionCost, mode } = req.body;
   if (!name || !categoryId || !acquisitionDate || !acquisitionCost) {
     throw new ValidationError('name, categoryId, acquisitionDate, and acquisitionCost are required');
   }
+  if (!mode || !['PURCHASE', 'OPENING'].includes(mode)) {
+    throw new ValidationError('mode is required: PURCHASE (new asset bought now) or OPENING (pre-ERP asset)');
+  }
+  if (mode === 'PURCHASE' && !req.body.paymentMethod) {
+    throw new ValidationError('paymentMethod is required for PURCHASE mode (CASH, BANK, or AP)');
+  }
+  if (mode === 'OPENING' && req.body.paymentMethod) {
+    throw new ValidationError('paymentMethod must not be provided for OPENING mode. Opening assets credit Opening Balance Equity, not Cash or Payables.');
+  }
   const asset = await assetService.acquireAsset({
     ...req.body,
-    paymentMethod: req.body.paymentMethod || 'CASH',
+    mode,
     userId,
   }, req.tenantPool);
   res.status(201).json({ success: true, data: asset });

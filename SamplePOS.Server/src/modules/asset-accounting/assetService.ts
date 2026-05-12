@@ -20,6 +20,7 @@ import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { AccountingCore, JournalLine } from '../../services/accountingCore.js';
 import { AccountCodes } from '../../services/glEntryService.js';
+import type { PostingSource } from '../../services/postingGovernanceService.js';
 import { ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
@@ -27,6 +28,15 @@ import { getBusinessYear } from '../../utils/dateRange.js';
 // =============================================================================
 // TYPES
 // =============================================================================
+
+/**
+ * PURCHASE — asset bought now (credits Cash, Bank, or Accounts Payable).
+ * OPENING  — asset existed before ERP go-live (credits Opening Balance Equity).
+ *
+ * This is the core law: registering a pre-existing asset is NOT a purchase.
+ * Opening balance registration must NEVER touch Cash or Payables.
+ */
+export type AssetRegistrationMode = 'PURCHASE' | 'OPENING';
 
 export interface AssetCategory {
   id: string;
@@ -61,6 +71,7 @@ export interface FixedAsset {
   costCenterId: string | null;
   location: string | null;
   serialNumber: string | null;
+  registrationMode: AssetRegistrationMode;
   createdAt: string;
 }
 
@@ -136,8 +147,92 @@ export const getFixedAssetById = async (id: string, pool?: pg.Pool): Promise<Fix
   return normalizeAsset(result.rows[0]);
 };
 
+// =============================================================================
+// ASSET ACQUISITION GL ENGINE
+// =============================================================================
+
 /**
- * Acquire (create) a new fixed asset and post the acquisition to GL.
+ * Build the GL journal lines for an asset acquisition.
+ *
+ * This is the SINGLE posting engine — all asset creation paths call this.
+ * No inline GL posting is permitted anywhere else.
+ *
+ * Mode routing:
+ *   PURCHASE + CASH/BANK → Dr FixedAsset / Cr Cash        (source: EXPENSE_PAYMENT)
+ *   PURCHASE + AP        → Dr FixedAsset / Cr AP           (source: PURCHASE_BILL)
+ *   OPENING             → Dr FixedAsset / Cr OpeningEquity (source: OPENING_BALANCE_WIZARD)
+ *
+ * @throws ValidationError if mode/paymentMethod combination violates accounting law.
+ */
+export function buildAssetAcquisitionGLLines(
+  mode: AssetRegistrationMode,
+  paymentMethod: 'CASH' | 'BANK' | 'AP' | undefined,
+  assetAccountCode: string,
+  acquisitionCost: number,
+  assetId: string,
+  assetName: string,
+  assetNumber: string,
+): { lines: JournalLine[]; source: PostingSource; creditAccountCode: string } {
+  // ── Accounting law guards ──────────────────────────────────────────────────
+  if (mode === 'OPENING' && paymentMethod !== undefined) {
+    throw new ValidationError(
+      'Opening balance assets cannot specify a payment method. ' +
+      'Pre-ERP assets always credit Opening Balance Equity (3050), not Cash or Payables.'
+    );
+  }
+  if (mode === 'PURCHASE' && !paymentMethod) {
+    throw new ValidationError(
+      'New asset purchase requires a payment method (CASH, BANK, or AP).'
+    );
+  }
+
+  // ── Credit account & posting source by mode ────────────────────────────────
+  let creditAccountCode: string;
+  let source: PostingSource;
+
+  if (mode === 'OPENING') {
+    // Pre-ERP asset: state registration, not a payment event.
+    creditAccountCode = AccountCodes.OPENING_BALANCE_EQUITY;
+    source = 'OPENING_BALANCE_WIZARD';
+  } else if (paymentMethod === 'CASH' || paymentMethod === 'BANK') {
+    creditAccountCode = AccountCodes.CASH;
+    source = 'EXPENSE_PAYMENT';
+  } else {
+    // AP
+    creditAccountCode = AccountCodes.ACCOUNTS_PAYABLE;
+    source = 'PURCHASE_BILL';
+  }
+
+  const lines: JournalLine[] = [
+    {
+      accountCode: assetAccountCode,
+      description: `Asset acquisition: ${assetName} (${assetNumber})`,
+      debitAmount: acquisitionCost,
+      creditAmount: 0,
+      entityType: 'FIXED_ASSET',
+      entityId: assetId,
+    },
+    {
+      accountCode: creditAccountCode,
+      description: mode === 'OPENING'
+        ? `Opening balance — existing asset: ${assetNumber}`
+        : `Payment for asset: ${assetNumber}`,
+      debitAmount: 0,
+      creditAmount: acquisitionCost,
+      entityType: 'FIXED_ASSET',
+      entityId: assetId,
+    },
+  ];
+
+  return { lines, source, creditAccountCode };
+}
+
+/**
+ * Acquire (create) a new or opening-balance fixed asset and post the acquisition to GL.
+ *
+ * Mode PURCHASE: asset bought now — credits Cash, Bank, or Accounts Payable.
+ * Mode OPENING:  asset existed before ERP go-live — credits Opening Balance Equity.
+ *                Cash and Payables are NEVER touched.
  */
 export const acquireAsset = async (
   data: {
@@ -153,7 +248,10 @@ export const acquireAsset = async (
     costCenterId?: string;
     location?: string;
     serialNumber?: string;
-    paymentMethod: 'CASH' | 'AP';
+    /** Required for PURCHASE mode; must be omitted for OPENING mode. */
+    paymentMethod?: 'CASH' | 'BANK' | 'AP';
+    /** PURCHASE = new acquisition. OPENING = pre-ERP asset, no payment implied. */
+    mode: AssetRegistrationMode;
     userId: string;
   },
   pool?: pg.Pool
@@ -181,51 +279,46 @@ export const acquireAsset = async (
     const assetNumber = `FA-${year}-${String(nextNum).padStart(4, '0')}`;
 
     // Create asset record
+    const assetId = uuidv4();
     const result = await client.query(
       `INSERT INTO fixed_assets (id, asset_number, name, description, category_id, acquisition_date, acquisition_cost,
        salvage_value, useful_life_months, depreciation_method, depreciation_start_date,
-       accumulated_depreciation, net_book_value, status, cost_center_id, location, serial_number, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, 'ACTIVE', $13, $14, $15, $16)
+       accumulated_depreciation, net_book_value, status, cost_center_id, location, serial_number, created_by,
+       registration_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, 'ACTIVE', $13, $14, $15, $16, $17)
        RETURNING *`,
-      [uuidv4(), assetNumber, data.name, data.description || null, data.categoryId,
+      [assetId, assetNumber, data.name, data.description || null, data.categoryId,
       data.acquisitionDate, data.acquisitionCost, salvage, usefulLife, method,
       data.depreciationStartDate || data.acquisitionDate,
-        nbv, data.costCenterId || null, data.location || null, data.serialNumber || null, data.userId]
+      nbv, data.costCenterId || null, data.location || null, data.serialNumber || null, data.userId,
+      data.mode]
     );
 
-    // GL: DR Fixed Assets, CR Cash or AP
-    const creditAccount = data.paymentMethod === 'CASH' ? AccountCodes.CASH : AccountCodes.ACCOUNTS_PAYABLE;
-    const lines: JournalLine[] = [
-      {
-        accountCode: category.assetAccountCode,
-        description: `Asset acquisition: ${data.name} (${assetNumber})`,
-        debitAmount: data.acquisitionCost,
-        creditAmount: 0,
-        entityType: 'FIXED_ASSET',
-        entityId: result.rows[0].id,
-      },
-      {
-        accountCode: creditAccount,
-        description: `Payment for asset: ${assetNumber}`,
-        debitAmount: 0,
-        creditAmount: data.acquisitionCost,
-        entityType: 'FIXED_ASSET',
-        entityId: result.rows[0].id,
-      },
-    ];
+    // GL: single posting engine — no inline posting allowed.
+    const { lines, source } = buildAssetAcquisitionGLLines(
+      data.mode,
+      data.paymentMethod,
+      category.assetAccountCode,
+      data.acquisitionCost,
+      assetId,
+      data.name,
+      assetNumber,
+    );
+
+    const description = data.mode === 'OPENING'
+      ? `Opening balance asset: ${data.name} (${assetNumber})`
+      : `Asset acquisition: ${data.name} (${assetNumber})`;
 
     await AccountingCore.createJournalEntry({
       entryDate: data.acquisitionDate,
-      description: `Asset acquisition: ${data.name} (${assetNumber})`,
+      description,
       referenceType: 'ASSET_ACQUISITION',
-      referenceId: result.rows[0].id,
+      referenceId: assetId,
       referenceNumber: assetNumber,
       lines,
       userId: data.userId,
-      idempotencyKey: `ASSET-ACQ-${result.rows[0].id}`,
-      // CASH method credits cash directly (EXPENSE_PAYMENT passes Rule D).
-      // AP method creates a payable (PURCHASE_BILL is the correct AP source).
-      source: data.paymentMethod === 'CASH' ? 'EXPENSE_PAYMENT' : 'PURCHASE_BILL',
+      idempotencyKey: `ASSET-ACQ-${assetId}`,
+      source,
     }, undefined, client);
 
     logger.info('Fixed asset acquired', { assetNumber, cost: data.acquisitionCost });
@@ -589,6 +682,7 @@ function normalizeAsset(row: Record<string, unknown>): FixedAsset {
     costCenterId: row.cost_center_id as string | null,
     location: row.location as string | null,
     serialNumber: row.serial_number as string | null,
+    registrationMode: (row.registration_mode as AssetRegistrationMode | undefined) ?? 'PURCHASE',
     createdAt: row.created_at as string,
   };
 }
