@@ -23,7 +23,9 @@ export function SupplierSelector({
   className = "",
   showLabel = true,
 }: SupplierSelectorProps) {
-  const { data: suppliersData, isLoading } = useSuppliers();
+  // Fetch all active suppliers (limit:200 covers any realistic catalogue size;
+  // default limit:50 would cut off suppliers alphabetically after row 50).
+  const { data: suppliersData, isLoading } = useSuppliers({ limit: 200 });
 
   const rawData = suppliersData?.data;
   const suppliers = (Array.isArray(rawData) ? rawData : []) as Array<{ id: string; name: string }>;

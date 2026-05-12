@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Plus, Search, Eye, Check, FileText, FileMinus, FilePlus, XCircle, Sparkles } from 'lucide-react';
@@ -54,7 +55,10 @@ import { formatTimestampDate } from '../../utils/businessDate';
 // ============================================================
 
 const CreditDebitNotesPage: React.FC = () => {
-    const [activeTab, setActiveTab] = useState('customer');
+    const location = useLocation();
+    // Auto-select supplier tab when navigated via ?tab=supplier (e.g. from Supplier Payments page)
+    const initialTab = new URLSearchParams(location.search).get('tab') === 'supplier' ? 'supplier' : 'customer';
+    const [activeTab, setActiveTab] = useState(initialTab);
 
     return (
         <div className="p-6 space-y-6">

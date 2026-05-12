@@ -17,7 +17,8 @@ import Decimal from 'decimal.js';
 import { AxiosError } from 'axios';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
-import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks } from 'lucide-react';
+import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks, FileMinus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { downloadFile } from '../../utils/download';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { AdjustSupplierInvoiceModal } from '../../components/shared/AdjustSupplierInvoiceModal';
@@ -101,6 +102,7 @@ const safeParseFloat = (value: unknown): number => {
 };
 
 const SupplierPaymentsPage: React.FC = () => {
+    const navigate = useNavigate();
     // Permission checks (hide actions user cannot perform)
     const canCreatePayment = useCanAccess([], ['suppliers.create']);
     const canCreateBill = useCanAccess([], ['purchasing.create']);
@@ -1151,10 +1153,14 @@ const SupplierPaymentsPage: React.FC = () => {
 
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid w-full grid-cols-3">
+                <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="payments">Payments</TabsTrigger>
                     <TabsTrigger value="bills">Bills</TabsTrigger>
                     <TabsTrigger value="mass-payment">Mass Payment Run</TabsTrigger>
+                    <TabsTrigger value="credit-notes" onClick={() => navigate('/accounting/credit-debit-notes?tab=supplier')}>
+                        <FileMinus className="h-3.5 w-3.5 mr-1.5" />
+                        Credit Notes
+                    </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="payments" className="space-y-4">
