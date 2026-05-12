@@ -159,6 +159,8 @@ export default function JournalEntriesPage() {
     const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
     const [reverseReason, setReverseReason] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const [activePreset, setActivePreset] = useState<'capital-investment' | 'owner-withdrawal' | null>(null);
+    const [presetAmount, setPresetAmount] = useState<number>(0);
 
     // ── Transaction Guard ─────────────────────────────────────────────────────
     // Lock the ERP UI whenever a journal posting or reversal dialog is open.
@@ -314,9 +316,11 @@ export default function JournalEntriesPage() {
                 { accountId: '', debitAmount: 0, creditAmount: 0, description: '' }
             ]
         });
+        setActivePreset(null);
+        setPresetAmount(0);
     };
 
-    // Preset templates for common journal entries
+    // SAP-grade preset: system decides debit/credit sides; user enters amount only.
     const applyPreset = (preset: 'capital-investment' | 'owner-withdrawal') => {
         const accountList = accounts as Account[];
         const cashOrBank = accountList.find(a => a.accountNumber === '1010') || accountList.find(a => a.accountNumber === '1020');
@@ -328,6 +332,7 @@ export default function JournalEntriesPage() {
                 setError('Required accounts not found (Cash/Bank 1010 or Owner Capital 3200). Check Chart of Accounts.');
                 return;
             }
+            // Dr Cash (increases) / Cr Owner Capital — the ONLY valid direction for cash coming in
             setForm(prev => ({
                 ...prev,
                 description: 'Capital investment by owner',
@@ -341,6 +346,7 @@ export default function JournalEntriesPage() {
                 setError('Required accounts not found (Cash/Bank 1010 or Owner Drawings 3300). Check Chart of Accounts.');
                 return;
             }
+            // Dr Owner Drawings / Cr Cash (decreases) — the ONLY valid direction for cash going out
             setForm(prev => ({
                 ...prev,
                 description: 'Owner withdrawal / drawings',
@@ -350,7 +356,36 @@ export default function JournalEntriesPage() {
                 ]
             }));
         }
+        setActivePreset(preset);
+        setPresetAmount(0);
         setError(null);
+    };
+
+    const clearPreset = () => {
+        setActivePreset(null);
+        setPresetAmount(0);
+        setForm(prev => ({
+            ...prev,
+            description: '',
+            lines: [
+                { accountId: '', debitAmount: 0, creditAmount: 0, description: '' },
+                { accountId: '', debitAmount: 0, creditAmount: 0, description: '' }
+            ]
+        }));
+    };
+
+    // When preset is active, derive debit/credit automatically from the single amount.
+    // Capital investment: line[0]=Dr (Cash in), line[1]=Cr (Equity up)
+    // Owner withdrawal:   line[0]=Dr (Drawings up), line[1]=Cr (Cash out)
+    const handlePresetAmountChange = (amount: number) => {
+        setPresetAmount(amount);
+        setForm(prev => ({
+            ...prev,
+            lines: [
+                { ...prev.lines[0], debitAmount: amount, creditAmount: 0 },
+                { ...prev.lines[1], debitAmount: 0, creditAmount: amount }
+            ]
+        }));
     };
 
     const addLine = () => {
@@ -652,44 +687,101 @@ export default function JournalEntriesPage() {
                             <div className="mb-4">
                                 <div className="flex items-center justify-between mb-2">
                                     <h3 className="font-medium">Journal Lines</h3>
-                                    <button
-                                        type="button"
-                                        onClick={addLine}
-                                        className="text-sm text-blue-600 hover:text-blue-700 flex items-center space-x-1"
-                                    >
-                                        <Plus className="h-4 w-4" />
-                                        <span>Add Line</span>
-                                    </button>
+                                    {!activePreset && (
+                                        <button
+                                            type="button"
+                                            onClick={addLine}
+                                            className="text-sm text-blue-600 hover:text-blue-700 flex items-center space-x-1"
+                                        >
+                                            <Plus className="h-4 w-4" />
+                                            <span>Add Line</span>
+                                        </button>
+                                    )}
                                 </div>
+
+                                {/* SAP-grade preset mode: single Amount input, system controls Dr/Cr sides */}
+                                {activePreset && (
+                                    <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">
+                                                Preset active — system controls debit/credit direction
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={clearPreset}
+                                                className="text-xs text-blue-600 hover:text-blue-800 underline"
+                                            >
+                                                Clear preset (manual mode)
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <label className="text-sm font-medium text-blue-800 whitespace-nowrap">Amount *</label>
+                                            <input
+                                                type="number"
+                                                value={presetAmount || ''}
+                                                onChange={(e) => handlePresetAmountChange(parseFloat(e.target.value) || 0)}
+                                                placeholder="Enter total amount"
+                                                min="0"
+                                                step="0.01"
+                                                className="w-52 px-3 py-1.5 border border-blue-300 rounded-lg text-right focus:ring-2 focus:ring-blue-500 bg-white"
+                                                autoFocus
+                                            />
+                                            <span className="text-sm text-blue-600">
+                                                {activePreset === 'capital-investment'
+                                                    ? '→ Dr Cash (in) / Cr Owner Capital'
+                                                    : '→ Dr Owner Drawings / Cr Cash (out)'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <ResponsiveTableWrapper>
                                     <table className="w-full text-sm">
                                         <thead className="bg-gray-50">
                                             <tr>
                                                 <th className="text-left px-3 py-2">Account</th>
                                                 <th className="text-left px-3 py-2">Description</th>
-                                                <th className="text-right px-3 py-2 w-32">Debit</th>
-                                                <th className="text-right px-3 py-2 w-32">Credit</th>
+                                                {activePreset ? (
+                                                    <>
+                                                        <th className="text-center px-3 py-2 w-20">Side</th>
+                                                        <th className="text-right px-3 py-2 w-32">Amount</th>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <th className="text-right px-3 py-2 w-32">Debit</th>
+                                                        <th className="text-right px-3 py-2 w-32">Credit</th>
+                                                    </>
+                                                )}
                                                 <th className="w-10"></th>
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {form.lines.map((line, idx) => (
+                                            {form.lines.map((line, idx) => {
+                                                const acc = (accounts as Account[]).find(a => a.id === line.accountId);
+                                                const isDebitLine = line.debitAmount > 0;
+                                                return (
                                                 <tr key={idx} className="border-b">
                                                     <td className="px-3 py-2">
-                                                        <select
-                                                            value={line.accountId}
-                                                            onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
-                                                            className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
-                                                            title={`Select account for line ${idx + 1}`}
-                                                            aria-label={`Account for line ${idx + 1}`}
-                                                        >
-                                                            <option value="">Select account...</option>
-                                                            {(accounts as Account[]).map((acc) => (
-                                                                <option key={acc.id} value={acc.id}>
-                                                                    {acc.accountNumber} - {acc.accountName}
-                                                                </option>
-                                                            ))}
-                                                        </select>
+                                                        {activePreset ? (
+                                                            <span className="px-2 py-1 text-sm font-medium text-gray-800">
+                                                                {acc ? `${acc.accountNumber} – ${acc.accountName}` : '—'}
+                                                            </span>
+                                                        ) : (
+                                                            <select
+                                                                value={line.accountId}
+                                                                onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
+                                                                className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
+                                                                title={`Select account for line ${idx + 1}`}
+                                                                aria-label={`Account for line ${idx + 1}`}
+                                                            >
+                                                                <option value="">Select account...</option>
+                                                                {(accounts as Account[]).map((a) => (
+                                                                    <option key={a.id} value={a.id}>
+                                                                        {a.accountNumber} - {a.accountName}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        )}
                                                     </td>
                                                     <td className="px-3 py-2">
                                                         <input
@@ -698,38 +790,54 @@ export default function JournalEntriesPage() {
                                                             onChange={(e) => updateLine(idx, 'description', e.target.value)}
                                                             placeholder="Line description"
                                                             className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
+                                                            readOnly={activePreset !== null && line.description !== ''}
                                                         />
                                                     </td>
+                                                    {activePreset ? (
+                                                        <>
+                                                            <td className="px-3 py-2 text-center">
+                                                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isDebitLine ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                                    {isDebitLine ? 'DR' : 'CR'}
+                                                                </span>
+                                                            </td>
+                                                            <td className="px-3 py-2 text-right font-mono text-gray-700">
+                                                                {presetAmount > 0 ? formatCurrency(presetAmount) : '—'}
+                                                            </td>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <td className="px-3 py-2">
+                                                                <input
+                                                                    type="number"
+                                                                    value={line.debitAmount || ''}
+                                                                    onChange={(e) => {
+                                                                        updateLine(idx, 'debitAmount', parseFloat(e.target.value) || 0);
+                                                                        if (parseFloat(e.target.value) > 0) updateLine(idx, 'creditAmount', 0);
+                                                                    }}
+                                                                    placeholder="0.00"
+                                                                    min="0"
+                                                                    step="0.01"
+                                                                    className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
+                                                                />
+                                                            </td>
+                                                            <td className="px-3 py-2">
+                                                                <input
+                                                                    type="number"
+                                                                    value={line.creditAmount || ''}
+                                                                    onChange={(e) => {
+                                                                        updateLine(idx, 'creditAmount', parseFloat(e.target.value) || 0);
+                                                                        if (parseFloat(e.target.value) > 0) updateLine(idx, 'debitAmount', 0);
+                                                                    }}
+                                                                    placeholder="0.00"
+                                                                    min="0"
+                                                                    step="0.01"
+                                                                    className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
+                                                                />
+                                                            </td>
+                                                        </>
+                                                    )}
                                                     <td className="px-3 py-2">
-                                                        <input
-                                                            type="number"
-                                                            value={line.debitAmount || ''}
-                                                            onChange={(e) => {
-                                                                updateLine(idx, 'debitAmount', parseFloat(e.target.value) || 0);
-                                                                if (parseFloat(e.target.value) > 0) updateLine(idx, 'creditAmount', 0);
-                                                            }}
-                                                            placeholder="0.00"
-                                                            min="0"
-                                                            step="0.01"
-                                                            className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
-                                                        />
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        <input
-                                                            type="number"
-                                                            value={line.creditAmount || ''}
-                                                            onChange={(e) => {
-                                                                updateLine(idx, 'creditAmount', parseFloat(e.target.value) || 0);
-                                                                if (parseFloat(e.target.value) > 0) updateLine(idx, 'debitAmount', 0);
-                                                            }}
-                                                            placeholder="0.00"
-                                                            min="0"
-                                                            step="0.01"
-                                                            className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
-                                                        />
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        {form.lines.length > 2 && (
+                                                        {!activePreset && form.lines.length > 2 && (
                                                             <button
                                                                 type="button"
                                                                 onClick={() => removeLine(idx)}
@@ -742,7 +850,8 @@ export default function JournalEntriesPage() {
                                                         )}
                                                     </td>
                                                 </tr>
-                                            ))}
+                                                );
+                                            })}
                                         </tbody>
                                         <tfoot className="bg-gray-50 font-semibold">
                                             <tr>
