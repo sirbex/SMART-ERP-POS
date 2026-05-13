@@ -548,36 +548,68 @@ export const systemManagementRepository = {
             'stock_adjustments',
             'delivery_notes',
             'delivery_note_lines',
+            // Sales returns & POS orders
+            'sale_refunds',
+            'sale_refund_items',
+            'pos_orders',
+            'pos_order_items',
+            // Purchase returns & payment runs
+            'return_grn',
+            'return_grn_lines',
+            'payment_runs',
+            'payment_run_items',
+            'supplier_invoice_grn_links',
+            'grir_clearing',
+            // Fixed assets
+            'fixed_assets',
+            'depreciation_entries',
+            // Inventory derived
+            'inventory_adjustment_documents',
+            'inventory_balances',
+            'customer_balances',
+            // Tax & clearing
+            'withholding_tax_entries',
+            'down_payment_clearings',
+            'document_flow',
+            'idempotency_keys',
         ];
 
         // Accounting data tables
         const acctTables = [
             'ledger_transactions',
             'ledger_entries',
+            'gl_period_balances',
             'journal_entries',
             'journal_entry_lines',
             'manual_journal_entries',
             'manual_journal_entry_lines',
+            'je_approval_requests',
             'payment_allocations',
             'payment_lines',
             'accounting_periods',
             'accounting_period_history',
         ];
 
-        // Fetch all table counts in a single query using pg_stat_user_tables
+        // Use exact COUNT(*) — pg_stat_user_tables.n_live_tup is a stale estimate
+        // only refreshed by autovacuum and will show 0 on freshly loaded databases.
         const allTables = [...masterTables, ...txnTables, ...acctTables];
-        const countsResult = await pool.query(
-            `
-            SELECT relname AS table_name, n_live_tup AS count
-            FROM pg_stat_user_tables
-            WHERE relname = ANY($1)
-        `,
-            [allTables]
+        const countResults = await Promise.all(
+            allTables.map(async (tableName) => {
+                assertSafeTableName(tableName);
+                try {
+                    const r = await pool.query(
+                        `SELECT COUNT(*)::int AS cnt FROM "${tableName}"`
+                    );
+                    return { tableName, count: (r.rows[0]?.cnt as number) ?? 0 };
+                } catch {
+                    return { tableName, count: 0 };
+                }
+            })
         );
 
         const countMap = new Map<string, number>();
-        for (const row of countsResult.rows) {
-            countMap.set(row.table_name, parseInt(row.count));
+        for (const { tableName, count } of countResults) {
+            countMap.set(tableName, count);
         }
 
         for (const t of masterTables) {
@@ -768,6 +800,9 @@ export const systemManagementRepository = {
         try {
             await client.query(`DELETE FROM ledger_entries`);
             await client.query(`DELETE FROM ledger_transactions`);
+            // CRITICAL: gl_period_balances is the SAP FAGLFLEXT totals table the
+            // balance sheet reads from. Must be cleared or the report shows ghost balances.
+            await client.query(`DELETE FROM gl_period_balances`);
             await client.query(`UPDATE accounts SET "CurrentBalance" = 0`);
             tablesCleared['accounting_reset'] = 1;
             logger.info('Accounting reset completed');
@@ -782,7 +817,8 @@ export const systemManagementRepository = {
         // =========================================================================
         logger.info('Phase 1: Clearing remaining accounting data...');
 
-        // ledger_entries, ledger_transactions, and account balances already cleared in Phase 0
+        // ledger_entries, ledger_transactions, gl_period_balances and account balances already cleared in Phase 0
+        tablesCleared['je_approval_requests'] = await safeDelete('je_approval_requests', step++);
         tablesCleared['journal_entry_lines'] = await safeDelete('journal_entry_lines', step++);
         tablesCleared['journal_entries'] = await safeDelete('journal_entries', step++);
 
@@ -851,6 +887,18 @@ export const systemManagementRepository = {
         // Discounts
         tablesCleared['discount_authorizations'] = await safeDelete('discount_authorizations', step++);
 
+        // Sales refunds (FK to sales — must delete before sales)
+        tablesCleared['sale_refund_items'] = await safeDelete('sale_refund_items', step++);
+        tablesCleared['sale_refunds'] = await safeDelete('sale_refunds', step++);
+
+        // POS orders (legacy/new POS order tables)
+        tablesCleared['pos_order_items'] = await safeDelete('pos_order_items', step++);
+        tablesCleared['pos_orders'] = await safeDelete('pos_orders', step++);
+
+        // Withholding tax & down payments
+        tablesCleared['withholding_tax_entries'] = await safeDelete('withholding_tax_entries', step++);
+        tablesCleared['down_payment_clearings'] = await safeDelete('down_payment_clearings', step++);
+
         // Sales
         tablesCleared['sale_discounts'] = await safeDelete('sale_discounts', step++);
         tablesCleared['sale_items'] = await safeDelete('sale_items', step++);
@@ -865,6 +913,14 @@ export const systemManagementRepository = {
         // =========================================================================
         logger.info('Phase 3: Clearing supplier and purchase transactions...');
 
+        // Payment runs (FK to supplier data — clear before supplier_payments)
+        tablesCleared['payment_run_items'] = await safeDelete('payment_run_items', step++);
+        tablesCleared['payment_runs'] = await safeDelete('payment_runs', step++);
+
+        // GR/IR clearing and supplier invoice ↔ GRN links (FK to both invoices and GRs)
+        tablesCleared['grir_clearing'] = await safeDelete('grir_clearing', step++);
+        tablesCleared['supplier_invoice_grn_links'] = await safeDelete('supplier_invoice_grn_links', step++);
+
         tablesCleared['supplier_payment_allocations'] = await safeTruncate(
             'supplier_payment_allocations',
             step++
@@ -876,6 +932,10 @@ export const systemManagementRepository = {
         );
         tablesCleared['supplier_invoices'] = await safeTruncate('supplier_invoices', step++);
         tablesCleared['supplier_ledger'] = await safeDelete('supplier_ledger', step++);
+
+        // Purchase returns (FK to goods_receipts and purchase_orders — clear before them)
+        tablesCleared['return_grn_lines'] = await safeDelete('return_grn_lines', step++);
+        tablesCleared['return_grn'] = await safeDelete('return_grn', step++);
 
         // Goods receipts - Use TRUNCATE CASCADE
         tablesCleared['goods_receipt_items'] = await safeTruncate('goods_receipt_items', step++);
@@ -889,6 +949,14 @@ export const systemManagementRepository = {
         // PHASE 4: INVENTORY DATA (Use TRUNCATE CASCADE for reliable cleanup)
         // =========================================================================
         logger.info('Phase 4: Clearing inventory data...');
+
+        // Fixed assets: depreciation entries reference fixed_assets — clear in order
+        tablesCleared['depreciation_entries'] = await safeDelete('depreciation_entries', step++);
+        tablesCleared['fixed_assets'] = await safeDelete('fixed_assets', step++);
+
+        // Inventory derived tables
+        tablesCleared['inventory_adjustment_documents'] = await safeDelete('inventory_adjustment_documents', step++);
+        tablesCleared['inventory_balances'] = await safeDelete('inventory_balances', step++);
 
         // Use TRUNCATE CASCADE to handle FK dependencies automatically
         tablesCleared['stock_movements'] = await safeTruncate('stock_movements', step++);
@@ -925,6 +993,9 @@ export const systemManagementRepository = {
         );
         tablesCleared['quotation_items'] = await safeDelete('quotation_items', step++);
         tablesCleared['quotations'] = await safeDelete('quotations', step++);
+
+        // Document flow (cross-module linkage records)
+        tablesCleared['document_flow'] = await safeDelete('document_flow', step++);
 
         // =========================================================================
         // PHASE 6: EXPENSES & BANKING
@@ -1013,6 +1084,11 @@ export const systemManagementRepository = {
         tablesCleared['product_demand_stats'] = await safeDelete('product_demand_stats', step++);
         tablesCleared['product_seasonality'] = await safeDelete('product_seasonality', step++);
         tablesCleared['demand_forecast_runs'] = await safeDelete('demand_forecast_runs', step++);
+
+        // Idempotency keys (transaction dedup tokens — stale after reset)
+        tablesCleared['idempotency_keys'] = await safeDelete('idempotency_keys', step++);
+        // Customer balance summary table (derived from transactions)
+        tablesCleared['customer_balances'] = await safeDelete('customer_balances', step++);
 
         // Session tokens (stale after reset)
         tablesCleared['refresh_tokens'] = await safeDelete('refresh_tokens', step++);
