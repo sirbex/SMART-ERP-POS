@@ -196,9 +196,21 @@ export async function pollAndProcessPendingEvents(pool: pg.Pool): Promise<{
 
         return { claimed, rebuilt, failed, durationMs };
     } catch (err) {
-        logger.error('[PeriodBalanceWorker] poll cycle error', {
-            error: err instanceof Error ? err.message : String(err),
-        });
+        // In multi-tenant production the global pool points to an empty database
+        // that has no GL tables yet.  This is expected — swallow silently at DEBUG
+        // so logs stay clean.  Code '42P01' = undefined_table in PostgreSQL.
+        const isTableMissing =
+            err instanceof Error &&
+            (err.message.includes('relation') && err.message.includes('does not exist') ||
+             (err as unknown as { code?: string }).code === '42P01');
+
+        if (isTableMissing) {
+            logger.debug('[PeriodBalanceWorker] gl_projection_events not found in this pool — skipping (expected for global/empty DB)');
+        } else {
+            logger.error('[PeriodBalanceWorker] poll cycle error', {
+                error: err instanceof Error ? err.message : String(err),
+            });
+        }
         return { claimed, rebuilt, failed, durationMs: Date.now() - start };
     }
 }

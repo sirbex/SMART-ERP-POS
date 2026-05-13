@@ -42,7 +42,7 @@ export const pool = new Pool({
 pool.on('connect', (client) => {
   client.query("SET timezone = 'UTC'; SET statement_timeout = '30s'")
     .catch(err => logger.error('Failed to configure session settings on new connection', { err }));
-  logger.info('Database connected | Strategy: UTC everywhere | DATE parser: string');
+  logger.debug('Database connected | Strategy: UTC everywhere | DATE parser: string');
 });
 
 pool.on('error', (err) => {
