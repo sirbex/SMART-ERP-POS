@@ -567,6 +567,10 @@ export const systemManagementRepository = {
             'inventory_adjustment_documents',
             'inventory_balances',
             'customer_balances',
+            // State/aggregate tables (derived from sales/purchasing — must match txns)
+            'product_daily_summary',
+            'sales_daily_summary',
+            'supplier_balances',
             // Tax & clearing
             'withholding_tax_entries',
             'down_payment_clearings',
@@ -908,6 +912,10 @@ export const systemManagementRepository = {
         tablesCleared['pos_held_order_items'] = await safeDelete('pos_held_order_items', step++);
         tablesCleared['pos_held_orders'] = await safeDelete('pos_held_orders', step++);
 
+        // State/aggregate tables derived from sales (must be wiped — txnRevenue=0 but stateRevenue persists otherwise)
+        tablesCleared['product_daily_summary'] = await safeDelete('product_daily_summary', step++);
+        tablesCleared['sales_daily_summary'] = await safeDelete('sales_daily_summary', step++);
+
         // =========================================================================
         // PHASE 3: SUPPLIER & PURCHASE DATA (Use TRUNCATE CASCADE for reliability)
         // =========================================================================
@@ -944,6 +952,9 @@ export const systemManagementRepository = {
         // Purchase orders - Use TRUNCATE CASCADE
         tablesCleared['purchase_order_items'] = await safeTruncate('purchase_order_items', step++);
         tablesCleared['purchase_orders'] = await safeTruncate('purchase_orders', step++);
+
+        // Supplier balance state table (derived from invoices/payments — stale after reset)
+        tablesCleared['supplier_balances'] = await safeDelete('supplier_balances', step++);
 
         // =========================================================================
         // PHASE 4: INVENTORY DATA (Use TRUNCATE CASCADE for reliable cleanup)
