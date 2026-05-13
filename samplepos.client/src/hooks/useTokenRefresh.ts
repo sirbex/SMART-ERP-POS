@@ -13,6 +13,14 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { setAuthState, getAuthState, waitForAuthenticated, resetAuthState } from '../lib/authStateMachine';
 import { broadcastAuthEvent } from '../lib/authBroadcast';
 
+// Bare axios instance used exclusively for the /token/refresh HTTP call.
+// Must have NO response interceptors so that a 401 from the refresh endpoint
+// propagates cleanly to the caller instead of triggering a recursive
+// build401Handler → _refreshOnce → refreshAccessToken loop that clears tokens
+// before the pending request can read them (root cause of "Authentication
+// token required" on the next request after a session expiry).
+const _refreshHttp = axios.create();
+
 export { resetAuthState };
 
 const API_BASE = '/api/auth/token';
@@ -168,7 +176,7 @@ export async function refreshAccessToken(): Promise<void> {
             throw new Error('No refresh token available');
         }
 
-        const response = await axios.post(`${API_BASE}/refresh`, { refreshToken });
+        const response = await _refreshHttp.post(`${API_BASE}/refresh`, { refreshToken });
         const data = response.data.data as TokenResponse;
 
         storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
