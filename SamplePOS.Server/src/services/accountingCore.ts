@@ -497,7 +497,7 @@ export class AccountingCore {
             const countResult = await client.query(`
         SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 5) AS INTEGER)), 0) + 1 as next_num 
         FROM ledger_transactions
-        WHERE "TransactionNumber" LIKE 'TXN-%'
+        WHERE "TransactionNumber" ~ '^TXN-[0-9]+$'
       `);
             const nextNum = parseInt(countResult.rows[0].next_num);
             const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
@@ -898,7 +898,7 @@ export class AccountingCore {
             const countResult = await client.query(`
         SELECT COALESCE(MAX(CAST(SUBSTRING("TransactionNumber" FROM 5) AS INTEGER)), 0) + 1 as next_num 
         FROM ledger_transactions
-        WHERE "TransactionNumber" LIKE 'TXN-%'
+        WHERE "TransactionNumber" ~ '^TXN-[0-9]+$'
       `);
             const nextNum = parseInt(countResult.rows[0].next_num);
             const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
