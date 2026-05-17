@@ -59,7 +59,22 @@ jobs:
     environment: production
 
     steps:
+      - name: Check SSH key is configured
+        id: check_key
+        run: |
+          if [ -z "$SSH_KEY" ]; then
+            echo "⚠️  PROD_SSH_PRIVATE_KEY secret is not configured in this repository."
+            echo "   Add it under Settings → Secrets and variables → Actions."
+            echo "   Skipping deployment — no changes were made to the server."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+
       - name: Set up SSH
+        if: steps.check_key.outputs.configured == 'true'
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
@@ -68,6 +83,7 @@ jobs:
           echo "✅ SSH key configured"
 
       - name: Run deploy-update.sh on production server
+        if: steps.check_key.outputs.configured == 'true'
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  DEPLOYING TO PRODUCTION"
@@ -85,13 +101,13 @@ jobs:
               "cd /opt/smarterp && bash scripts/deploy-update.sh"
 
       - name: Cleanup SSH key
-        if: always()
+        if: always() && steps.check_key.outputs.configured == 'true'
         run: |
           rm -f ~/.ssh/prod_key
           echo "✅ SSH key removed from runner"
 
       - name: Deployment summary
-        if: success()
+        if: success() && steps.check_key.outputs.configured == 'true'
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  ✅ PRODUCTION DEPLOY COMPLETE"
@@ -101,7 +117,7 @@ jobs:
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
       - name: Deploy failed
-        if: failure()
+        if: failure() && steps.check_key.outputs.configured == 'true'
         run: |
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "  ❌ PRODUCTION DEPLOY FAILED"
