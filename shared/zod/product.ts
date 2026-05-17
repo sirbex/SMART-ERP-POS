@@ -162,8 +162,7 @@ export const ProductUpdateSchema = ProductCoreObject.partial()
   .extend({
     id: z.string().uuid().optional(),
     version: z.number().int().positive().optional(),
-  })
-  .superRefine(pricingRefinement);
+  });
 
 // Back-compat: ProductImportSchema is now identical to ProductCreateSchema
 // since UoM validation is dynamic (z.string instead of z.enum).

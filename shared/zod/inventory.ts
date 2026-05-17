@@ -142,6 +142,7 @@ export const BatchAdjustmentSchema = z
     notes: z.string().min(5, 'Notes must be at least 5 characters'),
     userId: z.string().uuid('Invalid user ID'),
     documentId: z.string().uuid().optional(),
+    unitCost: z.number().positive('Unit cost must be positive').optional(), // Optional: backend falls back to product_valuation.cost_price for ADJUSTMENT_IN
   })
   .refine(
     (data) => {

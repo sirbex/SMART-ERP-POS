@@ -11,8 +11,9 @@ export const ProductUomSchema = z.object({
   costOverride: z.number().optional().nullable(),
 }).strict();
 
-// Schema for updating a product UoM - doesn't require productId/uomId since they're in URL params
+// Schema for updating a product UoM - uomId is optional to allow changing the UoM type
 export const ProductUomUpdateSchema = z.object({
+  uomId: z.string().uuid().optional(),
   conversionFactor: z.number().min(1).optional(),
   barcode: z.string().max(100).optional().nullable(),
   isDefault: z.boolean().optional(),

@@ -47,6 +47,8 @@ export const ReportTypeEnum = z.enum([
   'QUOTATIONS',
   'MANUAL_JOURNAL_ENTRIES',
   'BANK_TRANSACTIONS',
+  // Category Intelligence
+  'CATEGORY_INTELLIGENCE',
 ]);
 export type ReportType = z.infer<typeof ReportTypeEnum>;
 
@@ -698,6 +700,7 @@ export const SalesByCategoryRequestSchema = z.object({
   reportType: z.literal('SALES_BY_CATEGORY'),
   startDate: z.string(),
   endDate: z.string(),
+  category: z.string().optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 }).strict();
 
@@ -716,6 +719,7 @@ export const SalesByCategoryItemSchema = z.object({
 export const SalesByCategoryParamsSchema = z.object({
   start_date: z.string(),
   end_date: z.string(),
+  category: z.string().optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 });
 
@@ -1199,4 +1203,24 @@ export const BankTransactionReportParamsSchema = z.object({
   type: z.enum(['DEPOSIT', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT', 'FEE', 'INTEREST']).optional(),
   is_reconciled: z.enum(['true', 'false']).optional(),
   format: z.enum(['json', 'pdf', 'csv']).optional(),
+});
+
+// ── Category Intelligence Report ──
+export const CategoryIntelligenceReportTypeEnum = z.enum([
+  'INVENTORY_POSITION',
+  'SALES',
+  'PURCHASES',
+  'STOCK_VALUATION',
+  'EXPIRY_EXPOSURE',
+  'FULL_STATEMENT',
+]);
+export type CategoryIntelligenceReportType = z.infer<typeof CategoryIntelligenceReportTypeEnum>;
+
+export const CategoryIntelligenceParamsSchema = z.object({
+  category: z.string().min(1, 'Category is required'),
+  report_type: CategoryIntelligenceReportTypeEnum,
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  days_ahead: z.coerce.number().int().min(1).max(365).optional().default(90),
+  format: z.enum(['json', 'pdf']).optional().default('json'),
 });
