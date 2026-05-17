@@ -621,3 +621,80 @@ cd ../samplepos.client && npm run build # Must pass with zero TS errors
 ---
 
 *These rules are mandatory. Code that violates these rules should not be committed.*
+
+---
+
+## 🏛️ ENGINEERING DISCIPLINE — MANDATORY RULES
+
+**This is not optional guidance. Copilot must treat this as architecture law.**
+
+### 🎯 PRIMARY RULE — DO NOT REWRITE WORKING CODE
+
+Before writing any new code, Copilot must:
+
+1. Read existing implementation fully
+2. Determine if the function already exists
+3. If it exists and is correct → **REUSE IT**
+4. If it exists but UI/flow is poor → **Change UI only**
+5. Only write new backend logic if:
+   - Functionality is wrong, or
+   - Functionality does not exist at all
+
+❗ **Never duplicate logic that already exists somewhere else in the system.**
+
+### 🧱 ENFORCE SHARED RESOURCES
+
+Copilot must:
+
+- Reuse shared components
+- Reuse shared services
+- Reuse shared posting engine
+- Reuse shared journal engine
+- Reuse shared form styles
+- Reuse shared validation framework
+
+No screen should look like it was built by a different developer.
+The ERP must feel like one system, not many small apps.
+
+### 🎨 UI RULE — CHANGE DESIGN, NOT ARCHITECTURE (WHEN POSSIBLE)
+
+| Problem | What Copilot must do |
+|---|---|
+| Bad layout | Fix layout only |
+| Confusing form | Improve form only |
+| Poor UX flow | Improve UX only |
+| Wrong accounting logic | Fix backend logic |
+| Missing feature | Implement properly |
+
+### 🧠 ALWAYS READ COPILOT INSTRUCTIONS WHILE WORKING
+
+Copilot must continuously re-read:
+- The Cutover Accounting Prompt
+- These Engineering Discipline Rules
+
+Before writing each file or function.
+
+### 🛑 AVOID DUPLICATION AT ALL COSTS
+
+Copilot must check:
+- Does a posting service already exist?
+- Does a journal creator already exist?
+- Does validation framework already exist?
+- Does a form component already exist?
+
+If yes → **reuse**.
+
+### 🏗️ TARGET: ENTERPRISE-GRADE ERP APPLICATION
+
+The final system must feel like:
+- One consistent design language
+- One posting engine
+- One validation logic
+- One UI component library
+- Centralized accounting behavior
+
+Not scattered custom code per screen.
+
+### 🔐 FINAL DIRECTIVE
+
+> Before implementing anything, search the codebase for existing services, components, posting logic, and UI patterns. Reuse them. Only create new code when the required capability truly does not exist or is fundamentally incorrect. The ERP must remain visually and architecturally consistent across all modules.
