@@ -281,6 +281,11 @@ export const salesService = {
       // This ensures customer-group pricing, quantity breaks, and price rules are enforced server-side.
       const resolvedPriceMap = new Map<string, ResolvedPrice>();
       if (regularProductIds.length > 0) {
+        // SAVEPOINT: pricing queries run on the transaction client.
+        // If any pricing table is missing or the query fails, we MUST rollback to
+        // the savepoint — otherwise the whole transaction is left in an aborted state
+        // (pgCode 25P02) and every subsequent query fails, killing the sale.
+        await client.query('SAVEPOINT before_pricing');
         try {
           const bulkItems = input.items
             .filter((it) => !it.productId?.startsWith('custom_'))
@@ -300,13 +305,17 @@ export const salesService = {
             );
           }
 
+          await client.query('RELEASE SAVEPOINT before_pricing');
           logger.info('Pricing engine resolved prices for sale', {
             itemCount: resolved.length,
             customerId: input.customerId,
             hasCustomerPricing: resolved.some((r) => r.appliedRule.scope !== 'base'),
           });
         } catch (pricingError) {
-          // Non-blocking: if pricing engine fails, fall through to frontend-supplied prices
+          // Roll back to the savepoint so the transaction stays usable, then fall
+          // through to frontend-supplied prices (non-blocking degradation).
+          await client.query('ROLLBACK TO SAVEPOINT before_pricing');
+          await client.query('RELEASE SAVEPOINT before_pricing');
           logger.warn('Pricing engine failed, using frontend-supplied prices', {
             error: pricingError instanceof Error ? pricingError.message : String(pricingError),
           });
