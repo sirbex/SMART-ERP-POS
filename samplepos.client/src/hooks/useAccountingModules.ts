@@ -448,6 +448,25 @@ export function useDisposeAsset() {
   });
 }
 
+export function useCutoverPreview() {
+  return useMutation({
+    mutationFn: (data: { cutoverDate: string }) => api.assets.cutoverPreview(data),
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+}
+
+export function useApplyCutoverCorrections() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { cutoverDate: string }) => api.assets.cutoverApply(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: accountingKeys.assets.all });
+      toast.success('Cutover corrections applied — GL entries reversed and Opening Balance Equity credited');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+}
+
 // ── JE Approval ─────────────────────────────────────────────────────
 
 export function useJeApprovalRules() {

@@ -696,6 +696,10 @@ export const api = {
       apiClient.get<ApiResponse>(`assets/${assetId}/schedule`),
     dispose: (assetId: string, data: { disposalDate: string; disposalAmount: number }) =>
       apiClient.post<ApiResponse>(`assets/${assetId}/dispose`, data),
+    cutoverPreview: (data: { cutoverDate: string }) =>
+      apiClient.post<ApiResponse>('assets/cutover-corrections/preview', data),
+    cutoverApply: (data: { cutoverDate: string }) =>
+      apiClient.post<ApiResponse>('assets/cutover-corrections/apply', data),
   },
 
   jeApproval: {

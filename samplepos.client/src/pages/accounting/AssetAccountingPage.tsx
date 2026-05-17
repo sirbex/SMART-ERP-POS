@@ -1,14 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   useAssetCategories, useCreateAssetCategory, useAssets, useCreateAsset, useRunDepreciation,
-  useDisposeAsset,
+  useDisposeAsset, useCutoverPreview, useApplyCutoverCorrections,
 } from '../../hooks/useAccountingModules';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import {
   Building, Plus, X, Play, Package, Search, Eye,
   Trash2, DollarSign, BarChart3, FileText, Settings, ArrowRight,
-  CheckCircle, AlertTriangle, Clock, TrendingDown,
+  CheckCircle, AlertTriangle, Clock, TrendingDown, ShieldAlert,
 } from 'lucide-react';
 import { formatCurrency } from '../../utils/currency';
 
@@ -49,6 +49,38 @@ interface Asset {
   createdAt: string;
 }
 
+interface CutoverCandidate {
+  assetId: string;
+  assetNumber: string;
+  assetName: string;
+  acquisitionDate: string;
+  acquisitionCost: number;
+  registrationMode: string;
+  originalCreditAccountCode: string;
+  originalCreditAccountName: string;
+  originalTransactionId: string;
+  originalSource: string;
+  alreadyCorrected: boolean;
+}
+
+interface CutoverCorrectionResult {
+  assetId: string;
+  assetNumber: string;
+  assetName: string;
+  correctionTransactionId: string | null;
+  status: 'APPLIED' | 'SKIPPED_ALREADY_CORRECTED' | 'SKIPPED_PROTECTED_SOURCE';
+  reason?: string;
+}
+
+interface CutoverSummary {
+  cutoverDate: string;
+  candidatesFound: number;
+  applied: number;
+  skipped: number;
+  dryRun: boolean;
+  results: CutoverCorrectionResult[];
+}
+
 interface ChartAccount {
   id: string;
   accountCode: string;
@@ -58,7 +90,7 @@ interface ChartAccount {
   isActive: boolean;
 }
 
-type TabId = 'register' | 'categories' | 'depreciation';
+type TabId = 'register' | 'categories' | 'depreciation' | 'corrections';
 
 // ─── Constants ──────────────────────────────────────────────────────
 const DEPRECIATION_METHODS = [
@@ -133,6 +165,30 @@ export default function AssetAccountingPage() {
 
   const [showDisposeForm, setShowDisposeForm] = useState(false);
   const [disposeForm, setDisposeForm] = useState({ disposalDate: '', disposalAmount: '0' });
+
+  // ── Cutover Correction State ──────────────────────────────────────
+  const [cutoverDate, setCutoverDate] = useState('2026-02-01');
+  const [cutoverPreviewData, setCutoverPreviewData] = useState<CutoverSummary | null>(null);
+  const [cutoverApplyResult, setCutoverApplyResult] = useState<CutoverSummary | null>(null);
+  const [showApplyConfirm, setShowApplyConfirm] = useState(false);
+  const cutoverPreview = useCutoverPreview();
+  const applyCutover = useApplyCutoverCorrections();
+
+  const handleCutoverPreview = async () => {
+    setCutoverPreviewData(null);
+    setCutoverApplyResult(null);
+    const res = await cutoverPreview.mutateAsync({ cutoverDate });
+    const summary = (res as { data?: { data?: CutoverSummary } })?.data?.data;
+    if (summary) setCutoverPreviewData(summary);
+  };
+
+  const handleCutoverApply = async () => {
+    setShowApplyConfirm(false);
+    setCutoverApplyResult(null);
+    const res = await applyCutover.mutateAsync({ cutoverDate });
+    const summary = (res as { data?: { data?: CutoverSummary } })?.data?.data;
+    if (summary) { setCutoverApplyResult(summary); setCutoverPreviewData(null); }
+  };
 
   const cats: AssetCategory[] = useMemo(() => Array.isArray(categories) ? categories : [], [categories]);
   const assetList: Asset[] = useMemo(() => Array.isArray(assets) ? assets : [], [assets]);
@@ -333,6 +389,7 @@ export default function AssetAccountingPage() {
             { id: 'register' as TabId, label: 'Asset Register', icon: FileText, count: assetList.length },
             { id: 'categories' as TabId, label: 'Asset Classes', icon: Settings, count: cats.length },
             { id: 'depreciation' as TabId, label: 'Depreciation', icon: TrendingDown },
+          { id: 'corrections' as TabId, label: 'Cutover Fix', icon: ShieldAlert },
           ]).map(tab => (
             <button
               key={tab.id}
@@ -901,6 +958,113 @@ export default function AssetAccountingPage() {
         </div>
       )}
 
+      {/* ═══════════════ TAB: Cutover Correction ═══════════════ */}
+      {activeTab === 'corrections' && (
+        <div className="space-y-5">
+          {/* Explanation banner */}
+          <div className="bg-amber-50 border border-amber-300 rounded-lg p-5">
+            <div className="flex gap-3">
+              <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-semibold text-amber-900">Pre-ERP Assets Incorrectly Debited Cash</h3>
+                <p className="text-sm text-amber-800 mt-1">
+                  Assets that existed <strong>before the ERP go-live</strong> must credit <strong>Opening Balance Equity (3050)</strong>,
+                  not Cash. If they were registered as <em>New Asset Purchase</em>, the system incorrectly
+                  posted: <span className="font-mono text-xs bg-amber-100 px-1 rounded">DR Fixed Assets / CR Cash</span>.
+                </p>
+                <p className="text-sm text-amber-800 mt-1">
+                  The correction posts: <span className="font-mono text-xs bg-amber-100 px-1 rounded">DR Cash (reverse) / CR Opening Balance Equity</span> — restoring
+                  your cash balance and declaring the correct opening position. This is idempotent: already-corrected assets are skipped.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls */}
+          <div className="bg-white border rounded-lg p-5">
+            <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-amber-600" /> Cutover Correction Tool
+            </h3>
+            <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  ERP Go-Live Date (Cutover Date)
+                </label>
+                <input
+                  type="date"
+                  value={cutoverDate}
+                  onChange={e => { setCutoverDate(e.target.value); setCutoverPreviewData(null); setCutoverApplyResult(null); }}
+                  className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Assets acquired <em>before</em> this date are candidates for correction.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCutoverPreview}
+                  disabled={cutoverPreview.isPending}
+                  className="inline-flex items-center px-4 py-2 bg-amber-50 text-amber-800 border border-amber-300 rounded-lg text-sm hover:bg-amber-100 disabled:opacity-50 transition-colors"
+                >
+                  <ShieldAlert className="h-4 w-4 mr-2" />
+                  {cutoverPreview.isPending ? 'Scanning...' : 'Preview Candidates'}
+                </button>
+                {cutoverPreviewData && cutoverPreviewData.candidatesFound > 0 && (
+                  <button
+                    onClick={() => setShowApplyConfirm(true)}
+                    className="inline-flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700 transition-colors"
+                  >
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    Apply {cutoverPreviewData.results.filter(r => r.status === 'APPLIED').length} Corrections
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Apply Confirmation */}
+          {showApplyConfirm && cutoverPreviewData && (
+            <div className="bg-orange-50 border border-orange-300 rounded-lg p-5">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-orange-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h4 className="text-sm font-semibold text-orange-900">Confirm: Post Correction Journals</h4>
+                  <p className="text-sm text-orange-800 mt-1">
+                    This will post <strong>{cutoverPreviewData.results.filter(r => r.status === 'APPLIED').length} correction journal entries</strong> to the GL,
+                    reversing the incorrect Cash credit and crediting Opening Balance Equity (3050) for each asset.
+                    This action is <strong>reversible via GL</strong> but should only be done once.
+                  </p>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={handleCutoverApply}
+                      disabled={applyCutover.isPending}
+                      className="px-4 py-2 bg-orange-600 text-white rounded-lg text-sm hover:bg-orange-700 disabled:opacity-50 inline-flex items-center gap-2"
+                    >
+                      <CheckCircle className="h-4 w-4" />
+                      {applyCutover.isPending ? 'Posting GL...' : 'Confirm & Post'}
+                    </button>
+                    <button onClick={() => setShowApplyConfirm(false)}
+                      className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Preview Results */}
+          {cutoverPreviewData && (
+            <CutoverResultsTable summary={cutoverPreviewData} formatCurrency={formatCurrency} />
+          )}
+
+          {/* Apply Results */}
+          {cutoverApplyResult && (
+            <CutoverResultsTable summary={cutoverApplyResult} formatCurrency={formatCurrency} />
+          )}
+        </div>
+      )}
+
       {/* ═══════════════ TAB: Depreciation Overview ═══════════════ */}
       {activeTab === 'depreciation' && (
         <div className="space-y-4">
@@ -1076,6 +1240,88 @@ function DetailField({ label, value, mono, highlight }: {
       <p className={`text-sm font-medium text-gray-900 mt-0.5 ${mono ? 'font-mono' : ''} ${highlight ? 'text-blue-800 text-lg' : ''}`}>
         {value}
       </p>
+    </div>
+  );
+}
+
+function CutoverResultsTable({ summary, formatCurrency }: {
+  summary: CutoverSummary;
+  formatCurrency: (n: number) => string;
+}) {
+  const statusConfig: Record<CutoverCorrectionResult['status'], { bg: string; text: string; label: string }> = {
+    APPLIED: { bg: 'bg-green-50 border-green-200', text: 'text-green-700', label: summary.dryRun ? 'Will Apply' : 'Applied' },
+    SKIPPED_ALREADY_CORRECTED: { bg: 'bg-gray-50 border-gray-200', text: 'text-gray-500', label: 'Already Fixed' },
+    SKIPPED_PROTECTED_SOURCE: { bg: 'bg-blue-50 border-blue-200', text: 'text-blue-700', label: 'Protected (AP)' },
+  };
+  return (
+    <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b bg-gray-50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <div>
+          <h3 className="text-base font-semibold text-gray-900">
+            {summary.dryRun ? 'Preview Results' : 'Correction Results'} — cutover {summary.cutoverDate}
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {summary.candidatesFound} candidate(s) found &bull; {summary.applied} {summary.dryRun ? 'will be applied' : 'applied'} &bull; {summary.skipped} skipped
+          </p>
+        </div>
+        {summary.dryRun ? (
+          <span className="px-3 py-1 bg-amber-100 text-amber-800 text-xs font-semibold rounded-full border border-amber-200">
+            DRY-RUN — No changes written
+          </span>
+        ) : (
+          <span className="px-3 py-1 bg-green-100 text-green-800 text-xs font-semibold rounded-full border border-green-200">
+            LIVE — GL entries posted
+          </span>
+        )}
+      </div>
+      {summary.results.length === 0 ? (
+        <div className="px-5 py-8 text-center text-gray-500 text-sm">
+          No candidates found before {summary.cutoverDate}. All assets are correctly registered.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Asset #</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Correction</th>
+                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">GL Ref</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {summary.results.map(r => {
+                const cfg = statusConfig[r.status];
+                return (
+                  <tr key={r.assetId} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-sm font-mono font-medium text-blue-700">{r.assetNumber}</td>
+                    <td className="px-4 py-3 text-sm text-gray-900">{r.assetName}</td>
+                    <td className="px-4 py-3 text-sm text-right text-gray-500 font-mono text-xs">
+                      {r.status === 'APPLIED' ? (
+                        <span>DR Cash / CR 3050</span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full border ${cfg.bg} ${cfg.text}`}>
+                        {cfg.label}
+                      </span>
+                      {r.reason && (
+                        <div className="text-xs text-gray-400 mt-0.5 max-w-xs">{r.reason}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs font-mono text-gray-400 hidden sm:table-cell">
+                      {r.correctionTransactionId ? r.correctionTransactionId.slice(0, 8) + '…' : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
