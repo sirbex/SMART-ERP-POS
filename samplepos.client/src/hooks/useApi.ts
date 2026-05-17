@@ -47,8 +47,8 @@ export const queryKeys = {
       ['sales', 'reports', 'top-selling', limit, startDate, endDate] as const,
     summaryByDate: (groupBy?: string, startDate?: string, endDate?: string) =>
       ['sales', 'reports', 'summary-by-date', groupBy, startDate, endDate] as const,
-    byCashier: (startDate?: string, endDate?: string) =>
-      ['sales', 'reports', 'by-cashier', startDate, endDate] as const,
+    responsibility: (startDate?: string, endDate?: string, cashierId?: string, orderedById?: string, groupBy?: string) =>
+      ['sales', 'reports', 'responsibility', startDate, endDate, cashierId, orderedById, groupBy] as const,
   },
   inventory: {
     stockLevels: ['inventory', 'stock-levels'] as const,
@@ -378,11 +378,17 @@ export function useSalesSummaryByDate(groupBy: 'day' | 'week' | 'month' = 'day',
   );
 }
 
-export function useSalesByCashier(filters?: { startDate?: string; endDate?: string }) {
-  const { startDate, endDate } = filters || {};
+export function useSalesResponsibility(filters?: {
+  startDate?: string;
+  endDate?: string;
+  cashierId?: string;
+  orderedById?: string;
+  groupBy?: 'detail' | 'cashier' | 'orderedBy';
+}) {
+  const { startDate, endDate, cashierId, orderedById, groupBy } = filters || {};
   return useApiQuery(
-    queryKeys.sales.byCashier(startDate, endDate),
-    () => api.sales.byCashier({ startDate, endDate }),
+    queryKeys.sales.responsibility(startDate, endDate, cashierId, orderedById, groupBy),
+    () => api.sales.responsibility({ startDate, endDate, cashierId, orderedById, groupBy }),
     { staleTime: 60000 }
   );
 }

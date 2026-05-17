@@ -66,7 +66,8 @@ export interface CreateSaleInput {
   totalAmount?: number; // Total amount (can be provided or calculated)
   paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT' | 'BANK_TRANSFER';
   paymentReceived: number;
-  soldBy: string;
+  soldBy: string; // cashier_id — always forced from req.user.id
+  orderCreatedByUserId?: string; // who placed the order (= soldBy for direct sales)
   saleDate?: string; // ISO 8601 datetime for backdated sales
   paymentLines?: PaymentLineInput[]; // Split payment support
   cashRegisterSessionId?: string; // Link to cash register session for drawer tracking
@@ -846,6 +847,21 @@ export const salesService = {
       );
       const totalDiscountAmount = cartDiscount.plus(lineItemDiscountTotal);
 
+      // Resolve who placed the order (SAP/Odoo accountability)
+      // Priority: explicit input → POS order creator → same as cashier (direct sale)
+      let orderCreatedByUserId: string = input.soldBy;
+      if (input.orderCreatedByUserId) {
+        orderCreatedByUserId = input.orderCreatedByUserId;
+      } else if (input.fromOrderId) {
+        const orderRow = await client.query(
+          `SELECT created_by_id FROM pos_orders WHERE id = $1 LIMIT 1`,
+          [input.fromOrderId]
+        );
+        if (orderRow.rows[0]?.created_by_id) {
+          orderCreatedByUserId = orderRow.rows[0].created_by_id;
+        }
+      }
+
       const saleData: CreateSaleData = {
         customerId: input.customerId || null,
         subtotal: input.subtotal
@@ -864,6 +880,7 @@ export const salesService = {
           ? 0 // No change for credit/partial payment sales
           : Money.toNumber(changeAmount),
         soldBy: input.soldBy,
+        orderCreatedByUserId,
         saleDate: input.saleDate, // Pass through backdated sale date if provided
         quoteId: input.quoteId || null, // Link to quotation for auto-conversion
         idempotencyKey: input.idempotencyKey,
@@ -2200,17 +2217,19 @@ export const salesService = {
   },
 
   /**
-   * Get sales by cashier report - sales performance by user
+   * Sales Responsibility Report — who ordered vs who handled cash
    */
-  async getSalesByCashier(
+  async getSalesResponsibility(
     pool: Pool,
     filters?: {
       startDate?: string;
       endDate?: string;
-      userId?: string;
+      cashierId?: string;
+      orderedById?: string;
+      groupBy?: 'detail' | 'cashier' | 'orderedBy';
     }
   ): Promise<Record<string, unknown>[]> {
-    return salesRepository.getSalesByCashier(pool, filters);
+    return salesRepository.getSalesResponsibility(pool, filters);
   },
 
   /**

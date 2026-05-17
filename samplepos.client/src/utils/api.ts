@@ -361,8 +361,13 @@ export const api = {
       startDate?: string;
       endDate?: string;
     }) => apiClient.get<ApiResponse>('sales/reports/summary-by-date', { params }),
-    byCashier: (params?: { startDate?: string; endDate?: string }) =>
-      apiClient.get<ApiResponse>('sales/reports/by-cashier', { params }),
+    responsibility: (params?: {
+      startDate?: string;
+      endDate?: string;
+      cashierId?: string;
+      orderedById?: string;
+      groupBy?: 'detail' | 'cashier' | 'orderedBy';
+    }) => apiClient.get<ApiResponse>('sales/reports/responsibility', { params }),
     voidSale: (id: string, data: { reason: string; approvedById?: string }) =>
       apiClient.post<ApiResponse>(`sales/${id}/void`, data),
     refundSale: (id: string, data: { items: { saleItemId: string; quantity: number }[]; reason: string; approvedById?: string; refundDate?: string }) =>

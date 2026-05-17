@@ -3549,7 +3549,7 @@ export const reportsController = {
 
     // Import salesService
     const { salesService } = await import('../sales/salesService.js');
-    const result = await salesService.getSalesByCashier(pool, filters);
+    const result = await salesService.getSalesResponsibility(pool, { ...filters, groupBy: 'cashier' as const });
 
     // Calculate summary using Decimal.js
     // NOTE: Repository returns snake_case field names from PostgreSQL

@@ -144,6 +144,7 @@ export interface CreateSaleData {
   paymentReceived: number;
   changeAmount: number;
   soldBy: string;
+  orderCreatedByUserId?: string; // who placed the order (= soldBy for direct sales)
   saleDate?: string; // ISO 8601 datetime for backdated sales
   isSplitPayment?: boolean; // Indicates if sale uses split payment
   totalPaid?: number; // Total amount paid (may differ from totalAmount for credit)
@@ -239,9 +240,9 @@ export const salesRepository = {
         `INSERT INTO sales (
         sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
         total_cost, profit, profit_margin,
-        payment_method, amount_paid, change_amount, cashier_id, quote_id,
+        payment_method, amount_paid, change_amount, cashier_id, order_created_by_user_id, quote_id,
         idempotency_key, offline_id, cash_register_session_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING 
         id,
         sale_number as "saleNumber",
@@ -258,6 +259,7 @@ export const salesRepository = {
         amount_paid as "amountPaid",
         change_amount as "changeAmount",
         cashier_id as "cashierId",
+        order_created_by_user_id as "orderCreatedByUserId",
         quote_id as "quoteId",
         cash_register_session_id as "cashRegisterSessionId",
         created_at as "createdAt"`,
@@ -276,6 +278,7 @@ export const salesRepository = {
           data.paymentReceived,
           data.changeAmount,
           data.soldBy, // Maps to cashier_id
+          data.orderCreatedByUserId || data.soldBy, // who placed the order; defaults to cashier
           data.quoteId || null, // Link to quotation
           data.idempotencyKey || null,
           data.offlineId || null,
@@ -1016,56 +1019,104 @@ export const salesRepository = {
   },
 
   /**
-   * Get sales by cashier report - shows sales performance by user/cashier
+   * Sales Responsibility Report — per-sale detail showing both who ordered and who processed payment.
+   * groupBy: 'detail' (one row per sale) | 'cashier' | 'orderedBy'
    */
-  async getSalesByCashier(
+  async getSalesResponsibility(
     pool: Pool,
-    filters: Record<string, unknown> = {}
+    filters: {
+      startDate?: string;
+      endDate?: string;
+      cashierId?: string;
+      orderedById?: string;
+      groupBy?: 'detail' | 'cashier' | 'orderedBy';
+    } = {}
   ): Promise<Record<string, unknown>[]> {
-    const whereClauses = ['s.status = $1'];
-    const values: unknown[] = ['COMPLETED'];
-    let paramIndex = 2;
+    const groupBy = filters.groupBy || 'detail';
+    const whereClauses: string[] = [`s.status NOT IN ('VOID', 'VOIDED')`];
+    const values: unknown[] = [];
+    let paramIndex = 1;
 
     if (filters.startDate) {
-      whereClauses.push(`s.sale_date >= $${paramIndex++}`);
+      whereClauses.push(`s.sale_date::DATE >= $${paramIndex++}`);
       values.push(filters.startDate);
     }
-
     if (filters.endDate) {
-      whereClauses.push(`s.sale_date <= $${paramIndex++}`);
+      whereClauses.push(`s.sale_date::DATE <= $${paramIndex++}`);
       values.push(filters.endDate);
     }
-
-    if (filters.userId) {
+    if (filters.cashierId) {
       whereClauses.push(`s.cashier_id = $${paramIndex++}`);
-      values.push(filters.userId);
+      values.push(filters.cashierId);
+    }
+    if (filters.orderedById) {
+      whereClauses.push(`s.order_created_by_user_id = $${paramIndex++}`);
+      values.push(filters.orderedById);
     }
 
-    const query = `
-      SELECT 
-        u.id as user_id,
-        u.full_name as cashier_name,
-        u.email,
-        u.role,
-        COUNT(DISTINCT s.id) as total_transactions,
-        COUNT(DISTINCT s.customer_id) as unique_customers,
-        ROUND(SUM(s.total_amount)::numeric, 2) as total_revenue,
-        ROUND(SUM(s.total_cost)::numeric, 2) as total_cost,
-        ROUND(SUM(s.profit)::numeric, 2) as total_profit,
-        CASE 
-          WHEN SUM(s.subtotal - s.discount_amount) > 0 
-          THEN ROUND((SUM(s.profit) / SUM(s.subtotal - s.discount_amount) * 100)::numeric, 2)
-          ELSE 0 
-        END as profit_margin_percentage,
-        ROUND(AVG(s.total_amount)::numeric, 2) as avg_transaction_value,
-        TO_CHAR(MAX(s.sale_date), 'Mon DD, YYYY HH24:MI') as last_sale_date,
-        TO_CHAR(MIN(s.sale_date), 'Mon DD, YYYY HH24:MI') as first_sale_date
-      FROM sales s
-      INNER JOIN users u ON s.cashier_id = u.id
-      WHERE ${whereClauses.join(' AND ')}
-      GROUP BY u.id, u.full_name, u.email, u.role
-      ORDER BY total_revenue DESC
-    `;
+    const where = whereClauses.join(' AND ');
+
+    let query: string;
+
+    if (groupBy === 'cashier') {
+      query = `
+        SELECT
+          u_cashier.id                                          AS user_id,
+          u_cashier.full_name                                   AS cashier_name,
+          u_cashier.role,
+          COUNT(DISTINCT s.id)::int                            AS total_transactions,
+          ROUND(SUM(s.total_amount)::numeric, 2)               AS total_revenue,
+          ROUND(SUM(s.total_cost)::numeric, 2)                 AS total_cost,
+          ROUND(SUM(s.profit)::numeric, 2)                     AS total_profit,
+          COUNT(DISTINCT s.order_created_by_user_id)::int      AS unique_order_creators,
+          TO_CHAR(MAX(s.sale_date), 'YYYY-MM-DD')              AS last_sale_date
+        FROM sales s
+        LEFT JOIN users u_cashier ON u_cashier.id = s.cashier_id
+        WHERE ${where}
+        GROUP BY u_cashier.id, u_cashier.full_name, u_cashier.role
+        ORDER BY total_revenue DESC
+      `;
+    } else if (groupBy === 'orderedBy') {
+      query = `
+        SELECT
+          u_creator.id                                          AS user_id,
+          u_creator.full_name                                   AS ordered_by_name,
+          u_creator.role,
+          COUNT(DISTINCT s.id)::int                            AS total_transactions,
+          ROUND(SUM(s.total_amount)::numeric, 2)               AS total_revenue,
+          ROUND(SUM(s.total_cost)::numeric, 2)                 AS total_cost,
+          ROUND(SUM(s.profit)::numeric, 2)                     AS total_profit,
+          COUNT(DISTINCT s.cashier_id)::int                    AS unique_cashiers,
+          TO_CHAR(MAX(s.sale_date), 'YYYY-MM-DD')              AS last_sale_date
+        FROM sales s
+        LEFT JOIN users u_creator ON u_creator.id = s.order_created_by_user_id
+        WHERE ${where}
+        GROUP BY u_creator.id, u_creator.full_name, u_creator.role
+        ORDER BY total_revenue DESC
+      `;
+    } else {
+      // detail: one row per sale
+      query = `
+        SELECT
+          s.sale_number                                         AS sale_number,
+          s.sale_date::DATE                                     AS sale_date,
+          ROUND(s.total_amount::numeric, 2)                    AS total_amount,
+          s.payment_method,
+          u_cashier.full_name                                   AS cashier_name,
+          u_creator.full_name                                   AS ordered_by_name,
+          CASE WHEN s.cashier_id = s.order_created_by_user_id
+               THEN false ELSE true END                        AS is_queue_sale,
+          s.status,
+          c.name                                                AS customer_name
+        FROM sales s
+        LEFT JOIN users u_cashier ON u_cashier.id = s.cashier_id
+        LEFT JOIN users u_creator ON u_creator.id = s.order_created_by_user_id
+        LEFT JOIN customers c ON c.id = s.customer_id
+        WHERE ${where}
+        ORDER BY s.sale_date DESC, s.sale_number DESC
+        LIMIT 500
+      `;
+    }
 
     const result = await pool.query(query, values);
     return result.rows;
