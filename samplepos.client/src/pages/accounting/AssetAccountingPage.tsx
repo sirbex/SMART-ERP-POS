@@ -49,20 +49,6 @@ interface Asset {
   createdAt: string;
 }
 
-interface CutoverCandidate {
-  assetId: string;
-  assetNumber: string;
-  assetName: string;
-  acquisitionDate: string;
-  acquisitionCost: number;
-  registrationMode: string;
-  originalCreditAccountCode: string;
-  originalCreditAccountName: string;
-  originalTransactionId: string;
-  originalSource: string;
-  alreadyCorrected: boolean;
-}
-
 interface CutoverCorrectionResult {
   assetId: string;
   assetNumber: string;
@@ -1055,12 +1041,12 @@ export default function AssetAccountingPage() {
 
           {/* Preview Results */}
           {cutoverPreviewData && (
-            <CutoverResultsTable summary={cutoverPreviewData} formatCurrency={formatCurrency} />
+            <CutoverResultsTable summary={cutoverPreviewData} />
           )}
 
           {/* Apply Results */}
           {cutoverApplyResult && (
-            <CutoverResultsTable summary={cutoverApplyResult} formatCurrency={formatCurrency} />
+            <CutoverResultsTable summary={cutoverApplyResult} />
           )}
         </div>
       )}
@@ -1244,9 +1230,8 @@ function DetailField({ label, value, mono, highlight }: {
   );
 }
 
-function CutoverResultsTable({ summary, formatCurrency }: {
+function CutoverResultsTable({ summary }: {
   summary: CutoverSummary;
-  formatCurrency: (n: number) => string;
 }) {
   const statusConfig: Record<CutoverCorrectionResult['status'], { bg: string; text: string; label: string }> = {
     APPLIED: { bg: 'bg-green-50 border-green-200', text: 'text-green-700', label: summary.dryRun ? 'Will Apply' : 'Applied' },
