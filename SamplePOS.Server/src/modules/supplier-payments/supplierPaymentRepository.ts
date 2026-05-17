@@ -360,14 +360,15 @@ export async function findAllInvoices(
     const params: (string | number | string[])[] = [];
     let paramIndex = 1;
 
-    // Default behaviour: exclude credit notes from the bills list. Credit
-    // notes have their own document_type=SUPPLIER_CREDIT_NOTE and are
-    // surfaced via dedicated UI / Credit Balance card.
+    // Default behaviour: exclude credit notes and opening balance records from the bills list.
+    // Opening balance records (document_type=OPENING_BALANCE) are cutover GL declarations —
+    // they are not business documents and must NOT appear in the Purchases/Invoices screen.
+    // They are surfaced only via the Supplier Ledger.
     if (documentTypes && documentTypes.length > 0) {
         whereClause += ` AND si.document_type = ANY($${paramIndex++}::text[])`;
         params.push(documentTypes);
     } else if (!includeCreditNotes) {
-        whereClause += ` AND COALESCE(si.document_type, 'SUPPLIER_INVOICE') <> 'SUPPLIER_CREDIT_NOTE'`;
+        whereClause += ` AND COALESCE(si.document_type, 'SUPPLIER_INVOICE') NOT IN ('SUPPLIER_CREDIT_NOTE', 'OPENING_BALANCE')`;
     }
 
     if (supplierId) {
@@ -691,8 +692,8 @@ export async function createInvoice(
         `INSERT INTO supplier_invoices (
        "Id", "SupplierInvoiceNumber", "InternalReferenceNumber", "SupplierId", "InvoiceDate", "DueDate",
        "Subtotal", "TaxAmount", "TotalAmount", "AmountPaid", "OutstandingBalance",
-       "Status", "CurrencyCode", "Notes", "CreatedAt", "UpdatedAt"
-     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 0, $8, $10, $9, $11, NOW(), NOW())
+       "Status", "CurrencyCode", "Notes", grn_computed_total, variance_reason, "CreatedAt", "UpdatedAt"
+     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 0, $8, $10, $9, $11, $12, $13, NOW(), NOW())
      RETURNING
        "Id" as id,
        "SupplierInvoiceNumber" as "invoiceNumber",
@@ -721,6 +722,8 @@ export async function createInvoice(
             currencyCode,
             initialStatus,
             data.notes || null,
+            data.grnComputedTotal ?? null,
+            data.varianceReason ?? null,
         ]
     );
 

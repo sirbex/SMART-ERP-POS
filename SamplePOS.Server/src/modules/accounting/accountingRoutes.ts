@@ -27,6 +27,10 @@ import {
   buildIncomeStatementIntegrity,
   buildCashFlowIntegrity,
 } from '../../services/financialIntegrityService.js';
+import {
+  buildCashFlowStatement,
+  auditCashFlowClassification,
+} from '../../services/cashFlowService.js';
 
 // Zod schemas for accounting routes
 const ChartOfAccountsQuerySchema = z.object({
@@ -43,6 +47,7 @@ const CreateAccountSchema = z.object({
   normalBalance: z.enum(['DEBIT', 'CREDIT']),
   parentAccountId: z.string().uuid().optional().nullable(),
   isPostingAccount: z.boolean().optional().default(true),
+  cashFlowClass: z.enum(['operating', 'investing', 'financing']).optional().nullable(),
 });
 const GLQuerySchema = z.object({
   page: z
@@ -204,6 +209,7 @@ router.post(
       normalBalance,
       parentAccountId,
       isPostingAccount,
+      cashFlowClass,
     } = CreateAccountSchema.parse(req.body);
 
     // Determine level based on parent
@@ -225,6 +231,7 @@ router.post(
         level,
         isPostingAccount: isPostingAccount !== false,
         isActive: true,
+        cashFlowClass: cashFlowClass ?? null,
       },
       pool
     );
@@ -237,6 +244,7 @@ router.post(
         accountName: account.accountName,
         accountType: account.accountType,
         normalBalance: account.normalBalance,
+        cashFlowClass: account.cashFlowClass ?? null,
       },
     });
   })
@@ -255,6 +263,7 @@ const UpdateAccountSchema = z.object({
   isPostingAccount: z.boolean().optional(),
   isActive: z.boolean().optional(),
   description: z.string().optional(),
+  cashFlowClass: z.enum(['operating', 'investing', 'financing']).optional().nullable(),
 });
 
 router.put(
@@ -280,6 +289,7 @@ router.put(
         parentAccountId: data.parentAccountId,
         isPostingAccount: data.isPostingAccount,
         isActive: data.isActive,
+        ...('cashFlowClass' in data ? { cashFlowClass: data.cashFlowClass ?? null } : {}),
       },
       pool
     );
@@ -296,6 +306,7 @@ router.put(
           parentAccountId: updated.parentAccountId,
           isPostingAccount: updated.isPostingAccount,
           isActive: updated.isActive,
+          cashFlowClass: updated.cashFlowClass ?? null,
         }
         : null,
     });
@@ -652,22 +663,22 @@ router.get(
 );
 
 // =============================================================================
-// CASH FLOW STATEMENT
+// CASH FLOW STATEMENT  (IAS 7 — GL-driven, Direct Method)
 // =============================================================================
 
 /**
  * GET /api/accounting/cash-flow
- * Generate cash flow statement for a date range
  *
- * Note: Cash flow is calculated from changes in account balances
- * between two periods, categorized by activity type.
+ * IAS 7-compliant Cash Flow Statement.
+ * Classification is determined solely by accounts.CashFlowClass of the
+ * OPPOSITE GL account in each journal entry — never by transaction type.
+ * No "OTHER" section ever appears.
  */
 router.get(
   '/cash-flow',
   requirePermission('accounting.read'),
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
-    // Use business date for default range (timezone-safe, SAP pattern)
     const bizDate = getBusinessDate();
     const firstDayOfMonth = bizDate.slice(0, 8) + '01';
 
@@ -675,184 +686,89 @@ router.get(
     const startDate = query.startDate || firstDayOfMonth;
     const endDate = query.endDate || bizDate;
 
-    // Get income statement for net income
-    const incomeStatement = await accountingRepository.getIncomeStatement(startDate, endDate, pool);
+    const [statement, settings, integrity] = await Promise.all([
+      buildCashFlowStatement(pool, startDate, endDate),
+      getSettings(pool),
+      buildCashFlowIntegrity(pool, startDate, endDate),
+    ]);
 
-    // Get cash movements by type from ledger entries
-    const cashMovementsResult = await pool.query(
-      `
-      SELECT 
-    lt."ReferenceType",
-    SUM(CASE WHEN le."EntryType" = 'DEBIT' THEN le."Amount" ELSE 0 END) as cash_in,
-    SUM(CASE WHEN le."EntryType" = 'CREDIT' THEN le."Amount" ELSE 0 END) as cash_out
-      FROM ledger_entries le
-      JOIN accounts a ON a."Id" = le."AccountId"
-      LEFT JOIN ledger_transactions lt ON lt."Id" = le."LedgerTransactionId"
-      WHERE a."AccountCode" = '1010'
-    AND le."EntryDate" >= $1 AND le."EntryDate" <= $2
-      GROUP BY lt."ReferenceType"
-    `,
-      [startDate, endDate + ' 23:59:59']
-    );
-
-    // Categorize cash movements using decimal-safe arithmetic
-    let operatingCashIn = Money.parse(0);
-    let operatingCashOut = Money.parse(0);
-    let investingCashIn = Money.parse(0);
-    let investingCashOut = Money.parse(0);
-    let financingCashIn = Money.parse(0);
-    let financingCashOut = Money.parse(0);
-
-    const operatingItems: { description: string; amount: number }[] = [];
-    const investingItems: { description: string; amount: number }[] = [];
-    const financingItems: { description: string; amount: number }[] = [];
-
-    for (const row of cashMovementsResult.rows) {
-      const cashIn = Money.parseDb(row.cash_in);
-      const cashOut = Money.parseDb(row.cash_out);
-      const netAmount = Money.subtract(cashIn, cashOut);
-      const refType = row.ReferenceType || 'OTHER';
-
-      // Operating activities: sales, customer payments, deposits, expenses
-      if (
-        ['SALE', 'CUSTOMER_PAYMENT', 'INVOICE_PAYMENT', 'CUSTOMER_DEPOSIT', 'EXPENSE'].includes(
-          refType
-        )
-      ) {
-        operatingCashIn = Money.add(operatingCashIn, cashIn);
-        operatingCashOut = Money.add(operatingCashOut, cashOut);
-        if (!Money.isZero(netAmount)) {
-          operatingItems.push({
-            description: refType.replace(/_/g, ' '),
-            amount: netAmount.toNumber(),
-          });
-        }
-      }
-      // Investing activities: fixed assets, equipment purchases
-      else if (['ASSET_PURCHASE', 'ASSET_SALE', 'INVESTMENT'].includes(refType)) {
-        investingCashIn = Money.add(investingCashIn, cashIn);
-        investingCashOut = Money.add(investingCashOut, cashOut);
-        if (!Money.isZero(netAmount)) {
-          investingItems.push({
-            description: refType.replace(/_/g, ' '),
-            amount: netAmount.toNumber(),
-          });
-        }
-      }
-      // Financing activities: loans, capital contributions
-      else if (['LOAN', 'CAPITAL_CONTRIBUTION', 'DIVIDEND'].includes(refType)) {
-        financingCashIn = Money.add(financingCashIn, cashIn);
-        financingCashOut = Money.add(financingCashOut, cashOut);
-        if (!Money.isZero(netAmount)) {
-          financingItems.push({
-            description: refType.replace(/_/g, ' '),
-            amount: netAmount.toNumber(),
-          });
-        }
-      }
-      // Default to operating
-      else if (!Money.isZero(netAmount)) {
-        operatingCashIn = Money.add(operatingCashIn, cashIn);
-        operatingCashOut = Money.add(operatingCashOut, cashOut);
-        operatingItems.push({
-          description: refType.replace(/_/g, ' '),
-          amount: netAmount.toNumber(),
-        });
-      }
-    }
-
-    // Calculate totals from actual cash movements (Direct Method)
-    // Note: Net Income is NOT added here - we show actual cash flows, not accrual-based income
-    const totalOperatingCashFlow = Money.subtract(operatingCashIn, operatingCashOut).toNumber();
-    const totalInvestingCashFlow = Money.subtract(investingCashIn, investingCashOut).toNumber();
-    const totalFinancingCashFlow = Money.subtract(financingCashIn, financingCashOut).toNumber();
-
-    const operatingActivities = {
-      items: operatingItems, // Direct method: show actual cash transactions only
-      totalOperatingCashFlow,
-    };
-
-    const investingActivities = {
-      items: investingItems,
-      totalInvestingCashFlow,
-    };
-
-    const financingActivities = {
-      items: financingItems,
-      totalFinancingCashFlow,
-    };
-
-    // Calculate net change in cash from the three activities
-    const netCashFlow = Money.add(
-      totalOperatingCashFlow,
-      totalInvestingCashFlow,
-      totalFinancingCashFlow
-    ).toNumber();
-
-    // Get beginning cash balance from gl_period_balances (before the period)
-    const [bStartYear, bStartMonth] = startDate.split('-').map(Number);
-    // "Before start" = up to the period just before startMonth
-    const bPrevMonth = bStartMonth === 1 ? 12 : bStartMonth - 1;
-    const bPrevYear = bStartMonth === 1 ? bStartYear - 1 : bStartYear;
-    const beginningResult = await pool.query(
-      `
-      SELECT 
-        COALESCE(SUM(gpb.debit_total), 0) - COALESCE(SUM(gpb.credit_total), 0) as beginning_balance
-      FROM gl_period_balances gpb
-      JOIN accounts a ON a."Id" = gpb.account_id
-      WHERE a."AccountCode" IN ('1010', '1020', '1030')
-        AND (gpb.fiscal_year < $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period <= $2))
-      `,
-      [bPrevYear, bPrevMonth]
-    );
-    const beginningCashBalance = Money.parseDb(
-      beginningResult.rows[0]?.beginning_balance
-    ).toNumber();
-
-    // Calculate ending balance from gl_period_balances (through end of period)
-    const [eEndYear, eEndMonth] = endDate.split('-').map(Number);
-    const endingResult = await pool.query(
-      `
-      SELECT 
-        COALESCE(SUM(gpb.debit_total), 0) - COALESCE(SUM(gpb.credit_total), 0) as ending_balance
-      FROM gl_period_balances gpb
-      JOIN accounts a ON a."Id" = gpb.account_id
-      WHERE a."AccountCode" IN ('1010', '1020', '1030')
-        AND (gpb.fiscal_year < $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period <= $2))
-      `,
-      [eEndYear, eEndMonth]
-    );
-    const endingCashBalance = Money.parseDb(endingResult.rows[0]?.ending_balance).toNumber();
-
-    // Net change should equal total cash flows (this is a validation)
-    // Use the calculated net cash flow for consistency
-    const netChangeInCash = netCashFlow;
-
-    // Get company name from settings
-    const settings = await getSettings(pool);
-    const companyName = settings.companyName || 'SMART ERP';
-
-    // Build integrity block (scoped to period)
-    const integrity = await buildCashFlowIntegrity(pool, startDate, endDate);
+    // Map to the shape the frontend expects
+    const mapItems = (items: typeof statement.operating.items) =>
+      items.map((item) => ({
+        description: item.description,   // aggregated account name, e.g. "Sales Revenue"
+        accountCode: item.oppositeAccountCode,
+        amount: item.net,
+        cashInflow: item.cashInflow,
+        cashOutflow: item.cashOutflow,
+      }));
 
     res.json({
       success: true,
       data: {
-        companyName,
+        companyName: settings.companyName || 'SMART ERP',
         periodStart: startDate,
         periodEnd: endDate,
-        generatedAt: new Date().toISOString(),
-        operatingActivities,
-        investingActivities,
-        financingActivities,
-        // Provide totals in the format expected by frontend
-        totalOperatingCashFlow: operatingActivities.totalOperatingCashFlow,
-        totalInvestingCashFlow: investingActivities.totalInvestingCashFlow,
-        totalFinancingCashFlow: financingActivities.totalFinancingCashFlow,
-        netChangeInCash,
-        beginningCashBalance,
-        endingCashBalance,
+        generatedAt: statement.generatedAt,
+        // Section objects with items + totals (used by frontend transformer)
+        operatingActivities: {
+          items: mapItems(statement.operating.items),
+          totalOperatingCashFlow: statement.operating.netTotal,
+        },
+        investingActivities: {
+          items: mapItems(statement.investing.items),
+          totalInvestingCashFlow: statement.investing.netTotal,
+        },
+        financingActivities: {
+          items: mapItems(statement.financing.items),
+          totalFinancingCashFlow: statement.financing.netTotal,
+        },
+        // Flat totals (backward-compatible aliases)
+        totalOperatingCashFlow: statement.operating.netTotal,
+        totalInvestingCashFlow: statement.investing.netTotal,
+        totalFinancingCashFlow: statement.financing.netTotal,
+        netChangeInCash: statement.netChangeInCash,
+        beginningCashBalance: statement.beginningCashBalance,
+        endingCashBalance: statement.endingCashBalance,
+        // Audit: classification issues (empty = fully compliant)
+        unclassifiedIssues: statement.unclassifiedIssues,
         integrity,
+      },
+    });
+  })
+);
+
+/**
+ * GET /api/accounting/cash-flow/audit
+ *
+ * Returns all historical GL cash movements that cannot be classified because
+ * the opposite account has no CashFlowClass set.
+ * Empty result = chart of accounts is fully IAS 7 compliant.
+ */
+router.get(
+  '/cash-flow/audit',
+  requirePermission('accounting.read'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const bizDate = getBusinessDate();
+
+    const query = DateRangeQuerySchema.parse(req.query);
+    const startDate = query.startDate || '2000-01-01';
+    const endDate = query.endDate || bizDate;
+
+    const issues = await auditCashFlowClassification(pool, startDate, endDate);
+
+    res.json({
+      success: true,
+      data: {
+        periodStart: startDate,
+        periodEnd: endDate,
+        totalIssues: issues.length,
+        issues,
+        compliant: issues.length === 0,
+        message:
+          issues.length === 0
+            ? 'All cash movements are fully classified per IAS 7'
+            : `${issues.length} cash movement(s) could not be classified — assign CashFlowClass to the affected accounts`,
       },
     });
   })

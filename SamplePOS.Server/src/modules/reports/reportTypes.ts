@@ -852,3 +852,51 @@ export interface BankTransactionReportRow {
     isReconciled: boolean;
     createdAt: string | null;
 }
+
+// ── Category Intelligence Report ──
+export interface UomLevel {
+    uomId: string;
+    name: string;
+    symbol: string | null;
+    conversionFactor: number; // base units per 1 of this UoM (base itself = 1)
+    isDefault: boolean;
+}
+
+export interface CategoryInventoryPositionRow {
+    productId: string;
+    sku: string | null;
+    productName: string;
+    unitOfMeasure: string | null;
+    qtyOnHand: number;
+    reorderLevel: number;
+    unitCost: number;
+    stockValue: number;
+    uomLevels: UomLevel[];  // all UoMs sorted by conversionFactor DESC
+}
+
+export interface CategoryPurchasesRow {
+    productId: string;
+    sku: string | null;
+    productName: string;
+    unitOfMeasure: string | null;
+    supplierName: string;
+    receivedDate: string;
+    grNumber: string;
+    totalQtyReceived: number;
+    totalPurchaseValue: number;
+    avgUnitCost: number;
+}
+
+export interface CategoryExpiryExposureRow {
+    productId: string;
+    sku: string | null;
+    productName: string;
+    unitOfMeasure: string | null;
+    batchNumber: string;
+    expiryDate: string;
+    remainingQuantity: number;
+    costPrice: number;
+    exposedValue: number;
+    status: string;
+    daysUntilExpiry: number;
+}

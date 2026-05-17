@@ -90,6 +90,7 @@ import {
   QuotationReportParamsSchema,
   ManualJournalEntryReportParamsSchema,
   BankTransactionReportParamsSchema,
+  CategoryIntelligenceParamsSchema,
 } from '../../../../shared/zod/reports.js';
 import { z } from 'zod';
 import { getBusinessDate } from '../../utils/dateRange.js';
@@ -2639,6 +2640,7 @@ export const reportsController = {
     const report = await reportsService.generateSalesByCategory(pool, {
       startDate: params.start_date,
       endDate: params.end_date,
+      category: params.category,
       format: params.format,
       userId,
     });
@@ -2664,7 +2666,9 @@ export const reportsController = {
       pdfGen.addHeader({
         companyName,
         title: 'Sales by Category Report',
-        subtitle: `Category breakdown - ${startDate} to ${endDate}`,
+        subtitle: params.category
+          ? `Category: ${params.category} — ${startDate} to ${endDate}`
+          : `All categories — ${startDate} to ${endDate}`,
         generatedAt: formatDateTime(),
       });
 
@@ -4101,6 +4105,7 @@ export const reportsController = {
         queryParams = {
           start_date: params.startDate,
           end_date: params.endDate,
+          category: params.category,
           format: params.format,
         };
         return await reportsController.getSalesByCategory(modifiedReq, res, pool);
@@ -4343,6 +4348,17 @@ export const reportsController = {
           format: params.format,
         };
         return await reportsController.getCancelledOrdersReport(modifiedReq, res, pool);
+
+      case 'CATEGORY_INTELLIGENCE':
+        queryParams = {
+          category: params.category,
+          report_type: params.reportType2 ?? 'FULL_STATEMENT',
+          start_date: params.startDate,
+          end_date: params.endDate,
+          days_ahead: params.daysAhead,
+          format: params.format,
+        };
+        return await reportsController.getCategoryIntelligenceReport(modifiedReq, res, pool);
 
       default:
         return res.status(400).json({
@@ -5134,6 +5150,147 @@ export const reportsController = {
     };
 
     logger.info('Cancelled orders report generated', { userId, recordCount: report.recordCount });
+    res.json({ success: true, data: report });
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // CATEGORY INTELLIGENCE REPORTING ENGINE
+  // ─────────────────────────────────────────────────────────────────
+
+  async getCategoryIntelligenceReport(req: Request, res: Response, pool: Pool) {
+    const params = CategoryIntelligenceParamsSchema.parse(req.query);
+    const userId = req.user?.id;
+
+    const report = await reportsService.generateCategoryIntelligenceReport(pool, {
+      category: params.category,
+      reportType: params.report_type,
+      startDate: params.start_date,
+      endDate: params.end_date,
+      daysAhead: params.days_ahead,
+      userId,
+    });
+
+    // ── PDF export ──
+    if (params.format === 'pdf') {
+      const companyName = await getCompanyName(pool);
+      const pdfGen = new ReportPDFGenerator(companyName);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="category_intelligence_${params.category.replace(/\s+/g, '_')}_${params.report_type}.pdf"`
+      );
+      pdfGen.getDocument().pipe(res);
+
+      const subtitle = `Category: ${params.category} | ${params.report_type.replace(/_/g, ' ')} | ${report.parameters.startDate} – ${report.parameters.endDate}`;
+      pdfGen.addHeader({
+        title: 'Category Intelligence Report',
+        subtitle,
+        generatedAt: report.generatedAt,
+        generatedBy: userId,
+        companyName,
+      });
+
+      // Section: Inventory Position / Stock Valuation
+      if (report.inventoryPosition && report.inventorySummary && report.inventoryPosition.length > 0) {
+        pdfGen.addSummaryCards([
+          { label: 'Products', value: report.inventorySummary.productCount.toLocaleString() },
+          { label: 'Total Qty on Hand', value: report.inventorySummary.totalQtyOnHand.toLocaleString() },
+          { label: 'Total Stock Value', value: `${report.systemSettings.currencySymbol} ${report.inventorySummary.totalStockValue.toLocaleString()}`, color: PDFColors.primary },
+          { label: 'Below Reorder', value: report.inventorySummary.belowReorderCount.toLocaleString(), color: report.inventorySummary.belowReorderCount > 0 ? PDFColors.danger : PDFColors.success },
+        ]);
+        pdfGen.addSectionHeading('Inventory Position');
+        const invCols: PDFTableColumn[] = [
+          { header: 'Product', key: 'productName', width: 0.3 },
+          { header: 'SKU', key: 'sku', width: 0.12, format: (v) => (v as string | null) ?? '—' },
+          { header: 'UoM', key: 'unitOfMeasure', width: 0.08, format: (v) => (v as string | null) ?? '—' },
+          { header: 'Qty on Hand', key: 'qtyOnHand', width: 0.12, align: 'right', format: (v) => formatQuantityPDF(v as number) },
+          { header: 'Reorder Lvl', key: 'reorderLevel', width: 0.12, align: 'right', format: (v) => formatQuantityPDF(v as number) },
+          { header: 'Unit Cost', key: 'unitCost', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+          { header: 'Stock Value', key: 'stockValue', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        ];
+        pdfGen.addTable(invCols, report.inventoryPosition);
+      }
+
+      // Section: Sales
+      if (report.sales && report.salesSummary && report.sales.length > 0) {
+        pdfGen.addSectionHeading('Sales Performance');
+        pdfGen.addSummaryCards([
+          { label: 'Revenue', value: `${report.systemSettings.currencySymbol} ${report.salesSummary.totalRevenue.toLocaleString()}`, color: PDFColors.primary },
+          { label: 'Gross Profit', value: `${report.systemSettings.currencySymbol} ${report.salesSummary.grossProfit.toLocaleString()}`, color: PDFColors.success },
+          { label: 'Total Cost', value: `${report.systemSettings.currencySymbol} ${report.salesSummary.totalCost.toLocaleString()}` },
+          { label: 'Transactions', value: report.salesSummary.totalTransactions.toLocaleString() },
+        ]);
+        const salesCols: PDFTableColumn[] = [
+          { header: 'Sub-Category', key: 'category', width: 0.18 },
+          { header: 'Products', key: 'productCount', width: 0.09, align: 'right' },
+          { header: 'Qty Sold', key: 'totalQuantitySold', width: 0.1, align: 'right', format: (v) => formatQuantityPDF(v as number) },
+          { header: 'Revenue', key: 'totalRevenue', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+          { header: 'Cost', key: 'totalCost', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+          { header: 'Gross Profit', key: 'grossProfit', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+          { header: 'Margin %', key: 'profitMargin', width: 0.1, align: 'right', format: (v) => `${(v as number).toFixed(1)}%` },
+          { header: 'Trans.', key: 'transactionCount', width: 0.08, align: 'right' },
+          { header: 'Avg Trans.', key: 'averageTransactionValue', width: 0.07, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        ];
+        pdfGen.addTable(salesCols, report.sales);
+      }
+
+      // Section: Purchases
+      if (report.purchases && report.purchasesSummary && report.purchases.length > 0) {
+        pdfGen.addSectionHeading('Purchase History');
+        pdfGen.addSummaryCards([
+          { label: 'Deliveries', value: report.purchasesSummary.deliveryCount.toLocaleString() },
+          { label: 'Total Qty Received', value: report.purchasesSummary.totalQtyReceived.toLocaleString() },
+          { label: 'Total Purchase Value', value: `${report.systemSettings.currencySymbol} ${report.purchasesSummary.totalPurchaseValue.toLocaleString()}`, color: PDFColors.warning },
+        ]);
+        const purCols: PDFTableColumn[] = [
+          { header: 'Product', key: 'productName', width: 0.22 },
+          { header: 'GR #', key: 'grNumber', width: 0.12 },
+          { header: 'Supplier', key: 'supplierName', width: 0.15 },
+          { header: 'Date', key: 'receivedDate', width: 0.1, format: (v) => String(v) },
+          { header: 'Qty Received', key: 'totalQtyReceived', width: 0.12, align: 'right', format: (v) => formatQuantityPDF(v as number) },
+          { header: 'Avg Unit Cost', key: 'avgUnitCost', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+          { header: 'Total Value', key: 'totalPurchaseValue', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        ];
+        pdfGen.addTable(purCols, report.purchases);
+      }
+
+      // Section: Expiry Exposure
+      if (report.expiry && report.expirySummary && report.expiry.length > 0) {
+        pdfGen.addSectionHeading(`Expiry Exposure (next ${report.parameters.daysAhead} days)`);
+        pdfGen.addSummaryCards([
+          { label: 'Active Batches', value: report.expirySummary.batchCount.toLocaleString() },
+          { label: 'Exposed Qty', value: report.expirySummary.totalExposedQty.toLocaleString() },
+          { label: 'Exposed Value', value: `${report.systemSettings.currencySymbol} ${report.expirySummary.totalExposedValue.toLocaleString()}`, color: PDFColors.danger },
+          { label: 'Expiring ≤ 30 days', value: report.expirySummary.expiringSoonCount.toLocaleString(), color: report.expirySummary.expiringSoonCount > 0 ? PDFColors.warning : PDFColors.success },
+        ]);
+        const expCols: PDFTableColumn[] = [
+          { header: 'Product', key: 'productName', width: 0.22 },
+          { header: 'Batch #', key: 'batchNumber', width: 0.13 },
+          { header: 'Expiry Date', key: 'expiryDate', width: 0.11, format: (v) => String(v) },
+          { header: 'Days Left', key: 'daysUntilExpiry', width: 0.09, align: 'right', format: (v) => (v as number) <= 0 ? 'EXPIRED' : String(v) },
+          { header: 'Qty Remaining', key: 'remainingQuantity', width: 0.12, align: 'right', format: (v) => formatQuantityPDF(v as number) },
+          { header: 'Unit Cost', key: 'costPrice', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+          { header: 'Exposed Value', key: 'exposedValue', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+        ];
+        pdfGen.addTable(expCols, report.expiry);
+      }
+
+      // Fallback: nothing to show
+      const sectionsRendered = [
+        report.inventoryPosition?.length,
+        report.sales?.length,
+        report.purchases?.length,
+        report.expiry?.length,
+      ].some((n) => n && n > 0);
+
+      if (!sectionsRendered) {
+        pdfGen.addTable([], []);
+      }
+
+      pdfGen.end();
+      return;
+    }
+
     res.json({ success: true, data: report });
   },
 };

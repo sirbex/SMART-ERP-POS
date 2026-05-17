@@ -22,6 +22,7 @@ import { Money } from '../../utils/money.js';
 import { SalesBusinessRules, InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import * as masterDataGuard from '../../services/masterDataGuard.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessDate, getBusinessYear, addDaysToDateString } from '../../utils/dateRange.js';
@@ -427,6 +428,9 @@ export const salesService = {
 
         // BR-SAL-005: Validate product is active
         await SalesBusinessRules.validateProductActive(client, item.productId);
+
+        // MASTER DATA GUARD (Rule 2): Block sales of items without configured selling price
+        await masterDataGuard.assertItemHasSellingPrice(client, item.productId);
 
         // ========== PRICING ENGINE OVERRIDE ==========
         // If the pricing engine resolved a better price for this customer/quantity,

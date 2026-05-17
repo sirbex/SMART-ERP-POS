@@ -288,10 +288,10 @@ export const acquireAsset = async (
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, 'ACTIVE', $13, $14, $15, $16, $17)
        RETURNING *`,
       [assetId, assetNumber, data.name, data.description || null, data.categoryId,
-      data.acquisitionDate, data.acquisitionCost, salvage, usefulLife, method,
-      data.depreciationStartDate || data.acquisitionDate,
-      nbv, data.costCenterId || null, data.location || null, data.serialNumber || null, data.userId,
-      data.mode]
+        data.acquisitionDate, data.acquisitionCost, salvage, usefulLife, method,
+        data.depreciationStartDate || data.acquisitionDate,
+        nbv, data.costCenterId || null, data.location || null, data.serialNumber || null, data.userId,
+        data.mode]
     );
 
     // GL: single posting engine — no inline posting allowed.

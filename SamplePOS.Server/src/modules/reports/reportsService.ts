@@ -1863,6 +1863,7 @@ export const reportsService = {
     options: {
       startDate: string;
       endDate: string;
+      category?: string;
       format?: 'pdf' | 'csv' | 'json';
       userId?: string;
     }
@@ -2743,6 +2744,134 @@ export const reportsService = {
       },
       recordCount: headers.length,
       executionTimeMs: executionTime,
+    };
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // CATEGORY INTELLIGENCE REPORTING ENGINE
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Generates a Category Intelligence report for a single category.
+   * reportType controls which sections are populated:
+   *   INVENTORY_POSITION | SALES | PURCHASES | STOCK_VALUATION | EXPIRY_EXPOSURE | FULL_STATEMENT
+   */
+  async generateCategoryIntelligenceReport(
+    pool: Pool,
+    options: {
+      category: string;
+      reportType: 'INVENTORY_POSITION' | 'SALES' | 'PURCHASES' | 'STOCK_VALUATION' | 'EXPIRY_EXPOSURE' | 'FULL_STATEMENT';
+      startDate?: string;
+      endDate?: string;
+      daysAhead?: number;
+      userId?: string;
+    }
+  ) {
+    const start = performance.now();
+    const systemContext = await getSystemContext(pool);
+    const today = getBusinessDate();
+    const startDate = options.startDate || today.slice(0, 8) + '01'; // first of current month
+    const endDate = options.endDate || today;
+    const daysAhead = options.daysAhead ?? 90;
+
+    const include = (section: string) =>
+      options.reportType === 'FULL_STATEMENT' || options.reportType === section;
+
+    const [inventoryRows, salesRows, purchasesRows, expiryRows] = await Promise.all([
+      include('INVENTORY_POSITION') || include('STOCK_VALUATION')
+        ? reportsRepository.getCategoryInventoryPosition(pool, { category: options.category })
+        : Promise.resolve(null),
+      include('SALES')
+        ? reportsRepository.getSalesByCategory(pool, {
+          startDate,
+          endDate,
+          category: options.category,
+        })
+        : Promise.resolve(null),
+      include('PURCHASES')
+        ? reportsRepository.getCategoryPurchases(pool, {
+          category: options.category,
+          startDate,
+          endDate,
+        })
+        : Promise.resolve(null),
+      include('EXPIRY_EXPOSURE')
+        ? reportsRepository.getCategoryExpiryExposure(pool, {
+          category: options.category,
+          daysAhead,
+        })
+        : Promise.resolve(null),
+    ]);
+
+    // ── Inventory / Stock-Valuation totals ──
+    const inventorySummary = inventoryRows
+      ? {
+        productCount: inventoryRows.length,
+        totalQtyOnHand: inventoryRows.reduce(
+          (s, r) => new Decimal(s).plus(r.qtyOnHand).toNumber(), 0
+        ),
+        totalStockValue: inventoryRows.reduce(
+          (s, r) => new Decimal(s).plus(r.stockValue).toNumber(), 0
+        ),
+        belowReorderCount: inventoryRows.filter((r) => r.qtyOnHand < r.reorderLevel).length,
+      }
+      : null;
+
+    // ── Sales totals ──
+    const salesSummary = salesRows
+      ? {
+        totalRevenue: salesRows.reduce((s, r) => new Decimal(s).plus(r.totalRevenue).toNumber(), 0),
+        totalCost: salesRows.reduce((s, r) => new Decimal(s).plus(r.totalCost).toNumber(), 0),
+        grossProfit: salesRows.reduce((s, r) => new Decimal(s).plus(r.grossProfit).toNumber(), 0),
+        totalTransactions: salesRows.reduce((s, r) => s + r.transactionCount, 0),
+      }
+      : null;
+
+    // ── Purchases totals ──
+    const purchasesSummary = purchasesRows
+      ? {
+        totalQtyReceived: purchasesRows.reduce(
+          (s, r) => new Decimal(s).plus(r.totalQtyReceived).toNumber(), 0
+        ),
+        totalPurchaseValue: purchasesRows.reduce(
+          (s, r) => new Decimal(s).plus(r.totalPurchaseValue).toNumber(), 0
+        ),
+        deliveryCount: new Set(purchasesRows.map((r) => r.grNumber)).size,
+      }
+      : null;
+
+    // ── Expiry totals ──
+    const expirySummary = expiryRows
+      ? {
+        batchCount: expiryRows.length,
+        totalExposedQty: expiryRows.reduce(
+          (s, r) => new Decimal(s).plus(r.remainingQuantity).toNumber(), 0
+        ),
+        totalExposedValue: expiryRows.reduce(
+          (s, r) => new Decimal(s).plus(r.exposedValue).toNumber(), 0
+        ),
+        expiredCount: expiryRows.filter((r) => r.daysUntilExpiry <= 0).length,
+        expiringSoonCount: expiryRows.filter((r) => r.daysUntilExpiry > 0 && r.daysUntilExpiry <= 30).length,
+      }
+      : null;
+
+    return {
+      reportType: 'CATEGORY_INTELLIGENCE' as const,
+      reportName: `Category Intelligence — ${options.category}`,
+      category: options.category,
+      sectionType: options.reportType,
+      generatedAt: new Date().toISOString(),
+      parameters: { startDate, endDate, daysAhead },
+      systemSettings: systemContext,
+      inventoryPosition: inventoryRows,
+      inventorySummary,
+      sales: salesRows,
+      salesSummary,
+      purchases: purchasesRows,
+      purchasesSummary,
+      expiry: expiryRows,
+      expirySummary,
+      executionTimeMs: Math.round(performance.now() - start),
     };
   },
 };

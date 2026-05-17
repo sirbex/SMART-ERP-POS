@@ -202,7 +202,7 @@ export async function pollAndProcessPendingEvents(pool: pg.Pool): Promise<{
         const isTableMissing =
             err instanceof Error &&
             (err.message.includes('relation') && err.message.includes('does not exist') ||
-             (err as unknown as { code?: string }).code === '42P01');
+                (err as unknown as { code?: string }).code === '42P01');
 
         if (isTableMissing) {
             logger.debug('[PeriodBalanceWorker] gl_projection_events not found in this pool — skipping (expected for global/empty DB)');

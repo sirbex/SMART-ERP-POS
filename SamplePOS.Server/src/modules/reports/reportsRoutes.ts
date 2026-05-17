@@ -424,5 +424,12 @@ export function createReportsRouter(pool: Pool) {
     asyncHandler(async (req, res) => reportsController.getCancelledOrdersReport(req, res, p(req)))
   );
 
+  // Category Intelligence
+  router.get(
+    '/category-intelligence',
+    requirePermission('reports.financial_view'),
+    asyncHandler(async (req, res) => reportsController.getCategoryIntelligenceReport(req, res, p(req)))
+  );
+
   return router;
 }

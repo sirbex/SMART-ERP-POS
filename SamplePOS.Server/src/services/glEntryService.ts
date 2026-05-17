@@ -90,8 +90,12 @@ export const AccountCodes = {
   SALES_RETURNS: '4010',
   PURCHASE_RETURNS: '5010',
 
-  // GR/IR Clearing
+  // GR/IR Clearing (SAP WRX) — ONLY uninvoiced goods receipts post here
   GRIR_CLEARING: '2150',
+
+  // Supplier Return Clearing — returns/credit notes AFTER invoice already posted
+  // (Keeps GR/IR pure: SAP-style MR11 purity rule)
+  SUPPLIER_RETURN_CLEARING: '2160',
 
   // Price Variance (GR/IR mismatch — SAP account 393000)
   PRICE_VARIANCE: '5020',
@@ -915,6 +919,16 @@ export interface ReturnGrnGLData {
   supplierId: string;
   supplierName: string;
   originalGrNumber?: string;
+  /**
+   * True when the originating GRN already has a posted supplier invoice.
+   * In that case the return must NOT touch GR/IR Clearing (2150) — which is
+   * already netted to zero by the invoice — and instead routes through the
+   * dedicated Supplier Return Clearing account (2160).
+   *
+   * False (or undefined) means the goods receipt is still uninvoiced:
+   * the return reverses the original GR/IR debit (standard 3-way match reversal).
+   */
+  hasInvoice?: boolean;
 }
 
 export async function recordReturnGrnToGL(
@@ -923,6 +937,26 @@ export async function recordReturnGrnToGL(
   txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
+    // ── MR11 PURITY RULE ─────────────────────────────────────────────────────
+    // GR/IR Clearing (2150) must ONLY represent uninvoiced goods receipts.
+    //
+    //  • hasInvoice = false (or undefined): GRN not yet invoiced.
+    //    The return reverses the original GRN clearing entry.
+    //    DR GR/IR Clearing (2150) / CR Inventory (1300)  ← standard reversal
+    //
+    //  • hasInvoice = true: GRN already invoiced (2150 already netted to zero).
+    //    Posting to 2150 would corrupt MR11 and inflate the GR/IR balance.
+    //    DR Supplier Return Clearing (2160) / CR Inventory (1300)  ← clean path
+    //    A subsequent Supplier Credit Note will: DR AP (2100) / CR 2160.
+    // ─────────────────────────────────────────────────────────────────────────
+    const clearingAccountCode = data.hasInvoice
+      ? AccountCodes.SUPPLIER_RETURN_CLEARING
+      : AccountCodes.GRIR_CLEARING;
+
+    const clearingDescription = data.hasInvoice
+      ? `Supplier return clearing (post-invoice) — ${data.returnGrnNumber}`
+      : `Reverse GRN clearing — returned goods: ${data.returnGrnNumber}`;
+
     await AccountingCore.createJournalEntry({
       entryDate: data.returnDate,
       description: `Return to Supplier: ${data.returnGrnNumber} (${data.supplierName})${data.originalGrNumber ? ` — orig GR ${data.originalGrNumber}` : ''}`,
@@ -931,8 +965,8 @@ export async function recordReturnGrnToGL(
       referenceNumber: data.returnGrnNumber,
       lines: [
         {
-          accountCode: AccountCodes.GRIR_CLEARING,
-          description: `Reverse GRN clearing — returned goods: ${data.returnGrnNumber}`,
+          accountCode: clearingAccountCode,
+          description: clearingDescription,
           debitAmount: data.totalAmount,
           creditAmount: 0,
           entityType: 'supplier',
@@ -953,10 +987,12 @@ export async function recordReturnGrnToGL(
       source: 'INVENTORY_MOVE' as const,
     }, pool, txClient);
 
-    logger.info('Recorded return GRN to GL (GRIR Clearing reversed)', {
+    logger.info('Recorded return GRN to GL', {
       returnGrnId: data.returnGrnId,
       returnGrnNumber: data.returnGrnNumber,
       amount: data.totalAmount,
+      clearingAccount: clearingAccountCode,
+      hasInvoice: data.hasInvoice ?? false,
     });
   } catch (error: unknown) {
     logger.error('Failed to record return GRN to GL', { error, data });

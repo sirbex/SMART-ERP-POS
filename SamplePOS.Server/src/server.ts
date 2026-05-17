@@ -453,6 +453,24 @@ async function startServer() {
 
     logger.info('Database connection successful');
 
+    // Self-healing guard: ensure every product has its child rows in
+    // product_valuation and product_inventory. Safe to call at any time —
+    // the underlying INSERT uses ON CONFLICT DO NOTHING. This recovers from
+    // any data reset (UI or SQL) that wiped the child tables.
+    try {
+      const { ensureProductChildRows } = await import('./modules/products/productRepository.js');
+      const healed = await ensureProductChildRows(pool);
+      if (healed.valuation > 0 || healed.inventory > 0) {
+        logger.warn('Product child rows were missing and have been recreated', healed);
+      } else {
+        logger.info('Product child row integrity check passed');
+      }
+    } catch (err) {
+      logger.warn('Product child row integrity check skipped', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     // Pre-build tenant template database (non-blocking — failure just means
     // first tenant provision will build it on demand)
     try {

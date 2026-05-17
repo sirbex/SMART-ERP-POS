@@ -23,16 +23,8 @@ export interface MoneyInRow {
   total_amount: string;
 }
 
-/** Section 2 — Revenue by product category (from GL revenue accounts → sale_items → products) */
-export interface RevenueByCategoryRow {
-  category_name: string;
-  transaction_count: number;
-  units_sold: string;
-  total_revenue: string;
-  total_cogs: string;
-  gross_profit: string;
-  gross_margin_pct: string;
-}
+// Section 2 — Revenue by Product Category is now handled by reportsRepository.getSalesByCategory
+// (reads from live sale_items transactions, not product_daily_summary state table)
 
 /** Section 3 — Cost & stock impact from GL (COGS + inventory adjustments) */
 export interface CostAndStockRow {
@@ -143,49 +135,6 @@ export async function getMoneyIn(
   if (filters.paymentMethod) params.push(filters.paymentMethod);
 
   const result = await db.query(query, params);
-  return result.rows;
-}
-
-// ---------------------------------------------------------------------------
-// Section 2 — Revenue by Product Category
-// Reads from product_daily_summary state table (maintained at write-time).
-// SAP pattern: "Reports read reality (state tables), not transaction tables."
-// ---------------------------------------------------------------------------
-
-export async function getRevenueByCategory(
-  filters: BusinessReportFilters,
-  dbPool?: Pool | PoolClient
-): Promise<RevenueByCategoryRow[]> {
-  const db = dbPool || globalPool;
-
-  // product_daily_summary uses DATE (not TIMESTAMPTZ), so we use date bounds directly.
-  // PDS stores revenue as pre-discount (lineTotal) and discount_given separately.
-  // Net revenue = revenue - discount_given; gross profit = net revenue - COGS.
-  const query = `
-    SELECT
-      pds.category AS category_name,
-      SUM(pds.transaction_count)::integer AS transaction_count,
-      ROUND(SUM(pds.units_sold)::numeric, 2) AS units_sold,
-      ROUND(SUM(pds.revenue - pds.discount_given)::numeric, 2) AS total_revenue,
-      ROUND(SUM(pds.cost_of_goods)::numeric, 2) AS total_cogs,
-      ROUND(SUM(pds.revenue - pds.discount_given - pds.cost_of_goods)::numeric, 2) AS gross_profit,
-      CASE
-        WHEN SUM(pds.revenue - pds.discount_given) > 0
-        THEN ROUND(SUM(pds.revenue - pds.discount_given - pds.cost_of_goods) / SUM(pds.revenue - pds.discount_given) * 100, 2)
-        ELSE 0
-      END AS gross_margin_pct
-    FROM product_daily_summary pds
-    WHERE ($1::date IS NULL OR pds.business_date >= $1::date)
-      AND ($2::date IS NULL OR pds.business_date <= $2::date)
-    GROUP BY pds.category
-    ORDER BY total_revenue DESC
-  `;
-
-  // Convert TIMESTAMPTZ-style date params to plain DATE bounds
-  const startDate = filters.startDate || null;
-  const endDate = filters.endDate || null;
-
-  const result = await db.query(query, [startDate, endDate]);
   return result.rows;
 }
 

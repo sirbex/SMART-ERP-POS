@@ -52,6 +52,10 @@ import type {
   VoidSalesReportRow,
   RefundReportHeader,
   RefundReportLine,
+  CategoryInventoryPositionRow,
+  CategoryPurchasesRow,
+  CategoryExpiryExposureRow,
+  UomLevel,
 } from './reportTypes.js';
 
 // Configure Decimal for financial precision (2 decimal places for currency)
@@ -3456,10 +3460,17 @@ export const reportsRepository = {
     options: {
       startDate: string;
       endDate: string;
+      category?: string;
     }
   ): Promise<SalesByCategoryRow[]> {
     const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
     const params: unknown[] = [startUtc, endUtc];
+
+    let categoryFilter = '';
+    if (options.category) {
+      params.push(options.category);
+      categoryFilter = `AND COALESCE(p.category, 'Uncategorized') = $${params.length}`;
+    }
 
     const query = `
       SELECT 
@@ -3477,6 +3488,7 @@ export const reportsRepository = {
       LEFT JOIN products p ON p.id = si.product_id
       WHERE s.sale_date >= $1 AND s.sale_date < $2
         AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
+        ${categoryFilter}
       GROUP BY COALESCE(p.category, 'Uncategorized')
       ORDER BY total_revenue DESC
     `;
@@ -5217,5 +5229,192 @@ export const reportsRepository = {
         totalAmount: new Decimal(r.total_amount || 0).toDecimalPlaces(2).toNumber(),
       })),
     };
+  },
+
+  // ─────────────────────────────────────────────────────────────────
+  // CATEGORY INTELLIGENCE REPORTING ENGINE
+  // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * CATEGORY INVENTORY POSITION
+   * Per-product snapshot of on-hand quantity, average cost, and stock value
+   * for all products belonging to the given category.
+   * Source: product_inventory + product_valuation + products (no GL).
+   */
+  async getCategoryInventoryPosition(
+    pool: Pool,
+    options: { category: string }
+  ): Promise<CategoryInventoryPositionRow[]> {
+    const query = `
+      SELECT
+        p.id                                        AS product_id,
+        p.sku,
+        p.name                                      AS product_name,
+        COALESCE(u.symbol, u.name)                  AS unit_of_measure,
+        COALESCE(pi.quantity_on_hand, 0)            AS qty_on_hand,
+        COALESCE(pi.reorder_level, 0)               AS reorder_level,
+        COALESCE(pv.average_cost, pv.cost_price, 0) AS unit_cost,
+        COALESCE(pi.quantity_on_hand, 0)
+          * COALESCE(pv.average_cost, pv.cost_price, 0) AS stock_value
+      FROM products p
+      LEFT JOIN product_uoms       pu ON pu.product_id = p.id AND pu.is_default = TRUE
+      LEFT JOIN uoms               u  ON u.id  = pu.uom_id
+      LEFT JOIN product_inventory  pi ON pi.product_id = p.id
+      LEFT JOIN product_valuation  pv ON pv.product_id = p.id
+      WHERE COALESCE(p.category, 'Uncategorized') = $1
+        AND p.is_active = TRUE
+      ORDER BY p.name
+    `;
+    const result = await pool.query(query, [options.category]);
+    const rows = result.rows;
+
+    // Fetch all UoM levels for these products in one query
+    const productIds: string[] = rows.map((r) => r.product_id);
+    let uomLevelsByProduct: Map<string, UomLevel[]> = new Map();
+    if (productIds.length > 0) {
+      const uomQuery = `
+        SELECT
+          pu.product_id,
+          u.id    AS uom_id,
+          u.name,
+          u.symbol,
+          pu.conversion_factor,
+          pu.is_default
+        FROM product_uoms pu
+        JOIN uoms u ON u.id = pu.uom_id
+        WHERE pu.product_id = ANY($1::uuid[])
+        ORDER BY pu.product_id, pu.conversion_factor DESC
+      `;
+      const uomResult = await pool.query(uomQuery, [productIds]);
+      for (const ur of uomResult.rows) {
+        const levels = uomLevelsByProduct.get(ur.product_id) ?? [];
+        levels.push({
+          uomId: ur.uom_id,
+          name: ur.name,
+          symbol: ur.symbol || null,
+          conversionFactor: new Decimal(ur.conversion_factor || 1).toNumber(),
+          isDefault: ur.is_default,
+        });
+        uomLevelsByProduct.set(ur.product_id, levels);
+      }
+    }
+
+    return rows.map((row) => ({
+      productId: row.product_id,
+      sku: row.sku || null,
+      productName: row.product_name,
+      unitOfMeasure: row.unit_of_measure || null,
+      qtyOnHand: new Decimal(row.qty_on_hand || 0).toDecimalPlaces(4).toNumber(),
+      reorderLevel: new Decimal(row.reorder_level || 0).toDecimalPlaces(4).toNumber(),
+      unitCost: new Decimal(row.unit_cost || 0).toDecimalPlaces(2).toNumber(),
+      stockValue: new Decimal(row.stock_value || 0).toDecimalPlaces(2).toNumber(),
+      uomLevels: uomLevelsByProduct.get(row.product_id) ?? [],
+    }));
+  },
+
+  /**
+   * CATEGORY PURCHASES
+   * Goods-receipt-based purchase analysis per category.
+   * Aggregates received quantity and value from finalised GRs.
+   * Source: goods_receipt_items + goods_receipts + products + purchase_orders + suppliers.
+   */
+  async getCategoryPurchases(
+    pool: Pool,
+    options: { category: string; startDate: string; endDate: string }
+  ): Promise<CategoryPurchasesRow[]> {
+    const query = `
+      SELECT
+        p.id                              AS product_id,
+        p.sku,
+        p.name                            AS product_name,
+        COALESCE(u.symbol, u.name)        AS unit_of_measure,
+        s."CompanyName"                   AS supplier_name,
+        gr.received_date                  AS received_date,
+        gr.receipt_number                 AS gr_number,
+        SUM(gri.received_quantity)        AS total_qty_received,
+        SUM(gri.received_quantity * gri.cost_price) AS total_purchase_value,
+        AVG(gri.cost_price)               AS avg_unit_cost
+      FROM goods_receipt_items   gri
+      JOIN goods_receipts        gr  ON gr.id  = gri.goods_receipt_id
+      JOIN products              p   ON p.id   = gri.product_id
+      LEFT JOIN product_uoms     pu  ON pu.product_id = p.id AND pu.is_default = TRUE
+      LEFT JOIN uoms             u   ON u.id   = pu.uom_id
+      LEFT JOIN purchase_orders  po  ON po.id  = gr.purchase_order_id
+      LEFT JOIN suppliers        s   ON s."Id" = po.supplier_id
+      WHERE COALESCE(p.category, 'Uncategorized') = $1
+        AND gr.status = 'COMPLETED'
+        AND gr.received_date::date >= $2::date
+        AND gr.received_date::date < $3::date
+      GROUP BY p.id, p.sku, p.name, COALESCE(u.symbol, u.name), s."CompanyName",
+               gr.received_date, gr.receipt_number
+      ORDER BY gr.received_date DESC, total_purchase_value DESC
+    `;
+    const result = await pool.query(query, [
+      options.category,
+      options.startDate,
+      options.endDate,
+    ]);
+    return result.rows.map((row) => ({
+      productId: row.product_id,
+      sku: row.sku || null,
+      productName: row.product_name,
+      unitOfMeasure: row.unit_of_measure || null,
+      supplierName: row.supplier_name || 'Unknown',
+      receivedDate: row.received_date,
+      grNumber: row.gr_number,
+      totalQtyReceived: new Decimal(row.total_qty_received || 0).toDecimalPlaces(4).toNumber(),
+      totalPurchaseValue: new Decimal(row.total_purchase_value || 0).toDecimalPlaces(2).toNumber(),
+      avgUnitCost: new Decimal(row.avg_unit_cost || 0).toDecimalPlaces(2).toNumber(),
+    }));
+  },
+
+  /**
+   * CATEGORY EXPIRY EXPOSURE
+   * Active batches expiring within daysAhead days for the given category.
+   * Ordered by expiry_date ascending (most urgent first).
+   * Source: inventory_batches + products.
+   */
+  async getCategoryExpiryExposure(
+    pool: Pool,
+    options: { category: string; daysAhead: number }
+  ): Promise<CategoryExpiryExposureRow[]> {
+    const query = `
+      SELECT
+        p.id               AS product_id,
+        p.sku,
+        p.name             AS product_name,
+        COALESCE(u.symbol, u.name) AS unit_of_measure,
+        ib.batch_number,
+        ib.expiry_date,
+        ib.remaining_quantity,
+        ib.cost_price,
+        ib.remaining_quantity * ib.cost_price AS exposed_value,
+        ib.status,
+        (ib.expiry_date - CURRENT_DATE) AS days_until_expiry
+      FROM inventory_batches ib
+      JOIN products p ON p.id = ib.product_id
+      LEFT JOIN product_uoms pu ON pu.product_id = p.id AND pu.is_default = TRUE
+      LEFT JOIN uoms u ON u.id = pu.uom_id
+      WHERE COALESCE(p.category, 'Uncategorized') = $1
+        AND ib.status = 'ACTIVE'
+        AND ib.expiry_date IS NOT NULL
+        AND ib.expiry_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL
+        AND ib.remaining_quantity > 0
+      ORDER BY ib.expiry_date ASC, exposed_value DESC
+    `;
+    const result = await pool.query(query, [options.category, options.daysAhead]);
+    return result.rows.map((row) => ({
+      productId: row.product_id,
+      sku: row.sku || null,
+      productName: row.product_name,
+      unitOfMeasure: row.unit_of_measure || null,
+      batchNumber: row.batch_number,
+      expiryDate: row.expiry_date,
+      remainingQuantity: new Decimal(row.remaining_quantity || 0).toDecimalPlaces(4).toNumber(),
+      costPrice: new Decimal(row.cost_price || 0).toDecimalPlaces(2).toNumber(),
+      exposedValue: new Decimal(row.exposed_value || 0).toDecimalPlaces(2).toNumber(),
+      status: row.status,
+      daysUntilExpiry: parseInt(row.days_until_expiry) || 0,
+    }));
   },
 };

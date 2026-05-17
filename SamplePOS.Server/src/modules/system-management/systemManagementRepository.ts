@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
+import { ensureProductChildRows } from '../products/productRepository.js';
 
 /** Validates that a table name is a safe PostgreSQL identifier (defense-in-depth) */
 const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
@@ -979,6 +980,13 @@ export const systemManagementRepository = {
         tablesCleared['inventory_snapshots'] = await safeDelete('inventory_snapshots', step++);
         tablesCleared['product_valuation'] = await safeDelete('product_valuation', step++);
         tablesCleared['product_inventory'] = await safeDelete('product_inventory', step++);
+
+        // Recreate product_valuation and product_inventory from products master.
+        // Delegates to the single authoritative ensureProductChildRows() function so the
+        // recreation logic is never duplicated. quantity_on_hand is reset to 0 — opening
+        // stock must be re-entered via the opening stock workflow after reset.
+        const recreated = await ensureProductChildRows(client);
+        logger.info('Recreated product child rows after reset', recreated);
 
         // =========================================================================
         // PHASE 5: DELIVERY & QUOTATIONS

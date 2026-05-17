@@ -77,6 +77,7 @@ export class GLIntegrityChecker {
       inventoryBalancesRecon,
       customerBalancesRecon,
       supplierInvoiceSafety,
+      structuralWarnings,
     ] = await Promise.all([
       this.checkUnbalancedTransactions(pool),
       this.checkOrphanEntries(pool),
@@ -95,6 +96,7 @@ export class GLIntegrityChecker {
       this.checkInventoryBalancesReconciliation(pool),
       this.checkCustomerBalancesReconciliation(pool),
       this.checkSupplierInvoiceSafety(pool),
+      this.checkTrialBalanceStructuralIntegrity(pool),
     ]);
 
     findings.push(
@@ -115,6 +117,7 @@ export class GLIntegrityChecker {
       ...inventoryBalancesRecon,
       ...customerBalancesRecon,
       ...supplierInvoiceSafety,
+      ...structuralWarnings,
     );
 
     const errors = findings.filter(f => f.severity === 'ERROR').length;
@@ -125,7 +128,7 @@ export class GLIntegrityChecker {
       runDate: new Date().toISOString(),
       durationMs,
       passed: errors === 0,
-      totalChecks: 17,
+      totalChecks: 18,
       errors,
       warnings,
       findings,
@@ -1082,6 +1085,160 @@ export class GLIntegrityChecker {
           orphanGlSamples: orphanGl.rows.slice(0, 5),
           orphanInvoicesCount: orphanInvoices.rows.length,
           orphanInvoicesSamples: orphanInvoices.rows.slice(0, 5),
+        },
+      });
+    }
+
+    return findings;
+  }
+
+  // ===========================================================================
+  // CHECK 18: Trial Balance Structural Integrity (3 rules)
+  // ===========================================================================
+
+  /**
+   * Structural warnings that don't necessarily mean the trial balance is out
+   * of balance, but indicate accounting hygiene problems:
+   *
+   *   Rule A — Opening Balance Equity (3050) non-zero
+   *     In a properly closed system, 3050 should be cleared into Retained Earnings
+   *     after the first year-end close. A persistent non-zero balance means opening
+   *     entries have never been formally closed.
+   *
+   *   Rule B — GR/IR (2150) has a GL balance but no uninvoiced GRNs exist
+   *     GR/IR should net to zero once all goods receipts are invoiced. A remaining
+   *     balance with no open GRNs indicates polluted entries (typically Return GRN
+   *     or Supplier Credit Note entries that incorrectly posted to 2150 instead of
+   *     the dedicated Supplier Return Clearing account 2160).
+   *
+   *   Rule C — GR/IR pollution: Return GRN or Supplier Credit Note entries in 2150
+   *     These entries should have gone through account 2160 (Supplier Return Clearing).
+   *     A non-zero count means historical data needs migration.
+   */
+  private static async checkTrialBalanceStructuralIntegrity(
+    pool: pg.Pool
+  ): Promise<IntegrityFinding[]> {
+    const findings: IntegrityFinding[] = [];
+
+    // ── Rule A: Opening Balance Equity (3050) should be zero ──────────────
+    const obEquityResult = await pool.query(`
+      SELECT COALESCE(SUM(le."DebitAmount" - le."CreditAmount"), 0) AS balance
+      FROM ledger_entries le
+      JOIN accounts a ON a."Id" = le."AccountId"
+      WHERE a."AccountCode" = '3050'
+    `);
+    const obEquityBalance = Money.toNumber(Money.parseDb(
+      String(obEquityResult.rows[0]?.balance ?? '0')
+    ));
+
+    if (Math.abs(obEquityBalance) < 0.01) {
+      findings.push({
+        check: 'structural_opening_balance_equity',
+        severity: 'INFO',
+        message: 'Opening Balance Equity (3050) is zero — properly closed.',
+      });
+    } else {
+      findings.push({
+        check: 'structural_opening_balance_equity',
+        severity: 'WARNING',
+        message: `Opening Balance Equity (3050) has a non-zero balance of ${obEquityBalance}. ` +
+          'This account should be cleared to Retained Earnings after the first year-end close.',
+        details: { accountCode: '3050', balance: obEquityBalance },
+      });
+    }
+
+    // ── Rule B: GR/IR (2150) balance vs. uninvoiced GRN count ────────────
+    const grirGlResult = await pool.query(`
+      SELECT COALESCE(SUM(le."DebitAmount" - le."CreditAmount"), 0) AS gl_balance
+      FROM ledger_entries le
+      JOIN accounts a ON a."Id" = le."AccountId"
+      JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+      WHERE a."AccountCode" = '2150'
+        AND lt."Status" = 'POSTED'
+    `);
+    const grirGlBalance = Money.toNumber(Money.parseDb(
+      String(grirGlResult.rows[0]?.gl_balance ?? '0')
+    ));
+
+    const uninvoicedResult = await pool.query(`
+      SELECT COUNT(DISTINCT gr.id) AS uninvoiced_count
+      FROM goods_receipts gr
+      JOIN purchase_orders po ON gr.purchase_order_id = po.id
+      WHERE gr.status = 'COMPLETED'
+        AND NOT EXISTS (
+          SELECT 1 FROM supplier_invoices si
+          WHERE si."PurchaseOrderId" = po.id
+            AND si.deleted_at IS NULL
+            AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+        )
+    `);
+    const uninvoicedCount = parseInt(String(uninvoicedResult.rows[0]?.uninvoiced_count ?? '0'), 10);
+
+    if (Math.abs(grirGlBalance) > 0.01 && uninvoicedCount === 0) {
+      findings.push({
+        check: 'structural_grir_balance_no_open_grns',
+        severity: 'WARNING',
+        message: `GR/IR Clearing (2150) has a GL balance of ${grirGlBalance} but there are no uninvoiced goods receipts. ` +
+          'This indicates polluted entries (Return GRN or Supplier Credit Note) were posted to 2150. ' +
+          'Run the migration script to move them to account 2160 (Supplier Return Clearing).',
+        details: { accountCode: '2150', glBalance: grirGlBalance, uninvoicedGrnCount: uninvoicedCount },
+      });
+    } else if (Math.abs(grirGlBalance) < 0.01 && uninvoicedCount === 0) {
+      findings.push({
+        check: 'structural_grir_balance_no_open_grns',
+        severity: 'INFO',
+        message: 'GR/IR Clearing (2150) is zero with no uninvoiced GRNs — fully cleared.',
+      });
+    } else {
+      findings.push({
+        check: 'structural_grir_balance_no_open_grns',
+        severity: 'INFO',
+        message: `GR/IR Clearing (2150) balance of ${grirGlBalance} matches ${uninvoicedCount} uninvoiced GRN(s).`,
+        details: { accountCode: '2150', glBalance: grirGlBalance, uninvoicedGrnCount: uninvoicedCount },
+      });
+    }
+
+    // ── Rule C: Detect historical GR/IR pollution (Return GRN / Credit Note) ─
+    // Only count entries that do NOT have an offsetting GRIR_CORRECTION journal
+    const pollutionResult = await pool.query(`
+      SELECT
+        COUNT(*) AS polluted_count,
+        COALESCE(SUM(le."DebitAmount" - le."CreditAmount"), 0) AS polluted_balance
+      FROM ledger_entries le
+      JOIN accounts a ON a."Id" = le."AccountId"
+      JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+      WHERE a."AccountCode" = '2150'
+        AND lt."Status" = 'POSTED'
+        AND lt."ReferenceType" IN ('RETURN_GRN', 'SUPPLIER_CREDIT_NOTE')
+        AND NOT EXISTS (
+          SELECT 1 FROM ledger_transactions lt2
+          WHERE lt2."ReferenceType" = 'GRIR_CORRECTION'
+            AND lt2."ReferenceId" = lt."ReferenceId"
+        )
+    `);
+    const pollutedCount = parseInt(String(pollutionResult.rows[0]?.polluted_count ?? '0'), 10);
+    const pollutedBalance = Money.toNumber(Money.parseDb(
+      String(pollutionResult.rows[0]?.polluted_balance ?? '0')
+    ));
+
+    if (pollutedCount === 0) {
+      findings.push({
+        check: 'structural_grir_pollution',
+        severity: 'INFO',
+        message: 'GR/IR Clearing (2150) contains no Return GRN or Supplier Credit Note entries — MR11 purity confirmed.',
+      });
+    } else {
+      findings.push({
+        check: 'structural_grir_pollution',
+        severity: 'WARNING',
+        message: `GR/IR Clearing (2150) contains ${pollutedCount} Return GRN / Supplier Credit Note entries ` +
+          `with a net balance of ${pollutedBalance}. These should be in account 2160 (Supplier Return Clearing). ` +
+          'Run shared/sql/migrate_supplier_return_clearing.sql to fix historical data.',
+        details: {
+          accountCode: '2150',
+          pollutedEntryCount: pollutedCount,
+          pollutedBalance,
+          remediationScript: 'shared/sql/migrate_supplier_return_clearing.sql',
         },
       });
     }

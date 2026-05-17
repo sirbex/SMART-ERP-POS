@@ -17,6 +17,7 @@ import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { ValidationError, BusinessError } from '../../middleware/errorHandler.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import * as costLayerService from '../../services/costLayerService.js';
+import * as masterDataGuard from '../../services/masterDataGuard.js';
 import logger from '../../utils/logger.js';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
@@ -102,6 +103,25 @@ export class StockMovementHandler {
 
       // Step 1: Validate parameters
       this.validateMovementParams(params);
+
+      // MASTER DATA GUARD (Rule 1): Block movements when item has no cost configured
+      // Exempt: GOODS_RECEIPT (establishes cost), SALE (validated via cost layers),
+      //         TRANSFER_IN/OUT, RETURN (batch already carries cost)
+      const COST_GUARD_MOVEMENT_TYPES: ReadonlySet<StockMovementType> = new Set([
+        'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY', 'PHYSICAL_COUNT',
+      ]);
+      if (COST_GUARD_MOVEMENT_TYPES.has(params.movementType)) {
+        await masterDataGuard.assertItemHasCost(client, params.productId);
+      }
+      // ADJUSTMENT_IN specifically: require caller-supplied unitCost > 0 to prevent
+      // zero-cost stock from being created via manual adjustments.
+      if (params.movementType === 'ADJUSTMENT_IN' && (!params.unitCost || params.unitCost <= 0)) {
+        throw new ValidationError(
+          '[MDG-001b] unitCost is required for ADJUSTMENT_IN. ' +
+          'Provide a cost > 0 to prevent introducing zero-cost stock. ' +
+          'If this is opening stock, use the Opening Stock with Valuation feature instead.',
+        );
+      }
 
       // Step 2: Determine if this is an IN or OUT movement
       const isInbound = this.isInboundMovement(params.movementType);

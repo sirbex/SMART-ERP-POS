@@ -104,9 +104,43 @@ export const returnGrnService = {
             for (const line of input.lines) {
                 if (line.quantity <= 0) throw new Error('Return quantity must be positive');
 
+                // ── Purchase-UOM lock (SAP-grade rule) ───────────────────────────
+                // Returns MUST use the same UoM the item was received in.
+                // Allowing a different UoM produces wrong base_quantity, wrong GL,
+                // wrong inventory value, and MR11 drift.
+                const grItemRow = await client.query<{
+                    uom_id: string | null;
+                    uom_name: string | null;
+                }>(
+                    `SELECT gri.uom_id, u.name AS uom_name
+                     FROM goods_receipt_items gri
+                     LEFT JOIN uoms u ON u.id = gri.uom_id
+                     WHERE gri.goods_receipt_id = $1 AND gri.product_id = $2
+                     LIMIT 1`,
+                    [input.grnId, line.productId],
+                );
+                const purchaseUomId: string | null = grItemRow.rows[0]?.uom_id ?? null;
+                const purchaseUomName: string | null = grItemRow.rows[0]?.uom_name ?? null;
+
+                let effectiveUomId: string | null = line.uomId || null;
+
+                if (purchaseUomId) {
+                    if (effectiveUomId && effectiveUomId !== purchaseUomId) {
+                        throw new ValidationError(
+                            `UoM mismatch: this product was received in "${purchaseUomName ?? purchaseUomId}". ` +
+                            `Returns must use the same unit of measure — no conversion allowed on returns.`,
+                        );
+                    }
+                    // Default to purchase UOM when caller omits it
+                    if (!effectiveUomId) {
+                        effectiveUomId = purchaseUomId;
+                    }
+                }
+                // ────────────────────────────────────────────────────────────────
+
                 const { conversionFactor } = await resolveCanonicalProductUom(
                     line.productId,
-                    line.uomId || null,
+                    effectiveUomId,
                     client,
                 );
 
@@ -115,15 +149,18 @@ export const returnGrnService = {
                     conversionFactor,
                 ).toNumber();
 
+                // lineTotal = quantity × unitCost (both in purchase-UOM units).
+                // Do NOT use baseQuantity × unitCost — that mixes base-unit qty
+                // with purchase-UOM price, producing a 10× or 100× overstatement.
                 const lineTotal = Money.toNumber(
-                    Money.multiply(Money.parseDb(baseQuantity), Money.parseDb(line.unitCost))
+                    Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitCost))
                 );
 
                 const created = await returnGrnRepository.createLine(client, {
                     rgrnId: returnGrn.id,
                     productId: line.productId,
                     batchId: line.batchId || null,
-                    uomId: line.uomId || null,
+                    uomId: effectiveUomId,
                     quantity: line.quantity,
                     baseQuantity,
                     unitCost: line.unitCost,
@@ -299,6 +336,30 @@ export const returnGrnService = {
             const originalGrNumber = grResult.rows[0]?.gr_number;
 
             if (returnTotalNum > 0) {
+                // MR11 PURITY — detect whether the originating GRN already has a
+                // posted supplier invoice.  If yes, the return must route through
+                // Supplier Return Clearing (2160) so GR/IR (2150) is not polluted.
+                const invoiceCheck = await client.query<{ has_invoice: boolean }>(
+                    `SELECT EXISTS(
+                        SELECT 1
+                        FROM supplier_invoices si
+                        WHERE si.deleted_at IS NULL
+                          AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+                          AND (
+                            si."Id" IN (
+                              SELECT sigl.invoice_id
+                              FROM supplier_invoice_grn_links sigl
+                              WHERE sigl.grn_id = $1
+                            )
+                            OR si."InternalReferenceNumber" = (
+                              SELECT receipt_number FROM goods_receipts WHERE id = $1
+                            )
+                          )
+                     ) AS has_invoice`,
+                    [rgrn.grnId],
+                );
+                const hasInvoice = invoiceCheck.rows[0]?.has_invoice ?? false;
+
                 await glEntryService.recordReturnGrnToGL(
                     {
                         returnGrnId: rgrnId,
@@ -308,6 +369,7 @@ export const returnGrnService = {
                         supplierId,
                         supplierName,
                         originalGrNumber,
+                        hasInvoice,
                     },
                     undefined, // pool — not needed when txClient is provided
                     client,    // atomic: GL commits/rolls back with inventory
@@ -319,7 +381,7 @@ export const returnGrnService = {
             // Only a Supplier Credit Note (created manually via POST /:id/credit-note)
             // should reduce AP and update the supplier's outstanding balance.
 
-            logger.info('Return GRN posted — stock decreased, GL posted (GRN Clearing / Inventory)', {
+            logger.info('Return GRN posted — stock decreased, GL posted', {
                 rgrnId: posted.id,
                 rgrnNumber: posted.returnGrnNumber,
                 grnId: posted.grnId,
@@ -381,16 +443,21 @@ export const returnGrnService = {
      *
      * This is the ONLY way a Return GRN should reduce AP (2100).
      *
-     * GL posted by this method (SAP / Odoo standard):
-     *   DR Accounts Payable (2100)   — reduce what we owe the supplier
-     *   CR GRN/IR Clearing  (2150)   — clear the debit created when the Return GRN was posted
+     * Two GL flows depending on whether the Return GRN was posted before or
+     * after the originating GRN had a supplier invoice:
      *
-     * The Return GRN itself posts:
-     *   DR GRN/IR Clearing  (2150)
-     *   CR Inventory        (1300)
+     * ── Pre-invoice return (GRN uninvoiced at return time) ──────────────
+     *   Return GRN posts:  DR GR/IR Clearing (2150) / CR Inventory (1300)
+     *   Credit Note posts: DR AP (2100)              / CR GR/IR Clearing (2150)
+     *   Net effect: DR AP / CR Inventory ✓  |  GR/IR clears to zero ✓
      *
-     * Together, the two entries net to: DR AP / CR Inventory — the correct
-     * accounting for goods returned to a supplier.
+     * ── Post-invoice return (GRN already invoiced at return time) ───────
+     *   Return GRN posts:  DR Supplier Return Clearing (2160) / CR Inventory (1300)
+     *   Credit Note posts: DR AP (2100)                       / CR 2160
+     *   Net effect: DR AP / CR Inventory ✓  |  GR/IR untouched ✓  |  2160 clears ✓
+     *
+     * The correct clearing account is determined by looking up which account
+     * the Return GRN's journal entry debited (2150 or 2160).
      */
     async createCreditNoteFromReturn(
         pool: Pool,
@@ -418,13 +485,13 @@ export const returnGrnService = {
             const lines = await returnGrnRepository.getLines(client, rgrnId);
             if (lines.length === 0) throw new Error('Return GRN has no line items');
 
-            // Use the same amount that was posted to GRN Clearing when the RGRN was posted.
-            // Sum line totals (baseQuantity × unitCost) — same logic as the RGRN post step.
+            // Use the pre-computed lineTotal from each return line.
+            // lineTotal = quantity × unitCost (both in purchase-UOM units).
+            // Do NOT recompute as baseQuantity × unitCost — that mixes base-unit
+            // quantity with purchase-UOM price, producing a gross overstatement.
             let returnTotal = new Decimal(0);
             for (const line of lines) {
-                returnTotal = returnTotal.plus(
-                    new Decimal(String(line.baseQuantity)).times(String(line.unitCost)),
-                );
+                returnTotal = returnTotal.plus(new Decimal(String(line.lineTotal)));
             }
             const returnTotalNum = Money.toNumber(returnTotal);
             if (returnTotalNum <= 0) throw new Error('Return GRN total amount is zero — cannot create Credit Note');
@@ -501,15 +568,17 @@ export const returnGrnService = {
             });
 
             // 7. Create line items
+            // Use purchase-UOM quantity (line.quantity), not base quantity.
+            // The supplier deals in purchase UOM (PKT, BOX) — not in base tablets.
             await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(
                 client,
                 scn.id,
                 lines.map((line, idx) => ({
                     productId: line.productId,
                     productName: line.productName || `Product ${idx + 1}`,
-                    description: `Returned: ${line.baseQuantity} × ${line.unitCost} (${rgrn.reason})`,
-                    quantity: line.baseQuantity,
-                    unitCost: line.unitCost,
+                    description: `Returned: ${line.quantity}${line.uomSymbol ? ' ' + line.uomSymbol : ''} × ${line.unitCost} (${rgrn.reason})`,
+                    quantity: line.quantity,        // purchase-UOM qty (1 PKT, not 10 tablets)
+                    unitCost: line.unitCost,        // purchase-UOM cost (6000/PKT, not 600/tablet)
                     taxRate: 0,
                 })),
             );
@@ -518,8 +587,29 @@ export const returnGrnService = {
             const postedScn = await supplierCreditDebitNoteRepository.postSupplierNote(client, scn.id);
             if (!postedScn) throw new Error('Failed to post Supplier Credit Note');
 
-            // 9. GL: DR AP (2100) / CR GRN/IR Clearing (2150)
-            //    Clears the GRN Clearing debit that was posted when the Return GRN was posted.
+            // 9. GL: DR AP (2100) / CR [clearing account used by the RGRN]
+            //
+            // The clearing account depends on which path the Return GRN took:
+            //   \u2022 Pre-invoice return  \u2192 RGRN debited GR/IR (2150)  \u2192 Credit Note credits 2150
+            //   \u2022 Post-invoice return \u2192 RGRN debited 2160 (Supplier Return Clearing)
+            //                         \u2192 Credit Note credits 2160
+            //
+            // Look up the debit leg of the RGRN journal to find which account was used.
+            const rgrnClearingResult = await client.query<{ account_code: string }>(
+                `SELECT a."AccountCode" AS account_code
+                 FROM ledger_transactions lt
+                 JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+                 JOIN accounts a ON a."Id" = le."AccountId"
+                 WHERE lt."ReferenceType" = 'RETURN_GRN'
+                   AND lt."ReferenceId" = $1
+                   AND le."DebitAmount" > 0
+                   AND a."AccountCode" IN ('2150','2160')
+                 LIMIT 1`,
+                [rgrnId],
+            );
+            const rgrnClearingCode: string =
+                rgrnClearingResult.rows[0]?.account_code ?? AccountCodes.GRIR_CLEARING;
+
             await recordSupplierCreditNoteToGL({
                 noteId: postedScn.id,
                 noteNumber: postedScn.invoiceNumber,
@@ -529,7 +619,7 @@ export const returnGrnService = {
                 totalAmount: returnTotalNum,
                 supplierId,
                 supplierName,
-                clearingAccountCode: AccountCodes.GRIR_CLEARING,
+                clearingAccountCode: rgrnClearingCode,
             }, undefined, client);
 
             // 10. Auto-allocate the credit note against the referenced bill

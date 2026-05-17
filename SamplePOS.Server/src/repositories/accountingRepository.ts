@@ -36,6 +36,8 @@ export interface Account {
   isPostingAccount: boolean;
   isActive: boolean;
   currentBalance?: string | number; // Optional: returned from DB as string for precision
+  /** IAS 7 Cash Flow classification. NULL for Cash/Bank accounts (they are the subject, not classifiers). */
+  cashFlowClass?: 'operating' | 'investing' | 'financing' | null;
 }
 
 export interface JournalEntry {
@@ -133,7 +135,8 @@ export async function getAccounts(
         "Level" as level,
         "IsPostingAccount" as "isPostingAccount",
         "IsActive" as "isActive",
-        "CurrentBalance" as "currentBalance"
+        "CurrentBalance" as "currentBalance",
+        "CashFlowClass" as "cashFlowClass"
       FROM accounts
       WHERE 1=1
     `;
@@ -193,7 +196,8 @@ export async function getAccountById(id: string, dbPool?: pg.Pool): Promise<Acco
         "ParentAccountId" as "parentAccountId",
         "Level" as level,
         "IsPostingAccount" as "isPostingAccount",
-        "IsActive" as "isActive"
+        "IsActive" as "isActive",
+        "CashFlowClass" as "cashFlowClass"
       FROM accounts
       WHERE "Id" = $1
     `,
@@ -224,7 +228,8 @@ export async function getAccountByCode(code: string, dbPool?: pg.Pool): Promise<
         "ParentAccountId" as "parentAccountId",
         "Level" as level,
         "IsPostingAccount" as "isPostingAccount",
-        "IsActive" as "isActive"
+        "IsActive" as "isActive",
+        "CashFlowClass" as "cashFlowClass"
       FROM accounts
       WHERE "AccountCode" = $1
     `,
@@ -249,8 +254,8 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
       `
       INSERT INTO accounts (
         "Id", "AccountCode", "AccountName", "AccountType", "NormalBalance",
-        "ParentAccountId", "Level", "IsPostingAccount", "IsActive"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        "ParentAccountId", "Level", "IsPostingAccount", "IsActive", "CashFlowClass"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING 
         "Id" as id,
         "AccountCode" as "accountCode",
@@ -260,7 +265,8 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
         "ParentAccountId" as "parentAccountId",
         "Level" as level,
         "IsPostingAccount" as "isPostingAccount",
-        "IsActive" as "isActive"
+        "IsActive" as "isActive",
+        "CashFlowClass" as "cashFlowClass"
     `,
       [
         id,
@@ -272,6 +278,7 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
         data.level,
         data.isPostingAccount,
         data.isActive,
+        data.cashFlowClass ?? null,
       ]
     );
 
@@ -297,6 +304,7 @@ export async function updateAccount(
       | 'parentAccountId'
       | 'isPostingAccount'
       | 'isActive'
+      | 'cashFlowClass'
     >
   >,
   dbPool?: pg.Pool
@@ -335,6 +343,10 @@ export async function updateAccount(
       setClauses.push(`"IsActive" = $${paramIndex++}`);
       params.push(data.isActive);
     }
+    if ('cashFlowClass' in data) {
+      setClauses.push(`"CashFlowClass" = $${paramIndex++}`);
+      params.push(data.cashFlowClass ?? null);
+    }
 
     if (setClauses.length === 0) {
       return getAccountById(id, pool);
@@ -355,7 +367,8 @@ export async function updateAccount(
         "ParentAccountId" as "parentAccountId",
         "Level" as level,
         "IsPostingAccount" as "isPostingAccount",
-        "IsActive" as "isActive"
+        "IsActive" as "isActive",
+        "CashFlowClass" as "cashFlowClass"
     `,
       params
     );

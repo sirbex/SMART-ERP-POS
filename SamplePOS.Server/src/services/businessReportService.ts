@@ -4,6 +4,7 @@ import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
 import * as repo from '../repositories/businessReportRepository.js';
 import type { BusinessReportFilters } from '../repositories/businessReportRepository.js';
+import { reportsRepository } from '../modules/reports/reportsRepository.js';
 
 // ---------------------------------------------------------------------------
 // Section 1 — Money In
@@ -122,9 +123,13 @@ export async function getBusinessPerformanceReport(
 
   try {
     // Run all 5 sections in parallel
+    // Section 2 uses the canonical reportsRepository.getSalesByCategory (live transaction tables)
     const [moneyInRows, revRows, costRows, expRows, supplierPayRows, totals, depositSummary] = await Promise.all([
       repo.getMoneyIn(filters, pool),
-      repo.getRevenueByCategory(filters, pool),
+      reportsRepository.getSalesByCategory(globalPool, {
+        startDate: filters.startDate ?? '',
+        endDate: filters.endDate ?? '',
+      }),
       repo.getCostAndStock(filters, pool),
       filters.includeExpenses !== false
         ? repo.getExpensesByAccount(filters, pool)
@@ -143,14 +148,15 @@ export async function getBusinessPerformanceReport(
     }));
 
     // --- Normalize Section 2 ---
+    // revRows is SalesByCategoryRow[] from canonical reportsRepository (already typed numbers)
     const revenueByCategory: RevenueByCategoryEntry[] = revRows.map((r) => ({
-      categoryName: r.category_name,
-      transactionCount: r.transaction_count,
-      unitsSold: Money.toNumber(Money.parseDb(r.units_sold)),
-      totalRevenue: Money.toNumber(Money.parseDb(r.total_revenue)),
-      totalCogs: Money.toNumber(Money.parseDb(r.total_cogs)),
-      grossProfit: Money.toNumber(Money.parseDb(r.gross_profit)),
-      grossMarginPct: Money.toNumber(Money.parseDb(r.gross_margin_pct)),
+      categoryName: r.category,
+      transactionCount: r.transactionCount,
+      unitsSold: r.totalQuantitySold,
+      totalRevenue: r.totalRevenue,
+      totalCogs: r.totalCost,
+      grossProfit: r.grossProfit,
+      grossMarginPct: r.profitMargin,
     }));
 
     // --- Normalize Section 3 ---

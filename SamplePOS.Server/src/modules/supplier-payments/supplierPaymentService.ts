@@ -758,9 +758,36 @@ export async function createInvoiceFromGRN(
         userId,
     );
 
-    // Post immediately so GR/IR Clearing (2150) is cleared and AP (2100) recognized.
+    // Post GL immediately so GR/IR Clearing (2150) is cleared and AP (2100) recognized.
     // The variance data is read from the invoice record inside postInvoiceToGL.
-    await postInvoiceToGL(pool, created.id);
+    //
+    // ATOMICITY: createSupplierInvoice and postInvoiceToGL run in separate transactions.
+    // If GL posting fails, the invoice record already exists. We compensate by deleting
+    // the invoice so the operation is fully rolled back from the user's perspective.
+    // The user will see an error and can safely retry.
+    try {
+        await postInvoiceToGL(pool, created.id);
+    } catch (glError: unknown) {
+        const detail = glError instanceof Error ? glError.message : String(glError);
+        logger.error('GL posting failed after invoice creation — compensating by deleting invoice', {
+            invoiceId: created.id,
+            invoiceNumber: created.invoiceNumber,
+            supplierId,
+            grNumber,
+            error: detail,
+        });
+        // Compensating delete: restore system to pre-create state
+        try {
+            await deleteSupplierInvoice(pool, created.id);
+        } catch (deleteErr: unknown) {
+            logger.error('CRITICAL: compensating delete also failed — invoice exists without GL', {
+                invoiceId: created.id,
+                invoiceNumber: created.invoiceNumber,
+                deleteError: deleteErr instanceof Error ? deleteErr.message : String(deleteErr),
+            });
+        }
+        throw new Error(`Invoice created but GL posting failed: ${detail}`);
+    }
 
     return created;
 }
@@ -809,6 +836,12 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
                 `use the credit/debit note module (postNote) for ${inv.document_type} documents.`
             );
         }
+        if (inv.document_type === 'OPENING_BALANCE') {
+            throw new ValidationError(
+                `Cannot post ${inv.SupplierInvoiceNumber} via postInvoiceToGL: ` +
+                `opening balance entries are system-generated and their GL is already posted.`
+            );
+        }
 
         const totalAmount = new Decimal(inv.TotalAmount).toNumber();
         if (totalAmount <= 0) {
@@ -818,12 +851,30 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
         // Determine routing path:
         //   GR-linked invoice → DR GR/IR Clearing (2150) / CR AP (2100)  [2-line or 3-line]
         //   Standalone invoice → DR General Expense (6900) / CR AP (2100) [always 2-line]
+        //
+        // Detection order:
+        //   1. InternalReferenceNumber starts with 'GR-' and the GR exists in goods_receipts
+        //   2. Fallback: check supplier_invoice_grn_links (authoritative 3-way match table)
+        //      Handles cases where InternalReferenceNumber has a non-standard prefix (e.g. 'INV-GR-...')
         const grRef = (inv.InternalReferenceNumber || '').trim();
-        const hasGrReference = grRef.startsWith('GR-') &&
+        let hasGrReference = grRef.startsWith('GR-') &&
             (await client.query(
                 `SELECT 1 FROM goods_receipts WHERE receipt_number = $1 AND status = 'COMPLETED' LIMIT 1`,
                 [grRef],
             )).rows.length > 0;
+
+        // Fallback: supplier_invoice_grn_links is the authoritative source for 3-way match
+        if (!hasGrReference) {
+            const linkCheck = await client.query(
+                `SELECT 1
+                   FROM supplier_invoice_grn_links sigl
+                   JOIN goods_receipts gr ON gr.id = sigl.grn_id AND gr.status = 'COMPLETED'
+                  WHERE sigl.invoice_id = $1
+                  LIMIT 1`,
+                [invoiceId],
+            );
+            hasGrReference = linkCheck.rows.length > 0;
+        }
 
         // ── Variance data ──────────────────────────────────────────────────────
         // grn_computed_total: PricingEngine total at GRN receipt time (stored on invoice).
@@ -1268,7 +1319,7 @@ export async function importSupplierOpeningBalance(
         const existing = await client.query(
             `SELECT "Id" FROM supplier_invoices
              WHERE "SupplierId" = $1
-               AND "SupplierInvoiceNumber" LIKE 'OB-%'
+               AND document_type = 'OPENING_BALANCE'
                AND deleted_at IS NULL`,
             [data.supplierId]
         );
@@ -1299,7 +1350,9 @@ export async function importSupplierOpeningBalance(
         const nextNum = seqResult.rows[0].next_num as number;
         const invoiceNumber = `OB-${String(nextNum).padStart(6, '0')}`;
 
-        // Create supplier invoice record (POSTED, no line items needed)
+        // Create supplier invoice record with document_type = 'OPENING_BALANCE'.
+        // This drives supplier balance and aging WITHOUT appearing in the Purchases/Invoices screen.
+        // The record is system-locked: it must never be edited or voided from regular invoice flows.
         // InvoiceDate = asOfDate (posting / cutover date)
         // DueDate = baseline date for aging — defaults to asOfDate when not supplied
         const dueDate = data.dueDate ?? data.asOfDate;
@@ -1316,7 +1369,7 @@ export async function importSupplierOpeningBalance(
                $3, $4,
                $5, 0, $5,
                0, $5,
-               'Pending', 'UGX', 'SUPPLIER_INVOICE',
+               'Pending', 'UGX', 'OPENING_BALANCE',
                $6, NOW(), NOW()
              ) RETURNING "Id", "SupplierInvoiceNumber"`,
             [
@@ -1356,7 +1409,7 @@ export async function importSupplierOpeningBalance(
                 ],
                 userId: data.userId,
                 idempotencyKey: `SUPPLIER_OB-${invoice.Id}`,
-                source: 'OPENING_BALANCE_WIZARD',
+                source: 'CUTOVER_OB',
             },
             pool,
             client
@@ -1364,6 +1417,12 @@ export async function importSupplierOpeningBalance(
 
         // Recalculate supplier balance
         await recalcSupplierBalance(client, data.supplierId);
+
+        // Mark the invoice as GL-posted so the postInvoiceToGL guard skips it safely
+        await client.query(
+            `UPDATE supplier_invoices SET is_posted_to_gl = TRUE, "UpdatedAt" = NOW() WHERE "Id" = $1`,
+            [invoice.Id]
+        );
 
         return {
             invoiceNumber,

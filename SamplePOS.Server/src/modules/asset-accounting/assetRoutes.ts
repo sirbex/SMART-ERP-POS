@@ -9,6 +9,7 @@ import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 import * as assetService from './assetService.js';
+import * as cutoverCorrectionService from './cutoverCorrectionService.js';
 
 const router = Router();
 
@@ -121,6 +122,50 @@ router.post('/:id/dispose', authenticate, requirePermission('accounting.manage')
     req.tenantPool
   );
   res.json({ success: true, data: asset });
+}));
+
+// =========================================
+// CUTOVER CORRECTIONS (Rule 2)
+// Detect and correct pre-ERP assets that wrongly credited Cash or AP.
+// =========================================
+
+/**
+ * POST /assets/cutover-corrections/preview
+ * Dry-run: returns a list of candidates that WOULD be corrected — no DB writes.
+ * Body: { cutoverDate: 'YYYY-MM-DD' }
+ */
+router.post('/cutover-corrections/preview', authenticate, requirePermission('accounting.manage'), asyncHandler(async (req, res) => {
+  const { cutoverDate } = req.body;
+  if (!cutoverDate || !/^\d{4}-\d{2}-\d{2}$/.test(cutoverDate)) {
+    throw new ValidationError('cutoverDate is required and must be YYYY-MM-DD');
+  }
+  const summary = await cutoverCorrectionService.applyCutoverAssetCorrections(
+    cutoverDate,
+    req.user!.id,
+    true,   // dryRun
+    req.tenantPool
+  );
+  res.json({ success: true, data: summary });
+}));
+
+/**
+ * POST /assets/cutover-corrections/apply
+ * Live run: posts correction journals for all eligible pre-ERP assets.
+ * Body: { cutoverDate: 'YYYY-MM-DD' }
+ * This action is idempotent — re-running will skip already-corrected assets.
+ */
+router.post('/cutover-corrections/apply', authenticate, requirePermission('accounting.manage'), asyncHandler(async (req, res) => {
+  const { cutoverDate } = req.body;
+  if (!cutoverDate || !/^\d{4}-\d{2}-\d{2}$/.test(cutoverDate)) {
+    throw new ValidationError('cutoverDate is required and must be YYYY-MM-DD');
+  }
+  const summary = await cutoverCorrectionService.applyCutoverAssetCorrections(
+    cutoverDate,
+    req.user!.id,
+    false,  // live
+    req.tenantPool
+  );
+  res.json({ success: true, data: summary });
 }));
 
 export const assetRoutes = router;

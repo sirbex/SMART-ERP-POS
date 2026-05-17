@@ -664,6 +664,19 @@ export const goodsReceiptService = {
       const costLayerProductIds = [...new Set(costLayerData.map((d) => d.productId))];
       if (costLayerProductIds.length > 0) {
         try {
+          // SAP MAP / Odoo AVCO: the effective cost (MAP for AVCO, last purchase for FIFO)
+          // becomes the product's displayed cost_price so the UI always reflects reality.
+          await client.query(
+            `UPDATE product_valuation pv
+             SET cost_price = CASE
+               WHEN pv.costing_method = 'AVCO' THEN pv.average_cost
+               ELSE pv.last_cost
+             END,
+             updated_at = CURRENT_TIMESTAMP
+             WHERE pv.product_id = ANY($1)
+               AND pv.last_cost > 0`,
+            [costLayerProductIds]
+          );
           await client.query(
             `UPDATE products p
              SET cost_price = CASE
@@ -677,7 +690,7 @@ export const goodsReceiptService = {
                AND pv.last_cost > 0`,
             [costLayerProductIds]
           );
-          logger.info('Synced products.cost_price from valuation', {
+          logger.info('Synced cost_price (product_valuation + products master) from GRN', {
             grId: id,
             productCount: costLayerProductIds.length,
           });

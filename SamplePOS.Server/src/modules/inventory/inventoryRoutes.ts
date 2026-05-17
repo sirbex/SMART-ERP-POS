@@ -155,6 +155,7 @@ export const inventoryController = {
       notes: validated.notes,
       userId: validated.userId,
       documentId: validated.documentId,
+      unitCost: validated.unitCost,        // optional — service auto-looks up product cost for ADJUSTMENT_IN
     });
 
     res.json({

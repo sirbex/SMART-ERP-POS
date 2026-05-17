@@ -206,6 +206,7 @@ export const inventoryService = {
       notes: string;
       userId: string;
       documentId?: string; // If provided, links to an existing document
+      unitCost?: number;   // Optional: auto-looked up from product_valuation for ADJUSTMENT_IN
     }
   ) {
     if (params.quantity <= 0) {
@@ -255,12 +256,28 @@ export const inventoryService = {
       documentId = docResult.rows[0].id as string;
     }
 
+    // For ADJUSTMENT_IN: resolve unitCost from product_valuation when caller didn't supply one.
+    // This lets the MDG-001b guard pass for products that already have a cost set, while
+    // still blocking zero-cost products (guard fires when the lookup also returns 0/null).
+    let resolvedUnitCost = params.unitCost;
+    if (movementType === 'ADJUSTMENT_IN' && (!resolvedUnitCost || resolvedUnitCost <= 0)) {
+      const costRow = await pool.query(
+        'SELECT cost_price FROM product_valuation WHERE product_id = $1',
+        [params.productId]
+      );
+      const dbCost = costRow.rows[0]?.cost_price;
+      if (dbCost && parseFloat(String(dbCost)) > 0) {
+        resolvedUnitCost = parseFloat(String(dbCost));
+      }
+    }
+
     const handler = new StockMovementHandler(pool);
     const result = await handler.processMovement({
       productId: params.productId,
       batchId: params.batchId,
       movementType,
       quantity: params.quantity,
+      unitCost: resolvedUnitCost,
       reason: `${params.reason}: ${params.notes}`,
       referenceType,
       referenceId: documentId,

@@ -46,7 +46,9 @@ export type PostingSource =
     | 'EXPENSE_PAYMENT'         // Expense payment — Dr AP / Cr Cash or Bank
     | 'ASSET_DEPRECIATION'      // Fixed asset depreciation runs
     | 'PERIOD_CLOSE'            // Retained earnings close-out
-    | 'FX_REVALUATION';         // Foreign currency revaluation
+    | 'FX_REVALUATION'          // Foreign currency revaluation
+    | 'CUTOVER_OB'              // Cutover: supplier/customer opening balances (GL-only, no invoice)
+    | 'CUTOVER_CORRECTION';     // Cutover: reversal of wrongly posted pre-ERP asset credits
 
 // =============================================================================
 // GOVERNANCE ACCOUNT SHAPE
@@ -330,10 +332,16 @@ export class PostingGovernanceService {
             if (line.debitAmount > 0 || line.creditAmount > 0) {
                 const account = findAccount(accounts, line.accountCode);
                 if (account?.systemAccountTag === 'OPENING_BALANCE_EQUITY') {
-                    if (source !== 'OPENING_BALANCE_WIZARD' && source !== 'SYSTEM_CORRECTION') {
+                    if (
+                        source !== 'OPENING_BALANCE_WIZARD' &&
+                        source !== 'CUTOVER_OB' &&
+                        source !== 'CUTOVER_CORRECTION' &&
+                        source !== 'SYSTEM_CORRECTION'
+                    ) {
                         throw new PostingGovernanceError(
                             `Account ${account.accountCode} (${account.accountName}) is the Opening Balance Equity account. ` +
-                            `It can only be posted via the Opening Balance Wizard (OPENING_BALANCE_WIZARD). ` +
+                            `It can only be posted via the Opening Balance Wizard (OPENING_BALANCE_WIZARD), ` +
+                            `a cutover entry (CUTOVER_OB, CUTOVER_CORRECTION), or system correction. ` +
                             `Received source: '${source}'.`,
                             'GOV_RULE_G_OBE_RESTRICTED',
                             { accountCode: account.accountCode, source }
