@@ -209,6 +209,50 @@ export async function getClearingBalance(
 }
 
 // =============================================================================
+// MR11 PURITY DIAGNOSTIC
+// =============================================================================
+
+export interface GrirPurityDiagnostic {
+  /** GR/IR GL balance from only GRN/Invoice sources — the "clean" balance. */
+  pureBalance: number;
+  /** Balance contributed by Return GRN/Credit Note entries still in account 2150 (should be 0 after migration). */
+  pollutedBalance: number;
+  /** Full GL balance of account 2150. */
+  totalGlBalance: number;
+  /** Number of polluting ledger entries in account 2150. */
+  pollutedEntryCount: number;
+  /** True when pollutedBalance === 0: GR/IR is clean. */
+  isPure: boolean;
+}
+
+/**
+ * Diagnose GR/IR (2150) purity by splitting the GL balance into:
+ *   \u2022 pureBalance:    entries from GOODS_RECEIPT and SUPPLIER_INVOICE only
+ *   \u2022 pollutedBalance: entries from RETURN_GRN or SUPPLIER_CREDIT_NOTE
+ *
+ * A non-zero pollutedBalance means historical data predates the
+ * Supplier Return Clearing (2160) refactor. Run the migration SQL to clean.
+ */
+export async function getGrirPurityDiagnostic(
+  pool?: pg.Pool
+): Promise<GrirPurityDiagnostic> {
+  const dbPool = pool || globalPool;
+  const row = await repo.getGrirPurityDiagnostic(dbPool);
+  const pureBalance = Money.toNumber(Money.parseDb(row.pure_balance));
+  const pollutedBalance = Money.toNumber(Money.parseDb(row.polluted_balance));
+  const totalGlBalance = Money.toNumber(Money.parseDb(row.total_gl_balance));
+  const pollutedEntryCount = parseInt(row.polluted_entry_count, 10);
+
+  return {
+    pureBalance,
+    pollutedBalance,
+    totalGlBalance,
+    pollutedEntryCount,
+    isPure: pollutedBalance === 0,
+  };
+}
+
+// =============================================================================
 // GR ITEM DRILL-DOWN — SAP 3-way match detail
 // =============================================================================
 

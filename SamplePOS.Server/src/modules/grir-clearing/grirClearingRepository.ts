@@ -196,8 +196,9 @@ export async function getOpenItems(
        JOIN purchase_orders po ON gr.purchase_order_id = po.id
        JOIN suppliers s ON po.supplier_id = s."Id"
        LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+       LEFT JOIN supplier_invoice_grn_links sigl ON sigl.grn_id = gr.id
        LEFT JOIN supplier_invoices si
-         ON si."PurchaseOrderId" = po.id
+         ON si."Id" = sigl.invoice_id
          AND si."Status" NOT IN ('CANCELLED')
          AND (si.deleted_at IS NULL)
        ${whereClause}
@@ -276,8 +277,9 @@ export async function searchClearingItems(
        JOIN purchase_orders po ON gr.purchase_order_id = po.id
        JOIN suppliers s ON po.supplier_id = s."Id"
        LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+       LEFT JOIN supplier_invoice_grn_links sigl ON sigl.grn_id = gr.id
        LEFT JOIN supplier_invoices si
-         ON si."PurchaseOrderId" = po.id
+         ON si."Id" = sigl.invoice_id
          AND si."Status" NOT IN ('CANCELLED')
          AND (si.deleted_at IS NULL)
        WHERE gr.status = 'COMPLETED'
@@ -490,8 +492,9 @@ export async function getBalanceSummary(
        FROM goods_receipts gr
        LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
        LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
+       LEFT JOIN supplier_invoice_grn_links sigl ON sigl.grn_id = gr.id
        LEFT JOIN supplier_invoices si
-         ON si."PurchaseOrderId" = po.id
+         ON si."Id" = sigl.invoice_id
          AND si."Status" NOT IN ('CANCELLED')
          AND (si.deleted_at IS NULL)
        WHERE gr.status = 'COMPLETED'
@@ -571,4 +574,49 @@ export async function getGrItemDetails(
         [goodsReceiptId]
     );
     return result.rows;
+}
+
+// =============================================================================
+// PURITY DIAGNOSTIC — detect 2150 pollution from RGRN / supplier credit notes
+// =============================================================================
+
+/**
+ * Split GR/IR (2150) GL balance into "pure" (GR/Invoice only) vs. "polluted"
+ * (RETURN_GRN or SUPPLIER_CREDIT_NOTE entries that should live in 2160).
+ */
+export async function getGrirPurityDiagnostic(
+    client: pg.Pool | pg.PoolClient
+): Promise<{
+    pure_balance: string;
+    polluted_balance: string;
+    total_gl_balance: string;
+    polluted_entry_count: string;
+}> {
+    const result = await client.query(
+        `SELECT
+           -- Pure entries: only GOODS_RECEIPT and SUPPLIER_INVOICE reference types
+           COALESCE(SUM(CASE
+             WHEN lt."ReferenceType" IN ('GOODS_RECEIPT', 'SUPPLIER_INVOICE')
+             THEN le."CreditAmount" - le."DebitAmount"
+             ELSE 0
+           END), 0)::text AS pure_balance,
+           -- Polluted entries: RETURN_GRN or SUPPLIER_CREDIT_NOTE
+           COALESCE(SUM(CASE
+             WHEN lt."ReferenceType" IN ('RETURN_GRN', 'SUPPLIER_CREDIT_NOTE')
+             THEN le."CreditAmount" - le."DebitAmount"
+             ELSE 0
+           END), 0)::text AS polluted_balance,
+           -- Total GL balance for 2150
+           COALESCE(SUM(le."CreditAmount" - le."DebitAmount"), 0)::text AS total_gl_balance,
+           -- Count of polluted entries
+           COUNT(*) FILTER (
+             WHERE lt."ReferenceType" IN ('RETURN_GRN', 'SUPPLIER_CREDIT_NOTE')
+           )::text AS polluted_entry_count
+         FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE a."AccountCode" = '2150'
+           AND lt."Status" = 'POSTED'`
+    );
+    return result.rows[0];
 }

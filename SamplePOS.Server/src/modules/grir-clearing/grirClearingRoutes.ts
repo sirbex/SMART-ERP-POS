@@ -7,6 +7,7 @@
  *   GET  /open                — MR11 work list (open items with filters)
  *   GET  /search?q=           — F4 search across PO/GR/supplier/invoice
  *   GET  /balance             — FBL3N clearing account balance summary
+ *   GET  /purity              — MR11 purity diagnostic (GL split: pure vs polluted)
  *   GET  /match-candidates    — Preview auto-match candidates
  *   GET  /gr/:grId/items      — 3-way match item drill-down
  *   GET  /history/:poId       — Clearing history for a PO
@@ -67,6 +68,19 @@ router.get('/search', authenticate, asyncHandler(async (req, res) => {
 router.get('/balance', authenticate, asyncHandler(async (req, res) => {
   const balance = await grirService.getClearingBalance(req.tenantPool);
   res.json({ success: true, data: balance });
+}));
+
+// ─── MR11 PURITY DIAGNOSTIC ────────────────────────────────────────
+
+/**
+ * GET /api/grir-clearing/purity
+ * Diagnose GR/IR account (2150) for pollution by return/credit-note entries.
+ * A non-zero pollutedBalance means historical entries should be migrated to
+ * account 2160 (Supplier Return Clearing).
+ */
+router.get('/purity', authenticate, asyncHandler(async (req, res) => {
+  const diagnostic = await grirService.getGrirPurityDiagnostic(req.tenantPool);
+  res.json({ success: true, data: diagnostic });
 }));
 
 // ─── AUTO-MATCH CANDIDATES PREVIEW ─────────────────────────────────
