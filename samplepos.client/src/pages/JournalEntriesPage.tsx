@@ -183,7 +183,7 @@ export default function JournalEntriesPage() {
                 }
             };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showCreateModal]);
 
     useEffect(() => {
@@ -199,7 +199,7 @@ export default function JournalEntriesPage() {
                 }
             };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showReverseModal]);
 
     // Wrap submit handlers with double-submission prevention
@@ -760,96 +760,96 @@ export default function JournalEntriesPage() {
                                                 const acc = (accounts as Account[]).find(a => a.id === line.accountId);
                                                 const isDebitLine = line.debitAmount > 0;
                                                 return (
-                                                <tr key={idx} className="border-b">
-                                                    <td className="px-3 py-2">
-                                                        {activePreset ? (
-                                                            <span className="px-2 py-1 text-sm font-medium text-gray-800">
-                                                                {acc ? `${acc.accountNumber} – ${acc.accountName}` : '—'}
-                                                            </span>
-                                                        ) : (
-                                                            <select
-                                                                value={line.accountId}
-                                                                onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
-                                                                className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
-                                                                title={`Select account for line ${idx + 1}`}
-                                                                aria-label={`Account for line ${idx + 1}`}
-                                                            >
-                                                                <option value="">Select account...</option>
-                                                                {(accounts as Account[]).map((a) => (
-                                                                    <option key={a.id} value={a.id}>
-                                                                        {a.accountNumber} - {a.accountName}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
-                                                        )}
-                                                    </td>
-                                                    <td className="px-3 py-2">
-                                                        <input
-                                                            type="text"
-                                                            value={line.description}
-                                                            onChange={(e) => updateLine(idx, 'description', e.target.value)}
-                                                            placeholder="Line description"
-                                                            className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
-                                                            readOnly={activePreset !== null && line.description !== ''}
-                                                        />
-                                                    </td>
-                                                    {activePreset ? (
-                                                        <>
-                                                            <td className="px-3 py-2 text-center">
-                                                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isDebitLine ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                                                                    {isDebitLine ? 'DR' : 'CR'}
+                                                    <tr key={idx} className="border-b">
+                                                        <td className="px-3 py-2">
+                                                            {activePreset ? (
+                                                                <span className="px-2 py-1 text-sm font-medium text-gray-800">
+                                                                    {acc ? `${acc.accountNumber} – ${acc.accountName}` : '—'}
                                                                 </span>
-                                                            </td>
-                                                            <td className="px-3 py-2 text-right font-mono text-gray-700">
-                                                                {presetAmount > 0 ? formatCurrency(presetAmount) : '—'}
-                                                            </td>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <td className="px-3 py-2">
-                                                                <input
-                                                                    type="number"
-                                                                    value={line.debitAmount || ''}
-                                                                    onChange={(e) => {
-                                                                        updateLine(idx, 'debitAmount', parseFloat(e.target.value) || 0);
-                                                                        if (parseFloat(e.target.value) > 0) updateLine(idx, 'creditAmount', 0);
-                                                                    }}
-                                                                    placeholder="0.00"
-                                                                    min="0"
-                                                                    step="0.01"
-                                                                    className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
-                                                                />
-                                                            </td>
-                                                            <td className="px-3 py-2">
-                                                                <input
-                                                                    type="number"
-                                                                    value={line.creditAmount || ''}
-                                                                    onChange={(e) => {
-                                                                        updateLine(idx, 'creditAmount', parseFloat(e.target.value) || 0);
-                                                                        if (parseFloat(e.target.value) > 0) updateLine(idx, 'debitAmount', 0);
-                                                                    }}
-                                                                    placeholder="0.00"
-                                                                    min="0"
-                                                                    step="0.01"
-                                                                    className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
-                                                                />
-                                                            </td>
-                                                        </>
-                                                    )}
-                                                    <td className="px-3 py-2">
-                                                        {!activePreset && form.lines.length > 2 && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => removeLine(idx)}
-                                                                className="text-red-400 hover:text-red-600"
-                                                                title="Remove line"
-                                                                aria-label={`Remove line ${idx + 1}`}
-                                                            >
-                                                                <X className="h-4 w-4" />
-                                                            </button>
+                                                            ) : (
+                                                                <select
+                                                                    value={line.accountId}
+                                                                    onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
+                                                                    className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
+                                                                    title={`Select account for line ${idx + 1}`}
+                                                                    aria-label={`Account for line ${idx + 1}`}
+                                                                >
+                                                                    <option value="">Select account...</option>
+                                                                    {(accounts as Account[]).map((a) => (
+                                                                        <option key={a.id} value={a.id}>
+                                                                            {a.accountNumber} - {a.accountName}
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            )}
+                                                        </td>
+                                                        <td className="px-3 py-2">
+                                                            <input
+                                                                type="text"
+                                                                value={line.description}
+                                                                onChange={(e) => updateLine(idx, 'description', e.target.value)}
+                                                                placeholder="Line description"
+                                                                className="w-full px-2 py-1 border rounded focus:ring-2 focus:ring-blue-500"
+                                                                readOnly={activePreset !== null && line.description !== ''}
+                                                            />
+                                                        </td>
+                                                        {activePreset ? (
+                                                            <>
+                                                                <td className="px-3 py-2 text-center">
+                                                                    <span className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${isDebitLine ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                                                                        {isDebitLine ? 'DR' : 'CR'}
+                                                                    </span>
+                                                                </td>
+                                                                <td className="px-3 py-2 text-right font-mono text-gray-700">
+                                                                    {presetAmount > 0 ? formatCurrency(presetAmount) : '—'}
+                                                                </td>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <td className="px-3 py-2">
+                                                                    <input
+                                                                        type="number"
+                                                                        value={line.debitAmount || ''}
+                                                                        onChange={(e) => {
+                                                                            updateLine(idx, 'debitAmount', parseFloat(e.target.value) || 0);
+                                                                            if (parseFloat(e.target.value) > 0) updateLine(idx, 'creditAmount', 0);
+                                                                        }}
+                                                                        placeholder="0.00"
+                                                                        min="0"
+                                                                        step="0.01"
+                                                                        className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
+                                                                    />
+                                                                </td>
+                                                                <td className="px-3 py-2">
+                                                                    <input
+                                                                        type="number"
+                                                                        value={line.creditAmount || ''}
+                                                                        onChange={(e) => {
+                                                                            updateLine(idx, 'creditAmount', parseFloat(e.target.value) || 0);
+                                                                            if (parseFloat(e.target.value) > 0) updateLine(idx, 'debitAmount', 0);
+                                                                        }}
+                                                                        placeholder="0.00"
+                                                                        min="0"
+                                                                        step="0.01"
+                                                                        className="w-full px-2 py-1 border rounded text-right focus:ring-2 focus:ring-blue-500"
+                                                                    />
+                                                                </td>
+                                                            </>
                                                         )}
-                                                    </td>
-                                                </tr>
+                                                        <td className="px-3 py-2">
+                                                            {!activePreset && form.lines.length > 2 && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => removeLine(idx)}
+                                                                    className="text-red-400 hover:text-red-600"
+                                                                    title="Remove line"
+                                                                    aria-label={`Remove line ${idx + 1}`}
+                                                                >
+                                                                    <X className="h-4 w-4" />
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
                                                 );
                                             })}
                                         </tbody>

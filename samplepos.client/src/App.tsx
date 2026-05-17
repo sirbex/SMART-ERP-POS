@@ -58,6 +58,7 @@ const InventoryValuationReportPage = lazyWithRetry(() => import('./pages/reports
 const InventoryReconciliationReportPage = lazyWithRetry(() => import('./pages/reports/inventory/InventoryReconciliationReportPage'));
 const InventoryAnalyticsReportPage = lazyWithRetry(() => import('./pages/reports/inventory/InventoryAnalyticsReportPage'));
 const InventoryMarginsReportPage = lazyWithRetry(() => import('./pages/reports/inventory/InventoryMarginsReportPage'));
+const CategoryIntelligencePage = lazyWithRetry(() => import('./pages/reports/CategoryIntelligencePage'));
 const AdminDataManagementPage = lazyWithRetry(() => import('./pages/AdminDataManagementPage'));
 const StockLevelsPage = lazyWithRetry(() => import('./pages/inventory/StockLevelsPage'));
 const ProductsPage = lazyWithRetry(() => import('./pages/inventory/ProductsPage'));
@@ -893,6 +894,16 @@ function App() {
                     element={
                       <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.inventory_view', 'reports.read']} requiredFeature="reports">
                         <InventoryMarginsReportPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Category Intelligence Report */}
+                  <Route
+                    path="/reports/category-intelligence"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.financial_view', 'reports.read']} requiredFeature="reports">
+                        <CategoryIntelligencePage />
                       </ProtectedRoute>
                     }
                   />

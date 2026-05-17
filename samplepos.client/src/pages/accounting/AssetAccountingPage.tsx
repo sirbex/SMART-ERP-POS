@@ -89,7 +89,7 @@ export default function AssetAccountingPage() {
       catGuardRef.current = openCatGuard({ cancellable: false, label: 'Create asset category' });
       return () => { if (catGuardRef.current) { closeCatGuard(catGuardRef.current.id); catGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showCategoryForm]);
   const { openGuard: openAssetGuard, closeGuard: closeAssetGuard } = useTransactionGuard();
   const assetGuardRef = useRef<GuardHandle | null>(null);
@@ -98,7 +98,7 @@ export default function AssetAccountingPage() {
       assetGuardRef.current = openAssetGuard({ cancellable: false, label: 'Acquire fixed asset' });
       return () => { if (assetGuardRef.current) { closeAssetGuard(assetGuardRef.current.id); assetGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showAssetForm]);
   const { openGuard: openDepGuard, closeGuard: closeDepGuard } = useTransactionGuard();
   const depGuardRef = useRef<GuardHandle | null>(null);
@@ -107,7 +107,7 @@ export default function AssetAccountingPage() {
       depGuardRef.current = openDepGuard({ cancellable: false, label: 'Run depreciation' });
       return () => { if (depGuardRef.current) { closeDepGuard(depGuardRef.current.id); depGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDepRun]);
   const { openGuard: openDetailGuard, closeGuard: closeDetailGuard } = useTransactionGuard();
   const detailGuardRef = useRef<GuardHandle | null>(null);
@@ -116,7 +116,7 @@ export default function AssetAccountingPage() {
       detailGuardRef.current = openDetailGuard({ cancellable: true, label: 'View asset details' });
       return () => { if (detailGuardRef.current) { closeDetailGuard(detailGuardRef.current.id); detailGuardRef.current = null; } };
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAsset]);
 
   const [searchTerm, setSearchTerm] = useState('');

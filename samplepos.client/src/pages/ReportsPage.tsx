@@ -565,7 +565,7 @@ const REPORT_OPTIONS: ReportOption[] = [
     label: 'Sales by Category',
     description: 'Revenue and profit analysis grouped by product category',
     requiresDateRange: true,
-    supportsFilters: [],
+    supportsFilters: ['category'],
     category: 'Sales',
     icon: '📂',
   },
@@ -1108,6 +1108,8 @@ export default function ReportsPage() {
         params.supplierId = supplierId;
       } else if (selectedReport === 'ORDERS_REPORT') {
         if (status) params.status = status;
+      } else if (selectedReport === 'SALES_BY_CATEGORY') {
+        if (categoryFilter) params.category = categoryFilter;
       }
 
       const { data: result } = await api.post('/reports/generate', params);
@@ -1227,6 +1229,8 @@ export default function ReportsPage() {
         params.append('previous_start_date', previousStartDate);
         params.append('previous_end_date', previousEndDate);
         if (groupBy) params.append('group_by', groupBy);
+      } else if (selectedReport === 'SALES_BY_CATEGORY' && categoryFilter) {
+        params.append('category', categoryFilter);
       }
 
       // Use relative URL to go through Vite proxy (avoids CORS issues)
@@ -3343,6 +3347,42 @@ export default function ReportsPage() {
                             </div>
                           </Link>
                         ))}
+                      </>
+                    )}
+
+                    {/* Category Intelligence — standalone page, rendered under Inventory */}
+                    {category === 'Inventory' && (
+                      <>
+                        <Link
+                          to="/reports/category-intelligence"
+                          className="group relative bg-white p-4 sm:p-6 rounded-xl border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-xl transition-all duration-200 text-left block"
+                        >
+                          <div className="absolute -top-2 sm:-top-3 -right-2 sm:-right-3 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-full flex items-center justify-center text-xl sm:text-2xl shadow-lg group-hover:scale-110 transition-transform">
+                            🏷️
+                          </div>
+                          <div className="pr-6 sm:pr-8">
+                            <h3 className="font-bold text-gray-900 mb-1 sm:mb-2 text-base sm:text-lg group-hover:text-indigo-700 transition-colors">
+                              Category Intelligence
+                            </h3>
+                            <p className="text-xs sm:text-sm text-gray-600 mb-2 sm:mb-3 line-clamp-2">
+                              SAP/Odoo-style multi-dimensional analysis. Inventory, Sales, Purchases, Stock Valuation & Expiry Exposure — all from ledger/stock tables, reconciled with GL.
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              <span className="inline-flex items-center text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                                Cross-Module
+                              </span>
+                              <span className="inline-flex items-center text-xs bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full font-medium">
+                                SAP/Odoo-style
+                              </span>
+                              <span className="inline-flex items-center text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
+                                PDF Export
+                              </span>
+                            </div>
+                          </div>
+                          <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            →
+                          </div>
+                        </Link>
                       </>
                     )}
                   </div>

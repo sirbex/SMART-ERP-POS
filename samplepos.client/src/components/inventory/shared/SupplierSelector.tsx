@@ -54,8 +54,8 @@ export function SupplierSelector({
   // Filtered list: when open & query is set, filter; otherwise show all
   const filtered: Supplier[] = query.trim()
     ? suppliers.filter((s) =>
-        s.name.toLowerCase().includes(query.trim().toLowerCase())
-      )
+      s.name.toLowerCase().includes(query.trim().toLowerCase())
+    )
     : suppliers;
 
   // ── helpers ───────────────────────────────────────────────────────────────

@@ -277,6 +277,7 @@ export const api = {
       productId: string,
       productUomId: string,
       data: {
+        uomId?: string;
         conversionFactor?: number;
         isDefault?: boolean;
         overrideCost?: number;
@@ -285,6 +286,12 @@ export const api = {
     ) => apiClient.patch<ApiResponse>(`products/${productId}/uoms/${productUomId}`, data),
     deleteProductUom: (productId: string, productUomId: string) =>
       apiClient.delete<ApiResponse>(`products/${productId}/uoms/${productUomId}`),
+    // Master Data Guard
+    getDamagedItems: () => apiClient.get<ApiResponse>('products/damaged'),
+    repairValuation: (id: string, data: { unitCost: number }) =>
+      apiClient.post<ApiResponse>(`products/${id}/repair-valuation`, data),
+    createOpeningStock: (id: string, data: { quantity: number; unitCost: number }) =>
+      apiClient.post<ApiResponse>(`products/${id}/opening-stock`, data),
   },
 
   // Customers

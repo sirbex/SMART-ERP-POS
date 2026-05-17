@@ -26,9 +26,18 @@ const localStorageMock = {
 global.localStorage = localStorageMock;
 
 // ── Mock axios BEFORE importing useTokenRefresh ─────────────────────────────
+const _mockAxiosInstance = vi.hoisted(() => ({
+    post: vi.fn(),
+    interceptors: {
+        request: { use: vi.fn() },
+        response: { use: vi.fn() },
+    },
+}));
+
 vi.mock('axios', () => ({
     default: {
         post: vi.fn(),
+        create: vi.fn(() => _mockAxiosInstance),
         interceptors: {
             request: { use: vi.fn() },
             response: { use: vi.fn() },

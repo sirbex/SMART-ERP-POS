@@ -44,6 +44,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Pricing', path: '/pricing', icon: '🏷️', color: 'text-rose-600', permissions: ['settings.read'], feature: 'pricing' },
     { name: 'Accounting', path: '/accounting', icon: '🧾', color: 'text-orange-600', permissions: ['accounting.read'], feature: 'accounting' },
     { name: 'Reports', path: '/reports', icon: '📈', color: 'text-cyan-600', permissions: ['reports.read', 'reports.sales_view', 'reports.financial_view'], feature: 'reports' },
+    { name: 'Category Reports', path: '/reports/category-intelligence', icon: '🏷️', color: 'text-indigo-600', permissions: ['reports.financial_view'], feature: 'reports' },
   ];
 
   const adminNavItems: NavItem[] = [
@@ -161,8 +162,8 @@ export default function Layout({ children }: LayoutProps) {
                   <Link
                     to={item.path}
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${isActive(item.path)
-                        ? 'bg-blue-50 text-blue-700 font-bold'
-                        : 'text-gray-700 hover:bg-gray-100 font-semibold'
+                      ? 'bg-blue-50 text-blue-700 font-bold'
+                      : 'text-gray-700 hover:bg-gray-100 font-semibold'
                       }`}
                     title={!sidebarOpen && isDesktop ? item.name : undefined}
                     onClick={() => {

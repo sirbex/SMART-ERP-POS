@@ -118,7 +118,7 @@ function CustomerNotesTab() {
             detailGuardRef.current = openGuard({ cancellable: true, label: 'View credit/debit note' });
             return () => { if (detailGuardRef.current) { closeGuard(detailGuardRef.current.id); detailGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isDetailOpen]);
 
     const fetchNotes = useCallback(async () => {
@@ -358,7 +358,7 @@ function SupplierNotesTab() {
             detailGuardRefS.current = openGuardS({ cancellable: true, label: 'View supplier credit/debit note' });
             return () => { if (detailGuardRefS.current) { closeGuardS(detailGuardRefS.current.id); detailGuardRefS.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isDetailOpen]);
 
     const fetchNotes = useCallback(async () => {
@@ -503,10 +503,10 @@ function SupplierNotesTab() {
                                             {note.documentType === 'SUPPLIER_CREDIT_NOTE'
                                                 && note.status === 'POSTED'
                                                 && note.outstandingBalance > 0 && (
-                                                <Badge variant="outline" className="border-purple-300 bg-purple-50 text-purple-700">
-                                                    On-account: {formatCurrency(note.outstandingBalance)}
-                                                </Badge>
-                                            )}
+                                                    <Badge variant="outline" className="border-purple-300 bg-purple-50 text-purple-700">
+                                                        On-account: {formatCurrency(note.outstandingBalance)}
+                                                    </Badge>
+                                                )}
                                         </div>
                                         <div className="mt-1 text-sm text-gray-600">
                                             <span className="font-medium">{note.supplierName || 'Unknown supplier'}</span>
@@ -565,16 +565,16 @@ function SupplierNotesTab() {
                                         {note.documentType === 'SUPPLIER_CREDIT_NOTE'
                                             && note.status === 'POSTED'
                                             && note.outstandingBalance > 0 && (
-                                            <Button
-                                                size="sm"
-                                                onClick={() => handleApplyFIFO(note.id)}
-                                                disabled={applyingNoteId === note.id}
-                                                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                                            >
-                                                <Sparkles className="h-4 w-4" />
-                                                {applyingNoteId === note.id ? 'Applying…' : 'Apply to Open Bills'}
-                                            </Button>
-                                        )}
+                                                <Button
+                                                    size="sm"
+                                                    onClick={() => handleApplyFIFO(note.id)}
+                                                    disabled={applyingNoteId === note.id}
+                                                    className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                                >
+                                                    <Sparkles className="h-4 w-4" />
+                                                    {applyingNoteId === note.id ? 'Applying…' : 'Apply to Open Bills'}
+                                                </Button>
+                                            )}
                                     </div>
                                 </div>
                             </CardContent>
@@ -659,7 +659,7 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
             cnGuardRef.current = openCNGuard({ cancellable: false, label: 'Create customer credit/debit note' });
             return () => { if (cnGuardRef.current) { closeCNGuard(cnGuardRef.current.id); cnGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
     // Invoice search
@@ -970,7 +970,7 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
             snGuardRef.current = openSNGuard({ cancellable: false, label: 'Create supplier credit/debit note' });
             return () => { if (snGuardRef.current) { closeSNGuard(snGuardRef.current.id); snGuardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
 
     // Invoice search
