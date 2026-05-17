@@ -2992,7 +2992,31 @@ export const salesService = {
       // ── 6. Handle customer balance (credit sale refund) ─────────
 
       if (sale.customer_id && sale.payment_method === 'CREDIT') {
-        // Recalculate customer balance from invoices (SSOT) — never use incremental arithmetic
+        // Step 6a: Reduce the invoice's amount_due by the refund amount FIRST.
+        // syncCustomerBalanceFromInvoices reads SUM(invoices.amount_due) — if the
+        // invoice is not updated here, the balance recalc returns the same number
+        // and customer.balance is never reduced (the bug that caused AR drift).
+        //
+        // NOTE: We reduce amount_due directly (not via amount_paid) because a refund
+        // is a forgiveness of debt, not a cash receipt. Incrementing amount_paid would
+        // violate the CHECK constraint (amount_paid <= total_amount) when the refund
+        // exceeds the unpaid portion.
+        await client.query(
+          `UPDATE invoices
+           SET amount_due = GREATEST(amount_due - $2, 0),
+               status = CASE
+                 WHEN GREATEST(amount_due - $2, 0) = 0 THEN 'PAID'
+                 WHEN $2 < amount_due THEN 'PARTIALLY_PAID'
+                 ELSE status
+               END,
+               updated_at = NOW()
+           WHERE sale_id = $1
+             AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')`,
+          [saleId, refundTotalAmount.toFixed(2)]
+        );
+
+        // Step 6b: Recalculate customer balance from invoices (SSOT).
+        // Now that amount_due is updated, this will return the correct lower balance.
         const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
         await syncCustomerBalanceFromInvoices(client, sale.customer_id, 'SALE_REFUND');
       }
