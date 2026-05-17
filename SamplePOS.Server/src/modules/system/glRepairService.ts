@@ -892,12 +892,12 @@ export async function rebuildPeriodBalances(
         const beforeOpen: number = beforeCount.rows[0]?.n ?? 0;
 
         // 2. Recompute totals from ledger_entries and UPSERT.
-        //    Includes BOTH 'POSTED' and 'REVERSED' transactions: when a tx is
-        //    reversed, the original keeps its entries (status=REVERSED) and a
-        //    new POSTED reversal tx is created with offsetting entries. The
-        //    audit checker sums both, so the rebuild must too — otherwise the
-        //    rebuild itself introduces drift. DRAFT is excluded because
-        //    jeApprovalService reverses its gpb contribution when parking.
+        //    Includes POSTED transactions only. REVERSED transactions are excluded:
+        //    when AccountingCore.reverseTransaction() properly reverses a transaction,
+        //    a new POSTED reversal entry is created with opposite amounts — so including
+        //    REVERSED would double-count those entries. Orphaned REVERSED transactions
+        //    (manually status-flipped without a counter entry) would also inflate totals.
+        //    DRAFT is excluded because jeApprovalService reverses its gpb contribution when parking.
         //    Locked/closed periods are filtered out via NOT EXISTS clause.
         const upsertRes = await client.query(
             `WITH fresh AS (
@@ -909,7 +909,7 @@ export async function rebuildPeriodBalances(
                  COALESCE(SUM(le."CreditAmount"), 0)                                        AS credits
                FROM ledger_entries le
                JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-               WHERE lt."Status" IN ('POSTED', 'REVERSED')
+               WHERE lt."Status" = 'POSTED'
                GROUP BY le."AccountId",
                         EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT,
                         EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT
@@ -954,7 +954,7 @@ export async function rebuildPeriodBalances(
                  FROM ledger_entries le
                  JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
                  WHERE le."AccountId" = gpb.account_id
-                   AND lt."Status" IN ('POSTED', 'REVERSED')
+                   AND lt."Status" = 'POSTED'
                    AND EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = gpb.fiscal_year
                    AND EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = gpb.fiscal_period
                )`,

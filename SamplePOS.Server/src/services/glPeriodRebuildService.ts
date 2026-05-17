@@ -28,8 +28,11 @@ import logger from '../utils/logger.js';
  * Recompute a single gl_period_balances row from ledger_entries.
  *
  * Uses absolute (replace) totals — NEVER incremental addition.
- * Covers POSTED + REVERSED transactions (same logic as the full rebuild in
- * glRepairService.rebuildPeriodBalances).
+ * Covers POSTED transactions only.
+ * REVERSED transactions are excluded: when AccountingCore.reverseTransaction() properly
+ * reverses a transaction, a new POSTED reversal entry is created with opposite amounts.
+ * Including REVERSED would double-count those entries. Orphaned REVERSED transactions
+ * (manually status-flipped without a counter entry) would also inflate totals.
  *
  * @param pool        Tenant pool — caller provides the correct pool.
  * @param accountId   UUID of the account.
@@ -64,7 +67,7 @@ export async function rebuildSingleAccountPeriod(
          WHERE le."AccountId" = $1
            AND EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = $2
            AND EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = $3
-           AND lt."Status" IN ('POSTED', 'REVERSED')`,
+           AND lt."Status" = 'POSTED'`,
         [accountId, fiscalYear, fiscalPeriod],
     );
 

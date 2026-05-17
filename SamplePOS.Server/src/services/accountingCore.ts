@@ -643,7 +643,7 @@ export class AccountingCore {
                          WHERE le."AccountId" = $1
                            AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = $2
                            AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = $3
-                           AND lt."Status" IN ('POSTED', 'REVERSED')
+                           AND lt."Status" = 'POSTED'
                          ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
                              debit_total     = EXCLUDED.debit_total,
                              credit_total    = EXCLUDED.credit_total,
@@ -1026,7 +1026,7 @@ export class AccountingCore {
                          WHERE le."AccountId" = $1
                            AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = $2
                            AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = $3
-                           AND lt."Status" IN ('POSTED', 'REVERSED')
+                           AND lt."Status" = 'POSTED'
                          ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
                              debit_total     = EXCLUDED.debit_total,
                              credit_total    = EXCLUDED.credit_total,
