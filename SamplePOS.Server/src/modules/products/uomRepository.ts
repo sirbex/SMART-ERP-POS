@@ -253,6 +253,17 @@ export async function deleteItemUomConversionBySource(
   );
 }
 
+export async function deleteAllItemUomConversionsForProduct(
+  itemId: string,
+  db?: Queryable,
+): Promise<void> {
+  const pool = db || globalPool;
+  await pool.query(
+    `DELETE FROM item_uom_conversions WHERE item_id = $1`,
+    [itemId],
+  );
+}
+
 export async function createProductUom(data: {
   productId: string;
   uomId: string;
@@ -304,6 +315,7 @@ export async function unsetDefaultForProduct(productId: string, dbPool?: pg.Pool
 export async function updateProductUom(
   id: string,
   data: {
+    uomId?: string;
     conversionFactor?: number;
     barcode?: string | null;
     isDefault?: boolean;
@@ -317,6 +329,10 @@ export async function updateProductUom(
   const values: unknown[] = [];
   let i = 1;
 
+  if (data.uomId !== undefined) {
+    fields.push(`uom_id = $${i++}`);
+    values.push(data.uomId);
+  }
   if (data.conversionFactor !== undefined) {
     fields.push(`conversion_factor = $${i++}`);
     values.push(data.conversionFactor);

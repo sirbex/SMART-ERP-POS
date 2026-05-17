@@ -23,6 +23,7 @@ import {
   type ProductHistoryType
 } from '../../hooks/useProductHistory';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
+import { DamagedItemsBanner, OpeningStockDialog } from '../../components/inventory/DamagedItemsBanner';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -444,7 +445,7 @@ export default function ProductsPage() {
       purchaseUomId: formData.purchaseUomId,
       leadTimeDays: formData.leadTimeDays,
       reorderQuantity: formData.reorderQuantity,
-    });
+    }, modalMode === 'edit' ? 'update' : 'create');
 
     const errors: Record<string, string> = { ...(z.valid ? {} : z.errors) };
 
@@ -614,6 +615,7 @@ export default function ProductsPage() {
           for (const uom of validUoms) {
             if (uom.id && uom.id.trim() !== '') {
               const updateData = {
+                uomId: uom.uomId,
                 conversionFactor: parseFloat(uom.conversionFactor),
                 isDefault: uom.isDefault,
                 overrideCost: uom.costOverride ? parseFloat(uom.costOverride) : undefined,
@@ -809,6 +811,7 @@ export default function ProductsPage() {
       if (formData.id && uomWithDetails.id) {
         try {
           await api.products.updateProductUom(formData.id, uomWithDetails.id, {
+            uomId: uomWithDetails.uomId,
             conversionFactor: parseFloat(uomWithDetails.conversionFactor),
             isDefault: uomWithDetails.isDefault,
             overrideCost: uomWithDetails.costOverride ? parseFloat(uomWithDetails.costOverride) : undefined,
@@ -927,6 +930,8 @@ export default function ProductsPage() {
 
   useSubmitOnEnter(showModal, !createProductMutation.isPending && !updateProductMutation.isPending, handleSave);
 
+  const [openingStockProduct, setOpeningStockProduct] = useState<{ id: string; name: string; sku: string } | null>(null);
+
   return (
     <div className="p-6">
       {/* Offline notice */}
@@ -936,6 +941,9 @@ export default function ProductsPage() {
           Offline — showing cached products (read-only). Create/edit/delete require an internet connection.
         </div>
       )}
+
+      {/* Master Data Guard — Damaged Items Banner */}
+      {isOnline && <DamagedItemsBanner />}
 
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
@@ -1089,6 +1097,7 @@ export default function ProductsPage() {
                   <div className="flex gap-3 border-t border-gray-100 pt-2">
                     <button onClick={() => handleViewHistory(product.id!)} className="text-xs text-purple-600 hover:text-purple-800 font-medium">History</button>
                     <button onClick={() => handleEdit(product)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                    <button onClick={() => setOpeningStockProduct({ id: product.id!, name: product.name, sku: product.sku })} className="text-xs text-green-600 hover:text-green-800 font-medium">Opening Stock</button>
                     <button onClick={() => handleDeleteClick(product.id!)} className="text-xs text-red-600 hover:text-red-800 font-medium">Delete</button>
                   </div>
                 </div>
@@ -2100,6 +2109,15 @@ export default function ProductsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Master Data Guard — Opening Stock dialog */}
+      {openingStockProduct && (
+        <OpeningStockDialog
+          product={openingStockProduct}
+          onClose={() => setOpeningStockProduct(null)}
+          onSuccess={() => setOpeningStockProduct(null)}
+        />
       )}
     </div>
   );

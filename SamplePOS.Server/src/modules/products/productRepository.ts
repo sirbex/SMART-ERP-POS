@@ -375,6 +375,18 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
     valFields.push(`selling_price = $${valIdx++}`);
     valValues.push(data.sellingPrice);
   }
+  if (data.pricingFormula !== undefined) {
+    valFields.push(`pricing_formula = $${valIdx++}`);
+    valValues.push(data.pricingFormula || null);
+  }
+  if (data.autoUpdatePrice !== undefined) {
+    valFields.push(`auto_update_price = $${valIdx++}`);
+    valValues.push(data.autoUpdatePrice);
+  }
+  if (data.costingMethod !== undefined) {
+    valFields.push(`costing_method = $${valIdx++}`);
+    valValues.push(data.costingMethod);
+  }
 
   // ── Inventory (product_inventory table) ──
   if (data.reorderLevel !== undefined) {
@@ -411,19 +423,26 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
   }
 
   if (valFields.length > 0) {
-    valFields.push(`version = version + 1`);
-    valValues.push(id);
+    // Upsert: create the row if it was never created during bulk import.
+    // valValues holds the field values ($1..$N); id goes at $valIdx for the INSERT.
+    const setCols = valFields.join(', ');
+    valValues.push(id); // $valIdx = product_id for the INSERT
     await pool.query(
-      `UPDATE product_valuation SET ${valFields.join(', ')}, updated_at = NOW() WHERE product_id = $${valIdx}`,
+      `INSERT INTO product_valuation (product_id)
+       VALUES ($${valIdx})
+       ON CONFLICT (product_id) DO UPDATE SET ${setCols}, version = product_valuation.version + 1, updated_at = NOW()`,
       valValues
     );
   }
 
   if (invFields.length > 0) {
-    invFields.push(`version = version + 1`);
-    invValues.push(id);
+    // Upsert: create the row if it was never created during bulk import.
+    const setCols = invFields.join(', ');
+    invValues.push(id); // $invIdx = product_id for the INSERT
     await pool.query(
-      `UPDATE product_inventory SET ${invFields.join(', ')}, updated_at = NOW() WHERE product_id = $${invIdx}`,
+      `INSERT INTO product_inventory (product_id)
+       VALUES ($${invIdx})
+       ON CONFLICT (product_id) DO UPDATE SET ${setCols}, version = product_inventory.version + 1, updated_at = NOW()`,
       invValues
     );
   }
@@ -840,4 +859,52 @@ export async function procurementSearch(
 
   const result = await pool.query(sql, params);
   return result.rows;
+}
+
+/**
+ * Self-healing guard: recreate product_valuation and product_inventory rows
+ * for any products that are missing them.
+ *
+ * Called at server startup and after any data reset. Safe to call at any time —
+ * the ON CONFLICT DO NOTHING clause makes it idempotent.
+ *
+ * This is the single authoritative recreation path; systemManagementRepository
+ * delegates to this function after Phase 4 deletes.
+ *
+ * NEVER replace this with a database trigger — all business logic lives in the
+ * service layer (see COPILOT_IMPLEMENTATION_RULES.md).
+ */
+export async function ensureProductChildRows(conn?: pg.Pool | pg.PoolClient): Promise<{ valuation: number; inventory: number }> {
+  const db = conn ?? globalPool;
+
+  const invResult = await db.query(`
+    INSERT INTO product_inventory (product_id, quantity_on_hand, reorder_level)
+    SELECT p.id, 0, COALESCE(p.reorder_level, 0)
+    FROM products p
+    ON CONFLICT (product_id) DO NOTHING
+  `);
+
+  const valResult = await db.query(`
+    INSERT INTO product_valuation (
+      product_id, cost_price, selling_price,
+      average_cost, last_cost,
+      costing_method, pricing_formula, auto_update_price
+    )
+    SELECT
+      p.id,
+      COALESCE(p.cost_price, 0),
+      COALESCE(p.selling_price, 0),
+      COALESCE(p.cost_price, 0),
+      COALESCE(p.cost_price, 0),
+      COALESCE(p.costing_method, 'FIFO'),
+      p.pricing_formula,
+      COALESCE(p.auto_update_price, false)
+    FROM products p
+    ON CONFLICT (product_id) DO NOTHING
+  `);
+
+  return {
+    valuation: valResult.rowCount ?? 0,
+    inventory: invResult.rowCount ?? 0,
+  };
 }

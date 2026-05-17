@@ -1,4 +1,4 @@
-import { ProductCreateSchema } from '@shared/zod/product';
+import { ProductCreateSchema, UpdateProductSchema } from '@shared/zod/product';
 import type { CostingMethod } from '@shared/zod/product';
 import type { ProductFormValues } from '@/components/products/ProductForm';
 
@@ -41,9 +41,10 @@ function coerceToSchemaInput(values: ProductFormValues) {
   };
 }
 
-export function validateProductValues(values: ProductFormValues) {
+export function validateProductValues(values: ProductFormValues, mode: 'create' | 'update' = 'create') {
   const input = coerceToSchemaInput(values);
-  const result = ProductCreateSchema.safeParse(input);
+  const schema = mode === 'update' ? UpdateProductSchema : ProductCreateSchema;
+  const result = schema.safeParse(input);
 
   if (result.success) {
     return { valid: true as const, data: result.data, errors: {} as ProductValidationErrors };

@@ -13,6 +13,10 @@ const router = Router();
 // All routes require authentication
 // List products - any authenticated user
 router.get('/', authenticate, productController.getProducts);
+// Master Data Guard — must appear BEFORE /:id routes to avoid swallowing the literal 'damaged'
+router.get('/damaged', authenticate, requirePermission('inventory.read'), productController.getDamagedItems);
+router.post('/:id/repair-valuation', authenticate, requirePermission('inventory.update'), productController.repairItemValuation);
+router.post('/:id/opening-stock', authenticate, requirePermission('inventory.create'), productController.createOpeningStock);
 
 // Procurement search - must be before :id to avoid being captured
 router.get('/procurement-search', authenticate, productController.procurementSearch);

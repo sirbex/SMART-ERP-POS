@@ -10,6 +10,7 @@ import * as productRepository from './productRepository.js';
 import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
 import { normalizeResponse } from '../../utils/caseConverter.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
+import * as masterDataGuard from '../../services/masterDataGuard.js';
 import { pool as globalPool } from '../../db/pool.js';
 import logger from '../../utils/logger.js';
 
@@ -201,4 +202,72 @@ export const procurementSearch = asyncHandler(async (req: Request, res: Response
   const results = await productRepository.procurementSearch(q, supplierId || null, limit, pool);
 
   res.json({ success: true, data: results });
+});
+
+// ── Master Data Guard: Damaged Items Scan ────────────────────────────────────
+
+/**
+ * GET /api/products/damaged
+ * Returns all products where QoH > 0 but cost = 0 (post-reset damaged items).
+ * Used by the DamagedItemsBanner to warn staff and trigger repair.
+ */
+export const getDamagedItems = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const items = await masterDataGuard.scanDamagedItems(pool);
+  res.json({ success: true, data: items, count: items.length });
+});
+
+// ── Master Data Guard: Repair Item Valuation ─────────────────────────────────
+
+const RepairValuationBodySchema = z.object({
+  unitCost: z.number().positive('Unit cost must be greater than zero'),
+});
+
+/**
+ * POST /api/products/:id/repair-valuation
+ * Assigns a unit cost to existing zero-cost stock and posts
+ * DR Inventory / CR Opening Balance Equity to the GL.
+ */
+export const repairItemValuation = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id } = UuidParamSchema.parse(req.params);
+  const { unitCost } = RepairValuationBodySchema.parse(req.body);
+  const userId = (req as any).user?.id;
+  if (!userId) throw new ValidationError('Authentication required');
+
+  const result = await masterDataGuard.repairItemValuation(pool, id, unitCost, userId);
+
+  res.json({
+    success: true,
+    data: result,
+    message: `Valuation repaired: ${result.productName} — ${result.quantityOnHand} units @ ${unitCost}`,
+  });
+});
+
+// ── Master Data Guard: Opening Stock with Valuation ──────────────────────────
+
+const OpeningStockBodySchema = z.object({
+  quantity: z.number().positive('Quantity must be greater than zero'),
+  unitCost: z.number().positive('Unit cost must be greater than zero'),
+});
+
+/**
+ * POST /api/products/:id/opening-stock
+ * Creates opening stock: physical quantity + unit cost together.
+ * Posts DR Inventory / CR Opening Balance Equity to the GL.
+ */
+export const createOpeningStock = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id } = UuidParamSchema.parse(req.params);
+  const { quantity, unitCost } = OpeningStockBodySchema.parse(req.body);
+  const userId = (req as any).user?.id;
+  if (!userId) throw new ValidationError('Authentication required');
+
+  const result = await masterDataGuard.createOpeningStockEntry(pool, id, quantity, unitCost, userId);
+
+  res.status(201).json({
+    success: true,
+    data: result,
+    message: `Opening stock created: ${result.productName} — ${result.quantityAdded} units @ ${unitCost}`,
+  });
 });

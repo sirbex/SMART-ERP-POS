@@ -74,7 +74,8 @@ async function syncCanonicalConversion(
 
   const existingConversions = await repo.listItemUomConversions(productId, db);
   const nextConversions: ItemUomConversion[] = existingConversions
-    .filter((conversion) => conversion.fromUomId !== uomId)
+    // Exclude the current UoM's old entry and any stale entries pointing to a different base
+    .filter((conversion) => conversion.fromUomId !== uomId && conversion.toUomId === baseUomId)
     .map((conversion) => ({
       itemId: conversion.itemId,
       fromUomId: conversion.fromUomId,
@@ -356,7 +357,11 @@ export async function updateProductUom(
     return null;
   }
 
-  await assertNoCanonicalDuplicateMeaning(existing.productId, existing.uomId, pool, id);
+  // Determine effective uomId: use the incoming one if supplied, else keep existing
+  const effectiveUomId = parsed.uomId ?? existing.uomId;
+  const uomIdChanging = parsed.uomId !== undefined && parsed.uomId !== existing.uomId;
+
+  await assertNoCanonicalDuplicateMeaning(existing.productId, effectiveUomId, pool, id);
 
   // Safeguard: clear redundant overrides (same logic as addProductUom)
   let costOverride = parsed.costOverride;
@@ -376,13 +381,35 @@ export async function updateProductUom(
     priceOverride = cleared.priceOverride;
   }
 
+  // When the uomId is changing, detect canonical state BEFORE unsetDefaultForProduct
+  // clears all is_default flags (which would make getProductBaseUomId return NULL via COALESCE).
+  let pendingBaseUomId: string | null = null;
+  if (uomIdChanging) {
+    const currentBaseUomId = await repo.getProductBaseUomId(existing.productId, pool);
+    if (currentBaseUomId === existing.uomId) {
+      // This UoM is the base; record the new base to write after unsetDefaultForProduct.
+      // Delete ALL conversions now — they all pointed to the old base and are stale.
+      await repo.deleteAllItemUomConversionsForProduct(existing.productId, pool);
+      pendingBaseUomId = effectiveUomId;
+    } else {
+      // Not the base UoM, just clean up this UoM's own stale conversion entry
+      await repo.deleteItemUomConversionBySource(existing.productId, existing.uomId, pool);
+    }
+  }
+
   if (parsed.isDefault) {
     await repo.unsetDefaultForProduct(existing.productId, dbPool);
+  }
+
+  // Now apply the base_uom_id transfer (safe here: unsetDefaultForProduct already ran)
+  if (pendingBaseUomId) {
+    await repo.setProductBaseUomId(existing.productId, pendingBaseUomId, pool);
   }
 
   const result = await repo.updateProductUom(
     id,
     {
+      uomId: parsed.uomId,
       barcode: parsed.barcode,
       conversionFactor: parsed.conversionFactor,
       isDefault: parsed.isDefault,

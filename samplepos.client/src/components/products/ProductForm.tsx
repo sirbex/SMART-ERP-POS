@@ -1,5 +1,25 @@
 // Reusable Product Form used across ProductsPage and ManualGRModal
+import { useMemo } from 'react';
 import CategoryCombobox from './CategoryCombobox';
+
+/**
+ * SAP/Odoo formula preview: safely evaluates the pricing formula in the browser
+ * so the user sees what selling price would result BEFORE saving.
+ * Variables match pricingService.evaluateFormula: cost, lastCost, sellingPrice, quantity, Math.
+ */
+function evalFormulaPreview(formula: string, costPrice: number): number | null {
+  if (!formula.trim() || costPrice <= 0) return null;
+  try {
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('cost', 'lastCost', 'sellingPrice', 'quantity', 'Math',
+      `return (${formula});`);
+    const result = fn(costPrice, costPrice, 0, 1, Math);
+    if (typeof result === 'number' && isFinite(result) && result > 0) return result;
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export interface ProductFormValues {
   name: string;
@@ -43,6 +63,11 @@ export interface ProductFormProps {
 }
 
 export default function ProductForm({ values, onChange, validationErrors = {}, disabled = false, suppliers, masterUoms, lastPurchasePrice }: ProductFormProps) {
+  const costNum = parseFloat(values.costPrice) || 0;
+  const formulaPreviewPrice = useMemo(
+    () => values.autoUpdatePrice ? evalFormulaPreview(values.pricingFormula, costNum) : null,
+    [values.pricingFormula, values.autoUpdatePrice, costNum]
+  );
   return (
     <div className="space-y-4">
       {/* Basic Information */}
@@ -181,6 +206,14 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
             {validationErrors.sellingPrice && (
               <p className="text-sm text-red-600 mt-1">{validationErrors.sellingPrice}</p>
             )}
+            {/* SAP/Odoo formula preview — shows computed price before save */}
+            {formulaPreviewPrice !== null && (
+              <p className="text-xs text-blue-600 mt-1">
+                Formula preview:{' '}
+                <strong>{formulaPreviewPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
+                {' '}— backend may use avg cost for AVCO products
+              </p>
+            )}
           </div>
 
           <div>
@@ -265,7 +298,11 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="e.g., cost * 1.20"
             />
-            <p className="text-xs text-gray-500 mt-1">Formula to auto-calculate selling price</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Variables: <code className="text-blue-600">cost</code> (AVCO/manual),{' '}
+              <code className="text-blue-600">lastCost</code> (latest GRN price),{' '}
+              <code className="text-blue-600">Math</code>
+            </p>
           </div>
 
           <div className="flex items-start gap-2 pt-6">

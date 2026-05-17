@@ -14,6 +14,7 @@ import { PricingBusinessRules, InventoryBusinessRules } from '../../middleware/b
 import logger from '../../utils/logger.js';
 import type { BulkImportProductRow, BulkUpsertResult } from './productRepository.js';
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
+import * as pricingService from '../../services/pricingService.js';
 
 // Server-side limit cap — safe with lightweight flat query (no json_agg/GROUP BY).
 // 1800 products + batch UOM = ~25ms total. Cap at 5000 for safety.
@@ -289,20 +290,35 @@ export async function updateProduct(
   };
 
   // Transaction: Update product atomically
-  return UnitOfWork.run(pool, async (client) => {
-    const updated = await productRepository.updateProduct(id, updateData, pool);
+  const saved = await UnitOfWork.run(pool, async (client) => {
+    const updated = await productRepository.updateProduct(id, updateData, client as unknown as pg.Pool);
 
     if (!updated) {
       throw new Error(`Failed to update product with ID ${id}`);
     }
 
-    // If product UoM changes are included, update them within the transaction
-    // (UoM updates would be added here if needed)
-
     logger.info('Product updated successfully (transaction committed)', { productId: id });
 
     return updated;
   });
+
+  // SAP MAP / Odoo auto-price principle:
+  // When cost_price is explicitly changed by the user, and the user did NOT also
+  // set a new selling_price in the same request, cascade through the pricing formula.
+  // If auto_update_price=true and pricing_formula is set, selling_price is recalculated.
+  // If neither is set, onCostChange is a no-op (just logs).
+  if (data.costPrice !== undefined && data.sellingPrice === undefined) {
+    try {
+      await pricingService.onCostChange(id, pool);
+      // Re-fetch so caller receives the formula-computed selling_price
+      const refreshed = await productRepository.findProductById(id, pool);
+      if (refreshed) return refreshed;
+    } catch (err) {
+      logger.warn('Price cascade after manual cost edit failed (non-fatal)', { productId: id, err });
+    }
+  }
+
+  return saved;
 }
 
 export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<void> {

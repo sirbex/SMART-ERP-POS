@@ -31,6 +31,7 @@ const AddProductUomSchema = z.object({
 
 const UpdateProductUomSchema = z.object({
   productId: z.string().uuid().optional(),
+  uomId: z.string().uuid().optional(),
   conversionFactor: z.number({ coerce: true }).positive().optional(),
   barcode: z.string().optional().nullable(),
   isDefault: z.boolean().optional(),
@@ -126,6 +127,9 @@ export const updateProductUom = asyncHandler(async (req, res) => {
 
   if (validated.productId) {
     normalized.productId = validated.productId;
+  }
+  if (validated.uomId) {
+    normalized.uomId = validated.uomId;
   }
   if (validated.conversionFactor !== undefined) {
     normalized.conversionFactor = validated.conversionFactor;
