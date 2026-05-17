@@ -98,7 +98,7 @@ jobs:
               -o ServerAliveInterval=30 \
               -o ServerAliveCountMax=10 \
               root@209.38.203.138 \
-              "cd /opt/smarterp && bash scripts/deploy-update.sh"
+              "cd /opt/smarterp && git stash --include-untracked 2>/dev/null || true && bash scripts/deploy-update.sh"
 
       - name: Cleanup SSH key
         if: always() && steps.check_key.outputs.configured == 'true'
