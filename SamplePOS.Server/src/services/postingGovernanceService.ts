@@ -183,11 +183,15 @@ export class PostingGovernanceService {
             //  We also skip Rule B on CASH-tagged accounts — Rule D handles those explicitly.
             //  We also skip Rule B on accounts with allowManualPosting=false when source is
             //  MANUAL_JOURNAL — Rule C handles those and gives a more specific message.
+            //  CUTOVER_CORRECTION / CUTOVER_OB are system-level cutover operations that must
+            //  be able to debit Cash (reversing a wrong credit) and post to any system account.
+            //  They are validated structurally by cutoverCorrectionService — not here.
             // ------------------------------------------------------------------
             const isPaymentSource = source === 'PAYMENT_RECEIPT' || source === 'PAYMENT_DEPOSIT';
+            const isCutoverSource = source === 'CUTOVER_CORRECTION' || source === 'CUTOVER_OB';
             const isCashTaggedCreditLine = account.systemAccountTag === 'CASH' && line.creditAmount > 0;
             const deferToRuleC = !account.allowManualPosting && source === 'MANUAL_JOURNAL';
-            if (!isPaymentSource && !isCashTaggedCreditLine && !deferToRuleC && account.allowedSources.length > 0) {
+            if (!isPaymentSource && !isCutoverSource && !isCashTaggedCreditLine && !deferToRuleC && account.allowedSources.length > 0) {
                 if (!account.allowedSources.includes(source)) {
                     throw new PostingGovernanceError(
                         `Source '${source}' is not permitted to post to account ${account.accountCode} (${account.accountName}). ` +
@@ -231,7 +235,8 @@ export class PostingGovernanceService {
                         source !== 'SUPPLIER_PAYMENT' &&
                         source !== 'EXPENSE_PAYMENT' &&
                         source !== 'SALES_REFUND' &&
-                        source !== 'SYSTEM_CORRECTION'
+                        source !== 'SYSTEM_CORRECTION' &&
+                        source !== 'CUTOVER_CORRECTION'  // reversing a wrong pre-ERP cash credit
                     ) {
                         throw new PostingGovernanceError(
                             `Cannot credit Cash account ${account.accountCode} (${account.accountName}) from source '${source}'. ` +
