@@ -611,7 +611,14 @@ export default function ProductsPage() {
           }
 
           // Update existing and add new UoMs (one at a time) - filter out entries with empty uomId
-          const validUoms = productUoms.filter(uom => uom.uomId && uom.uomId.trim() !== '');
+          // Sort so the default (base) UoM is always processed first — the backend requires
+          // base_uom_id to be set before any non-default canonical conversions can be added.
+          const validUoms = productUoms
+            .filter(uom => uom.uomId && uom.uomId.trim() !== '')
+            .sort((a, b) => {
+              if (a.isDefault === b.isDefault) return 0;
+              return a.isDefault ? -1 : 1;
+            });
           for (const uom of validUoms) {
             if (uom.id && uom.id.trim() !== '') {
               const updateData = {

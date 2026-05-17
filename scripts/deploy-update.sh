@@ -67,6 +67,46 @@ echo ""
 echo ">>> Pulling latest code..."
 git pull
 
+# ── DATABASE MIGRATIONS ────────────────────────────────────────────────────────
+# Runs every *.sql file in shared/sql/ (sorted) against all tenant databases.
+# Uses schema_migrations table to skip already-applied files (idempotent).
+# All SQL files use CREATE/ALTER … IF NOT EXISTS, so replaying is safe.
+
+echo ">>> Running pending database migrations..."
+MIGRATION_DBS=("pos_system" "pos_tenant_henber_pharmacy")
+
+for DB in "${MIGRATION_DBS[@]}"; do
+  # Ensure migration-tracking table exists (in case 000_schema_migrations.sql not yet run)
+  docker exec smarterp-postgres psql -U postgres -d "$DB" \
+    -c "CREATE TABLE IF NOT EXISTS schema_migrations (id SERIAL PRIMARY KEY, filename TEXT UNIQUE NOT NULL, executed_at TIMESTAMPTZ NOT NULL DEFAULT now());" \
+    2>/dev/null || true
+
+  for MIGRATION in $(ls shared/sql/*.sql 2>/dev/null | sort); do
+    FILENAME=$(basename "$MIGRATION")
+
+    APPLIED=$(docker exec smarterp-postgres psql -U postgres -d "$DB" -t -c \
+      "SELECT COUNT(*) FROM schema_migrations WHERE filename = '$FILENAME';" \
+      2>/dev/null | tr -d '[:space:]')
+
+    if [ "$APPLIED" = "1" ]; then
+      continue  # already applied — skip
+    fi
+
+    echo "  [$DB] Applying $FILENAME ..."
+    if docker exec -i smarterp-postgres psql -U postgres -d "$DB" < "$MIGRATION" 2>&1; then
+      docker exec smarterp-postgres psql -U postgres -d "$DB" \
+        -c "INSERT INTO schema_migrations (filename) VALUES ('$FILENAME') ON CONFLICT DO NOTHING;" \
+        2>/dev/null || true
+      echo "  [$DB] ✅ $FILENAME"
+    else
+      echo "  [$DB] ⚠️  $FILENAME reported errors (see above) — continuing"
+    fi
+  done
+done
+
+echo ">>> Migrations complete"
+echo ""
+
 # Build only app containers
 echo ">>> Building backend + frontend..."
 docker compose -f docker-compose.deploy.yml build backend frontend
