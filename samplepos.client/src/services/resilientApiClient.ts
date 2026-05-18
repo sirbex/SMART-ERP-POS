@@ -1,6 +1,8 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import { clearTokens } from '../hooks/useTokenRefresh';
 import logger from '../utils/logger';
+import { HandledApiError } from '../utils/errorHandler';
+import { toast } from 'sonner';
 
 /**
  * RESILIENT API CLIENT
@@ -79,9 +81,30 @@ class ResilientApiClient {
                     }
                 }
 
+                // ── Business rule violations ──
+                const brvData = error.response?.data as Record<string, unknown> | undefined;
+                const brvCode = brvData?.error_code as string | undefined;
+                if (
+                  brvCode &&
+                  (brvCode.startsWith('GOV_RULE_') ||
+                    brvCode.startsWith('ACC_RULE_') ||
+                    brvCode.startsWith('INV_RULE_'))
+                ) {
+                  const details = brvData?.details as Record<string, unknown> | undefined;
+                  const reason =
+                    (details?.reason as string | undefined) ||
+                    (brvData?.error as string | undefined) ||
+                    'This action is not allowed by business rules.';
+                  toast.error('Action Not Allowed', {
+                    description: reason,
+                    duration: 8000,
+                    id: brvCode,
+                  });
+                  return Promise.reject(new HandledApiError(reason));
+                }
+
                 // Handle specific error cases
-                if (error.response?.status === 401) {
-                    // Token expired - redirect to login
+                if (error.response?.status === 401) {                    // Token expired - redirect to login
                     this.handleUnauthorized();
                 }
 

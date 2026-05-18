@@ -17,6 +17,8 @@ import {
 } from '../hooks/useTokenRefresh';
 import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
+import { HandledApiError } from './errorHandler';
+import { toast } from 'sonner';
 import type {
   CreateProductInput,
   UpdateProductInput,
@@ -165,9 +167,31 @@ apiClient.interceptors.response.use(
       }
     }
 
+    // ── Business rule violations (GOV_RULE_*, ACC_RULE_*, INV_RULE_*) ──
+    // Auto-show a structured "Action Not Allowed" notification so every screen
+    // inherits the behaviour without per-page catch blocks.
+    const brvCode = error.response?.data?.error_code as string | undefined;
+    if (
+      brvCode &&
+      (brvCode.startsWith('GOV_RULE_') ||
+        brvCode.startsWith('ACC_RULE_') ||
+        brvCode.startsWith('INV_RULE_'))
+    ) {
+      const details = error.response?.data?.details as Record<string, unknown> | undefined;
+      const reason =
+        (details?.reason as string | undefined) ||
+        (error.response?.data?.error as string | undefined) ||
+        'This action is not allowed by business rules.';
+      toast.error('Action Not Allowed', {
+        description: reason,
+        duration: 8000,
+        id: brvCode, // deduplicate: same rule won't stack multiple toasts
+      });
+      return Promise.reject(new HandledApiError(reason));
+    }
+
     // Handle specific error cases
-    if (error.response?.status === 401) {
-      // Don't clear tokens or redirect when offline — the 401 is expected
+    if (error.response?.status === 401) {      // Don't clear tokens or redirect when offline — the 401 is expected
       if (!navigator.onLine) {
         return Promise.reject(error);
       }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { formatCurrency } from '../../utils/currency';
 import { useCustomers } from '../../hooks/useApi';
 import { apiClient } from '../../utils/api';
@@ -379,8 +380,8 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
                 )}
             </div>
 
-            {/* Add Deposit Modal */}
-            {showAddModal && (
+            {/* Add Deposit Modal — portaled to body to escape any parent stacking context */}
+            {showAddModal && ReactDOM.createPortal(
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center" style={{ zIndex: guardRef.current?.panelZIndex ?? ZINDEX.PANEL }} onClick={() => setShowAddModal(false)}>
                     <div className="bg-white rounded-lg p-6 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
                         <h3 className="text-lg font-semibold mb-4">Add Customer Deposit</h3>
@@ -479,7 +480,8 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
                             </button>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );

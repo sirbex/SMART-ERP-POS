@@ -4,6 +4,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import logger from '../utils/logger.js';
+import { PostingGovernanceError } from '../services/postingGovernanceService.js';
 
 // Custom error class for application errors
 export class AppError extends Error {
@@ -134,6 +135,23 @@ export function errorHandler(
       error: 'Validation failed',
       error_code: 'ERR_VALIDATION_FIELDS',
       details: formattedErrors,
+      requestId: req.requestId,
+    });
+    return;
+  }
+
+  // Handle PostingGovernanceError — structured accounting rule violation → 400
+  if (error instanceof PostingGovernanceError) {
+    // Strip the [CODE] prefix that super() prepended so the error field is clean
+    const cleanMessage = error.message.replace(/^\[[A-Z0-9_]+\]\s*/, '');
+    res.status(400).json({
+      success: false,
+      error: cleanMessage,
+      error_code: error.code,
+      details: {
+        ...(error.context ?? {}),
+        reason: cleanMessage,
+      },
       requestId: req.requestId,
     });
     return;

@@ -19,6 +19,20 @@ import { formatCurrency } from './currency';
 
 // ── Types ──────────────────────────────────────────────────────────
 
+/**
+ * Thrown (and re-rejected) by the API interceptor after it has already
+ * shown a toast for a GOV_RULE_* / ACC_RULE_* / INV_RULE_* error.
+ * Catch handlers that call handleApiError will see this and skip a
+ * duplicate toast.
+ */
+export class HandledApiError extends Error {
+  readonly isHandled = true as const;
+  constructor(message: string) {
+    super(message);
+    this.name = 'HandledApiError';
+  }
+}
+
 export interface ValidationDetail {
   path: string;
   message: string;
@@ -310,6 +324,17 @@ function formatByErrorCode(parsed: ParsedApiError): string {
   if (code.startsWith('ERR_COSTLAYER_')) return formatCostLayerError(parsed);
   if (code.startsWith('ERR_PRICING_')) return formatPricingError(parsed);
 
+  // Accounting / governance / inventory rule violations
+  if (
+    code.startsWith('GOV_RULE_') ||
+    code.startsWith('ACC_RULE_') ||
+    code.startsWith('INV_RULE_')
+  ) {
+    // Prefer details.reason (set by backend for GOV_RULE errors);
+    // fall back to the top-level error message
+    return (parsed.details?.reason as string | undefined) ?? parsed.message;
+  }
+
   // Generic classified errors from middleware (catches all plain Error throws)
   if (code === 'ERR_NOT_FOUND')
     return `Not found: ${(parsed.details?.reason as string) || parsed.message}`;
@@ -334,6 +359,12 @@ function formatByErrorCode(parsed: ParsedApiError): string {
  */
 export function handleApiError(error: unknown, options: HandleApiErrorOptions = {}): string {
   const { silent = false, fallback = 'An unexpected error occurred' } = options;
+
+  // The API interceptor already showed a toast for GOV/ACC/INV rule errors;
+  // don't toast again from individual catch blocks.
+  if (error instanceof HandledApiError) {
+    return error.message;
+  }
 
   const parsed = parseApiError(error, fallback);
   const friendly = formatByErrorCode(parsed);
