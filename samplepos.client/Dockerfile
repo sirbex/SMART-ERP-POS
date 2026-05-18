@@ -12,6 +12,8 @@ RUN npm install --no-audit --no-fund
 COPY samplepos.client/ .
 # Place shared/ at ../shared/ relative to the frontend workdir
 COPY shared/ /app/shared/
+# Install shared/ dependencies so its imports (e.g. zod) resolve during tsc
+RUN cd /app/shared && npm install --no-audit --no-fund
 RUN npm run build
 
 # Production image with nginx
