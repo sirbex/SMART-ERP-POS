@@ -144,7 +144,6 @@ export interface CreateSaleData {
   paymentReceived: number;
   changeAmount: number;
   soldBy: string;
-  orderCreatedByUserId?: string; // who placed the order (= soldBy for direct sales)
   saleDate?: string; // ISO 8601 datetime for backdated sales
   isSplitPayment?: boolean; // Indicates if sale uses split payment
   totalPaid?: number; // Total amount paid (may differ from totalAmount for credit)
@@ -240,9 +239,9 @@ export const salesRepository = {
         `INSERT INTO sales (
         sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
         total_cost, profit, profit_margin,
-        payment_method, amount_paid, change_amount, cashier_id, order_created_by_user_id, quote_id,
+        payment_method, amount_paid, change_amount, cashier_id, quote_id,
         idempotency_key, offline_id, cash_register_session_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING 
         id,
         sale_number as "saleNumber",
@@ -259,7 +258,6 @@ export const salesRepository = {
         amount_paid as "amountPaid",
         change_amount as "changeAmount",
         cashier_id as "cashierId",
-        order_created_by_user_id as "orderCreatedByUserId",
         quote_id as "quoteId",
         cash_register_session_id as "cashRegisterSessionId",
         created_at as "createdAt"`,
@@ -278,7 +276,6 @@ export const salesRepository = {
           data.paymentReceived,
           data.changeAmount,
           data.soldBy, // Maps to cashier_id
-          data.orderCreatedByUserId || data.soldBy, // who placed the order; defaults to cashier
           data.quoteId || null, // Link to quotation
           data.idempotencyKey || null,
           data.offlineId || null,
@@ -1019,104 +1016,67 @@ export const salesRepository = {
   },
 
   /**
-   * Sales Responsibility Report — per-sale detail showing both who ordered and who processed payment.
-   * groupBy: 'detail' (one row per sale) | 'cashier' | 'orderedBy'
+   * Get sales by cashier report - shows sales performance by user/cashier
    */
-  async getSalesResponsibility(
+  async getSalesByCashier(
     pool: Pool,
-    filters: {
-      startDate?: string;
-      endDate?: string;
-      cashierId?: string;
-      orderedById?: string;
-      groupBy?: 'detail' | 'cashier' | 'orderedBy';
-    } = {}
+    filters: Record<string, unknown> = {}
   ): Promise<Record<string, unknown>[]> {
-    const groupBy = filters.groupBy || 'detail';
-    const whereClauses: string[] = [`s.status NOT IN ('VOID', 'VOIDED')`];
+    const whereClauses = ["s.status = 'COMPLETED'"];
     const values: unknown[] = [];
     let paramIndex = 1;
 
     if (filters.startDate) {
-      whereClauses.push(`s.sale_date::DATE >= $${paramIndex++}`);
+      whereClauses.push(`s.sale_date >= $${paramIndex++}`);
       values.push(filters.startDate);
     }
+
     if (filters.endDate) {
-      whereClauses.push(`s.sale_date::DATE <= $${paramIndex++}`);
+      whereClauses.push(`s.sale_date <= $${paramIndex++}`);
       values.push(filters.endDate);
     }
+
+    // cashierId filters by the user who processed the payment
     if (filters.cashierId) {
       whereClauses.push(`s.cashier_id = $${paramIndex++}`);
       values.push(filters.cashierId);
+    } else if (filters.userId) {
+      // legacy compat: user_id also maps to cashier
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
+      values.push(filters.userId);
     }
+
+    // orderedById filters by the user who created the order (queue sales only)
     if (filters.orderedById) {
-      whereClauses.push(`s.order_created_by_user_id = $${paramIndex++}`);
-      values.push(filters.orderedById);
+      whereClauses.push(`(po.created_by = $${paramIndex++} OR (s.from_order_id IS NULL AND s.cashier_id = $${paramIndex++}))`);
+      values.push(filters.orderedById, filters.orderedById);
     }
 
-    const where = whereClauses.join(' AND ');
-
-    let query: string;
-
-    if (groupBy === 'cashier') {
-      query = `
-        SELECT
-          u_cashier.id                                          AS user_id,
-          u_cashier.full_name                                   AS cashier_name,
-          u_cashier.role,
-          COUNT(DISTINCT s.id)::int                            AS total_transactions,
-          ROUND(SUM(s.total_amount)::numeric, 2)               AS total_revenue,
-          ROUND(SUM(s.total_cost)::numeric, 2)                 AS total_cost,
-          ROUND(SUM(s.profit)::numeric, 2)                     AS total_profit,
-          COUNT(DISTINCT s.order_created_by_user_id)::int      AS unique_order_creators,
-          TO_CHAR(MAX(s.sale_date), 'YYYY-MM-DD')              AS last_sale_date
-        FROM sales s
-        LEFT JOIN users u_cashier ON u_cashier.id = s.cashier_id
-        WHERE ${where}
-        GROUP BY u_cashier.id, u_cashier.full_name, u_cashier.role
-        ORDER BY total_revenue DESC
-      `;
-    } else if (groupBy === 'orderedBy') {
-      query = `
-        SELECT
-          u_creator.id                                          AS user_id,
-          u_creator.full_name                                   AS ordered_by_name,
-          u_creator.role,
-          COUNT(DISTINCT s.id)::int                            AS total_transactions,
-          ROUND(SUM(s.total_amount)::numeric, 2)               AS total_revenue,
-          ROUND(SUM(s.total_cost)::numeric, 2)                 AS total_cost,
-          ROUND(SUM(s.profit)::numeric, 2)                     AS total_profit,
-          COUNT(DISTINCT s.cashier_id)::int                    AS unique_cashiers,
-          TO_CHAR(MAX(s.sale_date), 'YYYY-MM-DD')              AS last_sale_date
-        FROM sales s
-        LEFT JOIN users u_creator ON u_creator.id = s.order_created_by_user_id
-        WHERE ${where}
-        GROUP BY u_creator.id, u_creator.full_name, u_creator.role
-        ORDER BY total_revenue DESC
-      `;
-    } else {
-      // detail: one row per sale
-      query = `
-        SELECT
-          s.sale_number                                         AS sale_number,
-          s.sale_date::DATE                                     AS sale_date,
-          ROUND(s.total_amount::numeric, 2)                    AS total_amount,
-          s.payment_method,
-          u_cashier.full_name                                   AS cashier_name,
-          u_creator.full_name                                   AS ordered_by_name,
-          CASE WHEN s.cashier_id = s.order_created_by_user_id
-               THEN false ELSE true END                        AS is_queue_sale,
-          s.status,
-          c.name                                                AS customer_name
-        FROM sales s
-        LEFT JOIN users u_cashier ON u_cashier.id = s.cashier_id
-        LEFT JOIN users u_creator ON u_creator.id = s.order_created_by_user_id
-        LEFT JOIN customers c ON c.id = s.customer_id
-        WHERE ${where}
-        ORDER BY s.sale_date DESC, s.sale_number DESC
-        LIMIT 500
-      `;
+    // productId filters by item product
+    if (filters.productId) {
+      whereClauses.push(`si.product_id = $${paramIndex++}`);
+      values.push(filters.productId);
     }
+
+    // One row per sale_item: Sale #, Date, Product, Qty, Amount, Ordered By, Cashier, Payment Method
+    const query = `
+      SELECT
+        s.sale_number,
+        s.sale_date,
+        si.product_name,
+        ROUND(si.quantity::numeric, 4)                           AS quantity,
+        ROUND(si.total_price::numeric, 2)                        AS amount,
+        COALESCE(ou.full_name, cu.full_name)                     AS ordered_by,
+        cu.full_name                                             AS cashier,
+        s.payment_method
+      FROM sales s
+      INNER JOIN sale_items  si ON si.sale_id    = s.id
+      INNER JOIN users       cu ON cu.id         = s.cashier_id
+      LEFT  JOIN pos_orders  po ON po.id         = s.from_order_id
+      LEFT  JOIN users       ou ON ou.id         = po.created_by
+      WHERE ${whereClauses.join(' AND ')}
+      ORDER BY s.sale_date DESC, s.sale_number, si.product_name
+    `;
 
     const result = await pool.query(query, values);
     return result.rows;

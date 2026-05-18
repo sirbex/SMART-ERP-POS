@@ -136,7 +136,8 @@ ON CONFLICT (business_date, product_id) DO UPDATE SET
 -- ============================================================
 DO $$
 DECLARE
-    pascal_invoices boolean;
+    pascal_invoices  boolean;
+    has_credit_trans boolean;
 BEGIN
     -- Detect invoice column naming convention
     SELECT EXISTS (
@@ -146,8 +147,15 @@ BEGIN
           AND column_name  = 'TotalAmount'
     ) INTO pascal_invoices;
 
+    -- Detect credit_transactions table (legacy; may not exist on all tenants)
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name   = 'credit_transactions'
+    ) INTO has_credit_trans;
+
     IF pascal_invoices THEN
-        -- Legacy PascalCase schema (e.g. henber)
+        -- Legacy PascalCase schema (e.g. henber) — always has credit_transactions
         INSERT INTO customer_balances (
             customer_id, total_invoiced, total_paid, balance,
             last_invoice_date, last_payment_date, transaction_count, updated_at
@@ -189,8 +197,9 @@ BEGIN
             last_payment_date = EXCLUDED.last_payment_date,
             transaction_count = EXCLUDED.transaction_count,
             updated_at        = NOW();
-    ELSE
-        -- snake_case schema (newer tenants)
+
+    ELSIF has_credit_trans THEN
+        -- snake_case schema with credit_transactions
         INSERT INTO customer_balances (
             customer_id, total_invoiced, total_paid, balance,
             last_invoice_date, last_payment_date, transaction_count, updated_at
@@ -223,6 +232,42 @@ BEGIN
             WHERE customer_id = c.id
               AND transaction_type = 'PAYMENT'
         ) pay ON true
+        WHERE c.is_active = true
+        ON CONFLICT (customer_id) DO UPDATE SET
+            total_invoiced    = EXCLUDED.total_invoiced,
+            total_paid        = EXCLUDED.total_paid,
+            balance           = EXCLUDED.balance,
+            last_invoice_date = EXCLUDED.last_invoice_date,
+            last_payment_date = EXCLUDED.last_payment_date,
+            transaction_count = EXCLUDED.transaction_count,
+            updated_at        = NOW();
+
+    ELSE
+        -- snake_case schema without credit_transactions (fresh tenants)
+        -- Backfill from invoices only; payment totals default to 0
+        INSERT INTO customer_balances (
+            customer_id, total_invoiced, total_paid, balance,
+            last_invoice_date, last_payment_date, transaction_count, updated_at
+        )
+        SELECT
+            c.id AS customer_id,
+            COALESCE(inv.total_invoiced, 0)     AS total_invoiced,
+            0                                   AS total_paid,
+            c.balance                           AS balance,
+            inv.last_invoice_date,
+            NULL                                AS last_payment_date,
+            COALESCE(inv.inv_count, 0)          AS transaction_count,
+            NOW()
+        FROM customers c
+        LEFT JOIN LATERAL (
+            SELECT
+                SUM(total_amount)       AS total_invoiced,
+                MAX(issue_date::date)   AS last_invoice_date,
+                COUNT(*)::INTEGER       AS inv_count
+            FROM invoices
+            WHERE customer_id = c.id
+              AND status NOT IN ('Cancelled', 'Voided', 'Draft', 'CANCELLED', 'VOIDED', 'DRAFT')
+        ) inv ON true
         WHERE c.is_active = true
         ON CONFLICT (customer_id) DO UPDATE SET
             total_invoiced    = EXCLUDED.total_invoiced,

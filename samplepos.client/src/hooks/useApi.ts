@@ -385,10 +385,23 @@ export function useSalesResponsibility(filters?: {
   orderedById?: string;
   groupBy?: 'detail' | 'cashier' | 'orderedBy';
 }) {
-  const { startDate, endDate, cashierId, orderedById, groupBy } = filters || {};
+  const { startDate, endDate, cashierId } = filters || {};
   return useApiQuery(
-    queryKeys.sales.responsibility(startDate, endDate, cashierId, orderedById, groupBy),
-    () => api.sales.responsibility({ startDate, endDate, cashierId, orderedById, groupBy }),
+    queryKeys.sales.responsibility(startDate, endDate, cashierId, undefined, undefined),
+    () => api.sales.byCashier({ startDate, endDate, cashierId }),
+    { staleTime: 60000 }
+  );
+}
+
+export function useSalesByCashier(filters?: {
+  startDate?: string;
+  endDate?: string;
+  cashierId?: string;
+}) {
+  const { startDate, endDate, cashierId } = filters || {};
+  return useApiQuery(
+    queryKeys.sales.responsibility(startDate, endDate, cashierId, undefined, undefined),
+    () => api.sales.byCashier({ startDate, endDate, cashierId }),
     { staleTime: 60000 }
   );
 }

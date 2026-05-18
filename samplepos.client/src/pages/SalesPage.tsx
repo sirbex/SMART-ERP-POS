@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import Layout from '../components/Layout';
-import { useSales, useSalesSummary, useSalesSummaryByDate, useSalesResponsibility } from '../hooks/useApi';
+import { useSales, useSalesSummary, useSalesSummaryByDate, useSalesByCashier } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import { formatCurrency } from '../utils/currency';
 import { BUSINESS_TIMEZONE, getBusinessDate } from '../utils/businessDate';
@@ -356,11 +356,10 @@ export default function SalesPage() {
     endDate: endDate ? endDate : undefined,
   });
 
-  // Fetch server-side responsibility data (accurate totals across all pages)
-  const { data: responsibilityData } = useSalesResponsibility({
+  // Fetch server-side cashier performance (correct totals, not limited by pagination)
+  const { data: cashierData } = useSalesByCashier({
     startDate: startDate ? startDate : undefined,
     endDate: endDate ? endDate : undefined,
-    groupBy: 'cashier',
   });
 
   // Extract data from API responses
@@ -538,10 +537,10 @@ export default function SalesPage() {
     );
   }, [filteredSales]);
 
-  // Group sales by cashier — use SERVER-SIDE aggregation for accurate totals
+  // Group sales by user — use SERVER-SIDE aggregation for accurate totals
   // (client-side grouping from paginated data gives wrong totals)
   const salesByUser = useMemo(() => {
-    const serverRows = Array.isArray(responsibilityData) ? responsibilityData : [];
+    const serverRows = Array.isArray(cashierData) ? cashierData : [];
 
     // Build a map of paginated sales by cashier for the expandable detail view
     const salesByCashierId = new Map<string, SaleRow[]>();
@@ -554,12 +553,12 @@ export default function SalesPage() {
     if (serverRows.length > 0) {
       // Use server-side totals (accurate across all pages)
       return serverRows.map((row: Record<string, unknown>) => ({
-        userId: String(row.cashier_id || row.user_id || ''),
+        userId: String(row.user_id || ''),
         userName: String(row.cashier_name || 'Unknown User'),
         salesCount: Number(row.total_transactions || 0),
         totalAmount: new Decimal(Number(row.total_revenue || 0)),
         totalProfit: new Decimal(Number(row.total_profit || 0)),
-        sales: salesByCashierId.get(String(row.cashier_id || row.user_id || '')) || [],
+        sales: salesByCashierId.get(String(row.user_id || '')) || [],
       })).sort((a: UserGroup, b: UserGroup) => b.salesCount - a.salesCount);
     }
 
@@ -590,7 +589,7 @@ export default function SalesPage() {
       });
 
     return Array.from(grouped.values()).sort((a, b) => b.salesCount - a.salesCount);
-  }, [filteredSales, responsibilityData]);
+  }, [filteredSales, cashierData]);
 
   // Fetch orders and group by creator (for "Ordered By" tab)
   const [orderGroups, setOrderGroups] = useState<OrderGroup[]>([]);
@@ -642,7 +641,7 @@ export default function SalesPage() {
       adminOnly: false,
     },
     { id: 'by-customer' as TabType, label: 'By Customer', icon: '👥', adminOnly: true },
-    { id: 'by-user' as TabType, label: 'Responsibility', icon: '🧑‍💼', adminOnly: true },
+    { id: 'by-user' as TabType, label: 'By Cashier', icon: '🧑‍💼', adminOnly: true },
     { id: 'ordered-by' as TabType, label: 'Ordered By', icon: '📋', adminOnly: true },
     { id: 'invoices' as TabType, label: 'Credit Sales', icon: '📄', adminOnly: false },
     { id: 'payments' as TabType, label: 'Partial Payments', icon: '💰', adminOnly: false },
@@ -1029,16 +1028,16 @@ export default function SalesPage() {
                   </>
                 )}
 
-                {/* Responsibility Tab */}
+                {/* By User Tab */}
                 {activeTab === 'by-user' && (
                   <>
                     {salesByUser.length > 0 ? (
                       <UserSalesView users={salesByUser} onSelectSale={setSelectedSale} startDate={startDate} endDate={endDate} />
                     ) : (
                       <div className="text-center py-12">
-                        <p className="text-gray-500 text-lg">No sales found</p>
+                        <p className="text-gray-500 text-lg">No cashier sales found</p>
                         <p className="text-gray-400 text-sm mt-2">
-                          Sales responsibility breakdown will appear here
+                          Sales by cashier will appear here
                         </p>
                       </div>
                     )}

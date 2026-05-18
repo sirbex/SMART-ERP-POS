@@ -33,6 +33,7 @@ module.exports = {
     'src/tests/accounting-integrity\\.test\\.ts',
     'src/rbac/test\\.ts',
     'src/modules/inventory/stockCount\\.test\\.ts',
+    'src/tests/supplierCnDnProof\\.test\\.ts',
   ],
   setupFilesAfterEnv: ['<rootDir>/src/test/setup.ts'],
   globals: {

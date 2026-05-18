@@ -626,9 +626,9 @@ const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'SALES_BY_CASHIER',
     label: 'Sales by Cashier',
-    description: 'Sales performance breakdown by user/cashier',
+    description: 'Sale line accountability report — who ordered and who received payment',
     requiresDateRange: true,
-    supportsFilters: ['userId'],
+    supportsFilters: ['cashierId', 'orderedById', 'productId'],
     category: 'Sales',
     icon: '👤',
   },
@@ -957,6 +957,15 @@ export default function ReportsPage() {
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
 
+  // Sales by Cashier filters
+  const [sbcCashierId, setSbcCashierId] = useState<string>('');
+  const [sbcOrderedById, setSbcOrderedById] = useState<string>('');
+  const [sbcProductId, setSbcProductId] = useState<string>('');
+  const [sbcUsersList, setSbcUsersList] = useState<Array<{ id: string; full_name: string }>>([]);
+  const [sbcUsersLoading, setSbcUsersLoading] = useState(false);
+  const [sbcProductsList, setSbcProductsList] = useState<Array<{ id: string; name: string }>>([]);
+  const [sbcProductsLoading, setSbcProductsLoading] = useState(false);
+
   // Fetch customers when customer reports are selected
   useEffect(() => {
     if (selectedReport === 'CUSTOMER_PURCHASE_HISTORY' || selectedReport === 'CUSTOMER_ACCOUNT_STATEMENT' || selectedReport === 'AR_LEDGER') {
@@ -1014,6 +1023,42 @@ export default function ReportsPage() {
         })
         .catch(() => { /* categories are optional, silently fail */ })
         .finally(() => setCategoriesLoading(false));
+    }
+  }, [selectedReport]);
+
+  // Fetch users list for Sales by Cashier filters
+  useEffect(() => {
+    if (selectedReport === 'SALES_BY_CASHIER') {
+      setSbcUsersLoading(true);
+      const token = localStorage.getItem('auth_token');
+      api.get('/users', {
+        params: { limit: 200, is_active: true },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+        .then(res => {
+          const rows = res.data?.data?.data || res.data?.data || [];
+          setSbcUsersList(Array.isArray(rows) ? rows.map((u: Record<string, unknown>) => ({
+            id: String(u.id),
+            full_name: String(u.full_name || u.fullName || u.name || ''),
+          })) : []);
+        })
+        .catch(() => { /* silently fail */ })
+        .finally(() => setSbcUsersLoading(false));
+
+      setSbcProductsLoading(true);
+      api.get('/products', {
+        params: { limit: 1000, is_active: true },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+        .then(res => {
+          const rows = res.data?.data?.data || res.data?.data || [];
+          setSbcProductsList(Array.isArray(rows) ? rows.map((p: Record<string, unknown>) => ({
+            id: String(p.id),
+            name: String(p.name || p.productName || ''),
+          })) : []);
+        })
+        .catch(() => { /* silently fail */ })
+        .finally(() => setSbcProductsLoading(false));
     }
   }, [selectedReport]);
 
@@ -1110,6 +1155,10 @@ export default function ReportsPage() {
         if (status) params.status = status;
       } else if (selectedReport === 'SALES_BY_CATEGORY') {
         if (categoryFilter) params.category = categoryFilter;
+      } else if (selectedReport === 'SALES_BY_CASHIER') {
+        if (sbcCashierId) params.cashierId = sbcCashierId;
+        if (sbcOrderedById) params.orderedById = sbcOrderedById;
+        if (sbcProductId) params.productId = sbcProductId;
       }
 
       const { data: result } = await api.post('/reports/generate', params);
@@ -1753,6 +1802,72 @@ export default function ReportsPage() {
             </select>
           </div>
         )}
+
+        {/* Sales by Cashier — Cashier filter */}
+        {selectedReportOption?.supportsFilters.includes('cashierId') && (
+          <div>
+            <label htmlFor="sbcCashier" className="block text-sm font-semibold text-gray-700 mb-2">
+              Cashier (received payment)
+            </label>
+            <select
+              id="sbcCashier"
+              value={sbcCashierId}
+              onChange={(e) => setSbcCashierId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              aria-label="Filter by cashier"
+              disabled={sbcUsersLoading}
+            >
+              <option value="">{sbcUsersLoading ? 'Loading...' : '-- All Cashiers --'}</option>
+              {sbcUsersList.map((u) => (
+                <option key={u.id} value={u.id}>{u.full_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Sales by Cashier — Ordered By filter */}
+        {selectedReportOption?.supportsFilters.includes('orderedById') && (
+          <div>
+            <label htmlFor="sbcOrderedBy" className="block text-sm font-semibold text-gray-700 mb-2">
+              Ordered By (created the order)
+            </label>
+            <select
+              id="sbcOrderedBy"
+              value={sbcOrderedById}
+              onChange={(e) => setSbcOrderedById(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              aria-label="Filter by order creator"
+              disabled={sbcUsersLoading}
+            >
+              <option value="">{sbcUsersLoading ? 'Loading...' : '-- All Users --'}</option>
+              {sbcUsersList.map((u) => (
+                <option key={u.id} value={u.id}>{u.full_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Sales by Cashier — Product filter */}
+        {selectedReportOption?.supportsFilters.includes('productId') && (
+          <div>
+            <label htmlFor="sbcProduct" className="block text-sm font-semibold text-gray-700 mb-2">
+              Product
+            </label>
+            <select
+              id="sbcProduct"
+              value={sbcProductId}
+              onChange={(e) => setSbcProductId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              aria-label="Filter by product"
+              disabled={sbcProductsLoading}
+            >
+              <option value="">{sbcProductsLoading ? 'Loading...' : '-- All Products --'}</option>
+              {sbcProductsList.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
     );
   };
@@ -1938,8 +2053,8 @@ export default function ReportsPage() {
             )}
           </div>
         ) : (
-          /* Standard Summary Statistics for Other Reports (skip PROFIT_LOSS - has custom renderer) */
-          reportData.reportType !== 'PROFIT_LOSS' && reportData.summary && (
+          /* Standard Summary Statistics for Other Reports (skip PROFIT_LOSS, SALES_BY_CASHIER - have custom renderers) */
+          reportData.reportType !== 'PROFIT_LOSS' && reportData.reportType !== 'SALES_BY_CASHIER' && reportData.summary && (
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="bg-gradient-to-r from-purple-500 to-purple-600 px-4 sm:px-6 py-3">
                 <h4 className="text-base sm:text-lg font-semibold text-white">📊 Summary Statistics</h4>
@@ -2765,8 +2880,8 @@ export default function ReportsPage() {
             )}
           </div>
         ) : (
-          /* Standard Data Table for Other Reports (skip PROFIT_LOSS - has custom renderer) */
-          reportData.reportType !== 'PROFIT_LOSS' && reportData.data && reportData.data.length > 0 && (
+          /* Standard Data Table for Other Reports (skip PROFIT_LOSS, SALES_BY_CASHIER - have custom renderers) */
+          reportData.reportType !== 'PROFIT_LOSS' && reportData.reportType !== 'SALES_BY_CASHIER' && reportData.data && reportData.data.length > 0 && (
             <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
               <div className="bg-gradient-to-r from-green-500 to-green-600 px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <h4 className="text-base sm:text-lg font-semibold text-white">📋 Detailed Data</h4>
@@ -2970,6 +3085,81 @@ export default function ReportsPage() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════ SALES BY CASHIER — line-level accountability ═══════════ */}
+        {reportData.reportType === 'SALES_BY_CASHIER' && (
+          <div className="space-y-4">
+            {/* Summary cards */}
+            {reportData.summary && (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                {[
+                  { label: 'Line Items',    value: String(reportData.summary.totalLines   ?? 0),                      color: 'text-blue-600' },
+                  { label: 'Sales',         value: String(reportData.summary.totalSales   ?? 0),                      color: 'text-indigo-600' },
+                  { label: 'Total Amount',  value: formatCurrency(Number(reportData.summary.totalAmount ?? 0)),        color: 'text-green-600' },
+                  { label: 'Cashiers',      value: String(reportData.summary.uniqueCashiers ?? 0),                    color: 'text-purple-600' },
+                  { label: 'Ordered By',    value: String(reportData.summary.uniqueOrderedBy ?? 0),                   color: 'text-orange-600' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="bg-white rounded-xl shadow border border-gray-200 p-4 text-center">
+                    <div className={`text-xl font-bold ${color}`}>{value}</div>
+                    <div className="text-xs text-gray-500 mt-1">{label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Detail table */}
+            <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 sm:px-6 py-3 flex items-center justify-between">
+                <h4 className="text-base sm:text-lg font-semibold text-white">👤 Sales by Cashier — Detail</h4>
+                <span className="text-blue-100 text-xs sm:text-sm">{(reportData.data || []).length} line items</span>
+              </div>
+              {(!reportData.data || reportData.data.length === 0) ? (
+                <div className="p-8 text-center text-gray-500">No sales found for the selected filters.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-full">
+                    <thead className="bg-gray-100 border-b-2 border-gray-300">
+                      <tr>
+                        {['Sale #', 'Date', 'Product', 'Qty', 'Amount', 'Ordered By', 'Cashier', 'Payment'].map(h => (
+                          <th key={h} className="px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {(reportData.data as Record<string, unknown>[]).map((row, idx) => (
+                        <tr key={idx} className="hover:bg-blue-50 transition-colors">
+                          <td className="px-3 py-2 text-xs font-mono font-semibold text-indigo-700 whitespace-nowrap">{String(row.sale_number ?? '')}</td>
+                          <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{formatDisplayDate(String(row.sale_date ?? ''))}</td>
+                          <td className="px-3 py-2 text-xs text-gray-900">{String(row.product_name ?? '')}</td>
+                          <td className="px-3 py-2 text-xs text-right text-gray-700">{Number(row.quantity).toLocaleString()}</td>
+                          <td className="px-3 py-2 text-xs text-right font-semibold text-green-700 whitespace-nowrap">{formatCurrency(Number(row.amount ?? 0))}</td>
+                          <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{String(row.ordered_by ?? '')}</td>
+                          <td className="px-3 py-2 text-xs text-gray-700 whitespace-nowrap">{String(row.cashier ?? '')}</td>
+                          <td className="px-3 py-2 text-xs whitespace-nowrap">
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                              {String(row.payment_method ?? '')}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    {reportData.data.length > 0 && (
+                      <tfoot className="bg-gray-50 border-t-2 border-gray-300">
+                        <tr className="font-bold">
+                          <td colSpan={4} className="px-3 py-2 text-xs text-gray-700 uppercase">Total</td>
+                          <td className="px-3 py-2 text-xs text-right text-green-700 whitespace-nowrap">
+                            {formatCurrency(Number(reportData.summary?.totalAmount ?? 0))}
+                          </td>
+                          <td colSpan={3} />
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         )}

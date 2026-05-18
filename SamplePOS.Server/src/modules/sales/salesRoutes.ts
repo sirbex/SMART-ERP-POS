@@ -450,42 +450,19 @@ export const salesController = {
     });
   },
 
-    /**
-     * Sales Responsibility Report — who ordered vs who handled cash
-     * GET /api/sales/reports/responsibility
-     * Query: startDate, endDate, cashierId, orderedById, groupBy (detail|cashier|orderedBy)
-     */
-  async getSalesResponsibility(req: Request, res: Response): Promise<void> {
+  /**
+   * Get sales grouped by cashier (server-side aggregation)
+   */
+  async getSalesByCashier(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
     const { startDate, endDate } = SalesSummaryQuerySchema.parse(req.query);
-    const { cashierId, orderedById, groupBy } = req.query as {
-      cashierId?: string;
-      orderedById?: string;
-      groupBy?: 'detail' | 'cashier' | 'orderedBy';
-    };
 
-    const filters: {
-      startDate?: string;
-      endDate?: string;
-      cashierId?: string;
-      orderedById?: string;
-      groupBy?: 'detail' | 'cashier' | 'orderedBy';
-    } = {};
+    const filters: { startDate?: string; endDate?: string; userId?: string } = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
-    if (groupBy && ['detail', 'cashier', 'orderedBy'].includes(groupBy)) {
-      filters.groupBy = groupBy;
-    }
+    if (req.user?.role === 'CASHIER') filters.userId = req.user.id;
 
-    // SECURITY: CASHIER can only see their own responsibility data
-    if (req.user?.role === 'CASHIER') {
-      filters.cashierId = req.user.id;
-    } else {
-      if (cashierId) filters.cashierId = cashierId;
-      if (orderedById) filters.orderedById = orderedById;
-    }
-
-    const result = await salesService.getSalesResponsibility(pool, filters);
+    const result = await salesService.getSalesByCashier(pool, filters);
 
     res.json({
       success: true,
@@ -707,9 +684,9 @@ salesRoutes.get(
   asyncHandler(salesController.getSalesSummaryByDate)
 );
 salesRoutes.get(
-  '/reports/responsibility',
+  '/reports/by-cashier',
   authenticate,
-  asyncHandler(salesController.getSalesResponsibility)
+  asyncHandler(salesController.getSalesByCashier)
 );
 
 // Void sale - requires sales.void permission (with audit trail)

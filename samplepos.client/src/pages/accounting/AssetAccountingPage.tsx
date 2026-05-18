@@ -375,7 +375,7 @@ export default function AssetAccountingPage() {
             { id: 'register' as TabId, label: 'Asset Register', icon: FileText, count: assetList.length },
             { id: 'categories' as TabId, label: 'Asset Classes', icon: Settings, count: cats.length },
             { id: 'depreciation' as TabId, label: 'Depreciation', icon: TrendingDown },
-          { id: 'corrections' as TabId, label: 'Cutover Fix', icon: ShieldAlert },
+            { id: 'corrections' as TabId, label: 'Cutover Fix', icon: ShieldAlert },
           ]).map(tab => (
             <button
               key={tab.id}

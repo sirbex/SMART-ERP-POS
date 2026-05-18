@@ -111,7 +111,10 @@ const SalesDetailsQuerySchema = z.object({
 const SalesByCashierQuerySchema = z.object({
   start_date: z.string().optional(),
   end_date: z.string().optional(),
-  user_id: z.string().optional(),
+  user_id: z.string().optional(),     // legacy compat
+  cashier_id: z.string().optional(),
+  ordered_by_id: z.string().optional(),
+  product_id: z.string().optional(),
   format: z.string().optional(),
 });
 const OrdersReportQuerySchema = z.object({
@@ -3539,65 +3542,40 @@ export const reportsController = {
    * GET /api/reports/sales-by-cashier
    */
   async getSalesByCashierReport(req: Request, res: Response, pool: Pool) {
-    const { start_date, end_date, user_id, format } = SalesByCashierQuerySchema.parse(req.query);
+    const { start_date, end_date, user_id, cashier_id, ordered_by_id, product_id, format } =
+      SalesByCashierQuerySchema.parse(req.query);
     const userId = req.user?.id;
 
-    const filters: Record<string, string | number | Date | undefined> = {};
+    const filters: Record<string, string | undefined> = {};
     if (start_date) filters.startDate = start_date;
     if (end_date) filters.endDate = end_date;
-    if (user_id) filters.userId = user_id;
+    if (cashier_id) filters.cashierId = cashier_id;
+    else if (user_id) filters.userId = user_id;   // legacy compat
+    if (ordered_by_id) filters.orderedById = ordered_by_id;
+    if (product_id) filters.productId = product_id;
 
     // Import salesService
     const { salesService } = await import('../sales/salesService.js');
-    const result = await salesService.getSalesResponsibility(pool, { ...filters, groupBy: 'cashier' as const });
+    const result = await salesService.getSalesByCashier(pool, filters);
 
-    // Calculate summary using Decimal.js
-    // NOTE: Repository returns snake_case field names from PostgreSQL
+    // Summary over line-level rows
     const summary =
       result.length > 0
         ? {
-          totalTransactions: result.reduce(
-            (sum: number, item: Record<string, unknown>) =>
-              sum + parseInt(String(item.total_transactions ?? '0'), 10),
-            0
-          ),
-          totalRevenue: result
+          totalLines: result.length,
+          totalSales: [...new Set(result.map((r: Record<string, unknown>) => r.sale_number))].length,
+          totalAmount: result
             .reduce(
-              (sum: Decimal, item: Record<string, unknown>) =>
-                sum.plus(Number(item.total_revenue) || 0),
+              (sum: Decimal, r: Record<string, unknown>) =>
+                sum.plus(Number(r.amount) || 0),
               new Decimal(0)
             )
             .toDecimalPlaces(2)
             .toNumber(),
-          totalProfit: result
-            .reduce(
-              (sum: Decimal, item: Record<string, unknown>) =>
-                sum.plus(Number(item.total_profit) || 0),
-              new Decimal(0)
-            )
-            .toDecimalPlaces(2)
-            .toNumber(),
-          averageTransactionValue:
-            result.length > 0
-              ? result
-                .reduce(
-                  (sum: Decimal, item: Record<string, unknown>) =>
-                    sum.plus(Number(item.avg_transaction_value) || 0),
-                  new Decimal(0)
-                )
-                .dividedBy(result.length)
-                .toDecimalPlaces(2)
-                .toNumber()
-              : 0,
-          totalCashiers: result.length,
+          uniqueCashiers: [...new Set(result.map((r: Record<string, unknown>) => r.cashier))].length,
+          uniqueOrderedBy: [...new Set(result.map((r: Record<string, unknown>) => r.ordered_by))].length,
         }
-        : {
-          totalTransactions: 0,
-          totalRevenue: 0,
-          totalProfit: 0,
-          averageTransactionValue: 0,
-          totalCashiers: 0,
-        };
+        : { totalLines: 0, totalSales: 0, totalAmount: 0, uniqueCashiers: 0, uniqueOrderedBy: 0 };
 
     // PDF export
     if (format === 'pdf') {
@@ -3622,63 +3600,38 @@ export const reportsController = {
 
       pdfGen.addSummaryCards([
         {
-          label: 'Total Revenue',
-          value: formatCurrencyPDF(summary.totalRevenue),
+          label: 'Total Amount',
+          value: formatCurrencyPDF(summary.totalAmount),
           color: PDFColors.success,
         },
         {
-          label: 'Total Transactions',
-          value: String(summary.totalTransactions),
+          label: 'Total Sales',
+          value: String(summary.totalSales),
           color: PDFColors.info,
         },
-        { label: 'Total Cashiers', value: String(summary.totalCashiers), color: PDFColors.primary },
+        { label: 'Line Items', value: String(summary.totalLines), color: PDFColors.primary },
         {
-          label: 'Avg Revenue/Cashier',
-          value: formatCurrencyPDF(summary.totalRevenue / summary.totalCashiers || 0),
+          label: 'Cashiers',
+          value: String(summary.uniqueCashiers),
           color: PDFColors.secondary,
         },
       ]);
 
       const columns: PDFTableColumn[] = [
-        { header: 'Cashier', key: 'fullName', width: 0.15 },
-        { header: 'Email', key: 'email', width: 0.12 },
-        { header: 'Role', key: 'role', width: 0.1 },
-        { header: 'Trans.', key: 'totalTransactions', width: 0.08 },
+        { header: 'Sale #',        key: 'sale_number',   width: 0.12 },
+        { header: 'Date',          key: 'sale_date',     width: 0.10 },
+        { header: 'Product',       key: 'product_name',  width: 0.22 },
+        { header: 'Qty',           key: 'quantity',      width: 0.07, align: 'right' },
         {
-          header: 'Revenue',
-          key: 'totalRevenue',
+          header: 'Amount',
+          key: 'amount',
           width: 0.12,
           align: 'right',
           format: (v) => formatCurrencyPDF(v),
         },
-        {
-          header: 'Cost',
-          key: 'totalCost',
-          width: 0.12,
-          align: 'right',
-          format: (v) => formatCurrencyPDF(v),
-        },
-        {
-          header: 'Profit',
-          key: 'totalProfit',
-          width: 0.12,
-          align: 'right',
-          format: (v) => formatCurrencyPDF(v),
-        },
-        {
-          header: 'Margin %',
-          key: 'profitMargin',
-          width: 0.1,
-          align: 'right',
-          format: (v) => v + '%',
-        },
-        {
-          header: 'Avg Trans.',
-          key: 'avgTransactionValue',
-          width: 0.09,
-          align: 'right',
-          format: (v) => formatCurrencyPDF(v),
-        },
+        { header: 'Ordered By',    key: 'ordered_by',    width: 0.15 },
+        { header: 'Cashier',       key: 'cashier',       width: 0.15 },
+        { header: 'Payment',       key: 'payment_method', width: 0.10 },
       ];
 
       pdfGen.addTable(columns, result);
@@ -4170,6 +4123,9 @@ export const reportsController = {
           start_date: params.startDate,
           end_date: params.endDate,
           user_id: params.userId,
+          cashier_id: params.cashierId,
+          ordered_by_id: params.orderedById,
+          product_id: params.productId,
           format: params.format,
         };
         return await reportsController.getSalesByCashierReport(modifiedReq, res, pool);
