@@ -25,10 +25,17 @@ BEGIN;
 ALTER TABLE sale_items
   ADD COLUMN IF NOT EXISTS refunded_qty DECIMAL(15, 4) NOT NULL DEFAULT 0;
 
--- Constraint: refunded_qty must be 0..quantity
-ALTER TABLE sale_items
-  ADD CONSTRAINT chk_sale_items_refunded_qty
-  CHECK (refunded_qty >= 0 AND refunded_qty <= quantity);
+-- Constraint: refunded_qty must be 0..quantity (idempotent)
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE table_name = 'sale_items' AND constraint_name = 'chk_sale_items_refunded_qty'
+  ) THEN
+    ALTER TABLE sale_items
+      ADD CONSTRAINT chk_sale_items_refunded_qty
+      CHECK (refunded_qty >= 0 AND refunded_qty <= quantity);
+  END IF;
+END $$;
 
 -- 2. Refund document header
 CREATE TABLE IF NOT EXISTS sale_refunds (
