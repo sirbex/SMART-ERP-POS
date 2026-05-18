@@ -37,6 +37,8 @@ RUN adduser -S nextjs -u 1001
 RUN chown -R nginx:nginx /usr/share/nginx/html
 RUN chown -R nginx:nginx /var/cache/nginx
 RUN chown -R nginx:nginx /etc/nginx/conf.d
+# nginx writes its PID here — must be writable by nginx user
+RUN touch /run/nginx.pid && chown nginx:nginx /run/nginx.pid
 
 # Switch to nginx user
 USER nginx
