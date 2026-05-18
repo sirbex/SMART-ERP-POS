@@ -241,9 +241,6 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
     data.sellingPrice || 0,
     data.isTaxable ?? false,
     data.taxRate ?? 0,
-    data.costingMethod || 'FIFO',
-    data.pricingFormula || null,
-    data.autoUpdatePrice ?? false,
     data.reorderLevel ?? 0,
     data.trackExpiry ?? false,
     data.minDaysBeforeExpirySale ?? 0,
@@ -257,11 +254,11 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   const sql = `INSERT INTO products (
       product_number, sku, barcode, name, description, category, generic_name,
       conversion_factor,
-      cost_price, selling_price, is_taxable, tax_rate, costing_method,
-      pricing_formula, auto_update_price, reorder_level, track_expiry, min_days_before_expiry_sale, is_active,
+      cost_price, selling_price, is_taxable, tax_rate,
+      reorder_level, track_expiry, min_days_before_expiry_sale, is_active,
       preferred_supplier_id, supplier_product_code, purchase_uom_id, lead_time_days
-  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-    RETURNING ${PRODUCT_RETURNING_COLUMNS}`;
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+    RETURNING id`;
 
   const result = await pool.query(sql, params);
   const product = result.rows[0];
@@ -284,7 +281,7 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
     data.pricingFormula || null, data.autoUpdatePrice ?? false]
   );
 
-  return product;
+  return (await findProductById(product.id, pool))!;
 }
 
 export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product | null> {
