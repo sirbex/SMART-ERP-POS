@@ -4,7 +4,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { ZodError } from 'zod';
 import logger from '../utils/logger.js';
-import { PostingGovernanceError } from '../services/postingGovernanceService.js';
+import { BusinessRuleException } from '../errors/BusinessRuleException.js';
 
 // Custom error class for application errors
 export class AppError extends Error {
@@ -140,17 +140,20 @@ export function errorHandler(
     return;
   }
 
-  // Handle PostingGovernanceError — structured accounting rule violation → 400
-  if (error instanceof PostingGovernanceError) {
-    // Strip the [CODE] prefix that super() prepended so the error field is clean
+  // Handle BusinessRuleException → HTTP 422 (covers PostingGovernanceError,
+  // BusinessRuleViolation, and any future subclass).
+  // Returning 422 signals a RULE violation, not a server crash (500).
+  if (error instanceof BusinessRuleException) {
+    // Strip the [CODE] prefix that PostingGovernanceError prepends to its message
     const cleanMessage = error.message.replace(/^\[[A-Z0-9_]+\]\s*/, '');
-    res.status(400).json({
+    const reason = (error.details.reason as string | undefined) ?? cleanMessage;
+    res.status(422).json({
       success: false,
       error: cleanMessage,
-      error_code: error.code,
+      error_code: error.error_code,
       details: {
-        ...(error.context ?? {}),
-        reason: cleanMessage,
+        ...error.details,
+        reason,
       },
       requestId: req.requestId,
     });

@@ -81,15 +81,17 @@ class ResilientApiClient {
                     }
                 }
 
-                // ── Business rule violations ──
+                // ── Business rule violations (HTTP 422 or known error_code prefixes) ──
                 const brvData = error.response?.data as Record<string, unknown> | undefined;
                 const brvCode = brvData?.error_code as string | undefined;
-                if (
-                  brvCode &&
-                  (brvCode.startsWith('GOV_RULE_') ||
-                    brvCode.startsWith('ACC_RULE_') ||
-                    brvCode.startsWith('INV_RULE_'))
-                ) {
+                const isBusinessRuleViolation =
+                  error.response?.status === 422 ||
+                  (brvCode &&
+                    (brvCode.startsWith('GOV_RULE_') ||
+                      brvCode.startsWith('ACC_RULE_') ||
+                      brvCode.startsWith('INV_RULE_') ||
+                      brvCode.startsWith('BR-')));
+                if (isBusinessRuleViolation) {
                   const details = brvData?.details as Record<string, unknown> | undefined;
                   const reason =
                     (details?.reason as string | undefined) ||
@@ -98,7 +100,7 @@ class ResilientApiClient {
                   toast.error('Action Not Allowed', {
                     description: reason,
                     duration: 8000,
-                    id: brvCode,
+                    id: brvCode ?? 'BUSINESS_RULE_VIOLATION',
                   });
                   return Promise.reject(new HandledApiError(reason));
                 }

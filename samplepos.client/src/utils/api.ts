@@ -167,16 +167,19 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // ── Business rule violations (GOV_RULE_*, ACC_RULE_*, INV_RULE_*) ──
+    // ── Business rule violations (HTTP 422 or known error_code prefixes) ──
+    // Covers: GOV_RULE_*, ACC_RULE_*, INV_RULE_*, BR-* and any future rule codes.
     // Auto-show a structured "Action Not Allowed" notification so every screen
     // inherits the behaviour without per-page catch blocks.
     const brvCode = error.response?.data?.error_code as string | undefined;
-    if (
-      brvCode &&
-      (brvCode.startsWith('GOV_RULE_') ||
-        brvCode.startsWith('ACC_RULE_') ||
-        brvCode.startsWith('INV_RULE_'))
-    ) {
+    const isBusinessRuleViolation =
+      error.response?.status === 422 ||
+      (brvCode &&
+        (brvCode.startsWith('GOV_RULE_') ||
+          brvCode.startsWith('ACC_RULE_') ||
+          brvCode.startsWith('INV_RULE_') ||
+          brvCode.startsWith('BR-')));
+    if (isBusinessRuleViolation) {
       const details = error.response?.data?.details as Record<string, unknown> | undefined;
       const reason =
         (details?.reason as string | undefined) ||
@@ -185,7 +188,7 @@ apiClient.interceptors.response.use(
       toast.error('Action Not Allowed', {
         description: reason,
         duration: 8000,
-        id: brvCode, // deduplicate: same rule won't stack multiple toasts
+        id: brvCode ?? 'BUSINESS_RULE_VIOLATION', // deduplicate: same rule won't stack multiple toasts
       });
       return Promise.reject(new HandledApiError(reason));
     }

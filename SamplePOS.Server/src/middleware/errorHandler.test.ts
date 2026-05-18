@@ -18,6 +18,7 @@ import {
     errorHandler,
 } from './errorHandler.js';
 import { PostingGovernanceError } from '../services/postingGovernanceService.js';
+import { BusinessRuleException } from '../errors/BusinessRuleException.js';
 
 describe('Error Classes', () => {
     describe('AppError', () => {
@@ -168,6 +169,7 @@ describe('PostingGovernanceError', () => {
         expect(err.code).toBe('GOV_RULE_A_NORMAL_BALANCE');
         expect(err.context).toEqual({ accountCode: '1000' });
         expect(err).toBeInstanceOf(Error);
+        expect(err).toBeInstanceOf(BusinessRuleException);
     });
 
     it('should prefix code into message so jest toThrow assertions work', () => {
@@ -181,7 +183,7 @@ describe('PostingGovernanceError', () => {
 
 describe('errorHandler middleware', () => {
     describe('PostingGovernanceError', () => {
-        it('should respond 400 with the GOV_RULE error_code', () => {
+    it('should respond 422 with the GOV_RULE error_code', () => {
             const err = new PostingGovernanceError(
                 'Account 1000 (Cash) is debit-normal. Manual credit not permitted.',
                 'GOV_RULE_A_NORMAL_BALANCE',
@@ -191,7 +193,7 @@ describe('errorHandler middleware', () => {
 
             errorHandler(err, makeReq(), res, jest.fn() as unknown as NextFunction);
 
-            expect(status).toHaveBeenCalledWith(400);
+            expect(status).toHaveBeenCalledWith(422);
             const payload = (json as jest.Mock).mock.calls[0][0] as Record<string, unknown>;
             expect(payload.success).toBe(false);
             expect(payload.error_code).toBe('GOV_RULE_A_NORMAL_BALANCE');

@@ -28,6 +28,7 @@
 
 import type pg from 'pg';
 import { AccountingCore, JournalLine, AccountingError } from './accountingCore.js';
+import { BusinessRuleException } from '../errors/BusinessRuleException.js';
 import { pool as globalPool } from '../db/pool.js';
 import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
@@ -545,6 +546,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
       costAmount: sale.costAmount
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record sale to GL', { error, sale });
     // CRITICAL: GL failure MUST throw to prevent sales without accounting entries
     // A sale without GL entries breaks double-entry accounting integrity
@@ -662,6 +664,7 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
       creditAccount: creditAccountCode
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record customer payment to GL', { error, payment });
     // CRITICAL: GL failure MUST throw to prevent payments without AR adjustment
     throw new Error(`GL posting failed for customer payment ${payment.paymentNumber}: ${(error instanceof Error ? error.message : String(error))}`);
@@ -749,6 +752,7 @@ export async function recordExpenseToGL(expense: ExpenseData, pool?: pg.Pool): P
       category: expense.categoryName
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record expense to GL', { error, expense });
     // CRITICAL: GL failure MUST throw to prevent expenses without accounting entries
     throw new Error(`GL posting failed for expense ${expense.expenseNumber}: ${(error instanceof Error ? error.message : String(error))}`);
@@ -857,6 +861,7 @@ export async function recordGoodsReceiptToGL(
       amount: gr.totalAmount
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record goods receipt to GL', { error, gr });
     // CRITICAL: GL failure MUST throw to prevent GRN without inventory/GRIR entries
     throw new Error(`GL posting failed for goods receipt ${gr.grNumber}: ${(error instanceof Error ? error.message : String(error))}`);
@@ -995,6 +1000,7 @@ export async function recordReturnGrnToGL(
       hasInvoice: data.hasInvoice ?? false,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record return GRN to GL', { error, data });
     throw new Error(`GL posting failed for return GRN ${data.returnGrnNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -1106,6 +1112,7 @@ export async function recordSupplierInvoiceToGL(
         varianceReason: data.varianceReason,
       });
     } catch (error: unknown) {
+      if (error instanceof BusinessRuleException) throw error;
       logger.error('Failed to record supplier invoice to GL (variance path)', { error, data });
       throw new Error(`[GL_ERROR] GL posting failed for supplier invoice ${data.invoiceNumber}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1152,6 +1159,7 @@ export async function recordSupplierInvoiceToGL(
       hasGrReference: data.hasGrReference,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record supplier invoice to GL', { error, data });
     throw new Error(`[GL_ERROR] GL posting failed for supplier invoice ${data.invoiceNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -1234,6 +1242,7 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, po
       supplierId: payment.supplierId
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record supplier payment to GL', { error, payment });
     // CRITICAL: GL failure MUST throw to prevent payments without AP adjustment.
     // Use [GL_ERROR] prefix so the error handler does not misclassify
@@ -1322,6 +1331,7 @@ export async function recordStockAdjustmentToGL(adjustment: StockAdjustmentData,
       value: adjustment.totalValue
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record stock adjustment to GL', { error, adjustment });
     // CRITICAL: GL failure MUST throw to prevent inventory changes without GL entries
     throw new Error(`GL posting failed for stock adjustment ${adjustment.adjustmentNumber}: ${(error instanceof Error ? error.message : String(error))}`);
@@ -1394,6 +1404,7 @@ export async function recordDeliveryChargeToGL(data: DeliveryChargeData, pool?: 
       deliveryFee: data.deliveryFee
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record delivery charge to GL', { error, data });
     throw new Error(`GL posting failed for delivery charge ${data.deliveryNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -1446,6 +1457,7 @@ export async function recordDeliveryCompletedToGL(data: DeliveryCompletedData, p
       totalCost: data.totalCost
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record delivery cost to GL', { error, data });
     throw new Error(`GL posting failed for delivery cost ${data.deliveryNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -1514,6 +1526,7 @@ export async function recordDeliveryNoteGoodsIssueToGL(
       totalCost: data.totalCost,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record DN goods issue to GL', { error, data });
     throw new Error(`GL posting failed for DN PGI ${data.deliveryNoteNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -1585,6 +1598,7 @@ export async function recordDeliveryNoteInvoiceToGL(
       totalAmount: data.totalAmount,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record DN invoice to GL', { error, data });
     throw new Error(`GL posting failed for DN invoice ${data.invoiceNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -1647,6 +1661,7 @@ export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool, txC
       logger.info('Sale GL already reversed (idempotent)', { saleId: data.saleId });
       return;
     }
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record sale void to GL', { error, data });
     throw new Error(`GL reversal failed for voided sale ${data.saleNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -1849,6 +1864,7 @@ export async function recordSaleRefundToGL(
       logger.info('Sale refund GL already posted (idempotent)', { refundId: data.refundId });
       return undefined;
     }
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record sale refund to GL', { error, data });
     throw new Error(
       `GL posting failed for refund ${data.refundNumber}: ${error instanceof Error ? error.message : String(error)}`
@@ -1929,6 +1945,7 @@ export async function recordCustomerDepositToGL(deposit: CustomerDepositData, po
       customerId: deposit.customerId,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record customer deposit to GL', { error, deposit });
     throw new Error(`GL posting failed for customer deposit ${deposit.depositNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -2008,6 +2025,7 @@ export async function recordDepositApplicationToGL(
       customerId: data.customerId,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record deposit application to GL', { error, data });
     throw new Error(
       `GL posting failed for deposit application ${data.depositNumber || data.depositId} → ${data.saleNumber}: ${error instanceof Error ? error.message : String(error)}`
@@ -2072,6 +2090,7 @@ export async function recordCustomerInvoiceToGL(invoice: CustomerInvoiceData, po
       totalAmount: invoice.totalAmount,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record customer invoice to GL', { error, invoice });
     throw new Error(`GL posting failed for invoice ${invoice.invoiceNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -2146,6 +2165,7 @@ export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool
       amount: payment.amount,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record invoice payment to GL', { error, payment });
     throw new Error(`GL posting failed for invoice payment ${payment.receiptNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -2252,6 +2272,7 @@ export async function recordStockMovementToGL(movement: StockMovementData, pool?
       value: movement.movementValue,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record stock movement to GL', { error, movement });
     throw new Error(`GL posting failed for stock movement ${movement.movementNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -2349,6 +2370,7 @@ export async function recordOpeningStockToGL(data: OpeningStockData, pool?: pg.P
       value: data.movementValue,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record opening stock to GL', { error, data });
     throw new Error(`GL posting failed for opening stock ${data.movementNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -2421,6 +2443,7 @@ export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData, po
       isPaid: expense.isPaidAtApproval,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record expense approval to GL', { error, expense });
     throw new Error(`GL posting failed for expense ${expense.expenseNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -2481,6 +2504,7 @@ export async function recordExpensePaymentToGL(payment: ExpensePaymentData, pool
       amount: payment.amount,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record expense payment to GL', { error, payment });
     throw new Error(`GL posting failed for expense payment ${payment.expenseNumber}: ${(error instanceof Error ? error.message : String(error))}`);
   }
@@ -2570,6 +2594,7 @@ export async function recordCustomerCreditNoteToGL(
       totalAmount: data.totalAmount,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record customer credit note to GL', { error, data });
     throw new Error(`GL posting failed for credit note ${data.noteNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -2635,6 +2660,7 @@ export async function recordCustomerDebitNoteToGL(
       totalAmount: data.totalAmount,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record customer debit note to GL', { error, data });
     throw new Error(`GL posting failed for debit note ${data.noteNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -2701,6 +2727,7 @@ export async function recordSupplierCreditNoteToGL(
       totalAmount: data.totalAmount,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record supplier credit note to GL', { error, data });
     throw new Error(`GL posting failed for supplier credit note ${data.noteNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -2772,6 +2799,7 @@ export async function recordSupplierDebitNoteToGL(
       totalAmount: data.totalAmount,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record supplier debit note to GL', { error, data });
     throw new Error(`GL posting failed for supplier debit note ${data.noteNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -2837,6 +2865,7 @@ export async function recordDownPaymentClearingToGL(data: DownPaymentClearingDat
       invoiceNumber: data.invoiceNumber,
     });
   } catch (error: unknown) {
+    if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record down payment clearing to GL', { error, data });
     throw new Error(`GL posting failed for clearing ${data.clearingNumber}: ${error instanceof Error ? error.message : String(error)}`);
   }

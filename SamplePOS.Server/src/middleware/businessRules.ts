@@ -4,6 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { BusinessRuleException } from '../errors/BusinessRuleException.js';
 import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
@@ -14,17 +15,22 @@ import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
 /**
- * Business rule violation error
+ * Business rule violation error — extends BusinessRuleException so the
+ * global handler returns HTTP 422 (not 500) for inventory/sales rule violations.
  */
-export class BusinessRuleViolation extends Error {
+export class BusinessRuleViolation extends BusinessRuleException {
   constructor(
-    public rule: string,
-    public details: string,
-    public code: string = 'BUSINESS_RULE_VIOLATION'
+    public readonly rule: string,
+    /** Human-readable description of the violation */
+    public readonly reason: string,
+    code: string = 'BUSINESS_RULE_VIOLATION'
   ) {
-    super(`Business Rule Violation: ${rule} - ${details}`);
+    super(`Business Rule Violation: ${rule} - ${reason}`, code, { rule, reason });
     this.name = 'BusinessRuleViolation';
   }
+
+  /** @deprecated use `error_code` — kept for backward compat with businessRuleErrorHandler */
+  get code(): string { return this.error_code; }
 }
 
 /**
@@ -980,22 +986,15 @@ export function businessRuleErrorHandler(
   next: NextFunction
 ): void {
   if (err instanceof BusinessRuleViolation) {
+    // Log with structured context, then delegate to globalErrorHandler
+    // which returns HTTP 422 for all BusinessRuleException subclasses.
     logger.warn('Business rule violation', {
       rule: err.rule,
       code: err.code,
-      details: err.details,
+      reason: err.reason,
       path: req.path,
       method: req.method,
     });
-
-    res.status(400).json({
-      success: false,
-      error: err.details,
-      code: err.code,
-      rule: err.rule,
-      type: 'BUSINESS_RULE_VIOLATION',
-    });
-    return;
   }
 
   next(err);

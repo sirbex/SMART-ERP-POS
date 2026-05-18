@@ -22,6 +22,7 @@
  */
 
 import type pg from 'pg';
+import { BusinessRuleException } from '../errors/BusinessRuleException.js';
 
 // =============================================================================
 // POSTING SOURCE TYPE
@@ -91,17 +92,26 @@ export interface GovernanceJournalRequest {
 /**
  * Standalone error class — does NOT extend AccountingError to avoid circular deps.
  * accountingCore imports this file; this file must NOT import accountingCore.
+ *
+ * Extends BusinessRuleException so the global handler returns HTTP 422 (not 500)
+ * and the frontend can distinguish "rule violated" from "server crashed".
  */
-export class PostingGovernanceError extends Error {
+export class PostingGovernanceError extends BusinessRuleException {
     constructor(
         message: string,
+        /** GOV_RULE_* code — kept as `code` for backward-compat with existing call sites */
         public readonly code: string,
-        public readonly context?: Record<string, unknown>
+        context: Record<string, unknown> = {}
     ) {
-        // Include code in message so Jest toThrow('CODE') assertions work
-        super(`[${code}] ${message}`);
+        // Include [CODE] in message so Jest toThrow('CODE') assertions still work
+        super(`[${code}] ${message}`, code, { ...context, reason: message });
         this.name = 'PostingGovernanceError';
+        // Keep context as own property so tests that check err.context still pass
+        Object.defineProperty(this, 'context', { value: context, enumerable: true });
     }
+
+    /** @deprecated access this.details instead — kept for backward compat */
+    declare readonly context: Record<string, unknown>;
 }
 
 // =============================================================================
