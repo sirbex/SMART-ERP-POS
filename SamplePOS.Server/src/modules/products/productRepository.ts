@@ -536,8 +536,8 @@ export async function bulkUpsertForImport(
     const r = rows[i];
     placeholders.push(
       `($${idx}, $${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, $${idx + 5}, $${idx + 6},
-        $${idx + 7}, $${idx + 8}, $${idx + 9}, $${idx + 10}, $${idx + 11}, $${idx + 12},
-        $${idx + 13}, $${idx + 14}, $${idx + 15}, $${idx + 16}, $${idx + 17}, $${idx + 18})`
+        $${idx + 7}, $${idx + 8}, $${idx + 9}, $${idx + 10}, $${idx + 11},
+        $${idx + 12}, $${idx + 13}, $${idx + 14}, $${idx + 15})`
     );
     values.push(
       productNumbers[i],
@@ -552,15 +552,12 @@ export async function bulkUpsertForImport(
       r.sellingPrice ?? 0,
       r.isTaxable ?? false,
       r.taxRate ?? 0,
-      r.costingMethod || 'FIFO',
-      r.pricingFormula || null,
-      r.autoUpdatePrice ?? false,
       r.reorderLevel ?? 0,
       r.trackExpiry ?? false,
       r.minDaysBeforeExpirySale ?? 0,
       r.isActive ?? true
     );
-    idx += 19;
+    idx += 16;
   }
 
   let conflictClause: string;
@@ -576,9 +573,6 @@ export async function bulkUpsertForImport(
       selling_price = EXCLUDED.selling_price,
       is_taxable = EXCLUDED.is_taxable,
       tax_rate = EXCLUDED.tax_rate,
-      costing_method = EXCLUDED.costing_method,
-      pricing_formula = EXCLUDED.pricing_formula,
-      auto_update_price = EXCLUDED.auto_update_price,
       reorder_level = EXCLUDED.reorder_level,
       track_expiry = EXCLUDED.track_expiry,
       min_days_before_expiry_sale = EXCLUDED.min_days_before_expiry_sale,
@@ -591,8 +585,7 @@ export async function bulkUpsertForImport(
     INSERT INTO products (
       product_number, sku, barcode, name, description, category, generic_name,
       conversion_factor, cost_price, selling_price,
-      is_taxable, tax_rate, costing_method,
-      pricing_formula, auto_update_price,
+      is_taxable, tax_rate,
       reorder_level, track_expiry, min_days_before_expiry_sale, is_active
     ) VALUES ${placeholders.join(', ')}
     ${conflictClause}
