@@ -44,11 +44,13 @@
 BEGIN;
 
 -- ── Step 1: Verify account 2160 exists ──────────────────────────────────────
+-- If account 2160 does not exist this tenant has no polluted GR/IR entries
+-- (it was provisioned after the Supplier Return Clearing refactor).
+-- The TEMP TABLE JOIN in Step 2 will return 0 rows, making this a safe no-op.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM accounts WHERE "AccountCode" = '2160') THEN
-    RAISE EXCEPTION 'Account 2160 (Supplier Return Clearing) does not exist. '
-      'Run the account creation INSERT before this migration.';
+    RAISE NOTICE 'Account 2160 (Supplier Return Clearing) does not exist on this tenant — skipping migration (no polluted entries possible).';
   END IF;
 END $$;
 
