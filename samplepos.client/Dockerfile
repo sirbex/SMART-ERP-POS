@@ -1,13 +1,17 @@
 # Phase 6: Frontend Dockerfile
+# Build context must be the repo root so shared/ is accessible as ../shared/
 
 FROM node:22-alpine AS base
 
 # Build stage
 FROM base AS builder
-WORKDIR /app
-COPY package.json package-lock.json* ./
+# Use /app/samplepos.client as WORKDIR so ../shared resolves to /app/shared/
+WORKDIR /app/samplepos.client
+COPY samplepos.client/package.json samplepos.client/package-lock.json* ./
 RUN npm install --no-audit --no-fund
-COPY . .
+COPY samplepos.client/ .
+# Place shared/ at ../shared/ relative to the frontend workdir
+COPY shared/ /app/shared/
 RUN npm run build
 
 # Production image with nginx
@@ -18,10 +22,10 @@ WORKDIR /usr/share/nginx/html
 RUN rm -rf ./*
 
 # Copy static assets from builder stage
-COPY --from=builder /app/dist .
+COPY --from=builder /app/samplepos.client/dist .
 
 # Copy nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY samplepos.client/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Add nginx user
 RUN addgroup -g 1001 -S nodejs

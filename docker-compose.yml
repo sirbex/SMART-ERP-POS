@@ -113,8 +113,8 @@ services:
   # Frontend (React + Vite)
   frontend:
     build:
-      context: ./samplepos.client
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: samplepos.client/Dockerfile
     container_name: samplepos-frontend
     restart: unless-stopped
     environment:
