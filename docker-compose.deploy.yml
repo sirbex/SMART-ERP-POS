@@ -66,13 +66,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
       PORT: 3001
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     networks:
       - app-network
+      - samplepos-network
     volumes:
       - ./uploads:/app/uploads
       - ./logs:/app/logs
@@ -127,3 +123,6 @@ volumes:
 networks:
   app-network:
     driver: bridge
+  samplepos-network:
+    external: true
+    name: smarterp_samplepos-network
