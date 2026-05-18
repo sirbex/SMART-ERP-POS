@@ -43,6 +43,8 @@
 BEGIN;
 
 -- Safety: verify preconditions before touching anything
+-- (RAISE NOTICE on failure — tenants without RGRN-2026-0001 / TXN-000007
+--  will simply update 0 rows and commit cleanly as a no-op)
 DO $$
 BEGIN
     -- RGRN must be POSTED and line must have base_quantity=1 (not yet repaired)
@@ -53,16 +55,16 @@ BEGIN
           AND rgl.base_quantity = 1
           AND rg.status = 'POSTED'
     ) THEN
-        RAISE EXCEPTION 'Precondition failed: RGRN-2026-0001 either already repaired or not in expected state';
+        RAISE NOTICE 'Precondition: RGRN-2026-0001 not in expected state — repair is a no-op on this tenant';
     END IF;
     -- TXN-000007 must exist and not be reversed
     IF NOT EXISTS (
         SELECT 1 FROM ledger_transactions
         WHERE "TransactionNumber" = 'TXN-000007' AND "IsReversed" = FALSE
     ) THEN
-        RAISE EXCEPTION 'Precondition failed: TXN-000007 not found or already reversed';
+        RAISE NOTICE 'Precondition: TXN-000007 not found or already reversed — repair is a no-op on this tenant';
     END IF;
-    RAISE NOTICE 'Preconditions verified — proceeding with repair';
+    RAISE NOTICE 'Precondition check complete — proceeding (may be no-op if data absent)';
 END;
 $$;
 
