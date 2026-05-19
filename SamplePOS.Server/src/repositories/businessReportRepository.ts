@@ -162,8 +162,10 @@ export async function getCostAndStock(
       a."AccountName"  AS account_name,
       COUNT(le."Id")::integer AS entry_count,
       ROUND(COALESCE(SUM(
+        -- EXPENSE accounts (5110, 5120, 5130, 5000): positive = a cost
+        -- INCOME accounts (4110 overage): negated → negative = a gain that offsets cost
         CASE WHEN a."NormalBalance" = 'DEBIT' THEN le."DebitAmount" - le."CreditAmount"
-             ELSE le."CreditAmount" - le."DebitAmount"
+             ELSE -(le."CreditAmount" - le."DebitAmount")
         END
       ), 0)::numeric, 2) AS total_amount
     FROM ledger_entries le
@@ -368,8 +370,11 @@ export async function getSummaryTotals(
   const stockAdjQuery = `
     SELECT
       ROUND(COALESCE(SUM(
+        -- Expense accounts (5110, 5120, 5130): positive = stock loss
+        -- Income account (4110 overage): negated → negative = stock gain
+        -- Net result: positive = net stock cost, negative = net stock gain
         CASE WHEN a."NormalBalance" = 'DEBIT' THEN le."DebitAmount" - le."CreditAmount"
-             ELSE le."CreditAmount" - le."DebitAmount"
+             ELSE -(le."CreditAmount" - le."DebitAmount")
         END
       ), 0)::numeric, 2) AS total_stock_adjustments
     FROM ledger_entries le
