@@ -126,7 +126,7 @@ export async function getBusinessPerformanceReport(
     // Section 2 uses the canonical reportsRepository.getSalesByCategory (live transaction tables)
     const [moneyInRows, revRows, costRows, expRows, supplierPayRows, totals, depositSummary] = await Promise.all([
       repo.getMoneyIn(filters, pool),
-      reportsRepository.getSalesByCategory(globalPool, {
+      reportsRepository.getSalesByCategory(pool as Pool, {
         startDate: filters.startDate ?? '',
         endDate: filters.endDate ?? '',
       }),
