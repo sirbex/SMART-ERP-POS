@@ -2596,18 +2596,8 @@ export default function POSPage() {
       return;
     }
 
-    // TIMEZONE STRATEGY: Keep date as string, no conversion
-    let formattedSaleDate: string | undefined = undefined;
-    if (saleDate) {
-      try {
-        formattedSaleDate = saleDate;
-      } catch (error) {
-        isSubmittingRef.current = false;
-        setIsProcessingSale(false);
-        alert('Invalid date format. Please check the sale date.');
-        return;
-      }
-    }
+    // TIMEZONE STRATEGY: Send YYYY-MM-DD string as-is (DATE column, no conversion)
+    const formattedSaleDate: string | undefined = saleDate || undefined;
 
     // Log calculation breakdown for debugging
     console.log('💰 Sale Calculation Breakdown:', {
@@ -4350,10 +4340,10 @@ export default function POSPage() {
                     Sale Date
                   </label>
                   <input
-                    type="datetime-local"
+                    type="date"
                     value={saleDate}
                     onChange={(e) => setSaleDate(e.target.value)}
-                    max={new Date().toISOString().slice(0, 16)} // Prevent future dates (OK - for input constraint only)
+                    max={new Date().toISOString().slice(0, 10)}
                     className="w-full px-2 sm:px-3 py-2 text-sm sm:text-base border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
                     aria-label="Sale date"
                   />

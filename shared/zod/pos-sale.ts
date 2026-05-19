@@ -38,7 +38,7 @@ export const POSSaleSchema = z.object({
   paymentLines: z.array(PaymentLineSchema).optional(), // New split payment support
   amountTendered: z.number().nonnegative().finite().optional(),
   changeGiven: z.number().nonnegative().finite().optional(),
-  saleDate: z.string().datetime().optional(), // ISO 8601 datetime for backdated sales
+  saleDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Sale date must be YYYY-MM-DD').optional(), // YYYY-MM-DD for backdated sales (DATE column — no time/timezone)
   notes: z.string().max(500).optional(),
   requiresApproval: z.boolean().optional(), // Flag for discount approvals or special pricing
   idempotencyKey: z.string().min(1).max(100).optional(), // Prevents duplicate sale creation
