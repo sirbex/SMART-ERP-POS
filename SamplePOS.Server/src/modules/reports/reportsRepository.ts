@@ -645,7 +645,7 @@ export const reportsRepository = {
       WITH filtered_sales AS (
         SELECT s.id, s.total_amount, s.discount_amount
         FROM sales s
-        WHERE s.sale_date >= $1 AND s.sale_date < $2
+        WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
           AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
           ${customerFilter}
           ${sessionFilter}
@@ -720,7 +720,7 @@ export const reportsRepository = {
         FROM sale_items si
         INNER JOIN sales s ON s.id = si.sale_id
         LEFT JOIN products p ON p.id = si.product_id
-        WHERE s.sale_date >= $1 AND s.sale_date < $2
+        WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
           AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
           ${customerFilter}
           ${sessionFilter}
@@ -733,7 +733,7 @@ export const reportsRepository = {
           SELECT s.id, s.sale_date, s.customer_id, s.payment_method,
                  s.total_amount, s.discount_amount
           FROM sales s
-          WHERE s.sale_date >= $1 AND s.sale_date < $2
+          WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
             AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
             ${customerFilter}
             ${sessionFilter}
@@ -1000,7 +1000,7 @@ export const reportsRepository = {
       FROM sale_items si
       INNER JOIN sales s ON s.id = si.sale_id
       LEFT JOIN products p ON p.id = si.product_id
-      WHERE s.sale_date >= $1 AND s.sale_date < $2
+      WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
         AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         ${categoryFilter}
       GROUP BY p.id, COALESCE(p.name, si.product_name, 'Custom Item'), p.sku
@@ -1208,7 +1208,7 @@ export const reportsRepository = {
           COUNT(*) as transaction_count,
           SUM(s.total_amount) as total_amount
         FROM sales s
-        WHERE s.sale_date >= $1 AND s.sale_date < $2
+        WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
           AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
           ${methodFilter}
         GROUP BY s.payment_method
@@ -1434,7 +1434,7 @@ export const reportsRepository = {
         SUM(s.total_cost) as cost_of_goods_sold,
         SUM(s.profit) as gross_profit
       FROM sales s
-      WHERE s.sale_date >= $1 AND s.sale_date < $2
+      WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
         AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
       GROUP BY ${dateGroup}
       ORDER BY period
@@ -1450,7 +1450,7 @@ export const reportsRepository = {
           ELSE 0
         END as gross_profit_margin
       FROM sales s
-      WHERE s.sale_date >= $1 AND s.sale_date < $2
+      WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
         AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
     `;
 
@@ -2181,7 +2181,7 @@ export const reportsRepository = {
             SUM(COALESCE(s.total_amount, 0) - COALESCE(s.amount_paid, 0)) as credit_created,
             AVG(COALESCE(s.total_amount, 0)) as average_sale_value
           FROM sales s
-          WHERE s.sale_date >= $1 AND s.sale_date < $2
+          WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
             AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
             AND s.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND s.payment_method = $3' : ''}
@@ -2293,7 +2293,7 @@ export const reportsRepository = {
             SUM(COALESCE(s.total_amount, 0) - COALESCE(s.amount_paid, 0)) as credit_created,
             COUNT(DISTINCT (s.sale_date AT TIME ZONE '${TZ}')::date) as sale_days
           FROM sales s
-          WHERE s.sale_date >= $1 AND s.sale_date < $2
+          WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
             AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
             AND s.payment_method IS NOT NULL
             ${options.paymentMethod ? 'AND s.payment_method = $3' : ''}
@@ -3486,7 +3486,7 @@ export const reportsRepository = {
       FROM sales s
       INNER JOIN sale_items si ON si.sale_id = s.id
       LEFT JOIN products p ON p.id = si.product_id
-      WHERE s.sale_date >= $1 AND s.sale_date < $2
+      WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
         AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         ${categoryFilter}
       GROUP BY COALESCE(p.category, 'Uncategorized')
@@ -3543,7 +3543,7 @@ export const reportsRepository = {
           AVG(s.total_amount) as average_transaction_value,
           COALESCE(SUM(s.discount_amount), 0) as total_discounts
         FROM sales s
-        WHERE s.sale_date >= $1 AND s.sale_date < $2
+        WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
           AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         GROUP BY s.payment_method
       ),
@@ -3598,7 +3598,7 @@ export const reportsRepository = {
         AVG(s.total_amount) as average_transaction_value,
         MODE() WITHIN GROUP (ORDER BY to_char(s.sale_date AT TIME ZONE '${TZ}', 'Day')) as peak_day
       FROM sales s
-      WHERE s.sale_date >= $1 AND s.sale_date < $2
+      WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
         AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
       GROUP BY EXTRACT(HOUR FROM s.sale_date AT TIME ZONE '${TZ}')
       ORDER BY hour
@@ -3661,7 +3661,7 @@ export const reportsRepository = {
           SUM(s.total_amount) as total_sales,
           COUNT(s.id) as transaction_count
         FROM sales s
-        WHERE s.sale_date >= $1 AND s.sale_date < $2
+        WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
           AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         GROUP BY ${groupByClause}
       ),
@@ -3671,7 +3671,7 @@ export const reportsRepository = {
           SUM(s.total_amount) as total_sales,
           COUNT(s.id) as transaction_count
         FROM sales s
-        WHERE s.sale_date >= $3 AND s.sale_date < $4
+        WHERE s.sale_date >= ($3::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($4::timestamptz AT TIME ZONE '${TZ}')::date
           AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
         GROUP BY ${groupByClause}
       )
@@ -3754,7 +3754,7 @@ export const reportsRepository = {
       LEFT JOIN invoices i ON i.sale_id = s.id
       LEFT JOIN sale_items si ON si.sale_id = s.id
       WHERE s.customer_id = $1
-        AND s.sale_date >= $2 AND s.sale_date < $3
+        AND s.sale_date >= ($2::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($3::timestamptz AT TIME ZONE '${TZ}')::date
       GROUP BY s.id, s.sale_number, s.sale_date, s.total_amount, s.amount_paid,
                s.payment_method, s.status, i.amount_paid, i.amount_due, i.status
       ORDER BY s.sale_date DESC
@@ -3808,7 +3808,7 @@ export const reportsRepository = {
           SUM(s.amount_paid) as cash_collected,
           SUM(s.total_amount - s.amount_paid) as credit_extended
         FROM sales s
-        WHERE s.sale_date >= $1 AND s.sale_date < $2
+        WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
           AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
       ),
       daily_collections AS (
