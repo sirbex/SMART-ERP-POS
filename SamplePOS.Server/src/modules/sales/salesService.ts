@@ -2244,7 +2244,8 @@ export const salesService = {
     voidedById: string,
     voidReason: string,
     approvedById?: string,
-    amountThreshold: number = 1000000
+    amountThreshold: number = 1000000,
+    forceAdminVoid: boolean = false
   ): Promise<{
     success: boolean;
     sale: Record<string, unknown>;
@@ -2272,17 +2273,37 @@ export const salesService = {
 
       const sale = saleResult.rows[0];
 
-      // ERP discipline: A completed POS sale is NEVER voided.
-      // Stock, invoice, and payment are already posted subsystems.
-      // Reverse via Return workflow (refundSale) which posts CREDIT_NOTE + RETURN_IN + refund payment.
+      // ERP discipline: A completed POS sale is NEVER voided — UNLESS an ADMIN explicitly
+      // requests a force void (e.g., to correct a pricing error). forceAdminVoid must be
+      // accompanied by an ADMIN-role voider; the reversal is full (GL + stock + invoice).
       if (sale.status === 'COMPLETED' || sale.status === 'PARTIALLY_RETURNED') {
-        throw new BusinessError(
-          `Cannot void a completed POS sale (status: ${sale.status}). ` +
-          `Stock, invoice, and payment are already posted. ` +
-          `Use Return to reverse this sale — this restores inventory, posts a Credit Note, and issues a refund.`,
-          'ERR_SALE_COMPLETED_NO_VOID',
-          { saleId, currentStatus: sale.status }
+        if (!forceAdminVoid) {
+          throw new BusinessError(
+            `Cannot void a completed POS sale (status: ${sale.status}). ` +
+            `Stock, invoice, and payment are already posted. ` +
+            `Use Return to reverse this sale — this restores inventory, posts a Credit Note, and issues a refund.`,
+            'ERR_SALE_COMPLETED_NO_VOID',
+            { saleId, currentStatus: sale.status }
+          );
+        }
+        // forceAdminVoid path: verify voider is ADMIN (not just MANAGER)
+        const voiderRole = await client.query(
+          `SELECT role FROM users WHERE id = $1`,
+          [voidedById]
         );
+        if (voiderRole.rows[0]?.role !== 'ADMIN') {
+          throw new BusinessError(
+            'Only an ADMIN can force-void a completed sale. Contact your system administrator.',
+            'ERR_SALE_FORCE_VOID_ADMIN_ONLY',
+            { saleId, voidedById }
+          );
+        }
+        logger.warn('ADMIN force-void of completed sale authorised', {
+          saleId,
+          saleNumber: sale.sale_number,
+          voidedById,
+          voidReason,
+        });
       }
       // Block void for already-reversed or already-voided statuses
       if (['VOID', 'REFUNDED', 'VOIDED_BY_RETURN'].includes(sale.status)) {

@@ -362,10 +362,8 @@ export default function POSPage() {
   const [showManagerApprovalDialog, setShowManagerApprovalDialog] = useState(false);
   const [pendingDiscount, setPendingDiscount] = useState<PendingDiscount | null>(null);
 
-  // Below-cost sale override state
+// Below-cost sale block state
   const [showBelowCostOverrideDialog, setShowBelowCostOverrideDialog] = useState(false);
-  const [belowCostOverridePin, setBelowCostOverridePin] = useState('');
-  const [belowCostOverrideError, setBelowCostOverrideError] = useState('');
   const [belowCostItems, setBelowCostItems] = useState<Array<{ name: string; unitPrice: number; costPrice: number }>>([]);
 
   // Hold/Resume Cart state
@@ -1361,28 +1359,12 @@ export default function POSPage() {
     }
   };
 
-  // Below-cost override: verify manager role then proceed with sale
-  const handleBelowCostOverrideApprove = async () => {
-    const role = currentUser?.role || 'CASHIER';
-    if (role !== 'ADMIN' && role !== 'MANAGER') {
-      setBelowCostOverrideError('Only ADMIN or MANAGER can override below-cost sales. Please call a manager.');
-      return;
-    }
-
-    if (!belowCostOverridePin || belowCostOverridePin.length < 4) {
-      setBelowCostOverrideError('Manager PIN required (minimum 4 digits)');
-      return;
-    }
-
-    // Override approved — close dialog and proceed with sale
+  // Remove below-cost items from cart
+  const handleRemoveBelowCostItems = () => {
+    setItems((prev) => prev.filter((item) => !(item.costPrice > 0 && item.unitPrice < item.costPrice)));
     setShowBelowCostOverrideDialog(false);
-    setBelowCostOverridePin('');
-    setBelowCostOverrideError('');
     setBelowCostItems([]);
-    toast.success('Below-cost override approved. Proceeding with sale.');
-
-    // Re-invoke finalize (now that the dialog is closed, the check won't re-trigger)
-    handleFinalizeSale();
+    toast('Below-cost items removed from cart. Please re-check prices before continuing.');
   };
 
   const handleRemoveDiscount = (type: 'cart' | 'item', itemIndex?: number) => {
@@ -2494,11 +2476,9 @@ export default function POSPage() {
     // Non-blocking for ADMIN/MANAGER — they see the warning but must PIN-confirm.
     // CASHIER is always blocked and must call a manager.
     const itemsBelowCost = items.filter((item) => item.costPrice > 0 && item.unitPrice < item.costPrice);
-    if (itemsBelowCost.length > 0 && !showBelowCostOverrideDialog) {
+    if (itemsBelowCost.length > 0) {
       setBelowCostItems(itemsBelowCost.map((i) => ({ name: i.name, unitPrice: i.unitPrice, costPrice: i.costPrice })));
       setShowBelowCostOverrideDialog(true);
-      setBelowCostOverridePin('');
-      setBelowCostOverrideError('');
       return;
     }
 
@@ -4572,82 +4552,67 @@ export default function POSPage() {
         reason={pendingDiscount?.reason || ''}
       />
 
-      {/* Below-Cost Sale Override Dialog */}
+      {/* Below-Cost Sale BLOCK Dialog — no override allowed */}
       {showBelowCostOverrideDialog && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          role="dialog"
+          role="alertdialog"
           aria-modal="true"
           aria-labelledby="below-cost-dialog-title"
+          aria-describedby="below-cost-dialog-desc"
         >
           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md mx-4">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="text-3xl" aria-hidden="true">⚠️</span>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="text-3xl" aria-hidden="true">🚫</span>
               <h2 id="below-cost-dialog-title" className="text-xl font-bold text-red-700">
-                Below-Cost Sale Detected
+                Sale Blocked — Items Below Cost
               </h2>
             </div>
-            <p className="text-sm text-gray-700 mb-3">
-              The following items are priced <strong>below their cost price</strong>. This sale
-              will result in a guaranteed loss. A manager must authorise to proceed.
+            <p id="below-cost-dialog-desc" className="text-sm text-gray-700 mb-3">
+              The following item{belowCostItems.length > 1 ? 's are' : ' is'} priced{' '}
+              <strong className="text-red-700">below cost price</strong> and{' '}
+              <strong>cannot be sold at a loss</strong>. You must fix the selling price or
+              remove the item before completing this sale.
             </p>
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 space-y-1 max-h-40 overflow-y-auto">
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 space-y-2 max-h-48 overflow-y-auto">
               {belowCostItems.map((item, i) => (
-                <div key={i} className="flex justify-between text-xs">
-                  <span className="font-medium text-gray-800 truncate mr-2">{item.name}</span>
-                  <span className="text-red-700 whitespace-nowrap shrink-0">
-                    {formatCurrency(item.unitPrice)} &lt; cost {formatCurrency(item.costPrice)}
-                  </span>
+                <div key={i} className="text-xs">
+                  <div className="font-semibold text-gray-900 truncate">{item.name}</div>
+                  <div className="flex justify-between mt-0.5">
+                    <span className="text-red-700">
+                      Selling price: <strong>{formatCurrency(item.unitPrice)}</strong>
+                    </span>
+                    <span className="text-gray-600">
+                      Cost price: <strong>{formatCurrency(item.costPrice)}</strong>
+                    </span>
+                  </div>
+                  <div className="text-red-600 font-medium">
+                    Loss per unit: {formatCurrency(item.costPrice - item.unitPrice)}
+                  </div>
                 </div>
               ))}
             </div>
-            {currentUser?.role === 'CASHIER' ? (
-              <div className="bg-yellow-50 border border-yellow-300 rounded-lg p-3 text-sm text-yellow-800 mb-4">
-                🔒 Your role (<strong>CASHIER</strong>) cannot override below-cost sales.
-                Please call a <strong>Manager</strong> or <strong>Admin</strong> to correct the price or authorise this sale.
-              </div>
-            ) : (
-              <>
-                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="below-cost-pin">
-                  Manager PIN (your 4+ digit PIN to authorise)
-                </label>
-                <input
-                  id="below-cost-pin"
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={8}
-                  autoFocus
-                  value={belowCostOverridePin}
-                  onChange={(e) => { setBelowCostOverridePin(e.target.value); setBelowCostOverrideError(''); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleBelowCostOverrideApprove(); }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 mb-1"
-                  placeholder="Enter PIN"
-                />
-              </>
-            )}
-            {belowCostOverrideError && (
-              <p className="text-xs text-red-600 mt-1 mb-2">{belowCostOverrideError}</p>
-            )}
-            <div className="flex gap-3 mt-4">
+            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-800 mb-4">
+              <strong>Action required:</strong> Go back and correct the selling price of each
+              blocked item to at least its cost price, or remove those items from the cart.
+            </div>
+            <div className="flex gap-3">
               <button
+                autoFocus
                 onClick={() => {
                   setShowBelowCostOverrideDialog(false);
-                  setBelowCostOverridePin('');
-                  setBelowCostOverrideError('');
                   setBelowCostItems([]);
                 }}
                 className="flex-1 py-2.5 rounded-lg border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
-                Cancel
+                Go Back &amp; Fix Prices
               </button>
-              {currentUser?.role !== 'CASHIER' && (
-                <button
-                  onClick={handleBelowCostOverrideApprove}
-                  className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition-colors"
-                >
-                  Override &amp; Complete Sale
-                </button>
-              )}
+              <button
+                onClick={handleRemoveBelowCostItems}
+                className="flex-1 py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition-colors"
+              >
+                Remove Blocked Items
+              </button>
             </div>
           </div>
         </div>

@@ -95,6 +95,7 @@ const VoidSaleBodySchema = z.object({
   reason: z.string().min(1).trim(),
   approvedById: z.string().uuid().optional(),
   amountThreshold: z.number().positive().optional(),
+  forceAdminVoid: z.boolean().optional().default(false),
 });
 
 const RefundSaleBodySchema = z.object({
@@ -478,7 +479,7 @@ export const salesController = {
   async voidSale(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
     const { id } = UuidParamSchema.parse(req.params);
-    const { reason, approvedById, amountThreshold } = VoidSaleBodySchema.parse(req.body);
+    const { reason, approvedById, amountThreshold, forceAdminVoid } = VoidSaleBodySchema.parse(req.body);
 
     const voidedById = req.user?.id;
     if (!voidedById) {
@@ -496,7 +497,8 @@ export const salesController = {
       voidedById,
       reason,
       approvedById || undefined,
-      amountThreshold || 1000000 // Default threshold: 1M UGX
+      amountThreshold || 1000000, // Default threshold: 1M UGX
+      forceAdminVoid
     );
 
     // Log audit trail (failure here should not fail the void)
