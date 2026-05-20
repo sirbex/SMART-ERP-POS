@@ -1656,6 +1656,30 @@ export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool, txC
       saleNumber: data.saleNumber,
       originalTransactionId,
     });
+
+    // Also reverse SALE_COGS transaction(s) — posted separately for COGS/Inventory entries
+    const cogsTransactions = await queryTarget.query(
+      `SELECT "Id" FROM ledger_transactions
+       WHERE "ReferenceType" = 'SALE_COGS' AND "ReferenceId" = $1
+         AND "IsReversed" = FALSE`,
+      [data.saleId]
+    );
+
+    for (const row of cogsTransactions.rows) {
+      await AccountingCore.reverseTransaction({
+        originalTransactionId: row.Id,
+        reversalDate: data.voidDate,
+        reason: `VOID COGS: Sale ${data.saleNumber} — ${data.voidReason}`,
+        userId: SYSTEM_USER_ID,
+        idempotencyKey: `SALE_COGS_VOID-${data.saleId}`,
+      }, pool, txClient);
+
+      logger.info('Recorded sale COGS void reversal to GL', {
+        saleId: data.saleId,
+        saleNumber: data.saleNumber,
+        cogsTransactionId: row.Id,
+      });
+    }
   } catch (error: unknown) {
     if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
       logger.info('Sale GL already reversed (idempotent)', { saleId: data.saleId });
