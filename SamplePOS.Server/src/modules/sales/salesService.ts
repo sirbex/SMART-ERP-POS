@@ -2433,7 +2433,11 @@ export const salesService = {
             `INSERT INTO inventory_batches (
               product_id, batch_number, quantity, remaining_quantity,
               cost_price, received_date, status, notes
-            ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, 'ACTIVE', $6)`,
+            ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, 'ACTIVE', $6)
+            ON CONFLICT (product_id, batch_number) DO UPDATE SET
+              quantity           = inventory_batches.quantity           + EXCLUDED.quantity,
+              remaining_quantity = inventory_batches.remaining_quantity + EXCLUDED.remaining_quantity,
+              updated_at         = NOW()`,
             [
               productId,
               `VOID-RESTORE-${sale.sale_number}`,
