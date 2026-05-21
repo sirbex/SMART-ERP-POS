@@ -18,6 +18,7 @@ export async function findAllCustomers(
       c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
       c.customer_group_id as "customerGroupId",
       c.price_group_id as "priceGroupId",
+      pg.pricing_mode as "pricingMode",
       c.balance, c.credit_limit as "creditLimit",
       c.is_active as "isActive",
       c.created_at as "createdAt",
@@ -25,6 +26,7 @@ export async function findAllCustomers(
       c.version,
       COALESCE(dep.available_balance, 0) as "depositBalance"
     FROM customers c
+    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
     LEFT JOIN LATERAL (
       SELECT SUM(amount_available) as available_balance
       FROM pos_customer_deposits
@@ -43,16 +45,18 @@ export async function findCustomerById(id: string, dbPool?: pg.Pool | pg.PoolCli
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
-      id, customer_number as "customerNumber", name, email, phone, address,
-      customer_group_id as "customerGroupId",
-      price_group_id as "priceGroupId",
-      balance, credit_limit as "creditLimit",
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      version
-    FROM customers 
-    WHERE id = $1`,
+      c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
+      c.customer_group_id as "customerGroupId",
+      c.price_group_id as "priceGroupId",
+      pg.pricing_mode as "pricingMode",
+      c.balance, c.credit_limit as "creditLimit",
+      c.is_active as "isActive",
+      c.created_at as "createdAt",
+      c.updated_at as "updatedAt",
+      c.version
+    FROM customers c
+    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
+    WHERE c.id = $1`,
     [id]
   );
 
@@ -252,16 +256,18 @@ export async function findCustomerByNumber(customerNumber: string, dbPool?: pg.P
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
-      id, customer_number as "customerNumber", name, email, phone, address,
-      customer_group_id as "customerGroupId",
-      price_group_id as "priceGroupId",
-      balance, credit_limit as "creditLimit",
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      version
-    FROM customers 
-    WHERE customer_number = $1`,
+      c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
+      c.customer_group_id as "customerGroupId",
+      c.price_group_id as "priceGroupId",
+      pg.pricing_mode as "pricingMode",
+      c.balance, c.credit_limit as "creditLimit",
+      c.is_active as "isActive",
+      c.created_at as "createdAt",
+      c.updated_at as "updatedAt",
+      c.version
+    FROM customers c
+    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
+    WHERE c.customer_number = $1`,
     [customerNumber]
   );
 
@@ -272,29 +278,31 @@ export async function searchCustomers(searchTerm: string, limit: number = 20, db
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
-      id, customer_number as "customerNumber", name, email, phone, address,
-      customer_group_id as "customerGroupId",
-      price_group_id as "priceGroupId",
-      balance, credit_limit as "creditLimit",
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      version
-    FROM customers 
-    WHERE is_active = true
+      c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
+      c.customer_group_id as "customerGroupId",
+      c.price_group_id as "priceGroupId",
+      pg.pricing_mode as "pricingMode",
+      c.balance, c.credit_limit as "creditLimit",
+      c.is_active as "isActive",
+      c.created_at as "createdAt",
+      c.updated_at as "updatedAt",
+      c.version
+    FROM customers c
+    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
+    WHERE c.is_active = true
       AND (
-        customer_number ILIKE $1
-        OR name ILIKE $1
-        OR email ILIKE $1
-        OR phone ILIKE $1
+        c.customer_number ILIKE $1
+        OR c.name ILIKE $1
+        OR c.email ILIKE $1
+        OR c.phone ILIKE $1
       )
     ORDER BY 
       CASE 
-        WHEN customer_number ILIKE $1 THEN 1
-        WHEN name ILIKE $2 THEN 2
+        WHEN c.customer_number ILIKE $1 THEN 1
+        WHEN c.name ILIKE $2 THEN 2
         ELSE 3
       END,
-      name ASC
+      c.name ASC
     LIMIT $3`,
     [`%${searchTerm}%`, `${searchTerm}%`, limit]
   );

@@ -12,6 +12,7 @@ export const CustomerSchema = z.object({
   address: z.string().optional().nullable(),
   customerGroupId: z.string().uuid().optional().nullable(),
   priceGroupId: z.string().uuid().optional().nullable(),
+  pricingMode: z.enum(['STANDARD', 'AT_COST']).optional().nullable(), // Resolved from price_groups join
   balance: z.number().default(0),
   creditLimit: z.number().nonnegative().default(0),
   depositBalance: z.number().default(0).optional(),

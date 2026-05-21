@@ -188,4 +188,177 @@ describe('POS Module - Integration Tests', () => {
       expect(subtotal.toNumber()).toBe(3704 + 1975 + 543); // 6222
     });
   });
+
+  // ── AT_COST repricing: UoM scaling ──────────────────────────────────────────
+  // The pricing engine always returns BASE-UNIT prices (e.g. cost per tablet).
+  // The cart item may use a multi-unit UoM (e.g. STRIP of 10 tablets), so
+  // repriceCart must multiply finalPrice/basePrice by conversionFactor.
+  describe('AT_COST repricing – UoM conversion factor scaling', () => {
+    // Helper: simulates the scaling logic in repriceCart's setItems callback
+    function scaleEnginePrice(
+      engineBaseUnitPrice: number,
+      availableUoms: Array<{ uomId: string; conversionFactor: number }>,
+      selectedUomId: string | undefined,
+    ): number {
+      const uomEntry = availableUoms.find((u) => u.uomId === selectedUomId);
+      const factor = uomEntry?.conversionFactor ?? 1;
+      return new Decimal(engineBaseUnitPrice).times(factor).toNumber();
+    }
+
+    const uoms = [
+      { uomId: 'tablet', conversionFactor: 1 },
+      { uomId: 'strip', conversionFactor: 10 },
+      { uomId: 'box', conversionFactor: 100 },
+    ];
+
+    it('base unit (factor=1): scaled price equals engine price', () => {
+      expect(scaleEnginePrice(70, uoms, 'tablet')).toBe(70);
+    });
+
+    it('STRIP of 10: scaled price = engine × 10', () => {
+      expect(scaleEnginePrice(70, uoms, 'strip')).toBe(700);
+    });
+
+    it('BOX of 100: scaled price = engine × 100', () => {
+      expect(scaleEnginePrice(70, uoms, 'box')).toBe(7000);
+    });
+
+    it('unknown/missing UoM id falls back to factor=1', () => {
+      expect(scaleEnginePrice(70, uoms, undefined)).toBe(70);
+      expect(scaleEnginePrice(70, uoms, 'nonexistent')).toBe(70);
+    });
+
+    it('empty availableUoms falls back to factor=1', () => {
+      expect(scaleEnginePrice(70, [], 'strip')).toBe(70);
+    });
+
+    it('AT_COST: both finalPrice and basePrice are scaled identically', () => {
+      const engineCost = 70;      // cost_price (base unit)
+      const engineSelling = 100;  // selling_price (base unit)
+
+      const scaledCost = scaleEnginePrice(engineCost, uoms, 'strip');    // 700
+      const scaledSelling = scaleEnginePrice(engineSelling, uoms, 'strip'); // 1000
+
+      expect(scaledCost).toBe(700);
+      expect(scaledSelling).toBe(1000);
+      // Cost is still lower than selling – AT_COST invariant holds
+      expect(scaledCost).toBeLessThan(scaledSelling);
+    });
+
+    it('subtotal is quantity × scaled unit price (not base-unit price)', () => {
+      const engineCost = 70;
+      const quantity = 3; // 3 strips
+      const scaledPrice = scaleEnginePrice(engineCost, uoms, 'strip'); // 700
+      const subtotal = new Decimal(quantity).times(scaledPrice).toNumber();
+      expect(subtotal).toBe(2100); // 3 strips × 700 = 2100, NOT 3 × 70 = 210
+    });
+  });
+
+  // ── itemsPricingKey: selectedUomId included ────────────────────────────────
+  describe('itemsPricingKey – UoM change triggers reprice', () => {
+    type CartItem = { id: string; quantity: number; selectedUomId?: string };
+
+    function buildKey(items: CartItem[]): string {
+      return items
+        .filter((it) => !it.id.startsWith('custom_'))
+        .map((it) => `${it.id}:${it.quantity}:${it.selectedUomId ?? ''}`)
+        .join(',');
+    }
+
+    it('same product, same qty but different UoM → different key', () => {
+      const before = buildKey([{ id: 'prod-1', quantity: 1, selectedUomId: 'tablet' }]);
+      const after = buildKey([{ id: 'prod-1', quantity: 1, selectedUomId: 'strip' }]);
+      expect(before).not.toBe(after);
+    });
+
+    it('same product, same qty, same UoM → same key (no redundant reprice)', () => {
+      const k1 = buildKey([{ id: 'prod-1', quantity: 2, selectedUomId: 'strip' }]);
+      const k2 = buildKey([{ id: 'prod-1', quantity: 2, selectedUomId: 'strip' }]);
+      expect(k1).toBe(k2);
+    });
+
+    it('custom_ items are excluded from the key', () => {
+      const key = buildKey([
+        { id: 'custom_abc', quantity: 1, selectedUomId: undefined },
+        { id: 'prod-1', quantity: 1, selectedUomId: 'tablet' },
+      ]);
+      expect(key).toBe('prod-1:1:tablet');
+      expect(key).not.toContain('custom_');
+    });
+
+    it('missing selectedUomId renders as empty string (stable key)', () => {
+      const k1 = buildKey([{ id: 'prod-1', quantity: 1, selectedUomId: undefined }]);
+      const k2 = buildKey([{ id: 'prod-1', quantity: 1 }]);
+      expect(k1).toBe(k2); // both give 'prod-1:1:'
+    });
+  });
+
+  // ── handleAddProduct: functional updater deduplication ────────────────────
+  describe('handleAddProduct – functional updater duplicate detection', () => {
+    type Item = { id: string; selectedUomId: string; quantity: number; unitPrice: number; subtotal: number };
+
+    // Mirrors the functional updater logic from the early-return path
+    function addOrIncrement(prev: Item[], newItem: Item): Item[] {
+      const idx = prev.findIndex(
+        (i) => i.id === newItem.id && i.selectedUomId === newItem.selectedUomId,
+      );
+      if (idx >= 0) {
+        const updated = [...prev];
+        const existing = updated[idx];
+        const qty = existing.quantity + 1;
+        updated[idx] = {
+          ...existing,
+          quantity: qty,
+          subtotal: new Decimal(qty).times(existing.unitPrice).toNumber(),
+        };
+        return updated;
+      }
+      return [...prev, newItem];
+    }
+
+    const item = (id: string, uomId: string, qty: number, price: number): Item => ({
+      id, selectedUomId: uomId, quantity: qty, unitPrice: price, subtotal: qty * price,
+    });
+
+    it('adds new product to empty cart', () => {
+      const result = addOrIncrement([], item('A', 'tablet', 1, 500));
+      expect(result).toHaveLength(1);
+      expect(result[0].quantity).toBe(1);
+    });
+
+    it('increments quantity when same product + UoM already in cart', () => {
+      const cart = [item('A', 'tablet', 1, 500)];
+      const result = addOrIncrement(cart, item('A', 'tablet', 1, 500));
+      expect(result).toHaveLength(1);
+      expect(result[0].quantity).toBe(2);
+      expect(result[0].subtotal).toBe(1000);
+    });
+
+    it('adds as separate row when same product but different UoM', () => {
+      const cart = [item('A', 'tablet', 1, 500)];
+      const result = addOrIncrement(cart, item('A', 'strip', 1, 4500));
+      expect(result).toHaveLength(2);
+    });
+
+    it('does not create duplicate rows on rapid scan of same product', () => {
+      let cart: Item[] = [];
+      // Simulate 3 rapid scans of the same product
+      cart = addOrIncrement(cart, item('A', 'tablet', 1, 500));
+      cart = addOrIncrement(cart, item('A', 'tablet', 1, 500));
+      cart = addOrIncrement(cart, item('A', 'tablet', 1, 500));
+      expect(cart).toHaveLength(1);
+      expect(cart[0].quantity).toBe(3);
+      expect(cart[0].subtotal).toBe(1500);
+    });
+
+    it('correctly handles multiple distinct products', () => {
+      let cart: Item[] = [];
+      cart = addOrIncrement(cart, item('A', 'tablet', 1, 500));
+      cart = addOrIncrement(cart, item('B', 'bottle', 1, 12000));
+      cart = addOrIncrement(cart, item('A', 'tablet', 1, 500));
+      expect(cart).toHaveLength(2);
+      expect(cart.find((i) => i.id === 'A')?.quantity).toBe(2);
+      expect(cart.find((i) => i.id === 'B')?.quantity).toBe(1);
+    });
+  });
 });

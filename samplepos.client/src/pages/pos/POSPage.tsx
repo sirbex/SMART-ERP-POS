@@ -362,7 +362,7 @@ export default function POSPage() {
   const [showManagerApprovalDialog, setShowManagerApprovalDialog] = useState(false);
   const [pendingDiscount, setPendingDiscount] = useState<PendingDiscount | null>(null);
 
-// Below-cost sale block state
+  // Below-cost sale block state
   const [showBelowCostOverrideDialog, setShowBelowCostOverrideDialog] = useState(false);
   const [belowCostItems, setBelowCostItems] = useState<Array<{ name: string; unitPrice: number; costPrice: number }>>([]);
 
@@ -611,11 +611,11 @@ export default function POSPage() {
     fetchCustomerDepositBalance();
   }, [selectedCustomer?.id]);
 
-  // Stable key of cart items for pricing — only changes when product IDs or quantities change
+  // Stable key of cart items for pricing — changes when product IDs, quantities, or UoMs change
   const itemsPricingKey = useMemo(
     () => items
       .filter((it) => !it.id.startsWith('custom_'))
-      .map((it) => `${it.id}:${it.quantity}`)
+      .map((it) => `${it.id}:${it.quantity}:${it.selectedUomId ?? ''}`)
       .join(','),
     [items],
   );
@@ -643,20 +643,28 @@ export default function POSPage() {
           const updated = prev.map((item) => {
             if (item.id.startsWith('custom_')) return item;
             const idx = regularItems.findIndex(
-              (r) => r.id === item.id && r.quantity === item.quantity
+              (r) => r.id === item.id && r.quantity === item.quantity && r.selectedUomId === item.selectedUomId
             );
             const price = idx >= 0 ? resolved[idx] : undefined;
             if (!price) return item;
 
+            // Scale the engine's BASE-UNIT price by the item's UoM conversion factor.
+            // The engine always returns prices in base units (e.g. cost per tablet),
+            // but cart items may use a multi-unit UoM (e.g. strip of 10 tablets).
+            const uomEntry = item.availableUoms?.find((u) => u.uomId === item.selectedUomId);
+            const factor = uomEntry?.conversionFactor ?? 1;
+            const scaledFinalPrice = new Decimal(price.finalPrice).times(factor).toNumber();
+            const scaledBasePrice = new Decimal(price.basePrice).times(factor).toNumber();
+
             // Only update if the engine returned a non-base price or we need to revert
             const hasPricingRule = price.appliedRule.scope !== 'base';
-            const priceChanged = item.unitPrice !== price.finalPrice;
+            const priceChanged = item.unitPrice !== scaledFinalPrice;
             const hadPricingRule = !!item.pricingRule;
 
             if (!priceChanged && hasPricingRule === hadPricingRule) return item;
             changed = true;
 
-            const newPrice = price.finalPrice;
+            const newPrice = scaledFinalPrice;
             const newSubtotal = new Decimal(item.quantity).times(newPrice).toNumber();
             const newMargin =
               newPrice > 0
@@ -676,7 +684,7 @@ export default function POSPage() {
                 ? {
                   scope: price.appliedRule.scope,
                   ruleName: price.appliedRule.ruleName,
-                  basePrice: price.basePrice,
+                  basePrice: scaledBasePrice,
                   discount: price.discount,
                 }
                 : undefined,
@@ -1053,6 +1061,11 @@ export default function POSPage() {
 
       // Handle case where UoM already has price/cost (from inventory API)
       if (uom && uom.price && uom.cost) {
+        // For AT_COST customers, always start at the UoM's cost price — no async reprice flash.
+        // The pricing engine will confirm the same value on the next repriceCart run.
+        const isAtCost = selectedCustomer?.pricingMode === 'AT_COST';
+        const effectiveUnitPrice = isAtCost ? uom.cost : uom.price;
+
         // Use pre-calculated prices from inventory API
         const newItem: LineItem = {
           id: product.id,
@@ -1060,13 +1073,13 @@ export default function POSPage() {
           sku: product.sku,
           uom: uom.symbol || uom.name || product.unitOfMeasure || 'PIECE',
           quantity: 1,
-          unitPrice: uom.price,
+          unitPrice: effectiveUnitPrice,
           costPrice: uom.cost,
           marginPct:
-            uom.price > 0
-              ? new Decimal(uom.price).minus(uom.cost).dividedBy(uom.price).times(100).toNumber()
+            effectiveUnitPrice > 0
+              ? new Decimal(effectiveUnitPrice).minus(uom.cost).dividedBy(effectiveUnitPrice).times(100).toNumber()
               : 0,
-          subtotal: uom.price,
+          subtotal: effectiveUnitPrice,
           productType: product.productType,
           stockOnHand: product.stockOnHand,
           isTaxable: product.isTaxable ?? false,
@@ -1075,7 +1088,24 @@ export default function POSPage() {
           selectedUomId: uom.uomId,
           baseCost: product.costPrice || product.averageCost || product.average_cost || 0,
         };
-        setItems([...items, newItem]);
+        setItems((prev) => {
+          // If already exists with same product + UoM, increment quantity
+          const idx = prev.findIndex(
+            (i) => i.id === newItem.id && i.selectedUomId === newItem.selectedUomId
+          );
+          if (idx >= 0) {
+            const updated = [...prev];
+            const existing = updated[idx];
+            const qty = existing.quantity + 1;
+            updated[idx] = {
+              ...existing,
+              quantity: qty,
+              subtotal: new Decimal(qty).times(existing.unitPrice).toNumber(),
+            };
+            return updated;
+          }
+          return [...prev, newItem];
+        });
         return;
       }
 
@@ -1177,10 +1207,8 @@ export default function POSPage() {
         productSearchRef.current?.focusSearch();
       }, 50);
     },
-    [items]
-  ); // Dependency: items (used in setItems spread)
-
-  // Handle UoM change for existing cart item
+    [] // no stale-closure dependency on items — all setItems calls use functional updaters
+  ); // Handle UoM change for existing cart item
   const handleUomChange = (itemIndex: number, newUomId: string) => {
     setItems((prev) => {
       const updated = [...prev];
