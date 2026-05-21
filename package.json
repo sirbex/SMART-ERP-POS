@@ -13,7 +13,9 @@
     "lint": "cd SamplePOS.Server && npm run lint && cd ../samplepos.client && npm run lint",
     "lint:fix": "cd SamplePOS.Server && npm run lint:fix && cd ../samplepos.client && npm run lint -- --fix",
     "build": "cd SamplePOS.Server && npm run build:prod && cd ../samplepos.client && npm run build",
-    "test": "cd SamplePOS.Server && npm run test && cd ../samplepos.client && npm run test"
+    "test": "cd SamplePOS.Server && npm run test && cd ../samplepos.client && npm run test",
+    "test:pricing-phases": "node scripts/run-pricing-phase-tests.mjs",
+    "test:pricing-phases:live": "node scripts/run-pricing-phase-tests.mjs --live"
   },
   "devDependencies": {
     "husky": "^8.0.0",

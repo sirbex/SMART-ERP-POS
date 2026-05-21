@@ -9,7 +9,25 @@
 
 import type { Pool, PoolClient } from 'pg';
 import * as groupRepo from './customerGroupRepository.js';
+import * as pricingRepo from '../pricing/pricingRepository.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
+
+async function assertDefaultPriceGroup(
+  pool: Pool | PoolClient,
+  defaultPriceGroupId: string | null | undefined,
+) {
+  if (!defaultPriceGroupId) return;
+  const ok = await pricingRepo.priceGroupExistsActive(pool, defaultPriceGroupId);
+  if (!ok) throw new NotFoundError('Default price group not found or inactive');
+}
+
+type GroupWriteData = {
+  name?: string;
+  description?: string | null;
+  discountPercentage?: number;
+  defaultPriceGroupId?: string | null;
+  isActive?: boolean;
+};
 
 // ============================================================================
 // Queries
@@ -40,7 +58,7 @@ export async function getGroupCustomers(pool: Pool | PoolClient, groupId: string
 
 export async function createGroup(
   pool: Pool | PoolClient,
-  data: { name: string; description?: string | null; discountPercentage: number; isActive?: boolean },
+  data: GroupWriteData & { name: string; discountPercentage: number },
 ) {
   const existing = await groupRepo.findByName(pool, data.name);
   if (existing) throw new ConflictError(`Customer group "${data.name}" already exists`);
@@ -48,6 +66,8 @@ export async function createGroup(
   if (data.discountPercentage < 0 || data.discountPercentage > 100) {
     throw new ValidationError('Discount percentage must be between 0 and 100');
   }
+
+  await assertDefaultPriceGroup(pool, data.defaultPriceGroupId);
 
   // Convert percentage (0-100) to decimal (0-1) for storage
   // Pricing engine expects decimal: 0.10 = 10%
@@ -61,7 +81,7 @@ export async function createGroup(
 export async function updateGroup(
   pool: Pool | PoolClient,
   id: string,
-  data: { name?: string; description?: string | null; discountPercentage?: number; isActive?: boolean },
+  data: GroupWriteData,
 ) {
   const group = await groupRepo.findById(pool, id);
   if (!group) throw new NotFoundError('Customer group not found');
@@ -76,6 +96,8 @@ export async function updateGroup(
   if (data.discountPercentage !== undefined && (data.discountPercentage < 0 || data.discountPercentage > 100)) {
     throw new ValidationError('Discount percentage must be between 0 and 100');
   }
+
+  await assertDefaultPriceGroup(pool, data.defaultPriceGroupId);
 
   // Convert percentage (0-100) to decimal (0-1) for storage
   const repoData = data.discountPercentage !== undefined
@@ -115,4 +137,18 @@ export async function bulkAssignCustomers(
   if (!group) throw new NotFoundError('Customer group not found');
 
   await groupRepo.bulkAssign(pool, customerIds, groupId);
+}
+
+export async function applyDefaultPriceGroupToAllMembers(
+  pool: Pool | PoolClient,
+  groupId: string,
+): Promise<{ updatedCount: number }> {
+  const group = await groupRepo.findById(pool, groupId);
+  if (!group) throw new NotFoundError('Customer group not found');
+  if (!group.defaultPriceGroupId) {
+    throw new ValidationError('This group has no default price group configured');
+  }
+
+  const updatedCount = await groupRepo.applyDefaultPriceGroupToMembers(pool, groupId);
+  return { updatedCount };
 }

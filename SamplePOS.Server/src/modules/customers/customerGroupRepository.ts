@@ -17,6 +17,9 @@ export interface CustomerGroupDbRow {
   name: string;
   description: string | null;
   discount_percentage: string;
+  default_price_group_id: string | null;
+  default_price_group_name?: string | null;
+  default_pricing_mode?: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -47,6 +50,9 @@ export function normaliseCustomerGroup(r: CustomerGroupDbRow) {
     name: r.name,
     description: r.description,
     discountPercentage: Money.parseDb(r.discount_percentage).toNumber(),
+    defaultPriceGroupId: r.default_price_group_id ?? null,
+    defaultPriceGroupName: r.default_price_group_name ?? null,
+    defaultPricingMode: r.default_pricing_mode ?? null,
     isActive: r.is_active,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -98,10 +104,14 @@ export async function findAll(
   const res = await pool.query(
     `SELECT
        cg.id, cg.name, cg.description, cg.discount_percentage,
+       cg.default_price_group_id,
+       dpg.name AS default_price_group_name,
+       dpg.pricing_mode AS default_pricing_mode,
        cg.is_active, cg.created_at, cg.updated_at,
        COALESCE(cc.cnt, 0)::int AS customer_count,
        COALESCE(pr.cnt, 0)::int AS rule_count
      FROM customer_groups cg
+     LEFT JOIN price_groups dpg ON dpg.id = cg.default_price_group_id
      LEFT JOIN (
        SELECT customer_group_id, COUNT(*) AS cnt
        FROM customers WHERE customer_group_id IS NOT NULL
@@ -124,10 +134,14 @@ export async function findById(pool: Pool | PoolClient, id: string) {
   const res = await pool.query(
     `SELECT
        cg.id, cg.name, cg.description, cg.discount_percentage,
+       cg.default_price_group_id,
+       dpg.name AS default_price_group_name,
+       dpg.pricing_mode AS default_pricing_mode,
        cg.is_active, cg.created_at, cg.updated_at,
        COALESCE(cc.cnt, 0)::int AS customer_count,
        COALESCE(pr.cnt, 0)::int AS rule_count
      FROM customer_groups cg
+     LEFT JOIN price_groups dpg ON dpg.id = cg.default_price_group_id
      LEFT JOIN (
        SELECT customer_group_id, COUNT(*) AS cnt
        FROM customers WHERE customer_group_id = $1
@@ -155,21 +169,39 @@ export async function findByName(pool: Pool | PoolClient, name: string) {
 
 export async function create(
   pool: Pool | PoolClient,
-  data: { name: string; description?: string | null; discountPercentage: number; isActive?: boolean },
+  data: {
+    name: string;
+    description?: string | null;
+    discountPercentage: number;
+    defaultPriceGroupId?: string | null;
+    isActive?: boolean;
+  },
 ) {
   const res = await pool.query(
-    `INSERT INTO customer_groups (name, description, discount_percentage, is_active)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO customer_groups (name, description, discount_percentage, default_price_group_id, is_active)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING *`,
-    [data.name, data.description ?? null, data.discountPercentage, data.isActive ?? true],
+    [
+      data.name,
+      data.description ?? null,
+      data.discountPercentage,
+      data.defaultPriceGroupId ?? null,
+      data.isActive ?? true,
+    ],
   );
-  return normaliseCustomerGroup(res.rows[0]);
+  return findById(pool, res.rows[0].id);
 }
 
 export async function update(
   pool: Pool | PoolClient,
   id: string,
-  data: { name?: string; description?: string | null; discountPercentage?: number; isActive?: boolean },
+  data: {
+    name?: string;
+    description?: string | null;
+    discountPercentage?: number;
+    defaultPriceGroupId?: string | null;
+    isActive?: boolean;
+  },
 ) {
   const fields: string[] = [];
   const params: unknown[] = [];
@@ -186,6 +218,10 @@ export async function update(
   if (data.discountPercentage !== undefined) {
     fields.push(`discount_percentage = $${idx++}`);
     params.push(data.discountPercentage);
+  }
+  if (data.defaultPriceGroupId !== undefined) {
+    fields.push(`default_price_group_id = $${idx++}`);
+    params.push(data.defaultPriceGroupId);
   }
   if (data.isActive !== undefined) {
     fields.push(`is_active = $${idx++}`);
@@ -235,7 +271,12 @@ export async function assignCustomer(
   groupId: string,
 ) {
   await pool.query(
-    `UPDATE customers SET customer_group_id = $1, updated_at = NOW() WHERE id = $2`,
+    `UPDATE customers c
+     SET customer_group_id = $1,
+         price_group_id = COALESCE(c.price_group_id, g.default_price_group_id),
+         updated_at = NOW()
+     FROM customer_groups g
+     WHERE c.id = $2 AND g.id = $1`,
     [groupId, customerId],
   );
 }
@@ -253,8 +294,33 @@ export async function bulkAssign(
   groupId: string,
 ) {
   await pool.query(
-    `UPDATE customers SET customer_group_id = $1, updated_at = NOW()
-     WHERE id = ANY($2::uuid[])`,
+    `UPDATE customers c
+     SET customer_group_id = $1,
+         price_group_id = COALESCE(c.price_group_id, g.default_price_group_id),
+         updated_at = NOW()
+     FROM customer_groups g
+     WHERE c.id = ANY($2::uuid[]) AND g.id = $1`,
     [groupId, customerIds],
   );
+}
+
+/**
+ * Overwrites price_group_id for all members of a group from the group's default.
+ * Returns the number of customers updated.
+ */
+export async function applyDefaultPriceGroupToMembers(
+  pool: Pool | PoolClient,
+  groupId: string,
+): Promise<number> {
+  const res = await pool.query(
+    `UPDATE customers c
+     SET price_group_id = g.default_price_group_id,
+         updated_at = NOW()
+     FROM customer_groups g
+     WHERE c.customer_group_id = g.id
+       AND g.id = $1
+       AND g.default_price_group_id IS NOT NULL`,
+    [groupId],
+  );
+  return res.rowCount ?? 0;
 }

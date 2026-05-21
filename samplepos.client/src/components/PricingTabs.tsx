@@ -6,6 +6,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 
 const tabs = [
+  { label: 'Price Groups', path: '/pricing/price-groups' },
   { label: 'Price Rules', path: '/pricing/rules' },
   { label: 'Categories', path: '/pricing/categories' },
   { label: 'Price Preview', path: '/pricing/preview' },

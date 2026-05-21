@@ -7,6 +7,8 @@ import { pricingApi } from '../api/pricing';
 import type {
   CreateProductCategoryInput,
   UpdateProductCategoryInput,
+  CreatePriceGroupInput,
+  UpdatePriceGroupInput,
   CreatePriceRuleInput,
   UpdatePriceRuleInput,
   PriceRuleFilters,
@@ -27,6 +29,9 @@ export const pricingKeys = {
 
   // Customer Groups
   customerGroups: () => [...pricingKeys.all, 'customerGroups'] as const,
+
+  // Price Groups
+  priceGroups: () => [...pricingKeys.all, 'priceGroups'] as const,
 
   // Price Rules
   rules: () => [...pricingKeys.all, 'rules'] as const,
@@ -104,6 +109,49 @@ export function useMergeCategory() {
       pricingApi.mergeCategory(targetId, sourceId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: pricingKeys.categories() });
+    },
+  });
+}
+
+// ============================================================================
+// Price Groups
+// ============================================================================
+
+export function usePriceGroups(isActive?: boolean) {
+  return useQuery({
+    queryKey: [...pricingKeys.priceGroups(), isActive],
+    queryFn: () => pricingApi.listPriceGroups(isActive),
+    staleTime: 60_000,
+  });
+}
+
+export function useCreatePriceGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: CreatePriceGroupInput) => pricingApi.createPriceGroup(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: pricingKeys.priceGroups() });
+    },
+  });
+}
+
+export function useUpdatePriceGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdatePriceGroupInput }) =>
+      pricingApi.updatePriceGroup(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: pricingKeys.priceGroups() });
+    },
+  });
+}
+
+export function useDeletePriceGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => pricingApi.deletePriceGroup(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: pricingKeys.priceGroups() });
     },
   });
 }

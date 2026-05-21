@@ -9,16 +9,20 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   useCustomerGroupsList,
   useGroupCustomers,
+  useCustomerGroupDetail,
   useCreateGroup,
   useUpdateGroup,
   useDeleteGroup,
   useUnassignCustomer,
   useAssignCustomer,
+  useApplyDefaultPriceGroup,
 } from '../../hooks/useCustomerGroups';
 import { useCustomers } from '../../hooks/useApi';
+import { pricingApi } from '../../api/pricing';
 import { formatCurrency } from '../../utils/currency';
 import { useCanAccess } from '../auth/ProtectedRoute';
 import type { CustomerGroupData } from '../../api/customerGroups';
@@ -57,7 +61,7 @@ export default function CustomerGroupsPanel() {
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Customer Groups</h3>
           <p className="text-sm text-gray-500">
-            Manage pricing tiers and group-based discounts
+            Retail discounts and price rules by group. For at-cost selling, set a default price group below.
           </p>
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -93,7 +97,7 @@ export default function CustomerGroupsPanel() {
       {groups && groups.length === 0 && !isLoading && (
         <div className="bg-white rounded-lg shadow border border-gray-200 p-8 text-center text-gray-500">
           <p className="text-base mb-1">No customer groups yet</p>
-          <p className="text-sm">Create your first group to start managing pricing tiers</p>
+          <p className="text-sm">Create your first group for discounts, price rules, or at-cost defaults</p>
         </div>
       )}
 
@@ -123,6 +127,12 @@ export default function CustomerGroupsPanel() {
                   </div>
                   {group.description && (
                     <p className="text-sm text-gray-500 mt-1 line-clamp-2">{group.description}</p>
+                  )}
+                  {group.defaultPriceGroupName && (
+                    <p className="text-xs text-amber-700 mt-1">
+                      Price mode: {group.defaultPriceGroupName}
+                      {group.defaultPricingMode === 'AT_COST' ? ' (at cost)' : ''}
+                    </p>
                   )}
                 </div>
                 {canManage && (
@@ -224,21 +234,47 @@ function GroupMembersPanel({
   groupId: string;
   canManage: boolean;
 }) {
+  const { data: group } = useCustomerGroupDetail(groupId);
   const { data: members, isLoading } = useGroupCustomers(groupId);
   const unassignMutation = useUnassignCustomer();
+  const applyPriceGroupMutation = useApplyDefaultPriceGroup();
   const [showAssign, setShowAssign] = useState(false);
+  const [confirmApplyPriceGroup, setConfirmApplyPriceGroup] = useState(false);
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-200">
       <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-        <h4 className="font-semibold text-gray-900">Group Members</h4>
+        <div>
+          <h4 className="font-semibold text-gray-900">Group Members</h4>
+          {group?.defaultPriceGroupName && (
+            <p className="text-xs text-gray-500 mt-0.5">
+              New members without a price group receive{' '}
+              <span className="font-medium">{group.defaultPriceGroupName}</span>
+              {group.defaultPricingMode === 'AT_COST' ? ' (at cost)' : ''}.
+              Existing price groups are not overwritten.
+            </p>
+          )}
+        </div>
         {canManage && (
-          <button
-            onClick={() => setShowAssign(true)}
-            className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-          >
-            + Add Customer
-          </button>
+          <div className="flex items-center gap-2">
+            {group?.defaultPriceGroupId && (
+              <button
+                type="button"
+                onClick={() => setConfirmApplyPriceGroup(true)}
+                disabled={applyPriceGroupMutation.isPending || !members?.length}
+                className="px-3 py-1.5 border border-amber-300 text-amber-800 bg-amber-50 rounded text-sm hover:bg-amber-100 disabled:opacity-50"
+                title="Overwrite price group on all members"
+              >
+                Apply {group.defaultPriceGroupName ?? 'default'} to all
+              </button>
+            )}
+            <button
+              onClick={() => setShowAssign(true)}
+              className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+            >
+              + Add Customer
+            </button>
+          </div>
         )}
       </div>
 
@@ -305,6 +341,44 @@ function GroupMembersPanel({
           onClose={() => setShowAssign(false)}
         />
       )}
+
+      {confirmApplyPriceGroup && group?.defaultPriceGroupName && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setConfirmApplyPriceGroup(false)} />
+          <div className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold mb-2">Apply price group to all members?</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              This sets <strong>{group.defaultPriceGroupName}</strong> on every customer in this group,
+              replacing any price group they already have ({members?.length ?? 0} customer(s)).
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmApplyPriceGroup(false)}
+                className="px-4 py-2 border rounded-lg text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  applyPriceGroupMutation.mutate(groupId, {
+                    onSuccess: (data) => {
+                      setConfirmApplyPriceGroup(false);
+                      alert(`Updated price group on ${data.updatedCount} customer(s).`);
+                    },
+                    onError: (err: Error) => alert(err.message),
+                  })
+                }
+                disabled={applyPriceGroupMutation.isPending}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700 disabled:opacity-50"
+              >
+                Apply to all
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -332,7 +406,16 @@ function GroupFormModal({
       : '0'
   );
   const [isActive, setIsActive] = useState(group?.isActive ?? true);
+  const [defaultPriceGroupId, setDefaultPriceGroupId] = useState(
+    group?.defaultPriceGroupId ?? '',
+  );
   const [formError, setFormError] = useState('');
+
+  const { data: priceGroups = [] } = useQuery({
+    queryKey: ['pricing', 'price-groups', true],
+    queryFn: () => pricingApi.listPriceGroups(true),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -359,6 +442,7 @@ function GroupFormModal({
       name: name.trim(),
       description: description.trim() || null,
       discountPercentage: discountNum,
+      defaultPriceGroupId: defaultPriceGroupId || null,
       isActive,
     };
 
@@ -429,7 +513,30 @@ function GroupFormModal({
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
             />
             <p className="text-xs text-gray-400 mt-1">
-              Flat discount applied when no specific price rule matches
+              Flat discount on retail price when no specific price rule matches
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Default price group (optional)
+            </label>
+            <select
+              value={defaultPriceGroupId}
+              onChange={(e) => setDefaultPriceGroupId(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            >
+              <option value="">— None (assign group only) —</option>
+              {priceGroups.map((pg) => (
+                <option key={pg.id} value={pg.id}>
+                  {pg.name}
+                  {pg.pricingMode === 'AT_COST' ? ' (at cost — 0% margin)' : ' (standard retail)'}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              When adding customers to this group, applies this price group only if the customer
+              does not already have one (e.g. At Cost for pharmacy partners).
             </p>
           </div>
 

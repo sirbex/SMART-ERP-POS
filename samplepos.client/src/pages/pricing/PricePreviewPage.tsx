@@ -28,6 +28,7 @@ function scopeExplanation(scope: string): string {
     case 'group_discount': return 'Customer group flat discount';
     case 'formula': return 'Product pricing formula';
     case 'base': return 'Base selling price (no rules applied)';
+    case 'at_cost': return 'At cost — inventory cost price (price group)';
     default: return scope;
   }
 }
@@ -41,6 +42,7 @@ function scopeColor(scope: string): string {
     case 'group_discount': return 'bg-orange-100 text-orange-800 border-orange-200';
     case 'formula': return 'bg-pink-100 text-pink-800 border-pink-200';
     case 'base': return 'bg-gray-100 text-gray-800 border-gray-200';
+    case 'at_cost': return 'bg-amber-100 text-amber-800 border-amber-200';
     default: return 'bg-gray-100 text-gray-800 border-gray-200';
   }
 }

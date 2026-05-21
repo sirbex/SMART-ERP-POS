@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react';
+import { useState, useEffect, Fragment, useRef } from 'react';
 import Decimal from 'decimal.js';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import { useCustomer, useCustomerSummary, useUpdateCustomer, useToggleCustomerActive, useDeleteCustomer, useCustomerStatement, useInvoices, useRecordInvoicePayment } from '../../hooks/useApi';
@@ -11,6 +11,12 @@ import { AxiosError } from 'axios';
 import { getBusinessDate, formatTimestampDate } from '../../utils/businessDate';
 import { pricingApi } from '../../api/pricing';
 import type { PriceGroup } from '../../types/pricing';
+import {
+    buildCustomerUpdatePayload,
+    priceGroupIdForEffectDeps,
+    syncEditPriceGroupState,
+    customerIsActive,
+} from '../../utils/customerPriceGroupEdit';
 
 interface CustomerData {
     id: string;
@@ -28,6 +34,9 @@ interface CustomerData {
     groupName?: string;
     group_name?: string;
     customerNumber?: string;
+    customerGroupId?: string | null;
+    priceGroupId?: string | null;
+    pricingMode?: 'STANDARD' | 'AT_COST' | null;
     createdAt?: string;
 }
 
@@ -183,16 +192,26 @@ export default function CustomerDetailModal({
     const toggleActiveM = useToggleCustomerActive();
     const deleteCustomerM = useDeleteCustomer();
 
-    // Price groups for edit form
     const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
+    const [editPriceGroupId, setEditPriceGroupId] = useState('');
+    const initialPriceGroupIdRef = useRef<string | null>(null);
+
     useEffect(() => {
         if (tab === 'edit') {
             pricingApi.listPriceGroups(true).then(setPriceGroups).catch(() => { });
         }
     }, [tab]);
 
-    const c = customer as CustomerData;
+    const c = customer as CustomerData | undefined;
     const sum = summary as SummaryData;
+
+    useEffect(() => {
+        if (tab === 'edit' && customer) {
+            const { editValue, initialRef } = syncEditPriceGroupState(customer as CustomerData);
+            setEditPriceGroupId(editValue);
+            initialPriceGroupIdRef.current = initialRef;
+        }
+    }, [tab, customer, priceGroupIdForEffectDeps(customer as CustomerData | undefined)]);
 
     // Reset tab when modal opens with different customer
     useEffect(() => {
@@ -221,14 +240,17 @@ export default function CustomerDetailModal({
         if (!customer || !customerId) return;
         const form = e.currentTarget;
         const formData = new FormData(form);
-        const payload: Record<string, unknown> = {
-            name: formData.get('name')?.toString() || undefined,
-            email: formData.get('email')?.toString() || undefined,
-            phone: formData.get('phone')?.toString() || undefined,
-            address: formData.get('address')?.toString() || undefined,
-            creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
-            priceGroupId: formData.get('priceGroupId')?.toString() || null,
-        };
+        const payload = buildCustomerUpdatePayload(
+            initialPriceGroupIdRef.current,
+            editPriceGroupId,
+            {
+                name: formData.get('name')?.toString() || undefined,
+                email: formData.get('email')?.toString() || undefined,
+                phone: formData.get('phone')?.toString() || undefined,
+                address: formData.get('address')?.toString() || undefined,
+                creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
+            },
+        );
         try {
             await updateCustomer.mutateAsync({ id: customerId, data: payload });
             alert('✅ Customer updated successfully!');
@@ -242,7 +264,7 @@ export default function CustomerDetailModal({
 
     const handleToggleActive = async () => {
         if (!customer || !customerId) return;
-        const newStatus = !c.isActive;
+        const newStatus = !customerIsActive(customer as CustomerData);
         try {
             await toggleActiveM.mutateAsync({ id: customerId, isActive: newStatus });
             alert(`Customer ${newStatus ? 'activated' : 'deactivated'} successfully`);
@@ -1176,8 +1198,8 @@ export default function CustomerDetailModal({
                                             <label htmlFor="customerPriceGroup" className="block text-sm font-medium text-gray-700 mb-1">Price Group</label>
                                             <select
                                                 id="customerPriceGroup"
-                                                name="priceGroupId"
-                                                defaultValue={(c as unknown as { priceGroupId?: string }).priceGroupId ?? ''}
+                                                value={editPriceGroupId}
+                                                onChange={(e) => setEditPriceGroupId(e.target.value)}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                             >
                                                 <option value="">— Standard pricing —</option>

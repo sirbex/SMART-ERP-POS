@@ -72,6 +72,8 @@ export function mapApiCustomer(item: ApiRow): OfflineCustomer {
     balance: parseFloat(item.balance || '0'),
     creditLimit: parseFloat(item.credit_limit || item.creditLimit || '0'),
     customerGroupId: item.customer_group_id || item.customerGroupId || undefined,
+    priceGroupId: item.price_group_id || item.priceGroupId || undefined,
+    pricingMode: item.pricing_mode || item.pricingMode || undefined,
     isActive: item.is_active ?? item.isActive ?? true,
   };
 }

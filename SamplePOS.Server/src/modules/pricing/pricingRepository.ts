@@ -549,7 +549,13 @@ export async function getProductBasePrice(
          WHERE p.id = $1`,
         [productId],
     );
-    return res.rows[0] ?? null;
+    const row = res.rows[0];
+    if (!row) return null;
+    return {
+        categoryId: row.category_id ?? null,
+        sellingPrice: row.selling_price,
+        costPrice: row.cost_price,
+    };
 }
 
 export async function getCustomerGroupId(
@@ -697,6 +703,17 @@ export async function deletePriceGroup(
         `UPDATE price_groups SET is_active = FALSE, updated_at = NOW() WHERE id = $1`,
         [id],
     );
+}
+
+export async function priceGroupExistsActive(
+    client: Pool | PoolClient,
+    id: string,
+): Promise<boolean> {
+    const res = await client.query(
+        `SELECT 1 FROM price_groups WHERE id = $1 AND is_active = TRUE`,
+        [id],
+    );
+    return res.rows.length > 0;
 }
 
 // ============================================================================

@@ -37,6 +37,8 @@ import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getFinalPricesBulk, type ResolvedPrice } from '../pricing/pricingEngineService.js';
+import { getCustomerPricingMode } from '../pricing/pricingRepository.js';
+import { validateAtCostSalePricing } from './atCostSalePricingGuard.js';
 import { detectCogsDrift } from '../../utils/cogsDriftGuard.js';
 import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
 
@@ -280,6 +282,10 @@ export const salesService = {
       // Resolve prices through the full cascade (tier → rule → group discount → formula → base)
       // This ensures customer-group pricing, quantity breaks, and price rules are enforced server-side.
       const resolvedPriceMap = new Map<string, ResolvedPrice>();
+      const customerPricingMode = input.customerId
+        ? await getCustomerPricingMode(client, input.customerId)
+        : null;
+
       if (regularProductIds.length > 0) {
         // SAVEPOINT: pricing queries run on the transaction client.
         // If any pricing table is missing or the query fails, we MUST rollback to
@@ -309,13 +315,35 @@ export const salesService = {
           logger.info('Pricing engine resolved prices for sale', {
             itemCount: resolved.length,
             customerId: input.customerId,
+            customerPricingMode,
             hasCustomerPricing: resolved.some((r) => r.appliedRule.scope !== 'base'),
           });
+
+          if (customerPricingMode === 'AT_COST') {
+            validateAtCostSalePricing(bulkItems, resolvedPriceMap);
+          }
         } catch (pricingError) {
-          // Roll back to the savepoint so the transaction stays usable, then fall
-          // through to frontend-supplied prices (non-blocking degradation).
           await client.query('ROLLBACK TO SAVEPOINT before_pricing');
           await client.query('RELEASE SAVEPOINT before_pricing');
+          if (pricingError instanceof BusinessError) {
+            throw pricingError;
+          }
+
+          logger.error('Pricing engine failed during sale', {
+            error: pricingError instanceof Error ? pricingError.message : String(pricingError),
+            customerId: input.customerId,
+            customerPricingMode,
+            itemCount: regularProductIds.length,
+          });
+
+          if (customerPricingMode === 'AT_COST') {
+            throw new BusinessError(
+              'Cannot complete sale: at-cost pricing could not be verified. Try again or contact support.',
+              'AT_COST_PRICING_UNAVAILABLE',
+              { customerId: input.customerId },
+            );
+          }
+
           logger.warn('Pricing engine failed, using frontend-supplied prices', {
             error: pricingError instanceof Error ? pricingError.message : String(pricingError),
           });

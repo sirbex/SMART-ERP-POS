@@ -142,6 +142,8 @@ export default function QuickAddCustomerModal({
         address: validation.data.address || '',
         creditLimit: validation.data.creditLimit ?? 0,
         balance: 0,
+        customerGroupId: validation.data.customerGroupId,
+        priceGroupId: validation.data.priceGroupId,
         isActive: true,
       }).catch(() => { /* best effort */ });
       // Queue for server sync when online

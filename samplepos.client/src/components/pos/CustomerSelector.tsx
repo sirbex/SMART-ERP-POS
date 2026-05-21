@@ -6,7 +6,25 @@ import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
 import QuickAddCustomerModal from '../customers/QuickAddCustomerModal';
 import { useOfflineContext } from '../../contexts/OfflineContext';
-import { searchCustomers as searchOfflineCustomers, getAllCustomers } from '../../lib/offlineDb';
+import { searchCustomers as searchOfflineCustomers, getAllCustomers, type OfflineCustomer } from '../../lib/offlineDb';
+
+function offlineToCustomer(c: OfflineCustomer): Customer {
+  return {
+    id: c.id,
+    name: c.name,
+    email: c.email || null,
+    phone: c.phone || null,
+    address: c.address || null,
+    customerGroupId: c.customerGroupId ?? null,
+    priceGroupId: c.priceGroupId ?? null,
+    pricingMode: c.pricingMode ?? null,
+    balance: c.balance,
+    creditLimit: c.creditLimit,
+    isActive: c.isActive,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 interface CustomerSelectorProps {
   selectedCustomer: Customer | null;
@@ -25,8 +43,8 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
     queryFn: async () => {
       // Offline: search IndexedDB
       if (!isOnline) {
-        if (search) return (await searchOfflineCustomers(search)) as unknown as Customer[];
-        return (await getAllCustomers()) as unknown as Customer[];
+        if (search) return (await searchOfflineCustomers(search)).map(offlineToCustomer);
+        return (await getAllCustomers()).map(offlineToCustomer);
       }
       // Online: search API
       const res = await api.customers.list();
@@ -50,14 +68,15 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
   };
 
   const handleQuickAddSuccess = (created: { id: string; name: string; email?: string; phone?: string; address?: string; creditLimit?: number;[key: string]: unknown }) => {
-    // Automatically select the newly created customer
-    // API returns full Customer data; map to Customer type
     const customer: Customer = {
       id: created.id,
       name: created.name,
       email: (created.email as string | undefined) ?? null,
       phone: (created.phone as string | undefined) ?? null,
       address: (created.address as string | undefined) ?? null,
+      customerGroupId: (created.customerGroupId as string | undefined) ?? null,
+      priceGroupId: (created.priceGroupId as string | undefined) ?? null,
+      pricingMode: (created.pricingMode as Customer['pricingMode']) ?? null,
       creditLimit: Number(created.creditLimit ?? 0),
       balance: Number(created.balance ?? 0),
       isActive: Boolean(created.isActive ?? true),
@@ -82,7 +101,18 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
           <div className="border border-gray-300 rounded p-2 sm:p-3 bg-gray-50">
             <div className="flex justify-between items-start gap-2">
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm sm:text-base text-gray-900 truncate">{selectedCustomer.name}</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-semibold text-sm sm:text-base text-gray-900 truncate">{selectedCustomer.name}</span>
+                  {selectedCustomer.pricingMode === 'AT_COST' ? (
+                    <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-800 shrink-0">
+                      At cost
+                    </span>
+                  ) : selectedCustomer.priceGroupId ? (
+                    <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600 shrink-0">
+                      Standard pricing
+                    </span>
+                  ) : null}
+                </div>
                 {selectedCustomer.email && <div className="text-xs text-gray-500 truncate">{selectedCustomer.email}</div>}
                 {selectedCustomer.phone && <div className="text-xs text-gray-500">{selectedCustomer.phone}</div>}
                 <div className="mt-2 text-xs space-y-1">

@@ -118,6 +118,7 @@ const ImportPage = lazyWithRetry(() => import('./pages/ImportPage'));
 const BarcodeLookupPage = lazyWithRetry(() => import('./pages/inventory/BarcodeLookupPage'));
 const CRMPage = lazyWithRetry(() => import('./pages/crm/CRMPage'));
 const HRPage = lazyWithRetry(() => import('./pages/hr/HRPage'));
+const PriceGroupsPage = lazyWithRetry(() => import('./pages/pricing/PriceGroupsPage'));
 const PriceRulesPage = lazyWithRetry(() => import('./pages/pricing/PriceRulesPage'));
 const CategoriesPage = lazyWithRetry(() => import('./pages/pricing/CategoriesPage'));
 const PricePreviewPage = lazyWithRetry(() => import('./pages/pricing/PricePreviewPage'));
@@ -414,7 +415,15 @@ function App() {
                   {/* Pricing - ADMIN, MANAGER */}
                   <Route
                     path="/pricing"
-                    element={<Navigate to="/pricing/rules" replace />}
+                    element={<Navigate to="/pricing/price-groups" replace />}
+                  />
+                  <Route
+                    path="/pricing/price-groups"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['settings.read']} requiredFeature="pricing">
+                        <PriceGroupsPage />
+                      </ProtectedRoute>
+                    }
                   />
                   <Route
                     path="/pricing/rules"

@@ -81,6 +81,8 @@ export interface OfflineCustomer {
   balance: number;
   creditLimit: number;
   customerGroupId?: string;
+  priceGroupId?: string;
+  pricingMode?: 'STANDARD' | 'AT_COST';
   isActive: boolean;
 }
 

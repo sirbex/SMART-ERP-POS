@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { formatCurrency } from '../../utils/currency';
@@ -11,6 +12,16 @@ import CustomerDeposits from '../../components/customers/CustomerDeposits';
 import StoreCredits from '../../components/customers/StoreCredits';
 import { DatePicker } from '../../components/ui/date-picker';
 import { getBusinessDate, formatTimestamp, formatTimestampDate } from '../../utils/businessDate';
+import { pricingApi } from '../../api/pricing';
+import { useCustomerGroupsList } from '../../hooks/useCustomerGroups';
+import {
+  buildCustomerUpdatePayload,
+  priceGroupIdForEffectDeps,
+  syncEditPriceGroupState,
+  customerIsAtCost,
+  customerIsActive,
+  priceGroupLabel as resolvePriceGroupLabel,
+} from '../../utils/customerPriceGroupEdit';
 
 // ── Local interfaces for Customer Detail page ──────────────────
 
@@ -81,6 +92,9 @@ interface CustomerDetailData {
   email?: string;
   phone?: string;
   address?: string;
+  customerGroupId?: string | null;
+  priceGroupId?: string | null;
+  pricingMode?: 'STANDARD' | 'AT_COST' | null;
   balance: number | string;
   creditLimit: number | string;
   isActive: boolean;
@@ -291,9 +305,36 @@ export default function CustomerDetailPage() {
 
   const updateCustomer = useUpdateCustomer();
 
-  const c = customer as CustomerDetailData;
+  const c = customer as CustomerDetailData | undefined;
   const sum = summary as CustomerSummaryData | undefined;
-  const title = useMemo(() => (c ? c.name : 'Customer'), [c]);
+  const title = useMemo(() => (customer as CustomerDetailData | undefined)?.name ?? 'Customer', [customer]);
+
+  const { data: priceGroups = [] } = useQuery({
+    queryKey: ['pricing', 'price-groups', true],
+    queryFn: () => pricingApi.listPriceGroups(true),
+    staleTime: 5 * 60 * 1000,
+    enabled: tab === 'edit',
+  });
+  const { data: customerGroups = [] } = useCustomerGroupsList();
+  const customerGroupName = useMemo(() => {
+    const cust = customer as CustomerDetailData | undefined;
+    return customerGroups.find((g) => g.id === cust?.customerGroupId)?.name ?? null;
+  }, [customerGroups, customer]);
+  const priceGroupLabel = useMemo(
+    () => resolvePriceGroupLabel(customer as CustomerDetailData | undefined, priceGroups),
+    [customer, priceGroups],
+  );
+
+  const [editPriceGroupId, setEditPriceGroupId] = useState('');
+  const initialPriceGroupIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (tab === 'edit' && customer) {
+      const { editValue, initialRef } = syncEditPriceGroupState(customer as CustomerDetailData);
+      setEditPriceGroupId(editValue);
+      initialPriceGroupIdRef.current = initialRef;
+    }
+  }, [tab, customer, priceGroupIdForEffectDeps(customer as CustomerDetailData | undefined)]);
 
   const toNumber = (v: unknown): number => {
     if (typeof v === 'number') return v;
@@ -306,13 +347,17 @@ export default function CustomerDetailPage() {
     if (!customer) return;
     const form = e.currentTarget;
     const formData = new FormData(form);
-    const payload: Record<string, unknown> = {
-      name: formData.get('name')?.toString() || undefined,
-      email: formData.get('email')?.toString() || undefined,
-      phone: formData.get('phone')?.toString() || undefined,
-      address: formData.get('address')?.toString() || undefined,
-      creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
-    };
+    const payload = buildCustomerUpdatePayload(
+      initialPriceGroupIdRef.current,
+      editPriceGroupId,
+      {
+        name: formData.get('name')?.toString() || undefined,
+        email: formData.get('email')?.toString() || undefined,
+        phone: formData.get('phone')?.toString() || undefined,
+        address: formData.get('address')?.toString() || undefined,
+        creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
+      },
+    );
     await updateCustomer.mutateAsync({ id, data: payload });
   };
 
@@ -492,7 +537,7 @@ export default function CustomerDetailPage() {
 
   const handleToggleActive = async () => {
     if (!customer) return;
-    const newStatus = !c.isActive;
+    const newStatus = !customerIsActive(customer as CustomerDetailData);
     try {
       await toggleActiveM.mutateAsync({ id, isActive: newStatus });
       alert(`Customer ${newStatus ? 'activated' : 'deactivated'} successfully`);
@@ -553,9 +598,16 @@ export default function CustomerDetailPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <button onClick={() => navigate('/customers')} className="text-sm text-gray-600 hover:text-gray-900">← Back to Customers</button>
-            <h1 className="text-3xl font-bold text-gray-900 mt-1">{title}</h1>
+            <div className="flex items-center gap-2 flex-wrap mt-1">
+              <h1 className="text-3xl font-bold text-gray-900">{title}</h1>
+              {customerIsAtCost(customer as CustomerDetailData | undefined) && (
+                <span className="inline-flex px-2.5 py-0.5 text-sm font-medium rounded-full bg-amber-100 text-amber-800">
+                  At cost
+                </span>
+              )}
+            </div>
             {customer ? (
-              <p className="text-gray-600 mt-1">ID: <span className="font-mono text-xs">{c.id}</span></p>
+              <p className="text-gray-600 mt-1">ID: <span className="font-mono text-xs">{(customer as CustomerDetailData).id}</span></p>
             ) : null}
           </div>
           <div className="flex items-center gap-3">
@@ -692,6 +744,17 @@ export default function CustomerDetailPage() {
                 <div className="py-3 grid grid-cols-3 gap-4">
                   <dt className="text-sm font-medium text-gray-500">Address</dt>
                   <dd className="mt-1 text-sm text-gray-900 col-span-2 whitespace-pre-wrap">{c.address || '-'}</dd>
+                </div>
+                <div className="py-3 grid grid-cols-3 gap-4">
+                  <dt className="text-sm font-medium text-gray-500">Customer group</dt>
+                  <dd className="mt-1 text-sm text-gray-900 col-span-2">
+                    {customerGroupName ?? '—'}
+                    <span className="block text-xs text-gray-400">Discounts and price rules (retail-based)</span>
+                  </dd>
+                </div>
+                <div className="py-3 grid grid-cols-3 gap-4">
+                  <dt className="text-sm font-medium text-gray-500">Price group</dt>
+                  <dd className="mt-1 text-sm text-gray-900 col-span-2">{priceGroupLabel}</dd>
                 </div>
                 <div className="py-3 grid grid-cols-3 gap-4">
                   <dt className="text-sm font-medium text-gray-500">Last Purchase</dt>
@@ -1172,6 +1235,34 @@ export default function CustomerDetailPage() {
                   <label htmlFor="creditLimit" className="block text-sm font-medium text-gray-700">Credit Limit</label>
                   <input id="creditLimit" name="creditLimit" type="number" step="0.01" placeholder="0.00" defaultValue={c.creditLimit} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Customer group</label>
+                  <p className="mt-1 px-3 py-2 border border-gray-200 rounded-lg bg-gray-50 text-sm text-gray-700">
+                    {customerGroupName ?? 'Not assigned'}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Assign via Customers → Customer Groups
+                  </p>
+                </div>
+              </div>
+              <div>
+                <label htmlFor="customerPriceGroup" className="block text-sm font-medium text-gray-700">Price group</label>
+                <select
+                  id="customerPriceGroup"
+                  value={editPriceGroupId}
+                  onChange={(e) => setEditPriceGroupId(e.target.value)}
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">— Standard pricing —</option>
+                  {priceGroups.map((pg) => (
+                    <option key={pg.id} value={pg.id}>
+                      {pg.name}{pg.pricingMode === 'AT_COST' ? ' (At Cost)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  At Cost sells at inventory cost. Leave empty for normal retail pricing.
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50" disabled={updateCustomer.isPending}>Save Changes</button>

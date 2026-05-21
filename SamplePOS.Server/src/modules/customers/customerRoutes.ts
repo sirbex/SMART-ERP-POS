@@ -21,6 +21,11 @@ router.get('/groups/:id/customers', groupController.getGroupCustomers);
 router.post('/groups/:id/assign', requirePermission('customers.update'), groupController.assignCustomer);
 router.post('/groups/:id/unassign', requirePermission('customers.update'), groupController.unassignCustomer);
 router.post('/groups/:id/bulk-assign', requirePermission('customers.update'), groupController.bulkAssignCustomers);
+router.post(
+  '/groups/:id/apply-default-price-group',
+  requirePermission('customers.update'),
+  groupController.applyDefaultPriceGroup,
+);
 
 // ── Customer routes ──
 router.get('/', customerController.getCustomers);

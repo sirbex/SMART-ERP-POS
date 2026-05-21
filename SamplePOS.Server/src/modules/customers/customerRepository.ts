@@ -5,6 +5,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import type pg from 'pg';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
+import { NotFoundError } from '../../middleware/errorHandler.js';
 import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness } from '../../utils/dateRange.js';
 
 export async function findAllCustomers(
@@ -67,16 +68,18 @@ export async function findCustomerByEmail(email: string, dbPool?: pg.Pool | pg.P
   const pool = dbPool || globalPool;
   const result = await pool.query(
     `SELECT 
-      id, customer_number as "customerNumber", name, email, phone, address,
-      customer_group_id as "customerGroupId",
-      price_group_id as "priceGroupId",
-      balance, credit_limit as "creditLimit",
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      version
-    FROM customers 
-    WHERE email = $1`,
+      c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
+      c.customer_group_id as "customerGroupId",
+      c.price_group_id as "priceGroupId",
+      pg.pricing_mode as "pricingMode",
+      c.balance, c.credit_limit as "creditLimit",
+      c.is_active as "isActive",
+      c.created_at as "createdAt",
+      c.updated_at as "updatedAt",
+      c.version
+    FROM customers c
+    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
+    WHERE c.email = $1`,
     [email]
   );
 
@@ -101,15 +104,7 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
     `INSERT INTO customers (
       customer_number, name, email, phone, address, customer_group_id, price_group_id, credit_limit
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    RETURNING 
-      id, customer_number as "customerNumber", name, email, phone, address,
-      customer_group_id as "customerGroupId",
-      price_group_id as "priceGroupId",
-      balance, credit_limit as "creditLimit",
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      version`,
+    RETURNING id`,
     [
       customerNumber,
       data.name,
@@ -122,7 +117,9 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
     ]
   );
 
-  return result.rows[0];
+  const created = await findCustomerById(result.rows[0].id, pool);
+  if (!created) throw new NotFoundError('Customer');
+  return created;
 }
 
 export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer | null> {
@@ -180,15 +177,7 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
     `UPDATE customers 
      SET ${fields.join(', ')}
      WHERE ${whereClause}
-     RETURNING 
-      id, customer_number as "customerNumber", name, email, phone, address,
-      customer_group_id as "customerGroupId",
-      price_group_id as "priceGroupId",
-      balance, credit_limit as "creditLimit",
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      version`,
+     RETURNING id`,
     values
   );
 
@@ -196,7 +185,8 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
     assertRowUpdated(result.rowCount, 'Customer', id);
   }
 
-  return result.rows[0] || null;
+  if (!result.rows[0]?.id) return null;
+  return findCustomerById(result.rows[0].id, pool);
 }
 
 export async function deleteCustomer(id: string, dbPool?: pg.Pool | pg.PoolClient): Promise<boolean> {

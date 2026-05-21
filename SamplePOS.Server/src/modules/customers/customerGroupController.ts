@@ -17,6 +17,7 @@ const CreateGroupSchema = z.object({
   name: z.string().min(2).max(100),
   description: z.string().max(500).optional().nullable(),
   discountPercentage: z.number().min(0).max(100),
+  defaultPriceGroupId: z.string().uuid().nullable().optional(),
   isActive: z.boolean().optional().default(true),
 });
 
@@ -24,6 +25,7 @@ const UpdateGroupSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   description: z.string().max(500).optional().nullable(),
   discountPercentage: z.number().min(0).max(100).optional(),
+  defaultPriceGroupId: z.string().uuid().nullable().optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -108,4 +110,15 @@ export const bulkAssignCustomers = asyncHandler(async (req: Request, res: Respon
   const { customerIds } = BulkAssignSchema.parse(req.body);
   await groupService.bulkAssignCustomers(pool, customerIds, id);
   res.json({ success: true, message: `${customerIds.length} customer(s) assigned to group` });
+});
+
+export const applyDefaultPriceGroup = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id } = UuidParamSchema.parse(req.params);
+  const result = await groupService.applyDefaultPriceGroupToAllMembers(pool, id);
+  res.json({
+    success: true,
+    data: result,
+    message: `Updated price group on ${result.updatedCount} customer(s)`,
+  });
 });

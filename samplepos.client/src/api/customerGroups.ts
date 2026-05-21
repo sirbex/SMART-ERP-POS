@@ -9,6 +9,9 @@ export interface CustomerGroupData {
   name: string;
   description: string | null;
   discountPercentage: number;
+  defaultPriceGroupId: string | null;
+  defaultPriceGroupName: string | null;
+  defaultPricingMode: 'STANDARD' | 'AT_COST' | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -30,6 +33,7 @@ export interface CreateGroupInput {
   name: string;
   description?: string | null;
   discountPercentage: number;
+  defaultPriceGroupId?: string | null;
   isActive?: boolean;
 }
 
@@ -37,6 +41,7 @@ export interface UpdateGroupInput {
   name?: string;
   description?: string | null;
   discountPercentage?: number;
+  defaultPriceGroupId?: string | null;
   isActive?: boolean;
 }
 
@@ -83,5 +88,10 @@ export const customerGroupsApi = {
 
   async bulkAssign(groupId: string, customerIds: string[]): Promise<void> {
     await apiClient.post(`/customers/groups/${groupId}/bulk-assign`, { customerIds });
+  },
+
+  async applyDefaultPriceGroup(groupId: string): Promise<{ updatedCount: number }> {
+    const res = await apiClient.post(`/customers/groups/${groupId}/apply-default-price-group`);
+    return res.data.data;
   },
 };

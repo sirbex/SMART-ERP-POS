@@ -63,12 +63,26 @@ export function useDeleteGroup() {
   });
 }
 
+export function useApplyDefaultPriceGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (groupId: string) => customerGroupsApi.applyDefaultPriceGroup(groupId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: groupKeys.all });
+      qc.invalidateQueries({ queryKey: ['customers'] });
+    },
+  });
+}
+
 export function useAssignCustomer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ groupId, customerId }: { groupId: string; customerId: string }) =>
       customerGroupsApi.assignCustomer(groupId, customerId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: groupKeys.all }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: groupKeys.all });
+      qc.invalidateQueries({ queryKey: ['customers'] });
+    },
   });
 }
 

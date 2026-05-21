@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
+    "test:pricing-phases": "vitest run src/__tests__/pricing-customer-phases.test.ts",
     "test:ui": "vitest --ui"
   },
   "dependencies": {
