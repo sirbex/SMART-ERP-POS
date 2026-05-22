@@ -57,9 +57,84 @@ Documented in `tenantService.ensureTemplateDatabase()`:
 
 1. **`pos_template`** holds schema (+ seed rows for accounts, UoMs, RBAC catalog) cloned from **`pos_system`** via `pg_dump --schema-only` (platform tables excluded).
 2. **New tenant:** `CREATE DATABASE pos_tenant_<slug> TEMPLATE pos_template` (instant clone).
-3. Therefore **every deploy must migrate `pos_template`** as well as `pos_system` and all `pos_tenant_*` — otherwise new tenants start on an old schema.
+3. **`pos_template` is NOT migrated via the numbered SQL chain** on deploy (that replays `001_*.sql` and fails on a clone). After `pos_system` + all `pos_tenant_*` are migrated, the backend refreshes the template from `pos_system` on startup (`ensureTemplateDatabase`).
 
 Registry table: `pos_system.tenants` (`database_name`, `database_host`, `database_port`, `status`).
+
+---
+
+## Mandatory instructions (agents + operators — moving forward)
+
+These rules come from production forensics (May 2026). Treat them as **non-optional**.
+
+### 1. User-visible truth is the authority
+
+- Do **not** say fixed, deployed, resolved, or working unless **runtime** evidence exists: UI change, API response, DB row, or deploy log line.
+- Code merged ≠ production behavior changed.
+- GitHub Actions green ≠ migrations ran (historically: wrong container name + script continued on error).
+
+### 2. Trace the real runtime path before changing code
+
+- Find the **exact** route, component, and API file the user hits (e.g. `/customers` → `CustomersPage` → `CustomerDetailModal`, not a similarly named page).
+- Confirm server route registration (`server.ts`) and client lazy chunks (feature may live in `CustomersPage-*.js`, not `index-*.js`).
+- State target environment: local / henber / all tenants.
+
+### 3. Production deploy — only this procedure
+
+- **Use:** `bash scripts/deploy-update.sh` on `/opt/smarterp` (or GitHub `deploy-production.yml`).
+- **Never:** `deploy.sh`, `docker compose down -v`, seeders, `CREATE DATABASE`, recreate postgres/redis.
+- Script order matters: **`git pull` → re-exec script** → discover DBs → migrate → build app → nginx reload.
+
+### 4. All tenants — discover, do not hardcode
+
+- Never hardcode `TENANT_DBS=(pos_system pos_tenant_henber_pharmacy)` or similar.
+- Use `discover_tenant_databases`: every `pos_tenant_*` on postgres + `tenants.database_name` in `pos_system`.
+- If registry lists a DB that does not exist on postgres → **fail deploy**.
+- Orphan `pos_tenant_*` not in registry → still migrate (warn only).
+
+### 5. Migrations — same rules everywhere
+
+- Versioned chain only: files tracked in `schema_migrations`, same filter as `migrate.mjs` (exclude `fix_*`, `backfill_*`, `apply-*`, `999_rollback*`, one-off repair/debug scripts).
+- **Fail-fast:** `ON_ERROR_STOP=1`; exit non-zero before rebuilding backend/frontend.
+- **Skip `pos_template`** in the deploy SQL loop; refresh via `ensureTemplateDatabase` from `pos_system`.
+- New RBAC/features need a **numbered** `shared/sql/NNN_*.sql` migration — production does **not** run `seed.ts`.
+
+### 6. Infrastructure names — resolve, do not assume
+
+- Postgres may be `samplepos-postgres` or `smarterp-postgres`; nginx/backend similarly.
+- Deploy script must auto-detect running container names.
+
+### 7. Proof hierarchy (what to run and in what order)
+
+| Layer | What proves it |
+|--------|----------------|
+| Build | `npm run build` / `proof:adjust-button:bundle` (local only) |
+| Deploy log | Discovered N DBs, `OK` on pending migrations, no `FATAL`, data snapshot unchanged |
+| DB | `proof-all-tenants-migrations.mjs`, `customers.adjust` count, `schema_migrations` row for new file |
+| Bundle | Index hash changed; lazy chunk contains API path (scan `index-*.js` imports, not entry chunks only) |
+| API | Authenticated call to affected endpoint |
+| UI | User or `proof:*:live` with real tenant credentials |
+
+### 8. When behavior does not change — do not repeat the same fix
+
+Investigate instead:
+
+- Wrong component or route
+- Stale frontend bundle or browser cache
+- Migration never applied (postgres container, script pre-pull, continue-on-error)
+- RBAC permission missing in **tenant** DB (not just `permissions.ts`)
+- Feature flag / invoice eligibility gating UI
+- Duplicate logic elsewhere
+
+### 9. Forensic summary required after deploy work
+
+Always report:
+
+- Files changed; routes/APIs affected
+- Which DBs discovered and which migrations applied (filename + OK/FAIL per DB)
+- Container names used; whether app containers restarted; index/asset hash if frontend touched
+- Runtime verification performed and **evidence** (log lines, proof script output)
+- What is **still unverified** (e.g. “henber Adjust button not confirmed in browser”)
 
 ---
 

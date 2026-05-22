@@ -2,7 +2,8 @@
 
 **This file is instruction memory for Copilot. It is NOT optional documentation.**
 
-**Full map of deploy + migration paths + templates:** [`DEPLOYMENT_AND_MIGRATIONS.md`](DEPLOYMENT_AND_MIGRATIONS.md)
+**Full map of deploy + migration paths + templates:** [`DEPLOYMENT_AND_MIGRATIONS.md`](DEPLOYMENT_AND_MIGRATIONS.md)  
+**Mandatory agent/operator rules (runtime proof, all tenants):** same doc → section **Mandatory instructions**
 
 This system is already running in production with live tenants and real data.
 
