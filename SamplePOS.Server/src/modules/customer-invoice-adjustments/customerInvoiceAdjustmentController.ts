@@ -20,8 +20,9 @@ const UuidParam = z.object({ invoiceId: z.string().uuid() });
 export const customerInvoiceAdjustmentController = {
 
     getContext: asyncHandler(async (req: Request, res: Response) => {
+        const pool = req.tenantPool || globalPool;
         const { invoiceId } = UuidParam.parse(req.params);
-        const context = await customerInvoiceAdjustmentService.getInvoiceContext(globalPool, invoiceId);
+        const context = await customerInvoiceAdjustmentService.getInvoiceContext(pool, invoiceId);
         res.json({ success: true, data: context });
     }),
 
@@ -36,7 +37,8 @@ export const customerInvoiceAdjustmentController = {
         const userId = req.user?.id;
         if (!userId) throw new ValidationError('User identity required');
 
-        const result = await customerInvoiceAdjustmentService.adjust(globalPool, input.data, userId);
+        const pool = req.tenantPool || globalPool;
+        const result = await customerInvoiceAdjustmentService.adjust(pool, input.data, userId);
         res.status(201).json({ success: true, data: result });
     }),
 };

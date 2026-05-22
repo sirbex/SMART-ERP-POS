@@ -99,7 +99,7 @@ export const customerInvoiceAdjustmentService = {
 
     async getInvoiceContext(pool: Pool, invoiceId: string): Promise<AdjustmentContext> {
         const invoice = await creditDebitNoteRepository.getInvoiceById(pool, invoiceId);
-        if (!invoice) throw new NotFoundError('Customer invoice not found');
+        if (!invoice) throw new NotFoundError('Customer invoice');
         if (invoice.documentType !== 'INVOICE') {
             throw new BusinessRuleException(
                 'Only standard customer invoices can be adjusted',
