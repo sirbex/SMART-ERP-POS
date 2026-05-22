@@ -83,14 +83,15 @@ export const creditDebitNoteService = {
             }
 
             // 4. Validate cumulative posted credit notes don't exceed invoice total
-            const existingNotes = await creditDebitNoteRepository.getNotesForInvoice(client, input.invoiceId, 'CREDIT_NOTE');
-            const postedNotes = existingNotes.filter((n) => String(n.status).toUpperCase() === 'POSTED');
-            const existingTotalDec = postedNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
-            const cumulativeDec = Money.add(existingTotalDec, totalAmount);
+            const existingPostedTotal = await creditDebitNoteRepository.sumPostedCreditNotesForInvoice(
+                client,
+                input.invoiceId,
+            );
+            const cumulativeDec = Money.add(Money.parseDb(existingPostedTotal), totalAmount);
             if (Money.toNumber(cumulativeDec) > invoice.totalAmount + 0.009) {
-                const headroom = Math.max(0, invoice.totalAmount - Money.toNumber(existingTotalDec));
+                const headroom = Math.max(0, invoice.totalAmount - existingPostedTotal);
                 throw new Error(
-                    `Credit note total (${total}) plus existing posted notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount}). Maximum additional credit: ${headroom.toFixed(2)}`,
+                    `Credit note total (${total}) plus existing posted notes (${existingPostedTotal}) would exceed invoice total (${invoice.totalAmount}). Maximum additional credit: ${headroom.toFixed(2)}`,
                 );
             }
 

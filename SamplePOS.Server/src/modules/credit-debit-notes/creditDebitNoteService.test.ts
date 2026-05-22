@@ -62,6 +62,7 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
 const mockCnRepo = {
     getInvoiceById: jest.fn<MockFn>(),
     getNotesForInvoice: jest.fn<MockFn>(),
+    sumPostedCreditNotesForInvoice: jest.fn<MockFn>(),
     generateCreditNoteNumber: jest.fn<MockFn>(),
     generateDebitNoteNumber: jest.fn<MockFn>(),
     createNote: jest.fn<MockFn>(),
@@ -260,6 +261,7 @@ function resetAll() {
     mockRecalcSupplierBalance.mockResolvedValue(undefined);
     // Pool query: default to no GL transaction found (cancel path)
     mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    mockCnRepo.sumPostedCreditNotesForInvoice.mockResolvedValue(0);
 }
 
 // ============================================================
@@ -336,9 +338,7 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
         it('throws when cumulative credit notes would exceed invoice total', async () => {
             // Invoice total = 50000. Existing notes = 40000. New attempt = 20000 → 60000 > 50000.
             mockCnRepo.getInvoiceById.mockResolvedValue(baseInvoice); // total = 50000
-            mockCnRepo.getNotesForInvoice.mockResolvedValue([
-                { totalAmount: '40000' }, // existing CN already covers 40k
-            ]);
+            mockCnRepo.sumPostedCreditNotesForInvoice.mockResolvedValue(40000);
 
             await expect(
                 creditDebitNoteService.createCreditNote(mockPool, {

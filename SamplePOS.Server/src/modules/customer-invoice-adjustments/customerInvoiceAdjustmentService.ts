@@ -97,10 +97,6 @@ function saleItemFromRow(row: Record<string, unknown>) {
 
 const VOID_SALE_STATUSES = new Set(['VOID', 'VOIDED', 'VOIDED_BY_RETURN', 'CANCELLED']);
 
-function isPostedNoteStatus(status: string): boolean {
-    return String(status).toUpperCase() === 'POSTED';
-}
-
 /** Credits already posted per sale_items.id (from CN line description). */
 async function getPostedCreditBySaleItem(
     pool: Pool,
@@ -241,14 +237,10 @@ export const customerInvoiceAdjustmentService = {
         const outstandingBalance = settlement?.amountDue ?? invoice.outstandingBalance;
         const amountPaid = settlement?.amountPaid ?? invoice.amountPaid;
 
-        const existingNotes = await creditDebitNoteRepository.getNotesForInvoice(
+        const existingCreditNoteTotal = await creditDebitNoteRepository.sumPostedCreditNotesForInvoice(
             pool,
             invoiceId,
-            'CREDIT_NOTE',
         );
-        const existingCreditNoteTotal = existingNotes
-            .filter((n) => isPostedNoteStatus(n.status))
-            .reduce((sum, n) => sum + n.totalAmount, 0);
 
         const totalSuggestedCredit = overchargeLines.reduce(
             (sum, l) => sum + l.suggestedLineCredit,
@@ -391,7 +383,7 @@ export const customerInvoiceAdjustmentService = {
             });
         }
 
-        const totalCredit = cnLines.reduce(
+        let totalCredit = cnLines.reduce(
             (sum, l) => sum + l.quantity * l.unitPrice,
             0,
         );
@@ -401,18 +393,48 @@ export const customerInvoiceAdjustmentService = {
                 'ADJUST_ZERO_CREDIT',
             );
         }
-        if (totalCredit > context.maxAdditionalCredit + 0.01) {
+        const postedCnTotal = await creditDebitNoteRepository.sumPostedCreditNotesForInvoice(
+            pool,
+            input.invoiceId,
+        );
+        const invoiceHeadroom = Math.max(0, context.invoice.totalAmount - postedCnTotal);
+        const allowedCredit = Math.min(
+            context.maxAdditionalCredit,
+            context.invoice.outstandingBalance,
+            invoiceHeadroom,
+        );
+
+        if (totalCredit > allowedCredit + 0.01) {
+            if (allowedCredit <= 0.009) {
+                throw new BusinessRuleException(
+                    postedCnTotal > 0.009
+                        ? `Prior posted credit notes (${postedCnTotal.toFixed(2)}) already use the allowable credit on invoice ${context.invoice.invoiceNumber} (total ${context.invoice.totalAmount.toFixed(2)}).`
+                        : 'No further price correction is available on this invoice.',
+                    'ADJUST_CREDIT_LIMIT_ZERO',
+                    { postedCnTotal, invoiceTotal: context.invoice.totalAmount },
+                );
+            }
+            const requestedCredit = totalCredit;
+            const scale = allowedCredit / totalCredit;
+            for (const line of cnLines) {
+                line.unitPrice = Money.toNumber(
+                    Money.multiply(Money.parseDb(line.unitPrice), Money.parseDb(scale)),
+                );
+            }
+            totalCredit = cnLines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
+            logger.warn('Customer adjustment: scaled credit to invoice headroom', {
+                invoiceId: input.invoiceId,
+                requestedCredit,
+                allowedCredit,
+                postedCnTotal,
+                scale,
+            });
+        }
+
+        if (totalCredit <= 0.009) {
             throw new BusinessRuleException(
-                `Selected credit (${totalCredit.toFixed(2)}) exceeds the maximum allowed (${context.maxAdditionalCredit.toFixed(2)}). `
-                + `Posted credit notes on this invoice total ${context.existingCreditNoteTotal.toFixed(2)}; `
-                + `outstanding balance is ${context.invoice.outstandingBalance.toFixed(2)}.`,
-                'ADJUST_CREDIT_EXCEEDS_LIMIT',
-                {
-                    totalCredit,
-                    maxAdditionalCredit: context.maxAdditionalCredit,
-                    existingCreditNoteTotal: context.existingCreditNoteTotal,
-                    outstandingBalance: context.invoice.outstandingBalance,
-                },
+                'Total credit must be greater than zero after applying prior credit notes.',
+                'ADJUST_ZERO_CREDIT',
             );
         }
 

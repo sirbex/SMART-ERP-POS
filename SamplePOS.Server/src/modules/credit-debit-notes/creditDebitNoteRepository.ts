@@ -195,6 +195,22 @@ export const creditDebitNoteRepository = {
         }));
     },
 
+    /** SSOT: sum of posted credit notes against a parent customer invoice. */
+    async sumPostedCreditNotesForInvoice(
+        client: Pool | PoolClient,
+        invoiceId: string,
+    ): Promise<number> {
+        const result = await client.query(
+            `SELECT COALESCE(SUM(total_amount), 0) AS total
+             FROM invoices
+             WHERE reference_invoice_id = $1
+               AND document_type = 'CREDIT_NOTE'
+               AND UPPER(TRIM(status)) = 'POSTED'`,
+            [invoiceId],
+        );
+        return Money.toNumber(Money.parseDb(result.rows[0]?.total ?? 0));
+    },
+
     // ----------------------------------------------------------
     // Create credit/debit note (in invoices table)
     // ----------------------------------------------------------

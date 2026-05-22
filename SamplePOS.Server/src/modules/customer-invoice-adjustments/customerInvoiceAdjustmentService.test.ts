@@ -12,6 +12,7 @@ const mockPool = { query: mockPoolQuery } as unknown as Pool;
 const mockCnRepo = {
     getInvoiceById: jest.fn<MockFn>(),
     getNotesForInvoice: jest.fn<MockFn>(),
+    sumPostedCreditNotesForInvoice: jest.fn<MockFn>(),
 };
 
 const mockInvoiceRepo = {
@@ -78,6 +79,7 @@ describe('customerInvoiceAdjustmentService', () => {
         mockPoolQuery.mockResolvedValue({ rows: [] });
         mockCnRepo.getInvoiceById.mockResolvedValue(baseInvoice);
         mockCnRepo.getNotesForInvoice.mockResolvedValue([]);
+        mockCnRepo.sumPostedCreditNotesForInvoice.mockResolvedValue(0);
         mockInvoiceRepo.getInvoiceById.mockResolvedValue({ sale_id: 'sale-1' });
         mockInvoiceRepo.getInvoiceSettlement.mockResolvedValue({
             totalAmount: 100000,
@@ -174,9 +176,7 @@ describe('customerInvoiceAdjustmentService', () => {
                 amountPaid: 0,
                 amountDue: 126300,
             });
-            mockCnRepo.getNotesForInvoice.mockResolvedValue([
-                { totalAmount: 81700, status: 'POSTED', invoiceNumber: 'CN-PRIOR' },
-            ]);
+            mockCnRepo.sumPostedCreditNotesForInvoice.mockResolvedValue(81700);
             mockPoolQuery.mockResolvedValue({ rows: [] });
             mockSalesRepo.getSaleById.mockResolvedValue({
                 sale: { status: 'COMPLETED', sale_number: 'SALE-0026' },
@@ -224,9 +224,7 @@ describe('customerInvoiceAdjustmentService', () => {
         });
 
         it('rejects when credit notes already cover full overcharge', async () => {
-            mockCnRepo.getNotesForInvoice.mockResolvedValue([
-                { totalAmount: 4000, status: 'POSTED', invoiceNumber: 'CN-1' },
-            ]);
+            mockCnRepo.sumPostedCreditNotesForInvoice.mockResolvedValue(4000);
             mockPoolQuery.mockResolvedValue({
                 rows: [{ description: 'sale_item:si-1|charged:5000|correct:3000', line_total: 4000 }],
             });
