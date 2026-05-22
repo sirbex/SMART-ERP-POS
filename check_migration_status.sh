@@ -1,21 +1,28 @@
 #!/bin/bash
-# Check migration status across all tenant DBs
-for db in pos_system pos_tenant_acme_store pos_tenant_blis pos_tenant_dynamics pos_tenant_henber_pharmacy; do
-  # Check migration 513: is_posted_to_gl column
-  m513=$(docker exec smarterp-postgres psql -U postgres -d "$db" -tc "SELECT COUNT(*) FROM information_schema.columns WHERE table_name='supplier_invoices' AND column_name='is_posted_to_gl'" 2>/dev/null | tr -d ' ')
-  
-  # Check migration 514: HIST_GRN_REROUTE idempotency keys in ledger_transactions
-  m514=$(docker exec smarterp-postgres psql -U postgres -d "$db" -tc "SELECT COUNT(*) FROM ledger_transactions WHERE \"IdempotencyKey\" LIKE 'HIST_GRN_REROUTE%'" 2>/dev/null | tr -d ' ')
-  
-  # Check supplier_invoice_grn_links table
-  links=$(docker exec smarterp-postgres psql -U postgres -d "$db" -tc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='supplier_invoice_grn_links'" 2>/dev/null | tr -d ' ')
-  
-  # Check tenants table for slug
-  slug=$(docker exec smarterp-postgres psql -U postgres -d "$db" -tc "SELECT slug FROM tenants LIMIT 1" 2>/dev/null | tr -d ' ')
-  
+# Migration status for ALL tenant databases on this postgres instance.
+set -euo pipefail
+
+CONTAINER="${POSTGRES_CONTAINER:-}"
+for name in smarterp-postgres samplepos-postgres; do
+  if docker ps --format '{{.Names}}' | grep -qx "$name"; then
+    CONTAINER="$name"
+    break
+  fi
+done
+if [ -z "$CONTAINER" ]; then
+  echo "No postgres container found (tried smarterp-postgres, samplepos-postgres)"
+  exit 1
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/discover-tenant-databases.sh
+source "$SCRIPT_DIR/scripts/lib/discover-tenant-databases.sh"
+
+discover_tenant_databases "$CONTAINER"
+
+for db in "${TENANT_DBS[@]}"; do
   echo "=== $db ==="
-  echo "  Migration 513 (is_posted_to_gl): $m513"
-  echo "  Migration 514 (HIST_GRN_REROUTE rows): $m514"
-  echo "  supplier_invoice_grn_links: $links"
-  echo "  tenant slug: $slug"
+  docker exec "$CONTAINER" psql -U postgres -d "$db" -tc \
+    "SELECT filename, executed_at FROM schema_migrations ORDER BY executed_at DESC LIMIT 5;" 2>/dev/null \
+    || echo "  (cannot query schema_migrations)"
 done

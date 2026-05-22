@@ -39,9 +39,10 @@ $ErrorActionPreference = 'Stop'
 
 # ── Config ────────────────────────────────────────────────────────────────────
 $SERVER       = '209.38.203.138'
-$CONTAINER    = 'smarterp-postgres'
+$CONTAINER    = if ($env:POSTGRES_CONTAINER) { $env:POSTGRES_CONTAINER } else { 'smarterp-postgres' }
 $PG_USER      = 'postgres'
-$TENANT_DBS   = @('pos_system', 'pos_tenant_henber_pharmacy')
+
+$TENANT_DBS = $null  # resolved in Snapshot/Verify via Get-TenantDatabases
 
 # Tables that contain irreplaceable business records.
 # Grouped by domain so failures are easy to interpret.
@@ -120,6 +121,29 @@ function Table-Exists([string]$db, [string]$table) {
     return ($out -match '1')
 }
 
+function Get-TenantDatabases {
+    $fromPg = (Run-PsqlQuery 'postgres' @"
+SELECT datname FROM pg_database
+WHERE datistemplate = false
+  AND (datname IN ('pos_system','pos_template') OR datname LIKE 'pos_tenant_%')
+ORDER BY datname;
+"@) -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+
+    $merged = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($d in $fromPg) { [void]$merged.Add($d) }
+
+    if ($merged.Contains('pos_system')) {
+        $fromReg = (Run-PsqlQuery 'pos_system' @"
+SELECT database_name FROM tenants
+WHERE status IS DISTINCT FROM 'DELETED' AND database_name IS NOT NULL
+ORDER BY database_name;
+"@) -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+        foreach ($d in $fromReg) { [void]$merged.Add($d) }
+    }
+
+    return ($merged | Sort-Object)
+}
+
 function Get-Counts {
     <# Returns hashtable: { "db.table" = count } for every existing table. #>
     $counts = @{}
@@ -139,6 +163,11 @@ function Get-Counts {
 }
 
 # ── Snapshot mode ─────────────────────────────────────────────────────────────
+
+if ($Snapshot -or $Verify) {
+    $TENANT_DBS = Get-TenantDatabases
+    Write-Host "Tenant databases: $($TENANT_DBS -join ', ')" -ForegroundColor DarkGray
+}
 
 if ($Snapshot) {
     Write-Host ""

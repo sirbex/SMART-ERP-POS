@@ -2367,7 +2367,6 @@ function GRItemRow({
     : undefined;
   const defaultUom = poUom || uomList.find(u => u.isDefault) || uomList[0];
   const selectedUomId = es.selectedUomId || defaultUom?.id;
-  const selectedUom = uomList.find(u => u.id === selectedUomId || u.uomId === selectedUomId);
 
   const displayedOrdered = ordered;
   const displayedReceived = receivedQty;

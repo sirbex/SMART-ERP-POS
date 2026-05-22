@@ -2,6 +2,8 @@
 
 **This file is instruction memory for Copilot. It is NOT optional documentation.**
 
+**Full map of deploy + migration paths + templates:** [`DEPLOYMENT_AND_MIGRATIONS.md`](DEPLOYMENT_AND_MIGRATIONS.md)
+
 This system is already running in production with live tenants and real data.
 
 - **Server**: 209.38.203.138
@@ -57,7 +59,11 @@ curl https://wizarddigital-inv.com/api/health
 - Existing data must **remain intact** after every deployment.
 - All migrations must be **idempotent** (safe to run multiple times).
 - Migrations run inside the postgres container: `docker exec samplepos-postgres psql -U postgres -d <db_name> -f /tmp/migration.sql`
-- Apply to **ALL tenant databases**: pos_system, pos_tenant_henber_pharmacy, and any future pos_tenant_* databases.
+- Apply to **ALL tenant databases** discovered automatically on deploy:
+  - Every `pos_system`, `pos_template`, and `pos_tenant_*` database on the postgres instance
+  - Plus every `tenants.database_name` row in `pos_system` (non-deleted)
+  - Deploy **fails** if any migration fails (`ON_ERROR_STOP`) or if a registry DB is missing on postgres
+  - Do **not** hardcode tenant names in `deploy-update.sh` — use `scripts/lib/discover-tenant-databases.sh`
 
 ---
 
@@ -66,7 +72,7 @@ curl https://wizarddigital-inv.com/api/health
 - Tenant databases already exist (`pos_tenant_*`). **Never recreate them.**
 - New tenants are provisioned via `POST /api/platform/tenants` (creates DB from pos_template).
 - The template database (`pos_template`) can be updated with new migrations.
-- **Active tenant databases (March 2026)**: pos_system, pos_tenant_henber_pharmacy.
+- **Tenant list is dynamic** — run `discover_tenant_databases` (see `scripts/deploy-update.sh`) or `node scripts/proof-all-tenants-migrations.mjs` after deploy to see which DBs were covered.
 
 ---
 

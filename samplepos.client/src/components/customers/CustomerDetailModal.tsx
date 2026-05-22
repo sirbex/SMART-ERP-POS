@@ -76,6 +76,7 @@ interface InvoiceRow {
     amountPaid?: number | string;
     amount_paid?: number | string;
     balance?: number | string;
+    amount_due?: number | string;
     notes?: string;
     documentType?: string;
     document_type?: string;
@@ -229,7 +230,6 @@ export default function CustomerDetailModal({
         }
     }, [tab]);
 
-    const c = customer as CustomerData | undefined;
     const sum = summary as SummaryData;
 
     useEffect(() => {
@@ -401,7 +401,7 @@ export default function CustomerDetailModal({
                     ref={modalRef}
                     role="dialog"
                     aria-modal="true"
-                    aria-label={`Customer Details - ${c?.name || 'Loading'}`}
+                    aria-label={`Customer Details - ${(customer as CustomerData | undefined)?.name || 'Loading'}`}
                     className="relative bg-white w-full max-w-[95vw] sm:max-w-5xl rounded-lg shadow-xl border border-gray-200 max-h-[90vh] overflow-hidden flex flex-col"
                 >
                     {/* Header */}
@@ -409,12 +409,12 @@ export default function CustomerDetailModal({
                         <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
                             <div className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
                                 <span className="text-blue-600 font-bold text-base sm:text-lg">
-                                    {c?.name?.charAt(0)?.toUpperCase() || '?'}
+                                    {(customer as CustomerData | undefined)?.name?.charAt(0)?.toUpperCase() || '?'}
                                 </span>
                             </div>
                             <div className="min-w-0">
-                                <h2 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">{c?.name || 'Loading...'}</h2>
-                                <p className="text-xs sm:text-sm text-gray-500 truncate">{c?.email || c?.phone || 'No contact info'}</p>
+                                <h2 className="text-lg sm:text-xl font-semibold text-gray-900 truncate">{(customer as CustomerData | undefined)?.name || 'Loading...'}</h2>
+                                <p className="text-xs sm:text-sm text-gray-500 truncate">{(customer as CustomerData | undefined)?.email || (customer as CustomerData | undefined)?.phone || 'No contact info'}</p>
                             </div>
                         </div>
                         <button
@@ -461,27 +461,27 @@ export default function CustomerDetailModal({
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                                 <div className="text-sm text-gray-600">
-                                                    {toNumber(c.balance) >= 0 ? 'Balance (Owed)' : 'Customer Credit'}
+                                                    {toNumber((customer as CustomerData).balance) >= 0 ? 'Balance (Owed)' : 'Customer Credit'}
                                                 </div>
-                                                <div className={`text-xl sm:text-2xl font-bold ${toNumber(c.balance) > 0 ? 'text-red-600' : toNumber(c.balance) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
-                                                    {formatCurrency(Math.abs(toNumber(c.balance)))}
+                                                <div className={`text-xl sm:text-2xl font-bold ${toNumber((customer as CustomerData).balance) > 0 ? 'text-red-600' : toNumber((customer as CustomerData).balance) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                                                    {formatCurrency(Math.abs(toNumber((customer as CustomerData).balance)))}
                                                 </div>
-                                                {toNumber(c.balance) < 0 && (
+                                                {toNumber((customer as CustomerData).balance) < 0 && (
                                                     <div className="text-xs text-green-600 mt-1">Overpaid — credit on account</div>
                                                 )}
                                             </div>
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                                 <div className="text-sm text-gray-600">Credit Limit</div>
                                                 <div className="text-xl sm:text-2xl font-bold text-gray-900">
-                                                    {formatCurrency(c.creditLimit || 0)}
+                                                    {formatCurrency((customer as CustomerData).creditLimit || 0)}
                                                 </div>
                                             </div>
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                                 <div className="text-sm text-gray-600">Status</div>
                                                 <div className="flex items-center mt-1">
-                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium ${c.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium ${(customer as CustomerData).isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                                                         }`}>
-                                                        {c.isActive ? '✓ Active' : '✗ Inactive'}
+                                                        {(customer as CustomerData).isActive ? '✓ Active' : '✗ Inactive'}
                                                     </span>
                                                 </div>
                                             </div>
@@ -493,28 +493,28 @@ export default function CustomerDetailModal({
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                                                 <div>
                                                     <span className="text-gray-500">Name:</span>
-                                                    <span className="ml-2 text-gray-900 font-medium">{c.name}</span>
+                                                    <span className="ml-2 text-gray-900 font-medium">{(customer as CustomerData).name}</span>
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Email:</span>
-                                                    <span className="ml-2 text-gray-900">{c.email || '-'}</span>
+                                                    <span className="ml-2 text-gray-900">{(customer as CustomerData).email || '-'}</span>
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Phone:</span>
-                                                    <span className="ml-2 text-gray-900">{c.phone || '-'}</span>
+                                                    <span className="ml-2 text-gray-900">{(customer as CustomerData).phone || '-'}</span>
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Address:</span>
-                                                    <span className="ml-2 text-gray-900">{c.address || '-'}</span>
+                                                    <span className="ml-2 text-gray-900">{(customer as CustomerData).address || '-'}</span>
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Customer Number:</span>
-                                                    <span className="ml-2 text-gray-900 font-mono">{c.customerNumber || c.id?.slice(0, 8)}</span>
+                                                    <span className="ml-2 text-gray-900 font-mono">{(customer as CustomerData).customerNumber || (customer as CustomerData).id?.slice(0, 8)}</span>
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Created:</span>
                                                     <span className="ml-2 text-gray-900">
-                                                        {c.createdAt ? formatTimestampDate(c.createdAt) : '-'}
+                                                        {(customer as CustomerData).createdAt ? formatTimestampDate((customer as CustomerData).createdAt) : '-'}
                                                     </span>
                                                 </div>
                                             </div>
@@ -561,12 +561,12 @@ export default function CustomerDetailModal({
                                             </button>
                                             <button
                                                 onClick={handleToggleActive}
-                                                className={`px-4 py-2 rounded-lg ${c.isActive
+                                                className={`px-4 py-2 rounded-lg ${(customer as CustomerData).isActive
                                                     ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
                                                     : 'bg-green-100 text-green-800 hover:bg-green-200'
                                                     }`}
                                             >
-                                                {c.isActive ? '⏸️ Deactivate' : '▶️ Activate'}
+                                                {(customer as CustomerData).isActive ? '⏸️ Deactivate' : '▶️ Activate'}
                                             </button>
                                             <button
                                                 onClick={() => setDeleteConfirmOpen(true)}
@@ -1056,33 +1056,37 @@ export default function CustomerDetailModal({
                                         </div>
 
                                         {/* Summary Cards */}
-                                        {statement ? (
+                                        {(() => {
+                                            const stmt = statement as StatementResponse | undefined;
+                                            if (!stmt) return null;
+                                            return (
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Opening Balance</div>
-                                                    <div className={`text-lg font-semibold ${Number((statement as StatementResponse).openingBalance || 0) > 0 ? 'text-red-600' : Number((statement as StatementResponse).openingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
-                                                        {formatCurrency(Math.abs(Number((statement as StatementResponse).openingBalance || 0)))}
-                                                        {Number((statement as StatementResponse).openingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                                                    <div className={`text-lg font-semibold ${Number(stmt.openingBalance || 0) > 0 ? 'text-red-600' : Number(stmt.openingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
+                                                        {formatCurrency(Math.abs(Number(stmt.openingBalance || 0)))}
+                                                        {Number(stmt.openingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
                                                     </div>
                                                 </div>
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Closing Balance</div>
-                                                    <div className={`text-lg font-semibold ${Number((statement as StatementResponse).closingBalance || 0) > 0 ? 'text-red-600' : Number((statement as StatementResponse).closingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
-                                                        {formatCurrency(Math.abs(Number((statement as StatementResponse).closingBalance || 0)))}
-                                                        {Number((statement as StatementResponse).closingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
+                                                    <div className={`text-lg font-semibold ${Number(stmt.closingBalance || 0) > 0 ? 'text-red-600' : Number(stmt.closingBalance || 0) < 0 ? 'text-green-600' : ''}`}>
+                                                        {formatCurrency(Math.abs(Number(stmt.closingBalance || 0)))}
+                                                        {Number(stmt.closingBalance || 0) < 0 && <span className="text-xs ml-1">(CR)</span>}
                                                     </div>
                                                 </div>
                                                 <div className="bg-gray-50 border border-gray-200 rounded p-3">
                                                     <div className="text-xs text-gray-600">Period</div>
                                                     <div className="text-sm">
-                                                        {(statement as StatementResponse).periodStart ? new Date(String((statement as StatementResponse).periodStart)).toLocaleDateString() : 'All time'} →{' '}
-                                                        {(statement as StatementResponse).periodEnd ? new Date(String((statement as StatementResponse).periodEnd)).toLocaleDateString() : 'Now'}
+                                                        {stmt.periodStart ? new Date(String(stmt.periodStart)).toLocaleDateString() : 'All time'} →{' '}
+                                                        {stmt.periodEnd ? new Date(String(stmt.periodEnd)).toLocaleDateString() : 'Now'}
                                                     </div>
                                                 </div>
                                             </div>
-                                        ) : null}
+                                            );
+                                        })()}
 
-                                        {statement && (() => {
+                                        {statement != null && (() => {
                                             const entries = (statement as StatementResponse).entries || [];
                                             const closing = Number((statement as StatementResponse).closingBalance || 0);
                                             const ledgerOverpaid = entries.some(
@@ -1223,7 +1227,7 @@ export default function CustomerDetailModal({
                                                 id="customerName"
                                                 name="name"
                                                 type="text"
-                                                defaultValue={c.name}
+                                                defaultValue={(customer as CustomerData).name}
                                                 required
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                             />
@@ -1234,7 +1238,7 @@ export default function CustomerDetailModal({
                                                 id="customerEmail"
                                                 name="email"
                                                 type="email"
-                                                defaultValue={c.email || ''}
+                                                defaultValue={(customer as CustomerData).email || ''}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                             />
                                         </div>
@@ -1244,7 +1248,7 @@ export default function CustomerDetailModal({
                                                 id="customerPhone"
                                                 name="phone"
                                                 type="tel"
-                                                defaultValue={c.phone || ''}
+                                                defaultValue={(customer as CustomerData).phone || ''}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                             />
                                         </div>
@@ -1253,7 +1257,7 @@ export default function CustomerDetailModal({
                                             <textarea
                                                 id="customerAddress"
                                                 name="address"
-                                                defaultValue={c.address || ''}
+                                                defaultValue={(customer as CustomerData).address || ''}
                                                 rows={2}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                             />
@@ -1264,7 +1268,7 @@ export default function CustomerDetailModal({
                                                 id="customerCreditLimit"
                                                 name="creditLimit"
                                                 type="number"
-                                                defaultValue={c.creditLimit || 0}
+                                                defaultValue={(customer as CustomerData).creditLimit || 0}
                                                 min={0}
                                                 step={1000}
                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -1317,7 +1321,7 @@ export default function CustomerDetailModal({
                             <div className="bg-white rounded-lg shadow-xl p-6 max-w-md mx-4">
                                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Delete Customer?</h3>
                                 <p className="text-gray-600 mb-6">
-                                    Are you sure you want to delete <strong>{c?.name}</strong>? This action cannot be undone.
+                                    Are you sure you want to delete <strong>{(customer as CustomerData | undefined)?.name}</strong>? This action cannot be undone.
                                 </p>
                                 <div className="flex justify-end gap-3">
                                     <button

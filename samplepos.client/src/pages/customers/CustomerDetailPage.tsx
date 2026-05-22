@@ -307,7 +307,6 @@ export default function CustomerDetailPage() {
 
   const updateCustomer = useUpdateCustomer();
 
-  const c = customer as CustomerDetailData | undefined;
   const sum = summary as CustomerSummaryData | undefined;
   const title = useMemo(() => (customer as CustomerDetailData | undefined)?.name ?? 'Customer', [customer]);
 
@@ -615,15 +614,15 @@ export default function CustomerDetailPage() {
             ) : null}
           </div>
           <div className="flex items-center gap-3">
-            <span className={`px-3 py-1 rounded-full text-sm ${c?.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-              {c?.isActive ? 'Active' : 'Inactive'}
+            <span className={`px-3 py-1 rounded-full text-sm ${customerIsActive(customer as CustomerDetailData | undefined) ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+              {customerIsActive(customer as CustomerDetailData | undefined) ? 'Active' : 'Inactive'}
             </span>
             <button
               onClick={handleToggleActive}
               disabled={toggleActiveM.isPending}
-              className={`px-4 py-2 border rounded-lg hover:bg-gray-50 ${c?.isActive ? 'border-gray-300 text-gray-700' : 'border-green-500 text-green-700 bg-green-50'}`}
+              className={`px-4 py-2 border rounded-lg hover:bg-gray-50 ${customerIsActive(customer as CustomerDetailData | undefined) ? 'border-gray-300 text-gray-700' : 'border-green-500 text-green-700 bg-green-50'}`}
             >
-              {toggleActiveM.isPending ? '...' : (c?.isActive ? 'Deactivate' : 'Activate')}
+              {toggleActiveM.isPending ? '...' : (customerIsActive(customer as CustomerDetailData | undefined) ? 'Deactivate' : 'Activate')}
             </button>
             <button
               onClick={() => setDeleteConfirmOpen(true)}
@@ -639,17 +638,17 @@ export default function CustomerDetailPage() {
         {customer ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
             <div className="bg-white rounded-lg shadow p-5 border border-gray-200">
-              <p className="text-sm text-gray-600">{toNumber(c.balance) >= 0 ? 'Balance (Owed)' : 'Customer Credit'}</p>
-              <p className={`text-2xl font-bold ${toNumber(c.balance) > 0 ? 'text-red-600' : toNumber(c.balance) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
-                {formatCurrency(Math.abs(toNumber(c.balance)))}
+              <p className="text-sm text-gray-600">{toNumber((customer as CustomerDetailData).balance) >= 0 ? 'Balance (Owed)' : 'Customer Credit'}</p>
+              <p className={`text-2xl font-bold ${toNumber((customer as CustomerDetailData).balance) > 0 ? 'text-red-600' : toNumber((customer as CustomerDetailData).balance) < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                {formatCurrency(Math.abs(toNumber((customer as CustomerDetailData).balance)))}
               </p>
-              {toNumber(c.balance) < 0 && <p className="text-xs text-green-600 mt-1">Overpaid — credit on account</p>}
-              {toNumber(c.balance) > 0 && <p className="text-xs text-gray-500 mt-1">Outstanding receivable</p>}
-              {toNumber(c.balance) === 0 && <p className="text-xs text-gray-500 mt-1">Account settled</p>}
+              {toNumber((customer as CustomerDetailData).balance) < 0 && <p className="text-xs text-green-600 mt-1">Overpaid — credit on account</p>}
+              {toNumber((customer as CustomerDetailData).balance) > 0 && <p className="text-xs text-gray-500 mt-1">Outstanding receivable</p>}
+              {toNumber((customer as CustomerDetailData).balance) === 0 && <p className="text-xs text-gray-500 mt-1">Account settled</p>}
             </div>
             <div className="bg-white rounded-lg shadow p-5 border border-gray-200">
               <p className="text-sm text-gray-600">Credit Limit</p>
-              <p className="text-2xl font-bold text-gray-900">{formatCurrency(typeof c.creditLimit === 'string' ? c.creditLimit : Number(c.creditLimit))}</p>
+              <p className="text-2xl font-bold text-gray-900">{formatCurrency(typeof (customer as CustomerDetailData).creditLimit === 'string' ? (customer as CustomerDetailData).creditLimit : Number((customer as CustomerDetailData).creditLimit))}</p>
               <p className="text-xs text-gray-500 mt-1">Maximum credit allowed</p>
             </div>
             <div className="bg-white rounded-lg shadow p-5 border border-gray-200">
@@ -739,15 +738,15 @@ export default function CustomerDetailPage() {
               <dl className="divide-y divide-gray-200">
                 <div className="py-3 grid grid-cols-3 gap-4">
                   <dt className="text-sm font-medium text-gray-500">Email</dt>
-                  <dd className="mt-1 text-sm text-gray-900 col-span-2">{c.email || '-'}</dd>
+                  <dd className="mt-1 text-sm text-gray-900 col-span-2">{(customer as CustomerDetailData).email || '-'}</dd>
                 </div>
                 <div className="py-3 grid grid-cols-3 gap-4">
                   <dt className="text-sm font-medium text-gray-500">Phone</dt>
-                  <dd className="mt-1 text-sm text-gray-900 col-span-2">{c.phone || '-'}</dd>
+                  <dd className="mt-1 text-sm text-gray-900 col-span-2">{(customer as CustomerDetailData).phone || '-'}</dd>
                 </div>
                 <div className="py-3 grid grid-cols-3 gap-4">
                   <dt className="text-sm font-medium text-gray-500">Address</dt>
-                  <dd className="mt-1 text-sm text-gray-900 col-span-2 whitespace-pre-wrap">{c.address || '-'}</dd>
+                  <dd className="mt-1 text-sm text-gray-900 col-span-2 whitespace-pre-wrap">{(customer as CustomerDetailData).address || '-'}</dd>
                 </div>
                 <div className="py-3 grid grid-cols-3 gap-4">
                   <dt className="text-sm font-medium text-gray-500">Customer group</dt>
@@ -1218,26 +1217,26 @@ export default function CustomerDetailPage() {
             <form className="space-y-4" onSubmit={onEditSubmit}>
               <div>
                 <label htmlFor="name" className="block text-sm font-medium text-gray-700">Name</label>
-                <input id="name" name="name" placeholder="Customer name" defaultValue={c.name} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                <input id="name" name="name" placeholder="Customer name" defaultValue={(customer as CustomerDetailData).name} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="email" className="block text-sm font-medium text-gray-700">Email</label>
-                  <input id="email" name="email" type="email" placeholder="name@example.com" defaultValue={c.email ?? ''} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <input id="email" name="email" type="email" placeholder="name@example.com" defaultValue={(customer as CustomerDetailData).email ?? ''} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
                   <label htmlFor="phone" className="block text-sm font-medium text-gray-700">Phone</label>
-                  <input id="phone" name="phone" placeholder="+256 700 000000" defaultValue={c.phone ?? ''} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <input id="phone" name="phone" placeholder="+256 700 000000" defaultValue={(customer as CustomerDetailData).phone ?? ''} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
                 </div>
               </div>
               <div>
                 <label htmlFor="address" className="block text-sm font-medium text-gray-700">Address</label>
-                <textarea id="address" name="address" placeholder="Street, City, Country" defaultValue={c.address ?? ''} rows={3} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                <textarea id="address" name="address" placeholder="Street, City, Country" defaultValue={(customer as CustomerDetailData).address ?? ''} rows={3} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="creditLimit" className="block text-sm font-medium text-gray-700">Credit Limit</label>
-                  <input id="creditLimit" name="creditLimit" type="number" step="0.01" placeholder="0.00" defaultValue={c.creditLimit} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <input id="creditLimit" name="creditLimit" type="number" step="0.01" placeholder="0.00" defaultValue={(customer as CustomerDetailData).creditLimit} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Customer group</label>
@@ -1635,7 +1634,7 @@ export default function CustomerDetailPage() {
           >
             <h3 id="delete-confirm-title" className="text-lg font-semibold text-gray-900 mb-4">Delete Customer</h3>
             <p className="text-gray-600 mb-6">
-              Are you sure you want to delete <span className="font-semibold">{c?.name}</span>?
+              Are you sure you want to delete <span className="font-semibold">{(customer as CustomerDetailData | undefined)?.name}</span>?
               This will deactivate the customer (soft delete) while preserving all transaction history.
             </p>
             <div className="flex items-center justify-end gap-3">

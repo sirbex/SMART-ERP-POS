@@ -45,29 +45,64 @@ async function req(method, path, { token, body } = {}) {
 
 async function checkFrontendBundle() {
   try {
-    const html = await (await fetch(`${BASE}/`)).text();
-    const assets = [...html.matchAll(/\/assets\/([^"]+\.js)/g)].map((m) => m[1]);
-    if (assets.length === 0) {
-      bad('Frontend bundle probe', 'no JS assets in HTML');
+    const htmlRes = await fetch(`${BASE}/`);
+    const html = await htmlRes.text();
+    const entryAssets = [...html.matchAll(/\/assets\/([^"]+\.js)/g)].map((m) => m[1]);
+    const indexFile = entryAssets.find((f) => f.startsWith('index-')) ?? entryAssets[0];
+    if (!indexFile) {
+      bad('Frontend bundle probe', 'no index chunk in HTML');
       return;
     }
+    ok('Served index chunk fingerprint', `${indexFile} (date: ${htmlRes.headers.get('date') || 'unknown'})`);
+
+    const indexJs = await (await fetch(`${BASE}/assets/${indexFile}`)).text();
+    const lazyAssets = [
+      ...new Set([...indexJs.matchAll(/assets\/([A-Za-z0-9_-]+-[A-Za-z0-9_-]+\.js)/g)].map((m) => m[1])),
+    ];
+    const customersPageChunk =
+      indexJs.match(/CustomersPage-[^"']+\.js/)?.[0] ??
+      lazyAssets.find((f) => f.startsWith('CustomersPage-'));
+    const apiNeedles = ['customer-invoice-adjustments', '/customer-invoice-adjustments/'];
+
     let apiChunk = null;
     let permChunk = null;
-    for (const file of assets) {
+    for (const file of entryAssets) {
       const js = await (await fetch(`${BASE}/assets/${file}`)).text();
-      if (js.includes('customer-invoice-adjustments')) apiChunk = file;
+      if (!apiChunk && apiNeedles.some((n) => js.includes(n))) apiChunk = file;
       if (js.includes('customers.adjust')) permChunk = file;
     }
-    if (apiChunk) {
-      ok('Deployed frontend includes adjust API client', apiChunk);
-    } else {
-      bad(
-        'Deployed frontend MISSING adjust feature (commit 43811fd+ not in served JS)',
-        `checked ${assets.length} chunks; redeploy frontend after git pull`,
-      );
+    for (const file of lazyAssets) {
+      const js = await (await fetch(`${BASE}/assets/${file}`)).text();
+      if (!apiChunk && apiNeedles.some((n) => js.includes(n))) apiChunk = file;
+      if (!permChunk && js.includes('customers.adjust')) permChunk = file;
     }
-    if (permChunk) ok('Frontend checks customers.adjust permission', permChunk);
-    else ok('customers.adjust string not in bundle (may be minified — rely on API check)');
+
+    if (apiChunk) {
+      ok('Lazy/entry bundle includes adjust API path', apiChunk);
+    } else {
+      bad('Adjust API path absent from index + lazy chunks', `lazy chunks scanned: ${lazyAssets.length}`);
+    }
+
+    if (customersPageChunk) {
+      const cpJs = await (await fetch(`${BASE}/assets/${customersPageChunk}`)).text();
+      const hasAdjustLabel = cpJs.includes('Adjust');
+      const hasPermGate = cpJs.includes('customers.adjust');
+      if (hasAdjustLabel && hasPermGate) {
+        ok('CustomersPage chunk has Adjust UI + permission gate', customersPageChunk);
+      } else {
+        bad('CustomersPage chunk incomplete', `${customersPageChunk} adjust=${hasAdjustLabel} perm=${hasPermGate}`);
+      }
+    } else {
+      bad('CustomersPage lazy chunk not found in index');
+    }
+
+    if (permChunk && permChunk !== customersPageChunk) {
+      ok('customers.adjust permission string present', permChunk);
+    }
+
+    console.log(
+      '\n  Note: bundle checks do NOT prove the button appears in the browser (RBAC + invoice eligibility still apply).',
+    );
   } catch (e) {
     bad('Frontend bundle probe', e.message);
   }

@@ -5,12 +5,48 @@
 
 set -e
 
+# Production may run postgres under smarterp-postgres (deploy compose) or samplepos-postgres (legacy).
+resolve_container() {
+  local preferred="$1"
+  shift
+  if docker ps --format '{{.Names}}' | grep -qx "$preferred"; then
+    echo "$preferred"
+    return 0
+  fi
+  for name in "$@"; do
+    if docker ps --format '{{.Names}}' | grep -qx "$name"; then
+      echo "$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+POSTGRES_CONTAINER=$(resolve_container smarterp-postgres samplepos-postgres) || true
+NGINX_CONTAINER=$(resolve_container smarterp-nginx samplepos-nginx) || true
+BACKEND_CONTAINER=$(resolve_container smarterp-backend samplepos-backend) || true
+
+if [ -z "$POSTGRES_CONTAINER" ]; then
+  echo ">>> FATAL: no running postgres container (tried smarterp-postgres, samplepos-postgres)"
+  docker ps --format 'table {{.Names}}\t{{.Status}}'
+  exit 1
+fi
+echo ">>> Using postgres container: $POSTGRES_CONTAINER"
+[ -n "$NGINX_CONTAINER" ] && echo ">>> Using nginx container: $NGINX_CONTAINER"
+[ -n "$BACKEND_CONTAINER" ] && echo ">>> Using backend container: $BACKEND_CONTAINER"
+
 echo "=== SMART-ERP Production Update ==="
 echo "Server: $(hostname)"
 echo "Date: $(date)"
 echo ""
 
 cd /opt/smarterp
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/discover-tenant-databases.sh
+source "$SCRIPT_DIR/lib/discover-tenant-databases.sh"
+
+discover_tenant_databases "$POSTGRES_CONTAINER" || exit 1
 
 # ── PRE-DEPLOY: Record-count snapshot ─────────────────────────────────────────
 # Counts every critical business table in every tenant DB and saves a snapshot.
@@ -20,7 +56,6 @@ cd /opt/smarterp
 SNAPSHOT_DIR="/opt/smarterp/deploy-snapshots"
 mkdir -p "$SNAPSHOT_DIR"
 SNAPSHOT_FILE="$SNAPSHOT_DIR/snapshot-$(date +%Y%m%d-%H%M%S).json"
-TENANT_DBS=("pos_system" "pos_tenant_henber_pharmacy")
 CRITICAL_TABLES=(
   sales sale_items payments
   customer_transactions credit_sales
@@ -43,11 +78,11 @@ FIRST=1
 for DB in "${TENANT_DBS[@]}"; do
   for TABLE in "${CRITICAL_TABLES[@]}"; do
     # Check table exists before counting (tolerates tenants on older schema)
-    EXISTS=$(docker exec smarterp-postgres psql -U postgres -d "$DB" -t -c \
+    EXISTS=$(docker exec "$POSTGRES_CONTAINER" psql -U postgres -d "$DB" -t -c \
       "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='$TABLE';" \
       2>/dev/null | tr -d '[:space:]')
     if [ "$EXISTS" = "1" ]; then
-      COUNT=$(docker exec smarterp-postgres psql -U postgres -d "$DB" -t -c \
+      COUNT=$(docker exec "$POSTGRES_CONTAINER" psql -U postgres -d "$DB" -t -c \
         "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null | tr -d '[:space:]')
       if [ $FIRST -eq 0 ]; then echo "," >> "$SNAPSHOT_FILE"; fi
       printf '    "%s.%s": %s' "$DB" "$TABLE" "$COUNT" >> "$SNAPSHOT_FILE"
@@ -72,37 +107,34 @@ git pull
 # Uses schema_migrations table to skip already-applied files (idempotent).
 # All SQL files use CREATE/ALTER … IF NOT EXISTS, so replaying is safe.
 
-echo ">>> Running pending database migrations..."
-MIGRATION_DBS=("pos_system" "pos_tenant_henber_pharmacy")
+echo ">>> Running pending database migrations (all discovered tenants, fail-fast)..."
+discover_tenant_databases "$POSTGRES_CONTAINER" || exit 1
+if ! run_migrations_all_tenants "$POSTGRES_CONTAINER" "shared/sql"; then
+  echo ">>> Deploy STOPPED: fix migration errors before rebuilding app containers."
+  exit 1
+fi
 
-for DB in "${MIGRATION_DBS[@]}"; do
-  # Ensure migration-tracking table exists (in case 000_schema_migrations.sql not yet run)
-  docker exec smarterp-postgres psql -U postgres -d "$DB" \
-    -c "CREATE TABLE IF NOT EXISTS schema_migrations (id SERIAL PRIMARY KEY, filename TEXT UNIQUE NOT NULL, executed_at TIMESTAMPTZ NOT NULL DEFAULT now());" \
-    2>/dev/null || true
-
-  for MIGRATION in $(ls shared/sql/*.sql 2>/dev/null | sort); do
-    FILENAME=$(basename "$MIGRATION")
-
-    APPLIED=$(docker exec smarterp-postgres psql -U postgres -d "$DB" -t -c \
-      "SELECT COUNT(*) FROM schema_migrations WHERE filename = '$FILENAME';" \
-      2>/dev/null | tr -d '[:space:]')
-
-    if [ "$APPLIED" = "1" ]; then
-      continue  # already applied — skip
-    fi
-
-    echo "  [$DB] Applying $FILENAME ..."
-    if docker exec -i smarterp-postgres psql -U postgres -d "$DB" < "$MIGRATION" 2>&1; then
-      docker exec smarterp-postgres psql -U postgres -d "$DB" \
-        -c "INSERT INTO schema_migrations (filename) VALUES ('$FILENAME') ON CONFLICT DO NOTHING;" \
-        2>/dev/null || true
-      echo "  [$DB] ✅ $FILENAME"
-    else
-      echo "  [$DB] ⚠️  $FILENAME reported errors (see above) — continuing"
-    fi
-  done
+echo ">>> Verifying customers.adjust RBAC on tenant DBs..."
+RBAC_WARN=0
+for DB in "${TENANT_DBS[@]}"; do
+  ADJUST_CNT=$(docker exec "$POSTGRES_CONTAINER" psql -U postgres -d "$DB" -t -c \
+    "SELECT COUNT(*) FROM rbac_role_permissions WHERE permission_key = 'customers.adjust';" \
+    2>/dev/null | tr -d '[:space:]')
+  if [ "$ADJUST_CNT" = "0" ] || [ -z "$ADJUST_CNT" ]; then
+    echo "  ⚠️  [$DB] customers.adjust not granted — check 073_customers_adjust_rbac_permission.sql"
+    RBAC_WARN=$((RBAC_WARN + 1))
+  else
+    echo "  ✅ [$DB] customers.adjust rows: $ADJUST_CNT"
+  fi
 done
+RBAC_WARN=${RBAC_WARN:-0}
+
+echo ">>> Post-migration parity check (latest shared/sql file on every DB)..."
+if command -v node >/dev/null 2>&1 && [ -f scripts/proof-all-tenants-migrations.mjs ]; then
+  POSTGRES_CONTAINER="$POSTGRES_CONTAINER" node scripts/proof-all-tenants-migrations.mjs || exit 1
+else
+  echo ">>> (skip node parity proof — install node or run scripts/proof-all-tenants-migrations.mjs manually)"
+fi
 
 echo ">>> Migrations complete"
 echo ""
@@ -117,7 +149,11 @@ docker compose -f docker-compose.deploy.yml up -d --no-deps backend frontend
 
 # Reload nginx so it picks up the new container IP (containers get new IPs on recreate)
 echo ">>> Reloading nginx to pick up new container IP..."
-docker exec smarterp-nginx nginx -s reload
+if [ -n "$NGINX_CONTAINER" ]; then
+  docker exec "$NGINX_CONTAINER" nginx -s reload
+else
+  echo ">>> WARN: nginx container not found — skip reload"
+fi
 
 # Verify
 echo ""
@@ -130,11 +166,13 @@ sleep 15
 
 # Internal health check (avoids nginx cold-start race)
 echo ">>> Internal backend health check:"
-if docker exec smarterp-backend wget -qO- http://localhost:3001/api/health > /dev/null 2>&1; then
+if [ -z "$BACKEND_CONTAINER" ]; then
+  echo ">>> Backend health: SKIPPED (no backend container found)"
+elif docker exec "$BACKEND_CONTAINER" wget -qO- http://localhost:3001/api/health > /dev/null 2>&1; then
   echo ">>> Backend health: OK (internal)"
 else
   echo ">>> Backend health: FAILED — checking logs..."
-  docker logs smarterp-backend --tail 30
+  docker logs "$BACKEND_CONTAINER" --tail 30
   exit 1
 fi
 
@@ -143,7 +181,8 @@ echo ">>> Public HTTPS health check:"
 if curl -sf https://wizarddigital-inv.com/api/health > /dev/null 2>&1; then
   echo ">>> HTTPS health: OK"
 else
-  echo ">>> HTTPS health: FAILED — nginx may need a moment, try: curl https://wizarddigital-inv.com/api/health"
+  echo ">>> HTTPS health: FAILED"
+  exit 1
 fi
 
 # ── POST-DEPLOY: Verify no rows were lost ─────────────────────────────────────
@@ -159,7 +198,7 @@ while IFS= read -r line; do
   DB=$(echo "$KEY" | cut -d. -f1)
   TABLE=$(echo "$KEY" | cut -d. -f2)
 
-  AFTER=$(docker exec smarterp-postgres psql -U postgres -d "$DB" -t -c \
+  AFTER=$(docker exec "$POSTGRES_CONTAINER" psql -U postgres -d "$DB" -t -c \
     "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null | tr -d '[:space:]')
 
   if [ -z "$AFTER" ]; then
@@ -193,4 +232,5 @@ echo "╔═══════════════════════�
 echo "║  ✅  ALL TENANT DATA VERIFIED INTACT                    ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
-echo "=== Deploy complete ==="
+echo "=== Deploy finished (all discovered tenant DBs migrated; app containers rebuilt) ==="
+echo "Tenants covered: ${TENANT_DBS[*]}"
