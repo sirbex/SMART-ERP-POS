@@ -38,7 +38,17 @@ interface ReturnLineState {
     quantity: string;
 }
 
-function AdjustmentGuide({ step, intent }: { step: Step; intent: Intent }) {
+function AdjustmentGuide({
+    step,
+    intent,
+    existingCreditNoteTotal = 0,
+    maxAdditionalCredit = 0,
+}: {
+    step: Step;
+    intent: Intent;
+    existingCreditNoteTotal?: number;
+    maxAdditionalCredit?: number;
+}) {
     if (step === 1) {
         return (
             <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 space-y-2">
@@ -68,6 +78,12 @@ function AdjustmentGuide({ step, intent }: { step: Step; intent: Intent }) {
         return (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
                 <p className="font-semibold">Price correction — your steps</p>
+                {existingCreditNoteTotal > 0 && (
+                    <p className="text-xs font-medium text-amber-800">
+                        Prior posted credit notes on this invoice: {formatCurrency(existingCreditNoteTotal)}.
+                        Maximum additional correction: {formatCurrency(maxAdditionalCredit)}.
+                    </p>
+                )}
                 <ol className="list-decimal pl-5 space-y-1">
                     <li>Tick each line where the <strong>charged</strong> price is higher than the <strong>correct</strong> price (system-calculated).</li>
                     <li>Check the <strong>Selected credit</strong> total matches what you expect to refund on this invoice.</li>
@@ -205,6 +221,8 @@ export function AdjustCustomerInvoiceModal({
         [selectedOverchargeLines],
     );
 
+    const maxAdditionalCredit = context?.maxAdditionalCredit ?? 0;
+
     const selectedReturnLines = useMemo(
         () => returnLines.filter(l => l.selected),
         [returnLines],
@@ -248,6 +266,12 @@ export function AdjustCustomerInvoiceModal({
     function validateStep2(): string | null {
         if (intent === 'PRICE_CORRECTION') {
             if (selectedOverchargeLines.length === 0) return 'Select at least one overcharged line.';
+            if (priceCorrectionTotal > maxAdditionalCredit + 0.01) {
+                return `Selected credit (${formatCurrency(priceCorrectionTotal)}) exceeds the maximum allowed (${formatCurrency(maxAdditionalCredit)}).`;
+            }
+            if (maxAdditionalCredit <= 0.01) {
+                return 'No further price correction is available on this invoice (prior credit notes may already apply).';
+            }
             if (!priceReason.trim()) return 'Reason is required.';
         } else {
             if (selectedReturnLines.length === 0) return 'Select at least one line to return.';
@@ -421,7 +445,12 @@ export function AdjustCustomerInvoiceModal({
 
                 {!loading && !contextError && context && (
                     <>
-                        <AdjustmentGuide step={step} intent={intent} />
+                        <AdjustmentGuide
+                            step={step}
+                            intent={intent}
+                            existingCreditNoteTotal={context?.existingCreditNoteTotal ?? 0}
+                            maxAdditionalCredit={maxAdditionalCredit}
+                        />
                         {step === 1 && (
                             <div className="space-y-3">
                                 <p className="text-sm text-gray-600">
@@ -552,6 +581,12 @@ export function AdjustCustomerInvoiceModal({
                             <div className="space-y-2 text-sm">
                                 <p><strong>Intent:</strong> {intent === 'PRICE_CORRECTION' ? 'Price correction' : 'Return goods'}</p>
                                 <p><strong>Total credit:</strong> {formatCurrency(intent === 'PRICE_CORRECTION' ? priceCorrectionTotal : returnTotal)}</p>
+                                {intent === 'PRICE_CORRECTION' && (context?.existingCreditNoteTotal ?? 0) > 0 && (
+                                    <p className="text-amber-800 text-xs">
+                                        Prior posted credits: {formatCurrency(context.existingCreditNoteTotal)}.
+                                        {' '}Maximum for this post: {formatCurrency(maxAdditionalCredit)}.
+                                    </p>
+                                )}
                                 {intent === 'PRICE_CORRECTION' && (
                                     <ul className="list-disc pl-5">
                                         {selectedOverchargeLines.map(l => (

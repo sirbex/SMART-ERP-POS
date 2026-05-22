@@ -65,6 +65,12 @@ export interface AdjustmentContext {
     overchargeLines: OverchargeLine[];
     returnableLines: ReturnableSaleLine[];
     existingCreditNoteTotal: number;
+    /** Sum of suggestedLineCredit on eligible lines (before prior CN offsets). */
+    totalSuggestedCredit: number;
+    /** Room left on overcharge after posted credits on the same sale lines. */
+    remainingOverchargeCredit: number;
+    /** Max this adjustment may post: min(remaining overcharge, outstanding, invoice headroom). */
+    maxAdditionalCredit: number;
     suggestedIntent: 'PRICE_CORRECTION' | 'RETURN_GOODS' | 'NONE';
 }
 
@@ -90,6 +96,37 @@ function saleItemFromRow(row: Record<string, unknown>) {
 }
 
 const VOID_SALE_STATUSES = new Set(['VOID', 'VOIDED', 'VOIDED_BY_RETURN', 'CANCELLED']);
+
+function isPostedNoteStatus(status: string): boolean {
+    return String(status).toUpperCase() === 'POSTED';
+}
+
+/** Credits already posted per sale_items.id (from CN line description). */
+async function getPostedCreditBySaleItem(
+    pool: Pool,
+    invoiceId: string,
+): Promise<Map<string, number>> {
+    const res = await pool.query(
+        `SELECT ili."Description" AS description, ili."LineTotal" AS line_total
+         FROM invoice_line_items ili
+         JOIN invoices cn ON cn.id = ili."InvoiceId"
+         WHERE cn.reference_invoice_id = $1
+           AND cn.document_type = 'CREDIT_NOTE'
+           AND UPPER(cn.status) = 'POSTED'`,
+        [invoiceId],
+    );
+    const bySaleItem = new Map<string, number>();
+    for (const row of res.rows as { description: string | null; line_total: string | number }[]) {
+        const match = /sale_item:([0-9a-f-]{36})/i.exec(row.description ?? '');
+        if (!match) continue;
+        const prior = Money.toNumber(Money.parseDb(bySaleItem.get(match[1]) ?? 0));
+        bySaleItem.set(
+            match[1],
+            Money.toNumber(Money.add(Money.parseDb(prior), Money.parseDb(row.line_total))),
+        );
+    }
+    return bySaleItem;
+}
 
 // ---------------------------------------------------------------------------
 // Service
@@ -120,10 +157,13 @@ export const customerInvoiceAdjustmentService = {
         let saleStatus: string | null = null;
         const overchargeLines: OverchargeLine[] = [];
         const returnableLines: ReturnableSaleLine[] = [];
+        let grossOverchargeTotal = 0;
 
         const pricingMode = invoice.customerId
             ? await pricingRepo.getCustomerPricingMode(pool, invoice.customerId)
             : 'STANDARD';
+
+        const postedCreditBySaleItem = await getPostedCreditBySaleItem(pool, invoiceId);
 
         if (saleId) {
             const saleData = await salesRepository.getSaleById(pool, saleId);
@@ -168,9 +208,19 @@ export const customerInvoiceAdjustmentService = {
                     Money.subtract(Money.parseDb(item.unitPrice), Money.parseDb(correct)),
                 );
                 if (creditPerUnit > 0.009) {
-                    const lineCredit = Money.toNumber(
+                    const grossLineCredit = Money.toNumber(
                         Money.multiply(Money.parseDb(item.quantity), Money.parseDb(creditPerUnit)),
                     );
+                    grossOverchargeTotal += grossLineCredit;
+                    const priorOnLine = postedCreditBySaleItem.get(item.id) ?? 0;
+                    const lineCredit = Money.toNumber(
+                        Money.max(
+                            Money.zero(),
+                            Money.subtract(Money.parseDb(grossLineCredit), Money.parseDb(priorOnLine)),
+                        ),
+                    );
+                    if (lineCredit <= 0.009) continue;
+                    const netPerUnit = item.quantity > 0 ? lineCredit / item.quantity : 0;
                     overchargeLines.push({
                         saleItemId: item.id,
                         productId: item.productId,
@@ -179,7 +229,7 @@ export const customerInvoiceAdjustmentService = {
                         unitPriceCharged: item.unitPrice,
                         batchUnitCost: item.unitCost,
                         suggestedCorrectUnitPrice: correct,
-                        suggestedCreditPerUnit: creditPerUnit,
+                        suggestedCreditPerUnit: netPerUnit,
                         suggestedLineCredit: lineCredit,
                         pricingScope: resolved.appliedRule?.scope ?? null,
                     });
@@ -196,16 +246,44 @@ export const customerInvoiceAdjustmentService = {
             invoiceId,
             'CREDIT_NOTE',
         );
-        const existingCreditNoteTotal = existingNotes.reduce(
-            (sum, n) => sum + n.totalAmount,
-            0,
-        );
+        const existingCreditNoteTotal = existingNotes
+            .filter((n) => isPostedNoteStatus(n.status))
+            .reduce((sum, n) => sum + n.totalAmount, 0);
 
         const totalSuggestedCredit = overchargeLines.reduce(
             (sum, l) => sum + l.suggestedLineCredit,
             0,
         );
-        const remainingCorrectable = Math.max(0, totalSuggestedCredit - existingCreditNoteTotal);
+        let remainingOverchargeCredit = Math.max(
+            0,
+            Math.max(grossOverchargeTotal, totalSuggestedCredit) - existingCreditNoteTotal,
+        );
+        if (
+            overchargeLines.length > 0
+            && totalSuggestedCredit > remainingOverchargeCredit + 0.009
+            && remainingOverchargeCredit > 0.009
+        ) {
+            const scale = remainingOverchargeCredit / totalSuggestedCredit;
+            for (const line of overchargeLines) {
+                line.suggestedLineCredit = Money.toNumber(
+                    Money.multiply(Money.parseDb(line.suggestedLineCredit), Money.parseDb(scale)),
+                );
+                line.suggestedCreditPerUnit = line.quantity > 0
+                    ? line.suggestedLineCredit / line.quantity
+                    : 0;
+            }
+        }
+        const totalSuggestedCreditAfterCap = overchargeLines.reduce(
+            (sum, l) => sum + l.suggestedLineCredit,
+            0,
+        );
+        const invoiceHeadroom = Math.max(0, invoice.totalAmount - existingCreditNoteTotal);
+        const maxAdditionalCredit = Math.min(
+            outstandingBalance,
+            invoiceHeadroom,
+            remainingOverchargeCredit,
+            totalSuggestedCreditAfterCap,
+        );
 
         if (outstandingBalance <= 0.009 && overchargeLines.length === 0) {
             throw new BusinessRuleException(
@@ -213,13 +291,23 @@ export const customerInvoiceAdjustmentService = {
                 'ADJUST_INVOICE_SETTLED',
             );
         }
-        if (overchargeLines.length > 0 && remainingCorrectable <= 0.009) {
+        if (remainingOverchargeCredit <= 0.009 && grossOverchargeTotal > 0.009) {
             throw new BusinessRuleException(
-                'Credit notes already cover the full overcharge on this invoice. No further adjustment is allowed.',
+                existingCreditNoteTotal > 0.009
+                    ? `Prior posted credit notes (${existingCreditNoteTotal.toFixed(2)}) already cover the remaining overcharge on this invoice.`
+                    : 'Credit notes already cover the full overcharge on this invoice. No further adjustment is allowed.',
                 'ADJUST_ALREADY_CREDITED',
+                { existingCreditNoteTotal, outstandingBalance, invoiceTotal: invoice.totalAmount },
             );
         }
-        if (outstandingBalance <= 0.009 && remainingCorrectable <= 0.009) {
+        if (overchargeLines.length > 0 && maxAdditionalCredit <= 0.009) {
+            throw new BusinessRuleException(
+                `No further price correction is available (maximum ${maxAdditionalCredit.toFixed(2)}).`,
+                'ADJUST_CREDIT_LIMIT_ZERO',
+                { maxAdditionalCredit, outstandingBalance, invoiceTotal: invoice.totalAmount },
+            );
+        }
+        if (outstandingBalance <= 0.009 && maxAdditionalCredit <= 0.009) {
             throw new BusinessRuleException(
                 'Cannot adjust a fully paid invoice with no remaining correctable amount.',
                 'ADJUST_INVOICE_SETTLED',
@@ -248,6 +336,9 @@ export const customerInvoiceAdjustmentService = {
             overchargeLines,
             returnableLines,
             existingCreditNoteTotal,
+            totalSuggestedCredit: totalSuggestedCreditAfterCap,
+            remainingOverchargeCredit,
+            maxAdditionalCredit,
             suggestedIntent,
         };
     },
@@ -308,6 +399,20 @@ export const customerInvoiceAdjustmentService = {
             throw new BusinessRuleException(
                 'Total credit must be greater than zero',
                 'ADJUST_ZERO_CREDIT',
+            );
+        }
+        if (totalCredit > context.maxAdditionalCredit + 0.01) {
+            throw new BusinessRuleException(
+                `Selected credit (${totalCredit.toFixed(2)}) exceeds the maximum allowed (${context.maxAdditionalCredit.toFixed(2)}). `
+                + `Posted credit notes on this invoice total ${context.existingCreditNoteTotal.toFixed(2)}; `
+                + `outstanding balance is ${context.invoice.outstandingBalance.toFixed(2)}.`,
+                'ADJUST_CREDIT_EXCEEDS_LIMIT',
+                {
+                    totalCredit,
+                    maxAdditionalCredit: context.maxAdditionalCredit,
+                    existingCreditNoteTotal: context.existingCreditNoteTotal,
+                    outstandingBalance: context.invoice.outstandingBalance,
+                },
             );
         }
 

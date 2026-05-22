@@ -82,13 +82,15 @@ export const creditDebitNoteService = {
                 );
             }
 
-            // 4. Validate cumulative credit notes don't exceed invoice total
+            // 4. Validate cumulative posted credit notes don't exceed invoice total
             const existingNotes = await creditDebitNoteRepository.getNotesForInvoice(client, input.invoiceId, 'CREDIT_NOTE');
-            const existingTotalDec = existingNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
+            const postedNotes = existingNotes.filter((n) => String(n.status).toUpperCase() === 'POSTED');
+            const existingTotalDec = postedNotes.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
             const cumulativeDec = Money.add(existingTotalDec, totalAmount);
-            if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
+            if (Money.toNumber(cumulativeDec) > invoice.totalAmount + 0.009) {
+                const headroom = Math.max(0, invoice.totalAmount - Money.toNumber(existingTotalDec));
                 throw new Error(
-                    `Credit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
+                    `Credit note total (${total}) plus existing posted notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount}). Maximum additional credit: ${headroom.toFixed(2)}`,
                 );
             }
 
@@ -212,6 +214,18 @@ export const creditDebitNoteService = {
             const note = await creditDebitNoteRepository.postNote(client, noteId);
             if (!note) throw new Error('Note not found or cannot be posted (must be in Draft status)');
 
+            const parentInvoice = note.referenceInvoiceId
+                ? await creditDebitNoteRepository.getInvoiceById(client, note.referenceInvoiceId)
+                : null;
+            let saleNumber: string | undefined;
+            if (parentInvoice?.saleId) {
+                const saleRes = await client.query(
+                    `SELECT sale_number FROM sales WHERE id = $1`,
+                    [parentInvoice.saleId],
+                );
+                saleNumber = saleRes.rows[0]?.sale_number as string | undefined;
+            }
+
             // 2. GL entries
             const glData = {
                 noteId: note.id,
@@ -224,6 +238,8 @@ export const creditDebitNoteService = {
                 totalAmount: note.totalAmount,
                 customerId: note.customerId,
                 customerName: note.customerName,
+                referenceInvoiceNumber: parentInvoice?.invoiceNumber,
+                saleNumber,
             };
 
             if (note.documentType === 'CREDIT_NOTE') {
@@ -373,22 +389,38 @@ export const creditDebitNoteService = {
                 [refType, noteId]
             );
 
-            if (glTxn.rows.length > 0) {
+            const reverseGlTxn = async (
+                referenceType: string,
+                idempotencySuffix: string,
+            ) => {
+                const txnRes = await pool.query(
+                    `SELECT "Id" FROM ledger_transactions
+                     WHERE "ReferenceType" = $1 AND "ReferenceId" = $2
+                       AND "IsReversed" = FALSE
+                     LIMIT 1`,
+                    [referenceType, noteId],
+                );
+                if (txnRes.rows.length === 0) return;
                 try {
                     await AccountingCore.reverseTransaction({
-                        originalTransactionId: glTxn.rows[0].Id,
+                        originalTransactionId: txnRes.rows[0].Id,
                         reversalDate: getBusinessDate(),
                         reason: `CANCEL: ${noteData.invoiceNumber} — ${reason}`,
                         userId: SYSTEM_USER_ID,
-                        idempotencyKey: `${refType}_CANCEL-${noteId}`,
+                        idempotencyKey: `${idempotencySuffix}_CANCEL-${noteId}`,
                     }, pool);
                 } catch (error: unknown) {
                     if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
-                        logger.info('Note GL already reversed (idempotent)', { noteId });
+                        logger.info('Note GL already reversed (idempotent)', { noteId, referenceType });
                     } else {
                         throw error;
                     }
                 }
+            };
+
+            await reverseGlTxn(refType, refType);
+            if (noteData.returnsGoods) {
+                await reverseGlTxn('CREDIT_NOTE_RETURN', 'CREDIT_NOTE_RETURN');
             }
 
             const { invoiceRepository } = await import('../invoices/invoiceRepository.js');

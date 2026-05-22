@@ -125,7 +125,7 @@ export const creditDebitNoteRepository = {
 
     async getInvoiceById(client: Pool | PoolClient, invoiceId: string) {
         const result = await client.query(
-            `SELECT i.id, i.invoice_number, i.customer_id, i.customer_name,
+            `SELECT i.id, i.invoice_number, i.customer_id, i.customer_name, i.sale_id,
               i.subtotal, i.tax_amount, i.total_amount, i.amount_paid,
               i.amount_due, i.status, i.document_type, i.issue_date
        FROM invoices i WHERE i.id = $1`,
@@ -136,6 +136,7 @@ export const creditDebitNoteRepository = {
         return {
             id: r.id as string,
             invoiceNumber: r.invoice_number as string,
+            saleId: (r.sale_id as string | null) ?? null,
             customerId: r.customer_id as string,
             customerName: r.customer_name as string,
             subtotal: Money.toNumber(Money.parseDb(r.subtotal)),

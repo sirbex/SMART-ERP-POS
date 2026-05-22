@@ -6,7 +6,8 @@ import type { Pool } from 'pg';
 
 type MockFn = jest.Mock<(...args: unknown[]) => unknown>;
 
-const mockPool = {} as Pool;
+const mockPoolQuery = jest.fn<MockFn>();
+const mockPool = { query: mockPoolQuery } as unknown as Pool;
 
 const mockCnRepo = {
     getInvoiceById: jest.fn<MockFn>(),
@@ -74,6 +75,7 @@ const baseInvoice = {
 describe('customerInvoiceAdjustmentService', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockPoolQuery.mockResolvedValue({ rows: [] });
         mockCnRepo.getInvoiceById.mockResolvedValue(baseInvoice);
         mockCnRepo.getNotesForInvoice.mockResolvedValue([]);
         mockInvoiceRepo.getInvoiceById.mockResolvedValue({ sale_id: 'sale-1' });
@@ -110,7 +112,33 @@ describe('customerInvoiceAdjustmentService', () => {
             expect(ctx.overchargeLines).toHaveLength(1);
             expect(ctx.overchargeLines[0].suggestedCreditPerUnit).toBe(2000);
             expect(ctx.overchargeLines[0].suggestedLineCredit).toBe(4000);
+            expect(ctx.maxAdditionalCredit).toBe(4000);
             expect(ctx.suggestedIntent).toBe('PRICE_CORRECTION');
+        });
+
+        it('reduces line credit when a prior posted CN already credited that sale item', async () => {
+            mockPoolQuery.mockResolvedValue({
+                rows: [{ description: 'sale_item:si-1|charged:5000|correct:3000', line_total: 3000 }],
+            });
+            mockSalesRepo.getSaleById.mockResolvedValue({
+                sale: { status: 'COMPLETED', sale_number: 'SALE-1' },
+                items: [
+                    {
+                        id: 'si-1',
+                        product_id: 'prod-1',
+                        product_name: 'Widget',
+                        quantity: 1,
+                        unit_price: 5000,
+                        unit_cost: 3000,
+                    },
+                ],
+            });
+            mockGetFinalPrice.mockResolvedValue({ finalPrice: 3000, appliedRule: { scope: 'at_cost' } });
+
+            const ctx = await customerInvoiceAdjustmentService.getInvoiceContext(mockPool, 'inv-1');
+
+            expect(ctx.overchargeLines).toHaveLength(1);
+            expect(ctx.overchargeLines[0].suggestedLineCredit).toBe(2000);
         });
 
         it('rejects fully settled invoices with no correctable lines', async () => {
@@ -135,10 +163,73 @@ describe('customerInvoiceAdjustmentService', () => {
             ).rejects.toMatchObject({ error_code: 'ADJUST_INVOICE_SETTLED' });
         });
 
+        it('caps line credits when invoice-level prior CN consumed most overcharge headroom', async () => {
+            mockCnRepo.getInvoiceById.mockResolvedValue({
+                ...baseInvoice,
+                totalAmount: 126300,
+                outstandingBalance: 126300,
+            });
+            mockInvoiceRepo.getInvoiceSettlement.mockResolvedValue({
+                totalAmount: 126300,
+                amountPaid: 0,
+                amountDue: 126300,
+            });
+            mockCnRepo.getNotesForInvoice.mockResolvedValue([
+                { totalAmount: 81700, status: 'POSTED', invoiceNumber: 'CN-PRIOR' },
+            ]);
+            mockPoolQuery.mockResolvedValue({ rows: [] });
+            mockSalesRepo.getSaleById.mockResolvedValue({
+                sale: { status: 'COMPLETED', sale_number: 'SALE-0026' },
+                items: [
+                    {
+                        id: 'si-a',
+                        product_id: 'p1',
+                        product_name: 'Benzhexol 5mg',
+                        quantity: 60,
+                        unit_price: 500,
+                        unit_cost: 285,
+                    },
+                    {
+                        id: 'si-b',
+                        product_id: 'p2',
+                        product_name: 'Mediscar silicone gel 15g',
+                        quantity: 1,
+                        unit_price: 50000,
+                        unit_cost: 25000,
+                    },
+                    {
+                        id: 'si-c',
+                        product_id: 'p3',
+                        product_name: 'Selegiline 5mg tabs',
+                        quantity: 60,
+                        unit_price: 1000,
+                        unit_cost: 250,
+                    },
+                ],
+            });
+            mockGetFinalPrice
+                .mockResolvedValueOnce({ finalPrice: 285, appliedRule: { scope: 'at_cost' } })
+                .mockResolvedValueOnce({ finalPrice: 25000, appliedRule: { scope: 'at_cost' } })
+                .mockResolvedValueOnce({ finalPrice: 250, appliedRule: { scope: 'at_cost' } });
+
+            const ctx = await customerInvoiceAdjustmentService.getInvoiceContext(mockPool, 'inv-1');
+
+            const gross = 12900 + 25000 + 45000;
+            expect(gross).toBe(82900);
+            expect(ctx.existingCreditNoteTotal).toBe(81700);
+            expect(ctx.maxAdditionalCredit).toBeCloseTo(1200, 0);
+            expect(ctx.totalSuggestedCredit).toBeCloseTo(1200, 0);
+            const lineSum = ctx.overchargeLines.reduce((s, l) => s + l.suggestedLineCredit, 0);
+            expect(lineSum).toBeCloseTo(1200, 0);
+        });
+
         it('rejects when credit notes already cover full overcharge', async () => {
             mockCnRepo.getNotesForInvoice.mockResolvedValue([
-                { totalAmount: 4000, status: 'POSTED' },
+                { totalAmount: 4000, status: 'POSTED', invoiceNumber: 'CN-1' },
             ]);
+            mockPoolQuery.mockResolvedValue({
+                rows: [{ description: 'sale_item:si-1|charged:5000|correct:3000', line_total: 4000 }],
+            });
             mockSalesRepo.getSaleById.mockResolvedValue({
                 sale: { status: 'COMPLETED', sale_number: 'SALE-1' },
                 items: [
