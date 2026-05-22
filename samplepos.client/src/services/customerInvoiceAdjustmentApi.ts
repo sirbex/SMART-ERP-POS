@@ -44,6 +44,9 @@ export interface AdjustmentContext {
     overchargeLines: OverchargeLine[];
     returnableLines: ReturnableSaleLine[];
     existingCreditNoteTotal: number;
+    totalSuggestedCredit: number;
+    remainingOverchargeCredit: number;
+    maxAdditionalCredit: number;
     suggestedIntent: 'PRICE_CORRECTION' | 'RETURN_GOODS' | 'NONE';
 }
 

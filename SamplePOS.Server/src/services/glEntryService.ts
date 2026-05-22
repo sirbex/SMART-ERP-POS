@@ -340,7 +340,10 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
           accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
           description: `Credit sale to ${sale.customerName || 'customer'} - ${sale.saleNumber}`,
           debitAmount: unpaidAmount.toNumber(),
-          creditAmount: 0
+          creditAmount: 0,
+          ...(sale.customerId
+            ? { entityType: 'customer' as const, entityId: sale.customerId }
+            : {}),
         });
       }
 
@@ -2547,6 +2550,9 @@ export interface CreditNoteGLData {
   totalAmount: number;
   customerId?: string;
   customerName?: string;
+  /** Parent invoice (e.g. INV-2026-0001) — shown in GL so credits link to the original charge */
+  referenceInvoiceNumber?: string;
+  saleNumber?: string;
   supplierId?: string;
   supplierName?: string;
   /**
@@ -2572,12 +2578,17 @@ export async function recordCustomerCreditNoteToGL(
   txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
+    const refParts = [
+      data.referenceInvoiceNumber ? `invoice ${data.referenceInvoiceNumber}` : null,
+      data.saleNumber ? `sale ${data.saleNumber}` : null,
+    ].filter(Boolean);
+    const refSuffix = refParts.length ? ` (reverses ${refParts.join(', ')})` : '';
     const lines: JournalLine[] = [];
 
     if (data.subtotal > 0) {
       lines.push({
         accountCode: AccountCodes.SALES_RETURNS,
-        description: `Credit note ${data.noteNumber} - sales return`,
+        description: `Credit note ${data.noteNumber}${refSuffix} - sales return`,
         debitAmount: data.subtotal,
         creditAmount: 0,
       });
@@ -2586,7 +2597,7 @@ export async function recordCustomerCreditNoteToGL(
     if (data.taxAmount > 0) {
       lines.push({
         accountCode: AccountCodes.TAX_PAYABLE,
-        description: `Credit note ${data.noteNumber} - output VAT reversal`,
+        description: `Credit note ${data.noteNumber}${refSuffix} - output VAT reversal`,
         debitAmount: data.taxAmount,
         creditAmount: 0,
       });
@@ -2594,7 +2605,7 @@ export async function recordCustomerCreditNoteToGL(
 
     lines.push({
       accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
-      description: `Credit note ${data.noteNumber} - reduce AR`,
+      description: `Credit note ${data.noteNumber}${refSuffix} - reduce AR`,
       debitAmount: 0,
       creditAmount: data.totalAmount,
       entityType: 'customer',
@@ -2603,7 +2614,7 @@ export async function recordCustomerCreditNoteToGL(
 
     await AccountingCore.createJournalEntry({
       entryDate: data.noteDate,
-      description: `Customer credit note ${data.noteNumber}${data.customerName ? ` for ${data.customerName}` : ''}`,
+      description: `Customer credit note ${data.noteNumber}${refSuffix}${data.customerName ? ` — ${data.customerName}` : ''}`,
       referenceType: 'CREDIT_NOTE',
       referenceId: data.noteId,
       referenceNumber: data.noteNumber,
