@@ -23,8 +23,8 @@ GitHub push main → .github/workflows/deploy-production.yml
 0. **`git pull` then re-exec itself** — required because SSH starts bash with the on-disk script *before* pull; without re-exec, migrations would still use the previous version.
 1. Resolve postgres/nginx/backend container names (`smarterp-*` or `samplepos-*`)
 2. **Discover all databases** (`scripts/lib/discover-tenant-databases.sh`):
-   - `pos_system`, `pos_template`, every `pos_tenant_*` on the instance
-   - Plus every `tenants.database_name` in `pos_system` (non-deleted)
+   - `pos_system`, every `pos_tenant_*` on the instance (+ registry merge)
+   - `pos_template` is listed for visibility but **SQL migrations skip it** — template schema is cloned from `pos_system` via `tenantService.ensureTemplateDatabase()` (pg_dump), not by replaying `001_*.sql` on an empty DB
 3. Pre-deploy row-count snapshot (integrity guard)
 4. **Fail-fast migrations** on every discovered DB (`ON_ERROR_STOP=1`, same file filter as `migrate.mjs`)
 6. Optional `node scripts/proof-all-tenants-migrations.mjs`

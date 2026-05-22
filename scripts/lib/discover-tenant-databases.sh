@@ -123,6 +123,13 @@ run_migrations_all_tenants() {
   fi
 
   for DB in "${TENANT_DBS[@]}"; do
+    # pos_template is cloned from pos_system (tenantService.ensureTemplateDatabase), not
+    # built by replaying 001..515 on an empty DB — that causes mass false failures.
+    if [ "$DB" = "pos_template" ]; then
+      echo "  [pos_template] SKIP SQL chain (refreshed from pos_system on backend startup / provision)"
+      continue
+    fi
+
     local db_exists
     db_exists=$(docker exec "$container" psql -U postgres -d postgres -t -A -c \
       "SELECT 1 FROM pg_database WHERE datname = '$DB';" 2>/dev/null | tr -d '\r[:space:]')
