@@ -3123,7 +3123,7 @@ export default function ReportsPage() {
                   <table className="w-full min-w-full">
                     <thead className="bg-gray-100 border-b-2 border-gray-300">
                       <tr>
-                        {['Sale #', 'Date', 'Product', 'Qty', 'Amount', 'Ordered By', 'Cashier', 'Payment'].map(h => (
+                        {['Sale #', 'Date & Time', 'Product', 'Qty', 'Amount', 'Ordered By', 'Cashier', 'Payment'].map(h => (
                           <th key={h} className="px-3 py-3 text-left text-xs font-bold text-gray-700 uppercase whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -3132,7 +3132,7 @@ export default function ReportsPage() {
                       {(reportData.data as Record<string, unknown>[]).map((row, idx) => (
                         <tr key={idx} className="hover:bg-blue-50 transition-colors">
                           <td className="px-3 py-2 text-xs font-mono font-semibold text-indigo-700 whitespace-nowrap">{String(row.sale_number ?? '')}</td>
-                          <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{formatDisplayDate(String(row.sale_date ?? ''))}</td>
+                          <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">{formatTimestamp(String(row.sale_date ?? ''))}</td>
                           <td className="px-3 py-2 text-xs text-gray-900">{String(row.product_name ?? '')}</td>
                           <td className="px-3 py-2 text-xs text-right text-gray-700">{Number(row.quantity).toLocaleString()}</td>
                           <td className="px-3 py-2 text-xs text-right font-semibold text-green-700 whitespace-nowrap">{formatCurrency(Number(row.amount ?? 0))}</td>

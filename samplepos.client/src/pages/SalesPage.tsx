@@ -3,7 +3,7 @@ import Layout from '../components/Layout';
 import { useSales, useSalesSummary, useSalesSummaryByDate, useSalesByCashier } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
 import { formatCurrency } from '../utils/currency';
-import { BUSINESS_TIMEZONE, getBusinessDate } from '../utils/businessDate';
+import { BUSINESS_TIMEZONE, getBusinessDate, formatTimestamp, formatTimestampDate } from '../utils/businessDate';
 import Decimal from 'decimal.js';
 import { api } from '../utils/api';
 import { DatePicker } from '../components/ui/date-picker';
@@ -195,6 +195,16 @@ function formatDisplayDate(dateString: string | null | undefined): string {
   }
 
   return dateString;
+}
+
+/** Single date+time column for sales (business TZ). Prefers createdAt, then saleDate. */
+function formatSaleDateTime(sale: { saleDate?: string; createdAt?: string }): string {
+  const ts = sale.createdAt || sale.saleDate;
+  if (!ts) return 'N/A';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
+    return formatTimestampDate(ts);
+  }
+  return formatTimestamp(ts);
 }
 
 // Format timestamp to display time (HH:MM:SS format) in business timezone
@@ -1115,7 +1125,7 @@ function SalesTable({
             <div className="flex justify-between items-start mb-2">
               <div>
                 <div className="text-sm font-semibold text-blue-600">{sale.saleNumber || sale.id.slice(0, 8)}</div>
-                <div className="text-xs text-gray-500">{formatDisplayDate(sale.saleDate)} {formatDisplayTime(sale.createdAt)}</div>
+                <div className="text-xs text-gray-500">{formatSaleDateTime(sale)}</div>
               </div>
               <div className="flex gap-1">
                 <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${sale.paymentMethod === 'CASH' ? 'bg-green-100 text-green-800' : sale.paymentMethod === 'CARD' ? 'bg-blue-100 text-blue-800' : sale.paymentMethod === 'CREDIT' ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-800'}`}>
@@ -1183,9 +1193,8 @@ function SalesTable({
                 <td className="px-4 py-3 text-sm font-medium text-blue-600">
                   {sale.saleNumber || sale.id.slice(0, 8)}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-900">
-                  <div>{formatDisplayDate(sale.saleDate)}</div>
-                  <div className="text-xs text-gray-500">{formatDisplayTime(sale.createdAt)}</div>
+                <td className="px-4 py-3 text-sm text-gray-900 whitespace-nowrap">
+                  {formatSaleDateTime(sale)}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-900">
                   {sale.customerName || 'Walk-in'}
@@ -1335,10 +1344,7 @@ function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) 
                   {customer.sales.map((sale: SaleRow) => (
                     <tr key={sale.id} className="border-t border-gray-100">
                       <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
-                      <td className="py-2">
-                        <div>{formatDisplayDate(sale.saleDate)}</div>
-                        <div className="text-xs text-gray-500">{formatDisplayTime(sale.createdAt)}</div>
-                      </td>
+                      <td className="py-2 whitespace-nowrap">{formatSaleDateTime(sale)}</td>
                       <td className="py-2 text-right font-medium">
                         {formatCurrency(sale.totalAmount)}
                       </td>
@@ -1389,6 +1395,7 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
           id: String(sale.id || ''),
           saleNumber: String(sale.sale_number || sale.saleNumber || ''),
           saleDate: String(sale.sale_date || sale.saleDate || ''),
+          createdAt: String(sale.created_at || sale.createdAt || ''),
           totalAmount: Number(sale.total_amount || sale.totalAmount || 0),
           profit: Number(sale.profit || 0),
           customerName: String(sale.customer_name || sale.customerName || ''),
@@ -1447,7 +1454,6 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
                       <th className="text-left pb-2">Sale #</th>
                       <th className="text-left pb-2">Customer</th>
                       <th className="text-left pb-2">Date & Time</th>
-                      <th className="text-left pb-2">Time</th>
                       <th className="text-right pb-2">Amount</th>
                       <th className="text-right pb-2">Actions</th>
                     </tr>
@@ -1457,8 +1463,7 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
                       <tr key={sale.id} className="border-t border-gray-100">
                         <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
                         <td className="py-2">{sale.customerName || 'Walk-in'}</td>
-                        <td className="py-2">{formatDisplayDate(sale.saleDate)}</td>
-                        <td className="py-2 text-gray-600">{formatDisplayTime(sale.createdAt)}</td>
+                        <td className="py-2 whitespace-nowrap">{formatSaleDateTime(sale)}</td>
                         <td className="py-2 text-right font-medium">
                           {formatCurrency(sale.totalAmount)}
                         </td>

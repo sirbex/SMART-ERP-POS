@@ -16,6 +16,7 @@ import {
   formatCurrencyPDF,
   formatQuantityPDF,
   formatDatePDF,
+  formatDateTimePDF,
   PDFColors,
 } from '../../utils/pdfGenerator.js';
 import { cnDnReportsController } from './cnDnReportController.js';
@@ -3556,7 +3557,7 @@ export const reportsController = {
 
     // Import salesService
     const { salesService } = await import('../sales/salesService.js');
-    const result = await salesService.getSalesByCashier(pool, filters);
+    const result = await salesService.getSalesByCashierDetail(pool, filters);
 
     // Summary over line-level rows
     const summary =
@@ -3619,7 +3620,12 @@ export const reportsController = {
 
       const columns: PDFTableColumn[] = [
         { header: 'Sale #', key: 'sale_number', width: 0.12 },
-        { header: 'Date', key: 'sale_date', width: 0.10 },
+        {
+          header: 'Date & Time',
+          key: 'sale_date',
+          width: 0.12,
+          format: (v) => (v ? formatDateTimePDF(String(v)) : ''),
+        },
         { header: 'Product', key: 'product_name', width: 0.22 },
         { header: 'Qty', key: 'quantity', width: 0.07, align: 'right' },
         {

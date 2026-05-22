@@ -23,7 +23,8 @@ const mockSalesRepo = {
     getTopSellingProducts: jest.fn<MockFn>(),
     getSalesSummaryByDate: jest.fn<MockFn>(),
     getSalesDetailsReport: jest.fn<MockFn>(),
-    getSalesByCashier: jest.fn<MockFn>(),
+    getSalesByCashierSummary: jest.fn<MockFn>(),
+    getSalesByCashierDetail: jest.fn<MockFn>(),
     getSalesSummaryFromRollup: jest.fn<MockFn>(),
 };
 

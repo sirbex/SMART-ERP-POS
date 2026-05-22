@@ -1016,9 +1016,9 @@ export const salesRepository = {
   },
 
   /**
-   * Get sales by cashier report - shows sales performance by user/cashier
+   * Aggregated sales-by-cashier (one row per cashier). Used by Sales page performance tab.
    */
-  async getSalesByCashier(
+  async getSalesByCashierSummary(
     pool: Pool,
     filters: Record<string, unknown> = {}
   ): Promise<Record<string, unknown>[]> {
@@ -1036,29 +1036,92 @@ export const salesRepository = {
       values.push(filters.endDate);
     }
 
-    // cashierId filters by the user who processed the payment
     if (filters.cashierId) {
       whereClauses.push(`s.cashier_id = $${paramIndex++}`);
       values.push(filters.cashierId);
     } else if (filters.userId) {
-      // legacy compat: user_id also maps to cashier
       whereClauses.push(`s.cashier_id = $${paramIndex++}`);
       values.push(filters.userId);
     }
 
-    // orderedById filters by the user who created the order (queue sales only)
     if (filters.orderedById) {
-      whereClauses.push(`(po.created_by = $${paramIndex++} OR (s.from_order_id IS NULL AND s.cashier_id = $${paramIndex++}))`);
+      whereClauses.push(
+        `(po.created_by = $${paramIndex++} OR (s.from_order_id IS NULL AND s.cashier_id = $${paramIndex++}))`
+      );
       values.push(filters.orderedById, filters.orderedById);
     }
 
-    // productId filters by item product
+    if (filters.productId) {
+      whereClauses.push(
+        `EXISTS (SELECT 1 FROM sale_items si_f WHERE si_f.sale_id = s.id AND si_f.product_id = $${paramIndex++})`
+      );
+      values.push(filters.productId);
+    }
+
+    const query = `
+      SELECT
+        u.id                                                   AS user_id,
+        u.full_name                                            AS cashier_name,
+        u.role,
+        COUNT(DISTINCT s.id)::int                              AS total_transactions,
+        ROUND(SUM(s.total_amount)::numeric, 2)                 AS total_revenue,
+        ROUND(SUM(s.total_cost)::numeric, 2)                   AS total_cost,
+        ROUND(SUM(s.profit)::numeric, 2)                       AS total_profit,
+        COUNT(DISTINCT po.created_by)::int                     AS unique_order_creators,
+        TO_CHAR(MAX(s.sale_date), 'YYYY-MM-DD')                AS last_sale_date
+      FROM sales s
+      INNER JOIN users u ON u.id = s.cashier_id
+      LEFT JOIN pos_orders po ON po.id = s.from_order_id
+      WHERE ${whereClauses.join(' AND ')}
+      GROUP BY u.id, u.full_name, u.role
+      ORDER BY total_revenue DESC
+    `;
+
+    const result = await pool.query(query, values);
+    return result.rows;
+  },
+
+  /**
+   * Line-level sales-by-cashier (one row per sale_item). Used by Reports export/detail.
+   */
+  async getSalesByCashierDetail(
+    pool: Pool,
+    filters: Record<string, unknown> = {}
+  ): Promise<Record<string, unknown>[]> {
+    const whereClauses = ["s.status = 'COMPLETED'"];
+    const values: unknown[] = [];
+    let paramIndex = 1;
+
+    if (filters.startDate) {
+      whereClauses.push(`s.sale_date >= $${paramIndex++}`);
+      values.push(filters.startDate);
+    }
+
+    if (filters.endDate) {
+      whereClauses.push(`s.sale_date <= $${paramIndex++}`);
+      values.push(filters.endDate);
+    }
+
+    if (filters.cashierId) {
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
+      values.push(filters.cashierId);
+    } else if (filters.userId) {
+      whereClauses.push(`s.cashier_id = $${paramIndex++}`);
+      values.push(filters.userId);
+    }
+
+    if (filters.orderedById) {
+      whereClauses.push(
+        `(po.created_by = $${paramIndex++} OR (s.from_order_id IS NULL AND s.cashier_id = $${paramIndex++}))`
+      );
+      values.push(filters.orderedById, filters.orderedById);
+    }
+
     if (filters.productId) {
       whereClauses.push(`si.product_id = $${paramIndex++}`);
       values.push(filters.productId);
     }
 
-    // One row per sale_item: Sale #, Date, Product, Qty, Amount, Ordered By, Cashier, Payment Method
     const query = `
       SELECT
         s.sale_number,

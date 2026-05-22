@@ -2240,7 +2240,7 @@ export const salesService = {
   },
 
   /**
-   * Get sales by cashier report - sales performance by user
+   * Aggregated sales-by-cashier (Sales page performance tab).
    */
   async getSalesByCashier(
     pool: Pool,
@@ -2253,7 +2253,24 @@ export const salesService = {
       productId?: string;
     }
   ): Promise<Record<string, unknown>[]> {
-    return salesRepository.getSalesByCashier(pool, filters ?? {});
+    return salesRepository.getSalesByCashierSummary(pool, filters ?? {});
+  },
+
+  /**
+   * Line-level sales-by-cashier (Reports detail/export).
+   */
+  async getSalesByCashierDetail(
+    pool: Pool,
+    filters?: {
+      startDate?: string;
+      endDate?: string;
+      userId?: string;
+      cashierId?: string;
+      orderedById?: string;
+      productId?: string;
+    }
+  ): Promise<Record<string, unknown>[]> {
+    return salesRepository.getSalesByCashierDetail(pool, filters ?? {});
   },
 
   /**
