@@ -56,18 +56,36 @@ node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/modules/goods
 
 ---
 
-## 4. DB / UI proof on GR-2026-0375 — NOT RUN locally
+## 4. Henber production API proof — run after deploy
 
-**Command (when GR exists on your DB):**
+**Command:**
 
 ```bash
-cd SamplePOS.Server
-node scripts/explain-gr-uom.mjs GR-2026-0375
+BASE_URL=https://henber.wizarddigital-inv.com \
+TEST_EMAIL=<henber-admin> \
+TEST_PASSWORD=<password> \
+npm run proof:gr-uom:live
 ```
 
-**Local `pos_system`:** GR not found (exit 1). Run on the environment where the draft lives.
+**Script:** `scripts/proof-gr-uom-live.mjs` — reads `GR-2026-0375` / `PO-2026-0373` from henber tenant API (display units in DB).
 
-**Manual UI check (you):** Open GR-2026-0375 → Sacoplus should show **1** / **UGX 70,000**; Fluoxetine **90** / **233**; preview **90,970**.
+**Expected when PASS:**
+
+| Line | ordered | received | unitCost | Notes |
+|------|--------:|---------:|---------:|-------|
+| Sacoplus | 1 | 1 | 70,000 | ≠ 0.033, ≠ 2,100,000, ≠ received 30 |
+| Fluoxetine | 90 | 90 | 233 | |
+| Σ qty×cost | | | **90,970** | |
+
+**DB script (on server):**
+
+```bash
+docker exec smarterp-postgres psql -U postgres -d pos_tenant_henber_pharmacy \
+  -c "SELECT p.name, gri.received_quantity, gri.cost_price FROM goods_receipt_items gri ..."
+# or: node SamplePOS.Server/scripts/explain-gr-uom.mjs GR-2026-0375
+```
+
+**Local `pos_system`:** GR not found — scenario is **henber production** only.
 
 ---
 

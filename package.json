@@ -20,7 +20,8 @@
     "proof:deploy": "node scripts/proof-deploy-readiness.mjs",
     "proof:at-cost": "cd SamplePOS.Server && npm run proof:at-cost",
     "proof:at-cost:all": "cd SamplePOS.Server && npm run test:pricing-phases && npm run proof:at-cost && cd ../samplepos.client && npm run test:pricing-phases",
-    "proof:gr-uom": "cd samplepos.client && npm run proof:gr-uom && cd ../SamplePOS.Server && npm run proof:gr-uom:server"
+    "proof:gr-uom": "cd samplepos.client && npm run proof:gr-uom && cd ../SamplePOS.Server && npm run proof:gr-uom:server",
+    "proof:gr-uom:live": "node scripts/proof-gr-uom-live.mjs"
   },
   "devDependencies": {
     "husky": "^8.0.0",
