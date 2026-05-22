@@ -5,6 +5,18 @@
 
 set -e
 
+# SSH runs this file from disk BEFORE git pull updates it. Re-exec after pull so the
+# remainder of the script is the version we just fetched (discover-all-tenants, fail-fast).
+cd /opt/smarterp
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -z "${DEPLOY_SELF_REEXEC:-}" ]; then
+  echo ">>> Pulling latest code (deploy script must run post-pull copy)..."
+  git pull
+  export DEPLOY_SELF_REEXEC=1
+  exec env DEPLOY_SELF_REEXEC=1 bash "$SCRIPT_DIR/deploy-update.sh"
+fi
+
 # Production may run postgres under smarterp-postgres (deploy compose) or samplepos-postgres (legacy).
 resolve_container() {
   local preferred="$1"
@@ -38,11 +50,9 @@ echo ">>> Using postgres container: $POSTGRES_CONTAINER"
 echo "=== SMART-ERP Production Update ==="
 echo "Server: $(hostname)"
 echo "Date: $(date)"
+echo "Git: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo ""
 
-cd /opt/smarterp
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/discover-tenant-databases.sh
 source "$SCRIPT_DIR/lib/discover-tenant-databases.sh"
 
@@ -95,12 +105,6 @@ echo "  }" >> "$SNAPSHOT_FILE"
 echo "}" >> "$SNAPSHOT_FILE"
 echo ">>> Snapshot saved → $SNAPSHOT_FILE"
 echo ""
-
-# ── CODE UPDATE ────────────────────────────────────────────────────────────────
-
-# Pull latest code
-echo ">>> Pulling latest code..."
-git pull
 
 # ── DATABASE MIGRATIONS ────────────────────────────────────────────────────────
 # Runs every *.sql file in shared/sql/ (sorted) against all tenant databases.

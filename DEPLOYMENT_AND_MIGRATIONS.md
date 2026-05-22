@@ -20,13 +20,13 @@ GitHub push main → .github/workflows/deploy-production.yml
 
 ### What `deploy-update.sh` does
 
+0. **`git pull` then re-exec itself** — required because SSH starts bash with the on-disk script *before* pull; without re-exec, migrations would still use the previous version.
 1. Resolve postgres/nginx/backend container names (`smarterp-*` or `samplepos-*`)
 2. **Discover all databases** (`scripts/lib/discover-tenant-databases.sh`):
    - `pos_system`, `pos_template`, every `pos_tenant_*` on the instance
    - Plus every `tenants.database_name` in `pos_system` (non-deleted)
 3. Pre-deploy row-count snapshot (integrity guard)
-4. `git pull`
-5. **Fail-fast migrations** on every discovered DB (`ON_ERROR_STOP=1`, same file filter as `migrate.mjs`)
+4. **Fail-fast migrations** on every discovered DB (`ON_ERROR_STOP=1`, same file filter as `migrate.mjs`)
 6. Optional `node scripts/proof-all-tenants-migrations.mjs`
 7. `docker compose -f docker-compose.deploy.yml build` backend + frontend only
 8. `up -d --no-deps` backend + frontend (postgres/redis volumes untouched)
