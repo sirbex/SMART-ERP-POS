@@ -678,6 +678,54 @@ describe('PostingGovernanceService', () => {
     });
 
     // --------------------------------------------------------------------------
+    // CUSTOMER CREDIT NOTE (SALES_REFUND → AR 1200)
+    // --------------------------------------------------------------------------
+    describe('SALES_REFUND — customer credit note GL', () => {
+        const arProductionLike = makeAccount({
+            ...arAccount,
+            allowedSources: ['SALES_INVOICE', 'CUTOVER_CORRECTION', 'SYSTEM_CORRECTION', 'PAYMENT_RECEIPT'],
+        });
+        const salesReturns = makeAccount({
+            accountCode: '4010',
+            accountName: 'Sales Returns & Allowances',
+            accountType: 'REVENUE',
+            normalBalance: 'DEBIT',
+            allowManualPosting: false,
+            allowedSources: [],
+            systemAccountTag: null,
+        });
+
+        it('blocks SALES_REFUND credit to AR when SALES_REFUND not in AllowedSources', () => {
+            const req = makeRequest(
+                'SALES_REFUND',
+                [
+                    { accountCode: '4010', debitAmount: 82900, creditAmount: 0 },
+                    { accountCode: '1200', debitAmount: 0, creditAmount: 82900 },
+                ],
+                [arProductionLike, salesReturns],
+            );
+            expect(() => PostingGovernanceService.validate(req)).toThrow(/GOV_RULE_B_SOURCE_NOT_ALLOWED/);
+            expect(() => PostingGovernanceService.validate(req)).toThrow(/1200/);
+        });
+
+        it('allows SALES_REFUND credit to AR when SALES_REFUND is in AllowedSources', () => {
+            const arWithRefund = makeAccount({
+                ...arProductionLike,
+                allowedSources: [...arProductionLike.allowedSources, 'SALES_REFUND'],
+            });
+            const req = makeRequest(
+                'SALES_REFUND',
+                [
+                    { accountCode: '4010', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '1200', debitAmount: 0, creditAmount: 100 },
+                ],
+                [arWithRefund, salesReturns],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+    });
+
+    // --------------------------------------------------------------------------
     // EDGE CASES
     // --------------------------------------------------------------------------
     describe('Edge cases', () => {
