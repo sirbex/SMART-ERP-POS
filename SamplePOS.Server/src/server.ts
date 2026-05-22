@@ -57,6 +57,7 @@ import { hrRoutes } from './modules/hr/hr.routes.js';
 import { creditDebitNoteRoutes } from './modules/credit-debit-notes/creditDebitNoteRoutes.js';
 import { returnGrnRoutes } from './modules/return-grn/returnGrnRoutes.js';
 import { supplierAdjustmentRoutes } from './modules/supplier-adjustments/supplierAdjustmentRoutes.js';
+import { customerInvoiceAdjustmentRoutes } from './modules/customer-invoice-adjustments/customerInvoiceAdjustmentRoutes.js';
 import { documentFlowRoutes } from './modules/document-flow/documentFlowRoutes.js';
 import { pricingEngineRoutes } from './modules/pricing/pricingRoutes.js';
 import { glRepairRoutes } from './modules/system/glRepairRoutes.js';
@@ -366,6 +367,7 @@ app.use('/api/inventory', requireFeature('inventory'), inventoryRoutes);
 app.use('/api/goods-receipts', requireFeature('inventory'), goodsReceiptRoutes);
 app.use('/api/return-grn', requireFeature('inventory'), returnGrnRoutes);
 app.use('/api/supplier-adjustments', requireFeature('purchase_orders'), supplierAdjustmentRoutes);
+app.use('/api/customer-invoice-adjustments', requireFeature('invoices'), customerInvoiceAdjustmentRoutes);
 app.use('/api/stock-movements', requireFeature('inventory'), stockMovementRoutes);
 
 // ── Purchase Orders (plan: PROFESSIONAL+) ───────────────────

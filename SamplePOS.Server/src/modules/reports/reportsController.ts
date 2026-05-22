@@ -3618,10 +3618,10 @@ export const reportsController = {
       ]);
 
       const columns: PDFTableColumn[] = [
-        { header: 'Sale #',        key: 'sale_number',   width: 0.12 },
-        { header: 'Date',          key: 'sale_date',     width: 0.10 },
-        { header: 'Product',       key: 'product_name',  width: 0.22 },
-        { header: 'Qty',           key: 'quantity',      width: 0.07, align: 'right' },
+        { header: 'Sale #', key: 'sale_number', width: 0.12 },
+        { header: 'Date', key: 'sale_date', width: 0.10 },
+        { header: 'Product', key: 'product_name', width: 0.22 },
+        { header: 'Qty', key: 'quantity', width: 0.07, align: 'right' },
         {
           header: 'Amount',
           key: 'amount',
@@ -3629,9 +3629,9 @@ export const reportsController = {
           align: 'right',
           format: (v) => formatCurrencyPDF(v),
         },
-        { header: 'Ordered By',    key: 'ordered_by',    width: 0.15 },
-        { header: 'Cashier',       key: 'cashier',       width: 0.15 },
-        { header: 'Payment',       key: 'payment_method', width: 0.10 },
+        { header: 'Ordered By', key: 'ordered_by', width: 0.15 },
+        { header: 'Cashier', key: 'cashier', width: 0.15 },
+        { header: 'Payment', key: 'payment_method', width: 0.10 },
       ];
 
       pdfGen.addTable(columns, result);

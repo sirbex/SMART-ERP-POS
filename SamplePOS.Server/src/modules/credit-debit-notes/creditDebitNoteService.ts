@@ -228,13 +228,6 @@ export const creditDebitNoteService = {
 
             if (note.documentType === 'CREDIT_NOTE') {
                 await recordCustomerCreditNoteToGL(glData, pool, client);
-                // 3. Reduce outstanding balance on original invoice
-                await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
-                    client,
-                    note.referenceInvoiceId,
-                    note.totalAmount,
-                    'CREDIT',
-                );
 
                 // 4. SAP: Inventory return — if returnsGoods flag is set, increase stock
                 //    Creates RETURN stock movements, updates batches + product_inventory,
@@ -332,16 +325,12 @@ export const creditDebitNoteService = {
                 }
             } else {
                 await recordCustomerDebitNoteToGL(glData, pool, client);
-                // Debit note increases the AR on the customer — also adjust original invoice
-                await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
-                    client,
-                    note.referenceInvoiceId,
-                    note.totalAmount,
-                    'DEBIT',
-                );
             }
 
-            // Recalculate customer balance from invoices (SSOT)
+            // Recalculate original invoice (payments + posted notes) then customer AR
+            const { invoiceRepository } = await import('../invoices/invoiceRepository.js');
+            await invoiceRepository.recalcInvoice(client, note.referenceInvoiceId);
+
             if (note.customerId) {
                 const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
                 await syncCustomerBalanceFromInvoices(client, note.customerId, 'CREDIT_DEBIT_NOTE');
@@ -402,26 +391,9 @@ export const creditDebitNoteService = {
                 }
             }
 
-            // 4. Reverse the balance adjustment on the original invoice
-            if (noteData.documentType === 'CREDIT_NOTE') {
-                // Credit note was credited → reverse by debiting back
-                await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
-                    client,
-                    noteData.referenceInvoiceId,
-                    noteData.totalAmount,
-                    'DEBIT',
-                );
-            } else {
-                // Debit note was debited → reverse by crediting back
-                await creditDebitNoteRepository.adjustOriginalInvoiceBalance(
-                    client,
-                    noteData.referenceInvoiceId,
-                    noteData.totalAmount,
-                    'CREDIT',
-                );
-            }
+            const { invoiceRepository } = await import('../invoices/invoiceRepository.js');
+            await invoiceRepository.recalcInvoice(client, noteData.referenceInvoiceId);
 
-            // Recalculate customer balance from invoices (SSOT)
             if (noteData.customerId) {
                 const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
                 await syncCustomerBalanceFromInvoices(client, noteData.customerId, 'NOTE_CANCELLATION');

@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:pricing-phases": "vitest run src/__tests__/pricing-customer-phases.test.ts",
+    "proof:gr-uom": "vitest run src/__tests__/gr-po-uom-display.test.ts",
     "test:ui": "vitest --ui"
   },
   "dependencies": {

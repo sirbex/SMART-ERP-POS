@@ -39,6 +39,7 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getFinalPricesBulk, type ResolvedPrice } from '../pricing/pricingEngineService.js';
 import { getCustomerPricingMode } from '../pricing/pricingRepository.js';
 import { validateAtCostSalePricing } from './atCostSalePricingGuard.js';
+import { computeSaleItemBaseQuantity } from './saleItemBaseQuantity.js';
 import { detectCogsDrift } from '../../utils/cogsDriftGuard.js';
 import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
 
@@ -295,7 +296,15 @@ export const salesService = {
         try {
           const bulkItems = input.items
             .filter((it) => !it.productId?.startsWith('custom_'))
-            .map((it) => ({ productId: it.productId, quantity: it.quantity }));
+            .map((it) => {
+              const productUoms = uomsMap.get(it.productId) || [];
+              const { baseQuantity } = computeSaleItemBaseQuantity(it, productUoms);
+              return {
+                productId: it.productId,
+                quantity: it.quantity,
+                baseQuantity,
+              };
+            });
 
           const resolved = await getFinalPricesBulk(
             bulkItems,

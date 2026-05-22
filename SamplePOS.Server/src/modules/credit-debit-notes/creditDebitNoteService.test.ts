@@ -156,6 +156,11 @@ jest.unstable_mockModule('../../utils/customerBalanceSync.js', () => ({
     syncCustomerBalanceFromInvoices: jest.fn<MockFn>().mockResolvedValue(undefined),
 }));
 
+const mockRecalcInvoice = jest.fn<MockFn>().mockResolvedValue(null);
+jest.unstable_mockModule('../invoices/invoiceRepository.js', () => ({
+    invoiceRepository: { recalcInvoice: mockRecalcInvoice },
+}));
+
 // ── Supplier repository (recalcSupplierBalance) ───────────────
 const mockRecalcSupplierBalance = jest.fn<MockFn>().mockResolvedValue(undefined);
 jest.unstable_mockModule('../suppliers/supplierRepository.js', () => ({
@@ -439,17 +444,12 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             expect(glCall.customerId).toBe('cust-001');
         });
 
-        it('calls adjustOriginalInvoiceBalance with CREDIT direction', async () => {
+        it('recalculates original invoice after posting credit note', async () => {
             mockCnRepo.postNote.mockResolvedValue(draftNote);
 
             await creditDebitNoteService.postNote(mockPool, 'cn-uuid-1');
 
-            expect(mockCnRepo.adjustOriginalInvoiceBalance).toHaveBeenCalledWith(
-                mockClient,
-                'inv-001',
-                50000,
-                'CREDIT',
-            );
+            expect(mockRecalcInvoice).toHaveBeenCalledWith(mockClient, 'inv-001');
         });
 
         it('does NOT call recordCustomerDebitNoteToGL (correct branch selection)', async () => {
@@ -491,7 +491,7 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             ).rejects.toThrow('Only posted notes can be cancelled');
         });
 
-        it('reverses invoice balance in DEBIT direction (undo the CREDIT that was applied on post)', async () => {
+        it('recalculates original invoice after cancelling credit note', async () => {
             mockCnRepo.getNoteById.mockResolvedValue(postedCreditNote);
             mockCnRepo.cancelNote.mockResolvedValue({ ...postedCreditNote, status: 'Cancelled' });
             // No GL transaction found → skip reverseTransaction call
@@ -499,13 +499,7 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
 
             await creditDebitNoteService.cancelNote(mockPool, 'cn-uuid-1', 'Customer request');
 
-            // CN was CREDIT on post → cancel must DEBIT back to restore original balance
-            expect(mockCnRepo.adjustOriginalInvoiceBalance).toHaveBeenCalledWith(
-                mockClient,
-                'inv-001',
-                50000,
-                'DEBIT',
-            );
+            expect(mockRecalcInvoice).toHaveBeenCalledWith(mockClient, 'inv-001');
         });
 
         it('calls AccountingCore.reverseTransaction when GL transaction exists', async () => {
@@ -634,17 +628,12 @@ describe('creditDebitNoteService — Customer Debit Note', () => {
             expect(mockRecordCustomerCreditNoteToGL).not.toHaveBeenCalled();
         });
 
-        it('calls adjustOriginalInvoiceBalance with DEBIT direction', async () => {
+        it('recalculates original invoice after posting debit note', async () => {
             mockCnRepo.postNote.mockResolvedValue(draftDebitNote);
 
             await creditDebitNoteService.postNote(mockPool, 'dn-uuid-1');
 
-            expect(mockCnRepo.adjustOriginalInvoiceBalance).toHaveBeenCalledWith(
-                mockClient,
-                'inv-001',
-                20000,
-                'DEBIT',
-            );
+            expect(mockRecalcInvoice).toHaveBeenCalledWith(mockClient, 'inv-001');
         });
     });
 
@@ -660,20 +649,14 @@ describe('creditDebitNoteService — Customer Debit Note', () => {
             issueDate: '2026-05-01',
         };
 
-        it('reverses invoice balance in CREDIT direction (undo the DEBIT applied on post)', async () => {
+        it('recalculates original invoice after cancelling debit note', async () => {
             mockCnRepo.getNoteById.mockResolvedValue(postedDebitNote);
             mockCnRepo.cancelNote.mockResolvedValue({ ...postedDebitNote, status: 'Cancelled' });
             mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
 
             await creditDebitNoteService.cancelNote(mockPool, 'dn-uuid-1', 'Error');
 
-            // DN was DEBIT on post → cancel must CREDIT back
-            expect(mockCnRepo.adjustOriginalInvoiceBalance).toHaveBeenCalledWith(
-                mockClient,
-                'inv-001',
-                20000,
-                'CREDIT',
-            );
+            expect(mockRecalcInvoice).toHaveBeenCalledWith(mockClient, 'inv-001');
         });
     });
 });
@@ -1218,7 +1201,7 @@ describe('Credit/Debit Note — balance direction invariants', () => {
      * CN post: CREDIT invoice balance
      * CN cancel: DEBIT invoice balance (net = 0, original balance restored)
      */
-    it('Customer CN: post direction is CREDIT, cancel direction is DEBIT (net-zero invariant)', async () => {
+    it('Customer CN: post and cancel both recalc the reference invoice', async () => {
         const noteId = 'cn-inv-1';
         const postedNote = {
             id: noteId, invoiceNumber: 'CN-2026-0099', documentType: 'CREDIT_NOTE',
@@ -1227,26 +1210,22 @@ describe('Credit/Debit Note — balance direction invariants', () => {
             issueDate: '2026-05-01', returnsGoods: false,
         };
 
-        // Simulate post
         mockCnRepo.postNote.mockResolvedValue(postedNote);
         await creditDebitNoteService.postNote(mockPool, noteId);
-        const postCall = mockCnRepo.adjustOriginalInvoiceBalance.mock.calls[0] as unknown[];
-        expect(postCall[3]).toBe('CREDIT');
+        expect(mockRecalcInvoice).toHaveBeenCalledWith(mockClient, 'inv-x');
 
-        // Simulate cancel
         jest.clearAllMocks();
         mockCnRepo.getNoteById.mockResolvedValue(postedNote);
         mockCnRepo.cancelNote.mockResolvedValue({ ...postedNote, status: 'Cancelled' });
         mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
         await creditDebitNoteService.cancelNote(mockPool, noteId, 'Test');
-        const cancelCall = mockCnRepo.adjustOriginalInvoiceBalance.mock.calls[0] as unknown[];
-        expect(cancelCall[3]).toBe('DEBIT');
+        expect(mockRecalcInvoice).toHaveBeenCalledWith(mockClient, 'inv-x');
     });
 
     /**
      * Invariant: DN post is DEBIT, DN cancel is CREDIT.
      */
-    it('Customer DN: post direction is DEBIT, cancel direction is CREDIT (net-zero invariant)', async () => {
+    it('Customer DN: post and cancel both recalc the reference invoice', async () => {
         const noteId = 'dn-inv-1';
         const postedNote = {
             id: noteId, invoiceNumber: 'DN-2026-0099', documentType: 'DEBIT_NOTE',
@@ -1255,20 +1234,16 @@ describe('Credit/Debit Note — balance direction invariants', () => {
             issueDate: '2026-05-01',
         };
 
-        // Simulate post
         mockCnRepo.postNote.mockResolvedValue(postedNote);
         await creditDebitNoteService.postNote(mockPool, noteId);
-        const postCall = mockCnRepo.adjustOriginalInvoiceBalance.mock.calls[0] as unknown[];
-        expect(postCall[3]).toBe('DEBIT');
+        expect(mockRecalcInvoice).toHaveBeenCalledWith(mockClient, 'inv-x');
 
-        // Simulate cancel
         jest.clearAllMocks();
         mockCnRepo.getNoteById.mockResolvedValue(postedNote);
         mockCnRepo.cancelNote.mockResolvedValue({ ...postedNote, status: 'Cancelled' });
         mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
         await creditDebitNoteService.cancelNote(mockPool, noteId, 'Test');
-        const cancelCall = mockCnRepo.adjustOriginalInvoiceBalance.mock.calls[0] as unknown[];
-        expect(cancelCall[3]).toBe('CREDIT');
+        expect(mockRecalcInvoice).toHaveBeenCalledWith(mockClient, 'inv-x');
     });
 
     /**

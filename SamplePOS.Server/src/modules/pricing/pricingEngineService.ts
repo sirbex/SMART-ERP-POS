@@ -29,6 +29,10 @@ import * as pricingCache from '../../services/pricingCacheService.js';
 import * as pricingService from '../../services/pricingService.js';
 import * as repo from './pricingRepository.js';
 import { normalisePriceRule, normaliseProductCategory } from './pricingRepository.js';
+import {
+    resolveAtCostPerBaseUnit,
+    type ProductValuationForAtCost,
+} from './atCostIssuePrice.js';
 import type {
     CreateProductCategory,
     UpdateProductCategory,
@@ -96,6 +100,7 @@ export async function getFinalPrice(
     customerGroupId: string | undefined,
     quantity: number = 1,
     dbPool?: Pool | PoolClient,
+    baseQuantity?: number,
 ): Promise<ResolvedPrice> {
     const pool = dbPool || globalPool;
 
@@ -111,20 +116,33 @@ export async function getFinalPrice(
     if (customerId) {
         const pricingMode = await repo.getCustomerPricingMode(pool, customerId);
         if (pricingMode === 'AT_COST') {
-            const product = await repo.getProductBasePrice(pool, productId);
+            const product = await repo.getProductValuationForAtCost(pool, productId);
             if (!product) throw new NotFoundError(`Product ${productId}`);
-            const costPrice = Money.parseDb(product.costPrice);
+            const baseQty = baseQuantity ?? quantity;
+            const valuation: ProductValuationForAtCost = {
+                sellingPrice: product.sellingPrice,
+                costPrice: product.costPrice,
+                averageCost: product.averageCost,
+                costingMethod: product.costingMethod as ProductValuationForAtCost['costingMethod'],
+            };
+            const { unitPricePerBase, ruleName } = await resolveAtCostPerBaseUnit(
+                pool,
+                productId,
+                baseQty,
+                valuation,
+            );
             const basePriceForMode = Money.parseDb(product.sellingPrice);
-            const discountAmt = basePriceForMode.minus(costPrice).greaterThan(0)
-                ? basePriceForMode.minus(costPrice)
+            const issueCost = Money.parseDb(String(unitPricePerBase));
+            const discountAmt = basePriceForMode.minus(issueCost).greaterThan(0)
+                ? basePriceForMode.minus(issueCost)
                 : Money.zero();
             return {
-                finalPrice: Money.toNumber(Money.round(costPrice)),
+                finalPrice: unitPricePerBase,
                 basePrice: Money.toNumber(Money.round(basePriceForMode)),
                 discount: Money.toNumber(Money.round(discountAmt)),
                 appliedRule: {
                     ruleId: null,
-                    ruleName: 'At Cost',
+                    ruleName,
                     ruleType: 'at_cost',
                     ruleValue: null,
                     scope: 'at_cost',
@@ -282,7 +300,7 @@ export async function getFinalPrice(
 // ============================================================================
 
 export async function getFinalPricesBulk(
-    items: Array<{ productId: string; quantity: number }>,
+    items: Array<{ productId: string; quantity: number; baseQuantity?: number }>,
     customerId: string | undefined,
     customerGroupId: string | undefined,
     dbPool?: Pool | PoolClient,
@@ -303,28 +321,41 @@ export async function getFinalPricesBulk(
         const pricingMode = await repo.getCustomerPricingMode(pool, customerId);
         if (pricingMode === 'AT_COST') {
             const productIds = items.map(i => i.productId);
-            const basePriceMap = await repo.getProductBasePricesBulk(pool, productIds);
-            return items.map(item => {
-                const baseData = basePriceMap.get(item.productId);
+            const valuationMap = await repo.getProductValuationForAtCostBulk(pool, productIds);
+            return Promise.all(items.map(async (item) => {
+                const baseData = valuationMap.get(item.productId);
                 if (!baseData) throw new NotFoundError(`Product ${item.productId}`);
-                const costPrice = Money.parseDb(baseData.costPrice);
+                const baseQty = item.baseQuantity ?? item.quantity;
+                const valuation: ProductValuationForAtCost = {
+                    sellingPrice: baseData.sellingPrice,
+                    costPrice: baseData.costPrice,
+                    averageCost: baseData.averageCost,
+                    costingMethod: baseData.costingMethod as ProductValuationForAtCost['costingMethod'],
+                };
+                const { unitPricePerBase, ruleName } = await resolveAtCostPerBaseUnit(
+                    pool,
+                    item.productId,
+                    baseQty,
+                    valuation,
+                );
                 const basePrice = Money.parseDb(baseData.sellingPrice);
-                const discountAmt = basePrice.minus(costPrice).greaterThan(0)
-                    ? basePrice.minus(costPrice)
+                const issueCost = Money.parseDb(String(unitPricePerBase));
+                const discountAmt = basePrice.minus(issueCost).greaterThan(0)
+                    ? basePrice.minus(issueCost)
                     : Money.zero();
                 return {
-                    finalPrice: Money.toNumber(Money.round(costPrice)),
+                    finalPrice: unitPricePerBase,
                     basePrice: Money.toNumber(Money.round(basePrice)),
                     discount: Money.toNumber(Money.round(discountAmt)),
                     appliedRule: {
                         ruleId: null,
-                        ruleName: 'At Cost',
+                        ruleName,
                         ruleType: 'at_cost',
                         ruleValue: null,
                         scope: 'at_cost' as const,
                     },
                 };
-            });
+            }));
         }
     }
 

@@ -321,7 +321,10 @@ export const creditDebitNoteRepository = {
     async postNote(client: Pool | PoolClient, noteId: string): Promise<CreditDebitNoteRecord | null> {
         const result = await client.query(
             `UPDATE invoices
-       SET status = 'POSTED', updated_at = NOW()
+       SET status = 'POSTED',
+           amount_paid = total_amount,
+           amount_due = 0,
+           updated_at = NOW()
        WHERE id = $1 AND status = 'DRAFT' AND document_type IN ('CREDIT_NOTE', 'DEBIT_NOTE')
        RETURNING *`,
             [noteId]

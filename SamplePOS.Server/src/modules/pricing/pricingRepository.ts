@@ -558,6 +558,39 @@ export async function getProductBasePrice(
     };
 }
 
+/** Valuation fields for AT_COST issue-cost pricing (FIFO FEFO preview / AVCO average). */
+export async function getProductValuationForAtCost(
+    client: Pool | PoolClient,
+    productId: string,
+): Promise<{
+    sellingPrice: string;
+    costPrice: string;
+    categoryId: string | null;
+    averageCost: string;
+    costingMethod: string;
+} | null> {
+    const res = await client.query(
+        `SELECT p.category_id,
+                COALESCE(pv.selling_price, p.selling_price) AS selling_price,
+                COALESCE(pv.cost_price, p.cost_price)       AS cost_price,
+                COALESCE(pv.average_cost, 0)                AS average_cost,
+                COALESCE(pv.costing_method, 'FIFO')         AS costing_method
+         FROM products p
+         LEFT JOIN product_valuation pv ON pv.product_id = p.id
+         WHERE p.id = $1`,
+        [productId],
+    );
+    const row = res.rows[0];
+    if (!row) return null;
+    return {
+        categoryId: row.category_id ?? null,
+        sellingPrice: row.selling_price,
+        costPrice: row.cost_price,
+        averageCost: row.average_cost,
+        costingMethod: row.costing_method,
+    };
+}
+
 export async function getCustomerGroupId(
     client: Pool | PoolClient,
     customerId: string,
@@ -905,6 +938,48 @@ export async function getProductBasePricesBulk(
             sellingPrice: row.selling_price,
             costPrice: row.cost_price,
             categoryId: row.category_id,
+        });
+    }
+    return map;
+}
+
+export async function getProductValuationForAtCostBulk(
+    client: Pool | PoolClient,
+    productIds: string[],
+): Promise<Map<string, {
+    sellingPrice: string;
+    costPrice: string;
+    categoryId: string | null;
+    averageCost: string;
+    costingMethod: string;
+}>> {
+    if (productIds.length === 0) return new Map();
+    const res = await client.query(
+        `SELECT p.id,
+                p.category_id,
+                COALESCE(pv.selling_price, p.selling_price) AS selling_price,
+                COALESCE(pv.cost_price, p.cost_price)       AS cost_price,
+                COALESCE(pv.average_cost, 0)                AS average_cost,
+                COALESCE(pv.costing_method, 'FIFO')         AS costing_method
+         FROM products p
+         LEFT JOIN product_valuation pv ON pv.product_id = p.id
+         WHERE p.id = ANY($1)`,
+        [productIds],
+    );
+    const map = new Map<string, {
+        sellingPrice: string;
+        costPrice: string;
+        categoryId: string | null;
+        averageCost: string;
+        costingMethod: string;
+    }>();
+    for (const row of res.rows) {
+        map.set(row.id, {
+            sellingPrice: row.selling_price,
+            costPrice: row.cost_price,
+            categoryId: row.category_id,
+            averageCost: row.average_cost,
+            costingMethod: row.costing_method,
         });
     }
     return map;

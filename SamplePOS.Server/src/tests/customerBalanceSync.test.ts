@@ -78,7 +78,8 @@ describe('Customer Balance — Single Source of Truth', () => {
       LEFT JOIN (
         SELECT customer_id, SUM(amount_due) AS computed_balance
         FROM invoices
-        WHERE status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
+        WHERE COALESCE(document_type, 'INVOICE') = 'INVOICE'
+          AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
         GROUP BY customer_id
       ) inv ON inv.customer_id = c.id
       WHERE c.is_active = true
@@ -266,7 +267,8 @@ describe('Invoice Arithmetic Invariant', () => {
       SELECT id, invoice_number, total_amount, amount_paid, amount_due,
              ABS(total_amount - amount_paid - amount_due) AS arithmetic_drift
       FROM invoices
-      WHERE status NOT IN ('CANCELLED', 'VOIDED')
+      WHERE COALESCE(document_type, 'INVOICE') = 'INVOICE'
+        AND status NOT IN ('CANCELLED', 'VOIDED')
         AND ABS(total_amount - amount_paid - amount_due) > 0.01
     `);
 

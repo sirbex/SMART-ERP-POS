@@ -480,7 +480,20 @@ export async function getCustomerStatement(
   const startIndex = Math.max(0, (page - 1) * limit);
   const endIndex = Math.min(totalEntries, startIndex + limit);
   const entries = entriesWithBalance.slice(startIndex, endIndex);
-  const closingBalance = running.toNumber();
+
+  // Closing balance must match customer AR (SUM invoice amount_due), not only ledger line math
+  const ledgerClosing = running.toNumber();
+  const customerBalance = new Decimal(customer.balance ?? 0).toNumber();
+  const closingBalance = customerBalance;
+  if (Math.abs(ledgerClosing - customerBalance) > 0.01) {
+    logger.warn('Customer statement ledger closing differs from AR balance', {
+      customerId,
+      ledgerClosing,
+      customerBalance,
+      periodStart: periodStartStr,
+      periodEnd: periodEndStr,
+    });
+  }
 
   // Get deposit summary
   const depositSummary = await customerRepository.getCustomerDepositSummary(customerId, dbPool);

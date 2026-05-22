@@ -183,7 +183,7 @@ describe('PostingGovernanceError', () => {
 
 describe('errorHandler middleware', () => {
     describe('PostingGovernanceError', () => {
-    it('should respond 422 with the GOV_RULE error_code', () => {
+        it('should respond 422 with the GOV_RULE error_code', () => {
             const err = new PostingGovernanceError(
                 'Account 1000 (Cash) is debit-normal. Manual credit not permitted.',
                 'GOV_RULE_A_NORMAL_BALANCE',

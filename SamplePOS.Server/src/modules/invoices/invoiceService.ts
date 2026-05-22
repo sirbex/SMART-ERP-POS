@@ -551,15 +551,19 @@ export const invoiceService = {
         throw new Error('Payment amount must be positive and greater than zero');
       }
 
-      // BR-INV-001: Check if payment would exceed invoice total (SINGLE SOURCE OF TRUTH)
-      const newTotalPaidDec = Money.parseDb(inv.amount_paid).plus(input.amount);
-      const invTotalDec = Money.parseDb(inv.total_amount);
-      if (newTotalPaidDec.greaterThan(invTotalDec)) {
+      // BR-INV-001: Payment cannot exceed outstanding (cash + posted credit/debit notes)
+      const settlement = await invoiceRepository.getInvoiceSettlement(client, invoiceId);
+      if (!settlement) {
+        throw new Error(`Cannot resolve settlement for invoice ${invoiceId}`);
+      }
+      const amountDueDec = Money.parseDb(settlement.amountDue);
+      const paymentDec = Money.parseDb(input.amount);
+      if (paymentDec.greaterThan(amountDueDec)) {
         throw new Error(
-          `OVERPAYMENT PREVENTION: Payment of ${input.amount.toFixed(2)} would exceed invoice total. ` +
-          `Invoice ${inv.invoice_number} total: ${invTotalDec.toFixed(2)}, ` +
-          `Already paid: ${Money.parseDb(inv.amount_paid).toFixed(2)}, ` +
-          `Maximum payment allowed: ${invTotalDec.minus(Money.parseDb(inv.amount_paid)).toFixed(2)}`
+          `OVERPAYMENT PREVENTION: Payment of ${paymentDec.toFixed(2)} exceeds outstanding balance. ` +
+          `Invoice ${inv.invoice_number} total: ${Money.parseDb(settlement.totalAmount).toFixed(2)}, ` +
+          `Settled (payments + credit notes): ${Money.parseDb(settlement.amountPaid).toFixed(2)}, ` +
+          `Outstanding: ${amountDueDec.toFixed(2)}`
         );
       }
 

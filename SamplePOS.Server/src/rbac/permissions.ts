@@ -51,6 +51,7 @@ export const PERMISSIONS: Record<string, Permission> = {
   CUSTOMERS_UPDATE: p('customers.update', 'customers', 'update', 'Modify customers'),
   CUSTOMERS_DELETE: p('customers.delete', 'customers', 'delete', 'Delete customers'),
   CUSTOMERS_EXPORT: p('customers.export', 'customers', 'export', 'Export customer data'),
+  CUSTOMERS_ADJUST: p('customers.adjust', 'customers', 'adjust', 'Adjust customer invoices (credit notes)'),
 
   SUPPLIERS_READ: p('suppliers.read', 'suppliers', 'read', 'View suppliers'),
   SUPPLIERS_CREATE: p('suppliers.create', 'suppliers', 'create', 'Create suppliers'),

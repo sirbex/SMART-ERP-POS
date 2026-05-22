@@ -9,7 +9,11 @@
  *
  * Formula:
  *   customer.balance = SUM(amount_due) FROM invoices
- *                      WHERE status NOT IN ('CANCELLED','VOIDED','DRAFT')
+ *                      WHERE document_type IS NULL OR document_type = 'INVOICE'
+ *                        AND status NOT IN ('CANCELLED','VOIDED','DRAFT')
+ *
+ * Credit/debit notes live in the same table but adjust the original invoice's
+ * amount_due on post — they must not be summed again into customer.balance.
  *
  * Why NOT IN ('CANCELLED','VOIDED','DRAFT') and NOT filtering PAID?
  *   - A PAID invoice has amount_due = 0, so it contributes zero.
@@ -46,6 +50,7 @@ export async function syncCustomerBalanceFromInvoices(
        SELECT COALESCE(SUM(amount_due), 0)
        FROM invoices
        WHERE customer_id = $1
+         AND COALESCE(document_type, 'INVOICE') = 'INVOICE'
          AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
      )
      WHERE id = $1

@@ -57,7 +57,7 @@ const CustomerDeposits: React.FC<CustomerDepositsProps> = ({
             guardRef.current = openGuard({ cancellable: false, label: 'Add customer deposit' });
             return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showAddModal]);
 
     const [selectedCustomer, setSelectedCustomer] = useState<string>(customerId || '');

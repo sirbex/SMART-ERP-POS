@@ -85,24 +85,24 @@ class ResilientApiClient {
                 const brvData = error.response?.data as Record<string, unknown> | undefined;
                 const brvCode = brvData?.error_code as string | undefined;
                 const isBusinessRuleViolation =
-                  error.response?.status === 422 ||
-                  (brvCode &&
-                    (brvCode.startsWith('GOV_RULE_') ||
-                      brvCode.startsWith('ACC_RULE_') ||
-                      brvCode.startsWith('INV_RULE_') ||
-                      brvCode.startsWith('BR-')));
+                    error.response?.status === 422 ||
+                    (brvCode &&
+                        (brvCode.startsWith('GOV_RULE_') ||
+                            brvCode.startsWith('ACC_RULE_') ||
+                            brvCode.startsWith('INV_RULE_') ||
+                            brvCode.startsWith('BR-')));
                 if (isBusinessRuleViolation) {
-                  const details = brvData?.details as Record<string, unknown> | undefined;
-                  const reason =
-                    (details?.reason as string | undefined) ||
-                    (brvData?.error as string | undefined) ||
-                    'This action is not allowed by business rules.';
-                  toast.error('Action Not Allowed', {
-                    description: reason,
-                    duration: 8000,
-                    id: brvCode ?? 'BUSINESS_RULE_VIOLATION',
-                  });
-                  return Promise.reject(new HandledApiError(reason));
+                    const details = brvData?.details as Record<string, unknown> | undefined;
+                    const reason =
+                        (details?.reason as string | undefined) ||
+                        (brvData?.error as string | undefined) ||
+                        'This action is not allowed by business rules.';
+                    toast.error('Action Not Allowed', {
+                        description: reason,
+                        duration: 8000,
+                        id: brvCode ?? 'BUSINESS_RULE_VIOLATION',
+                    });
+                    return Promise.reject(new HandledApiError(reason));
                 }
 
                 // Handle specific error cases

@@ -173,7 +173,9 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       p.module === 'admin' ||
       p.module === 'reports' ||
       p.module === 'settings' ||
-      p.action === 'read'
+      p.action === 'read' ||
+      // Invoice adjustment (credit notes) — admins must correct AR like accountants
+      p.key === 'customers.adjust'
     );
     for (const permission of adminPermissions) {
       await client.query(
@@ -265,7 +267,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     const accountantPerms = permissions.filter(p =>
       ['accounting', 'banking', 'reports', 'expenses'].includes(p.module) ||
       ['sales.read', 'sales.export', 'purchasing.read', 'purchasing.create',
-        'customers.read', 'customers.export',
+        'customers.read', 'customers.export', 'customers.adjust',
         'suppliers.read', 'suppliers.create', 'suppliers.update',
         'inventory.read', 'settings.read', 'quotations.read'].includes(p.key)
     );

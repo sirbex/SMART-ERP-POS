@@ -119,7 +119,6 @@ volumes:
   nginx_logs:
   certbot_webroot:
 
-
 networks:
   app-network:
     driver: bridge

@@ -14,6 +14,7 @@ const GRItemSchema = z.object({
   orderedQuantity: z.number().nonnegative('Ordered quantity must be non-negative'),
   receivedQuantity: z.number().nonnegative('Received quantity must be non-negative'),
   unitCost: z.number().nonnegative('Unit cost must be non-negative'),
+  uomId: z.string().uuid().optional().nullable(),
   batchNumber: z.string().optional().nullable(),
   isBonus: z.boolean().optional().default(false),
   expiryDate: z

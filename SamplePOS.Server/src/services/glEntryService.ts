@@ -2610,6 +2610,7 @@ export async function recordCustomerCreditNoteToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `CREDIT_NOTE-${data.noteId}`,
+      source: 'SALES_REFUND' as const,
     }, pool, txClient);
 
     logger.info('Recorded customer credit note to GL', {

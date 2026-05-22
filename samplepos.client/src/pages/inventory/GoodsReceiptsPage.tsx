@@ -2345,17 +2345,18 @@ function GRItemRow({
 }) {
   const es = editState || {};
   const ordered = Number(item.orderedQuantity ?? item.ordered_quantity ?? 0);
-  const baseReceived = Number(
+  // PO and GR persist qty/cost in the PO's order UoM (display units), same as PurchaseOrdersPage.
+  const receivedQty = Number(
     es.receivedQuantity ??
     item.receivedQuantity ??
     item.received_quantity ??
     (selectedGR.status === 'DRAFT' ? ordered : 0)
   );
   const disabled = selectedGR.status !== 'DRAFT';
-  const baseUnitCost = Number(es.unitCost ?? item.unitCost ?? item.unit_cost ?? 0);
-  const poBase = Number(item.po_unit_price ?? item.poUnitPrice ?? 0);
-  const prodBase = Number(item.product_cost_price ?? item.productCostPrice ?? 0);
-  const base = baseline === 'PO' ? poBase : prodBase;
+  const displayUnitCost = Number(es.unitCost ?? item.unitCost ?? item.unit_cost ?? 0);
+  const poUnitPrice = Number(item.po_unit_price ?? item.poUnitPrice ?? 0);
+  const prodUnitPrice = Number(item.product_cost_price ?? item.productCostPrice ?? 0);
+  const costBaseline = baseline === 'PO' ? poUnitPrice : prodUnitPrice;
 
   // Use bundled UoM data from GR detail response (no per-item fetch)
   const uomList = bundledUoms;
@@ -2367,24 +2368,21 @@ function GRItemRow({
   const defaultUom = poUom || uomList.find(u => u.isDefault) || uomList[0];
   const selectedUomId = es.selectedUomId || defaultUom?.id;
   const selectedUom = uomList.find(u => u.id === selectedUomId || u.uomId === selectedUomId);
-  const factor = selectedUom ? new Decimal(selectedUom.conversionFactor).toNumber() : 1;
 
-  const displayedOrdered = new Decimal(ordered || 0).div(factor).toNumber();
-  const displayedReceived = new Decimal(baseReceived || 0).div(factor).toNumber();
-  const displayedUnitCost = new Decimal(baseUnitCost || 0).mul(factor).toNumber();
+  const displayedOrdered = ordered;
+  const displayedReceived = receivedQty;
+  const displayedUnitCost = displayUnitCost;
 
-  // Calculate variance using BASE UNITS (not displayed UoM values)
   const qtyVariancePct =
     ordered > 0
-      ? new Decimal(baseReceived || 0).minus(ordered).div(ordered).mul(100).toNumber()
+      ? new Decimal(receivedQty || 0).minus(ordered).div(ordered).mul(100).toNumber()
       : 0;
   let costVarPct: number | null = null;
   let costVarAbs: number | null = null;
-  if (base && base > 0) {
-    const baselineDisplay = new Decimal(base).mul(factor);
-    const dAbs = new Decimal(displayedUnitCost).minus(baselineDisplay);
+  if (costBaseline > 0) {
+    const dAbs = new Decimal(displayUnitCost).minus(costBaseline);
     costVarAbs = dAbs.toNumber();
-    const dPct = dAbs.div(baselineDisplay).mul(100);
+    const dPct = dAbs.div(costBaseline).mul(100);
     costVarPct = dPct.toNumber();
   }
 
@@ -2411,7 +2409,7 @@ function GRItemRow({
   // Line completeness indicator — batch optional (auto-generated if blank)
   const hasBatch = !!(es.batchNumber ?? '').trim();
   const hasExpiry = !!(es.expiryDate ?? '').trim();
-  const hasQty = baseReceived > 0;
+  const hasQty = receivedQty > 0;
   const isComplete = hasExpiry && hasQty; // batch optional — auto-generated
   const isPartial = hasQty && !hasExpiry;
   const rowBorderColor = disabled
@@ -2466,8 +2464,7 @@ function GRItemRow({
           aria-label={`Received quantity for ${item.productName || item.product_name}`}
           onChange={(e) => {
             const uomQty = e.target.value === '' ? 0 : Number(e.target.value);
-            const totalBase = new Decimal(uomQty).mul(factor).toNumber();
-            onFieldChange(item.id, 'receivedQuantity', totalBase);
+            onFieldChange(item.id, 'receivedQuantity', uomQty);
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -2501,12 +2498,7 @@ function GRItemRow({
               aria-label={`Unit cost for ${item.productName || item.product_name}`}
               onChange={(e) => {
                 const v = e.target.value === '' ? undefined : Number(e.target.value);
-                if (v === undefined) {
-                  onFieldChange(item.id, 'unitCost', undefined);
-                } else {
-                  const baseVal = new Decimal(v).div(factor).toNumber();
-                  onFieldChange(item.id, 'unitCost', baseVal);
-                }
+                onFieldChange(item.id, 'unitCost', v);
               }}
             />
             {unitCostError && <div className="text-xs text-red-600 mt-1">{unitCostError}</div>}

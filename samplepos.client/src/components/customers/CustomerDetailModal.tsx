@@ -17,6 +17,8 @@ import {
     syncEditPriceGroupState,
     customerIsActive,
 } from '../../utils/customerPriceGroupEdit';
+import { AdjustCustomerInvoiceModal } from '../shared/AdjustCustomerInvoiceModal';
+import { useHasAnyPermission } from '../../hooks/useRbac';
 
 interface CustomerData {
     id: string;
@@ -75,6 +77,26 @@ interface InvoiceRow {
     amount_paid?: number | string;
     balance?: number | string;
     notes?: string;
+    documentType?: string;
+    document_type?: string;
+}
+
+function invoiceOutstandingAmount(inv: InvoiceRow): number {
+    const total = Number(inv.totalAmount ?? inv.total_amount ?? 0);
+    const paid = Number(inv.amountPaid ?? inv.amount_paid ?? 0);
+    return Number(inv.balance ?? inv.amount_due ?? new Decimal(total).minus(paid).toNumber());
+}
+
+/** Real customer invoices only — not credit/debit notes; must have AR left to correct */
+function isAdjustableCustomerInvoice(inv: InvoiceRow): boolean {
+    const num = String(inv.invoiceNumber ?? inv.invoice_number ?? '').toUpperCase();
+    if (num.startsWith('CN-') || num.startsWith('DN-')) return false;
+    const docType = String(inv.documentType ?? inv.document_type ?? 'INVOICE').toUpperCase();
+    if (docType !== 'INVOICE') return false;
+    const status = String(inv.status ?? '').toUpperCase();
+    if (['CANCELLED', 'VOIDED', 'VOID'].includes(status)) return false;
+    // Fully settled invoices: use credit note reversal flow, not Adjust wizard
+    return invoiceOutstandingAmount(inv) > 0.009;
 }
 
 interface InvoiceDetailItem {
@@ -167,6 +189,9 @@ export default function CustomerDetailModal({
     const [expandedInvoiceDetails, setExpandedInvoiceDetails] = useState<InvoiceDetailResponse | null>(null);
     const [loadingExpandedInvoiceId, setLoadingExpandedInvoiceId] = useState<string | null>(null);
     const [downloadingPdfId, setDownloadingPdfId] = useState<string | null>(null);
+    const [adjustInvoiceOpen, setAdjustInvoiceOpen] = useState(false);
+    const [adjustInvoice, setAdjustInvoice] = useState<{ id: string; invoiceNumber: string } | null>(null);
+    const canAdjustInvoices = useHasAnyPermission(['customers.adjust']);
 
     // Statement state
     const [stmtStart, setStmtStart] = useState<string>('');
@@ -185,7 +210,9 @@ export default function CustomerDetailModal({
     });
 
     const { data: invoicesData, isLoading: isLoadingInvoices, refetch: refetchInvoices } = useInvoices(invoicePage, 20, customerId || undefined);
-    const invoices: InvoiceRow[] = Array.isArray(invoicesData) ? invoicesData : [];
+    const allInvoiceRows: InvoiceRow[] = Array.isArray(invoicesData) ? invoicesData : [];
+    /** AR invoices only — credit notes are listed separately */
+    const salesInvoices = allInvoiceRows.filter(isAdjustableCustomerInvoice);
     const recordPayment = useRecordInvoicePayment();
 
     const updateCustomer = useUpdateCustomer();
@@ -554,22 +581,28 @@ export default function CustomerDetailModal({
                                 {/* Invoices Tab */}
                                 {tab === 'invoices' && (
                                     <div className="space-y-4">
-                                        <div className="flex items-center justify-between">
-                                            <h3 className="text-lg font-semibold text-gray-900">Invoices</h3>
+                                        <div className="flex items-center justify-between gap-4">
+                                            <div>
+                                                <h3 className="text-lg font-semibold text-gray-900">Invoices</h3>
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    Use <strong>Adjust</strong> to fix wrong prices or return goods.
+                                                    Posted credit notes appear on the <strong>Transactions</strong> tab.
+                                                </p>
+                                            </div>
                                         </div>
 
                                         {isLoadingInvoices ? (
                                             <div className="text-center py-10 text-gray-500">Loading invoices…</div>
-                                        ) : invoices.length === 0 ? (
+                                        ) : salesInvoices.length === 0 ? (
                                             <div className="text-center py-10 text-gray-500">No invoices found for this customer</div>
                                         ) : (
                                             <>
                                                 {/* Mobile Invoice Cards */}
                                                 <div className="block sm:hidden space-y-3">
-                                                    {invoices.map((inv: InvoiceRow) => {
+                                                    {salesInvoices.map((inv: InvoiceRow) => {
                                                         const total = Number(inv.totalAmount || inv.total_amount || 0);
                                                         const paid = Number(inv.amountPaid || inv.amount_paid || 0);
-                                                        const outstanding = new Decimal(total).minus(paid).toNumber();
+                                                        const outstanding = Number(inv.balance ?? inv.amount_due ?? new Decimal(total).minus(paid).toNumber());
                                                         const invoiceNo = String(inv.invoiceNumber || inv.invoice_number || inv.id);
                                                         const status = (inv.status || '').toUpperCase();
                                                         const statusLabel = status === 'PARTIALLYPAID' || status === 'PARTIALLY_PAID' ? 'Partial' : status === 'PAID' ? 'Paid' : status === 'UNPAID' ? 'Unpaid' : inv.status;
@@ -669,10 +702,10 @@ export default function CustomerDetailModal({
                                                             </tr>
                                                         </thead>
                                                         <tbody className="bg-white divide-y divide-gray-200">
-                                                            {invoices.map((inv: InvoiceRow) => {
+                                                            {salesInvoices.map((inv: InvoiceRow) => {
                                                                 const total = Number(inv.totalAmount || inv.total_amount || 0);
                                                                 const paid = Number(inv.amountPaid || inv.amount_paid || 0);
-                                                                const outstanding = new Decimal(total).minus(paid).toNumber();
+                                                                const outstanding = Number(inv.balance ?? inv.amount_due ?? new Decimal(total).minus(paid).toNumber());
                                                                 const invoiceNo = String(inv.invoiceNumber || inv.invoice_number || inv.id);
                                                                 const status = (inv.status || '').toUpperCase();
                                                                 const statusLabel = status === 'PARTIALLYPAID' || status === 'PARTIALLY_PAID' ? 'Partial' : status === 'PAID' ? 'Paid' : status === 'UNPAID' ? 'Unpaid' : inv.status;
@@ -708,6 +741,19 @@ export default function CustomerDetailModal({
                                                                                     >
                                                                                         {downloadingPdfId === inv.id ? 'Generating...' : 'PDF'}
                                                                                     </button>
+                                                                                    {canAdjustInvoices && isAdjustableCustomerInvoice(inv) && (
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={(e) => {
+                                                                                                e.stopPropagation();
+                                                                                                setAdjustInvoice({ id: inv.id, invoiceNumber: invoiceNo });
+                                                                                                setAdjustInvoiceOpen(true);
+                                                                                            }}
+                                                                                            className="px-3 py-1.5 text-sm border border-amber-500 text-amber-800 bg-amber-50 rounded-lg hover:bg-amber-100"
+                                                                                        >
+                                                                                            Adjust
+                                                                                        </button>
+                                                                                    )}
                                                                                     {status !== 'PAID' && outstanding > 0 && (
                                                                                         <button
                                                                                             onClick={(e) => {
@@ -739,13 +785,27 @@ export default function CustomerDetailModal({
                                                                                                     <div className="text-sm font-semibold text-gray-900">{invoiceNo}</div>
                                                                                                     <div className="text-xs text-gray-600">Items and payment history</div>
                                                                                                 </div>
-                                                                                                <button
-                                                                                                    onClick={() => handleDownloadInvoicePdf(inv.id, invoiceNo)}
-                                                                                                    disabled={downloadingPdfId === inv.id}
-                                                                                                    className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
-                                                                                                >
-                                                                                                    {downloadingPdfId === inv.id ? 'Generating...' : 'Export PDF'}
-                                                                                                </button>
+                                                                                                <div className="flex gap-2">
+                                                                                                    {canAdjustInvoices && isAdjustableCustomerInvoice(inv) && (
+                                                                                                        <button
+                                                                                                            type="button"
+                                                                                                            onClick={() => {
+                                                                                                                setAdjustInvoice({ id: inv.id, invoiceNumber: invoiceNo });
+                                                                                                                setAdjustInvoiceOpen(true);
+                                                                                                            }}
+                                                                                                            className="px-3 py-1.5 text-xs border border-amber-500 text-amber-800 bg-amber-50 rounded-lg hover:bg-amber-100"
+                                                                                                        >
+                                                                                                            Adjust
+                                                                                                        </button>
+                                                                                                    )}
+                                                                                                    <button
+                                                                                                        onClick={() => handleDownloadInvoicePdf(inv.id, invoiceNo)}
+                                                                                                        disabled={downloadingPdfId === inv.id}
+                                                                                                        className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
+                                                                                                    >
+                                                                                                        {downloadingPdfId === inv.id ? 'Generating...' : 'Export PDF'}
+                                                                                                    </button>
+                                                                                                </div>
                                                                                             </div>
                                                                                             <div className="p-4 space-y-4">
                                                                                                 {expandedInvoiceDetails.items && expandedInvoiceDetails.items.length > 0 ? (
@@ -1022,6 +1082,22 @@ export default function CustomerDetailModal({
                                             </div>
                                         ) : null}
 
+                                        {statement && (() => {
+                                            const entries = (statement as StatementResponse).entries || [];
+                                            const closing = Number((statement as StatementResponse).closingBalance || 0);
+                                            const ledgerOverpaid = entries.some(
+                                                (e) => Number(e.balanceAfter ?? 0) < -0.01,
+                                            );
+                                            if (!ledgerOverpaid || Math.abs(closing) > 0.01) return null;
+                                            return (
+                                                <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                                    A payment in this list exceeds what was owed after credit notes.
+                                                    Closing balance is <strong>{formatCurrency(0)}</strong> (correct AR).
+                                                    Reverse or correct the extra receipt (e.g. duplicate payment) in accounting.
+                                                </div>
+                                            );
+                                        })()}
+
                                         {/* Statement - Mobile Cards */}
                                         <div className="block sm:hidden space-y-3">
                                             {!statement || ((statement as StatementResponse).entries || []).length === 0 ? (
@@ -1261,8 +1337,23 @@ export default function CustomerDetailModal({
                             </div>
                         </div>
                     )}
+
                 </div>
             </div>
+            {adjustInvoice && (
+                <AdjustCustomerInvoiceModal
+                    open={adjustInvoiceOpen}
+                    onClose={() => {
+                        setAdjustInvoiceOpen(false);
+                        setAdjustInvoice(null);
+                        void refetchInvoices();
+                        void refetchCustomer();
+                    }}
+                    invoiceId={adjustInvoice.id}
+                    invoiceNumber={adjustInvoice.invoiceNumber}
+                    customerId={customerId ?? undefined}
+                />
+            )}
         </div>
     );
 }

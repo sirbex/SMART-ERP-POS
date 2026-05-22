@@ -3096,11 +3096,11 @@ export default function ReportsPage() {
             {reportData.summary && (
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
                 {[
-                  { label: 'Line Items',    value: String(reportData.summary.totalLines   ?? 0),                      color: 'text-blue-600' },
-                  { label: 'Sales',         value: String(reportData.summary.totalSales   ?? 0),                      color: 'text-indigo-600' },
-                  { label: 'Total Amount',  value: formatCurrency(Number(reportData.summary.totalAmount ?? 0)),        color: 'text-green-600' },
-                  { label: 'Cashiers',      value: String(reportData.summary.uniqueCashiers ?? 0),                    color: 'text-purple-600' },
-                  { label: 'Ordered By',    value: String(reportData.summary.uniqueOrderedBy ?? 0),                   color: 'text-orange-600' },
+                  { label: 'Line Items', value: String(reportData.summary.totalLines ?? 0), color: 'text-blue-600' },
+                  { label: 'Sales', value: String(reportData.summary.totalSales ?? 0), color: 'text-indigo-600' },
+                  { label: 'Total Amount', value: formatCurrency(Number(reportData.summary.totalAmount ?? 0)), color: 'text-green-600' },
+                  { label: 'Cashiers', value: String(reportData.summary.uniqueCashiers ?? 0), color: 'text-purple-600' },
+                  { label: 'Ordered By', value: String(reportData.summary.uniqueOrderedBy ?? 0), color: 'text-orange-600' },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="bg-white rounded-xl shadow border border-gray-200 p-4 text-center">
                     <div className={`text-xl font-bold ${color}`}>{value}</div>

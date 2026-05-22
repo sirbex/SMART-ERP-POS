@@ -209,6 +209,8 @@ export const BulkPriceRequestSchema = z.object({
     items: z.array(z.object({
         productId: z.string().uuid('Invalid product ID'),
         quantity: z.number().positive().default(1),
+        /** Base-unit qty for AT_COST FIFO issue preview (defaults to quantity when omitted). */
+        baseQuantity: z.number().positive().optional(),
     })).min(1, 'At least one item required').max(500, 'Maximum 500 items per request'),
     customerId: z.string().uuid().optional(),
     customerGroupId: z.string().uuid().optional(),

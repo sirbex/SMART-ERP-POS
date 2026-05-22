@@ -515,7 +515,7 @@ export async function getStatementEntries(customerId: string, start: Date | stri
     (
       SELECT 
         i.issue_date as date,
-        'CREDIT_NOTE' as type,
+        'ADJUSTMENT' as type,
         i.invoice_number as reference,
         CONCAT('Credit Note ', i.invoice_number, ' - ', COALESCE(i.reason, '')) as description,
         0::numeric as debit,
@@ -530,7 +530,7 @@ export async function getStatementEntries(customerId: string, start: Date | stri
     (
       SELECT 
         i.issue_date as date,
-        'DEBIT_NOTE' as type,
+        'ADJUSTMENT' as type,
         i.invoice_number as reference,
         CONCAT('Debit Note ', i.invoice_number, ' - ', COALESCE(i.reason, '')) as description,
         i.total_amount as debit,

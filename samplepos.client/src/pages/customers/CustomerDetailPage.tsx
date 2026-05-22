@@ -22,6 +22,8 @@ import {
   customerIsActive,
   priceGroupLabel as resolvePriceGroupLabel,
 } from '../../utils/customerPriceGroupEdit';
+import { AdjustCustomerInvoiceModal } from '../../components/shared/AdjustCustomerInvoiceModal';
+import { useHasAnyPermission } from '../../hooks/useRbac';
 
 // ── Local interfaces for Customer Detail page ──────────────────
 
@@ -490,6 +492,8 @@ export default function CustomerDetailPage() {
   // Invoice Details Drawer (payments history)
   const [isDetailsOpen, setDetailsOpen] = useState(false);
   const [detailsInvoice, setDetailsInvoice] = useState<NormalizedInvoice | null>(null);
+  const [adjustInvoiceOpen, setAdjustInvoiceOpen] = useState(false);
+  const canAdjustInvoices = useHasAnyPermission(['customers.adjust']);
   const detailsRef = useModalAccessibility(isDetailsOpen, () => setDetailsOpen(false));
   const { data: paymentHistory, isLoading: isLoadingPayments } = useInvoicePayments(detailsInvoice?.id || '',);
   // Fetch full invoice detail (includes items + payments)
@@ -1370,6 +1374,15 @@ export default function CustomerDetailPage() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Invoice Details</h3>
               <div className="flex items-center gap-2">
+                {detailsInvoice && canAdjustInvoices && Number(detailsInvoice.balance ?? 0) > 0.009 && (
+                  <button
+                    type="button"
+                    onClick={() => setAdjustInvoiceOpen(true)}
+                    className="px-3 py-1 text-sm border border-amber-500 text-amber-800 rounded bg-amber-50 hover:bg-amber-100"
+                  >
+                    Adjust
+                  </button>
+                )}
                 {detailsInvoice && (
                   <button
                     onClick={() => downloadFile(
@@ -1644,6 +1657,16 @@ export default function CustomerDetailPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {detailsInvoice?.id && (
+        <AdjustCustomerInvoiceModal
+          open={adjustInvoiceOpen}
+          onClose={() => setAdjustInvoiceOpen(false)}
+          invoiceId={detailsInvoice.id}
+          invoiceNumber={detailsInvoice.invoiceNumber}
+          customerId={id}
+        />
       )}
     </Layout>
   );

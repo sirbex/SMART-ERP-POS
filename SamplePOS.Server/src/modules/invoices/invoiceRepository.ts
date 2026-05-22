@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import { Money } from '../../utils/money.js';
+import logger from '../../utils/logger.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessYear, getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
@@ -216,6 +217,8 @@ export const invoiceRepository = {
     if (filters?.customerId) {
       where.push(`i.customer_id = $${idx++}`);
       values.push(filters.customerId);
+      // Customer AR list = sales invoices only; CNs live in credit-debit-notes API
+      where.push(`COALESCE(i.document_type, 'INVOICE') = 'INVOICE'`);
     }
     if (filters?.status) {
       where.push(`i.status = $${idx++}`);
@@ -288,30 +291,136 @@ export const invoiceRepository = {
   },
 
   /**
+   * Settlement on an invoice: cash payments plus posted credit/debit notes on the same invoice.
+   */
+  async getInvoiceSettlement(
+    pool: Pool | PoolClient,
+    invoiceId: string,
+  ): Promise<{ totalAmount: number; amountPaid: number; amountDue: number } | null> {
+    const res = await pool.query(
+      `SELECT
+         i.total_amount,
+         COALESCE(pay.cash_paid, 0) AS cash_paid,
+         COALESCE(cn.cn_amount, 0) AS cn_amount,
+         COALESCE(dn.dn_amount, 0) AS dn_amount
+       FROM invoices i
+       LEFT JOIN (
+         SELECT invoice_id, SUM(amount) AS cash_paid
+         FROM invoice_payments
+         WHERE invoice_id = $1
+         GROUP BY invoice_id
+       ) pay ON pay.invoice_id = i.id
+       LEFT JOIN (
+         SELECT reference_invoice_id, SUM(total_amount) AS cn_amount
+         FROM invoices
+         WHERE reference_invoice_id = $1
+           AND document_type = 'CREDIT_NOTE'
+           AND status = 'POSTED'
+         GROUP BY reference_invoice_id
+       ) cn ON cn.reference_invoice_id = i.id
+       LEFT JOIN (
+         SELECT reference_invoice_id, SUM(total_amount) AS dn_amount
+         FROM invoices
+         WHERE reference_invoice_id = $1
+           AND document_type = 'DEBIT_NOTE'
+           AND status = 'POSTED'
+         GROUP BY reference_invoice_id
+       ) dn ON dn.reference_invoice_id = i.id
+       WHERE i.id = $1`,
+      [invoiceId],
+    );
+    if (!res.rows[0]) return null;
+
+    const total = Money.parseDb(res.rows[0].total_amount);
+    const settled = Money.parseDb(res.rows[0].cash_paid)
+      .plus(Money.parseDb(res.rows[0].cn_amount))
+      .minus(Money.parseDb(res.rows[0].dn_amount));
+    const amountPaid = Money.min(total, Money.max(settled, Money.zero()));
+    const amountDue = Money.max(Money.zero(), Money.subtract(total, amountPaid));
+
+    return {
+      totalAmount: Money.toNumber(total),
+      amountPaid: Money.toNumber(amountPaid),
+      amountDue: Money.toNumber(amountDue),
+    };
+  },
+
+  /**
+   * Keep linked credit sale amount_paid in sync with invoice settlement (cash + credit notes).
+   */
+  async syncLinkedSaleFromInvoice(pool: Pool | PoolClient, invoiceId: string): Promise<void> {
+    const res = await pool.query(
+      `SELECT sale_id, total_amount, amount_paid, amount_due
+       FROM invoices WHERE id = $1`,
+      [invoiceId],
+    );
+    const row = res.rows[0] as {
+      sale_id?: string | null;
+      total_amount?: string | number;
+      amount_paid?: string | number;
+      amount_due?: string | number;
+    } | undefined;
+    if (!row?.sale_id) return;
+
+    const totalDec = Money.parseDb(row.total_amount ?? 0);
+    const paidDec = Money.parseDb(row.amount_paid ?? 0);
+    const dueDec = Money.parseDb(row.amount_due ?? 0);
+    const isFullySettled = dueDec.lte(0) && paidDec.greaterThan(0);
+
+    const saleRes = await pool.query(
+      'SELECT payment_method FROM sales WHERE id = $1',
+      [row.sale_id],
+    );
+    const currentMethod = saleRes.rows[0]?.payment_method as string | undefined;
+    const newPaymentMethod =
+      isFullySettled && currentMethod === 'CREDIT' ? 'CASH' : currentMethod;
+
+    await pool.query(
+      `UPDATE sales
+       SET amount_paid = $1::numeric,
+           payment_method = COALESCE($2::payment_method, payment_method)
+       WHERE id = $3`,
+      [Money.toNumber(paidDec), newPaymentMethod ?? null, row.sale_id],
+    );
+
+    logger.info('Linked sale synced from invoice settlement', {
+      invoiceId,
+      saleId: row.sale_id,
+      amountPaid: Money.toNumber(paidDec),
+      amountDue: Money.toNumber(dueDec),
+      totalAmount: Money.toNumber(totalDec),
+      paymentMethod: newPaymentMethod ?? currentMethod,
+    });
+  },
+
+  /**
    * Recalculate and persist aggregate payment metrics & status for an invoice.
+   * Includes posted credit/debit notes linked via reference_invoice_id (not only cash payments).
    */
   async recalcInvoice(pool: Pool | PoolClient, invoiceId: string): Promise<InvoiceRecord | null> {
-    const payAgg = await pool.query(
-      'SELECT COALESCE(SUM(amount),0) AS amount_paid FROM invoice_payments WHERE invoice_id = $1',
-      [invoiceId]
-    );
-    const amountPaid = Money.toNumber(Money.parseDb(payAgg.rows[0].amount_paid));
+    const settlement = await this.getInvoiceSettlement(pool, invoiceId);
+    if (!settlement) return null;
+
+    const { amountPaid, amountDue } = settlement;
     const updated = await pool.query(
       `UPDATE invoices
-         SET amount_paid = $1,
-             amount_due = GREATEST(total_amount - $1, 0),
+         SET amount_paid = $1::numeric,
+             amount_due = $2::numeric,
              status = (
                         CASE
-                          WHEN GREATEST(total_amount - $1, 0) = 0 AND $1 > 0 THEN 'PAID'
-                          WHEN GREATEST(total_amount - $1, 0) > 0 AND $1 > 0 THEN 'PARTIALLY_PAID'
-                          ELSE 'UNPAID'
+                          WHEN $2::numeric = 0 AND $1::numeric > 0 THEN 'PAID'::invoice_status
+                          WHEN $2::numeric > 0 AND $1::numeric > 0 THEN 'PARTIALLY_PAID'::invoice_status
+                          ELSE 'UNPAID'::invoice_status
                         END
                       ),
              updated_at = NOW()
-       WHERE id = $2
+       WHERE id = $3
        RETURNING *`,
-      [amountPaid, invoiceId]
+      [amountPaid, amountDue, invoiceId],
     );
-    return updated.rows[0] ? normalizeInvoiceRow(updated.rows[0]) : null;
+    if (!updated.rows[0]) return null;
+
+    await this.syncLinkedSaleFromInvoice(pool, invoiceId);
+    return normalizeInvoiceRow(updated.rows[0]);
   },
 };

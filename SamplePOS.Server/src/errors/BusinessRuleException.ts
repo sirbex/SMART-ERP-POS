@@ -15,22 +15,22 @@
  * - This distinction lets the UI tell users "you broke a rule" vs "server crashed"
  */
 export class BusinessRuleException extends Error {
-  /** HTTP status returned by the global error handler */
-  readonly statusCode = 422 as const;
+    /** HTTP status returned by the global error handler */
+    readonly statusCode = 422 as const;
 
-  /** Mark as operational so the error handler does not treat it as unexpected */
-  readonly isOperational = true as const;
+    /** Mark as operational so the error handler does not treat it as unexpected */
+    readonly isOperational = true as const;
 
-  constructor(
-    message: string,
-    /** Machine-readable code, e.g. 'GOV_RULE_A_NORMAL_BALANCE' */
-    public readonly error_code: string,
-    /** Structured context for the frontend (always includes `reason`) */
-    public readonly details: Record<string, unknown> = {},
-  ) {
-    super(message);
-    this.name = 'BusinessRuleException';
-    // Ensure instanceof checks work correctly with TypeScript subclasses
-    Object.setPrototypeOf(this, new.target.prototype);
-  }
+    constructor(
+        message: string,
+        /** Machine-readable code, e.g. 'GOV_RULE_A_NORMAL_BALANCE' */
+        public readonly error_code: string,
+        /** Structured context for the frontend (always includes `reason`) */
+        public readonly details: Record<string, unknown> = {},
+    ) {
+        super(message);
+        this.name = 'BusinessRuleException';
+        // Ensure instanceof checks work correctly with TypeScript subclasses
+        Object.setPrototypeOf(this, new.target.prototype);
+    }
 }
