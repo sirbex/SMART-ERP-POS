@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && shx cp -r src/public dist/ || echo 'no public dir'",
+    "build": "tsc && (shx test -d src/public && shx cp -r src/public dist/ || exit 0)",
     "build:prod": "shx rm -rf dist && tsc --build --verbose && shx cp -r src/public dist/ || echo 'no public dir'",
     "start": "node dist/server.js",
     "start:prod": "NODE_ENV=production node dist/server.js",

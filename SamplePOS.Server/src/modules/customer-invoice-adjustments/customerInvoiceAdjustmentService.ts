@@ -133,7 +133,7 @@ export const customerInvoiceAdjustmentService = {
                     'ADJUST_SALE_MISSING',
                 );
             }
-            const sale = saleData.sale as Record<string, unknown>;
+            const sale = saleData.sale as unknown as Record<string, unknown>;
             saleNumber = String(sale.sale_number ?? sale.saleNumber ?? '');
             saleStatus = String(sale.status ?? '');
             if (VOID_SALE_STATUSES.has(saleStatus)) {
@@ -143,7 +143,7 @@ export const customerInvoiceAdjustmentService = {
                 );
             }
 
-            for (const raw of saleData.items as Record<string, unknown>[]) {
+            for (const raw of saleData.items as unknown as Record<string, unknown>[]) {
                 const item = saleItemFromRow(raw);
                 if (!item.productId) continue;
 
@@ -244,7 +244,7 @@ export const customerInvoiceAdjustmentService = {
                 saleNumber,
                 saleStatus,
             },
-            customerPricingMode: pricingMode,
+            customerPricingMode: pricingMode ?? 'STANDARD',
             overchargeLines,
             returnableLines,
             existingCreditNoteTotal,
