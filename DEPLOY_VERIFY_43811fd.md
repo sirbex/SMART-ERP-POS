@@ -16,6 +16,25 @@
 
 ---
 
+## Adjust button missing on henber (INV-2026-0005) — investigated
+
+| Environment | Invoice | Buttons seen | Root cause |
+|-------------|---------|--------------|------------|
+| **Production** | INV-2026-0005 Unpaid 26,500 | View, PDF, Receive Payment | **`customers.adjust` not in DB** for user role (migration never applied) |
+| **Local** | INV-2026-0001 Partial 1,250 | Hide, PDF, **Adjust**, Receive Payment | Seed or admin role has `customers.adjust` |
+
+UI gate: `useHasAnyPermission(['customers.adjust'])` — **not** unpaid vs partial.
+
+**Fix:** `shared/sql/073_customers_adjust_rbac_permission.sql` (runs on next deploy to `pos_tenant_henber_pharmacy`).
+
+**Prove after fix:**
+
+```bash
+TEST_EMAIL=... TEST_PASSWORD=... npm run proof:adjust-button:live
+```
+
+---
+
 ## Henber production data — GR-2026-0375 (requires credentials)
 
 ```bash
