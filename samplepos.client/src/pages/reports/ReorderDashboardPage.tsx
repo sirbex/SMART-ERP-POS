@@ -12,6 +12,9 @@ interface ReorderItem {
     sku: string;
     category: string | null;
     currentStock: number;
+    unitsSold30d: number;
+    unitsSold7d: number;
+    qtyOnOrder: number;
     dailySalesVelocity: number;
     daysUntilStockout: number | null;
     suggestedOrderQty: number;
@@ -25,6 +28,9 @@ interface ReorderItem {
     preferredSupplier: string | null;
     preferredSupplierId: string | null;
 }
+
+const PAGE_SIZE_OPTIONS = [25, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 50;
 
 interface DashboardSummary {
     urgentCount: number;
@@ -77,6 +83,8 @@ export default function ReorderDashboardPage() {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [sortField, setSortField] = useState<SortField>('daysUntilStockout');
     const [sortAsc, setSortAsc] = useState(true);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
     const fetchDashboard = useCallback(async () => {
         setLoading(true);
@@ -96,7 +104,7 @@ export default function ReorderDashboardPage() {
 
     useEffect(() => { fetchDashboard(); }, [fetchDashboard]);
 
-    const tabItems = useMemo(() => {
+    const fullTabItems = useMemo(() => {
         if (!data) return [];
         const items = data[activeTab] ?? [];
         return [...items].sort((a, b) => {
@@ -115,6 +123,20 @@ export default function ReorderDashboardPage() {
         });
     }, [data, activeTab, sortField, sortAsc]);
 
+    const totalInTab = fullTabItems.length;
+    const totalPages = Math.max(1, Math.ceil(totalInTab / pageSize));
+    const safePage = Math.min(page, totalPages);
+
+    const tabItems = useMemo(() => {
+        const start = (safePage - 1) * pageSize;
+        return fullTabItems.slice(start, start + pageSize);
+    }, [fullTabItems, safePage, pageSize]);
+
+    useEffect(() => {
+        setPage(1);
+        setSelectedIds(new Set());
+    }, [activeTab, pageSize]);
+
     const handleSort = (field: SortField) => {
         if (sortField === field) { setSortAsc(!sortAsc); }
         else { setSortField(field); setSortAsc(true); }
@@ -128,12 +150,22 @@ export default function ReorderDashboardPage() {
         });
     };
 
-    const toggleAll = () => {
-        if (selectedIds.size === tabItems.length) {
-            setSelectedIds(new Set());
+    const toggleAllOnPage = () => {
+        const pageIds = tabItems.map((i) => i.productId);
+        const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+        if (allPageSelected) {
+            setSelectedIds((prev) => {
+                const next = new Set(prev);
+                pageIds.forEach((id) => next.delete(id));
+                return next;
+            });
         } else {
-            setSelectedIds(new Set(tabItems.map((i) => i.productId)));
+            setSelectedIds((prev) => new Set([...prev, ...pageIds]));
         }
+    };
+
+    const selectAllInTab = () => {
+        setSelectedIds(new Set(fullTabItems.map((i) => i.productId)));
     };
 
     const tabCount = (key: TabKey): number => {
@@ -207,7 +239,9 @@ export default function ReorderDashboardPage() {
                 <SummaryCard
                     label="Critical Restock"
                     value={summary.urgentCount}
-                    subtitle={summary.urgentCount > 0 ? `${summary.urgentCount} products will stock out in < 2 days` : 'No urgent items'}
+                    subtitle={summary.urgentCount > 0
+                        ? `${summary.urgentCount} out-of-stock or stockout within 2 days`
+                        : 'No urgent items'}
                     color="red"
                 />
                 <SummaryCard
@@ -239,7 +273,7 @@ export default function ReorderDashboardPage() {
                         return (
                             <button
                                 key={tab.key}
-                                onClick={() => { setActiveTab(tab.key); setSelectedIds(new Set()); }}
+                                onClick={() => { setActiveTab(tab.key); }}
                                 className={`flex items-center gap-2 px-5 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${isActive
                                     ? `border-blue-600 ${tab.color} bg-blue-50/40`
                                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
@@ -256,15 +290,56 @@ export default function ReorderDashboardPage() {
                 </div>
 
                 {/* ── Bulk Actions ── */}
+                <div className="bg-gray-50 border-b border-gray-200 px-4 py-2 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm text-gray-700">
+                        {totalInTab === 0
+                            ? 'No items in this tab'
+                            : `Showing ${(safePage - 1) * pageSize + 1}–${Math.min(safePage * pageSize, totalInTab)} of ${totalInTab}`}
+                    </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <label className="text-xs text-gray-600 flex items-center gap-1">
+                            Per page
+                            <select
+                                value={pageSize}
+                                onChange={(e) => setPageSize(Number(e.target.value))}
+                                className="border border-gray-300 rounded px-2 py-1 text-sm"
+                            >
+                                {PAGE_SIZE_OPTIONS.map((n) => (
+                                    <option key={n} value={n}>{n}</option>
+                                ))}
+                            </select>
+                        </label>
+                        {totalInTab > 0 && selectedIds.size < totalInTab && (
+                            <button
+                                type="button"
+                                onClick={selectAllInTab}
+                                className="px-2 py-1 text-xs border border-gray-300 rounded-lg hover:bg-white"
+                            >
+                                Select all {totalInTab} in tab
+                            </button>
+                        )}
+                        {selectedIds.size > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => setSelectedIds(new Set())}
+                                className="px-2 py-1 text-xs text-gray-600 hover:underline"
+                            >
+                                Clear selection
+                            </button>
+                        )}
+                    </div>
+                </div>
+
                 {selectedIds.size > 0 && (
                     <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between">
                         <span className="text-sm text-blue-800 font-medium">
                             {selectedIds.size} item{selectedIds.size > 1 ? 's' : ''} selected
+                            {selectedIds.size < totalInTab ? ` (${totalInTab} in tab)` : ''}
                         </span>
                         <button
                             onClick={() => {
-                                const selectedItems = tabItems
-                                    .filter((i) => selectedIds.has(i.productId))
+                                const selectedItems = fullTabItems
+                                    .filter((i) => selectedIds.has(i.productId) && i.suggestedOrderQty > 0)
                                     .map((i) => ({
                                         productId: i.productId,
                                         productName: i.name,
@@ -272,7 +347,12 @@ export default function ReorderDashboardPage() {
                                         costPrice: i.costPrice,
                                         currentStock: i.currentStock,
                                         reorderPoint: i.reorderPoint,
+                                        preferredSupplierId: i.preferredSupplierId,
                                     }));
+                                if (selectedItems.length === 0) {
+                                    alert('Selected items have no suggested order quantity (may already be covered by open POs).');
+                                    return;
+                                }
                                 navigate('/inventory/purchase-orders', { state: { openCreate: true, reorderItems: selectedItems } });
                             }}
                             className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -297,7 +377,7 @@ export default function ReorderDashboardPage() {
                         </div>
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto max-h-[min(70vh,900px)] overflow-y-auto">
                         <ResponsiveTableWrapper>
                             <table className="w-full text-sm">
                                 <thead>
@@ -305,8 +385,8 @@ export default function ReorderDashboardPage() {
                                         <th className="pl-4 py-3 w-10">
                                             <input
                                                 type="checkbox"
-                                                checked={selectedIds.size === tabItems.length && tabItems.length > 0}
-                                                onChange={toggleAll}
+                                                checked={tabItems.length > 0 && tabItems.every((i) => selectedIds.has(i.productId))}
+                                                onChange={toggleAllOnPage}
                                                 className="rounded border-gray-300"
                                                 aria-label="Select all"
                                             />
@@ -318,6 +398,8 @@ export default function ReorderDashboardPage() {
                                         <th className="px-3 py-3 text-right cursor-pointer select-none" onClick={() => handleSort('currentStock')}>
                                             Stock<SortIcon field="currentStock" />
                                         </th>
+                                        <th className="px-3 py-3 text-right">On PO</th>
+                                        <th className="px-3 py-3 text-right">Sold 30d</th>
                                         <th className="px-3 py-3 text-right cursor-pointer select-none" onClick={() => handleSort('dailySalesVelocity')}>
                                             Daily Avg<SortIcon field="dailySalesVelocity" />
                                         </th>
@@ -359,6 +441,12 @@ export default function ReorderDashboardPage() {
                                             <td className={`px-3 py-2.5 text-right tabular-nums font-medium ${item.currentStock <= 0 ? 'text-red-600' : 'text-gray-900'}`}>
                                                 {item.currentStock}
                                             </td>
+                                            <td className="px-3 py-2.5 text-right tabular-nums text-blue-700">
+                                                {item.qtyOnOrder > 0 ? item.qtyOnOrder : '—'}
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right tabular-nums text-gray-600">
+                                                {item.unitsSold30d > 0 ? item.unitsSold30d : '—'}
+                                            </td>
                                             <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">
                                                 {item.dailySalesVelocity > 0 ? item.dailySalesVelocity.toFixed(1) : '—'}
                                             </td>
@@ -395,6 +483,30 @@ export default function ReorderDashboardPage() {
                                 </tbody>
                             </table>
                         </ResponsiveTableWrapper>
+                    </div>
+                )}
+
+                {totalInTab > 0 && totalPages > 1 && (
+                    <div className="border-t border-gray-200 px-4 py-3 flex items-center justify-between bg-gray-50">
+                        <button
+                            type="button"
+                            disabled={safePage <= 1}
+                            onClick={() => setPage((p) => Math.max(1, p - 1))}
+                            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-white"
+                        >
+                            Previous
+                        </button>
+                        <span className="text-sm text-gray-600">
+                            Page {safePage} of {totalPages}
+                        </span>
+                        <button
+                            type="button"
+                            disabled={safePage >= totalPages}
+                            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                            className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg disabled:opacity-40 hover:bg-white"
+                        >
+                            Next
+                        </button>
                     </div>
                 )}
             </div>

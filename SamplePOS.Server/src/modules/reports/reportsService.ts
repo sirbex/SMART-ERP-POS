@@ -1712,7 +1712,7 @@ export const reportsService = {
 
   /**
    * Generate Reorder Dashboard — Business-driven decision engine
-   * Groups products by priority, caps per group, calculates summaries
+   * Groups products by priority (full lists for PO selection), calculates summaries
    */
   async generateReorderDashboard(
     pool: Pool,
@@ -1724,13 +1724,11 @@ export const reportsService = {
     // Group by priority
     const urgent = allItems
       .filter((i) => i.priority === 'URGENT')
-      .sort((a, b) => (a.daysUntilStockout ?? -1) - (b.daysUntilStockout ?? -1))
-      .slice(0, 20);
+      .sort((a, b) => (a.daysUntilStockout ?? -1) - (b.daysUntilStockout ?? -1));
 
     const high = allItems
       .filter((i) => i.priority === 'HIGH')
-      .sort((a, b) => (a.daysUntilStockout ?? 9999) - (b.daysUntilStockout ?? 9999))
-      .slice(0, 20);
+      .sort((a, b) => (a.daysUntilStockout ?? 9999) - (b.daysUntilStockout ?? 9999));
 
     const deadStock = allItems
       .filter((i) => i.priority === 'DEAD_STOCK')
@@ -1738,13 +1736,11 @@ export const reportsService = {
         const aVal = (a.currentStock) * (a.costPrice ?? 0);
         const bVal = (b.currentStock) * (b.costPrice ?? 0);
         return bVal - aVal; // highest value first
-      })
-      .slice(0, 20);
+      });
 
     const medium = allItems
       .filter((i) => i.priority === 'MEDIUM')
-      .sort((a, b) => (a.daysUntilStockout ?? 9999) - (b.daysUntilStockout ?? 9999))
-      .slice(0, 50);
+      .sort((a, b) => (a.daysUntilStockout ?? 9999) - (b.daysUntilStockout ?? 9999));
 
     // Summary
     const allUrgent = allItems.filter((i) => i.priority === 'URGENT');

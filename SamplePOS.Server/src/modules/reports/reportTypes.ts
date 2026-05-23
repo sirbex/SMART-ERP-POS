@@ -675,6 +675,9 @@ export interface ReorderDashboardItem {
     sku: string;
     category: string | null;
     currentStock: number;
+    unitsSold30d: number;
+    unitsSold7d: number;
+    qtyOnOrder: number;
     dailySalesVelocity: number;
     daysUntilStockout: number | null;
     suggestedOrderQty: number;

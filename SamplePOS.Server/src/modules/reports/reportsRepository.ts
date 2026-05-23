@@ -3330,19 +3330,41 @@ export const reportsRepository = {
           p.name,
           p.sku,
           p.category,
-          COALESCE(pi.reorder_level, 0)::numeric   AS reorder_level,
-          COALESCE(pi.quantity_on_hand, 0)::numeric AS current_stock,
-          COALESCE(pv.cost_price, 0)::numeric       AS cost_price
+          COALESCE(pi.reorder_level, 0)::numeric AS reorder_level,
+          COALESCE(pv.cost_price, 0)::numeric    AS cost_price
         FROM products p
         LEFT JOIN product_inventory pi ON pi.product_id = p.id
         LEFT JOIN product_valuation pv ON pv.product_id = p.id
         WHERE p.is_active = true ${categoryFilter}
+      ),
+      batch_stock AS (
+        SELECT product_id, COALESCE(SUM(remaining_quantity), 0)::numeric AS batch_qty
+        FROM inventory_batches
+        WHERE status = 'ACTIVE'
+        GROUP BY product_id
+      ),
+      qty_on_order AS (
+        SELECT poi.product_id,
+               COALESCE(SUM(poi.ordered_quantity - poi.received_quantity), 0)::numeric AS qty
+        FROM purchase_order_items poi
+        JOIN purchase_orders po ON po.id = poi.purchase_order_id
+        WHERE po.status = 'PENDING'
+          AND poi.ordered_quantity > poi.received_quantity
+        GROUP BY poi.product_id
       ),
       sales_30d AS (
         SELECT si.product_id, SUM(si.quantity) AS units_sold
         FROM sale_items si
         JOIN sales s ON s.id = si.sale_id
         WHERE s.sale_date >= CURRENT_DATE - 30
+          AND s.status = 'COMPLETED'
+        GROUP BY si.product_id
+      ),
+      sales_7d AS (
+        SELECT si.product_id, SUM(si.quantity) AS units_sold
+        FROM sale_items si
+        JOIN sales s ON s.id = si.sale_id
+        WHERE s.sale_date >= CURRENT_DATE - 7
           AND s.status = 'COMPLETED'
         GROUP BY si.product_id
       ),
@@ -3363,15 +3385,21 @@ export const reportsRepository = {
         pb.name          AS product_name,
         pb.sku,
         pb.category,
-        pb.current_stock,
+        COALESCE(bs.batch_qty, pi_fallback.quantity_on_hand, 0)::numeric AS current_stock,
         pb.cost_price,
         pb.reorder_level,
         COALESCE(s30.units_sold, 0) AS units_sold_30d,
+        COALESCE(s7.units_sold, 0)  AS units_sold_7d,
+        COALESCE(qoo.qty, 0)        AS qty_on_order,
         si.supplier_id,
         si.supplier_name,
         COALESCE(si.lead_time_days, 7) AS lead_time_days
       FROM product_base pb
+      LEFT JOIN product_inventory pi_fallback ON pi_fallback.product_id = pb.id
+      LEFT JOIN batch_stock bs ON bs.product_id = pb.id
+      LEFT JOIN qty_on_order qoo ON qoo.product_id = pb.id
       LEFT JOIN sales_30d s30 ON s30.product_id = pb.id
+      LEFT JOIN sales_7d s7 ON s7.product_id = pb.id
       LEFT JOIN supplier_info si ON si.product_id = pb.id
     `;
 
@@ -3381,44 +3409,55 @@ export const reportsRepository = {
       const currentStock = new Decimal(row.current_stock).toNumber();
       const costPrice = new Decimal(row.cost_price).toNumber();
       const unitsSold30d = new Decimal(row.units_sold_30d).toNumber();
+      const unitsSold7d = new Decimal(row.units_sold_7d).toNumber();
+      const qtyOnOrder = new Decimal(row.qty_on_order).toNumber();
       const leadTimeDays = Number(row.lead_time_days) || 7;
       const reorderLevel = new Decimal(row.reorder_level).toNumber();
 
-      // ── Core formulas ──
-      const dailySalesVelocity = new Decimal(unitsSold30d).dividedBy(30).toDecimalPlaces(2).toNumber();
+      const velocity30d = new Decimal(unitsSold30d).dividedBy(30).toNumber();
+      const velocity7d = new Decimal(unitsSold7d).dividedBy(7).toNumber();
+      const effectiveVelocity = new Decimal(Math.max(velocity30d, velocity7d)).toDecimalPlaces(2).toNumber();
 
       const daysUntilStockout: number | null =
-        dailySalesVelocity > 0
-          ? new Decimal(currentStock).dividedBy(dailySalesVelocity).toDecimalPlaces(0).toNumber()
+        effectiveVelocity > 0
+          ? new Decimal(currentStock).dividedBy(effectiveVelocity).toDecimalPlaces(0).toNumber()
           : null;
 
-      const safetyStock = dailySalesVelocity > 0
-        ? Math.ceil(dailySalesVelocity * Math.max(leadTimeDays * 0.5, 2))
+      const safetyStock = effectiveVelocity > 0
+        ? Math.ceil(effectiveVelocity * Math.max(leadTimeDays * 0.5, 2))
         : 0;
 
-      const reorderPoint = dailySalesVelocity > 0
-        ? Math.ceil(dailySalesVelocity * leadTimeDays + safetyStock)
+      const reorderPoint = effectiveVelocity > 0
+        ? Math.ceil(effectiveVelocity * leadTimeDays + safetyStock)
         : reorderLevel;
 
-      const suggestedOrderQty = Math.max(0, Math.ceil(reorderPoint - currentStock));
+      const netShortfall = Math.ceil(reorderPoint - currentStock - qtyOnOrder);
+      const suggestedOrderQty = Math.max(0, netShortfall);
       const estimatedOrderCost = costPrice > 0
         ? new Decimal(suggestedOrderQty).times(costPrice).toDecimalPlaces(2).toNumber()
         : null;
 
-      // ── Priority classification ──
       let priority: ReorderPriority;
       let reason: string;
 
-      if (currentStock <= 0 && (dailySalesVelocity > 0 || reorderLevel > 0)) {
+      if (currentStock <= 0) {
         priority = 'URGENT';
-        reason = 'Out of stock — immediate reorder required';
+        if (qtyOnOrder > 0) {
+          reason = `Out of stock — ${qtyOnOrder} unit(s) already on open PO`;
+        } else if (effectiveVelocity > 0) {
+          reason = 'Out of stock — immediate reorder (active sales movement)';
+        } else if (reorderLevel > 0) {
+          reason = 'Out of stock — reorder to minimum level';
+        } else {
+          reason = 'Out of stock — review and set reorder level';
+        }
       } else if (daysUntilStockout !== null && daysUntilStockout <= 2) {
         priority = 'URGENT';
-        reason = `Will stock out in ${daysUntilStockout} day(s)`;
-      } else if (dailySalesVelocity > 0 && daysUntilStockout !== null && daysUntilStockout <= leadTimeDays) {
+        reason = `Will stock out in ${daysUntilStockout} day(s) at current movement`;
+      } else if (effectiveVelocity > 0 && daysUntilStockout !== null && daysUntilStockout <= leadTimeDays) {
         priority = 'HIGH';
-        reason = `${daysUntilStockout} days left vs ${leadTimeDays}-day lead time`;
-      } else if (currentStock < reorderPoint && currentStock > 0 && dailySalesVelocity > 0) {
+        reason = `${daysUntilStockout} days left vs ${leadTimeDays}-day supplier lead time`;
+      } else if (currentStock < reorderPoint && currentStock > 0 && effectiveVelocity > 0) {
         priority = 'MEDIUM';
         reason = `Stock ${currentStock} below reorder point ${reorderPoint}`;
       } else if (currentStock > 0 && unitsSold30d === 0) {
@@ -3435,7 +3474,10 @@ export const reportsRepository = {
         sku: row.sku,
         category: row.category,
         currentStock,
-        dailySalesVelocity,
+        unitsSold30d,
+        unitsSold7d,
+        qtyOnOrder,
+        dailySalesVelocity: effectiveVelocity,
         daysUntilStockout,
         suggestedOrderQty,
         estimatedOrderCost,
