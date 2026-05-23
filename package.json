@@ -28,6 +28,8 @@
     "proof:sales-by-cashier": "node scripts/proof-sales-by-cashier.mjs",
     "proof:reorder-po-gr:local": "node scripts/proof-reorder-po-gr-local.mjs",
     "proof:customer-ob:local": "node scripts/proof-customer-opening-balance-local.mjs",
+    "proof:ar-allocation:local": "node scripts/proof-ar-allocation-local.mjs",
+    "proof:sale-integrity:local": "node scripts/proof-sale-integrity-local.mjs",
     "proof:all-tenants": "node scripts/proof-all-tenants-migrations.mjs"
   },
   "devDependencies": {

@@ -560,7 +560,7 @@ describe('glEntryService — GL Posting Accuracy', () => {
     // recordCustomerPaymentToGL
     // ========================================================================
     describe('recordCustomerPaymentToGL', () => {
-        it('should DR Cash / CR AR when reducesAR=true', async () => {
+        it('should DR Undeposited Funds / CR AR when reducesAR=true', async () => {
             await recordCustomerPaymentToGL({
                 paymentId: 'pay-1',
                 paymentNumber: 'PMT-001',
@@ -574,12 +574,12 @@ describe('glEntryService — GL Posting Accuracy', () => {
 
             const lines = capturedEntries[0].lines;
 
-            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(5000);
+            expect(findLine(lines, AccountCodes.UNDEPOSITED_FUNDS)!.debitAmount).toBe(5000);
             expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.creditAmount).toBe(5000);
             assertBalanced(lines);
         });
 
-        it('should DR Cash / CR Customer Deposits when reducesAR=false', async () => {
+        it('should DR Undeposited Funds / CR Customer Deposits when reducesAR=false', async () => {
             await recordCustomerPaymentToGL({
                 paymentId: 'pay-2',
                 paymentNumber: 'PMT-002',
@@ -593,7 +593,7 @@ describe('glEntryService — GL Posting Accuracy', () => {
 
             const lines = capturedEntries[0].lines;
 
-            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(3000);
+            expect(findLine(lines, AccountCodes.UNDEPOSITED_FUNDS)!.debitAmount).toBe(3000);
             expect(findLine(lines, AccountCodes.CUSTOMER_DEPOSITS)!.creditAmount).toBe(3000);
             assertBalanced(lines);
         });

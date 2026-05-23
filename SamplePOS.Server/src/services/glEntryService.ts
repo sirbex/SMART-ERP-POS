@@ -585,41 +585,17 @@ export interface CustomerPaymentData {
 }
 
 /**
- * Record a customer payment in the general ledger
- * 
- * BUG FIX: Only credit AR when payment actually reduces customer balance
- * 
- * Journal entry for payment on account (reducesAR = true):
- *   DR Cash (1010)                amount
- *   CR Accounts Receivable (1200) amount
- * 
- * Journal entry for unallocated payment (reducesAR = false):
- *   DR Cash (1010)                amount
- *   CR Customer Deposits (2200)   amount  (liability - customer prepayment)
+ * Record a customer payment in the general ledger (clearing step 1).
+ *
+ * Journal entry — PAYMENT_RECEIPT (matches invoice payment flow):
+ *   DR Undeposited Funds (1015)    amount
+ *   CR Accounts Receivable (1200)  amount   when reducesAR = true
+ *   CR Customer Deposits (2200)    amount   when reducesAR = false (on-account prepayment)
+ *
+ * Bank/cash recognition is step 2 — PAYMENT_DEPOSIT (separate process).
  */
 export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
-    // Determine debit account based on payment method
-    let debitAccountCode: string;
-    switch (payment.paymentMethod) {
-      case 'CASH':
-        debitAccountCode = AccountCodes.CASH;
-        break;
-      case 'CARD':
-        debitAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
-        break;
-      case 'BANK_TRANSFER':
-        debitAccountCode = AccountCodes.CHECKING_ACCOUNT;
-        break;
-      case 'MOBILE_MONEY':
-        debitAccountCode = AccountCodes.MOBILE_MONEY;
-        break;
-      default:
-        debitAccountCode = AccountCodes.CASH;
-    }
-
-    // Determine credit account based on whether payment reduces AR
-    // Default to true for backward compatibility (existing calls assume AR reduction)
     const reducesAR = payment.reducesAR !== false;
     const creditAccountCode = reducesAR
       ? AccountCodes.ACCOUNTS_RECEIVABLE
@@ -629,7 +605,6 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
       ? `Reduce A/R for ${payment.customerName}${payment.invoiceNumber ? ` - ${payment.invoiceNumber}` : ''}`
       : `Customer prepayment from ${payment.customerName}`;
 
-    // Use AccountingCore for audit-safe, idempotent journal entry creation
     await AccountingCore.createJournalEntry({
       entryDate: payment.paymentDate,
       description: `Customer payment from ${payment.customerName}: ${payment.paymentNumber}`,
@@ -638,12 +613,12 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
       referenceNumber: payment.paymentNumber,
       lines: [
         {
-          accountCode: debitAccountCode,
-          description: `Payment received from ${payment.customerName}`,
+          accountCode: AccountCodes.UNDEPOSITED_FUNDS,
+          description: `Payment received — ${payment.paymentNumber}`,
           debitAmount: payment.amount,
           creditAmount: 0,
           entityType: 'customer',
-          entityId: payment.customerId
+          entityId: payment.customerId,
         },
         {
           accountCode: creditAccountCode,
@@ -651,8 +626,8 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
           debitAmount: 0,
           creditAmount: payment.amount,
           entityType: 'customer',
-          entityId: payment.customerId
-        }
+          entityId: payment.customerId,
+        },
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `CUSTOMER_PAYMENT-${payment.paymentId}`,

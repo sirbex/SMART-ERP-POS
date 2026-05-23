@@ -84,6 +84,7 @@ const AccountingIntegrationDashboard = lazyWithRetry(() => import('./pages/accou
 const ExpensesPage = lazyWithRetry(() => import('./pages/accounting/ExpensesPage'));
 const ExpenseCategoriesPage = lazyWithRetry(() => import('./pages/accounting/ExpenseCategoriesPage'));
 const SupplierPaymentsPage = lazyWithRetry(() => import('./pages/accounting/SupplierPaymentsPage'));
+const CustomerPaymentsPage = lazyWithRetry(() => import('./pages/accounting/CustomerPaymentsPage'));
 const CreditDebitNotesPage = lazyWithRetry(() => import('./pages/accounting/CreditDebitNotesPage'));
 const ProfitLossPage = lazyWithRetry(() => import('./pages/ProfitLossPage'));
 const ReconciliationPage = lazyWithRetry(() => import('./pages/ReconciliationPage'));
@@ -545,7 +546,16 @@ function App() {
                     }
                   />
                   <Route path="/accounting/invoices" element={<Navigate to="/accounting/aged-balances" replace />} />
-                  <Route path="/accounting/customer-payments" element={<Navigate to="/accounting/banking" replace />} />
+                  <Route
+                    path="/accounting/customer-payments"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['customers.read']} requiredFeature="accounting">
+                        <AccountingLayout>
+                          <CustomerPaymentsPage />
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
                   <Route
                     path="/accounting/supplier-payments"
                     element={

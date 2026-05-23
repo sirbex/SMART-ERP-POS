@@ -87,6 +87,12 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           description: 'Bills and payments'
         },
         {
+          name: 'Customer Payments',
+          path: '/accounting/customer-payments',
+          icon: <DollarSign className="h-4 w-4" />,
+          description: 'Receipts and AR allocation'
+        },
+        {
           name: 'Credit/Debit Notes',
           path: '/accounting/credit-debit-notes',
           icon: <FileMinus className="h-4 w-4" />,

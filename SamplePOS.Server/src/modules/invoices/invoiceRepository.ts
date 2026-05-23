@@ -307,10 +307,21 @@ export const invoiceRepository = {
          COALESCE(dn.dn_amount, 0) AS dn_amount
        FROM invoices i
        LEFT JOIN (
-         SELECT invoice_id, SUM(amount) AS cash_paid
-         FROM invoice_payments
-         WHERE invoice_id = $1
-         GROUP BY invoice_id
+         SELECT ip.invoice_id, SUM(ip.amount) AS cash_paid
+         FROM invoice_payments ip
+         WHERE ip.invoice_id = $1
+           AND (
+             NOT EXISTS (
+               SELECT 1 FROM ar_payment_allocations a
+               WHERE a.invoice_payment_id = ip.id
+             )
+             OR EXISTS (
+               SELECT 1 FROM ar_payment_allocations a
+               WHERE a.invoice_payment_id = ip.id
+                 AND a.status = 'ACTIVE'
+             )
+           )
+         GROUP BY ip.invoice_id
        ) pay ON pay.invoice_id = i.id
        LEFT JOIN (
          SELECT reference_invoice_id, SUM(total_amount) AS cn_amount

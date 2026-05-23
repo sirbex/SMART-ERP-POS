@@ -51,6 +51,7 @@ import erpAccountingRoutes from './routes/erpAccountingRoutes.js';
 import bankingRoutes from './routes/bankingRoutes.js';
 import businessReportRoutes from './routes/businessReportRoutes.js';
 import { createSupplierPaymentRoutes } from './modules/supplier-payments/supplierPaymentRoutes.js';
+import { arPaymentRoutes } from './modules/ar-payments/arPaymentRoutes.js';
 import { cashRegisterRoutes } from './modules/cash-register/index.js';
 import { crmRoutes } from './modules/crm/crmRoutes.js';
 import { hrRoutes } from './modules/hr/hr.routes.js';
@@ -373,6 +374,7 @@ app.use('/api/stock-movements', requireFeature('inventory'), stockMovementRoutes
 // ── Purchase Orders (plan: PROFESSIONAL+) ───────────────────
 app.use('/api/purchase-orders', requireFeature('purchase_orders'), purchaseOrderRoutes);
 app.use('/api/supplier-payments', requireFeature('purchase_orders'), createSupplierPaymentRoutes(pool));
+app.use('/api/ar-payments', arPaymentRoutes);
 
 // ── Invoices & Credit Notes (plan: STARTER+) ────────────────
 app.use('/api/invoices', requireFeature('invoices'), invoiceRoutes);
