@@ -244,10 +244,10 @@ export default function CategoryIntelligencePage() {
 
         if (data.sales && data.sales.length > 0) {
             sections.push('Sales Performance');
-            sections.push(['Category', 'Products', 'Qty Sold', 'Revenue', 'Cost', 'Gross Profit', 'Margin %', 'Transactions', 'Avg Transaction'].join(','));
+            sections.push(['Product', 'SKU', 'Qty Sold', 'Revenue', 'Cost', 'Gross Profit', 'Margin %', 'Transactions'].join(','));
             data.sales.forEach((r) => {
                 sections.push(
-                    [r.category, r.productCount, r.totalQuantitySold, r.totalRevenue, r.totalCost, r.grossProfit, r.profitMargin, r.transactionCount, r.averageTransactionValue].map((v) => JSON.stringify(v)).join(',')
+                    [r.productName, r.sku ?? '', r.totalQuantitySold, r.totalRevenue, r.totalCost, r.grossProfit, r.profitMargin, r.transactionCount].map((v) => JSON.stringify(v)).join(',')
                 );
             });
             sections.push('');
