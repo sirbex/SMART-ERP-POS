@@ -2300,20 +2300,35 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                         <tbody className="bg-white divide-y divide-gray-200">
                           {items.map((item: SaleItemRow, index: number) => {
                             const quantity = parseFloat(String(item.quantity || item.qty || 0));
-                            const unitPrice = parseFloat(
-                              String(item.unitPrice || item.unit_price || item.price || 0)
-                            );
                             const itemDiscount = parseFloat(
                               String(item.discountAmount || item.discount_amount || 0)
                             );
-                            // Use stored total_price if available, otherwise compute
+                            const storedLineTotal = parseFloat(
+                              String(
+                                item.totalPrice ||
+                                  item.total_price ||
+                                  item.lineTotal ||
+                                  item.line_total ||
+                                  0,
+                              ),
+                            );
                             const subtotal =
-                              item.totalPrice || item.total_price
-                                ? parseFloat(String(item.totalPrice || item.total_price || 0))
+                              storedLineTotal > 0
+                                ? storedLineTotal
                                 : new Decimal(quantity)
-                                  .times(unitPrice)
-                                  .minus(itemDiscount)
-                                  .toNumber();
+                                    .times(
+                                      parseFloat(
+                                        String(item.unitPrice || item.unit_price || item.price || 0),
+                                      ),
+                                    )
+                                    .minus(itemDiscount)
+                                    .toNumber();
+                            const displayUnitPrice =
+                              quantity > 0
+                                ? new Decimal(subtotal).plus(itemDiscount).dividedBy(quantity).toNumber()
+                                : parseFloat(
+                                    String(item.unitPrice || item.unit_price || item.price || 0),
+                                  );
 
                             return (
                               <tr key={index} className="hover:bg-gray-50">
@@ -2324,7 +2339,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                                   {quantity.toFixed(quantity % 1 === 0 ? 0 : 2)}
                                 </td>
                                 <td className="px-4 py-3 text-sm text-gray-600 text-right">
-                                  {formatCurrency(unitPrice)}
+                                  {formatCurrency(displayUnitPrice)}
                                 </td>
                                 {hasAnyDiscount && (
                                   <td className="px-4 py-3 text-sm text-right">

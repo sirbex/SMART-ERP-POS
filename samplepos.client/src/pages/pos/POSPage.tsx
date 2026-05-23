@@ -12,6 +12,7 @@ import { ProductCreateSchema } from '@shared/zod/product';
 import { POSSaleSchema } from '@shared/zod/pos-sale';
 import type { Customer } from '@shared/zod/customer';
 import { formatCurrency } from '../../utils/currency';
+import { resolvePosCustomerForSale } from '../../utils/resolvePosCustomerId';
 import { useCreatePOSSale } from '../../hooks/usePOSSales';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
@@ -2617,25 +2618,50 @@ export default function POSPage() {
       calculation: `${subtotalAfterDiscount} + ${tax} = ${grandTotal}`,
     });
 
-    // Resolve customer ID — strip temp_ placeholders, sync offline_cust_ customers first
-    let resolvedCustomerId: string | undefined = selectedCustomer?.id;
-    const hasOfflineCustomer = resolvedCustomerId?.startsWith('offline_cust_') ?? false;
-    if (resolvedCustomerId?.startsWith('temp_')) {
+    // Resolve customer to a real UUID (never post walk-in when UI shows a named customer).
+    let resolvedCustomerId: string | undefined;
+    let customerForSale: Customer | null = selectedCustomer;
+    const hasOfflineCustomer = selectedCustomer?.id?.startsWith('offline_cust_') ?? false;
+
+    if (hasOfflineCustomer && !isOnline) {
       resolvedCustomerId = undefined;
-    } else if (hasOfflineCustomer) {
-      if (isOnline) {
-        // Network is back — sync the offline customer to get a real UUID
-        try {
-          const idMap = await syncOfflineCustomers();
-          resolvedCustomerId = idMap.get(resolvedCustomerId!) || undefined;
-        } catch {
-          resolvedCustomerId = undefined;
+    } else if (hasOfflineCustomer && isOnline) {
+      try {
+        const idMap = await syncOfflineCustomers();
+        const syncedId = idMap.get(selectedCustomer!.id);
+        if (syncedId) {
+          resolvedCustomerId = syncedId;
+          const refreshed = await api.customers.getById(syncedId);
+          if (refreshed.data?.success && refreshed.data.data) {
+            customerForSale = refreshed.data.data as Customer;
+            setSelectedCustomer(customerForSale);
+          }
         }
-      } else {
-        // Still offline — resolvedCustomerId stays undefined for Zod (UUID) validation,
-        // but the offline branch below will preserve the offline_cust_ ID for later sync
+      } catch {
         resolvedCustomerId = undefined;
       }
+    } else {
+      const resolved = await resolvePosCustomerForSale(selectedCustomer);
+      if (resolved.error && selectedCustomer) {
+        isSubmittingRef.current = false;
+        setIsProcessingSale(false);
+        alert(`❌ Cannot Complete Sale\n\n${resolved.error}`);
+        return;
+      }
+      resolvedCustomerId = resolved.customerId;
+      if (resolved.customer && resolved.customer.id !== selectedCustomer?.id) {
+        customerForSale = resolved.customer;
+        setSelectedCustomer(resolved.customer);
+      }
+    }
+
+    if (selectedCustomer && !resolvedCustomerId && !(hasOfflineCustomer && !isOnline)) {
+      isSubmittingRef.current = false;
+      setIsProcessingSale(false);
+      alert(
+        `❌ Cannot Complete Sale\n\nCustomer "${selectedCustomer.name}" is on screen but was not saved on the sale.\n\nRemove the customer, search "${selectedCustomer.name}" in the customer list, select it (look for the "At cost" badge for BOU), then complete the sale again.`,
+      );
+      return;
     }
 
     // Validate: CREDIT payments require a real customer (or an offline customer when offline)
@@ -2645,6 +2671,37 @@ export default function POSPage() {
       setIsProcessingSale(false);
       alert(
         `❌ Cannot Complete Sale\n\n💳 Credit Payment Requires a Customer\n\nThe selected customer "${selectedCustomer?.name || 'Unknown'}" is not linked to a database record.\n\n📋 To fix this:\n1. Remove the current customer (click ✕)\n2. Search and select "${selectedCustomer?.name || 'the customer'}" from the customer dropdown\n3. Try completing the payment again\n\n💡 Tip: The customer must exist in the system for credit/invoice sales.`
+      );
+      return;
+    }
+
+    // Cart/pricing integrity — block header vs line drift (e.g. at-cost subtotal with retail unit price).
+    const lineSum = items.reduce((sum, i) => new Decimal(sum).plus(i.subtotal).toNumber(), 0);
+    const expectedGrand = new Decimal(lineSum).minus(cartDiscountAmount).plus(tax).toNumber();
+    if (Math.abs(expectedGrand - grandTotal) > 0.02) {
+      isSubmittingRef.current = false;
+      setIsProcessingSale(false);
+      alert(
+        `❌ Cart total mismatch\n\nLines: ${formatCurrency(lineSum)}\nTotal shown: ${formatCurrency(grandTotal)}\n\nReselect the customer (BOU for at-cost) and refresh prices before completing.`,
+      );
+      return;
+    }
+    for (const item of items) {
+      const implied = new Decimal(item.quantity).times(item.unitPrice).toNumber();
+      if (Math.abs(implied - item.subtotal) > 0.02) {
+        isSubmittingRef.current = false;
+        setIsProcessingSale(false);
+        alert(
+          `❌ Line price mismatch on "${item.name}"\n\nUnit × qty: ${formatCurrency(implied)}\nLine subtotal: ${formatCurrency(item.subtotal)}\n\nRemove the line and re-add it, or reselect the customer.`,
+        );
+        return;
+      }
+    }
+    if (customerForSale?.pricingMode === 'AT_COST' && !resolvedCustomerId) {
+      isSubmittingRef.current = false;
+      setIsProcessingSale(false);
+      alert(
+        '❌ At-cost customer not linked\n\nSelect BOU (or the at-cost customer) from the customer search so the sale posts with correct pricing.',
       );
       return;
     }

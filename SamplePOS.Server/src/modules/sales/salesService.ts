@@ -39,6 +39,10 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getFinalPricesBulk, type ResolvedPrice } from '../pricing/pricingEngineService.js';
 import { getCustomerPricingMode } from '../pricing/pricingRepository.js';
 import { validateAtCostSalePricing } from './atCostSalePricingGuard.js';
+import {
+  assertSaleHeaderMatchesCalculatedTotal,
+  deriveUnitPriceFromLineTotal,
+} from './saleIntegrity.js';
 import { computeSaleItemBaseQuantity } from './saleItemBaseQuantity.js';
 import { detectCogsDrift } from '../../utils/cogsDriftGuard.js';
 import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
@@ -359,6 +363,12 @@ export const salesService = {
         }
       }
 
+      if (!input.customerId) {
+        logger.warn('Sale posted without customer_id — AT_COST and credit invoicing will not apply', {
+          itemCount: input.items.length,
+        });
+      }
+
       for (const item of input.items) {
         // ========== CUSTOM ITEM DETECTION ==========
         // Custom items (service/one-off items from quotations) have custom_* IDs
@@ -645,12 +655,17 @@ export const salesService = {
         // Use the selling UoM ID resolved during conversion lookup (no extra query needed)
         const actualUomId = snapshotSellingUomId || undefined;
 
+        const storedUnitPrice =
+          item.quantity > 0
+            ? deriveUnitPriceFromLineTotal(Money.toNumber(lineTotalAfterDiscount), item.quantity)
+            : effectiveUnitPrice;
+
         itemsWithCosts.push({
           saleId: '', // Will be set after sale creation
           productId: item.productId,
           productName: item.productName,
           quantity: item.quantity,
-          unitPrice: effectiveUnitPrice,
+          unitPrice: storedUnitPrice,
           lineTotal: Money.toNumber(lineTotalAfterDiscount),
           costPrice: costPerSellingUnit,
           profit: Money.toNumber(profit),
@@ -679,14 +694,13 @@ export const salesService = {
         calculated_totalAmount_from_items: totalAmount.toFixed(2),
       });
 
-      // Use provided totalAmount if available (from POS), otherwise calculate from items + tax - discount
-      const finalTotalAmount = input.totalAmount
-        ? new Decimal(input.totalAmount)
-        : totalAmount.minus(discountAmount).plus(taxAmount);
+      const calculatedTotal = totalAmount.minus(discountAmount).plus(taxAmount);
+      assertSaleHeaderMatchesCalculatedTotal(input.totalAmount, calculatedTotal);
+      const finalTotalAmount = calculatedTotal;
 
       logger.info('💰 FINAL TOTAL AMOUNT', {
         finalTotalAmount: finalTotalAmount.toFixed(2),
-        used: input.totalAmount ? 'input.totalAmount' : 'calculated (items + tax - discount)',
+        used: 'calculated (items + tax - discount)',
       });
 
       // Calculate subtotal: if provided use it, otherwise use line item totals
