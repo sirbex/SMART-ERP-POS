@@ -8,6 +8,15 @@ import { pool as globalPool } from '../../db/pool.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import Decimal from 'decimal.js';
+
+const CustomerOpeningBalanceSchema = z.object({
+  customerId: z.string().uuid(),
+  amount: z.union([z.number().positive(), z.string().transform(Number)]),
+  asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  notes: z.string().optional(),
+});
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const PaginationQuerySchema = z.object({
@@ -26,6 +35,20 @@ const SearchQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => (v ? parseInt(v) : 20)),
+});
+
+export const importCustomerOpeningBalance = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const validated = CustomerOpeningBalanceSchema.parse(req.body);
+  const result = await customerService.importCustomerOpeningBalance(pool, {
+    customerId: validated.customerId,
+    amount: new Decimal(validated.amount).toNumber(),
+    asOfDate: validated.asOfDate,
+    dueDate: validated.dueDate,
+    notes: validated.notes,
+    userId: req.user!.id,
+  });
+  res.status(201).json({ success: true, data: result });
 });
 
 export const getCustomers = asyncHandler(async (req: Request, res: Response) => {

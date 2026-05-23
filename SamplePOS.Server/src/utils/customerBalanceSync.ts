@@ -9,7 +9,7 @@
  *
  * Formula:
  *   customer.balance = SUM(amount_due) FROM invoices
- *                      WHERE document_type IS NULL OR document_type = 'INVOICE'
+ *                      WHERE document_type IN ('INVOICE', 'OPENING_BALANCE')
  *                        AND status NOT IN ('CANCELLED','VOIDED','DRAFT')
  *
  * Credit/debit notes live in the same table but adjust the original invoice's
@@ -50,7 +50,7 @@ export async function syncCustomerBalanceFromInvoices(
        SELECT COALESCE(SUM(amount_due), 0)
        FROM invoices
        WHERE customer_id = $1
-         AND COALESCE(document_type, 'INVOICE') = 'INVOICE'
+         AND COALESCE(document_type, 'INVOICE') IN ('INVOICE', 'OPENING_BALANCE')
          AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
      )
      WHERE id = $1

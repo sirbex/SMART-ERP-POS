@@ -343,6 +343,13 @@ export const api = {
       id: string,
       params?: { start?: string; end?: string; page?: number; limit?: number }
     ) => apiClient.get<ApiResponse>(`customers/${id}/statement`, { params }),
+    importOpeningBalance: (data: {
+      customerId: string;
+      amount: number;
+      asOfDate: string;
+      dueDate?: string;
+      notes?: string;
+    }) => apiClient.post<ApiResponse>('customers/opening-balance', data),
   },
 
   // Suppliers

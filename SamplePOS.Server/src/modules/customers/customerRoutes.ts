@@ -28,6 +28,11 @@ router.post(
 );
 
 // ── Customer routes ──
+router.post(
+  '/opening-balance',
+  requirePermission('customers.create'),
+  customerController.importCustomerOpeningBalance
+);
 router.get('/', customerController.getCustomers);
 router.get('/search', customerController.searchCustomers);
 router.get('/by-number/:customerNumber', customerController.getCustomerByNumber);

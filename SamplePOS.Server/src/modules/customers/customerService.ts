@@ -1,8 +1,14 @@
 // Customers Service - Business Logic Layer
 
 import Decimal from 'decimal.js';
+import type { Pool } from 'pg';
 import type pg from 'pg';
 import * as customerRepository from './customerRepository.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
+import { AccountingCore } from '../../services/accountingCore.js';
+import * as glEntryService from '../../services/glEntryService.js';
+import { syncCustomerBalanceFromInvoices } from '../../utils/customerBalanceSync.js';
+import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { CustomerStatementSchema } from '../../../../shared/zod/customerStatement.js';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
 import { SalesBusinessRules } from '../../middleware/businessRules.js';
@@ -535,4 +541,139 @@ export async function getCustomerStatement(
       entries: mappedDeposits,
     },
   };
+}
+
+// ============================================================
+// CUSTOMER OPENING BALANCE (AR cutover from legacy system)
+// ============================================================
+
+export interface ImportCustomerOpeningBalanceInput {
+  customerId: string;
+  amount: number;
+  asOfDate: string;
+  dueDate?: string;
+  notes?: string;
+  userId: string;
+}
+
+/**
+ * Import historical AR opening balance for a customer (balance brought forward).
+ * GL: DR Accounts Receivable (1200) / CR Opening Balance Equity (3050)
+ * Creates invoice document_type = OPENING_BALANCE (OB-NNNNNN).
+ */
+export async function importCustomerOpeningBalance(
+  pool: Pool,
+  data: ImportCustomerOpeningBalanceInput
+): Promise<{ invoiceId: string; invoiceNumber: string; amount: number }> {
+  const amount = new Decimal(data.amount);
+  if (amount.lessThanOrEqualTo(0)) {
+    throw new Error('Opening balance amount must be greater than zero');
+  }
+
+  return UnitOfWork.run(pool, async (client) => {
+    await checkAccountingPeriodOpen(client, data.asOfDate);
+
+    const existing = await client.query(
+      `SELECT id FROM invoices
+       WHERE customer_id = $1
+         AND document_type = 'OPENING_BALANCE'
+         AND status NOT IN ('CANCELLED', 'VOIDED')`,
+      [data.customerId]
+    );
+    if (existing.rows.length > 0) {
+      throw new Error(
+        'This customer already has an opening balance record. Cancel the existing OB invoice first.'
+      );
+    }
+
+    const customerRes = await client.query(
+      'SELECT id, name FROM customers WHERE id = $1',
+      [data.customerId]
+    );
+    if (!customerRes.rows[0]) {
+      throw new Error('Customer not found');
+    }
+    const customerName = customerRes.rows[0].name as string;
+
+    const seqResult = await client.query(
+      `SELECT COALESCE(MAX(
+         CAST(SUBSTRING(invoice_number FROM 'OB-([0-9]+)') AS INTEGER)
+       ), 0) + 1 AS next_num
+       FROM invoices
+       WHERE invoice_number LIKE 'OB-%'`
+    );
+    const nextNum = seqResult.rows[0].next_num as number;
+    const invoiceNumber = `OB-${String(nextNum).padStart(6, '0')}`;
+
+    const dueDate = data.dueDate ?? data.asOfDate;
+    const invoiceResult = await client.query(
+      `INSERT INTO invoices (
+         invoice_number, customer_id, customer_name,
+         issue_date, due_date,
+         subtotal, tax_amount, total_amount,
+         amount_paid, amount_due,
+         status, payment_terms, document_type, notes, source_module,
+         created_at, updated_at
+       ) VALUES (
+         $1, $2, $3,
+         $4, $5,
+         $6, 0, $6,
+         0, $6,
+         'UNPAID', 0, 'OPENING_BALANCE', $7, 'CUTOVER',
+         NOW(), NOW()
+       ) RETURNING id`,
+      [
+        invoiceNumber,
+        data.customerId,
+        customerName,
+        data.asOfDate,
+        dueDate,
+        amount.toNumber(),
+        data.notes ?? `Opening balance as of ${data.asOfDate}`,
+      ]
+    );
+    const invoiceId = invoiceResult.rows[0].id as string;
+
+    await AccountingCore.createJournalEntry(
+      {
+        entryDate: data.asOfDate,
+        description: `Customer opening balance — ${customerName}`,
+        referenceType: 'CUSTOMER_OPENING_BALANCE',
+        referenceId: invoiceId,
+        referenceNumber: invoiceNumber,
+        lines: [
+          {
+            accountCode: glEntryService.AccountCodes.ACCOUNTS_RECEIVABLE,
+            description: `Customer AR — ${customerName} opening balance`,
+            debitAmount: amount.toNumber(),
+            creditAmount: 0,
+            entityType: 'customer',
+            entityId: data.customerId,
+          },
+          {
+            accountCode: glEntryService.AccountCodes.OPENING_BALANCE_EQUITY,
+            description: `Opening balance equity — ${customerName}`,
+            debitAmount: 0,
+            creditAmount: amount.toNumber(),
+          },
+        ],
+        userId: data.userId,
+        idempotencyKey: `CUSTOMER_OB-${invoiceId}`,
+        source: 'CUTOVER_OB',
+      },
+      pool,
+      client
+    );
+
+    await syncCustomerBalanceFromInvoices(client, data.customerId, 'CUSTOMER_OPENING_BALANCE');
+
+    logger.info('Customer opening balance posted', {
+      customerId: data.customerId,
+      customerName,
+      invoiceNumber,
+      amount: amount.toNumber(),
+    });
+
+    return { invoiceId, invoiceNumber, amount: amount.toNumber() };
+  });
 }

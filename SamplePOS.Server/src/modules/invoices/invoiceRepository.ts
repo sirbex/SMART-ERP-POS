@@ -20,6 +20,7 @@ function normalizeInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
     total_amount: row.total_amount as number,
     amount_paid: row.amount_paid as number,
     balance: row.amount_due as number,
+    document_type: (row.document_type as string) || 'INVOICE',
     notes: (row.notes as string) || null,
     created_by_id: (row.created_by_id as string) || null,
     created_at: row.created_at as Date,
@@ -41,6 +42,7 @@ export interface InvoiceRecord {
   total_amount: number;
   amount_paid: number;
   balance: number;
+  document_type?: string;
   notes: string | null;
   created_by_id: string | null;
   created_at: Date;
@@ -217,8 +219,8 @@ export const invoiceRepository = {
     if (filters?.customerId) {
       where.push(`i.customer_id = $${idx++}`);
       values.push(filters.customerId);
-      // Customer AR list = sales invoices only; CNs live in credit-debit-notes API
-      where.push(`COALESCE(i.document_type, 'INVOICE') = 'INVOICE'`);
+      // Customer AR list = sales + opening balance; CNs live in credit-debit-notes API
+      where.push(`COALESCE(i.document_type, 'INVOICE') IN ('INVOICE', 'OPENING_BALANCE')`);
     }
     if (filters?.status) {
       where.push(`i.status = $${idx++}`);
