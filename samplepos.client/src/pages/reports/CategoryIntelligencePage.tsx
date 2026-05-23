@@ -92,17 +92,16 @@ function breakdownQty(qtyInBase: number, uomLevels: UomLevel[]): string {
     return parts.join(' + ');
 }
 
-interface SalesByCategoryRow {
-    category: string;
-    productCount: number;
+interface CategorySalesProductRow {
+    productId: string;
+    sku: string | null;
+    productName: string;
     totalQuantitySold: number;
     totalRevenue: number;
     totalCost: number;
     grossProfit: number;
     profitMargin: number;
-    totalDiscounts: number;
     transactionCount: number;
-    averageTransactionValue: number;
 }
 
 interface CategoryPurchasesRow {
@@ -138,8 +137,8 @@ interface CategoryIntelligenceReport {
     parameters: { startDate: string; endDate: string; daysAhead: number };
     inventoryPosition: CategoryInventoryPositionRow[] | null;
     inventorySummary: { productCount: number; totalQtyOnHand: number; totalStockValue: number; belowReorderCount: number } | null;
-    sales: SalesByCategoryRow[] | null;
-    salesSummary: { totalRevenue: number; totalCost: number; grossProfit: number; totalTransactions: number } | null;
+    sales: CategorySalesProductRow[] | null;
+    salesSummary: { totalRevenue: number; totalCost: number; grossProfit: number; totalTransactions: number; productCount?: number } | null;
     purchases: CategoryPurchasesRow[] | null;
     purchasesSummary: { totalQtyReceived: number; totalPurchaseValue: number; deliveryCount: number } | null;
     expiry: CategoryExpiryExposureRow[] | null;
@@ -500,7 +499,7 @@ export default function CategoryIntelligencePage() {
                                         {data.inventoryPosition.length > 0 && (
                                             <tfoot className="bg-gray-50 font-medium">
                                                 <tr>
-                                                    <td colSpan={3} className="px-3 py-2 text-right">Total</td>
+                                                    <td colSpan={2} className="px-3 py-2 text-right">Total</td>
                                                     <td className="px-3 py-2 text-right">{data.inventorySummary.totalQtyOnHand.toLocaleString()}</td>
                                                     <td />
                                                     <td />
@@ -514,25 +513,25 @@ export default function CategoryIntelligencePage() {
                         )}
 
                         {/* Sales Performance */}
-                        {data.sales && data.salesSummary && data.sales.length > 0 && (
+                        {data.sales !== null && data.salesSummary && (
                             <section className="space-y-4">
                                 <SectionHeading
                                     icon={<BarChart2 className="w-5 h-5 text-green-600" />}
                                     title="Sales Performance"
-                                    subtitle={`${data.parameters.startDate} – ${data.parameters.endDate}`}
+                                    subtitle={`${data.parameters.startDate} – ${data.parameters.endDate} · ${selectedCategory}`}
                                 />
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                                     <SummaryCard label="Revenue" value={formatCurrency(data.salesSummary.totalRevenue)} highlight />
                                     <SummaryCard label="Gross Profit" value={formatCurrency(data.salesSummary.grossProfit)} variant="success" />
-                                    <SummaryCard label="Total Cost" value={formatCurrency(data.salesSummary.totalCost)} />
-                                    <SummaryCard label="Transactions" value={data.salesSummary.totalTransactions.toLocaleString()} />
+                                    <SummaryCard label="Products Sold" value={(data.salesSummary.productCount ?? data.sales.length).toLocaleString()} />
+                                    <SummaryCard label="Sale Transactions" value={data.salesSummary.totalTransactions.toLocaleString()} />
                                 </div>
                                 <ResponsiveTableWrapper>
                                     <table className="min-w-full text-sm">
                                         <thead className="bg-gray-50">
                                             <tr>
-                                                <th className="px-3 py-2 text-left font-medium">Sub-Category</th>
-                                                <th className="px-3 py-2 text-right font-medium">Products</th>
+                                                <th className="px-3 py-2 text-left font-medium">Product</th>
+                                                <th className="px-3 py-2 text-left font-medium">SKU</th>
                                                 <th className="px-3 py-2 text-right font-medium">Qty Sold</th>
                                                 <th className="px-3 py-2 text-right font-medium">Revenue</th>
                                                 <th className="px-3 py-2 text-right font-medium">Cost</th>
@@ -545,9 +544,9 @@ export default function CategoryIntelligencePage() {
                                             {data.sales.length === 0 ? (
                                                 <tr><td colSpan={8} className="px-3 py-6 text-center text-gray-400">No sales for this category in the selected period.</td></tr>
                                             ) : data.sales.map((r) => (
-                                                <tr key={r.category} className="hover:bg-gray-50">
-                                                    <td className="px-3 py-2">{r.category}</td>
-                                                    <td className="px-3 py-2 text-right">{r.productCount.toLocaleString()}</td>
+                                                <tr key={r.productId} className="hover:bg-gray-50">
+                                                    <td className="px-3 py-2">{r.productName}</td>
+                                                    <td className="px-3 py-2 text-gray-500">{r.sku ?? '—'}</td>
                                                     <td className="px-3 py-2 text-right">{r.totalQuantitySold.toLocaleString()}</td>
                                                     <td className="px-3 py-2 text-right">{formatCurrency(r.totalRevenue)}</td>
                                                     <td className="px-3 py-2 text-right">{formatCurrency(r.totalCost)}</td>
@@ -564,7 +563,7 @@ export default function CategoryIntelligencePage() {
                                         {data.sales.length > 0 && (
                                             <tfoot className="bg-gray-50 font-medium">
                                                 <tr>
-                                                    <td colSpan={3} className="px-3 py-2 text-right">Total</td>
+                                                    <td colSpan={2} className="px-3 py-2 text-right">Total</td>
                                                     <td className="px-3 py-2 text-right">{formatCurrency(data.salesSummary.totalRevenue)}</td>
                                                     <td className="px-3 py-2 text-right">{formatCurrency(data.salesSummary.totalCost)}</td>
                                                     <td className="px-3 py-2 text-right">{formatCurrency(data.salesSummary.grossProfit)}</td>
@@ -583,7 +582,7 @@ export default function CategoryIntelligencePage() {
                         )}
 
                         {/* Purchases */}
-                        {data.purchases && data.purchasesSummary && data.purchases.length > 0 && (
+                        {data.purchases !== null && data.purchasesSummary && (
                             <section className="space-y-4">
                                 <SectionHeading
                                     icon={<ShoppingCart className="w-5 h-5 text-amber-600" />}

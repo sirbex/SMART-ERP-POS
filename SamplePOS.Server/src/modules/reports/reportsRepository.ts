@@ -53,6 +53,7 @@ import type {
   RefundReportHeader,
   RefundReportLine,
   CategoryInventoryPositionRow,
+  CategorySalesProductRow,
   CategoryPurchasesRow,
   CategoryExpiryExposureRow,
   UomLevel,
@@ -99,6 +100,11 @@ function formatDateOnly(date: Date | string | null | undefined): string | null {
 /** SQL constant for AT TIME ZONE expressions */
 const TZ = BUSINESS_TIMEZONE;
 
+/** Exact category match (trimmed) — products.category is VARCHAR, not UUID */
+function categoryMatchClause(columnRef: string, paramIndex: number): string {
+  return `TRIM(COALESCE(${columnRef}, 'Uncategorized')) = TRIM($${paramIndex})`;
+}
+
 /**
  * Convert incoming Date or string dates to UTC-bounded params
  * suitable for WHERE col >= $start AND col < $end queries.
@@ -140,8 +146,8 @@ export const reportsRepository = {
    */
   async getProductCategories(pool: Pool): Promise<string[]> {
     const result = await pool.query(
-      `SELECT DISTINCT category FROM products
-       WHERE is_active = true AND category IS NOT NULL AND category != ''
+      `SELECT DISTINCT TRIM(category) AS category FROM products
+       WHERE is_active = true AND category IS NOT NULL AND TRIM(category) != ''
        ORDER BY category`
     );
     return result.rows.map((r: { category: string }) => r.category);
@@ -3314,13 +3320,13 @@ export const reportsRepository = {
    */
   async getReorderDashboard(
     pool: Pool,
-    options: { categoryId?: string }
+    options: { category?: string }
   ): Promise<ReorderDashboardItem[]> {
     const params: unknown[] = [];
     let categoryFilter = '';
-    if (options.categoryId) {
-      params.push(options.categoryId);
-      categoryFilter = `AND p.category = $${params.length}`;
+    if (options.category) {
+      params.push(options.category);
+      categoryFilter = `AND ${categoryMatchClause('p.category', params.length)}`;
     }
 
     const query = `
@@ -3511,7 +3517,7 @@ export const reportsRepository = {
     let categoryFilter = '';
     if (options.category) {
       params.push(options.category);
-      categoryFilter = `AND COALESCE(p.category, 'Uncategorized') = $${params.length}`;
+      categoryFilter = `AND ${categoryMatchClause('p.category', params.length)}`;
     }
 
     const query = `
@@ -5293,17 +5299,23 @@ export const reportsRepository = {
         p.sku,
         p.name                                      AS product_name,
         COALESCE(u.symbol, u.name)                  AS unit_of_measure,
-        COALESCE(pi.quantity_on_hand, 0)            AS qty_on_hand,
+        COALESCE(bs.batch_qty, pi.quantity_on_hand, 0) AS qty_on_hand,
         COALESCE(pi.reorder_level, 0)               AS reorder_level,
         COALESCE(pv.average_cost, pv.cost_price, 0) AS unit_cost,
-        COALESCE(pi.quantity_on_hand, 0)
+        COALESCE(bs.batch_qty, pi.quantity_on_hand, 0)
           * COALESCE(pv.average_cost, pv.cost_price, 0) AS stock_value
       FROM products p
       LEFT JOIN product_uoms       pu ON pu.product_id = p.id AND pu.is_default = TRUE
       LEFT JOIN uoms               u  ON u.id  = pu.uom_id
       LEFT JOIN product_inventory  pi ON pi.product_id = p.id
       LEFT JOIN product_valuation  pv ON pv.product_id = p.id
-      WHERE COALESCE(p.category, 'Uncategorized') = $1
+      LEFT JOIN (
+        SELECT product_id, COALESCE(SUM(remaining_quantity), 0)::numeric AS batch_qty
+        FROM inventory_batches
+        WHERE status = 'ACTIVE'
+        GROUP BY product_id
+      ) bs ON bs.product_id = p.id
+      WHERE ${categoryMatchClause('p.category', 1)}
         AND p.is_active = TRUE
       ORDER BY p.name
     `;
@@ -5355,6 +5367,55 @@ export const reportsRepository = {
   },
 
   /**
+   * CATEGORY SALES BY PRODUCT — per-product movement for one selected category
+   */
+  async getCategorySalesByProduct(
+    pool: Pool,
+    options: { category: string; startDate: string; endDate: string }
+  ): Promise<CategorySalesProductRow[]> {
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
+    const query = `
+      SELECT
+        p.id AS product_id,
+        p.sku,
+        p.name AS product_name,
+        SUM(si.quantity) AS total_quantity_sold,
+        SUM(si.total_price) AS total_revenue,
+        SUM(si.quantity * si.unit_cost) AS total_cost,
+        SUM(si.profit) AS gross_profit,
+        COUNT(DISTINCT s.id) AS transaction_count
+      FROM sales s
+      INNER JOIN sale_items si ON si.sale_id = s.id
+      INNER JOIN products p ON p.id = si.product_id
+      WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date
+        AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
+        AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
+        AND ${categoryMatchClause('p.category', 3)}
+      GROUP BY p.id, p.sku, p.name
+      ORDER BY total_revenue DESC
+    `;
+    const result = await pool.query(query, [startUtc, endUtc, options.category]);
+    return result.rows.map((row) => {
+      const totalRevenue = new Decimal(row.total_revenue || 0);
+      const grossProfit = new Decimal(row.gross_profit || 0);
+      const profitMargin = totalRevenue.isZero()
+        ? 0
+        : grossProfit.dividedBy(totalRevenue).times(100).toDecimalPlaces(2).toNumber();
+      return {
+        productId: row.product_id,
+        sku: row.sku || null,
+        productName: row.product_name,
+        totalQuantitySold: new Decimal(row.total_quantity_sold || 0).toDecimalPlaces(2).toNumber(),
+        totalRevenue: totalRevenue.toDecimalPlaces(2).toNumber(),
+        totalCost: new Decimal(row.total_cost || 0).toDecimalPlaces(2).toNumber(),
+        grossProfit: grossProfit.toDecimalPlaces(2).toNumber(),
+        profitMargin,
+        transactionCount: parseInt(row.transaction_count, 10) || 0,
+      };
+    });
+  },
+
+  /**
    * CATEGORY PURCHASES
    * Goods-receipt-based purchase analysis per category.
    * Aggregates received quantity and value from finalised GRs.
@@ -5364,6 +5425,7 @@ export const reportsRepository = {
     pool: Pool,
     options: { category: string; startDate: string; endDate: string }
   ): Promise<CategoryPurchasesRow[]> {
+    const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
     const query = `
       SELECT
         p.id                              AS product_id,
@@ -5383,19 +5445,15 @@ export const reportsRepository = {
       LEFT JOIN uoms             u   ON u.id   = pu.uom_id
       LEFT JOIN purchase_orders  po  ON po.id  = gr.purchase_order_id
       LEFT JOIN suppliers        s   ON s."Id" = po.supplier_id
-      WHERE COALESCE(p.category, 'Uncategorized') = $1
+      WHERE ${categoryMatchClause('p.category', 1)}
         AND gr.status = 'COMPLETED'
-        AND gr.received_date::date >= $2::date
-        AND gr.received_date::date < $3::date
+        AND gr.received_date >= ($2::timestamptz AT TIME ZONE '${TZ}')::date
+        AND gr.received_date < ($3::timestamptz AT TIME ZONE '${TZ}')::date
       GROUP BY p.id, p.sku, p.name, COALESCE(u.symbol, u.name), s."CompanyName",
                gr.received_date, gr.receipt_number
       ORDER BY gr.received_date DESC, total_purchase_value DESC
     `;
-    const result = await pool.query(query, [
-      options.category,
-      options.startDate,
-      options.endDate,
-    ]);
+    const result = await pool.query(query, [options.category, startUtc, endUtc]);
     return result.rows.map((row) => ({
       productId: row.product_id,
       sku: row.sku || null,
@@ -5437,7 +5495,7 @@ export const reportsRepository = {
       JOIN products p ON p.id = ib.product_id
       LEFT JOIN product_uoms pu ON pu.product_id = p.id AND pu.is_default = TRUE
       LEFT JOIN uoms u ON u.id = pu.uom_id
-      WHERE COALESCE(p.category, 'Uncategorized') = $1
+      WHERE ${categoryMatchClause('p.category', 1)}
         AND ib.status = 'ACTIVE'
         AND ib.expiry_date IS NOT NULL
         AND ib.expiry_date <= CURRENT_DATE + ($2 || ' days')::INTERVAL

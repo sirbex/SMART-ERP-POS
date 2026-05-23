@@ -890,6 +890,19 @@ export interface CategoryPurchasesRow {
     avgUnitCost: number;
 }
 
+/** Per-product sales within a single selected category */
+export interface CategorySalesProductRow {
+    productId: string;
+    sku: string | null;
+    productName: string;
+    totalQuantitySold: number;
+    totalRevenue: number;
+    totalCost: number;
+    grossProfit: number;
+    profitMargin: number;
+    transactionCount: number;
+}
+
 export interface CategoryExpiryExposureRow {
     productId: string;
     sku: string | null;

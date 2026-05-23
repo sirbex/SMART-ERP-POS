@@ -1716,7 +1716,7 @@ export const reportsService = {
    */
   async generateReorderDashboard(
     pool: Pool,
-    options: { categoryId?: string }
+    options: { category?: string }
   ) {
     const startTime = Date.now();
     const allItems = await reportsRepository.getReorderDashboard(pool, options);
@@ -2778,7 +2778,7 @@ export const reportsService = {
         ? reportsRepository.getCategoryInventoryPosition(pool, { category: options.category })
         : Promise.resolve(null),
       include('SALES')
-        ? reportsRepository.getSalesByCategory(pool, {
+        ? reportsRepository.getCategorySalesByProduct(pool, {
           startDate,
           endDate,
           category: options.category,
@@ -2820,6 +2820,7 @@ export const reportsService = {
         totalCost: salesRows.reduce((s, r) => new Decimal(s).plus(r.totalCost).toNumber(), 0),
         grossProfit: salesRows.reduce((s, r) => new Decimal(s).plus(r.grossProfit).toNumber(), 0),
         totalTransactions: salesRows.reduce((s, r) => s + r.transactionCount, 0),
+        productCount: salesRows.length,
       }
       : null;
 

@@ -2435,8 +2435,13 @@ export const reportsController = {
    * GET /api/reports/reorder-dashboard
    */
   async getReorderDashboard(req: Request, res: Response, pool: Pool) {
-    const categoryId = typeof req.query.category_id === 'string' ? req.query.category_id : undefined;
-    const result = await reportsService.generateReorderDashboard(pool, { categoryId });
+    const category =
+      typeof req.query.category === 'string'
+        ? req.query.category
+        : typeof req.query.category_id === 'string'
+          ? req.query.category_id
+          : undefined;
+    const result = await reportsService.generateReorderDashboard(pool, { category });
     res.json({ success: true, data: result });
   },
 
@@ -5174,26 +5179,27 @@ export const reportsController = {
       }
 
       // Section: Sales
-      if (report.sales && report.salesSummary && report.sales.length > 0) {
+      if (report.sales && report.salesSummary) {
         pdfGen.addSectionHeading('Sales Performance');
         pdfGen.addSummaryCards([
           { label: 'Revenue', value: `${report.systemSettings.currencySymbol} ${report.salesSummary.totalRevenue.toLocaleString()}`, color: PDFColors.primary },
           { label: 'Gross Profit', value: `${report.systemSettings.currencySymbol} ${report.salesSummary.grossProfit.toLocaleString()}`, color: PDFColors.success },
-          { label: 'Total Cost', value: `${report.systemSettings.currencySymbol} ${report.salesSummary.totalCost.toLocaleString()}` },
+          { label: 'Products Sold', value: String(report.salesSummary.productCount ?? report.sales.length) },
           { label: 'Transactions', value: report.salesSummary.totalTransactions.toLocaleString() },
         ]);
         const salesCols: PDFTableColumn[] = [
-          { header: 'Sub-Category', key: 'category', width: 0.18 },
-          { header: 'Products', key: 'productCount', width: 0.09, align: 'right' },
+          { header: 'Product', key: 'productName', width: 0.22 },
+          { header: 'SKU', key: 'sku', width: 0.1 },
           { header: 'Qty Sold', key: 'totalQuantitySold', width: 0.1, align: 'right', format: (v) => formatQuantityPDF(v as number) },
           { header: 'Revenue', key: 'totalRevenue', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
           { header: 'Cost', key: 'totalCost', width: 0.12, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
           { header: 'Gross Profit', key: 'grossProfit', width: 0.13, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
           { header: 'Margin %', key: 'profitMargin', width: 0.1, align: 'right', format: (v) => `${(v as number).toFixed(1)}%` },
-          { header: 'Trans.', key: 'transactionCount', width: 0.08, align: 'right' },
-          { header: 'Avg Trans.', key: 'averageTransactionValue', width: 0.07, align: 'right', format: (v) => formatCurrencyPDF(v as number) },
+          { header: 'Trans.', key: 'transactionCount', width: 0.1, align: 'right' },
         ];
-        pdfGen.addTable(salesCols, report.sales);
+        if (report.sales.length > 0) {
+          pdfGen.addTable(salesCols, report.sales);
+        }
       }
 
       // Section: Purchases
