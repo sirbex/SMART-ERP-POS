@@ -523,6 +523,7 @@ export const api = {
       apiClient.delete<ApiResponse>(`goods-receipts/${grId}/items/${itemId}`),
     hydrateFromPO: (id: string) =>
       apiClient.post<ApiResponse>(`goods-receipts/${id}/hydrate-from-po`),
+    cancel: (id: string) => apiClient.post<ApiResponse>(`goods-receipts/${id}/cancel`),
   },
 
   // Return GRN (Goods Return to Supplier)

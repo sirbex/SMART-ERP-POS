@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
@@ -69,6 +69,104 @@ export interface ListGRsResult {
   total: number;
 }
 
+/** Odoo/SAP guard: only receive against an open (PENDING) purchase order. */
+async function assertPOAllowsReceiving(
+  pool: Pool | PoolClient,
+  purchaseOrderId: string
+): Promise<void> {
+  const poResult = await purchaseOrderRepository.getPOById(pool, purchaseOrderId);
+  if (!poResult) {
+    throw new Error(`Purchase order ${purchaseOrderId} not found`);
+  }
+  const status = poResult.po.status;
+  if (status === 'CANCELLED') {
+    throw new Error(
+      'Cannot receive goods against a cancelled purchase order. Cancelled orders cannot be received.'
+    );
+  }
+  if (status === 'COMPLETED') {
+    throw new Error('Purchase order is already fully received');
+  }
+  if (status !== 'PENDING') {
+    throw new Error(
+      `Purchase order must be pending (sent to supplier) before receiving. Current status: ${status}`
+    );
+  }
+}
+
+/** Add missing PO lines to a DRAFT GR — shared by hydrate and send-to-supplier idempotency. */
+async function syncDraftGRLinesFromPO(
+  client: PoolClient,
+  grId: string
+): Promise<number> {
+  const grResult = await goodsReceiptRepository.getGRById(client, grId);
+  if (!grResult) throw new Error(`Goods receipt ${grId} not found`);
+  const { gr, items } = grResult;
+
+  if (gr.status !== 'DRAFT') {
+    throw new Error('Can only sync lines for DRAFT goods receipts');
+  }
+  if (!gr.purchaseOrderId) {
+    throw new Error('Goods receipt is not linked to a purchase order');
+  }
+
+  await assertPOAllowsReceiving(client, gr.purchaseOrderId);
+
+  const poDetail = await purchaseOrderRepository.getPOById(client, gr.purchaseOrderId);
+  if (!poDetail) throw new Error(`Purchase order ${gr.purchaseOrderId} not found`);
+
+  interface POItemRow {
+    id: string;
+    product_id?: string;
+    productId?: string;
+    product_name?: string;
+    productName?: string;
+    ordered_quantity?: number;
+    quantity?: number;
+    unit_price?: number;
+    unitCost?: number;
+    uom_id?: string | null;
+    uomId?: string | null;
+  }
+
+  const poItems = (poDetail.items || []) as POItemRow[];
+  if (poItems.length === 0) {
+    throw new Error('Purchase order has no line items to receive');
+  }
+
+  const linkedPoItemIds = new Set(
+    items.map((row) => row.poItemId).filter((id): id is string => !!id)
+  );
+
+  const toInsert: CreateGRItemData[] = poItems
+    .filter((poi) => !linkedPoItemIds.has(poi.id))
+    .map((poi) => {
+      const productId = poi.product_id ?? poi.productId;
+      if (!productId) {
+        throw new Error(`PO line ${poi.id} is missing product_id`);
+      }
+      return {
+        goodsReceiptId: gr.id,
+        poItemId: poi.id,
+        productId,
+        productName: poi.product_name ?? poi.productName ?? 'Unknown Product',
+        orderedQuantity: Money.parseDb(poi.ordered_quantity ?? poi.quantity ?? 0).toNumber(),
+        receivedQuantity: 0,
+        unitCost: Money.parseDb(poi.unit_price ?? poi.unitCost ?? 0).toNumber(),
+        batchNumber: null,
+        expiryDate: null,
+        uomId: poi.uom_id ?? poi.uomId ?? null,
+      };
+    });
+
+  if (toInsert.length === 0) {
+    return 0;
+  }
+
+  await goodsReceiptRepository.addGRItems(client, toInsert);
+  return toInsert.length;
+}
+
 export const goodsReceiptService = {
   /**
    * Create goods receipt with items (DRAFT state, manual or from PO)
@@ -114,6 +212,10 @@ export const goodsReceiptService = {
     const txResult = await UnitOfWork.run(pool, async (client) => {
       let purchaseOrderId = data.purchaseOrderId || null;
       let manualPO = null;
+
+      if (purchaseOrderId) {
+        await assertPOAllowsReceiving(client, purchaseOrderId);
+      }
 
       // If supplierId provided without purchaseOrderId, create auto-generated manual PO
       if (!purchaseOrderId && data.supplierId) {
@@ -340,6 +442,13 @@ export const goodsReceiptService = {
 
       // High-level validations before side effects
       if (gr.status === 'COMPLETED') throw new Error('Goods receipt is already completed');
+      if (gr.status === 'CANCELLED') {
+        throw new Error('Cannot finalize a cancelled goods receipt');
+      }
+
+      if (gr.purchaseOrderId) {
+        await assertPOAllowsReceiving(client, gr.purchaseOrderId);
+      }
 
       // Must have items
       if (!Array.isArray(items) || items.length === 0) {
@@ -1005,67 +1114,41 @@ export const goodsReceiptService = {
     });
   },
 
-  /** Hydrate a DRAFT GR's items from its Purchase Order (for GRs created without items) */
+  /** Sync DRAFT GR lines from its Purchase Order (adds any missing PO lines) */
   async hydrateFromPO(
     pool: Pool,
     grId: string
-  ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[] }> {
+  ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[]; addedCount: number }> {
+    let addedCount = 0;
+
     await UnitOfWork.run(pool, async (client) => {
-      const grResult = await goodsReceiptRepository.getGRById(client, grId);
-      if (!grResult) throw new Error(`Goods receipt ${grId} not found`);
-      const { gr, items } = grResult;
-
-      if (gr.status !== 'DRAFT') {
-        throw new Error('Can only hydrate items for DRAFT goods receipts');
-      }
-
-      if (Array.isArray(items) && items.length > 0) {
-        // Already has items; nothing to do
-        return;
-      }
-
-      // Load PO with items (includes product_name alias via repository)
-      // NOTE: PO items use `SELECT *` which returns snake_case — defensive fallbacks required
-      const poDetail = await purchaseOrderRepository.getPOById(client, gr.purchaseOrderId);
-      if (!poDetail) throw new Error(`Purchase order ${gr.purchaseOrderId} not found`);
-
-      interface POItemRow {
-        id: string;
-        product_id?: string;
-        productId?: string;
-        product_name?: string;
-        productName?: string;
-        ordered_quantity?: number;
-        quantity?: number;
-        unit_price?: number;
-        unitCost?: number;
-        uom_id?: string | null;
-      }
-
-      const toInsert: CreateGRItemData[] = ((poDetail.items || []) as POItemRow[]).map((poi) => ({
-        goodsReceiptId: gr.id,
-        poItemId: poi.id,
-        productId: poi.product_id ?? poi.productId ?? '',
-        productName: poi.product_name ?? poi.productName ?? 'Unknown Product',
-        orderedQuantity: Money.parseDb(poi.ordered_quantity ?? poi.quantity).toNumber(),
-        receivedQuantity: 0,
-        unitCost: Money.parseDb(poi.unit_price ?? poi.unitCost).toNumber(),
-        batchNumber: null,
-        expiryDate: null,
-        uomId: poi.uom_id || null, // SAP: inherit UOM from PO item
-      }));
-
-      if (toInsert.length === 0) {
-        return;
-      }
-
-      await goodsReceiptRepository.addGRItems(client, toInsert);
+      addedCount = await syncDraftGRLinesFromPO(client, grId);
     });
 
     const refreshed = await goodsReceiptRepository.getGRById(pool, grId);
     if (!refreshed) throw new Error(`Goods receipt ${grId} not found after hydration`);
-    return refreshed;
+    return { ...refreshed, addedCount };
   },
+
+  /**
+   * Cancel a DRAFT goods receipt (Odoo cancel open picking — no stock/GL impact).
+   */
+  async cancelGR(pool: Pool, id: string): Promise<GoodsReceipt> {
+    return UnitOfWork.run(pool, async (client) => {
+      const grResult = await goodsReceiptRepository.getGRById(client, id);
+      if (!grResult) throw new Error(`Goods receipt ${id} not found`);
+
+      if (grResult.gr.status !== 'DRAFT') {
+        throw new Error('Only draft goods receipts can be cancelled');
+      }
+
+      return goodsReceiptRepository.cancelGR(client, id);
+    });
+  },
+
+  /** Used by purchase order send/cancel flows inside a shared transaction. */
+  syncDraftGRLinesFromPO,
+  assertPOAllowsReceiving,
 
   // ════════════════════════════════════════════════════════════
   // OPENING BALANCE GRN — ERP Opening Inventory (SAP MB1C / Odoo Adjustment)

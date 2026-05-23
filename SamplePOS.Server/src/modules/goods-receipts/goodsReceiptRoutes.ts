@@ -337,6 +337,21 @@ export const goodsReceiptController = {
   },
 
   /**
+   * Cancel a DRAFT goods receipt (no inventory/GL impact)
+   */
+  async cancelGR(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const gr = await goodsReceiptService.cancelGR(pool, id);
+
+    res.json({
+      success: true,
+      data: gr,
+      message: 'Goods receipt cancelled',
+    });
+  },
+
+  /**
    * Hydrate GR items from its Purchase Order (DRAFT only)
    */
   async hydrateFromPO(req: Request, res: Response): Promise<void> {
@@ -344,10 +359,14 @@ export const goodsReceiptController = {
     const { id } = UuidParamSchema.parse(req.params);
     const result = await goodsReceiptService.hydrateFromPO(pool, id);
 
+    const added = 'addedCount' in result ? result.addedCount : 0;
     res.json({
       success: true,
       data: result,
-      message: 'Goods receipt items hydrated from purchase order',
+      message:
+        added > 0
+          ? `Added ${added} line(s) from purchase order`
+          : 'Goods receipt already includes all purchase order lines',
     });
   },
 
@@ -447,6 +466,12 @@ goodsReceiptRoutes.post(
   authenticate,
   requirePermission('purchasing.create'),
   asyncHandler(goodsReceiptController.hydrateFromPO)
+);
+goodsReceiptRoutes.post(
+  '/:id/cancel',
+  authenticate,
+  requirePermission('purchasing.update'),
+  asyncHandler(goodsReceiptController.cancelGR)
 );
 goodsReceiptRoutes.post(
   '/:id/items',

@@ -26,6 +26,7 @@
     "proof:adjust-button:live": "node scripts/proof-adjust-button-live.mjs",
     "proof:invoice-adjust-cap": "node scripts/proof-invoice-adjust-cap.mjs",
     "proof:sales-by-cashier": "node scripts/proof-sales-by-cashier.mjs",
+    "proof:reorder-po-gr:local": "node scripts/proof-reorder-po-gr-local.mjs",
     "proof:all-tenants": "node scripts/proof-all-tenants-migrations.mjs"
   },
   "devDependencies": {

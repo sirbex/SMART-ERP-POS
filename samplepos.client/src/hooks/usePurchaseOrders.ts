@@ -4,6 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/api';
+import { GOODS_RECEIPTS_KEYS } from './useGoodsReceipts';
 import type { CreatePurchaseOrderInput, CreatePOInvoiceInput, RecordPOPaymentInput } from '../types/inputs';
 
 /**
@@ -117,6 +118,8 @@ export function useCancelPurchaseOrder() {
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.lists() });
       queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.detail(id) });
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.lists() });
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.details() });
     },
   });
 }

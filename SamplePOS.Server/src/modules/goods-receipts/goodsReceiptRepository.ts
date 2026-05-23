@@ -3,6 +3,11 @@ import logger from '../../utils/logger.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
+import {
+  tableHasColumn,
+  grItemsConversionFactorExpr,
+  grItemsIsBonusExpr,
+} from '../../db/schemaColumnCache.js';
 
 export interface GoodsReceipt {
   id: string;
@@ -17,6 +22,7 @@ export interface GoodsReceipt {
   updatedAt: string;
   // Join fields — present when fetched via getGRById / listGRs
   poNumber?: string | null;
+  poStatus?: string | null;
   supplierId?: string | null;
   supplierName?: string | null;
 }
@@ -145,33 +151,56 @@ export const goodsReceiptRepository = {
    * Accepts Pool or PoolClient to participate in caller's transaction.
    */
   async addGRItems(pool: Pool | PoolClient, items: CreateGRItemData[]): Promise<GoodsReceiptItem[]> {
+    if (items.length === 0) return [];
+
+    const hasUomSnapshot = await tableHasColumn(pool, 'goods_receipt_items', 'base_qty');
     const values: unknown[] = [];
     const placeholders: string[] = [];
+    const fieldsPerRow = hasUomSnapshot ? 11 : 8;
 
     items.forEach((item, index) => {
-      const offset = index * 11; // 11 fields (added base_qty, base_uom_id, conversion_factor)
-      placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11})`
-      );
-      values.push(
-        item.goodsReceiptId,
-        item.productId,
-        item.receivedQuantity,
-        item.batchNumber || null,
-        item.expiryDate || null,
-        item.unitCost,
-        item.uomId || null,  // SAP pattern: inherited from PO item
-        item.poItemId || null,  // po_item_id - link to purchase order item
-        item.baseQty ?? null, // SAP UoM snapshot: base quantity
-        item.baseUomId ?? null, // SAP UoM snapshot: base UoM at posting time
-        item.conversionFactor ?? 1 // SAP UoM snapshot: conversion factor at posting time
-      );
+      const offset = index * fieldsPerRow;
+      if (hasUomSnapshot) {
+        placeholders.push(
+          `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11})`
+        );
+        values.push(
+          item.goodsReceiptId,
+          item.productId,
+          item.receivedQuantity,
+          item.batchNumber || null,
+          item.expiryDate || null,
+          item.unitCost,
+          item.uomId || null,
+          item.poItemId || null,
+          item.baseQty ?? null,
+          item.baseUomId ?? null,
+          item.conversionFactor ?? 1
+        );
+      } else {
+        placeholders.push(
+          `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`
+        );
+        values.push(
+          item.goodsReceiptId,
+          item.productId,
+          item.receivedQuantity,
+          item.batchNumber || null,
+          item.expiryDate || null,
+          item.unitCost,
+          item.uomId || null,
+          item.poItemId || null
+        );
+      }
     });
 
+    const insertColumns = hasUomSnapshot
+      ? `goods_receipt_id, product_id, received_quantity, batch_number, expiry_date, cost_price, uom_id, po_item_id, base_qty, base_uom_id, conversion_factor`
+      : `goods_receipt_id, product_id, received_quantity, batch_number, expiry_date, cost_price, uom_id, po_item_id`;
+
     const result = await pool.query(
-      `INSERT INTO goods_receipt_items (
-        goods_receipt_id, product_id, received_quantity, batch_number, expiry_date, cost_price, uom_id, po_item_id, base_qty, base_uom_id, conversion_factor
-      ) VALUES ${placeholders.join(', ')}
+      `INSERT INTO goods_receipt_items (${insertColumns})
+      VALUES ${placeholders.join(', ')}
       RETURNING 
         id,
         goods_receipt_id as "goodsReceiptId",
@@ -213,6 +242,7 @@ export const goodsReceiptRepository = {
          gr.updated_at as "updatedAt",
          gr.version,
          po.order_number AS "poNumber",
+         po.status AS "poStatus",
          po.supplier_id as "supplierId",
          s."CompanyName" as "supplierName",
          (SELECT si."SupplierInvoiceNumber"
@@ -235,30 +265,33 @@ export const goodsReceiptRepository = {
       return null;
     }
 
+    const conversionFactorExpr = await grItemsConversionFactorExpr(pool);
+    const isBonusExpr = await grItemsIsBonusExpr(pool);
+
     const itemsResult = await pool.query(
       `SELECT 
          gri.id,
          gri.goods_receipt_id as "goodsReceiptId",
          gri.product_id as "productId",
          gri.po_item_id as "poItemId",
-         p.name as "productName",
+         COALESCE(p.name, 'Unknown Product') as "productName",
          ROUND(COALESCE(poi.ordered_quantity, gri.received_quantity)::numeric, 2) as "orderedQuantity",
          ROUND(gri.received_quantity::numeric, 2) as "receivedQuantity",
          COALESCE(gri.batch_number, ib.batch_number) as "batchNumber",
          gri.expiry_date as "expiryDate",
          ROUND(gri.cost_price::numeric, 2) as "unitCost",
-         gri.is_bonus as "isBonus",
+         ${isBonusExpr} as "isBonus",
          ROUND(poi.unit_price::numeric, 2) as "poUnitPrice",
          ROUND(pv.cost_price::numeric, 2) as "productCostPrice",
          ROUND((gri.received_quantity - COALESCE(poi.ordered_quantity, gri.received_quantity))::numeric, 2) as "qtyVariance",
          ROUND((gri.cost_price - COALESCE(poi.unit_price, pv.cost_price))::numeric, 2) as "costVariance",
          COALESCE(u.name, def_u.name) as "uomName",
          COALESCE(u.symbol, def_u.symbol) as "uomSymbol",
-         COALESCE(gri.conversion_factor, pu.conversion_factor, def_pu.conversion_factor, 1) as "conversionFactor",
+         ${conversionFactorExpr} as "conversionFactor",
          COALESCE(gri.uom_id, poi.uom_id) as "uomId"
        FROM goods_receipt_items gri
        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
-       JOIN products p ON gri.product_id = p.id
+       LEFT JOIN products p ON gri.product_id = p.id
        LEFT JOIN product_valuation pv ON pv.product_id = p.id
        LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id
        LEFT JOIN inventory_batches ib ON ib.goods_receipt_id = gri.goods_receipt_id
@@ -333,21 +366,23 @@ export const goodsReceiptRepository = {
     itemId: string
   ): Promise<{ item: GoodsReceiptItem & { ordered_quantity?: number }; gr: GoodsReceipt } | null> {
     // Fetch item with proper camelCase aliases, joining PO items for ordered quantity
+    const isBonusExpr = await grItemsIsBonusExpr(pool);
+
     const itemRes = await pool.query(
       `SELECT 
          gri.id,
          gri.goods_receipt_id as "goodsReceiptId",
          gri.po_item_id as "poItemId",
          gri.product_id as "productId",
-         p.name as "productName",
+         COALESCE(p.name, 'Unknown Product') as "productName",
          gri.received_quantity as "receivedQuantity",
          gri.batch_number as "batchNumber",
          gri.expiry_date as "expiryDate",
          gri.cost_price as "unitCost",
-         COALESCE(gri.is_bonus, false) as "isBonus",
+         ${isBonusExpr} as "isBonus",
          COALESCE(poi.ordered_quantity, gri.received_quantity) as "orderedQuantity"
        FROM goods_receipt_items gri
-       JOIN products p ON gri.product_id = p.id
+       LEFT JOIN products p ON gri.product_id = p.id
        LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id
        WHERE gri.id = $1`,
       [itemId]
@@ -524,6 +559,7 @@ export const goodsReceiptRepository = {
          gr.updated_at as "updatedAt",
          gr.version,
          po.order_number AS "poNumber",
+         po.status AS "poStatus",
          s."CompanyName" as "supplierName"
        FROM goods_receipts gr
        LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
@@ -539,6 +575,102 @@ export const goodsReceiptRepository = {
       grs: result.rows,
       total: parseInt(countResult.rows[0].count),
     };
+  },
+
+  /**
+   * Find the newest DRAFT goods receipt for a purchase order (Odoo open picking pattern).
+   */
+  async findDraftGRByPurchaseOrderId(
+    pool: Pool | PoolClient,
+    purchaseOrderId: string
+  ): Promise<GoodsReceipt | null> {
+    const result = await pool.query(
+      `SELECT 
+         id,
+         receipt_number as "grNumber",
+         purchase_order_id as "purchaseOrderId",
+         received_date as "receivedDate",
+         status,
+         notes as "supplierDeliveryNote",
+         received_by_id as "receivedBy",
+         created_at as "createdAt",
+         updated_at as "updatedAt"
+       FROM goods_receipts
+       WHERE purchase_order_id = $1 AND status = 'DRAFT'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [purchaseOrderId]
+    );
+    return result.rows[0] ?? null;
+  },
+
+  /**
+   * Count goods receipts for a PO in a given status.
+   */
+  async countGRsByPOAndStatus(
+    pool: Pool | PoolClient,
+    purchaseOrderId: string,
+    status: GoodsReceipt['status']
+  ): Promise<number> {
+    const result = await pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM goods_receipts
+       WHERE purchase_order_id = $1 AND status = $2`,
+      [purchaseOrderId, status]
+    );
+    return Number(result.rows[0]?.count ?? 0);
+  },
+
+  /**
+   * Cancel all DRAFT goods receipts linked to a purchase order (no stock impact).
+   */
+  async cancelDraftGRsForPurchaseOrder(
+    pool: Pool | PoolClient,
+    purchaseOrderId: string
+  ): Promise<string[]> {
+    const result = await pool.query(
+      `UPDATE goods_receipts
+       SET status = 'CANCELLED',
+           version = version + 1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE purchase_order_id = $1 AND status = 'DRAFT'
+       RETURNING id, receipt_number as "grNumber"`,
+      [purchaseOrderId]
+    );
+    return result.rows.map((r: { id: string }) => r.id);
+  },
+
+  /**
+   * Cancel a single DRAFT goods receipt.
+   */
+  async cancelGR(pool: Pool | PoolClient, id: string): Promise<GoodsReceipt> {
+    const result = await pool.query(
+      `UPDATE goods_receipts
+       SET status = 'CANCELLED',
+           version = version + 1,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1 AND status = 'DRAFT'
+       RETURNING 
+         id,
+         receipt_number as "grNumber",
+         purchase_order_id as "purchaseOrderId",
+         received_date as "receivedDate",
+         status,
+         notes as "supplierDeliveryNote",
+         received_by_id as "receivedBy",
+         created_at as "createdAt",
+         updated_at as "updatedAt",
+         version`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error(
+        'Goods receipt not found or cannot be cancelled (only DRAFT receipts can be cancelled)'
+      );
+    }
+
+    return result.rows[0];
   },
 
   /**

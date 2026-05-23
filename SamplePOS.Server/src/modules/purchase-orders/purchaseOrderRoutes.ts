@@ -274,7 +274,8 @@ export const purchaseOrderController = {
     res.json({
       success: true,
       data: result,
-      message: 'Purchase order cancelled successfully',
+      message:
+        'Purchase order cancelled. Any linked draft goods receipts were cancelled and will no longer appear for receiving.',
     });
   },
 

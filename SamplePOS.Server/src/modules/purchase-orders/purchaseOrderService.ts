@@ -19,6 +19,9 @@ import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
 import { resolveCanonicalProductUom } from '../products/uomService.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
+import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
+import { goodsReceiptService } from '../goods-receipts/goodsReceiptService.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 
 export interface CreatePOInput {
   supplierId: string;
@@ -387,16 +390,60 @@ export const purchaseOrderService = {
   },
 
   /**
-   * Cancel purchase order
+   * Cancel purchase order and cascade-cancel open (DRAFT) goods receipts (Odoo pattern).
+   * Posted (COMPLETED) receipts block cancellation — use Return GRN instead.
    */
   async cancelPO(pool: Pool, id: string): Promise<PurchaseOrder> {
-    return this.updatePOStatus(pool, id, 'CANCELLED');
+    return UnitOfWork.run(pool, async (client) => {
+      await checkMaintenanceMode(client);
+
+      const result = await purchaseOrderRepository.getPOById(client, id);
+      if (!result) {
+        throw new Error(`Purchase order ${id} not found`);
+      }
+
+      const { po } = result;
+      if (!['DRAFT', 'PENDING'].includes(po.status)) {
+        throw new Error(`Cannot change status from ${po.status} to CANCELLED`);
+      }
+
+      const completedGRs = await goodsReceiptRepository.countGRsByPOAndStatus(
+        client,
+        id,
+        'COMPLETED'
+      );
+      if (completedGRs > 0) {
+        throw new Error(
+          'Cannot cancel purchase order: goods have already been received. Use Return to supplier to reverse posted receipts.'
+        );
+      }
+
+      const cancelledGrIds = await goodsReceiptRepository.cancelDraftGRsForPurchaseOrder(
+        client,
+        id
+      );
+      if (cancelledGrIds.length > 0) {
+        logger.info('Cancelled draft goods receipts linked to purchase order', {
+          poId: id,
+          goodsReceiptIds: cancelledGrIds,
+        });
+      }
+
+      return purchaseOrderRepository.updatePOStatus(client, id, 'CANCELLED');
+    });
   },
 
   /**
    * Submit purchase order (DRAFT -> PENDING)
    */
   async submitPO(pool: Pool, id: string): Promise<PurchaseOrder> {
+    const existing = await purchaseOrderRepository.getPOById(pool, id);
+    if (!existing) {
+      throw new Error(`Purchase order ${id} not found`);
+    }
+    if (!existing.items?.length) {
+      throw new Error('Cannot submit a purchase order with no line items');
+    }
     return this.updatePOStatus(pool, id, 'PENDING');
   },
 
@@ -447,68 +494,97 @@ export const purchaseOrderService = {
         throw new Error('Purchase order must be in PENDING status to send to supplier');
       }
 
+      if (!items?.length) {
+        throw new Error('Cannot send purchase order to supplier without line items');
+      }
+
       // Update PO with sent_date
       await client.query(
         'UPDATE purchase_orders SET sent_date = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1',
         [id]
       );
 
-      // Auto-create DRAFT goods receipt for receiving
-      const grNumber = await this.generateGRNumber(client);
+      const existingDraft = await goodsReceiptRepository.findDraftGRByPurchaseOrderId(client, id);
+      if (existingDraft) {
+        await goodsReceiptService.syncDraftGRLinesFromPO(client, existingDraft.id);
+        logger.info('Reused existing draft goods receipt for purchase order', {
+          poId: id,
+          grId: existingDraft.id,
+          grNumber: existingDraft.grNumber,
+        });
+        return {
+          po: { ...po, sent_date: new Date() },
+          goodsReceipt: {
+            id: existingDraft.id,
+            receiptNumber: existingDraft.grNumber,
+            status: 'DRAFT',
+            message:
+              'Existing goods receipt draft updated from purchase order lines.',
+          },
+        };
+      }
 
-      const grResult = await client.query(
-        `INSERT INTO goods_receipts (
-          receipt_number, purchase_order_id, received_by_id, status
-        ) VALUES ($1, $2, $3, 'DRAFT')
-        RETURNING *`,
-        [grNumber, id, userId]
-      );
+      const receiptDate = getBusinessDate();
 
-      const goodsReceipt = grResult.rows[0];
+      const goodsReceipt = await goodsReceiptRepository.createGR(client, {
+        purchaseOrderId: id,
+        receiptDate,
+        notes: null,
+        receivedBy: userId,
+        source: 'PURCHASE_ORDER',
+      });
 
-      // Create GR items from PO items (with 0 received quantity initially)
-      // SAP/Odoo pattern: each GR line links back to its specific PO line via po_item_id
-      const grItems = items.map((item: PurchaseOrderItem & { product_id?: string; unit_price?: number }) => ({
-        goods_receipt_id: goodsReceipt.id,
-        product_id: item.product_id || item.productId,
-        received_quantity: 0,
-        cost_price: item.unit_price ?? item.unitCost,
-        po_item_id: item.id,  // Link GR line to specific PO line item
-      }));
+      type POItemRow = PurchaseOrderItem & {
+        product_id?: string;
+        product_name?: string;
+        ordered_quantity?: number;
+        unit_price?: number;
+        uom_id?: string | null;
+      };
 
-      const grItemPlaceholders = grItems
-        .map((_, index) => {
-          const offset = index * 5;
-          return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5})`;
-        })
-        .join(', ');
+      const grItemsToInsert = (items as POItemRow[]).map((item) => {
+        const productId = item.product_id ?? item.productId;
+        if (!productId) {
+          throw new Error(`PO line ${item.id} is missing product_id`);
+        }
+        const orderedQty = Money.parseDb(item.ordered_quantity ?? item.quantity ?? 0).toNumber();
+        return {
+          goodsReceiptId: goodsReceipt.id,
+          poItemId: item.id,
+          productId,
+          productName: item.product_name ?? item.productName ?? 'Unknown Product',
+          orderedQuantity: orderedQty,
+          receivedQuantity: 0,
+          unitCost: Money.parseDb(item.unit_price ?? item.unitCost ?? 0).toNumber(),
+          batchNumber: null,
+          expiryDate: null,
+          uomId: item.uom_id ?? item.uomId ?? null,
+        };
+      });
 
-      const grItemValues = grItems.flatMap((item) => [
-        item.goods_receipt_id,
-        item.product_id,
-        item.received_quantity,
-        item.cost_price,
-        item.po_item_id,
-      ]);
+      await goodsReceiptRepository.addGRItems(client, grItemsToInsert);
 
-      await client.query(
-        `INSERT INTO goods_receipt_items (
-          goods_receipt_id, product_id, received_quantity, cost_price, po_item_id
-        ) VALUES ${grItemPlaceholders}`,
-        grItemValues
+      await documentFlowService.linkDocuments(
+        client,
+        'PURCHASE_ORDER',
+        id,
+        'GOODS_RECEIPT',
+        goodsReceipt.id,
+        'FULFILLS'
       );
 
       logger.info('PO sent to supplier and goods receipt created', {
         poId: id,
         grId: goodsReceipt.id,
-        grNumber,
+        grNumber: goodsReceipt.grNumber,
+        itemCount: grItemsToInsert.length,
       });
 
       return {
         po: { ...po, sent_date: new Date() },
         goodsReceipt: {
           id: goodsReceipt.id,
-          receiptNumber: grNumber,
+          receiptNumber: goodsReceipt.grNumber,
           status: 'DRAFT',
           message: 'Goods receipt draft created. Confirm quantities when delivery arrives.',
         },

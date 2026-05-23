@@ -333,6 +333,29 @@ interface CreatePOModalProps {
   initialReorderItems?: ReorderItemState[];
 }
 
+function mapReorderItemsToLineItems(items: ReorderItemState[]): POLineItem[] {
+  return items.map((item) => {
+    const qtyNum = Math.max(1, Number(item.suggestedQty) || 1);
+    const qty = String(qtyNum);
+    const cost = item.costPrice ? new Decimal(item.costPrice).toFixed(2) : '0.00';
+    const total = new Decimal(qty).times(new Decimal(cost)).toFixed(2);
+    return {
+      id: `reorder-${item.productId}`,
+      productId: item.productId,
+      productName: item.productName,
+      quantity: qty,
+      unitCost: cost,
+      lineTotal: total,
+      baseCost: cost,
+      selectedUomId: null,
+      quantityOnHand: item.currentStock,
+      reorderLevel: item.reorderPoint,
+      reorderQuantity: qtyNum,
+      costSource: item.costPrice ? 'Cost' : '',
+    };
+  });
+}
+
 function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModalProps) {
   const { user } = useAuth();
 
@@ -348,30 +371,19 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   const [supplierId, setSupplierId] = useState('');
   const [expectedDelivery, setExpectedDelivery] = useState('');
   const [notes, setNotes] = useState('');
-  const [lineItems, setLineItems] = useState<POLineItem[]>(() => {
-    if (initialReorderItems && initialReorderItems.length > 0) {
-      return initialReorderItems.map((item) => {
-        const cost = item.costPrice ? new Decimal(item.costPrice).toFixed(2) : '0.00';
-        const qty = String(item.suggestedQty || 1);
-        const total = new Decimal(qty).times(new Decimal(cost)).toFixed(2);
-        return {
-          id: `reorder-${item.productId}`,
-          productId: item.productId,
-          productName: item.productName,
-          quantity: qty,
-          unitCost: cost,
-          lineTotal: total,
-          baseCost: cost,
-          selectedUomId: null,
-          quantityOnHand: item.currentStock,
-          reorderLevel: item.reorderPoint,
-          reorderQuantity: item.suggestedQty,
-          costSource: item.costPrice ? 'Cost' : '',
-        };
-      });
-    }
-    return [];
-  });
+  const [lineItems, setLineItems] = useState<POLineItem[]>(() =>
+    initialReorderItems?.length ? mapReorderItemsToLineItems(initialReorderItems) : []
+  );
+  const reorderLinesHydratedRef = useRef(false);
+
+  // Parent may mount modal before reorder items state is ready — hydrate when they arrive
+  useEffect(() => {
+    if (!initialReorderItems?.length) return;
+    if (reorderLinesHydratedRef.current) return;
+    reorderLinesHydratedRef.current = true;
+    setLineItems(mapReorderItemsToLineItems(initialReorderItems));
+  }, [initialReorderItems]);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const createPOMutation = useCreatePurchaseOrder();
@@ -1228,19 +1240,20 @@ export default function PurchaseOrdersPage() {
   const canCancelPO = useCanAccess([], ['purchasing.update']);
   const canDeletePO = useCanAccess([], ['purchasing.delete']);
 
-  // Auto-open create modal when navigated with state
-  const [pendingReorderItems, setPendingReorderItems] = useState<ReorderItemState[] | undefined>(undefined);
+  // Auto-open create modal when navigated from Reorder Intelligence (or similar)
+  const [createModalSeed, setCreateModalSeed] = useState<{
+    items: ReorderItemState[];
+    nonce: number;
+  } | null>(null);
 
   useEffect(() => {
     const state = location.state as { openCreate?: boolean; reorderItems?: ReorderItemState[] } | null;
-    if (state?.openCreate) {
-      if (state.reorderItems && state.reorderItems.length > 0) {
-        setPendingReorderItems(state.reorderItems);
-      }
-      setShowCreateModal(true);
-      // Clear the state so refreshing doesn't re-open
-      window.history.replaceState({}, '');
-    }
+    if (!state?.openCreate) return;
+
+    const items = Array.isArray(state.reorderItems) ? [...state.reorderItems] : [];
+    setCreateModalSeed({ items, nonce: Date.now() });
+    setShowCreateModal(true);
+    window.history.replaceState({}, '');
   }, [location.state]);
 
   // Helper to map snake_case DB columns to camelCase
@@ -1334,10 +1347,15 @@ export default function PurchaseOrdersPage() {
 
   // Handle cancel PO
   const handleCancelPO = async (id: string) => {
-    if (!confirm('Cancel this purchase order? This action cannot be undone.')) return;
+    if (
+      !confirm(
+        'Cancel this purchase order?\n\nAny draft goods receipts linked to this PO will also be cancelled and removed from the receiving queue. Posted receipts cannot be undone from here — use Return to supplier instead.'
+      )
+    )
+      return;
     try {
       await cancelPOMutation.mutateAsync(id);
-      alert('Purchase order cancelled');
+      alert('Purchase order cancelled. Linked draft goods receipts were cancelled.');
     } catch (error) {
       handleApiError(error, { fallback: 'Failed to cancel purchase order' });
     }
@@ -1879,9 +1897,21 @@ export default function PurchaseOrdersPage() {
       {/* Create PO Modal */}
       {showCreateModal && (
         <CreatePOModal
-          onClose={() => { setShowCreateModal(false); setPendingReorderItems(undefined); }}
-          onSuccess={() => { refetch(); setPendingReorderItems(undefined); }}
-          initialReorderItems={pendingReorderItems}
+          key={
+            createModalSeed
+              ? `reorder-po-${createModalSeed.nonce}-${createModalSeed.items.map((i) => i.productId).join(',')}`
+              : 'po-create-new'
+          }
+          onClose={() => {
+            setShowCreateModal(false);
+            setCreateModalSeed(null);
+          }}
+          onSuccess={() => {
+            refetch();
+            setShowCreateModal(false);
+            setCreateModalSeed(null);
+          }}
+          initialReorderItems={createModalSeed?.items}
         />
       )}
 

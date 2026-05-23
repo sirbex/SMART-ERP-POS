@@ -95,6 +95,33 @@ export function useAddGRItem() {
   });
 }
 
+// Cancel DRAFT goods receipt (no stock impact)
+export function useCancelGoodsReceipt() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (grId: string) => api.goodsReceipts.cancel(grId),
+    onSuccess: (_, grId) => {
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.detail(grId) });
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.lists() });
+      queryClient.invalidateQueries({ queryKey: ['purchase-orders'] });
+    },
+  });
+}
+
+// Pull missing PO lines into a DRAFT goods receipt (empty or partial GR)
+export function useHydrateGRFromPO() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (grId: string) => api.goodsReceipts.hydrateFromPO(grId),
+    onSuccess: (_, grId) => {
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.detail(grId) });
+      queryClient.invalidateQueries({ queryKey: GOODS_RECEIPTS_KEYS.lists() });
+    },
+  });
+}
+
 // Remove item from DRAFT goods receipt
 export function useRemoveGRItem() {
   const queryClient = useQueryClient();

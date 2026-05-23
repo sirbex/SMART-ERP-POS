@@ -10,6 +10,7 @@ import {
   useFinalizeGoodsReceipt,
   useGoodsReceipt,
   useCreateGoodsReceipt,
+  useHydrateGRFromPO,
   useAddGRItem,
   useRemoveGRItem,
 } from '../../hooks/useGoodsReceipts';
@@ -77,6 +78,8 @@ interface GRRow {
   purchase_order_id?: string;
   poNumber?: string;
   po_number?: string;
+  poStatus?: string;
+  po_status?: string;
   supplierName?: string;
   supplier_name?: string;
   supplierId?: string;
@@ -425,6 +428,8 @@ export default function GoodsReceiptsPage() {
     });
   };
   const createGRMutation = useCreateGoodsReceipt();
+  const hydrateFromPOMutation = useHydrateGRFromPO();
+  const hydrateAttemptRef = useRef<string | null>(null);
   const { user } = useAuth();
   const { config } = useTenant();
   void config;
@@ -441,12 +446,61 @@ export default function GoodsReceiptsPage() {
 
   // Load GR details when modal opens
   const detailsQuery = useGoodsReceipt(selectedGR?.id || '');
+  const refetchGRDetail = detailsQuery.refetch;
+  const grDetailLoading = detailsQuery.isLoading;
+  const grDetailFetching = detailsQuery.isFetching;
   const grDetail = detailsQuery.data?.data?.data as GRDetailData | undefined;
   const items = useMemo(() => grDetail?.items || [], [grDetail]);
   const productUomsMap = grDetail?.productUomsMap || {};
 
   // Determine if GR is linked to a PO (strict discipline applies)
   const isFromPO = !!(selectedGR?.purchaseOrderId || selectedGR?.purchase_order_id);
+
+  const linkedPoStatus =
+    grDetail?.gr?.poStatus ??
+    grDetail?.gr?.po_status ??
+    selectedGR?.poStatus ??
+    selectedGR?.po_status;
+
+  const canReceiveThisGR =
+    selectedGR?.status === 'DRAFT' &&
+    linkedPoStatus !== 'CANCELLED';
+
+  const isGrReceivable = (gr: GRRow) =>
+    gr.status === 'DRAFT' && (gr.poStatus ?? gr.po_status) !== 'CANCELLED';
+
+  // DRAFT GR from PO with no lines — sync from PO (fixes GRs created before PO lines existed)
+  useEffect(() => {
+    if (!showDetailsModal || !selectedGR?.id) return;
+    if (selectedGR.status !== 'DRAFT' || !isFromPO) return;
+    if (grDetailLoading || grDetailFetching) return;
+    if (items.length > 0) return;
+    if (hydrateAttemptRef.current === selectedGR.id) return;
+    hydrateAttemptRef.current = selectedGR.id;
+
+    hydrateFromPOMutation
+      .mutateAsync(selectedGR.id)
+      .then(() => refetchGRDetail())
+      .catch((err: unknown) => {
+        handleApiError(err, {
+          fallback: 'Could not load purchase order lines into this goods receipt',
+        });
+      });
+  }, [
+    showDetailsModal,
+    selectedGR?.id,
+    selectedGR?.status,
+    isFromPO,
+    items.length,
+    grDetailLoading,
+    grDetailFetching,
+    hydrateFromPOMutation,
+    refetchGRDetail,
+  ]);
+
+  useEffect(() => {
+    if (!showDetailsModal) hydrateAttemptRef.current = null;
+  }, [showDetailsModal]);
 
   // Receive All Remaining: set every line's receivedQuantity = orderedQuantity
   const handleReceiveAllRemaining = () => {
@@ -1083,13 +1137,18 @@ export default function GoodsReceiptsPage() {
                           >
                             👁️ View
                           </button>
-                          {gr.status === 'DRAFT' && canFinalizeGR && (
+                          {isGrReceivable(gr) && canFinalizeGR && (
                             <button
                               onClick={() => handleFinalize(gr.id)}
                               className="text-green-600 hover:text-green-800 font-medium"
                             >
                               ✓ Finalize
                             </button>
+                          )}
+                          {gr.status === 'DRAFT' && (gr.poStatus ?? gr.po_status) === 'CANCELLED' && (
+                            <span className="text-xs text-gray-500" title="Purchase order was cancelled">
+                              PO cancelled
+                            </span>
                           )}
                         </div>
                       </td>
@@ -1220,8 +1279,28 @@ export default function GoodsReceiptsPage() {
                         )}
                       </div>
                     )}
-                    {detailsQuery.isLoading && (
-                      <span className="text-sm text-gray-500">Loading items…</span>
+                    {(detailsQuery.isLoading || hydrateFromPOMutation.isPending) && (
+                      <span className="text-sm text-gray-500">
+                        {hydrateFromPOMutation.isPending ? 'Loading lines from purchase order…' : 'Loading items…'}
+                      </span>
+                    )}
+                    {selectedGR.status === 'DRAFT' && isFromPO && items.length === 0 && !detailsQuery.isLoading && !hydrateFromPOMutation.isPending && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!selectedGR?.id) return;
+                          hydrateFromPOMutation.mutate(selectedGR.id, {
+                            onSuccess: () => detailsQuery.refetch(),
+                            onError: (err: Error) =>
+                              handleApiError(err, {
+                                fallback: 'Could not load purchase order lines into this goods receipt',
+                              }),
+                          });
+                        }}
+                        className="px-3 py-1.5 text-sm border border-indigo-300 text-indigo-800 rounded-lg hover:bg-indigo-50"
+                      >
+                        Load from PO
+                      </button>
                     )}
                     {selectedGR.status === 'DRAFT' && !isFromPO && (
                       <button
@@ -1373,15 +1452,25 @@ export default function GoodsReceiptsPage() {
                   </button>
                   <DocumentFlowButton entityType="GOODS_RECEIPT" entityId={selectedGR.id} size="sm" />
                 </div>
+                {selectedGR.status === 'CANCELLED' && (
+                  <p className="text-sm text-gray-600 mb-3">
+                    This goods receipt was cancelled and cannot be posted to inventory.
+                  </p>
+                )}
+                {selectedGR.status === 'DRAFT' && linkedPoStatus === 'CANCELLED' && (
+                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                    The linked purchase order is cancelled. Receiving is blocked (open receipt cancelled with the PO).
+                  </p>
+                )}
                 {selectedGR.status === 'DRAFT' && (
                   <div className="flex gap-3">
                     <button
                       onClick={() => setShowDetailsModal(false)}
                       className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
                     >
-                      Cancel
+                      Close
                     </button>
-                    {canFinalizeGR && (
+                    {canFinalizeGR && canReceiveThisGR && (
                       <button
                         onClick={() => handleFinalize(selectedGR.id)}
                         className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"

@@ -40,6 +40,32 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
     },
 }));
 
+const mockGRRepo = {
+    countGRsByPOAndStatus: jest.fn<MockFn>().mockResolvedValue(0),
+    cancelDraftGRsForPurchaseOrder: jest.fn<MockFn>().mockResolvedValue([]),
+    findDraftGRByPurchaseOrderId: jest.fn<MockFn>().mockResolvedValue(null),
+    createGR: jest.fn<MockFn>(),
+    addGRItems: jest.fn<MockFn>(),
+};
+
+jest.unstable_mockModule('../goods-receipts/goodsReceiptRepository.js', () => ({
+    goodsReceiptRepository: mockGRRepo,
+}));
+
+jest.unstable_mockModule('../goods-receipts/goodsReceiptService.js', () => ({
+    goodsReceiptService: {
+        syncDraftGRLinesFromPO: jest.fn<MockFn>().mockResolvedValue(0),
+    },
+}));
+
+jest.unstable_mockModule('../../utils/maintenanceGuard.js', () => ({
+    checkMaintenanceMode: jest.fn<MockFn>().mockResolvedValue(undefined),
+}));
+
+jest.unstable_mockModule('../document-flow/documentFlowService.js', () => ({
+    linkDocuments: jest.fn<MockFn>().mockResolvedValue(undefined),
+}));
+
 const { purchaseOrderService } = await import('./purchaseOrderService.js');
 
 const mockPool = { query: jest.fn<MockFn>().mockResolvedValue({ rows: [] }), connect: jest.fn<MockFn>() } as unknown as Pool;
@@ -101,6 +127,35 @@ describe('purchaseOrderService', () => {
             await expect(
                 purchaseOrderService.updatePOStatus(mockPool, 'po1', 'PENDING')
             ).rejects.toThrow();
+        });
+    });
+
+    describe('cancelPO', () => {
+        it('should cancel PO and cascade-cancel draft goods receipts', async () => {
+            mockPORepo.getPOById.mockResolvedValue({
+                po: { id: 'po1', status: 'PENDING' },
+                items: [{ id: 'pi1' }],
+            });
+            mockGRRepo.countGRsByPOAndStatus.mockResolvedValue(0);
+            mockGRRepo.cancelDraftGRsForPurchaseOrder.mockResolvedValue(['gr1']);
+            mockPORepo.updatePOStatus.mockResolvedValue({ id: 'po1', status: 'CANCELLED' });
+
+            const result = await purchaseOrderService.cancelPO(mockPool, 'po1');
+
+            expect(result.status).toBe('CANCELLED');
+            expect(mockGRRepo.cancelDraftGRsForPurchaseOrder).toHaveBeenCalled();
+        });
+
+        it('should reject cancel when goods already received', async () => {
+            mockPORepo.getPOById.mockResolvedValue({
+                po: { id: 'po1', status: 'PENDING' },
+                items: [],
+            });
+            mockGRRepo.countGRsByPOAndStatus.mockResolvedValue(1);
+
+            await expect(purchaseOrderService.cancelPO(mockPool, 'po1')).rejects.toThrow(
+                'goods have already been received'
+            );
         });
     });
 

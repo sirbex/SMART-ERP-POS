@@ -3,6 +3,7 @@ import Decimal from 'decimal.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
+import { tableHasColumn } from '../../db/schemaColumnCache.js';
 
 export interface PurchaseOrder {
   id: string;
@@ -158,38 +159,56 @@ export const purchaseOrderRepository = {
    * Add items to purchase order
    */
   async addPOItems(pool: Pool | PoolClient, items: CreatePOItemData[]): Promise<PurchaseOrderItem[]> {
+    if (items.length === 0) return [];
+
+    const hasUomSnapshot = await tableHasColumn(pool, 'purchase_order_items', 'base_qty');
     const values: unknown[] = [];
     const placeholders: string[] = [];
+    const fieldsPerRow = hasUomSnapshot ? 9 : 6;
 
     items.forEach((item, index) => {
-      const offset = index * 9; // 9 fields (added base_qty, base_uom_id, conversion_factor)
-      // Use frontend-provided lineTotal if available (preserves user's intended total),
-      // otherwise recalculate from qty × unitCost
+      const offset = index * fieldsPerRow;
       const lineTotal = item.lineTotal != null
         ? new Decimal(item.lineTotal).toNumber()
         : new Decimal(item.quantity).times(item.unitCost).toNumber();
 
-      placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`
-      );
-
-      values.push(
-        item.purchaseOrderId,
-        item.productId,
-        item.quantity,
-        item.unitCost,
-        lineTotal,
-        item.uomId || null,
-        item.baseQty ?? null, // SAP UoM snapshot: base quantity
-        item.baseUomId ?? null, // SAP UoM snapshot: base UoM at posting time
-        item.conversionFactor ?? 1 // SAP UoM snapshot: conversion factor at posting time
-      );
+      if (hasUomSnapshot) {
+        placeholders.push(
+          `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`
+        );
+        values.push(
+          item.purchaseOrderId,
+          item.productId,
+          item.quantity,
+          item.unitCost,
+          lineTotal,
+          item.uomId || null,
+          item.baseQty ?? null,
+          item.baseUomId ?? null,
+          item.conversionFactor ?? 1
+        );
+      } else {
+        placeholders.push(
+          `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`
+        );
+        values.push(
+          item.purchaseOrderId,
+          item.productId,
+          item.quantity,
+          item.unitCost,
+          lineTotal,
+          item.uomId || null
+        );
+      }
     });
 
+    const insertColumns = hasUomSnapshot
+      ? `purchase_order_id, product_id, ordered_quantity, unit_price, total_price, uom_id, base_qty, base_uom_id, conversion_factor`
+      : `purchase_order_id, product_id, ordered_quantity, unit_price, total_price, uom_id`;
+
     const result = await pool.query(
-      `INSERT INTO purchase_order_items (
-        purchase_order_id, product_id, ordered_quantity, unit_price, total_price, uom_id, base_qty, base_uom_id, conversion_factor
-      ) VALUES ${placeholders.join(', ')}
+      `INSERT INTO purchase_order_items (${insertColumns})
+      VALUES ${placeholders.join(', ')}
       RETURNING *`,
       values
     );

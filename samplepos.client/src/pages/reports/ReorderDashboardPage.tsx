@@ -80,7 +80,13 @@ export default function ReorderDashboardPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<TabKey>('urgent');
-    const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+    /** Array (not Set) so React reliably re-renders checkboxes when switching tabs */
+    const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+    const selectedIdSet = useMemo(() => new Set(selectedProductIds), [selectedProductIds]);
+    const isSelected = useCallback(
+        (productId: string) => selectedIdSet.has(productId),
+        [selectedIdSet]
+    );
     const [sortField, setSortField] = useState<SortField>('daysUntilStockout');
     const [sortAsc, setSortAsc] = useState(true);
     const [page, setPage] = useState(1);
@@ -134,8 +140,28 @@ export default function ReorderDashboardPage() {
 
     useEffect(() => {
         setPage(1);
-        setSelectedIds(new Set());
     }, [activeTab, pageSize]);
+
+    /** All items across tabs — used for cross-tab PO creation */
+    const allDashboardItems = useMemo(() => {
+        if (!data) return [];
+        return [...data.urgent, ...data.high, ...data.medium, ...data.deadStock];
+    }, [data]);
+
+    const selectedCountInTab = useMemo(
+        () => fullTabItems.filter((i) => isSelected(i.productId)).length,
+        [fullTabItems, isSelected]
+    );
+
+    const selectedCountByTab = useMemo(() => {
+        if (!data) return { urgent: 0, high: 0, deadStock: 0, medium: 0 };
+        return {
+            urgent: data.urgent.filter((i) => isSelected(i.productId)).length,
+            high: data.high.filter((i) => isSelected(i.productId)).length,
+            deadStock: data.deadStock.filter((i) => isSelected(i.productId)).length,
+            medium: data.medium.filter((i) => isSelected(i.productId)).length,
+        };
+    }, [data, isSelected]);
 
     const handleSort = (field: SortField) => {
         if (sortField === field) { setSortAsc(!sortAsc); }
@@ -143,30 +169,75 @@ export default function ReorderDashboardPage() {
     };
 
     const toggleSelect = (id: string) => {
-        setSelectedIds((prev) => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id); else next.add(id);
-            return next;
-        });
+        setSelectedProductIds((prev) =>
+            prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+        );
     };
 
     const toggleAllOnPage = () => {
         const pageIds = tabItems.map((i) => i.productId);
-        const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+        const allPageSelected = pageIds.length > 0 && pageIds.every((id) => isSelected(id));
         if (allPageSelected) {
-            setSelectedIds((prev) => {
-                const next = new Set(prev);
-                pageIds.forEach((id) => next.delete(id));
-                return next;
-            });
+            setSelectedProductIds((prev) => prev.filter((id) => !pageIds.includes(id)));
         } else {
-            setSelectedIds((prev) => new Set([...prev, ...pageIds]));
+            setSelectedProductIds((prev) => [...new Set([...prev, ...pageIds])]);
         }
     };
 
     const selectAllInTab = () => {
-        setSelectedIds(new Set(fullTabItems.map((i) => i.productId)));
+        const tabIds = fullTabItems.map((i) => i.productId);
+        const allInTabSelected = tabIds.length > 0 && tabIds.every((id) => isSelected(id));
+        setSelectedProductIds((prev) => {
+            const next = new Set(prev);
+            tabIds.forEach((id) => (allInTabSelected ? next.delete(id) : next.add(id)));
+            return [...next];
+        });
     };
+
+    const clearSelection = () => setSelectedProductIds([]);
+
+    /** Qty for PO lines — include user-selected rows even when open POs zeroed suggestedOrderQty */
+    const effectiveOrderQty = useCallback((item: ReorderItem): number => {
+        if (item.suggestedOrderQty > 0) return item.suggestedOrderQty;
+        const gap = item.reorderPoint - item.currentStock;
+        if (gap > 0) return Math.ceil(gap);
+        return 1;
+    }, []);
+
+    const buildPurchaseOrderItems = useCallback(
+        (productIds: string[]) => {
+            const idSet = new Set(productIds);
+            return allDashboardItems
+                .filter((i) => idSet.has(i.productId))
+                .map((i) => ({
+                    productId: i.productId,
+                    productName: i.name,
+                    suggestedQty: effectiveOrderQty(i),
+                    costPrice: i.costPrice,
+                    currentStock: i.currentStock,
+                    reorderPoint: i.reorderPoint,
+                    preferredSupplierId: i.preferredSupplierId,
+                }));
+        },
+        [allDashboardItems, effectiveOrderQty]
+    );
+
+    const handleCreatePurchaseOrder = useCallback(() => {
+        const snapshotIds = [...selectedProductIds];
+        const selectedItems = buildPurchaseOrderItems(snapshotIds);
+        if (selectedItems.length === 0) {
+            alert('Select at least one product to create a purchase order.');
+            return;
+        }
+        if (selectedItems.length < snapshotIds.length) {
+            const found = new Set(selectedItems.map((i) => i.productId));
+            const missing = snapshotIds.filter((id) => !found.has(id));
+            console.warn('Reorder PO: some selected IDs were not on dashboard', missing);
+        }
+        navigate('/inventory/purchase-orders', {
+            state: { openCreate: true, reorderItems: selectedItems },
+        });
+    }, [selectedProductIds, buildPurchaseOrderItems, navigate]);
 
     const tabCount = (key: TabKey): number => {
         if (!data) return 0;
@@ -264,6 +335,35 @@ export default function ReorderDashboardPage() {
                 />
             </div>
 
+            {/* Cross-tab selection — always visible above tabs */}
+            {selectedProductIds.length > 0 && (
+                <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-sm">
+                    <div className="text-sm text-blue-900">
+                        <span className="font-semibold">{selectedProductIds.length}</span>
+                        {' '}item{selectedProductIds.length !== 1 ? 's' : ''} selected across tabs
+                        <span className="text-blue-700 ml-2">
+                            (Urgent {selectedCountByTab.urgent} · High {selectedCountByTab.high} · Normal {selectedCountByTab.medium} · Dead {selectedCountByTab.deadStock})
+                        </span>
+                    </div>
+                    <div className="flex gap-2 shrink-0">
+                        <button
+                            type="button"
+                            onClick={clearSelection}
+                            className="px-3 py-1.5 text-sm border border-blue-300 rounded-lg bg-white hover:bg-blue-100 text-blue-800"
+                        >
+                            Clear all
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleCreatePurchaseOrder}
+                            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                        >
+                            Create Purchase Order
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* ── Tabs ── */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                 <div className="border-b border-gray-200 flex overflow-x-auto">
@@ -284,6 +384,11 @@ export default function ReorderDashboardPage() {
                                     }`}>
                                     {count}
                                 </span>
+                                {!isActive && selectedCountByTab[tab.key] > 0 && (
+                                    <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 text-xs font-bold rounded-full bg-blue-600 text-white" title="Items selected on this tab">
+                                        {selectedCountByTab[tab.key]}
+                                    </span>
+                                )}
                             </button>
                         );
                     })}
@@ -309,19 +414,21 @@ export default function ReorderDashboardPage() {
                                 ))}
                             </select>
                         </label>
-                        {totalInTab > 0 && selectedIds.size < totalInTab && (
+                        {totalInTab > 0 && (
                             <button
                                 type="button"
                                 onClick={selectAllInTab}
                                 className="px-2 py-1 text-xs border border-gray-300 rounded-lg hover:bg-white"
                             >
-                                Select all {totalInTab} in tab
+                                {selectedCountInTab === totalInTab && totalInTab > 0
+                                    ? `Deselect all ${totalInTab} in tab`
+                                    : `Select all ${totalInTab} in tab`}
                             </button>
                         )}
-                        {selectedIds.size > 0 && (
+                        {selectedProductIds.length > 0 && (
                             <button
                                 type="button"
-                                onClick={() => setSelectedIds(new Set())}
+                                onClick={clearSelection}
                                 className="px-2 py-1 text-xs text-gray-600 hover:underline"
                             >
                                 Clear selection
@@ -329,38 +436,6 @@ export default function ReorderDashboardPage() {
                         )}
                     </div>
                 </div>
-
-                {selectedIds.size > 0 && (
-                    <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between">
-                        <span className="text-sm text-blue-800 font-medium">
-                            {selectedIds.size} item{selectedIds.size > 1 ? 's' : ''} selected
-                            {selectedIds.size < totalInTab ? ` (${totalInTab} in tab)` : ''}
-                        </span>
-                        <button
-                            onClick={() => {
-                                const selectedItems = fullTabItems
-                                    .filter((i) => selectedIds.has(i.productId) && i.suggestedOrderQty > 0)
-                                    .map((i) => ({
-                                        productId: i.productId,
-                                        productName: i.name,
-                                        suggestedQty: i.suggestedOrderQty,
-                                        costPrice: i.costPrice,
-                                        currentStock: i.currentStock,
-                                        reorderPoint: i.reorderPoint,
-                                        preferredSupplierId: i.preferredSupplierId,
-                                    }));
-                                if (selectedItems.length === 0) {
-                                    alert('Selected items have no suggested order quantity (may already be covered by open POs).');
-                                    return;
-                                }
-                                navigate('/inventory/purchase-orders', { state: { openCreate: true, reorderItems: selectedItems } });
-                            }}
-                            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                        >
-                            Create Purchase Order ({selectedIds.size} selected)
-                        </button>
-                    </div>
-                )}
 
                 {/* ── Table ── */}
                 {tabItems.length === 0 ? (
@@ -385,7 +460,7 @@ export default function ReorderDashboardPage() {
                                         <th className="pl-4 py-3 w-10">
                                             <input
                                                 type="checkbox"
-                                                checked={tabItems.length > 0 && tabItems.every((i) => selectedIds.has(i.productId))}
+                                                checked={tabItems.length > 0 && tabItems.every((i) => isSelected(i.productId))}
                                                 onChange={toggleAllOnPage}
                                                 className="rounded border-gray-300"
                                                 aria-label="Select all"
@@ -419,11 +494,11 @@ export default function ReorderDashboardPage() {
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {tabItems.map((item) => (
-                                        <tr key={item.productId} className={`hover:bg-gray-50 ${selectedIds.has(item.productId) ? 'bg-blue-50/60' : ''}`}>
+                                        <tr key={item.productId} className={`hover:bg-gray-50 ${isSelected(item.productId) ? 'bg-blue-50/60' : ''}`}>
                                             <td className="pl-4 py-2.5">
                                                 <input
                                                     type="checkbox"
-                                                    checked={selectedIds.has(item.productId)}
+                                                    checked={isSelected(item.productId)}
                                                     onChange={() => toggleSelect(item.productId)}
                                                     className="rounded border-gray-300"
                                                     aria-label={`Select ${item.name}`}
