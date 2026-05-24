@@ -26,6 +26,7 @@ import {
   recalcPosCartLineFields,
 } from '../../utils/posCartLine';
 import {
+  atCostCartGroupNeedsUpdate,
   buildAtCostBlendedCartLine,
   buildAtCostSplitCartLines,
   canSplitAtCostLayersToSellingUom,
@@ -785,9 +786,6 @@ export default function POSPage() {
                 !i.unitPriceManuallySet &&
                 posCartGroupKey(i.id, i.selectedUomId) === group.key,
             );
-            const oldSignature = oldLines
-              .map((l) => `${l.quantity}:${l.unitPrice}:${l.atCostLayerIndex ?? ''}`)
-              .join('|');
 
             if (
               isAtCostRule &&
@@ -799,10 +797,7 @@ export default function POSPage() {
                 layers,
                 pricingRule,
               ) as LineItem[];
-              const newSignature = splitLines
-                .map((l) => `${l.quantity}:${l.unitPrice}:${l.atCostLayerIndex ?? ''}`)
-                .join('|');
-              if (oldSignature !== newSignature) changed = true;
+              if (atCostCartGroupNeedsUpdate(oldLines, splitLines, true)) changed = true;
               repriced.push(...splitLines);
               return;
             }
@@ -816,10 +811,10 @@ export default function POSPage() {
             ) as LineItem;
             const withLayers: LineItem = {
               ...blended,
-              atCostLayers: isAtCostRule && layers.length > 1 ? layers : undefined,
+              atCostLayers:
+                isAtCostRule && layers.length > 1 ? layers : undefined,
             };
-            const newSignature = `${withLayers.quantity}:${withLayers.unitPrice}:${withLayers.atCostLayerLabel ?? ''}`;
-            if (oldSignature !== newSignature) changed = true;
+            if (atCostCartGroupNeedsUpdate(oldLines, [withLayers], isAtCostRule)) changed = true;
             repriced.push(withLayers);
           });
 

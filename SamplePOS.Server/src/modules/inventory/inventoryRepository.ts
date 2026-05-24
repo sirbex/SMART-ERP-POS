@@ -51,11 +51,13 @@ export const inventoryRepository = {
   async getBatchesByProduct(pool: Pool, productId: string): Promise<InventoryBatch[]> {
     const result = await pool.query(
       `SELECT * FROM inventory_batches 
-       WHERE product_id = $1 AND remaining_quantity > 0
+       WHERE product_id = $1 
+         AND remaining_quantity > 0 
+         AND status = 'ACTIVE'
+         AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
        ORDER BY 
-         CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END,
-         expiry_date ASC,
-         created_at ASC`,
+         expiry_date ASC NULLS LAST,
+         received_date ASC`,
       [productId]
     );
     return result.rows;

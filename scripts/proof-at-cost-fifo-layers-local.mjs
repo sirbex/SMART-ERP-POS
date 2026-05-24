@@ -66,18 +66,46 @@ async function main() {
 
     const batches = await req('GET', `/api/inventory/batches?productId=${row.product_id}`, { token });
     const batchRows = batches.data?.data || batches.data || [];
+    const active = (Array.isArray(batchRows) ? batchRows : []).filter(
+      (b) => Number(b.remaining_quantity ?? b.remainingQuantity ?? 0) > 0,
+    );
     const costs = new Set(
-      (Array.isArray(batchRows) ? batchRows : [])
-        .filter((b) => Number(b.remaining_quantity ?? b.remainingQuantity ?? 0) > 0)
-        .map((b) => Math.round(Number(b.cost_price ?? b.costPrice ?? 0))),
+      active.map((b) => Math.round(Number(b.cost_price ?? b.costPrice ?? 0))),
     );
     if (costs.size < 2) continue;
+
+    const productRes = await req('GET', `/api/products/${row.product_id}`, { token });
+    const product = productRes.data?.data || {};
+    const uoms = product.uoms || [];
+    const defaultUom = uoms.find((u) => u.isDefault) || uoms[0];
+    const factor = Number(defaultUom?.conversionFactor ?? 1) || 1;
+    const baseQty = 2 * factor;
+
+    const simLayers = [];
+    let remaining = baseQty;
+    for (const b of active) {
+      if (remaining <= 0) break;
+      const avail = Number(b.remaining_quantity ?? b.remainingQuantity ?? 0);
+      const cost = Number(b.cost_price ?? b.costPrice ?? 0);
+      if (avail <= 0) continue;
+      const take = Math.min(remaining, avail);
+      simLayers.push({ take, cost });
+      remaining -= take;
+    }
+    const simDistinct = new Set(simLayers.map((l) => Math.round(l.cost)));
+    if (simDistinct.size < 2) {
+      ok(
+        'Skip — first FEFO batch covers qty 2 alone',
+        `${row.product_name || row.product_id}`,
+      );
+      continue;
+    }
 
     const bulk = await req('POST', '/api/pricing/price/bulk', {
       token,
       body: {
         customerId,
-        items: [{ productId: row.product_id, quantity: 2, baseQuantity: 2 }],
+        items: [{ productId: row.product_id, quantity: 2, baseQuantity: baseQty }],
       },
     });
     const priced = bulk.data?.data?.[0];

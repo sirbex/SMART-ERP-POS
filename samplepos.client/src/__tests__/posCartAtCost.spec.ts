@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  atCostCartGroupNeedsUpdate,
   buildAtCostBlendedCartLine,
   buildAtCostSplitCartLines,
   canSplitAtCostLayersToSellingUom,
@@ -73,5 +74,19 @@ describe('posCartAtCost FIFO split', () => {
     const lines = buildAtCostSplitCartLines(stripTemplate, layers);
     expect(lines[0].unitPrice).toBe(11000);
     expect(lines[0].quantity).toBe(1);
+  });
+
+  it('does not split UoM when layer yields fractional selling qty', () => {
+    const layers = [
+      { baseQuantity: 5, unitCostPerBase: 20000, totalCost: 100000 },
+      { baseQuantity: 5, unitCostPerBase: 18000, totalCost: 90000 },
+    ];
+    expect(canSplitAtCostLayersToSellingUom(layers, 10)).toBe(false);
+  });
+
+  it('atCostCartGroupNeedsUpdate detects stale costPrice', () => {
+    const oldLines = [{ quantity: 1, unitPrice: 11000, costPrice: 11632, pricingRule: { scope: 'at_cost' } }];
+    const newLines = [{ quantity: 1, unitPrice: 11000, costPrice: 11000, pricingRule: { scope: 'at_cost' } }];
+    expect(atCostCartGroupNeedsUpdate(oldLines, newLines, true)).toBe(true);
   });
 });

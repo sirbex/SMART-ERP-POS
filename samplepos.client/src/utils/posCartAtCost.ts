@@ -77,7 +77,12 @@ export function layerBaseToSellingQuantity(baseQty: number, factor: number): num
   if (!rounded.times(factor).minus(baseQty).abs().lessThanOrEqualTo(0.0001)) {
     return null;
   }
-  return rounded.toNumber();
+  const sellingQty = rounded.toNumber();
+  // POS cart lines need whole selling units (qty ≥ 1); otherwise use blended line + FIFO hint.
+  if (sellingQty < 1 - 0.0001 || Math.abs(sellingQty - Math.round(sellingQty)) > 0.0001) {
+    return null;
+  }
+  return Math.round(sellingQty);
 }
 
 export function canSplitAtCostLayersToSellingUom(
@@ -118,6 +123,68 @@ export function buildAtCostSplitCartLines(
 }
 
 /** Single blended line with layer breakdown attached (fallback when UoM cannot split cleanly). */
+/** Stable signature for comparing repriced cart lines (order-independent). */
+export function atCostCartLinesSignature(
+  lines: Array<{
+    quantity: number;
+    unitPrice: number;
+    costPrice?: number;
+    atCostLayerIndex?: number;
+    atCostLayerLabel?: string;
+    atCostLayers?: AtCostLayerSegment[];
+    pricingRule?: { scope?: string };
+  }>,
+): string {
+  return [...lines]
+    .map((l) =>
+      [
+        l.quantity,
+        l.unitPrice,
+        l.costPrice ?? '',
+        l.atCostLayerIndex ?? '',
+        l.atCostLayerLabel ?? '',
+        l.pricingRule?.scope ?? '',
+        l.atCostLayers?.length
+          ? l.atCostLayers.map((x) => `${x.baseQuantity}@${x.unitCostPerBase}`).join('+')
+          : '',
+      ].join(':'),
+    )
+    .sort()
+    .join('|');
+}
+
+/** True when repriced lines must replace current cart lines (incl. costPrice / layer sync). */
+export function atCostCartGroupNeedsUpdate(
+  oldLines: Array<{
+    quantity: number;
+    unitPrice: number;
+    costPrice: number;
+    atCostLayerIndex?: number;
+    atCostLayerLabel?: string;
+    atCostLayers?: AtCostLayerSegment[];
+    pricingRule?: { scope?: string };
+  }>,
+  newLines: Array<{
+    quantity: number;
+    unitPrice: number;
+    costPrice: number;
+    atCostLayerIndex?: number;
+    atCostLayerLabel?: string;
+    atCostLayers?: AtCostLayerSegment[];
+    pricingRule?: { scope?: string };
+  }>,
+  isAtCostRule: boolean,
+): boolean {
+  if (oldLines.length !== newLines.length) return true;
+  if (atCostCartLinesSignature(oldLines) !== atCostCartLinesSignature(newLines)) return true;
+  if (!isAtCostRule) return false;
+  for (let i = 0; i < oldLines.length; i++) {
+    const o = oldLines[i];
+    if (Math.abs(o.costPrice - o.unitPrice) > 0.02) return true;
+  }
+  return false;
+}
+
 export function buildAtCostBlendedCartLine(
   template: PosAtCostLineTemplate,
   totalSellingQty: number,
