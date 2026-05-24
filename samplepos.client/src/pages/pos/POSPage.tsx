@@ -30,8 +30,9 @@ import {
   buildAtCostBlendedCartLine,
   buildAtCostSplitCartLines,
   canSplitAtCostLayersToSellingUom,
+  layerBaseToSellingQuantity,
+  mustSplitAtCostFifoLayers,
   posCartGroupKey,
-  shouldSplitAtCostFifoLayers,
   type AtCostLayerSegment,
 } from '../../utils/posCartAtCost';
 import PosUnitPriceInput from '../../components/pos/PosUnitPriceInput';
@@ -320,10 +321,13 @@ function AtCostFifoHint({ item }: { item: LineItem }) {
     return (
       <div className="text-[10px] text-amber-800 mt-0.5 space-y-0.5">
         {item.atCostLayers.map((layer, i) => {
+          const sellingQty = layerBaseToSellingQuantity(layer.baseQuantity, factor);
+          const qtyLabel = sellingQty != null ? `${sellingQty} ${item.uom}` : `${layer.baseQuantity} base`;
           const unit = new Decimal(layer.unitCostPerBase).times(factor).toNumber();
+          const lineTotal = layer.totalCost ?? unit * (sellingQty ?? layer.baseQuantity);
           return (
             <p key={i}>
-              FIFO: {layer.baseQuantity} × {formatCurrency(unit)} = {formatCurrency(layer.totalCost ?? unit * layer.baseQuantity)}
+              FIFO: {qtyLabel} × {formatCurrency(unit)} = {formatCurrency(lineTotal)}
             </p>
           );
         })}
@@ -789,7 +793,7 @@ export default function POSPage() {
 
             if (
               isAtCostRule &&
-              shouldSplitAtCostFifoLayers(layers) &&
+              mustSplitAtCostFifoLayers(layers, group.totalQty, scaledFinalPrice) &&
               canSplitAtCostLayersToSellingUom(layers, factor)
             ) {
               const splitLines = buildAtCostSplitCartLines(

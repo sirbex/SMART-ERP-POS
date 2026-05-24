@@ -46,6 +46,17 @@ function shouldSplit(layers) {
   return costs.size > 1;
 }
 
+function mustSplit(layers, totalSellingQty, blendedUnit) {
+  if (!layers || layers.length <= 1 || totalSellingQty <= 0) return false;
+  if (!shouldSplit(layers)) return false;
+  const fifoTotal = layers.reduce(
+    (s, l) => s + (l.totalCost ?? l.baseQuantity * l.unitCostPerBase),
+    0,
+  );
+  const blendedTotal = Math.round(blendedUnit * totalSellingQty * 100) / 100;
+  return Math.abs(blendedTotal - fifoTotal) > 0.01;
+}
+
 function canSplitUom(layers, factor) {
   return layers.every((l) => layerBaseToSellingQuantity(l.baseQuantity, factor) != null);
 }
@@ -148,7 +159,8 @@ async function main() {
     const scope = priced?.appliedRule?.scope;
     tested++;
 
-    const split = shouldSplit(layers) && canSplitUom(layers, factor);
+    const blendedUnit = Number(priced?.finalPrice ?? 0) * factor;
+    const split = mustSplit(layers, TEST_QTY, blendedUnit) && canSplitUom(layers, factor);
     if (split) splitReady++;
 
     const header = `${row.product_name || row.name} (${row.sku || 'no-sku'})`;
@@ -169,19 +181,18 @@ async function main() {
         `  API: ${layers.map((l) => `${l.baseQuantity}@${l.unitCostPerBase}`).join(' + ')}`,
       );
     }
-    console.log(`  shouldSplit=${shouldSplit(layers)}  canSplitUom=${canSplitUom(layers, factor)}`);
-    console.log(`  → POS cart split: ${split ? 'YES (2+ lines expected)' : 'NO'}`);
+    console.log(`  distinctCosts=${shouldSplit(layers)}  mustSplit=${mustSplit(layers, TEST_QTY, blendedUnit)}  canSplitUom=${canSplitUom(layers, factor)}`);
+    console.log(`  → POS cart split: ${split ? 'YES (2+ lines required)' : 'NO (blended line OK)'}`);
 
     if (!split && distinctCosts.size >= 2) {
       if (sim.layers.length <= 1) {
         console.log(
-          '  WHY: First FEFO batch covers full qty — split needs batch boundary within purchase qty.',
-        );
-        console.log(
-          `       (e.g. batch1 remaining=1 @20k + batch2 @18k, then qty 2 splits)`,
+          '  WHY: First FEFO batch covers full qty — one blended line at batch cost.',
         );
       } else if (!shouldSplit(layers)) {
         console.log('  WHY: Layers exist but same unit cost (after rounding) — blended line.');
+      } else if (!mustSplit(layers, TEST_QTY, blendedUnit)) {
+        console.log('  WHY: Blended unit price matches FIFO total — one line is correct.');
       } else if (!canSplitUom(layers, factor)) {
         console.log('  WHY: UoM conversion cannot split layers cleanly — blended + FIFO hint.');
       } else if (scope !== 'at_cost') {

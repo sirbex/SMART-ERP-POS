@@ -33,6 +33,7 @@
     "proof:sale-below-cost:local": "node scripts/proof-sale-below-cost-local.mjs",
     "proof:pos-at-cost-reprice:local": "node scripts/proof-pos-at-cost-reprice-local.mjs",
     "proof:at-cost-fifo-layers:local": "node scripts/proof-at-cost-fifo-layers-local.mjs",
+    "proof:at-cost-fifo-split-policy": "node scripts/proof-at-cost-fifo-split-policy.mjs",
     "diagnose:at-cost-fifo:production": "node scripts/diagnose-at-cost-fifo-production.mjs",
     "test:at-cost-regression": "node scripts/run-at-cost-regression.mjs",
     "test:pos-pricing-regression": "node scripts/run-at-cost-regression.mjs",

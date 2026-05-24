@@ -68,6 +68,16 @@ npm run proof:at-cost:local
 
 Husky runs `test:pos-pricing-regression` when any protected file above is staged.
 
-## Golden scenario (FIFO split)
+## Golden scenario (FIFO / blended)
 
-Qty 2 from batches @ 20,000 and @ 18,000 → **two lines** (20k + 18k), subtotal **38,000**.
+Qty 2 from batches @ 20,000 and @ 18,000 → **one line** @ 19,000, subtotal **38,000** (blended FIFO).
+
+Split only when blended unit cannot match total (e.g. 20,000 + 18,001 = 38,001).
+
+**Proof (required before merge):**
+
+```bash
+npm run proof:at-cost-fifo-split-policy   # golden scenarios (no server)
+npm run test:pos-pricing-regression       # unit tests + proof gate
+npm run proof:pos-pricing:local             # + live API on :3001
+```

@@ -10,7 +10,7 @@ Any change to files listed below must pass `npm run test:pos-pricing-regression`
 1. **FIFO walk** — AT_COST uses the same FEFO/FIFO batch order as sale COGS (`inventory_batches`, expiry then received date).
 2. **baseQuantity** — Bulk pricing must receive `baseQuantity = sellingQty × UoM conversionFactor`, not selling qty alone.
 3. **Layer breakdown** — API returns `atCostLayers[]` with one segment per batch cost consumed (e.g. `1@20000 + 1@18000`).
-4. **Cart split** — When `atCostLayers` has **distinct** unit costs and UoM allows it, POS shows **separate cart lines** (not a hidden blend).
+4. **Cart split** — POS keeps **one blended line** when a single unit price reproduces the exact FIFO total. Split into separate lines **only when** that is impossible (e.g. currency rounding: 38,001 ÷ 2) **and** UoM allows clean layer split.
 5. **costPrice sync** — On AT_COST reprice, `costPrice` must equal FEFO `unitPrice` (never stale catalog `uom.cost`).
 6. **No false below-cost** — Client validation must not compare AT_COST unit price to catalog cost when FEFO is lower.
 7. **Below-cost block** — Selling below allocated batch cost remains hard-blocked on server (`BELOW_ALLOCATED_COST`).
@@ -24,9 +24,8 @@ Any change to files listed below must pass `npm run test:pos-pricing-regression`
 
 **Cart (AT_COST customer, qty 2):**
 
-- Line 1: qty 1, unit **20,000**
-- Line 2: qty 1, unit **18,000**
-- Subtotal **38,000** (not one line @ 19,000 without breakdown)
+- **One line:** qty 2, unit **19,000**, subtotal **38,000** (blended FIFO — preferred)
+- **Split only if** blended unit cannot match total (e.g. 20,000 + 18,001 = 38,001 → no whole-cent average)
 
 ## Protected files
 

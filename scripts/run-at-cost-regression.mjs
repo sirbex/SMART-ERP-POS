@@ -36,6 +36,10 @@ run('Client — POS cart / validation unit tests', path.join(root, 'samplepos.cl
   'test:pos-pricing-regression',
 ]);
 
+run('Proof — AT_COST FIFO split policy (golden scenarios)', root, 'node', [
+  'scripts/proof-at-cost-fifo-split-policy.mjs',
+]);
+
 if (live) {
   run('Local proof — POS AT_COST reprice', root, 'npm', ['run', 'proof:pos-at-cost-reprice:local']);
   run('Local proof — FIFO layers API', root, 'npm', ['run', 'proof:at-cost-fifo-layers:local']);

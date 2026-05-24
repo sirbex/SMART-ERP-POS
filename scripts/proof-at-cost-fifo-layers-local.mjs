@@ -119,7 +119,14 @@ async function main() {
       Math.abs(layers.reduce((s, l) => s + l.totalCost, 0) - layerCosts.reduce((s, c, i) => s + c * layers[i].baseQuantity, 0)) < 1,
       'Layer totals sum correctly',
     );
-    ok('POS rule: cart splits when distinct FIFO layers (see posCartAtCost.ts)');
+
+    const fifoTotal = layers.reduce((s, l) => s + (l.totalCost ?? l.baseQuantity * l.unitCostPerBase), 0);
+    const blendedPerBase = Number(priced?.finalPrice ?? 0);
+    const blendedPerSelling = blendedPerBase * factor;
+    const blendedTotal = Math.round(blendedPerSelling * 2 * 100) / 100;
+    const mustSplit = Math.abs(blendedTotal - fifoTotal) > 0.01;
+    assert(!mustSplit, 'POS policy: blended line OK (mustSplit=false)', `fifo=${fifoTotal} blended=${blendedTotal}`);
+    ok('POS policy: one cart line when blended matches FIFO total');
     found = true;
     break;
   }

@@ -26,6 +26,91 @@ const FEFO_BATCH_QUERY = `
       AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
     ORDER BY expiry_date ASC NULLS LAST, received_date ASC`;
 
+const MAX_SELLING_FACTOR_QUERY = `
+    SELECT COALESCE(MAX(pu.conversion_factor), 1)::text AS max_factor
+    FROM product_uoms pu
+    WHERE pu.product_id = $1 AND pu.conversion_factor > 1`;
+
+export type FefoBatchRow = { remaining_quantity: string; cost_price: string };
+
+/**
+ * Opening-balance / legacy imports sometimes store batch remaining_quantity in selling units
+ * (e.g. 1 strip + 2 strips) with cost_price per strip, while FEFO expects base units.
+ */
+export function normalizeLegacyFefoBatchRows(
+    rows: FefoBatchRow[],
+    requestedBaseQty: Decimal,
+    sellingFactor: number,
+    masterCostPerBase: Decimal,
+): FefoBatchRow[] {
+    if (sellingFactor <= 1 || rows.length === 0) return rows;
+
+    const totalRemaining = rows.reduce(
+        (s, r) => s.plus(new Decimal(r.remaining_quantity)),
+        new Decimal(0),
+    );
+    if (totalRemaining.lessThanOrEqualTo(0)) return rows;
+
+    const requestedSellingQty = requestedBaseQty.dividedBy(sellingFactor);
+    const qtyTolerance = new Decimal(0.001);
+    const remainingMatchesSellingQty = totalRemaining
+        .minus(requestedSellingQty)
+        .abs()
+        .lessThanOrEqualTo(qtyTolerance);
+    const baseWouldBeShort = totalRemaining.lessThan(requestedBaseQty.times(0.5));
+
+    const hasSellingUnitCost = rows.some((r) => {
+        const cost = new Decimal(r.cost_price);
+        if (masterCostPerBase.greaterThan(0)) {
+            return cost.greaterThan(masterCostPerBase.times(sellingFactor));
+        }
+        return cost.greaterThan(new Decimal(1000).times(sellingFactor));
+    });
+
+    if (!remainingMatchesSellingQty || !baseWouldBeShort || !hasSellingUnitCost) {
+        return rows;
+    }
+
+    logger.info('[AT_COST] Normalizing legacy selling-unit batch rows to base units for FEFO', {
+        sellingFactor,
+        totalRemaining: totalRemaining.toFixed(4),
+        requestedBaseQty: requestedBaseQty.toFixed(4),
+    });
+
+    return rows.map((r) => {
+        const rem = new Decimal(r.remaining_quantity);
+        const cost = new Decimal(r.cost_price);
+        const costPerBase = cost.dividedBy(sellingFactor);
+
+        return {
+            remaining_quantity: rem.times(sellingFactor).toFixed(4),
+            cost_price: Money.toNumber(Money.round(costPerBase)).toString(),
+        };
+    });
+}
+
+async function getProductMaxSellingFactor(conn: Pool | PoolClient, productId: string): Promise<number> {
+    const res = await conn.query<{ max_factor: string }>(MAX_SELLING_FACTOR_QUERY, [productId]);
+    const factor = Number(res.rows[0]?.max_factor ?? 1);
+    return factor > 1 ? factor : 1;
+}
+
+async function loadNormalizedFefoBatches(
+    conn: Pool | PoolClient,
+    productId: string,
+    requestedBaseQty: Decimal,
+    masterCostPerBase: Decimal,
+): Promise<FefoBatchRow[]> {
+    const fefoPreview = await conn.query<FefoBatchRow>(FEFO_BATCH_QUERY, [productId]);
+    const sellingFactor = await getProductMaxSellingFactor(conn, productId);
+    return normalizeLegacyFefoBatchRows(
+        fefoPreview.rows,
+        requestedBaseQty,
+        sellingFactor,
+        masterCostPerBase,
+    );
+}
+
 export interface FefoIssuePreview {
     totalCost: Decimal;
     coveredQty: Decimal;
@@ -44,16 +129,14 @@ export async function previewFefoIssueCostForBaseQty(
     conn: Pool | PoolClient,
     productId: string,
     baseQty: Decimal,
+    masterCostPerBase: Decimal = new Decimal(0),
 ): Promise<FefoIssuePreview> {
-    const fefoPreview = await conn.query<{ remaining_quantity: string; cost_price: string }>(
-        FEFO_BATCH_QUERY,
-        [productId],
-    );
+    const batchRows = await loadNormalizedFefoBatches(conn, productId, baseQty, masterCostPerBase);
 
     let remainingForCost = baseQty;
     let totalCost = new Decimal(0);
 
-    for (const b of fefoPreview.rows) {
+    for (const b of batchRows) {
         if (remainingForCost.lessThanOrEqualTo(0)) break;
         const batchAvail = new Decimal(b.remaining_quantity);
         const take = Decimal.min(remainingForCost, batchAvail);
@@ -76,16 +159,14 @@ export async function previewFefoIssueLayers(
     conn: Pool | PoolClient,
     productId: string,
     baseQty: Decimal,
+    masterCostPerBase: Decimal = new Decimal(0),
 ): Promise<FefoIssueLayerSegment[]> {
-    const fefoPreview = await conn.query<{ remaining_quantity: string; cost_price: string }>(
-        FEFO_BATCH_QUERY,
-        [productId],
-    );
+    const batchRows = await loadNormalizedFefoBatches(conn, productId, baseQty, masterCostPerBase);
 
     const segments: FefoIssueLayerSegment[] = [];
     let remainingForCost = baseQty;
 
-    for (const b of fefoPreview.rows) {
+    for (const b of batchRows) {
         if (remainingForCost.lessThanOrEqualTo(0)) break;
         const batchAvail = new Decimal(b.remaining_quantity);
         const take = Decimal.min(remainingForCost, batchAvail);
@@ -150,7 +231,7 @@ export async function resolveAtCostWithLayers(
         };
     }
 
-    let segments = await previewFefoIssueLayers(conn, productId, baseQty);
+    let segments = await previewFefoIssueLayers(conn, productId, baseQty, masterCost);
     const covered = segments.reduce((s, l) => s + l.baseQuantity, 0);
     const shortfall = baseQuantity - covered;
 

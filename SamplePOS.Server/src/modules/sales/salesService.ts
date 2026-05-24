@@ -594,6 +594,7 @@ export const salesService = {
             client,
             item.productId,
             baseQty,
+            Money.parseDb(productData.cost_price || '0'),
           );
           itemCostDecimal = batchTotal;
 

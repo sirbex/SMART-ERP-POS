@@ -70,6 +70,39 @@ export function shouldSplitAtCostFifoLayers(layers: AtCostLayerSegment[] | undef
   return costs.size > 1;
 }
 
+function fifoLayersTotalCost(layers: AtCostLayerSegment[]): Decimal {
+  return layers.reduce(
+    (sum, l) =>
+      sum.plus(
+        l.totalCost != null
+          ? l.totalCost
+          : new Decimal(l.baseQuantity).times(l.unitCostPerBase),
+      ),
+    new Decimal(0),
+  );
+}
+
+/**
+ * True when a single blended cart line cannot reproduce the exact FIFO total
+ * (e.g. currency rounding: 38,001 ÷ 2 → no whole-cent unit price).
+ * Prefer one blended line whenever this returns false.
+ */
+export function mustSplitAtCostFifoLayers(
+  layers: AtCostLayerSegment[] | undefined,
+  totalSellingQty: number,
+  blendedUnitPerSelling: number,
+): boolean {
+  if (!layers || layers.length <= 1 || totalSellingQty <= 0) return false;
+  if (!shouldSplitAtCostFifoLayers(layers)) return false;
+
+  const fifoTotal = fifoLayersTotalCost(layers).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  const blendedTotal = new Decimal(blendedUnitPerSelling)
+    .times(totalSellingQty)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+
+  return blendedTotal.minus(fifoTotal).abs().greaterThan(0.01);
+}
+
 export function layerBaseToSellingQuantity(baseQty: number, factor: number): number | null {
   if (factor <= 0 || baseQty <= 0) return null;
   const selling = new Decimal(baseQty).dividedBy(factor);
