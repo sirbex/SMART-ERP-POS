@@ -59,7 +59,7 @@ export async function createCustomerPayment(pool: Pool, input: CreateArPaymentIn
         customerName,
         amount: paymentAmount.toNumber(),
         paymentDate: input.paymentDate,
-        paymentMethod: input.paymentMethod,
+        paymentMethod: input.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
         reducesAR: true,
       },
       pool,
