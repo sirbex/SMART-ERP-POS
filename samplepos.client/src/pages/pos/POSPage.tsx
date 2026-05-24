@@ -13,6 +13,27 @@ import { POSSaleSchema } from '@shared/zod/pos-sale';
 import type { Customer } from '@shared/zod/customer';
 import { formatCurrency } from '../../utils/currency';
 import { resolvePosCustomerForSale } from '../../utils/resolvePosCustomerId';
+import {
+  getPosLineBaseQuantity,
+  getPosLineConversionFactor,
+  getPosLineStockInSellingUom,
+  isPosQtyOverStockInSellingUom,
+  scaleEngineBasePriceToSellingUom,
+} from '../../utils/posCartUom';
+import {
+  getPosLineMinUnitPrice,
+  isPosLineBlockedByCatalogCost,
+  recalcPosCartLineFields,
+} from '../../utils/posCartLine';
+import {
+  buildAtCostBlendedCartLine,
+  buildAtCostSplitCartLines,
+  canSplitAtCostLayersToSellingUom,
+  posCartGroupKey,
+  shouldSplitAtCostFifoLayers,
+  type AtCostLayerSegment,
+} from '../../utils/posCartAtCost';
+import PosUnitPriceInput from '../../components/pos/PosUnitPriceInput';
 import { useCreatePOSSale } from '../../hooks/usePOSSales';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
 import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
@@ -269,6 +290,8 @@ interface LineItem {
     amount: number;
     reason: string;
   };
+  /** Cashier overrode unit price; skip automatic repricing until UoM changes. */
+  unitPriceManuallySet?: boolean;
   // Pricing engine metadata (shows when customer-group pricing is applied)
   pricingRule?: {
     scope: string;
@@ -276,6 +299,38 @@ interface LineItem {
     basePrice: number;
     discount: number;
   };
+  /** FIFO batch segment label when AT_COST splits or shows layers. */
+  atCostLayerIndex?: number;
+  atCostLayerLabel?: string;
+  /** Layer breakdown when shown on one blended line (multi-batch, non-splittable UoM). */
+  atCostLayers?: AtCostLayerSegment[];
+}
+
+function AtCostFifoHint({ item }: { item: LineItem }) {
+  const factor = getPosLineConversionFactor(item.availableUoms, item.selectedUomId);
+
+  if (item.atCostLayerIndex !== undefined && item.atCostLayerLabel) {
+    return (
+      <p className="text-[10px] text-amber-800 font-medium mt-0.5">{item.atCostLayerLabel}</p>
+    );
+  }
+
+  if (item.atCostLayers && item.atCostLayers.length > 1) {
+    return (
+      <div className="text-[10px] text-amber-800 mt-0.5 space-y-0.5">
+        {item.atCostLayers.map((layer, i) => {
+          const unit = new Decimal(layer.unitCostPerBase).times(factor).toNumber();
+          return (
+            <p key={i}>
+              FIFO: {layer.baseQuantity} × {formatCurrency(unit)} = {formatCurrency(layer.totalCost ?? unit * layer.baseQuantity)}
+            </p>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 export default function POSPage() {
@@ -612,16 +667,19 @@ export default function POSPage() {
     fetchCustomerDepositBalance();
   }, [selectedCustomer?.id]);
 
-  // Stable key of cart items for pricing — changes when product IDs, quantities, or UoMs change
-  const itemsPricingKey = useMemo(
-    () => items
-      .filter((it) => !it.id.startsWith('custom_'))
-      .map((it) => `${it.id}:${it.quantity}:${it.selectedUomId ?? ''}`)
-      .join(','),
-    [items],
-  );
+  // Stable key of cart — aggregate qty per product+UoM for AT_COST FIFO repricing
+  const itemsPricingKey = useMemo(() => {
+    const groups = new Map<string, number>();
+    for (const it of items) {
+      if (it.id.startsWith('custom_')) continue;
+      const k = posCartGroupKey(it.id, it.selectedUomId);
+      groups.set(k, (groups.get(k) ?? 0) + it.quantity);
+    }
+    return [...groups.entries()].map(([k, q]) => `${k}:${q}`).join(',');
+  }, [items]);
 
   // ========== PRICING ENGINE: Reprice cart when customer changes ==========
+  // REGRESSION: AT_COST_FIFO_INTEGRITY.md — baseQuantity, layer split, costPrice sync
   // When a customer is selected/changed, resolve prices through the engine
   // (tiers, price rules, group discounts) and update cart item prices.
   // Also re-resolves when items change (new item added or quantity updated).
@@ -629,69 +687,144 @@ export default function POSPage() {
     if (items.length === 0 || !selectedCustomer?.id) return;
 
     const repriceCart = async () => {
-      // Filter to real products only (not custom items)
       const regularItems = items.filter((it) => !it.id.startsWith('custom_'));
       if (regularItems.length === 0) return;
 
+      type PricingGroup = {
+        key: string;
+        productId: string;
+        selectedUomId?: string;
+        totalQty: number;
+        template: LineItem;
+      };
+
+      const groups = new Map<string, PricingGroup>();
+      for (const item of regularItems) {
+        if (item.unitPriceManuallySet) continue;
+        const key = posCartGroupKey(item.id, item.selectedUomId);
+        const existing = groups.get(key);
+        if (existing) {
+          existing.totalQty += item.quantity;
+        } else {
+          groups.set(key, {
+            key,
+            productId: item.id,
+            selectedUomId: item.selectedUomId,
+            totalQty: item.quantity,
+            template: item,
+          });
+        }
+      }
+
+      if (groups.size === 0) return;
+
       try {
-        const resolved = await pricingApi.calculateBulkPrices(
-          regularItems.map((it) => ({ productId: it.id, quantity: it.quantity })),
-          selectedCustomer?.id,
-        );
+        const bulkInput = [...groups.values()].map((g) => ({
+          productId: g.productId,
+          quantity: g.totalQty,
+          baseQuantity: getPosLineBaseQuantity(
+            g.totalQty,
+            g.template.availableUoms,
+            g.selectedUomId,
+          ),
+        }));
+
+        const resolved = await pricingApi.calculateBulkPrices(bulkInput, selectedCustomer?.id);
 
         setItems((prev) => {
           let changed = false;
-          const updated = prev.map((item) => {
-            if (item.id.startsWith('custom_')) return item;
-            const idx = regularItems.findIndex(
-              (r) => r.id === item.id && r.quantity === item.quantity && r.selectedUomId === item.selectedUomId
+          const manualOrCustom = prev.filter(
+            (i) => i.id.startsWith('custom_') || i.unitPriceManuallySet,
+          );
+          const repriced: LineItem[] = [];
+
+          const groupList = [...groups.values()];
+          groupList.forEach((group, groupIndex) => {
+            const price = resolved[groupIndex];
+            if (!price) {
+              prev
+                .filter(
+                  (i) =>
+                    !i.id.startsWith('custom_') &&
+                    !i.unitPriceManuallySet &&
+                    posCartGroupKey(i.id, i.selectedUomId) === group.key,
+                )
+                .forEach((i) => repriced.push(i));
+              return;
+            }
+
+            const factor = getPosLineConversionFactor(
+              group.template.availableUoms,
+              group.selectedUomId,
             );
-            const price = idx >= 0 ? resolved[idx] : undefined;
-            if (!price) return item;
-
-            // Scale the engine's BASE-UNIT price by the item's UoM conversion factor.
-            // The engine always returns prices in base units (e.g. cost per tablet),
-            // but cart items may use a multi-unit UoM (e.g. strip of 10 tablets).
-            const uomEntry = item.availableUoms?.find((u) => u.uomId === item.selectedUomId);
-            const factor = uomEntry?.conversionFactor ?? 1;
-            const scaledFinalPrice = new Decimal(price.finalPrice).times(factor).toNumber();
-            const scaledBasePrice = new Decimal(price.basePrice).times(factor).toNumber();
-
-            // Only update if the engine returned a non-base price or we need to revert
-            const hasPricingRule = price.appliedRule.scope !== 'base';
-            const priceChanged = item.unitPrice !== scaledFinalPrice;
-            const hadPricingRule = !!item.pricingRule;
-
-            if (!priceChanged && hasPricingRule === hadPricingRule) return item;
-            changed = true;
-
-            const newPrice = scaledFinalPrice;
-            const newSubtotal = new Decimal(item.quantity).times(newPrice).toNumber();
-            const newMargin =
-              newPrice > 0
-                ? new Decimal(newPrice)
-                  .minus(item.costPrice)
-                  .dividedBy(newPrice)
-                  .times(100)
-                  .toNumber()
-                : 0;
-
-            return {
-              ...item,
-              unitPrice: newPrice,
-              subtotal: newSubtotal,
-              marginPct: newMargin,
-              pricingRule: hasPricingRule
+            const scaledFinalPrice = scaleEngineBasePriceToSellingUom(
+              price.finalPrice,
+              group.template.availableUoms,
+              group.selectedUomId,
+            );
+            const scaledBasePrice = scaleEngineBasePriceToSellingUom(
+              price.basePrice,
+              group.template.availableUoms,
+              group.selectedUomId,
+            );
+            const isAtCostRule = price.appliedRule.scope === 'at_cost';
+            const layers = (price.atCostLayers ?? []) as AtCostLayerSegment[];
+            const pricingRule =
+              price.appliedRule.scope !== 'base'
                 ? {
-                  scope: price.appliedRule.scope,
-                  ruleName: price.appliedRule.ruleName,
-                  basePrice: scaledBasePrice,
-                  discount: price.discount,
-                }
-                : undefined,
+                    scope: price.appliedRule.scope,
+                    ruleName: price.appliedRule.ruleName,
+                    basePrice: scaledBasePrice,
+                    discount: price.discount,
+                  }
+                : undefined;
+
+            const oldLines = prev.filter(
+              (i) =>
+                !i.id.startsWith('custom_') &&
+                !i.unitPriceManuallySet &&
+                posCartGroupKey(i.id, i.selectedUomId) === group.key,
+            );
+            const oldSignature = oldLines
+              .map((l) => `${l.quantity}:${l.unitPrice}:${l.atCostLayerIndex ?? ''}`)
+              .join('|');
+
+            if (
+              isAtCostRule &&
+              shouldSplitAtCostFifoLayers(layers) &&
+              canSplitAtCostLayersToSellingUom(layers, factor)
+            ) {
+              const splitLines = buildAtCostSplitCartLines(
+                { ...group.template, discount: undefined },
+                layers,
+                pricingRule,
+              ) as LineItem[];
+              const newSignature = splitLines
+                .map((l) => `${l.quantity}:${l.unitPrice}:${l.atCostLayerIndex ?? ''}`)
+                .join('|');
+              if (oldSignature !== newSignature) changed = true;
+              repriced.push(...splitLines);
+              return;
+            }
+
+            const blended = buildAtCostBlendedCartLine(
+              group.template,
+              group.totalQty,
+              scaledFinalPrice,
+              layers,
+              pricingRule,
+            ) as LineItem;
+            const withLayers: LineItem = {
+              ...blended,
+              atCostLayers: isAtCostRule && layers.length > 1 ? layers : undefined,
             };
+            const newSignature = `${withLayers.quantity}:${withLayers.unitPrice}:${withLayers.atCostLayerLabel ?? ''}`;
+            if (oldSignature !== newSignature) changed = true;
+            repriced.push(withLayers);
           });
-          return changed ? updated : prev;
+
+          if (!changed) return prev;
+          return [...manualOrCustom, ...repriced];
         });
       } catch (err) {
         console.warn('Pricing engine bulk resolution failed, keeping current prices', err);
@@ -1065,7 +1198,9 @@ export default function POSPage() {
         // For AT_COST customers, always start at the UoM's cost price — no async reprice flash.
         // The pricing engine will confirm the same value on the next repriceCart run.
         const isAtCost = selectedCustomer?.pricingMode === 'AT_COST';
-        const effectiveUnitPrice = isAtCost ? uom.cost : uom.price;
+        // Catalog uom.cost ≠ FEFO AT_COST — repriceCart sets FEFO on both unitPrice and costPrice.
+        const effectiveUnitPrice = uom.price;
+        const lineCost = isAtCost ? uom.price : uom.cost;
 
         // Use pre-calculated prices from inventory API
         const newItem: LineItem = {
@@ -1075,10 +1210,10 @@ export default function POSPage() {
           uom: uom.symbol || uom.name || product.unitOfMeasure || 'PIECE',
           quantity: 1,
           unitPrice: effectiveUnitPrice,
-          costPrice: uom.cost,
+          costPrice: lineCost,
           marginPct:
             effectiveUnitPrice > 0
-              ? new Decimal(effectiveUnitPrice).minus(uom.cost).dividedBy(effectiveUnitPrice).times(100).toNumber()
+              ? new Decimal(effectiveUnitPrice).minus(lineCost).dividedBy(effectiveUnitPrice).times(100).toNumber()
               : 0,
           subtotal: effectiveUnitPrice,
           productType: product.productType,
@@ -1223,23 +1358,20 @@ export default function POSPage() {
       // Update item with new UoM pricing
       const newUnitPrice = newUom.price;
       const newCostPrice = newUom.cost;
-      const newMarginPct =
-        newUnitPrice > 0
-          ? new Decimal(newUnitPrice)
-            .minus(newCostPrice)
-            .dividedBy(newUnitPrice)
-            .times(100)
-            .toNumber()
-          : 0;
 
+      const recalc = recalcPosCartLineFields({
+        quantity: item.quantity,
+        unitPrice: newUnitPrice,
+        costPrice: newCostPrice,
+        discount: item.discount,
+      });
       updated[itemIndex] = {
         ...item,
         uom: newUom.symbol || newUom.name || item.uom,
         selectedUomId: newUomId,
-        unitPrice: newUnitPrice,
         costPrice: newCostPrice,
-        marginPct: newMarginPct,
-        subtotal: new Decimal(item.quantity).times(newUnitPrice).toNumber(),
+        unitPriceManuallySet: false,
+        ...recalc,
       };
 
       return updated;
@@ -1390,7 +1522,9 @@ export default function POSPage() {
 
   // Remove below-cost items from cart
   const handleRemoveBelowCostItems = () => {
-    setItems((prev) => prev.filter((item) => !(item.costPrice > 0 && item.unitPrice < item.costPrice)));
+    setItems((prev) =>
+      prev.filter((item) => !isPosLineBlockedByCatalogCost(item, selectedCustomer?.pricingMode)),
+    );
     setShowBelowCostOverrideDialog(false);
     setBelowCostItems([]);
     toast('Below-cost items removed from cart. Please re-check prices before continuing.');
@@ -1898,11 +2032,52 @@ export default function POSPage() {
       const item = updated[itemIndex];
       updated[itemIndex] = {
         ...item,
-        quantity: newQuantity,
-        subtotal: new Decimal(newQuantity).times(item.unitPrice).toNumber(),
+        ...recalcPosCartLineFields({
+          quantity: newQuantity,
+          unitPrice: item.unitPrice,
+          costPrice: item.costPrice,
+          discount: item.discount,
+        }),
       };
       return updated;
     });
+  };
+
+  const handleUnitPriceChange = (itemIndex: number, newUnitPrice: number, options?: { silent?: boolean }) => {
+    let belowCost = false;
+    let productName = '';
+
+    setItems((prev) => {
+      const updated = [...prev];
+      const item = updated[itemIndex];
+      if (!item) return prev;
+
+      productName = item.name;
+      const recalc = recalcPosCartLineFields({
+        quantity: item.quantity,
+        unitPrice: newUnitPrice,
+        costPrice: item.costPrice,
+        discount: item.discount,
+      });
+      belowCost = isPosLineBlockedByCatalogCost(
+        { ...item, ...recalc },
+        selectedCustomer?.pricingMode,
+      );
+
+      updated[itemIndex] = {
+        ...item,
+        ...recalc,
+        unitPriceManuallySet: options?.silent ? item.unitPriceManuallySet : true,
+      };
+      return updated;
+    });
+
+    if (!options?.silent && belowCost) {
+      toast.error(
+        `"${productName}": price is below catalog cost for this UoM. Sale will be blocked (server uses actual batch cost).`,
+        { duration: 6000 },
+      );
+    }
   };
 
   // Reactive totals
@@ -2500,13 +2675,18 @@ export default function POSPage() {
       }
     }
 
-    // SAP-CLASS BELOW-COST CONTROL: Require manager override when any line sells below cost.
-    // This catches misconfigured UoM price_overrides (e.g., PACKET sold at per-unit price).
-    // Non-blocking for ADMIN/MANAGER — they see the warning but must PIN-confirm.
-    // CASHIER is always blocked and must call a manager.
-    const itemsBelowCost = items.filter((item) => item.costPrice > 0 && item.unitPrice < item.costPrice);
+    // Hard block: no sale below inventory cost (server enforces FEFO-allocated cost; this is UX pre-check).
+    const itemsBelowCost = items.filter((item) =>
+      isPosLineBlockedByCatalogCost(item, selectedCustomer?.pricingMode),
+    );
     if (itemsBelowCost.length > 0) {
-      setBelowCostItems(itemsBelowCost.map((i) => ({ name: i.name, unitPrice: i.unitPrice, costPrice: i.costPrice })));
+      setBelowCostItems(
+        itemsBelowCost.map((i) => ({
+          name: i.name,
+          unitPrice: i.unitPrice,
+          costPrice: i.costPrice,
+        })),
+      );
       setShowBelowCostOverrideDialog(true);
       return;
     }
@@ -3064,6 +3244,8 @@ export default function POSPage() {
           }
           // Auto-trigger open register dialog so the user can fix it immediately
           setShowOpenRegisterDialog(true);
+        } else if (errorCode === 'BELOW_ALLOCATED_COST') {
+          userMessage += `🚫 ${errorMsg}\n\n💡 Unit price must be at or above actual inventory cost (per selected UoM). No manager override.`;
         } else if (errorCode?.startsWith('ERR_SALE_') || errorCode?.startsWith('ERR_PAYMENT_')) {
           userMessage += `⚠️ Sale Error [${errorCode}]\n\n${errorMsg}`;
         } else if (
@@ -3368,7 +3550,20 @@ export default function POSPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {items.map((item, idx) => (
+                {items.map((item, idx) => {
+                  const stockUom = getPosLineStockInSellingUom(
+                    item.stockOnHand,
+                    item.availableUoms,
+                    item.selectedUomId,
+                    item.uom,
+                  );
+                  const lineQtyOverStock = isPosQtyOverStockInSellingUom(
+                    item.quantity,
+                    item.stockOnHand,
+                    item.availableUoms,
+                    item.selectedUomId,
+                  );
+                  return (
                   <div
                     key={`mobile-${item.id}-${item.selectedUomId}-${idx}`}
                     ref={(el) => { cartRowRefs.current[idx] = el; }}
@@ -3382,6 +3577,7 @@ export default function POSPage() {
                           {item.productType === 'service' && <ServiceBadge />}
                         </div>
                         <div className="text-xs text-gray-500">SKU: {item.sku}</div>
+                        <AtCostFifoHint item={item} />
                       </div>
                       <button
                         onClick={(e) => { e.stopPropagation(); setItems((prev) => prev.filter((_, i) => i !== idx)); }}
@@ -3423,8 +3619,8 @@ export default function POSPage() {
                           value={item.quantity}
                           onChange={(e) => handleQuantityChange(idx, parseFloat(e.target.value) || 0)}
                           onFocus={() => setFocusedCartIndex(idx)}
-                          className={`w-12 h-8 border-x px-1 text-center text-sm focus:ring-2 focus:ring-blue-500 focus:z-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${item.stockOnHand !== undefined && item.quantity > item.stockOnHand ? 'bg-red-50' : ''}`}
-                          aria-label={`Quantity for ${item.name}`}
+                          className={`w-12 h-8 border-x px-1 text-center text-sm focus:ring-2 focus:ring-blue-500 focus:z-10 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${lineQtyOverStock ? 'bg-red-50' : ''}`}
+                          aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
                         />
                         <button
                           type="button"
@@ -3435,14 +3631,31 @@ export default function POSPage() {
                           +
                         </button>
                       </div>
-                      <span className="text-xs text-gray-500">× {formatCurrency(item.unitPrice)}</span>
+                      <div className="flex items-center gap-1 text-xs text-gray-500">
+                        <span>×</span>
+                        <PosUnitPriceInput
+                          compact
+                          value={item.unitPrice}
+                          minUnitPrice={getPosLineMinUnitPrice(item, selectedCustomer?.pricingMode)}
+                          atCostLine={
+                            selectedCustomer?.pricingMode === 'AT_COST' ||
+                            item.pricingRule?.scope === 'at_cost'
+                          }
+                          uomLabel={stockUom.uomLabel}
+                          productName={item.name}
+                          onFocus={() => setFocusedCartIndex(idx)}
+                          onChange={(price) => handleUnitPriceChange(idx, price, { silent: true })}
+                          onCommit={(price) => handleUnitPriceChange(idx, price)}
+                          manualOverride={!!item.unitPriceManuallySet}
+                        />
+                      </div>
                       <span className="ml-auto font-semibold text-sm">
                         {formatCurrency(item.subtotal)}
                       </span>
                     </div>
-                    {item.stockOnHand !== undefined && item.quantity > item.stockOnHand && (
+                    {lineQtyOverStock && stockUom.stockInSellingUom !== undefined && (
                       <div className="text-red-600 text-[10px] mt-0.5">
-                        Only {item.stockOnHand} available in stock
+                        Only {stockUom.stockInSellingUom} {stockUom.uomLabel} in stock
                       </div>
                     )}
                     {item.pricingRule && (
@@ -3479,9 +3692,9 @@ export default function POSPage() {
                       </div>
                     )}
                     <div className="flex items-center justify-between mt-1">
-                      {item.costPrice > 0 && item.unitPrice < item.costPrice ? (
-                        <span className="text-xs text-red-700 font-bold" title={`Price ${formatCurrency(item.unitPrice)} is below cost ${formatCurrency(item.costPrice)}`}>
-                          ⚠ BELOW COST — manager override required
+                      {isPosLineBlockedByCatalogCost(item, selectedCustomer?.pricingMode) ? (
+                        <span className="text-xs text-red-700 font-bold" title={`Price ${formatCurrency(item.unitPrice)} / line total ${formatCurrency(item.subtotal)} vs min ${formatCurrency(getPosLineMinUnitPrice(item, selectedCustomer?.pricingMode))} per ${stockUom.uomLabel}`}>
+                          ⚠ BELOW COST — sale blocked
                         </span>
                       ) : (
                         <span className={`text-xs ${item.marginPct < 10 ? 'text-red-600' : item.marginPct < 20 ? 'text-yellow-600' : 'text-green-600'}`}>
@@ -3499,7 +3712,8 @@ export default function POSPage() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -3527,7 +3741,20 @@ export default function POSPage() {
                       </td>
                     </tr>
                   ) : (
-                    items.map((item, idx) => (
+                    items.map((item, idx) => {
+                      const stockUom = getPosLineStockInSellingUom(
+                        item.stockOnHand,
+                        item.availableUoms,
+                        item.selectedUomId,
+                        item.uom,
+                      );
+                      const lineQtyOverStock = isPosQtyOverStockInSellingUom(
+                        item.quantity,
+                        item.stockOnHand,
+                        item.availableUoms,
+                        item.selectedUomId,
+                      );
+                      return (
                       <tr
                         key={`${item.id}-${item.selectedUomId}-${idx}`}
                         ref={(el) => {
@@ -3542,6 +3769,7 @@ export default function POSPage() {
                             <div>
                               <div className="font-medium text-gray-900">{item.name}</div>
                               <div className="text-xs text-gray-500">SKU: {item.sku}</div>
+                              <AtCostFifoHint item={item} />
                               <div className="text-xs text-gray-500 sm:hidden">
                                 Margin: {item.marginPct.toFixed(1)}%
                               </div>
@@ -3578,17 +3806,32 @@ export default function POSPage() {
                               handleQuantityChange(idx, parseFloat(e.target.value) || 0)
                             }
                             onFocus={() => setFocusedCartIndex(idx)}
-                            className={`w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 ${item.stockOnHand !== undefined && item.quantity > item.stockOnHand ? 'border-red-500 bg-red-50' : ''}`}
-                            aria-label={`Quantity for ${item.name}`}
+                            className={`w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 ${lineQtyOverStock ? 'border-red-500 bg-red-50' : ''}`}
+                            aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
                           />
-                          {item.stockOnHand !== undefined && item.quantity > item.stockOnHand && (
+                          {lineQtyOverStock && stockUom.stockInSellingUom !== undefined && (
                             <div className="text-red-600 text-[10px] mt-0.5 whitespace-nowrap">
-                              Only {item.stockOnHand} in stock
+                              Only {stockUom.stockInSellingUom} {stockUom.uomLabel} in stock
                             </div>
                           )}
                         </td>
                         <td className="px-2 py-2 text-right text-xs sm:text-sm">
-                          {formatCurrency(item.unitPrice)}
+                          <PosUnitPriceInput
+                            value={item.unitPrice}
+                            minUnitPrice={getPosLineMinUnitPrice(item, selectedCustomer?.pricingMode)}
+                            atCostLine={
+                              selectedCustomer?.pricingMode === 'AT_COST' ||
+                              item.pricingRule?.scope === 'at_cost'
+                            }
+                            uomLabel={stockUom.uomLabel}
+                            productName={item.name}
+                            onFocus={() => setFocusedCartIndex(idx)}
+                            onChange={(price) =>
+                              handleUnitPriceChange(idx, price, { silent: true })
+                            }
+                            onCommit={(price) => handleUnitPriceChange(idx, price)}
+                            manualOverride={!!item.unitPriceManuallySet}
+                          />
                         </td>
                         <td className="px-2 py-2 text-right font-semibold text-xs sm:text-sm">
                           {item.discount ? (
@@ -3609,7 +3852,7 @@ export default function POSPage() {
                         <td
                           className={
                             'px-2 py-2 text-right hidden sm:table-cell text-xs sm:text-sm ' +
-                            (item.costPrice > 0 && item.unitPrice < item.costPrice
+                            (isPosLineBlockedByCatalogCost(item, selectedCustomer?.pricingMode)
                               ? 'text-red-700 font-bold'
                               : item.marginPct < 10
                                 ? 'text-red-600'
@@ -3618,8 +3861,8 @@ export default function POSPage() {
                                   : 'text-green-600')
                           }
                         >
-                          {item.costPrice > 0 && item.unitPrice < item.costPrice ? (
-                            <span title={`Selling price (${formatCurrency(item.unitPrice)}) is below cost (${formatCurrency(item.costPrice)})`}>
+                          {isPosLineBlockedByCatalogCost(item, selectedCustomer?.pricingMode) ? (
+                            <span title={`Unit ${formatCurrency(item.unitPrice)} / line ${formatCurrency(item.subtotal)} below min (${formatCurrency(getPosLineMinUnitPrice(item, selectedCustomer?.pricingMode))} per ${stockUom.uomLabel})`}>
                               ⚠ BELOW COST
                             </span>
                           ) : (
@@ -3661,7 +3904,8 @@ export default function POSPage() {
                           </div>
                         </td>
                       </tr>
-                    ))
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -4655,9 +4899,10 @@ export default function POSPage() {
             </div>
             <p id="below-cost-dialog-desc" className="text-sm text-gray-700 mb-3">
               The following item{belowCostItems.length > 1 ? 's are' : ' is'} priced{' '}
-              <strong className="text-red-700">below cost price</strong> and{' '}
-              <strong>cannot be sold at a loss</strong>. You must fix the selling price or
-              remove the item before completing this sale.
+              <strong className="text-red-700">below catalog / inventory cost</strong> (unit price
+              and/or discount). This sale is <strong>blocked with no override</strong>. Edit the{' '}
+              <strong>Unit Price</strong> column to at least the cost shown (per selected UoM),
+              reduce discounts, or remove the line.
             </p>
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 space-y-2 max-h-48 overflow-y-auto">
               {belowCostItems.map((item, i) => (

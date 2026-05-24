@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:pricing-phases": "vitest run src/__tests__/pricing-customer-phases.test.ts",
+    "test:at-cost-regression": "vitest run src/__tests__/posCartAtCost.spec.ts src/__tests__/posCartLine.spec.ts src/__tests__/posCartUom-at-cost.spec.ts",
+    "test:pos-pricing-regression": "npm run test:at-cost-regression",
     "proof:gr-uom": "vitest run src/__tests__/gr-po-uom-display.test.ts",
     "test:ui": "vitest --ui"
   },

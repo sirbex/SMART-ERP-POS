@@ -512,26 +512,20 @@ export class SalesBusinessRules {
   }
 
   /**
-   * BR-SAL-007: Profit margin must be positive (cost < selling price)
+   * BR-SAL-007: Selling price must not be below cost (per-unit).
+   * Sale posting uses saleBelowCostGuard with FEFO-allocated layer cost — prefer that path.
    */
   static validateProfitMargin(
     costPrice: number,
     sellingPrice: number,
-    allowNegative: boolean = false
+    allowNegative: boolean = false,
   ): void {
-    if (!allowNegative && sellingPrice < costPrice) {
-      logger.warn('Negative profit margin detected', {
-        costPrice,
-        sellingPrice,
-        loss: costPrice - sellingPrice,
-      });
-
-      // Warning only in most cases, but can be enforced:
-      // throw new BusinessRuleViolation(
-      //   'BR-SAL-007',
-      //   `Selling price (${sellingPrice}) is below cost (${costPrice})`,
-      //   'NEGATIVE_PROFIT'
-      // );
+    if (!allowNegative && sellingPrice + 0.01 < costPrice) {
+      throw new BusinessRuleViolation(
+        'BR-SAL-007',
+        'Sale blocked. Selling price cannot be below actual inventory cost.',
+        'BELOW_ALLOCATED_COST',
+      );
     }
   }
 }

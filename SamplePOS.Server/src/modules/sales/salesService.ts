@@ -39,6 +39,13 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getFinalPricesBulk, type ResolvedPrice } from '../pricing/pricingEngineService.js';
 import { getCustomerPricingMode } from '../pricing/pricingRepository.js';
 import { validateAtCostSalePricing } from './atCostSalePricingGuard.js';
+import { assertSaleLineNotBelowAllocatedCost } from './saleBelowCostGuard.js';
+import { recordSaleLinePriceEvent } from './salePriceAuditService.js';
+import {
+  previewFefoIssueCostForBaseQty,
+  type ProductValuationForAtCost,
+} from '../pricing/atCostIssuePrice.js';
+import type { AuditContext } from '../../../../shared/types/audit.js';
 import {
   assertSaleHeaderMatchesCalculatedTotal,
   deriveUnitPriceFromLineTotal,
@@ -80,6 +87,8 @@ export interface CreateSaleInput {
   idempotencyKey?: string; // Offline sync idempotency key
   offlineId?: string; // Offline sale identifier
   fromOrderId?: string; // POS order ID — if set, mark the order COMPLETED atomically with this sale
+  /** Optional audit context for price-edit / below-cost audit rows */
+  auditContext?: AuditContext;
 }
 
 export interface RefundItemInput {
@@ -498,6 +507,7 @@ export const salesService = {
         // Without this multiplication, a PACKET sale would be charged at 1,500 (tablet price).
         const resolvedPrice = resolvedPriceMap.get(`${item.productId}:${item.quantity}`);
         let effectiveUnitPrice = item.unitPrice;
+        let engineSellingUnitPrice: number | null = null;
         if (resolvedPrice) {
           // Scale base-unit price to selling-UoM price.
           const uomAdjustedPrice = Money.toNumber(
@@ -506,10 +516,11 @@ export const salesService = {
               2,
             ),
           );
+          engineSellingUnitPrice = uomAdjustedPrice;
           if (uomAdjustedPrice !== item.unitPrice) {
-            logger.info('Pricing engine adjusted unit price (UoM-normalised)', {
+            logger.info('Pricing engine reference price (UoM-normalised)', {
               productId: item.productId,
-              frontendPrice: item.unitPrice,
+              submittedPrice: item.unitPrice,
               engineBasePrice: resolvedPrice.finalPrice,
               conversionFactor: snapshotConversionFactor.toNumber(),
               uomAdjustedPrice,
@@ -517,8 +528,9 @@ export const salesService = {
               ruleName: resolvedPrice.appliedRule.ruleName,
             });
           }
-          effectiveUnitPrice = uomAdjustedPrice;
         }
+        // POS/API submitted unit price is authoritative; below-cost guard enforces inventory floor.
+        effectiveUnitPrice = item.unitPrice;
 
         const lineTotal = new Decimal(item.quantity).times(effectiveUnitPrice);
         const itemDiscountAmount = new Decimal(item.discountAmount || 0);
@@ -570,47 +582,34 @@ export const salesService = {
         // Previously used costLayerService.calculateActualCost() which could diverge from
         // batch.cost_price due to FIFO layer averaging and UoM conversion rounding.
         let itemCostDecimal = new Decimal(0);
-        let unitCost: number = 0; // per base unit — used for profit margin validation only
+        let unitCost: number = 0; // per base unit
+        const valuation: ProductValuationForAtCost = {
+          sellingPrice: productData.selling_price || '0',
+          costPrice: productData.cost_price || '0',
+          averageCost: productData.average_cost || '0',
+          costingMethod,
+        };
         try {
-          // Read FEFO batches in the same order as the physical deduction loop below.
-          // No FOR UPDATE here — the deduction loop acquires row locks when it runs.
-          const fefoPreview = await client.query(
-            `SELECT remaining_quantity, cost_price
-             FROM inventory_batches
-             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
-               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
-             ORDER BY expiry_date ASC NULLS LAST, received_date ASC`,
-            [item.productId]
+          const { totalCost: batchTotal, shortfall } = await previewFefoIssueCostForBaseQty(
+            client,
+            item.productId,
+            baseQty,
           );
+          itemCostDecimal = batchTotal;
 
-          let remainingForCost = new Decimal(baseQty);
-          for (const b of fefoPreview.rows) {
-            if (remainingForCost.lessThanOrEqualTo(0)) break;
-            const batchAvail = new Decimal(b.remaining_quantity);
-            const take = Decimal.min(remainingForCost, batchAvail);
-            itemCostDecimal = itemCostDecimal.plus(take.times(new Decimal(b.cost_price)));
-            remainingForCost = remainingForCost.minus(take);
-          }
-
-          // ── DRIFT GUARD (preview) ────────────────────────────────────────────
-          // If FEFO batches can't cover the full quantity the GL COGS will fall
-          // back to average_cost instead of exact batch.cost_price — this causes
-          // inventory GL 1300 to drift from inventory_batches valuation.
-          // The sale will also throw ERR_STOCK_001 shortly, but logging here
-          // makes the accounting impact explicit before the rollback.
-          if (remainingForCost.greaterThan(0.001)) {
-            logger.warn('[COGS DRIFT RISK] FEFO batches insufficient for GL cost preview — GL COGS will use estimated average_cost, not exact batch cost_price', {
+          if (shortfall.greaterThan(0.001)) {
+            const avgCost = Money.parseDb(productData.average_cost);
+            const costPriceDec = Money.parseDb(productData.cost_price);
+            const shortfallUnit = avgCost.greaterThan(0) ? avgCost : costPriceDec;
+            itemCostDecimal = itemCostDecimal.plus(shortfall.times(shortfallUnit));
+            logger.warn('[COGS DRIFT RISK] FEFO batches insufficient for GL cost preview — shortfall priced at average/master', {
               productId: item.productId,
               productName: item.productName,
               requestedBaseQty: baseQty.toFixed(4),
-              coveredByBatches: baseQty.minus(remainingForCost).toFixed(4),
-              shortfall: remainingForCost.toFixed(4),
-              action: 'Ensure stock is received before selling. Inventory integrity check recommended.',
+              shortfall: shortfall.toFixed(4),
             });
           }
-          // ────────────────────────────────────────────────────────────────────
 
-          // Per-base-unit cost used only for profit margin validation
           unitCost = baseQty.greaterThan(0)
             ? Money.toNumber(Money.round(itemCostDecimal.dividedBy(baseQty), 2))
             : 0;
@@ -622,7 +621,6 @@ export const salesService = {
             unitCostPerBase: unitCost,
           });
         } catch (error: unknown) {
-          // Fallback: use pre-fetched average_cost, then cost_price
           const avgCost = Money.parseDb(productData.average_cost);
           const costPriceDec = Money.parseDb(productData.cost_price);
           unitCost = Money.toNumber(avgCost.greaterThan(0) ? avgCost : costPriceDec);
@@ -635,22 +633,73 @@ export const salesService = {
           });
         }
 
-        // BR-SAL-007: Validate profit margin (warning only)
-        SalesBusinessRules.validateProfitMargin(unitCost, effectiveUnitPrice, false);
-
-        // Exact batch-derived cost — no per-base-unit rounding applied
         const itemCost = itemCostDecimal;
+        const costPerSellingUnit = Money.toNumber(
+          Money.round(itemCost.dividedBy(new Decimal(item.quantity)), 2),
+        );
+
+        try {
+          assertSaleLineNotBelowAllocatedCost({
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.quantity,
+            lineRevenue: Money.toNumber(lineTotalAfterDiscount),
+            totalAllocatedCost: Money.toNumber(itemCost),
+            costPerSellingUnit,
+            unitPrice: effectiveUnitPrice,
+          });
+        } catch (belowCostError) {
+          if (input.auditContext && belowCostError instanceof BusinessError) {
+            // Separate connection — sale transaction will ROLLBACK; audit must persist.
+            await recordSaleLinePriceEvent(
+              pool,
+              {
+                eventType: 'BELOW_COST_BLOCKED',
+                productId: item.productId,
+                customerId: input.customerId,
+                originalUnitPrice: engineSellingUnitPrice,
+                newUnitPrice: effectiveUnitPrice,
+                allocatedCostPerSellingUnit: costPerSellingUnit,
+                allocatedTotalCost: Money.toNumber(itemCost),
+                quantity: item.quantity,
+                uomId: snapshotSellingUomId,
+                reason: belowCostError.message,
+                metadata: belowCostError.details,
+              },
+              input.auditContext,
+            );
+          }
+          throw belowCostError;
+        }
+
+        if (
+          input.auditContext &&
+          engineSellingUnitPrice != null &&
+          Math.abs(item.unitPrice - engineSellingUnitPrice) > 0.01
+        ) {
+          await recordSaleLinePriceEvent(
+            client,
+            {
+              eventType: 'PRICE_EDIT',
+              productId: item.productId,
+              customerId: input.customerId,
+              originalUnitPrice: engineSellingUnitPrice,
+              newUnitPrice: item.unitPrice,
+              allocatedCostPerSellingUnit: costPerSellingUnit,
+              allocatedTotalCost: Money.toNumber(itemCost),
+              quantity: item.quantity,
+              uomId: snapshotSellingUomId,
+              reason: 'POS unit price differs from pricing engine reference',
+              metadata: {
+                pricingScope: resolvedPrice?.appliedRule.scope,
+              },
+            },
+            input.auditContext,
+          );
+        }
+
         totalCost = totalCost.plus(itemCost);
         const profit = lineTotalAfterDiscount.minus(itemCost);
-
-        // CRITICAL: costPrice must reflect cost per SELLING UoM unit, not per base unit.
-        // When selling 1 Box (12 pieces) at base cost 6,000/piece, costPrice = 72,000/box.
-        // The DB trigger fn_post_sale_to_ledger computes COGS as SUM(unit_cost * quantity),
-        // so storing base-unit cost with selling-UoM quantity understates COGS.
-        // Using exact batch cost ensures GL COGS = batch subledger (no reconciliation drift).
-        const costPerSellingUnit = Money.toNumber(
-          Money.round(itemCost.dividedBy(new Decimal(item.quantity)), 2)
-        );
 
         // Use the selling UoM ID resolved during conversion lookup (no extra query needed)
         const actualUomId = snapshotSellingUomId || undefined;

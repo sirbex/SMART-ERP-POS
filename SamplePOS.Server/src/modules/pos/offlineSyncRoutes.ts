@@ -180,7 +180,18 @@ export function createOfflineSyncRoutes(pool: Pool): Router {
             // so a concurrent duplicate triggers a PG unique violation
             // instead of a TOCTOU race.
             try {
-                const result = await salesService.createSale(dbPool, serviceInput);
+                const result = await salesService.createSale(dbPool, {
+                    ...serviceInput,
+                    auditContext: {
+                        userId: userId || '00000000-0000-0000-0000-000000000000',
+                        userName: req.user?.fullName,
+                        userRole: req.user?.role,
+                        ipAddress: req.ip,
+                        userAgent: req.headers['user-agent'],
+                        sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+                        requestId: req.requestId,
+                    },
+                });
 
                 logger.info(`[OfflineSync] Successfully synced offline sale ${offlineId} → ${result.sale.saleNumber}`);
 

@@ -30,7 +30,7 @@ import * as pricingService from '../../services/pricingService.js';
 import * as repo from './pricingRepository.js';
 import { normalisePriceRule, normaliseProductCategory } from './pricingRepository.js';
 import {
-    resolveAtCostPerBaseUnit,
+    resolveAtCostWithLayers,
     type ProductValuationForAtCost,
 } from './atCostIssuePrice.js';
 import type {
@@ -77,10 +77,18 @@ function eCacheInvalidateGroup(groupId: string): void {
 // Types
 // ============================================================================
 
+export interface AtCostLayerPrice {
+    baseQuantity: number;
+    unitCostPerBase: number;
+    totalCost: number;
+}
+
 export interface ResolvedPrice {
     finalPrice: number;
     basePrice: number;
     discount: number;
+    /** FIFO/FEFO segments when scope is at_cost (e.g. 1@20000 + 1@18000). */
+    atCostLayers?: AtCostLayerPrice[];
     appliedRule: {
         ruleId: string | null;
         ruleName: string | null;
@@ -125,7 +133,7 @@ export async function getFinalPrice(
                 averageCost: product.averageCost,
                 costingMethod: product.costingMethod as ProductValuationForAtCost['costingMethod'],
             };
-            const { unitPricePerBase, ruleName } = await resolveAtCostPerBaseUnit(
+            const { unitPricePerBase, ruleName, layers } = await resolveAtCostWithLayers(
                 pool,
                 productId,
                 baseQty,
@@ -140,6 +148,7 @@ export async function getFinalPrice(
                 finalPrice: unitPricePerBase,
                 basePrice: Money.toNumber(Money.round(basePriceForMode)),
                 discount: Money.toNumber(Money.round(discountAmt)),
+                atCostLayers: layers,
                 appliedRule: {
                     ruleId: null,
                     ruleName,
@@ -332,7 +341,7 @@ export async function getFinalPricesBulk(
                     averageCost: baseData.averageCost,
                     costingMethod: baseData.costingMethod as ProductValuationForAtCost['costingMethod'],
                 };
-                const { unitPricePerBase, ruleName } = await resolveAtCostPerBaseUnit(
+                const { unitPricePerBase, ruleName, layers } = await resolveAtCostWithLayers(
                     pool,
                     item.productId,
                     baseQty,
@@ -347,6 +356,7 @@ export async function getFinalPricesBulk(
                     finalPrice: unitPricePerBase,
                     basePrice: Money.toNumber(Money.round(basePrice)),
                     discount: Money.toNumber(Money.round(discountAmt)),
+                    atCostLayers: layers,
                     appliedRule: {
                         ruleId: null,
                         ruleName,

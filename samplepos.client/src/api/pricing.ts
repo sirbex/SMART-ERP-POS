@@ -130,12 +130,16 @@ export const pricingApi = {
   },
 
   async calculateBulkPrices(
-    items: Array<{ productId: string; quantity?: number }>,
+    items: Array<{ productId: string; quantity?: number; baseQuantity?: number }>,
     customerId?: string,
     customerGroupId?: string,
   ): Promise<BulkPriceResult[]> {
     const response = await apiClient.post('/pricing/price/bulk', {
-      items: items.map(i => ({ productId: i.productId, quantity: i.quantity ?? 1 })),
+      items: items.map((i) => ({
+        productId: i.productId,
+        quantity: i.quantity ?? 1,
+        ...(i.baseQuantity != null && i.baseQuantity > 0 ? { baseQuantity: i.baseQuantity } : {}),
+      })),
       customerId,
       customerGroupId,
     });

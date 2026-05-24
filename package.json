@@ -30,6 +30,13 @@
     "proof:customer-ob:local": "node scripts/proof-customer-opening-balance-local.mjs",
     "proof:ar-allocation:local": "node scripts/proof-ar-allocation-local.mjs",
     "proof:sale-integrity:local": "node scripts/proof-sale-integrity-local.mjs",
+    "proof:sale-below-cost:local": "node scripts/proof-sale-below-cost-local.mjs",
+    "proof:pos-at-cost-reprice:local": "node scripts/proof-pos-at-cost-reprice-local.mjs",
+    "proof:at-cost-fifo-layers:local": "node scripts/proof-at-cost-fifo-layers-local.mjs",
+    "test:at-cost-regression": "node scripts/run-at-cost-regression.mjs",
+    "test:pos-pricing-regression": "node scripts/run-at-cost-regression.mjs",
+    "proof:at-cost:local": "node scripts/run-at-cost-regression.mjs --live",
+    "proof:pos-pricing:local": "node scripts/run-at-cost-regression.mjs --live",
     "proof:all-tenants": "node scripts/proof-all-tenants-migrations.mjs"
   },
   "devDependencies": {

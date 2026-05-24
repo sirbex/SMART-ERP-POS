@@ -8,7 +8,7 @@ type MockFn = (...args: unknown[]) => Promise<unknown>;
 const mockGetCustomerPricingMode = jest.fn<MockFn>();
 const mockGetProductBasePrice = jest.fn<MockFn>();
 const mockGetProductValuationForAtCost = jest.fn<MockFn>();
-const mockResolveAtCostPerBaseUnit = jest.fn<MockFn>();
+const mockResolveAtCostWithLayers = jest.fn<MockFn>();
 const mockGetCustomerGroupId = jest.fn<MockFn>();
 const mockFindApplicableTier = jest.fn<MockFn>();
 const mockFindApplicableRule = jest.fn<MockFn>();
@@ -16,7 +16,8 @@ const mockGetGroupDiscountPercentage = jest.fn<MockFn>();
 const mockGetProductFormula = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./atCostIssuePrice.js', () => ({
-    resolveAtCostPerBaseUnit: mockResolveAtCostPerBaseUnit,
+    resolveAtCostWithLayers: mockResolveAtCostWithLayers,
+    resolveAtCostPerBaseUnit: jest.fn<MockFn>(),
     previewFefoIssueCostForBaseQty: jest.fn<MockFn>(),
 }));
 
@@ -73,9 +74,10 @@ describe('getFinalPrice — AT_COST', () => {
             costingMethod: 'FIFO',
             categoryId: null,
         });
-        mockResolveAtCostPerBaseUnit.mockResolvedValue({
+        mockResolveAtCostWithLayers.mockResolvedValue({
             unitPricePerBase: 550,
             ruleName: 'At Cost (FIFO issue)',
+            layers: [{ baseQuantity: 20, unitCostPerBase: 550, totalCost: 11000 }],
         });
     });
 
@@ -86,12 +88,13 @@ describe('getFinalPrice — AT_COST', () => {
         expect(result.basePrice).toBe(1000);
         expect(result.appliedRule.scope).toBe('at_cost');
         expect(result.appliedRule.ruleName).toBe('At Cost (FIFO issue)');
-        expect(mockResolveAtCostPerBaseUnit).toHaveBeenCalledWith(
+        expect(mockResolveAtCostWithLayers).toHaveBeenCalledWith(
             pool,
             'product-1',
             20,
             expect.objectContaining({ costingMethod: 'FIFO' }),
         );
+        expect(result.atCostLayers).toHaveLength(1);
         expect(mockFindApplicableTier).not.toHaveBeenCalled();
         expect(mockFindApplicableRule).not.toHaveBeenCalled();
         expect(mockGetGroupDiscountPercentage).not.toHaveBeenCalled();
@@ -115,6 +118,6 @@ describe('getFinalPrice — AT_COST', () => {
         expect(result.finalPrice).toBe(1000);
         expect(result.appliedRule.scope).toBe('base');
         expect(mockGetCustomerGroupId).toHaveBeenCalledWith(pool, 'customer-2');
-        expect(mockResolveAtCostPerBaseUnit).not.toHaveBeenCalled();
+        expect(mockResolveAtCostWithLayers).not.toHaveBeenCalled();
     });
 });

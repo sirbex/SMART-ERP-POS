@@ -124,10 +124,17 @@ export interface UpdatePriceRuleInput {
 // Price Calculation
 // ============================================================================
 
+export interface AtCostLayerPrice {
+  baseQuantity: number;
+  unitCostPerBase: number;
+  totalCost: number;
+}
+
 export interface ResolvedPrice {
   finalPrice: number;
   basePrice: number;
   discount: number;
+  atCostLayers?: AtCostLayerPrice[];
   appliedRule: {
     ruleId: string | null;
     ruleName: string | null;

@@ -211,7 +211,22 @@ export const salesController = {
 
     let result;
     try {
-      result = await salesService.createSale(pool, serviceInput, req.tenantId);
+      result = await salesService.createSale(
+        pool,
+        {
+          ...serviceInput,
+          auditContext: req.auditContext ?? {
+            userId: req.user?.id || '00000000-0000-0000-0000-000000000000',
+            userName: req.user?.fullName,
+            userRole: req.user?.role,
+            ipAddress: req.ip,
+            userAgent: req.headers['user-agent'],
+            sessionId: req.cookies?.sessionId || (req.headers['x-session-id'] as string),
+            requestId: req.requestId,
+          },
+        },
+        req.tenantId,
+      );
     } catch (createErr: unknown) {
       // Handle concurrent duplicate: PG unique violation on idempotency_key
       const pgErr = createErr as { code?: string; constraint?: string };

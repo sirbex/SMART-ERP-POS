@@ -5,7 +5,9 @@ import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import Decimal from 'decimal.js';
 import {
     previewFefoIssueCostForBaseQty,
+    previewFefoIssueLayers,
     resolveAtCostPerBaseUnit,
+    resolveAtCostWithLayers,
     type ProductValuationForAtCost,
 } from './atCostIssuePrice.js';
 
@@ -52,6 +54,40 @@ describe('atCostIssuePrice', () => {
         const result = await resolveAtCostPerBaseUnit(pool, 'product-1', 20, valuation);
         expect(result.unitPricePerBase).toBe(118);
         expect(result.ruleName).toBe('At Cost (FIFO issue)');
+    });
+
+    it('previewFefoIssueLayers returns separate segments per batch cost (20k + 18k)', async () => {
+        mockQuery.mockResolvedValue({
+            rows: [
+                { remaining_quantity: '1', cost_price: '20000' },
+                { remaining_quantity: '1', cost_price: '18000' },
+            ],
+        });
+
+        const layers = await previewFefoIssueLayers(pool, 'product-1', new Decimal(2));
+        expect(layers).toHaveLength(2);
+        expect(layers[0]).toMatchObject({ baseQuantity: 1, unitCostPerBase: 20000 });
+        expect(layers[1]).toMatchObject({ baseQuantity: 1, unitCostPerBase: 18000 });
+    });
+
+    it('resolveAtCostWithLayers exposes layers and blended per-base (38k/2 → 19k)', async () => {
+        mockQuery.mockResolvedValue({
+            rows: [
+                { remaining_quantity: '1', cost_price: '20000' },
+                { remaining_quantity: '1', cost_price: '18000' },
+            ],
+        });
+
+        const valuation: ProductValuationForAtCost = {
+            sellingPrice: '25000',
+            costPrice: '19000',
+            averageCost: '0',
+            costingMethod: 'FIFO',
+        };
+
+        const result = await resolveAtCostWithLayers(pool, 'product-1', 2, valuation);
+        expect(result.layers).toHaveLength(2);
+        expect(result.unitPricePerBase).toBe(19000);
     });
 
     it('resolveAtCostPerBaseUnit uses average for AVCO', async () => {
