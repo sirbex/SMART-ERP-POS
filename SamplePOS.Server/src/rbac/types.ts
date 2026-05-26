@@ -17,7 +17,8 @@ export type PermissionModule =
   | 'hr'
   | 'expenses'
   | 'quotations'
-  | 'distribution';
+  | 'distribution'
+  | 'corrections';
 
 export type PermissionAction =
   | 'read'
@@ -37,6 +38,7 @@ export type PermissionAction =
   | 'payroll_process'
   | 'payroll_post'
   | 'adjust'
+  | 'execute'
   | 'sales_view'
   | 'inventory_view'
   | 'financial_view'

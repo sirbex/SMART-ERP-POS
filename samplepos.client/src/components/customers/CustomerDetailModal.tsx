@@ -19,6 +19,7 @@ import {
 } from '../../utils/customerPriceGroupEdit';
 import { AdjustCustomerInvoiceModal } from '../shared/AdjustCustomerInvoiceModal';
 import { useHasAnyPermission } from '../../hooks/useRbac';
+import { CustomerSmartStatementPanel } from './CustomerSmartStatementPanel';
 
 interface CustomerData {
     id: string;
@@ -198,14 +199,15 @@ export default function CustomerDetailModal({
     const [stmtStart, setStmtStart] = useState<string>('');
     const [stmtEnd, setStmtEnd] = useState<string>('');
     const [stmtPage, setStmtPage] = useState<number>(1);
+    const [stmtView, setStmtView] = useState<'smart' | 'legacy'>('smart');
     const stmtLimit = 100;
 
     // Data hooks
     const { data: customer, isLoading: isLoadingCustomer, refetch: refetchCustomer } = useCustomer(customerId || '');
     const { data: summary } = useCustomerSummary(customerId || '');
     const { data: statement } = useCustomerStatement(customerId || '', {
-        start: stmtStart ? new Date(stmtStart).toISOString() : undefined,
-        end: stmtEnd ? new Date(stmtEnd).toISOString() : undefined,
+        start: stmtView === 'legacy' && stmtStart ? new Date(stmtStart).toISOString() : undefined,
+        end: stmtView === 'legacy' && stmtEnd ? new Date(stmtEnd).toISOString() : undefined,
         page: stmtPage,
         limit: stmtLimit,
     });
@@ -1055,6 +1057,16 @@ export default function CustomerDetailModal({
                                             </div>
                                         </div>
 
+                                        {stmtView === 'smart' && customerId && (
+                                            <CustomerSmartStatementPanel
+                                                customerId={customerId}
+                                                startDate={stmtStart}
+                                                endDate={stmtEnd}
+                                            />
+                                        )}
+
+                                        {stmtView === 'legacy' && (
+                                        <>
                                         {/* Summary Cards */}
                                         {(() => {
                                             const stmt = statement as StatementResponse | undefined;
@@ -1210,6 +1222,8 @@ export default function CustomerDetailModal({
                                                 </button>
                                             </div>
                                         </div>
+                                        </>
+                                        )}
                                     </div>
                                 )}
 

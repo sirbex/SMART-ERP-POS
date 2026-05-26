@@ -14,6 +14,9 @@ import { handleApiError } from '../utils/errorHandler';
 import { downloadFile } from '../utils/download';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
 import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline';
+import { DatePicker } from '../components/ui/date-picker';
+import { toast } from 'sonner';
+import type { AxiosError } from 'axios';
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -244,6 +247,55 @@ export default function SuppliersPage() {
   const createMutation = useCreateSupplier();
   const updateMutation = useUpdateSupplier();
   const deleteMutation = useDeleteSupplier();
+
+  const [obSupplierId, setObSupplierId] = useState('');
+  const [obAmount, setObAmount] = useState('');
+  const [obDate, setObDate] = useState('');
+  const [obDueDate, setObDueDate] = useState('');
+  const [obNotes, setObNotes] = useState('');
+  const [obPosting, setObPosting] = useState(false);
+
+  const handlePostSupplierOpeningBalance = async () => {
+    if (!obSupplierId) {
+      toast.error('Select a supplier');
+      return;
+    }
+    const amt = parseFloat(obAmount);
+    if (!amt || amt <= 0) {
+      toast.error('Enter a positive amount');
+      return;
+    }
+    if (!obDate) {
+      toast.error('As-of date is required');
+      return;
+    }
+    if (obDueDate && obDueDate > obDate) {
+      toast.error('Original invoice date cannot be after the as-of (cutover) date');
+      return;
+    }
+    setObPosting(true);
+    try {
+      await api.post('/supplier-payments/invoices/opening-balance', {
+        supplierId: obSupplierId,
+        amount: amt,
+        asOfDate: obDate,
+        dueDate: obDueDate || undefined,
+        notes: obNotes || undefined,
+      });
+      toast.success('Supplier opening balance posted');
+      setObAmount('');
+      setObNotes('');
+      setObSupplierId('');
+      setObDate('');
+      setObDueDate('');
+      refetch();
+    } catch (err) {
+      const axErr = err as AxiosError<{ error?: string }>;
+      toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
+    } finally {
+      setObPosting(false);
+    }
+  };
 
   // Extract suppliers
   const allSuppliers = useMemo(() => {
@@ -923,6 +975,72 @@ export default function SuppliersPage() {
           </div>
         )}
 
+        {canCreateSupplier && (
+          <div className="mt-6 bg-white rounded-lg shadow border border-gray-200 p-4 sm:p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-1">Import Supplier Opening Balance</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Post a balance brought forward from another system (DR Opening Balance Equity / CR Accounts Payable).
+              One opening balance record per supplier — same cutover pattern as customer opening balance.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-medium text-gray-600 mb-1">Supplier *</label>
+                <select
+                  value={obSupplierId}
+                  onChange={(e) => setObSupplierId(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="">Select supplier</option>
+                  {allSuppliers.map((s: Supplier) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Amount (UGX) *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={obAmount}
+                  onChange={(e) => setObAmount(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">As-of date *</label>
+                <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Original invoice date</label>
+                <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
+                <p className="text-[10px] text-gray-400 mt-0.5">For aging (defaults to as-of)</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+                <input
+                  type="text"
+                  value={obNotes}
+                  onChange={(e) => setObNotes(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  placeholder="Optional"
+                />
+              </div>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => void handlePostSupplierOpeningBalance()}
+                  disabled={obPosting}
+                  className="w-full px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {obPosting ? 'Posting…' : 'Post Opening Balance'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Info Panel */}
         <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
           <h3 className="text-sm font-medium text-blue-900 mb-2">📋 Supplier Management</h3>
@@ -958,6 +1076,8 @@ export default function SuppliersPage() {
               setEditingSupplier(viewingSupplier);
               setViewingSupplier(null);
             } : undefined}
+            canPostOpeningBalance={canCreateSupplier}
+            onOpeningBalancePosted={() => refetch()}
           />
         )}
 
@@ -982,9 +1102,17 @@ interface SupplierDetailModalProps {
   supplier: Supplier;
   onClose: () => void;
   onEdit?: () => void;
+  canPostOpeningBalance?: boolean;
+  onOpeningBalancePosted?: () => void;
 }
 
-function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalProps) {
+function SupplierDetailModal({
+  supplier,
+  onClose,
+  onEdit,
+  canPostOpeningBalance = false,
+  onOpeningBalancePosted,
+}: SupplierDetailModalProps) {
   const [activeTab, setActiveTab] = useState<
     'info' | 'performance' | 'orders' | 'products' | 'invoices' | 'ledger'
   >('info');
@@ -1032,6 +1160,49 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
 
   // Permission check for recording payments
   const canCreatePayment = useCanAccess([], ['suppliers.create']);
+
+  const [obAmount, setObAmount] = useState('');
+  const [obDate, setObDate] = useState('');
+  const [obDueDate, setObDueDate] = useState('');
+  const [obNotes, setObNotes] = useState('');
+  const [obPosting, setObPosting] = useState(false);
+
+  const handlePostOpeningBalanceForSupplier = async () => {
+    const amt = parseFloat(obAmount);
+    if (!amt || amt <= 0) {
+      toast.error('Enter a positive amount');
+      return;
+    }
+    if (!obDate) {
+      toast.error('As-of date is required');
+      return;
+    }
+    if (obDueDate && obDueDate > obDate) {
+      toast.error('Original invoice date cannot be after the as-of (cutover) date');
+      return;
+    }
+    setObPosting(true);
+    try {
+      await api.post('/supplier-payments/invoices/opening-balance', {
+        supplierId: supplier.id,
+        amount: amt,
+        asOfDate: obDate,
+        dueDate: obDueDate || undefined,
+        notes: obNotes || undefined,
+      });
+      toast.success('Opening balance posted for this supplier');
+      setObAmount('');
+      setObNotes('');
+      setObDate('');
+      setObDueDate('');
+      onOpeningBalancePosted?.();
+    } catch (err) {
+      const axErr = err as AxiosError<{ error?: string }>;
+      toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
+    } finally {
+      setObPosting(false);
+    }
+  };
 
   // Single-invoice payment modal state
   const [payingInvoice, setPayingInvoice] = useState<SupplierInvoiceSummary | null>(null);
@@ -1586,6 +1757,57 @@ function SupplierDetailModal({ supplier, onClose, onEdit }: SupplierDetailModalP
                 <div className="mb-6 p-4 bg-gray-50 rounded-lg">
                   <label className="text-sm font-medium text-gray-500">Address</label>
                   <div className="mt-1 text-gray-900 whitespace-pre-wrap">{supplier.address}</div>
+                </div>
+              )}
+
+              {canPostOpeningBalance && (
+                <div className="mb-6 p-4 border border-indigo-200 bg-indigo-50/50 rounded-lg">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-1">Opening balance (cutover)</h4>
+                  <p className="text-xs text-gray-600 mb-3">
+                    Post historical AP for <strong>{supplier.name}</strong> so the ledger matches your books.
+                    DR Opening Balance Equity / CR Accounts Payable. One OB per supplier.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Amount (UGX) *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={obAmount}
+                        onChange={(e) => setObAmount(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">As-of date *</label>
+                      <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Original invoice date</label>
+                      <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => void handlePostOpeningBalanceForSupplier()}
+                        disabled={obPosting}
+                        className="w-full px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {obPosting ? 'Posting…' : 'Post Opening Balance'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <input
+                      type="text"
+                      value={obNotes}
+                      onChange={(e) => setObNotes(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                      placeholder="Optional notes"
+                    />
+                  </div>
                 </div>
               )}
 

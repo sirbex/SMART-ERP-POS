@@ -7,6 +7,33 @@ import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
 
+/** Coerce empty/ISO date strings to YYYY-MM-DD or null for PO date fields. */
+const optionalDateOnly = () =>
+  z.preprocess(
+    (val) => {
+      if (val === '' || val === undefined || val === null) return null;
+      if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (!trimmed) return null;
+        if (trimmed.includes('T')) return trimmed.slice(0, 10);
+        return trimmed;
+      }
+      return val;
+    },
+    z
+      .union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'), z.null()])
+      .optional()
+  );
+
+const requiredDateOnly = () =>
+  z.preprocess(
+    (val) => {
+      if (typeof val === 'string' && val.includes('T')) return val.slice(0, 10);
+      return val;
+    },
+    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
+  );
+
 // Validation schemas
 const POItemSchema = z.object({
   productId: z.string().uuid(),
@@ -20,12 +47,8 @@ const POItemSchema = z.object({
 const CreatePOSchema = z
   .object({
     supplierId: z.string().uuid(),
-    orderDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
-    expectedDate: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
-      .optional()
-      .nullable(),
+    orderDate: requiredDateOnly(),
+    expectedDate: optionalDateOnly(),
     notes: z.string().optional().nullable(),
     createdBy: z.string().uuid().optional(), // Optional - will use req.user if not provided
     items: z.array(POItemSchema).min(1, 'Purchase order must have at least one item'),
@@ -40,7 +63,7 @@ const UpdatePOStatusSchema = z
 
 const UpdateDraftPOSchema = z.object({
   supplierId: z.string().uuid().optional(),
-  expectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD').optional().nullable(),
+  expectedDate: optionalDateOnly(),
   notes: z.string().optional().nullable(),
   items: z.array(POItemSchema).min(1, 'Purchase order must have at least one item').optional(),
 }).strict();

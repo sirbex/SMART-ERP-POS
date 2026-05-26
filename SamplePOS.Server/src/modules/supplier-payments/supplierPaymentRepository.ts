@@ -360,15 +360,12 @@ export async function findAllInvoices(
     const params: (string | number | string[])[] = [];
     let paramIndex = 1;
 
-    // Default behaviour: exclude credit notes and opening balance records from the bills list.
-    // Opening balance records (document_type=OPENING_BALANCE) are cutover GL declarations —
-    // they are not business documents and must NOT appear in the Purchases/Invoices screen.
-    // They are surfaced only via the Supplier Ledger.
+    // Default: payable bills (invoices, debit notes, opening balance). Credit notes use CN module.
     if (documentTypes && documentTypes.length > 0) {
         whereClause += ` AND si.document_type = ANY($${paramIndex++}::text[])`;
         params.push(documentTypes);
     } else if (!includeCreditNotes) {
-        whereClause += ` AND COALESCE(si.document_type, 'SUPPLIER_INVOICE') NOT IN ('SUPPLIER_CREDIT_NOTE', 'OPENING_BALANCE')`;
+        whereClause += ` AND COALESCE(si.document_type, 'SUPPLIER_INVOICE') NOT IN ('SUPPLIER_CREDIT_NOTE')`;
     }
 
     if (supplierId) {
@@ -422,6 +419,7 @@ export async function findAllInvoices(
        COALESCE(si."AmountPaid", 0) as "amountPaid",
        COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
        si."Status" as status,
+       si.document_type as "documentType",
        si."Notes" as notes,
        si."CreatedAt" as "createdAt",
        si."UpdatedAt" as "updatedAt"
@@ -488,6 +486,7 @@ export async function findOutstandingInvoices(pool: Pool | PoolClient, supplierI
        COALESCE(si."AmountPaid", 0) as "amountPaid",
        COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
        si."Status" as status,
+       si.document_type as "documentType",
        si."Notes" as notes,
        si."CreatedAt" as "createdAt",
        si."UpdatedAt" as "updatedAt"
@@ -495,7 +494,7 @@ export async function findOutstandingInvoices(pool: Pool | PoolClient, supplierI
      LEFT JOIN suppliers s ON si."SupplierId" = s."Id"
      WHERE si."SupplierId" = $1 
        AND si.deleted_at IS NULL
-       AND si.document_type = 'SUPPLIER_INVOICE'
+       AND COALESCE(si.document_type, 'SUPPLIER_INVOICE') NOT IN ('SUPPLIER_CREDIT_NOTE')
        AND si.is_posted_to_gl = TRUE
        AND si."Status" NOT IN ('Paid', 'PAID', 'Cancelled', 'CANCELLED')
        AND COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) > 0
@@ -1309,7 +1308,6 @@ export async function findAllUnpaidInvoicesForMassPayment(
         "si.deleted_at IS NULL",
         "si.\"Status\" IN ('Pending', 'POSTED', 'PartiallyPaid', 'PARTIALLY_PAID')",
         "si.document_type NOT IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')",
-        "si.\"SupplierInvoiceNumber\" NOT LIKE 'OB-%'",
     ];
     const params: (string | number)[] = [];
     let idx = 1;

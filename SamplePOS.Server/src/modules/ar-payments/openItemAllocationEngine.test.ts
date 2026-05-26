@@ -6,6 +6,38 @@ import {
 } from './openItemAllocationEngine.js';
 
 describe('openItemAllocationEngine', () => {
+  it('buildFifoAllocations includes opening balance in oldest-first order', () => {
+    const lines = buildFifoAllocations(
+      [
+        {
+          id: 'ob',
+          invoiceNumber: 'OB-000001',
+          issueDate: '2025-12-01',
+          dueDate: '2025-12-01',
+          totalAmount: 500,
+          amountDue: 500,
+          status: 'UNPAID',
+          documentType: 'OPENING_BALANCE',
+        },
+        {
+          id: 'inv',
+          invoiceNumber: 'INV-2026-001',
+          issueDate: '2026-02-01',
+          dueDate: '2026-02-15',
+          totalAmount: 200,
+          amountDue: 200,
+          status: 'UNPAID',
+          documentType: 'INVOICE',
+        },
+      ],
+      new Decimal(600),
+    );
+    expect(lines).toEqual([
+      { invoiceId: 'ob', amount: 500 },
+      { invoiceId: 'inv', amount: 100 },
+    ]);
+  });
+
   it('buildFifoAllocations oldest-first partial', () => {
     const lines = buildFifoAllocations(
       [

@@ -24,6 +24,8 @@ import {
 } from '../../utils/customerPriceGroupEdit';
 import { AdjustCustomerInvoiceModal } from '../../components/shared/AdjustCustomerInvoiceModal';
 import { useHasAnyPermission } from '../../hooks/useRbac';
+import { useCanAccess } from '../../components/auth/ProtectedRoute';
+import { toast } from 'react-hot-toast';
 
 // ── Local interfaces for Customer Detail page ──────────────────
 
@@ -59,6 +61,8 @@ interface InvoiceRow {
   balance?: number | string;
   OutstandingBalance?: number | string;
   notes?: string | null;
+  documentType?: string;
+  document_type?: string;
   createdById?: string | null;
   created_by_id?: string | null;
   createdAt?: string;
@@ -82,6 +86,7 @@ interface NormalizedInvoice {
   totalAmount: number;
   amountPaid: number;
   balance: number;
+  documentType?: string;
   notes: string | null | undefined;
   createdById: string | null | undefined;
   createdAt: string | undefined;
@@ -209,6 +214,12 @@ interface SaleRow {
 
 type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'credits' | 'edit';
 
+function isCustomerOpeningBalance(inv: { documentType?: string; invoiceNumber?: string }) {
+  return (
+    inv.documentType === 'OPENING_BALANCE' || (inv.invoiceNumber || '').startsWith('OB-')
+  );
+}
+
 export default function CustomerDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
@@ -261,6 +272,7 @@ export default function CustomerDetailPage() {
       totalAmount: typeof r.totalAmount === 'number' ? r.totalAmount : Number(r.total_amount ?? r.totalAmount ?? 0),
       amountPaid: typeof r.amountPaid === 'number' ? r.amountPaid : Number(r.amount_paid ?? r.amountPaid ?? 0),
       balance: typeof r.balance === 'number' ? r.balance : Number(r.balance ?? (Number(r.total_amount ?? r.totalAmount ?? 0) - Number(r.amount_paid ?? r.amountPaid ?? 0))),
+      documentType: r.documentType ?? r.document_type,
       notes: r.notes ?? null,
       createdById: r.createdById ?? r.created_by_id ?? null,
       createdAt: r.createdAt ?? (r.created_at ? new Date(r.created_at).toISOString() : undefined),
@@ -493,6 +505,49 @@ export default function CustomerDetailPage() {
   const [detailsInvoice, setDetailsInvoice] = useState<NormalizedInvoice | null>(null);
   const [adjustInvoiceOpen, setAdjustInvoiceOpen] = useState(false);
   const canAdjustInvoices = useHasAnyPermission(['customers.adjust']);
+  const canPostOpeningBalance = useCanAccess([], ['customers.create']);
+
+  const [obAmount, setObAmount] = useState('');
+  const [obDate, setObDate] = useState('');
+  const [obDueDate, setObDueDate] = useState('');
+  const [obNotes, setObNotes] = useState('');
+  const [obPosting, setObPosting] = useState(false);
+
+  const handlePostOpeningBalanceForCustomer = async () => {
+    const amt = parseFloat(obAmount);
+    if (!amt || amt <= 0) {
+      toast.error('Enter a positive amount');
+      return;
+    }
+    if (!obDate) {
+      toast.error('As-of date is required');
+      return;
+    }
+    if (obDueDate && obDueDate > obDate) {
+      toast.error('Original invoice date cannot be after the as-of (cutover) date');
+      return;
+    }
+    setObPosting(true);
+    try {
+      await api.customers.importOpeningBalance({
+        customerId: id,
+        amount: amt,
+        asOfDate: obDate,
+        dueDate: obDueDate || undefined,
+        notes: obNotes || undefined,
+      });
+      toast.success('Opening balance posted for this customer');
+      setObAmount('');
+      setObNotes('');
+      setObDate('');
+      setObDueDate('');
+    } catch (err) {
+      const axErr = err as AxiosError<{ error?: string }>;
+      toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
+    } finally {
+      setObPosting(false);
+    }
+  };
   const detailsRef = useModalAccessibility(isDetailsOpen, () => setDetailsOpen(false));
   const { data: paymentHistory, isLoading: isLoadingPayments } = useInvoicePayments(detailsInvoice?.id || '',);
   // Fetch full invoice detail (includes items + payments)
@@ -713,7 +768,16 @@ export default function CustomerDetailPage() {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {invoices.slice(0, 10).map((inv) => (
                         <tr key={inv.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2 font-medium">{inv.invoiceNumber}</td>
+                          <td className="px-4 py-2 font-medium">
+                            <span className="inline-flex flex-wrap items-center gap-2">
+                              {inv.invoiceNumber}
+                              {isCustomerOpeningBalance(inv) && (
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                  Opening Balance
+                                </span>
+                              )}
+                            </span>
+                          </td>
                           <td className="px-4 py-2 text-sm text-gray-600">{inv.issueDate ? formatTimestamp(inv.issueDate) : '-'}</td>
                           <td className="px-4 py-2 text-sm text-gray-600">{inv.paymentMethod || 'CREDIT'}</td>
                           <td className="px-4 py-2 font-semibold">{formatCurrency(inv.totalAmount)}</td>
@@ -764,6 +828,58 @@ export default function CustomerDetailPage() {
                   <dd className="mt-1 text-sm text-gray-900 col-span-2">{sum?.lastPurchaseDate ? formatTimestamp(sum.lastPurchaseDate) : '-'}</dd>
                 </div>
               </dl>
+
+              {canPostOpeningBalance && (
+                <div className="mt-6 p-4 border border-indigo-200 bg-indigo-50/50 rounded-lg">
+                  <h4 className="text-sm font-semibold text-gray-900 mb-1">Opening balance (cutover)</h4>
+                  <p className="text-xs text-gray-600 mb-3">
+                    Post historical AR for <strong>{(customer as CustomerDetailData).name}</strong> so the
+                    ledger matches your books. DR Accounts Receivable / CR Opening Balance Equity. One OB
+                    per customer; appears in Accounting → Customer Payments for allocation.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Amount (UGX) *</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={obAmount}
+                        onChange={(e) => setObAmount(e.target.value)}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">As-of date *</label>
+                      <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Original invoice date</label>
+                      <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
+                    </div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => void handlePostOpeningBalanceForCustomer()}
+                        disabled={obPosting}
+                        className="w-full px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {obPosting ? 'Posting…' : 'Post Opening Balance'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <input
+                      type="text"
+                      value={obNotes}
+                      onChange={(e) => setObNotes(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                      placeholder="Optional notes"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : null}
@@ -796,7 +912,16 @@ export default function CustomerDetailPage() {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {invoices.map((inv) => (
                         <tr key={inv.id} className="hover:bg-gray-50">
-                          <td className="px-6 py-4">{inv.invoiceNumber}</td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex flex-wrap items-center gap-2">
+                              {inv.invoiceNumber}
+                              {isCustomerOpeningBalance(inv) && (
+                                <span className="px-2 py-0.5 rounded-full text-xs bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                  Opening Balance
+                                </span>
+                              )}
+                            </span>
+                          </td>
                           <td className="px-6 py-4 text-sm text-gray-600">{inv.issueDate ? formatTimestamp(inv.issueDate) : '-'}</td>
                           <td className="px-6 py-4 text-sm text-gray-600">{inv.paymentMethod || 'CREDIT'}</td>
                           <td className="px-6 py-4 font-semibold">{formatCurrency(inv.totalAmount)}</td>
@@ -1373,7 +1498,10 @@ export default function CustomerDetailPage() {
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Invoice Details</h3>
               <div className="flex items-center gap-2">
-                {detailsInvoice && canAdjustInvoices && Number(detailsInvoice.balance ?? 0) > 0.009 && (
+                {detailsInvoice &&
+                  canAdjustInvoices &&
+                  !isCustomerOpeningBalance(detailsInvoice) &&
+                  Number(detailsInvoice.balance ?? 0) > 0.009 && (
                   <button
                     type="button"
                     onClick={() => setAdjustInvoiceOpen(true)}

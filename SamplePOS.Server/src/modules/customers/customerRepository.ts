@@ -456,7 +456,7 @@ export async function getOpeningBalance(customerId: string, start: Date | string
   const res = await pool.query(
     `WITH debits AS (
        SELECT COALESCE(SUM(
-         CASE WHEN i.document_type IS NULL OR i.document_type = 'INVOICE' OR i.document_type = 'DEBIT_NOTE'
+         CASE WHEN i.document_type IS NULL OR i.document_type IN ('INVOICE', 'DEBIT_NOTE', 'OPENING_BALANCE')
               THEN i.total_amount ELSE 0 END
        ),0) AS amt
        FROM invoices i
@@ -508,6 +508,21 @@ export async function getStatementEntries(customerId: string, start: Date | stri
       FROM invoices i
       WHERE i.customer_id = $1
         AND (i.document_type IS NULL OR i.document_type = 'INVOICE')
+        AND i.status NOT IN ('CANCELLED', 'DRAFT')
+        AND i.issue_date >= $2 AND i.issue_date < $3
+    )
+    UNION ALL
+    (
+      SELECT 
+        i.issue_date as date,
+        'INVOICE' as type,
+        i.invoice_number as reference,
+        CONCAT('Opening balance ', i.invoice_number) as description,
+        i.total_amount as debit,
+        0::numeric as credit
+      FROM invoices i
+      WHERE i.customer_id = $1
+        AND i.document_type = 'OPENING_BALANCE'
         AND i.status NOT IN ('CANCELLED', 'DRAFT')
         AND i.issue_date >= $2 AND i.issue_date < $3
     )

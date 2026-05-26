@@ -18,6 +18,18 @@ export function getBusinessDate(): string {
 }
 
 /**
+ * Normalize API/form dates to YYYY-MM-DD for backend Zod validation.
+ * Handles ISO timestamps, empty strings, and already-valid date-only strings.
+ */
+export function toApiDateOnly(value: string | null | undefined): string | null {
+    if (value == null) return null;
+    const trimmed = String(value).trim();
+    if (!trimmed) return null;
+    const datePart = trimmed.includes('T') ? trimmed.slice(0, 10) : trimmed;
+    return /^\d{4}-\d{2}-\d{2}$/.test(datePart) ? datePart : null;
+}
+
+/**
  * Format a UTC ISO timestamp for display in the business timezone.
  * Input: ISO 8601 string (e.g. '2026-04-12T07:00:00.000Z')
  * Output: Localized date+time string in business TZ (e.g. '12/04/2026, 10:00:00 AM')

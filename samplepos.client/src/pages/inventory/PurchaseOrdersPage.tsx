@@ -11,7 +11,7 @@ import {
 } from '../../hooks/usePurchaseOrders';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { formatCurrency } from '../../utils/currency';
-import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
+import { BUSINESS_TIMEZONE, toApiDateOnly } from '../../utils/businessDate';
 import { useAuth } from '../../hooks/useAuth';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
@@ -604,7 +604,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
       const poData = {
         supplierId,
         orderDate: `${yyyy}-${mm}-${dd}`,
-        expectedDate: expectedDelivery || undefined,
+        expectedDate: toApiDateOnly(expectedDelivery) || undefined,
         notes: notes || undefined,
         createdBy: user.id,
         items: lineItems.map((item) => ({
@@ -680,7 +680,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
             </label>
             <DatePicker
               value={expectedDelivery}
-              onChange={(date) => setExpectedDelivery(date)}
+              onChange={(date) => setExpectedDelivery(toApiDateOnly(date) || '')}
               placeholder="Select expected delivery date"
               minDate={new Date(Date.now() + 86400000)}
               disabled={isSubmitting}
@@ -835,6 +835,14 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   );
 }
 
+function poCanChangeSupplier(po: PORow): boolean {
+  if (po.status !== 'PENDING') return false;
+  const items = po.items || [];
+  return !items.some(
+    (i) => Number(i.receivedQuantity ?? i.received_quantity ?? 0) > 0
+  );
+}
+
 // ── Edit PO Modal ──
 interface EditPOModalProps {
   po: PORow;
@@ -843,7 +851,7 @@ interface EditPOModalProps {
 }
 
 function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
-  const supplierId = po.supplierId || '';
+  const [supplierId, setSupplierId] = useState(po.supplierId || po.supplier_id || '');
 
   // ── Transaction Guard ──────────────────────────────────────────────────
   const { openGuard: openEditGuard, closeGuard: closeEditGuard } = useTransactionGuard();
@@ -854,7 +862,9 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [expectedDelivery, setExpectedDelivery] = useState(po.expectedDelivery || po.expected_delivery_date || '');
+  const [expectedDelivery, setExpectedDelivery] = useState(
+    () => toApiDateOnly(po.expectedDelivery || po.expected_delivery_date) || ''
+  );
   const [notes, setNotes] = useState(po.notes || '');
   const [lineItems, setLineItems] = useState<POLineItem[]>(() => {
     if (!po.items || po.items.length === 0) return [];
@@ -1055,7 +1065,8 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
       await updatePOMutation.mutateAsync({
         id: po.id,
         data: {
-          expectedDate: expectedDelivery || null,
+          supplierId: supplierId || undefined,
+          expectedDate: toApiDateOnly(expectedDelivery),
           notes: notes || null,
           items: lineItems.map((item) => ({
             productId: item.productId,
@@ -1098,12 +1109,11 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
       />
 
       <form onSubmit={handleSubmit}>
-        {/* Header — Vendor is read-only, only items and delivery are editable */}
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <span className="block text-xs font-medium text-gray-500 uppercase tracking-wide">Supplier</span>
-              <span className="text-sm font-semibold text-gray-900">{po.supplierName || po.supplier_name || 'Unknown'}</span>
+              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Supplier</label>
+              <SupplierSelector value={supplierId} onChange={setSupplierId} disabled={isSubmitting} showLabel={false} />
             </div>
             <div>
               <span className="block text-xs font-medium text-gray-500 uppercase tracking-wide">PO Number</span>
@@ -1119,7 +1129,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div>
             <label htmlFor="editExpectedDelivery" className="block text-sm font-medium text-gray-700 mb-2">Expected Delivery Date</label>
-            <DatePicker value={expectedDelivery} onChange={(date) => setExpectedDelivery(date)} placeholder="Select expected delivery date"
+            <DatePicker value={expectedDelivery} onChange={(date) => setExpectedDelivery(toApiDateOnly(date) || '')} placeholder="Select expected delivery date"
               minDate={new Date(Date.now() + 86400000)} disabled={isSubmitting} />
           </div>
         </div>
@@ -1232,6 +1242,9 @@ export default function PurchaseOrdersPage() {
   const submitPOMutation = useSubmitPurchaseOrder();
   const sendToSupplierMutation = useSendPOToSupplier();
   const cancelPOMutation = useCancelPurchaseOrder();
+  const updatePOMutation = useUpdateDraftPO();
+  const [pendingSupplierId, setPendingSupplierId] = useState('');
+  const [isChangingSupplier, setIsChangingSupplier] = useState(false);
   const deletePOMutation = useDeletePurchaseOrder();
 
   // Permission gating
@@ -1442,6 +1455,7 @@ export default function PurchaseOrdersPage() {
       console.log('Final PO:', finalPO);
 
       setSelectedPO(finalPO);
+      setPendingSupplierId(finalPO.supplierId || '');
       setShowDetailsModal(true);
     } catch (error: unknown) {
       console.error('Error loading PO details:', error);
@@ -1966,11 +1980,59 @@ export default function PurchaseOrdersPage() {
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <h3 className="text-sm font-medium text-gray-500">Supplier</h3>
-                  <p className="mt-1 text-base font-medium text-gray-900">
-                    {selectedPO.supplierName}
-                  </p>
-                  {selectedPO.supplierContact && (
-                    <p className="text-sm text-gray-600">{selectedPO.supplierContact}</p>
+                  {poCanChangeSupplier(selectedPO) ? (
+                    <div className="mt-2 space-y-2">
+                      <p className="text-xs text-gray-600">
+                        No goods received and no supplier invoice yet — you can change the vendor on this PO.
+                      </p>
+                      <SupplierSelector
+                        value={pendingSupplierId}
+                        onChange={setPendingSupplierId}
+                        disabled={isChangingSupplier}
+                        showLabel={false}
+                      />
+                      <button
+                        type="button"
+                        disabled={
+                          isChangingSupplier ||
+                          !pendingSupplierId ||
+                          pendingSupplierId === selectedPO.supplierId
+                        }
+                        onClick={async () => {
+                          setIsChangingSupplier(true);
+                          try {
+                            await updatePOMutation.mutateAsync({
+                              id: selectedPO.id,
+                              data: { supplierId: pendingSupplierId },
+                            });
+                            alert('Supplier updated on purchase order.');
+                            refetch();
+                            setShowDetailsModal(false);
+                          } catch (error: unknown) {
+                            handleApiError(error, { fallback: 'Failed to change supplier' });
+                          } finally {
+                            setIsChangingSupplier(false);
+                          }
+                        }}
+                        className="text-sm px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        Save supplier
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="mt-1 text-base font-medium text-gray-900">
+                        {selectedPO.supplierName}
+                      </p>
+                      {selectedPO.supplierContact && (
+                        <p className="text-sm text-gray-600">{selectedPO.supplierContact}</p>
+                      )}
+                      {selectedPO.status === 'PENDING' && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          Supplier is locked after receipt or invoicing. Use Return to supplier / credit note, or post-GR reassignment.
+                        </p>
+                      )}
+                    </>
                   )}
                 </div>
 

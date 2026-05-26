@@ -276,6 +276,7 @@ export const goodsReceiptRepository = {
          gri.po_item_id as "poItemId",
          COALESCE(p.name, 'Unknown Product') as "productName",
          ROUND(COALESCE(poi.ordered_quantity, gri.received_quantity)::numeric, 2) as "orderedQuantity",
+         ROUND(COALESCE(poi.received_quantity, 0)::numeric, 2) as "poAlreadyReceived",
          ROUND(gri.received_quantity::numeric, 2) as "receivedQuantity",
          COALESCE(gri.batch_number, ib.batch_number) as "batchNumber",
          gri.expiry_date as "expiryDate",
@@ -380,7 +381,8 @@ export const goodsReceiptRepository = {
          gri.expiry_date as "expiryDate",
          gri.cost_price as "unitCost",
          ${isBonusExpr} as "isBonus",
-         COALESCE(poi.ordered_quantity, gri.received_quantity) as "orderedQuantity"
+         COALESCE(poi.ordered_quantity, gri.received_quantity) as "orderedQuantity",
+         COALESCE(poi.received_quantity, 0) as "poAlreadyReceived"
        FROM goods_receipt_items gri
        LEFT JOIN products p ON gri.product_id = p.id
        LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id

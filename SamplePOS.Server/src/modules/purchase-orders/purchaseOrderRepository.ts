@@ -292,6 +292,11 @@ export const purchaseOrderRepository = {
       values.push(filters.supplierId);
     }
 
+    // Default list hides cancelled POs; pass status=CANCELLED to audit voided orders.
+    if (!filters?.status) {
+      whereClauses.push(`po.status <> 'CANCELLED'`);
+    }
+
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     const countResult = await pool.query(
@@ -349,12 +354,69 @@ export const purchaseOrderRepository = {
   },
 
   /**
-   * Update PO header fields (DRAFT only)
+   * Blockers for changing PO supplier before any receipt or supplier invoice.
+   * Returns human-readable reason, or null when change is allowed.
+   */
+  async getPOSupplierChangeBlocker(
+    pool: Pool | PoolClient,
+    poId: string
+  ): Promise<string | null> {
+    const poRes = await pool.query(
+      `SELECT status FROM purchase_orders WHERE id = $1`,
+      [poId]
+    );
+    if (poRes.rows.length === 0) return 'Purchase order not found';
+    const status = poRes.rows[0].status as string;
+    if (!['DRAFT', 'PENDING'].includes(status)) {
+      return `Purchase order is ${status}. Supplier can only be changed while DRAFT or PENDING (before receipt).`;
+    }
+
+    const receivedRes = await pool.query(
+      `SELECT COUNT(*)::int AS cnt
+       FROM purchase_order_items
+       WHERE purchase_order_id = $1 AND COALESCE(received_quantity, 0) > 0`,
+      [poId]
+    );
+    if ((receivedRes.rows[0]?.cnt ?? 0) > 0) {
+      return 'Goods have already been received on this PO. Use Return to supplier for corrections.';
+    }
+
+    const completedGrRes = await pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM goods_receipts
+       WHERE purchase_order_id = $1 AND status IN ('COMPLETED', 'FINALIZED')`,
+      [poId]
+    );
+    if ((completedGrRes.rows[0]?.cnt ?? 0) > 0) {
+      return 'A goods receipt has already been posted for this PO.';
+    }
+
+    const invoiceRes = await pool.query(
+      `SELECT si."SupplierInvoiceNumber" AS invoice_number
+       FROM supplier_invoices si
+       JOIN supplier_invoice_grn_links sigl ON sigl.invoice_id = si."Id"
+       JOIN goods_receipts gr ON gr.id = sigl.grn_id
+       WHERE gr.purchase_order_id = $1
+         AND si.deleted_at IS NULL
+         AND COALESCE(si."Status", '') NOT IN ('Cancelled', 'CANCELLED', 'Voided', 'VOIDED')
+       LIMIT 1`,
+      [poId]
+    );
+    if (invoiceRes.rows.length > 0) {
+      const invNo = invoiceRes.rows[0].invoice_number || 'supplier invoice';
+      return `Supplier invoice ${invNo} exists for this PO. Cancel or reverse the invoice before changing supplier.`;
+    }
+
+    return null;
+  },
+
+  /**
+   * Update PO header fields (DRAFT or PENDING when allowed)
    */
   async updatePOHeader(
     pool: Pool | PoolClient,
     id: string,
-    data: { supplierId?: string; expectedDate?: string | null; notes?: string | null }
+    data: { supplierId?: string; expectedDate?: string | null; notes?: string | null },
+    allowedStatuses: string[] = ['DRAFT']
   ): Promise<PurchaseOrder> {
     const setClauses: string[] = [];
     const values: unknown[] = [];
@@ -380,16 +442,22 @@ export const purchaseOrderRepository = {
     setClauses.push(`version = version + 1`);
     setClauses.push(`updated_at = CURRENT_TIMESTAMP`);
 
+    const idParam = paramIndex++;
+    const statusParam = paramIndex;
+    values.push(id, allowedStatuses);
+
     const result = await pool.query(
       `UPDATE purchase_orders 
        SET ${setClauses.join(', ')} 
-       WHERE id = $${paramIndex} AND status = 'DRAFT'
+       WHERE id = $${idParam} AND status::text = ANY($${statusParam}::text[])
        RETURNING *`,
-      [...values, id]
+      values
     );
 
     if (result.rows.length === 0) {
-      throw new Error(`Purchase order ${id} not found or not in DRAFT status`);
+      throw new Error(
+        `Purchase order ${id} not found or status does not allow this update (${allowedStatuses.join(', ')})`
+      );
     }
 
     return result.rows[0];

@@ -1264,6 +1264,12 @@ const SupplierPaymentsPage: React.FC = () => {
                                             <div className="flex-1">
                                                 <div className="flex items-center gap-3 mb-2">
                                                     <h3 className="text-lg font-semibold">{bill.invoiceNumber || 'N/A'}</h3>
+                                                    {(bill.documentType === 'OPENING_BALANCE' ||
+                                                        (bill.invoiceNumber || '').startsWith('OB-')) && (
+                                                        <Badge variant="outline" className="text-xs bg-indigo-50 text-indigo-800 border-indigo-200">
+                                                            Opening Balance
+                                                        </Badge>
+                                                    )}
                                                     <Badge className={`text-xs ${getStatusBadgeColor(bill.status || '')}`}>
                                                         {(bill.status || 'UNKNOWN').replace('_', ' ')}
                                                     </Badge>
@@ -1332,7 +1338,11 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     )
                                                 )}
                                                 {/* Adjust button — never shown for cancelled invoices */}
-                                                {canCreatePayment && safeParseFloat(bill.outstandingBalance) > 0 && !['Cancelled', 'CANCELLED'].includes(bill.status || '') && (
+                                                {canCreatePayment &&
+                                                    safeParseFloat(bill.outstandingBalance) > 0 &&
+                                                    !['Cancelled', 'CANCELLED'].includes(bill.status || '') &&
+                                                    bill.documentType !== 'OPENING_BALANCE' &&
+                                                    !(bill.invoiceNumber || '').startsWith('OB-') && (
                                                     <Button
                                                         variant="outline"
                                                         size="sm"

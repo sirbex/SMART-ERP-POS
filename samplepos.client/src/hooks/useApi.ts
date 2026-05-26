@@ -29,6 +29,8 @@ export const queryKeys = {
     list: (page?: number, limit?: number) => ['customers', 'list', page, limit] as const,
     detail: (id: string) => ['customers', 'detail', id] as const,
     statement: (id: string, start?: string, end?: string, page?: number, limit?: number) => ['customers', 'statement', id, start, end, page, limit] as const,
+    smartStatement: (id: string, startDate: string, endDate: string) =>
+      ['customers', 'smart-statement', id, startDate, endDate] as const,
   },
   suppliers: {
     all: ['suppliers'] as const,
@@ -299,6 +301,20 @@ export function useCustomerStatement(customerId: string, options?: { start?: str
     () => api.customers.getStatement(customerId, { start, end, page, limit }),
     { enabled: !!customerId, staleTime: 30000 }
   );
+}
+
+export function useCustomerSmartStatement(
+  customerId: string,
+  options: { startDate: string; endDate: string },
+) {
+  const { startDate, endDate } = options;
+  return useQuery({
+    queryKey: queryKeys.customers.smartStatement(customerId, startDate, endDate),
+    queryFn: () => api.customers.getSmartStatement(customerId, { startDate, endDate }),
+    select: (res) => res.data?.data,
+    enabled: !!customerId && !!startDate && !!endDate,
+    staleTime: 30000,
+  });
 }
 
 // Sales Hooks

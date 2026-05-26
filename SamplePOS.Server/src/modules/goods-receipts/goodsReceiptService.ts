@@ -298,11 +298,20 @@ export const goodsReceiptService = {
         // BR-PO-003: Validate unit cost
         PurchaseOrderBusinessRules.validateUnitCost(unitCost);
 
-        // BR-PO-006: Validate received vs ordered quantity (if linked to PO)
+        // BR-PO-006: PO-linked qty — open PO qty billable; excess is bonus (free)
         if (purchaseOrderId && !manualPO) {
-          PurchaseOrderBusinessRules.validateReceivedQuantity(orderedQty, receivedQty, false);
-          logger.info('BR-PO-006: Received quantity validation passed', {
+          const poAlready = Money.parseDb(
+            (it as { poAlreadyReceived?: number }).poAlreadyReceived ?? 0
+          ).toNumber();
+          PurchaseOrderBusinessRules.validateGRReceiptAgainstPO(
             orderedQty,
+            poAlready,
+            receivedQty,
+            !!(it as { isBonus?: boolean }).isBonus
+          );
+          logger.info('BR-PO-006: GR receipt quantity validated', {
+            orderedQty,
+            poAlready,
             receivedQty,
           });
 
@@ -513,7 +522,38 @@ export const goodsReceiptService = {
         const orderedQty: number = Money.parseDb(item.orderedQuantity).toNumber();
         const receivedQty: number = Money.parseDb(item.receivedQuantity).toNumber();
         const unitCost: number = Money.parseDb(item.unitCost).toNumber();
-        const isBonus: boolean = !!item.isBonus;
+        const isFullLineBonus: boolean = !!item.isBonus;
+        const poAlreadyReceived: number = Money.parseDb(
+          (item as GoodsReceiptItem & { poAlreadyReceived?: number }).poAlreadyReceived ?? 0
+        ).toNumber();
+
+        if (receivedQty <= 0) continue;
+
+        const receiptSplit = gr.purchaseOrderId
+          ? PurchaseOrderBusinessRules.validateGRReceiptAgainstPO(
+              orderedQty,
+              poAlreadyReceived,
+              receivedQty,
+              isFullLineBonus
+            )
+          : {
+              billableQty: isFullLineBonus ? 0 : receivedQty,
+              bonusQty: isFullLineBonus ? receivedQty : 0,
+              openQty: orderedQty,
+            };
+
+        type ReceiptSegment = { qty: number; isBonusSegment: boolean };
+        const segments: ReceiptSegment[] = [];
+        if (isFullLineBonus) {
+          segments.push({ qty: receivedQty, isBonusSegment: true });
+        } else {
+          if (receiptSplit.billableQty > 0) {
+            segments.push({ qty: receiptSplit.billableQty, isBonusSegment: false });
+          }
+          if (receiptSplit.bonusQty > 0) {
+            segments.push({ qty: receiptSplit.bonusQty, isBonusSegment: true });
+          }
+        }
 
         // SAP UoM snapshot: resolve base UoM and conversion factor for stock movement
         let finBaseUomId: string | null = null;
@@ -524,158 +564,128 @@ export const goodsReceiptService = {
         );
         finBaseUomId = finPuRes.rows[0]?.uom_id || null;
 
-        // Bonus stock: cost recorded as 0 for inventory batches (free goods from supplier)
-        const effectiveCost: number = isBonus ? 0 : unitCost;
-
-        // ── SAP-STANDARD: Normalize to base units ──────────────────────────
-        // Inventory batches, cost layers, and product valuation MUST store
-        // quantities in base units and costs per base unit.
-        // Example: 10 BOX × 100 (factor) = 1000 pieces, cost 1200/BOX → 12/pc
-        const baseQty = PricingEngine.calculateBaseQuantity(receivedQty, finConversionFactor).toNumber();
-        const baseCostPerUnit: number = isBonus
-          ? 0
-          : PricingEngine.normalizeDisplayUnitCost(unitCost, finConversionFactor).toNumber();
-
-        // Generate human-readable batch number: BATCH-YYYYMMDD-001
-        let batchNumber: string = item.batchNumber ?? '';
-        if (!batchNumber) {
-          const dateStr = getBusinessDate().replace(/-/g, ''); // YYYYMMDD
-          const prefix = `BATCH-${dateStr}-`;
-
-          // Single atomic query to get next sequence number
-          // Extract numeric suffix and find max, then add 1
-          // Advisory lock prevents concurrent duplicate batch number generation
-          await client.query(`SELECT pg_advisory_xact_lock(hashtext('batch_number_seq'))`);
-          const seqResult = await client.query(
-            `SELECT COALESCE(MAX(CAST(SUBSTRING(batch_number FROM $2) AS INTEGER)), 0) + 1 AS next_seq
-             FROM inventory_batches 
-             WHERE batch_number LIKE $1`,
-            [`${prefix}%`, `${prefix.replace(/-/g, '\\-')}(\\d+)`]
-          );
-          const seqNum = (seqResult.rows[0]?.next_seq || 1).toString().padStart(3, '0');
-          batchNumber = `${prefix}${seqNum}`;
-        }
-
         const expiryDate: string | null = item.expiryDate || null;
-
-        if (receivedQty <= 0) continue;
-
-        // Validate business rules
         InventoryBusinessRules.validatePositiveQuantity(receivedQty, 'goods receipt item');
         PurchaseOrderBusinessRules.validateUnitCost(unitCost);
-        // Only validate against ordered quantity if this GR is linked to a PO and we have an ordered quantity reference
-        if (gr.purchaseOrderId && item.orderedQuantity != null) {
-          PurchaseOrderBusinessRules.validateReceivedQuantity(orderedQty, receivedQty, false);
-        }
         if (expiryDate) InventoryBusinessRules.validateExpiryDate(expiryDate, false);
 
-        // Check previous cost for alert (compare base-unit costs)
-        const prodRes = await client.query(
-          'SELECT p.name, pv.cost_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
-          [productId]
-        );
-        const previousCostNum: number = prodRes.rows.length
-          ? Money.parseDb(prodRes.rows[0].cost_price).toNumber()
-          : 0;
+        for (const segment of segments) {
+          const segmentQty = segment.qty;
+          const isBonus = segment.isBonusSegment;
+          const effectiveCost: number = isBonus ? 0 : unitCost;
+          const baseQty = PricingEngine.calculateBaseQuantity(segmentQty, finConversionFactor).toNumber();
+          const baseCostPerUnit: number = isBonus
+            ? 0
+            : PricingEngine.normalizeDisplayUnitCost(unitCost, finConversionFactor).toNumber();
 
-        if (Number.isFinite(previousCostNum) && previousCostNum !== baseCostPerUnit) {
-          const prev = new Decimal(previousCostNum);
-          const next = new Decimal(baseCostPerUnit);
-          const changeAmount = next.minus(prev);
-          const changePct = prev.eq(0) ? new Decimal(100) : changeAmount.div(prev).times(100);
-          alerts.push({
+          let batchNumber: string = item.batchNumber ?? '';
+          if (!batchNumber || segments.length > 1) {
+            const dateStr = getBusinessDate().replace(/-/g, '');
+            const prefix = `BATCH-${dateStr}-`;
+            await client.query(`SELECT pg_advisory_xact_lock(hashtext('batch_number_seq'))`);
+            const seqResult = await client.query(
+              `SELECT COALESCE(MAX(CAST(SUBSTRING(batch_number FROM $2) AS INTEGER)), 0) + 1 AS next_seq
+               FROM inventory_batches 
+               WHERE batch_number LIKE $1`,
+              [`${prefix}%`, `${prefix.replace(/-/g, '\\-')}(\\d+)`]
+            );
+            const seqNum = (seqResult.rows[0]?.next_seq || 1).toString().padStart(3, '0');
+            batchNumber = `${prefix}${seqNum}${isBonus ? '-B' : ''}`;
+          }
+
+          if (!isBonus) {
+            const prodRes = await client.query(
+              'SELECT p.name, pv.cost_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
+              [productId]
+            );
+            const previousCostNum: number = prodRes.rows.length
+              ? Money.parseDb(prodRes.rows[0].cost_price).toNumber()
+              : 0;
+
+            if (Number.isFinite(previousCostNum) && previousCostNum !== baseCostPerUnit) {
+              const prev = new Decimal(previousCostNum);
+              const next = new Decimal(baseCostPerUnit);
+              const changeAmount = next.minus(prev);
+              const changePct = prev.eq(0) ? new Decimal(100) : changeAmount.div(prev).times(100);
+              alerts.push({
+                productId,
+                productName,
+                previousCost: prev.toNumber(),
+                newCost: next.toNumber(),
+                changeAmount: changeAmount.toNumber(),
+                changePercentage: changePct.toNumber(),
+                batchNumber,
+              });
+            }
+          }
+
+          const batch = await inventoryRepository.createBatch(client, {
             productId,
-            productName,
-            previousCost: prev.toNumber(),
-            newCost: next.toNumber(),
-            changeAmount: changeAmount.toNumber(),
-            changePercentage: changePct.toNumber(),
             batchNumber,
+            quantity: baseQty,
+            expiryDate,
+            costPrice: baseCostPerUnit,
+            goodsReceiptId: gr.id,
+            goodsReceiptItemId: item.id ?? null,
+            purchaseOrderId: gr.purchaseOrderId ?? null,
+            purchaseOrderItemId: poItemId ?? null,
+            isBonus,
           });
+
+          await syncProductQuantity(client, productId);
+
+          await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
+          const movementNumberResult = await client.query(
+            `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
+             CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
+                  THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
+                  ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
+             END
+             AS movement_number
+             FROM stock_movements 
+             WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
+          );
+          const movementNumber =
+            movementNumberResult.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
+
+          await client.query(
+            `INSERT INTO stock_movements (
+              movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
+              reference_type, reference_id, notes, created_by_id,
+              entered_qty, base_uom_id, conversion_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [
+              movementNumber,
+              productId,
+              batch.id,
+              'GOODS_RECEIPT',
+              baseQty,
+              baseCostPerUnit,
+              'GOODS_RECEIPT',
+              gr.id,
+              `GR ${grNumber || gr.id} - Batch ${batchNumber}${isBonus ? ' (BONUS)' : ''}`,
+              receivedBy || null,
+              segmentQty,
+              finBaseUomId,
+              finConversionFactor,
+            ]
+          );
+
+          if (!isBonus) {
+            costLayerData.push({
+              productId,
+              quantity: baseQty,
+              unitCost: baseCostPerUnit,
+              goodsReceiptId: gr.id,
+              batchNumber,
+            });
+          }
         }
 
-        // Create inventory batch for received quantity (SAP: always in base units)
-        const batch = await inventoryRepository.createBatch(client, {
-          productId,
-          batchNumber,
-          quantity: baseQty,
-          expiryDate,
-          costPrice: baseCostPerUnit,
-          goodsReceiptId: gr.id,
-          goodsReceiptItemId: item.id ?? null,
-          purchaseOrderId: gr.purchaseOrderId ?? null,
-          purchaseOrderItemId: poItemId ?? null,
-          isBonus,
-        });
-
-        // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
-        await syncProductQuantity(client, productId);
-
-        // Record stock movement (RECEIVE)
-        // Generate movement number
-        // Advisory lock prevents concurrent duplicate movement number generation
-        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-        const movementNumberResult = await client.query(
-          `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
-           CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-                THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-                ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-           END
-           AS movement_number
-           FROM stock_movements 
-           WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
-        );
-        const movementNumber =
-          movementNumberResult.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
-
-        await client.query(
-          `INSERT INTO stock_movements (
-            movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
-            reference_type, reference_id, notes, created_by_id,
-            entered_qty, base_uom_id, conversion_factor
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-          [
-            movementNumber,
-            productId,
-            batch.id,
-            'GOODS_RECEIPT',
-            baseQty,             // SAP: quantity in base units
-            baseCostPerUnit,     // SAP: cost per base unit
-            'GOODS_RECEIPT',
-            gr.id,
-            `GR ${grNumber || gr.id} - Batch ${batchNumber}${isBonus ? ' (BONUS)' : ''}`,
-            receivedBy || null,
-            receivedQty,         // SAP UoM snapshot: entered quantity in order units
-            finBaseUomId,        // SAP UoM snapshot: base UoM at posting time
-            finConversionFactor, // SAP UoM snapshot: conversion factor at posting time
-          ]
-        );
-
-        // Update PO item received quantity if mapped
         if (poItemId) {
-          logger.info('Updating PO item received quantity', {
-            poItemId,
-            receivedQty,
-            productId,
-            productName,
-          });
           await goodsReceiptRepository.updatePOItemReceivedQuantity(client, poItemId, receivedQty);
-          logger.info('PO item received quantity updated successfully', { poItemId });
         } else {
           logger.warn('No PO item ID found for GR item', { productId, productName });
-        }
-
-        // Collect cost layer data - will be processed AFTER transaction commits
-        // This avoids nested transactions which cause connection pool exhaustion and deadlocks
-        // Skip cost layers for bonus items (cost = 0, no cost valuation impact)
-        if (!isBonus) {
-          costLayerData.push({
-            productId,
-            quantity: baseQty,           // SAP: always in base units
-            unitCost: baseCostPerUnit,   // SAP: always per base unit
-            goodsReceiptId: gr.id,
-            batchNumber,
-          });
         }
       }
 
@@ -732,10 +742,22 @@ export const goodsReceiptService = {
       // via the 3-way match workflow (POST /supplier-payments/invoices/:id/post).
       // ============================================================
       const totalAmountDec = items.reduce((sum: Decimal, item: GoodsReceiptItem) => {
-        if (item.isBonus) return sum; // Bonus items are free, excluded from invoice
-        const qty = new Decimal(String(item.receivedQuantity ?? 0));
+        const receivedQty = Money.parseDb(item.receivedQuantity).toNumber();
+        const orderedQty = Money.parseDb(item.orderedQuantity).toNumber();
+        const poAlready = Money.parseDb(
+          (item as GoodsReceiptItem & { poAlreadyReceived?: number }).poAlreadyReceived ?? 0
+        ).toNumber();
+        const split = gr.purchaseOrderId
+          ? PurchaseOrderBusinessRules.validateGRReceiptAgainstPO(
+              orderedQty,
+              poAlready,
+              receivedQty,
+              !!item.isBonus
+            )
+          : { billableQty: item.isBonus ? 0 : receivedQty, bonusQty: 0, openQty: orderedQty };
+        if (split.billableQty <= 0) return sum;
         const cost = new Decimal(String(item.unitCost ?? 0));
-        return sum.plus(qty.times(cost));
+        return sum.plus(new Decimal(split.billableQty).times(cost));
       }, new Decimal(0));
       const totalAmount = Money.toNumber(totalAmountDec);
 
@@ -942,10 +964,14 @@ export const goodsReceiptService = {
         // Only validate against ordered quantity when GR is linked to a PO and we have PO-sourced orderedQuantity
         const orderedQty = Money.parseDb(item.orderedQuantity).toNumber();
         if (gr.purchaseOrderId && orderedQty > 0) {
-          PurchaseOrderBusinessRules.validateReceivedQuantity(
+          const poAlready = Money.parseDb(
+            (item as GoodsReceiptItem & { poAlreadyReceived?: number }).poAlreadyReceived ?? 0
+          ).toNumber();
+          PurchaseOrderBusinessRules.validateGRReceiptAgainstPO(
             orderedQty,
+            poAlready,
             data.receivedQuantity,
-            false
+            !!(data.isBonus ?? (item as GoodsReceiptItem).isBonus)
           );
         }
       }
@@ -1005,7 +1031,16 @@ export const goodsReceiptService = {
           InventoryBusinessRules.validatePositiveQuantity(update.receivedQuantity, 'goods receipt item');
           const orderedQty = Money.parseDb(existing.orderedQuantity).toNumber();
           if (gr.purchaseOrderId && orderedQty > 0) {
-            PurchaseOrderBusinessRules.validateReceivedQuantity(orderedQty, update.receivedQuantity, false);
+            const poAlready = Money.parseDb(
+              (existing as GoodsReceiptItem & { poAlreadyReceived?: number }).poAlreadyReceived ?? 0
+            ).toNumber();
+            const isBonus = update.isBonus ?? !!(existing as GoodsReceiptItem).isBonus;
+            PurchaseOrderBusinessRules.validateGRReceiptAgainstPO(
+              orderedQty,
+              poAlready,
+              update.receivedQuantity,
+              !!isBonus
+            );
           }
         }
 

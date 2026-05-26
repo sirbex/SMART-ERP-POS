@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
 import { downloadFile } from '../../utils/download';
 import { getBusinessDate } from '../../utils/businessDate';
+import { grBillableLineTotal, splitGRReceiptQuantities } from '../../utils/grReceiptQuantity';
 import {
   useGoodsReceipts,
   useFinalizeGoodsReceipt,
@@ -28,6 +29,7 @@ import { formatCurrency } from '../../utils/currency';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
+import { SupplierReassignmentModal } from '../../components/inventory/SupplierReassignmentModal';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
 import { ProcurementProductSearch } from '../../components/inventory/shared';
@@ -109,6 +111,8 @@ interface GRItemRow {
   product_name?: string;
   orderedQuantity?: number | string;
   ordered_quantity?: number | string;
+  poAlreadyReceived?: number | string;
+  po_already_received?: number | string;
   receivedQuantity?: number | string;
   received_quantity?: number | string;
   unitCost?: number | string;
@@ -293,6 +297,7 @@ export default function GoodsReceiptsPage() {
   // Permission gating
   const canCreateGR = useCanAccess([], ['purchasing.create']);
   const canFinalizeGR = useCanAccess([], ['purchasing.post']);
+  const canReassignSupplier = useCanAccess([], ['corrections.execute']);
   const [showAlertsModal, setShowAlertsModal] = useState(false);
   const [costAlerts, setCostAlerts] = useState<CostAlert[]>([]);
   // Post-finalize "Create Bill?" prompt (designed modal, not browser confirm)
@@ -319,6 +324,7 @@ export default function GoodsReceiptsPage() {
   const [batchWarnings, setBatchWarnings] = useState<Record<string, string>>({});
   const validationTimeout = useRef<Record<string, NodeJS.Timeout>>({});
   const [showReturnModal, setShowReturnModal] = useState(false);
+  const [showSupplierReassignModal, setShowSupplierReassignModal] = useState(false);
   const [creatingBillForGR, setCreatingBillForGR] = useState<string | null>(null);
 
   useEffect(() => {
@@ -405,7 +411,7 @@ export default function GoodsReceiptsPage() {
   const selectedGRId = selectedGR?.id || '';
   const isFinalized = selectedGR?.status === 'COMPLETED' || selectedGR?.status === 'FINALIZED';
   const { data: returnableData, isLoading: returnableLoading } = useReturnableItems(
-    showReturnModal ? selectedGRId : ''
+    (showReturnModal || (showDetailsModal && isFinalized)) && selectedGRId ? selectedGRId : '',
   );
   const { data: returnGrnData } = useReturnGrnsByGrn(isFinalized ? selectedGRId : '');
 
@@ -533,10 +539,10 @@ export default function GoodsReceiptsPage() {
       const es = editItems[it.id] || {};
       const qty = Number(es.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
       const cost = Number(es.unitCost ?? it.unitCost ?? it.unit_cost ?? 0);
+      const ordered = Number(it.orderedQuantity ?? it.ordered_quantity ?? 0);
+      const poAlready = Number(it.poAlreadyReceived ?? it.po_already_received ?? 0);
       const bonus = !!(es.isBonus ?? it.isBonus ?? it.is_bonus ?? false);
-      if (!bonus && qty > 0) {
-        total += qty * cost;
-      }
+      total += grBillableLineTotal(ordered, poAlready, qty, cost, bonus);
     });
     return total;
   }, [items, editItems]);
@@ -698,7 +704,10 @@ export default function GoodsReceiptsPage() {
           const edits = editItems[it.id] || {};
           const qty = Number(edits.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
           const cost = Number(edits.unitCost ?? it.unitCost ?? it.unit_cost ?? 0);
-          return sum + qty * cost;
+          const ordered = Number(it.orderedQuantity ?? it.ordered_quantity ?? 0);
+          const poAlready = Number(it.poAlreadyReceived ?? it.po_already_received ?? 0);
+          const bonus = !!(edits.isBonus ?? it.isBonus ?? it.is_bonus ?? false);
+          return sum + grBillableLineTotal(ordered, poAlready, qty, cost, bonus);
         }, 0);
         const grNumber = selectedGR?.grNumber || selectedGR?.receiptNumber || selectedGR?.receipt_number || '';
         const alreadyBilled =
@@ -1526,6 +1535,16 @@ export default function GoodsReceiptsPage() {
                       </svg>
                       Return to Supplier
                     </button>
+                    {canReassignSupplier && (grDetail?.gr?.supplierId || selectedGR.supplierId || selectedGR.supplier_id) && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSupplierReassignModal(true)}
+                        className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 flex items-center gap-2"
+                        title="Move GR/IR liability to another supplier (no stock change)"
+                      >
+                        Reassign supplier
+                      </button>
+                    )}
                     {(grDetail?.gr?.supplierId || selectedGR.supplierId) && (() => {
                       const grId = selectedGR.id || (selectedGR as { gr_id?: string }).gr_id || '';
                       const grNumber = selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || '';
@@ -1598,6 +1617,31 @@ export default function GoodsReceiptsPage() {
         </div>
       )}
 
+      {showSupplierReassignModal && selectedGR && isFinalized && (
+        <SupplierReassignmentModal
+          grnId={selectedGR.id}
+          grNumber={
+            selectedGR.grNumber ||
+            selectedGR.receiptNumber ||
+            selectedGR.receipt_number ||
+            selectedGR.gr_number ||
+            selectedGR.id
+          }
+          fromSupplierId={
+            (grDetail?.gr?.supplierId as string) ||
+            selectedGR.supplierId ||
+            selectedGR.supplier_id ||
+            ''
+          }
+          fromSupplierName={selectedGR.supplierName || selectedGR.supplier_name}
+          onClose={() => setShowSupplierReassignModal(false)}
+          onSuccess={() => {
+            void detailsQuery.refetch();
+            alert('Supplier reassignment posted to GL. Review supplier statements and GR/IR clearing.');
+          }}
+        />
+      )}
+
       {/* Return to Supplier Modal */}
       {showReturnModal && selectedGR && (
         <div
@@ -1617,6 +1661,11 @@ export default function GoodsReceiptsPage() {
                     GR: {selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || selectedGR.gr_number}
                     {' — '}
                     {selectedGR.supplierName || selectedGR.supplier_name}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-2 max-w-xl">
+                    Wrong product or quantity? Return it here (stock and GR/IR adjust). Receive the correct item on a{' '}
+                    <strong>new Goods Receipt</strong> from the same PO. If you already created a supplier bill, post the
+                    return then click <strong>Create Credit Note</strong> on the return badge.
                   </p>
                 </div>
                 <button
@@ -2474,13 +2523,25 @@ function GRItemRow({
     costVarPct = dPct.toNumber();
   }
 
+  const poAlready = Number(item.poAlreadyReceived ?? item.po_already_received ?? 0);
+  const openQty = Math.max(0, Number(ordered) - poAlready);
+  const isFullLineBonus = !!(es.isBonus ?? item.isBonus ?? item.is_bonus ?? false);
+  const receivedVal = Number(es.receivedQuantity ?? receivedQty);
+  const receiptSplit = isFromPO
+    ? splitGRReceiptQuantities(Number(ordered), poAlready, receivedVal, isFullLineBonus)
+    : { billableQty: receivedVal, bonusQty: 0, openQty };
+
   const receivedError = ((): string | null => {
     if (es.receivedQuantity == null) return null;
     if (Number(es.receivedQuantity) < 0) return 'Must be ≥ 0';
-    if (ordered !== undefined && Number(es.receivedQuantity) > Number(ordered))
-      return 'Cannot exceed ordered';
     return null;
   })();
+  const receivedHint =
+    isFromPO && receiptSplit.bonusQty > 0 && !isFullLineBonus
+      ? `${receiptSplit.bonusQty} unit(s) over open PO qty will post as bonus (free)`
+      : isFromPO && isFullLineBonus && receivedVal > 0
+        ? 'Full line posts as bonus stock (zero cost)'
+        : null;
   const unitCostError = ((): string | null => {
     if (es.unitCost == null) return null;
     return Number(es.unitCost) < 0 ? 'Must be ≥ 0' : null;
@@ -2538,8 +2599,13 @@ function GRItemRow({
           </select>
         )}
       </td>
-      {/* Ordered */}
-      <td className="px-4 py-2 text-sm text-center text-gray-700 font-medium">{displayedOrdered}</td>
+      {/* Ordered / open */}
+      <td className="px-4 py-2 text-sm text-center text-gray-700 font-medium">
+        <div>{displayedOrdered}</div>
+        {isFromPO && openQty < Number(ordered) && (
+          <div className="text-xs text-amber-700">Open: {openQty}</div>
+        )}
+      </td>
       {/* Received — single input (Problem 3) */}
       <td className="px-4 py-2 text-sm">
         <input
@@ -2564,6 +2630,9 @@ function GRItemRow({
           autoFocus={itemIndex === 0 && !disabled}
         />
         {receivedError && <div className="text-xs text-red-600 mt-0.5">{receivedError}</div>}
+        {receivedHint && !receivedError && (
+          <div className="text-xs text-green-700 mt-0.5 max-w-[140px]">{receivedHint}</div>
+        )}
       </td>
       {/* Unit Cost */}
       <td className="px-4 py-2 text-sm">
@@ -2653,7 +2722,7 @@ function GRItemRow({
       <td className="px-4 py-2 text-sm text-center">
         <label
           className="inline-flex items-center gap-1 cursor-pointer"
-          title="Mark as bonus stock (zero cost)"
+          title="All units on this line are free (bonus). To receive extra units above the PO, enter the full qty — excess over open PO qty posts as bonus automatically."
         >
           <input
             type="checkbox"

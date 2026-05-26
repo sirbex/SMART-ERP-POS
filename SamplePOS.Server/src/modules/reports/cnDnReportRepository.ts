@@ -25,6 +25,7 @@ import type {
   SupplierStatementEntry,
   SupplierAgingRow,
   SmartStatementEntry,
+  CustomerUnallocatedReceipt,
 } from './cnDnReportTypes.js';
 
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -860,4 +861,268 @@ function vchTypeLabel(referenceType: string): string {
     case 'DEBIT_NOTE': return 'Debit Note';
     default: return referenceType.replace(/_/g, ' ');
   }
+}
+
+// ─── 11. Smart Customer Statement (GL account 1200) ─────────────────────────
+
+/** AR lines tagged to customer, plus invoice payments resolved via invoice_payments. */
+const customerArScopeSql = (leAlias: string, ltAlias: string, customerParam: string): string => `
+  (
+    (${leAlias}."EntityId" = ${customerParam}::text AND UPPER(${leAlias}."EntityType") = 'CUSTOMER')
+    OR (
+      ${ltAlias}."ReferenceType" = 'INVOICE_PAYMENT'
+      AND EXISTS (
+        SELECT 1 FROM invoice_payments ip
+        INNER JOIN invoices i ON i.id = ip.invoice_id
+        WHERE ip.id = ${ltAlias}."ReferenceId"
+          AND i.customer_id = ${customerParam}::uuid
+      )
+    )
+  )`;
+
+export async function getCustomerStatementOpeningBalance(
+  pool: Pool,
+  customerId: string,
+  beforeDate: string,
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT COALESCE(
+           SUM(le."DebitAmount") - SUM(le."CreditAmount"), 0
+         ) AS opening
+         FROM ledger_entries le
+         JOIN accounts a ON le."AccountId" = a."Id"
+         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+         WHERE a."AccountCode" = '1200'
+           AND ${customerArScopeSql('le', 'lt', '$1')}
+           AND lt."Status" = 'POSTED'
+           AND le."EntryDate"::date < $2::date`,
+    [customerId, beforeDate],
+  );
+
+  return toNum(result.rows[0]?.opening);
+}
+
+export async function getSmartCustomerStatementEntries(
+  pool: Pool,
+  customerId: string,
+  startDate: string,
+  endDate: string,
+): Promise<SmartStatementEntry[]> {
+  const result = await pool.query(
+    `SELECT
+         lt."TransactionDate"::date AS date,
+         lt."ReferenceType"        AS ref_type,
+         COALESCE(lt."ReferenceNumber", lt."TransactionNumber", '') AS reference,
+         lt."Id"                                                     AS transaction_id,
+         COALESCE(lt."IsReversed", false)                            AS is_reversed,
+         ROUND(SUM(le."DebitAmount")::numeric, 4)                    AS total_dr,
+         ROUND(SUM(le."CreditAmount")::numeric, 4)                   AS total_cr,
+         MAX(COALESCE(acp.payment_method, ip.payment_method::text))    AS payment_method
+       FROM ledger_entries le
+       JOIN accounts a              ON a."Id"  = le."AccountId"
+       JOIN ledger_transactions lt  ON lt."Id" = le."TransactionId"
+       LEFT JOIN ar_customer_payments acp
+         ON lt."ReferenceType" = 'CUSTOMER_PAYMENT'
+         AND acp.payment_number = lt."ReferenceNumber"
+       LEFT JOIN invoice_payments ip
+         ON lt."ReferenceType" = 'INVOICE_PAYMENT'
+         AND ip.id = lt."ReferenceId"
+       WHERE a."AccountCode" = '1200'
+         AND ${customerArScopeSql('le', 'lt', '$1')}
+         AND lt."Status" = 'POSTED'
+         AND lt."ReferenceType" NOT IN (
+               'SYSTEM_CORRECTION', 'CORRECTION', 'HIST_REV', 'MANUAL_ADJUSTMENT', 'SALE_COGS'
+             )
+         AND le."EntryDate"::date >= $2::date
+         AND le."EntryDate"::date <= $3::date
+       GROUP BY
+         lt."Id", lt."TransactionDate", lt."ReferenceType",
+         lt."ReferenceNumber", lt."TransactionNumber", lt."IsReversed"
+       HAVING ABS(SUM(le."DebitAmount") - SUM(le."CreditAmount")) > 0.001
+       ORDER BY lt."TransactionDate"::date ASC, MIN(le."CreatedAt") ASC`,
+    [customerId, startDate, endDate],
+  );
+
+  return result.rows.map((r): SmartStatementEntry => {
+    const referenceType = r.ref_type as string;
+    const isReversed = r.is_reversed as boolean;
+    const debit = toNum(r.total_dr);
+    const credit = toNum(r.total_cr);
+    const paymentMethod = (r.payment_method as string | null) ?? undefined;
+    const paymentMethodLabel = formatCustomerPaymentMethodLabel(paymentMethod);
+
+    let particulars: string;
+    let vchType: string;
+    let itemStatus: SmartStatementEntry['itemStatus'];
+
+    if (isReversed) {
+      particulars = 'Voided transaction';
+      vchType = customerVchTypeLabel(referenceType);
+      itemStatus = 'Cancelled';
+    } else {
+      switch (referenceType) {
+        case 'INVOICE':
+          particulars = 'Customer invoice issued';
+          vchType = 'Invoice';
+          itemStatus = 'Unpaid';
+          break;
+        case 'SALE':
+          particulars = 'Credit sale';
+          vchType = 'Sale';
+          itemStatus = 'Unpaid';
+          break;
+        case 'INVOICE_PAYMENT':
+        case 'CUSTOMER_PAYMENT':
+          particulars = paymentMethodLabel
+            ? `Payment received (${paymentMethodLabel})`
+            : 'Payment received';
+          vchType = 'Payment';
+          itemStatus = 'Paid';
+          break;
+        case 'CREDIT_NOTE':
+          particulars = 'Credit note issued';
+          vchType = 'Credit Note';
+          itemStatus = 'Applied';
+          break;
+        case 'DEBIT_NOTE':
+          particulars = 'Debit note issued';
+          vchType = 'Debit Note';
+          itemStatus = 'Unpaid';
+          break;
+        case 'CUSTOMER_OPENING_BALANCE':
+          particulars = 'Opening balance brought forward';
+          vchType = 'Opening';
+          itemStatus = 'Unpaid';
+          break;
+        case 'SALE_REFUND':
+          particulars = 'Sale refund / return';
+          vchType = 'Refund';
+          itemStatus = 'Applied';
+          break;
+        default:
+          particulars = referenceType.replace(/_/g, ' ').toLowerCase();
+          vchType = customerVchTypeLabel(referenceType);
+          itemStatus = credit > 0 ? 'Applied' : 'Unpaid';
+      }
+    }
+
+    return {
+      date: r.date,
+      particulars,
+      vchType,
+      vchNo: r.reference as string,
+      debit,
+      credit,
+      balanceAfter: 0,
+      itemStatus,
+      paymentMethod,
+      transactionId: r.transaction_id as string,
+      referenceType,
+      isReversed,
+    };
+  });
+}
+
+function formatCustomerPaymentMethodLabel(method?: string | null): string | undefined {
+  if (!method) return undefined;
+  switch (method.toUpperCase()) {
+    case 'CASH': return 'Cash';
+    case 'CARD': return 'Card';
+    case 'MOBILE_MONEY': return 'Mobile Money';
+    case 'BANK_TRANSFER': return 'Bank Transfer';
+    case 'CREDIT': return 'Credit';
+    case 'DEPOSIT': return 'Deposit';
+    case 'OTHER': return 'Other';
+    default: return method.replace(/_/g, ' ');
+  }
+}
+
+function customerVchTypeLabel(referenceType: string): string {
+  switch (referenceType) {
+    case 'INVOICE': return 'Invoice';
+    case 'SALE': return 'Sale';
+    case 'INVOICE_PAYMENT':
+    case 'CUSTOMER_PAYMENT': return 'Payment';
+    case 'CREDIT_NOTE': return 'Credit Note';
+    case 'DEBIT_NOTE': return 'Debit Note';
+    case 'CUSTOMER_OPENING_BALANCE': return 'Opening';
+    case 'SALE_REFUND': return 'Refund';
+    default: return referenceType.replace(/_/g, ' ');
+  }
+}
+
+/** Reversed AR allocations in period (open-item subledger; no GL mirror). */
+export async function getCustomerReversedAllocationEntries(
+  pool: Pool,
+  customerId: string,
+  startDate: string,
+  endDate: string,
+): Promise<SmartStatementEntry[]> {
+  const result = await pool.query(
+    `SELECT
+       a.reversed_at::date AS date,
+       a.id AS allocation_id,
+       a.amount_allocated AS amount,
+       i.invoice_number,
+       p.payment_number
+     FROM ar_payment_allocations a
+     JOIN ar_customer_payments p ON p.id = a.payment_id
+     JOIN invoices i ON i.id = a.invoice_id
+     WHERE p.customer_id = $1
+       AND a.status = 'REVERSED'
+       AND a.reversed_at IS NOT NULL
+       AND a.reversed_at::date >= $2::date
+       AND a.reversed_at::date <= $3::date
+     ORDER BY a.reversed_at ASC`,
+    [customerId, startDate, endDate],
+  );
+
+  return result.rows.map((r): SmartStatementEntry => {
+    const amount = toNum(r.amount);
+    const invoiceNumber = String(r.invoice_number || '');
+    const paymentNumber = String(r.payment_number || '');
+    return {
+      date: r.date,
+      particulars: `Allocation reversed — invoice ${invoiceNumber} (receipt ${paymentNumber})`,
+      vchType: 'Allocation',
+      vchNo: String(r.allocation_id),
+      debit: amount,
+      credit: 0,
+      balanceAfter: 0,
+      itemStatus: 'Reversed',
+      transactionId: String(r.allocation_id),
+      referenceType: 'AR_ALLOCATION_REVERSED',
+      isReversed: true,
+    };
+  });
+}
+
+/** Current unallocated customer receipt balance (open-item; GL already posted on receipt). */
+export async function getCustomerUnallocatedReceipts(
+  pool: Pool,
+  customerId: string,
+): Promise<{ total: number; receipts: CustomerUnallocatedReceipt[] }> {
+  const result = await pool.query(
+    `SELECT id, payment_number, payment_date::date AS payment_date, unallocated_amount
+     FROM ar_customer_payments
+     WHERE customer_id = $1
+       AND status NOT IN ('REVERSED', 'CANCELLED')
+       AND unallocated_amount > 0.009
+     ORDER BY payment_date ASC`,
+    [customerId],
+  );
+
+  let total = new Decimal(0);
+  const receipts = result.rows.map((r) => {
+    const unallocatedAmount = toNum(r.unallocated_amount);
+    total = total.plus(unallocatedAmount);
+    return {
+      paymentId: r.id as string,
+      paymentNumber: r.payment_number as string,
+      paymentDate: String(r.payment_date).slice(0, 10),
+      unallocatedAmount,
+    };
+  });
+
+  return { total: total.toDecimalPlaces(2).toNumber(), receipts };
 }

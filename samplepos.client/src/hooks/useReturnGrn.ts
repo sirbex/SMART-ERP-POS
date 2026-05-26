@@ -19,6 +19,7 @@ export interface CreateReturnGrnInput {
 }
 
 export interface ReturnableItem {
+    grItemId?: string;
     productId: string;
     productName: string;
     batchId: string | null;

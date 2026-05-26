@@ -3,6 +3,7 @@
 import type { Request, Response } from 'express';
 import { CreateCustomerSchema, UpdateCustomerSchema } from '../../../../shared/zod/customer.js';
 import * as customerService from './customerService.js';
+import * as cnDnReportService from '../reports/cnDnReportService.js';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -19,6 +20,10 @@ const CustomerOpeningBalanceSchema = z.object({
 });
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
+const LedgerQuerySchema = z.object({
+  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'startDate must be YYYY-MM-DD'),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'endDate must be YYYY-MM-DD'),
+});
 const PaginationQuerySchema = z.object({
   page: z
     .string()
@@ -228,6 +233,18 @@ export const getCustomerSummary = asyncHandler(async (req: Request, res: Respons
     success: true,
     data: summary,
   });
+});
+
+/**
+ * GL-driven customer smart statement (mirrors supplier smart-statement).
+ * GET /api/customers/:id/smart-statement?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
+ */
+export const getSmartCustomerStatement = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id: customerId } = UuidParamSchema.parse(req.params);
+  const { startDate, endDate } = LedgerQuerySchema.parse(req.query);
+  const data = await cnDnReportService.getSmartCustomerStatementData(pool, customerId, startDate, endDate);
+  res.json({ success: true, data });
 });
 
 /**

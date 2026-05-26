@@ -175,7 +175,8 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       p.module === 'settings' ||
       p.action === 'read' ||
       // Invoice adjustment (credit notes) — admins must correct AR like accountants
-      p.key === 'customers.adjust'
+      p.key === 'customers.adjust' ||
+      p.module === 'corrections'
     );
     for (const permission of adminPermissions) {
       await client.query(
@@ -269,6 +270,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       ['sales.read', 'sales.export', 'purchasing.read', 'purchasing.create',
         'customers.read', 'customers.export', 'customers.adjust',
         'suppliers.read', 'suppliers.create', 'suppliers.update',
+        'corrections.read', 'corrections.execute',
         'inventory.read', 'settings.read', 'quotations.read'].includes(p.key)
     );
     for (const permission of accountantPerms) {

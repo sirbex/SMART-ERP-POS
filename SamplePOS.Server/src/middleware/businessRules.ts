@@ -630,7 +630,8 @@ export class PurchaseOrderBusinessRules {
   }
 
   /**
-   * BR-PO-006: Received quantity cannot exceed ordered quantity
+   * BR-PO-006: Received quantity cannot exceed ordered quantity (legacy strict check).
+   * Prefer {@link splitGRReceiptQuantities} for PO-linked GR — excess posts as bonus stock.
    */
   static validateReceivedQuantity(
     orderedQuantity: number,
@@ -644,6 +645,49 @@ export class PurchaseOrderBusinessRules {
         'OVER_RECEIVING'
       );
     }
+  }
+
+  /**
+   * SAP-style GR split: billable qty fills open PO qty; excess is free (bonus) stock.
+   * Full-line bonus = entire receipt is free (may exceed PO ordered qty).
+   */
+  static splitGRReceiptQuantities(
+    orderedQuantity: number,
+    alreadyReceivedOnPo: number,
+    receivedQuantity: number,
+    isFullLineBonus: boolean
+  ): { billableQty: number; bonusQty: number; openQty: number } {
+    const openQty = Math.max(0, orderedQuantity - alreadyReceivedOnPo);
+    if (isFullLineBonus) {
+      return { billableQty: 0, bonusQty: receivedQuantity, openQty };
+    }
+    const billableQty = Math.min(receivedQuantity, openQty);
+    const bonusQty = Math.max(0, receivedQuantity - openQty);
+    return { billableQty, bonusQty, openQty };
+  }
+
+  /**
+   * BR-PO-006 (modern): validate PO-linked GR qty; never blocks bonus excess.
+   */
+  static validateGRReceiptAgainstPO(
+    orderedQuantity: number,
+    alreadyReceivedOnPo: number,
+    receivedQuantity: number,
+    isFullLineBonus: boolean
+  ): { billableQty: number; bonusQty: number; openQty: number } {
+    if (receivedQuantity < 0) {
+      throw new BusinessRuleViolation(
+        'BR-PO-006',
+        'Received quantity cannot be negative',
+        'NEGATIVE_RECEIVED_QTY'
+      );
+    }
+    return PurchaseOrderBusinessRules.splitGRReceiptQuantities(
+      orderedQuantity,
+      alreadyReceivedOnPo,
+      receivedQuantity,
+      isFullLineBonus
+    );
   }
 
   /**

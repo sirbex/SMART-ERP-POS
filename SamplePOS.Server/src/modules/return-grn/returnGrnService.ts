@@ -7,6 +7,7 @@
  * - Validates return qty ≤ (received qty − previously returned qty)
  * - Creates SUPPLIER_RETURN stock movements (decreases stock)
  * - Reduces batch remaining_quantity
+ * - Deducts FIFO cost_layers (keeps layer subledger aligned with inventory GL)
  * - Recalculates product_inventory.quantity_on_hand
  * - Posts GL: DR GRN/IR Clearing (2150) / CR Inventory (1300) — inside same transaction
  *   ⚠️  AP (2100) is NOT touched on Return GRN post.
@@ -22,6 +23,7 @@ import {
     type ReturnGrnLine,
 } from './returnGrnRepository.js';
 import * as stockMovementRepository from '../stock-movements/stockMovementRepository.js';
+import * as costLayerService from '../../services/costLayerService.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
@@ -303,7 +305,31 @@ export const returnGrnService = {
                     createdBy: rgrn.createdBy,
                 });
 
-                // 3d. App-layer sync: update BOTH product_inventory and products.quantity_on_hand
+                // 3e. FIFO cost_layers — mirror sale outbound (GR finalize creates layers)
+                const costingResult = await client.query<{ costing_method: string | null }>(
+                    `SELECT costing_method FROM product_valuation WHERE product_id = $1`,
+                    [line.productId],
+                );
+                const costingMethod = (costingResult.rows[0]?.costing_method || 'FIFO') as
+                    | 'FIFO'
+                    | 'AVCO'
+                    | 'STANDARD';
+                if (costingMethod === 'FIFO') {
+                    await costLayerService.deductFromCostLayers(
+                        line.productId,
+                        line.baseQuantity,
+                        'FIFO',
+                        undefined,
+                        client,
+                    );
+                    logger.debug('Return GRN cost layers deducted', {
+                        rgrnId,
+                        productId: line.productId,
+                        baseQuantity: line.baseQuantity,
+                    });
+                }
+
+                // 3f. App-layer sync: update BOTH product_inventory and products.quantity_on_hand
                 await syncProductQuantity(client, line.productId);
             }
 

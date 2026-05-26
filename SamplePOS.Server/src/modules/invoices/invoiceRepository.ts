@@ -212,7 +212,7 @@ export const invoiceRepository = {
     filters?: { customerId?: string; status?: string }
   ): Promise<{ invoices: InvoiceRecord[]; total: number }> {
     const offset = (page - 1) * limit;
-    const where: string[] = [];
+    const where: string[] = [`i.status NOT IN ('CANCELLED', 'DRAFT', 'VOIDED')`];
     const values: unknown[] = [];
     let idx = 1;
 
@@ -223,8 +223,14 @@ export const invoiceRepository = {
       where.push(`COALESCE(i.document_type, 'INVOICE') IN ('INVOICE', 'OPENING_BALANCE')`);
     }
     if (filters?.status) {
-      where.push(`i.status = $${idx++}`);
-      values.push(filters.status);
+      if (filters.status === 'OVERDUE') {
+        where.push(`i.due_date < CURRENT_DATE`);
+        where.push(`i.amount_due > 0`);
+        where.push(`i.status NOT IN ('PAID')`);
+      } else {
+        where.push(`i.status = $${idx++}`);
+        values.push(filters.status);
+      }
     }
 
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';

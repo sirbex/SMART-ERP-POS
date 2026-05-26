@@ -23,7 +23,7 @@ const ListInvoicesQuerySchema = z.object({
     .optional()
     .transform((v) => (v ? parseInt(v) : 50)),
   customerId: z.string().uuid().optional(),
-  status: z.enum(['UNPAID', 'PARTIALLY_PAID', 'PAID', 'CANCELLED']).optional(),
+  status: z.enum(['UNPAID', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED']).optional(),
 });
 
 export const invoiceController = {

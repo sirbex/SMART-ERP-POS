@@ -222,16 +222,50 @@ export const purchaseOrderService = {
     return UnitOfWork.run(pool, async (client) => {
       await checkMaintenanceMode(client);
 
-      // Fetch existing PO — must be DRAFT
       const existing = await purchaseOrderRepository.getPOById(client, id);
       if (!existing) {
         throw new Error(`Purchase order ${id} not found`);
       }
-      if (existing.po.status !== 'DRAFT') {
-        throw new Error('Can only edit purchase orders in DRAFT status');
+
+      const status = existing.po.status;
+      if (status === 'PENDING') {
+        if (input.items && input.items.length > 0) {
+          throw new Error(
+            'Cannot replace line items on a submitted PO. Change supplier only, or cancel and create a new PO.'
+          );
+        }
+        const supplierBlocker = await purchaseOrderRepository.getPOSupplierChangeBlocker(client, id);
+        if (supplierBlocker) {
+          throw new Error(supplierBlocker);
+        }
+        if (!input.supplierId && input.expectedDate === undefined && input.notes === undefined) {
+          throw new Error('No fields to update');
+        }
+        if (input.supplierId) {
+          await PurchaseOrderBusinessRules.validateSupplierExists(client, input.supplierId);
+        }
+        if (input.supplierId || input.expectedDate !== undefined || input.notes !== undefined) {
+          await purchaseOrderRepository.updatePOHeader(
+            client,
+            id,
+            {
+              supplierId: input.supplierId,
+              expectedDate: input.expectedDate,
+              notes: input.notes,
+            },
+            ['DRAFT', 'PENDING']
+          );
+        }
+        await purchaseOrderRepository.updatePOTotal(client, id);
+        const pendingUpdated = await purchaseOrderRepository.getPOById(client, id);
+        logger.info('Purchase order header updated (PENDING)', { poId: id });
+        return pendingUpdated!;
       }
 
-      // Validate supplier if changed
+      if (status !== 'DRAFT') {
+        throw new Error('Can only fully edit purchase orders in DRAFT status');
+      }
+
       const supplierId = input.supplierId || existing.po.supplierId;
       if (input.supplierId) {
         await PurchaseOrderBusinessRules.validateSupplierExists(client, input.supplierId);
@@ -244,11 +278,16 @@ export const purchaseOrderService = {
 
       // Update header fields
       if (input.supplierId || input.expectedDate !== undefined || input.notes !== undefined) {
-        await purchaseOrderRepository.updatePOHeader(client, id, {
-          supplierId: input.supplierId,
-          expectedDate: input.expectedDate,
-          notes: input.notes,
-        });
+        await purchaseOrderRepository.updatePOHeader(
+          client,
+          id,
+          {
+            supplierId: input.supplierId,
+            expectedDate: input.expectedDate,
+            notes: input.notes,
+          },
+          ['DRAFT']
+        );
       }
 
       // If items are provided, replace all items (delete + re-insert)

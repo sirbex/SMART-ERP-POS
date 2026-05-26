@@ -132,6 +132,8 @@ export interface SupplierInvoice {
     amountPaid: string | Decimal;
     outstandingBalance: string | Decimal;
     status: 'PENDING' | 'APPROVED' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED';
+    /** SUPPLIER_INVOICE | OPENING_BALANCE | SUPPLIER_DEBIT_NOTE | … */
+    documentType?: string;
     notes?: string;
     createdAt: string;
     updatedAt: string;

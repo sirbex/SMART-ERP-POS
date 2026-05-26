@@ -343,6 +343,10 @@ export const api = {
       id: string,
       params?: { start?: string; end?: string; page?: number; limit?: number }
     ) => apiClient.get<ApiResponse>(`customers/${id}/statement`, { params }),
+    getSmartStatement: (
+      id: string,
+      params: { startDate: string; endDate: string }
+    ) => apiClient.get<ApiResponse>(`customers/${id}/smart-statement`, { params }),
     importOpeningBalance: (data: {
       customerId: string;
       amount: number;

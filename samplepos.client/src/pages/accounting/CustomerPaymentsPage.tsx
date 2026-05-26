@@ -3,9 +3,9 @@
  * Uses /api/ar-payments (payment header + reconciliation allocations).
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { AxiosError } from 'axios';
-import { Plus, Search, DollarSign, FileText, ArrowUpRight } from 'lucide-react';
+import { Plus, Search, DollarSign, FileText, ArrowUpRight, Wallet } from 'lucide-react';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import {
@@ -50,12 +50,20 @@ interface AllocationRow {
   invoiceNumber: string;
   amountDue: number;
   allocationAmount: number;
+  documentType?: string;
+}
+
+function isCustomerOpeningBalance(row: { documentType?: string; invoiceNumber?: string }) {
+  return (
+    row.documentType === 'OPENING_BALANCE' || (row.invoiceNumber || '').startsWith('OB-')
+  );
 }
 
 const todayIso = () => new Date().toLocaleDateString('en-CA');
 
 const CustomerPaymentsPage: React.FC = () => {
   const canCreate = useCanAccess([], ['customers.update']);
+  const canImportOpeningBalance = useCanAccess([], ['customers.create']);
 
   const [payments, setPayments] = useState<ArCustomerPayment[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -110,6 +118,69 @@ const CustomerPaymentsPage: React.FC = () => {
   });
   const [createAllocations, setCreateAllocations] = useState<AllocationRow[]>([]);
 
+  const [obCustomerId, setObCustomerId] = useState('');
+  const [obAmount, setObAmount] = useState('');
+  const [obDate, setObDate] = useState('');
+  const [obDueDate, setObDueDate] = useState('');
+  const [obNotes, setObNotes] = useState('');
+  const [obPosting, setObPosting] = useState(false);
+
+  const handlePostCustomerOpeningBalance = async () => {
+    if (!obCustomerId) {
+      toast.error('Select a customer');
+      return;
+    }
+    const amt = parseFloat(obAmount);
+    if (!amt || amt <= 0) {
+      toast.error('Enter a positive amount');
+      return;
+    }
+    if (!obDate) {
+      toast.error('As-of date is required');
+      return;
+    }
+    if (obDueDate && obDueDate > obDate) {
+      toast.error('Original invoice date cannot be after the as-of (cutover) date');
+      return;
+    }
+    setObPosting(true);
+    try {
+      await api.customers.importOpeningBalance({
+        customerId: obCustomerId,
+        amount: amt,
+        asOfDate: obDate,
+        dueDate: obDueDate || undefined,
+        notes: obNotes || undefined,
+      });
+      toast.success('Customer opening balance posted');
+      setObAmount('');
+      setObNotes('');
+      setObCustomerId('');
+      setObDate('');
+      setObDueDate('');
+      if (formData.customerId === obCustomerId && isCreateModalOpen) {
+        await loadOpenInvoicesForCustomer(obCustomerId);
+      }
+    } catch (err) {
+      const axErr = err as AxiosError<{ error?: string }>;
+      toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
+    } finally {
+      setObPosting(false);
+    }
+  };
+
+  const selectedCustomer = customers.find((c) => c.id === formData.customerId);
+  const openInvoicesTotal = useMemo(
+    () => createAllocations.reduce((sum, row) => sum + row.amountDue, 0),
+    [createAllocations],
+  );
+  const customerArBalance = useMemo(() => {
+    if (openInvoicesTotal > 0) return openInvoicesTotal;
+    const raw = selectedCustomer as Customer & { balance?: number | string };
+    const bal = raw?.balance ?? raw?.currentBalance;
+    return bal != null ? Number(bal) : 0;
+  }, [openInvoicesTotal, selectedCustomer]);
+
   const loadPayments = useCallback(async () => {
     try {
       setLoading(true);
@@ -152,6 +223,7 @@ const CustomerPaymentsPage: React.FC = () => {
         invoiceNumber: inv.invoiceNumber,
         amountDue: inv.amountDue,
         allocationAmount: 0,
+        documentType: inv.documentType,
       })),
     );
   };
@@ -216,6 +288,7 @@ const CustomerPaymentsPage: React.FC = () => {
           invoiceNumber: inv.invoiceNumber,
           amountDue: inv.amountDue,
           allocationAmount: 0,
+          documentType: inv.documentType,
         })),
       );
       setIsAllocationModalOpen(true);
@@ -424,6 +497,78 @@ const CustomerPaymentsPage: React.FC = () => {
         )}
       </div>
 
+      {canImportOpeningBalance && (
+        <Card>
+          <CardContent className="pt-4">
+            <h3 className="font-semibold text-gray-800 mb-1 flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-gray-500" />
+              Import Customer Opening Balance
+            </h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Post a historical balance brought forward as a single Opening Balance journal (DR
+              Accounts Receivable / CR Opening Balance Equity). Each customer may only have one
+              opening balance. Open items appear here for allocation and on Customer Center
+              invoices.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end">
+              <div className="sm:col-span-2">
+                <Label className="text-xs text-gray-600 mb-1 block">Customer *</Label>
+                <Select value={obCustomerId} onValueChange={setObCustomerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select customer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600 mb-1 block">Amount *</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={obAmount}
+                  onChange={(e) => setObAmount(e.target.value)}
+                  placeholder="0"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600 mb-1 block">As-Of Date *</Label>
+                <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
+                <p className="text-[10px] text-gray-400 mt-0.5">Posting / cutover date</p>
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600 mb-1 block">Original Invoice Date</Label>
+                <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
+                <p className="text-[10px] text-gray-400 mt-0.5">Baseline for aging (defaults to As-Of)</p>
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600 mb-1 block">Notes</Label>
+                <Input
+                  value={obNotes}
+                  onChange={(e) => setObNotes(e.target.value)}
+                  placeholder="Optional"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end mt-3">
+              <Button
+                onClick={() => void handlePostCustomerOpeningBalance()}
+                disabled={obPosting}
+                variant="outline"
+              >
+                {obPosting ? 'Posting…' : 'Post Opening Balance'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Dialog
         open={isCreateModalOpen}
         onOpenChange={setIsCreateModalOpen}
@@ -455,6 +600,32 @@ const CustomerPaymentsPage: React.FC = () => {
                   ))}
                 </SelectContent>
               </Select>
+              {formData.customerId && (
+                <div className="mt-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    <strong>Total outstanding:</strong>{' '}
+                    {formatCurrency(customerArBalance)}
+                    {openInvoicesTotal > 0 && createAllocations.length > 0 && (
+                      <span className="text-blue-700 ml-1">
+                        ({createAllocations.length} open invoice{createAllocations.length !== 1 ? 's' : ''})
+                      </span>
+                    )}
+                  </span>
+                  {customerArBalance > 0 && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() =>
+                        setFormData((p) => ({ ...p, amount: String(customerArBalance) }))
+                      }
+                    >
+                      Use full balance
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -507,8 +678,17 @@ const CustomerPaymentsPage: React.FC = () => {
                 <p className="text-sm font-medium">Manual allocation (optional)</p>
                 {createAllocations.map((row) => (
                   <div key={row.invoiceId} className="flex items-center justify-between gap-2 text-sm">
-                    <span>
-                      {row.invoiceNumber} — open {formatCurrency(row.amountDue)}
+                    <span className="flex flex-wrap items-center gap-2">
+                      {row.invoiceNumber}
+                      {isCustomerOpeningBalance(row) && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs bg-indigo-50 text-indigo-800 border-indigo-200"
+                        >
+                          Opening Balance
+                        </Badge>
+                      )}
+                      <span className="text-gray-600">— open {formatCurrency(row.amountDue)}</span>
                     </span>
                     <Input
                       type="number"
@@ -575,7 +755,17 @@ const CustomerPaymentsPage: React.FC = () => {
               {allocations.map((row) => (
                 <div key={row.invoiceId} className="border rounded p-3 flex flex-wrap justify-between gap-2">
                   <div>
-                    <div className="font-medium">{row.invoiceNumber}</div>
+                    <div className="font-medium flex flex-wrap items-center gap-2">
+                      {row.invoiceNumber}
+                      {isCustomerOpeningBalance(row) && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs bg-indigo-50 text-indigo-800 border-indigo-200"
+                        >
+                          Opening Balance
+                        </Badge>
+                      )}
+                    </div>
                     <div className="text-sm text-red-600">Open: {formatCurrency(row.amountDue)}</div>
                   </div>
                   <div className="flex items-center gap-2">

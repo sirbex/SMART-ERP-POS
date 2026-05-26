@@ -18,6 +18,7 @@ import type {
     SupplierStatementData,
     SupplierAgingRow,
     SmartStatementData,
+    CustomerSmartStatementData,
 } from './cnDnReportTypes.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 
@@ -345,5 +346,55 @@ export async function getSmartSupplierStatementData(
         openingBalance,
         closingBalance: runBal.toDecimalPlaces(2).toNumber(),
         entries,
+    };
+}
+
+// ─── 11. Smart Customer Statement (GL account 1200) ───────────────────────
+/**
+ * GL-driven customer AR statement — one row per business document on account 1200.
+ */
+export async function getSmartCustomerStatementData(
+    pool: Pool,
+    customerId: string,
+    startDate: string,
+    endDate: string,
+): Promise<CustomerSmartStatementData> {
+    const nameResult = await pool.query(
+        `SELECT name FROM customers WHERE id = $1`,
+        [customerId],
+    );
+    if (nameResult.rows.length === 0) {
+        throw new Error('Customer not found');
+    }
+    const customerName = (nameResult.rows[0]?.name as string | undefined) || 'Unknown';
+
+    const openingBalance = await repo.getCustomerStatementOpeningBalance(pool, customerId, startDate);
+    const rawEntries = await repo.getSmartCustomerStatementEntries(pool, customerId, startDate, endDate);
+    const openItemEntries = await repo.getCustomerReversedAllocationEntries(
+        pool,
+        customerId,
+        startDate,
+        endDate,
+    );
+    const { total: unallocatedReceiptsTotal, receipts: unallocatedReceipts } =
+        await repo.getCustomerUnallocatedReceipts(pool, customerId);
+
+    let runBal = new Decimal(openingBalance);
+    const entries: CustomerSmartStatementData['entries'] = rawEntries.map((e) => {
+        runBal = runBal.plus(e.debit).minus(e.credit);
+        return { ...e, balanceAfter: runBal.toDecimalPlaces(2).toNumber() };
+    });
+
+    return {
+        customerId,
+        customerName,
+        periodStart: startDate,
+        periodEnd: endDate,
+        openingBalance,
+        closingBalance: runBal.toDecimalPlaces(2).toNumber(),
+        entries,
+        openItemEntries,
+        unallocatedReceiptsTotal,
+        unallocatedReceipts,
     };
 }

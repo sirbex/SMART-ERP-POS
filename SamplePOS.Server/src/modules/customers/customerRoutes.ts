@@ -42,6 +42,7 @@ router.get('/:id', customerController.getCustomer);
 router.get('/:id/sales', customerController.getCustomerSales);
 router.get('/:id/transactions', customerController.getCustomerTransactions);
 router.get('/:id/summary', customerController.getCustomerSummary);
+router.get('/:id/smart-statement', customerController.getSmartCustomerStatement);
 router.get('/:id/statement', customerController.getCustomerStatement);
 router.get('/:id/statement/export.csv', customerController.exportCustomerStatementCsv);
 // PDF export — redirect to centralized DocumentRenderer

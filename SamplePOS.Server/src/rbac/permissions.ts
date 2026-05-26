@@ -178,6 +178,14 @@ export const PERMISSIONS: Record<string, Permission> = {
   QUOTATIONS_CREATE: p('quotations.create', 'quotations', 'create', 'Create quotations'),
   QUOTATIONS_UPDATE: p('quotations.update', 'quotations', 'update', 'Modify quotations'),
   QUOTATIONS_DELETE: p('quotations.delete', 'quotations', 'delete', 'Delete quotations'),
+
+  CORRECTIONS_READ: p('corrections.read', 'corrections', 'read', 'View correction eligibility and previews'),
+  CORRECTIONS_EXECUTE: p(
+    'corrections.execute',
+    'corrections',
+    'execute',
+    'Execute correction wizards (wrong product, supplier reassignment)',
+  ),
 } as const;
 
 export const PERMISSION_KEYS = Object.values(PERMISSIONS).map((p) => p.key);
