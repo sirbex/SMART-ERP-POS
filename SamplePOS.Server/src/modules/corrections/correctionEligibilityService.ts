@@ -358,8 +358,7 @@ export const correctionEligibilityService = {
         const data = await getPaymentWithAllocations(pool, paymentId);
         if (!data) throw new Error(`AR payment ${paymentId} not found`);
 
-        const payment = data.payment as Record<string, unknown>;
-        const paymentNumber = String(payment.payment_number ?? payment.id ?? paymentId);
+        const paymentNumber = data.payment.paymentNumber ?? data.payment.id ?? paymentId;
 
         const base = {
             documentType: 'AR_PAYMENT' as const,

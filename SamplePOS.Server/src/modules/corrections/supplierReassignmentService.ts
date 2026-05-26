@@ -2,7 +2,7 @@
  * Phase F — post-GR supplier reassignment (AP / GR-IR reclass only; no batch mutation).
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { AccountingCore } from '../../services/accountingCore.js';
 import { AccountCodes } from '../../services/glEntryService.js';
@@ -40,7 +40,7 @@ export interface SupplierReassignmentResult {
 }
 
 async function resolveSupplierNames(
-    pool: Pool,
+    pool: Pool | PoolClient,
     fromId: string,
     toId: string,
 ): Promise<{ fromName: string | null; toName: string | null }> {
