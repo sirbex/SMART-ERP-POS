@@ -39,6 +39,11 @@ import { getBusinessDate } from '../../utils/dateRange.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import { resolveCanonicalProductUom } from '../products/uomService.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
+import {
+    assertWithinReturnableLimits,
+    pickReturnableRow,
+    validateReturnLinesAgainstSnapshot,
+} from './returnGrnValidation.js';
 
 export interface CreateReturnGrnInput {
     grnId: string;
@@ -101,8 +106,15 @@ export const returnGrnService = {
                 createdBy: input.createdBy,
             });
 
-            // 4. Create line items with validation
-            const lines: ReturnGrnLine[] = [];
+            // 4. Validate all lines against one snapshot (prevents multi-line over-return)
+            const returnableSnapshot = await returnGrnRepository.getReturnableItems(client, input.grnId);
+            const pendingLines: Array<{
+                productId: string;
+                batchId?: string | null;
+                baseQuantity: number;
+                productName: string;
+            }> = [];
+
             for (const line of input.lines) {
                 if (line.quantity <= 0) throw new Error('Return quantity must be positive');
 
@@ -113,16 +125,19 @@ export const returnGrnService = {
                 const grItemRow = await client.query<{
                     uom_id: string | null;
                     uom_name: string | null;
+                    product_name: string | null;
                 }>(
-                    `SELECT gri.uom_id, u.name AS uom_name
+                    `SELECT gri.uom_id, u.name AS uom_name, p.name AS product_name
                      FROM goods_receipt_items gri
                      LEFT JOIN uoms u ON u.id = gri.uom_id
+                     JOIN products p ON p.id = gri.product_id
                      WHERE gri.goods_receipt_id = $1 AND gri.product_id = $2
                      LIMIT 1`,
                     [input.grnId, line.productId],
                 );
                 const purchaseUomId: string | null = grItemRow.rows[0]?.uom_id ?? null;
                 const purchaseUomName: string | null = grItemRow.rows[0]?.uom_name ?? null;
+                const productName = grItemRow.rows[0]?.product_name ?? 'product';
 
                 let effectiveUomId: string | null = line.uomId || null;
 
@@ -151,9 +166,44 @@ export const returnGrnService = {
                     conversionFactor,
                 ).toNumber();
 
+                pendingLines.push({
+                    productId: line.productId,
+                    batchId: line.batchId ?? null,
+                    baseQuantity,
+                    productName,
+                });
+            }
+
+            const resolvedBatches = validateReturnLinesAgainstSnapshot(
+                returnableSnapshot,
+                pendingLines,
+            );
+
+            const lines: ReturnGrnLine[] = [];
+            for (let i = 0; i < input.lines.length; i++) {
+                const line = input.lines[i];
+                const pending = pendingLines[i];
+                const resolvedBatchId = resolvedBatches[i]?.batchId ?? line.batchId ?? null;
+
+                const grItemRow = await client.query<{
+                    uom_id: string | null;
+                }>(
+                    `SELECT gri.uom_id FROM goods_receipt_items gri
+                     WHERE gri.goods_receipt_id = $1 AND gri.product_id = $2 LIMIT 1`,
+                    [input.grnId, line.productId],
+                );
+                const purchaseUomId: string | null = grItemRow.rows[0]?.uom_id ?? null;
+                let effectiveUomId: string | null = line.uomId || purchaseUomId;
+
+                const { conversionFactor } = await resolveCanonicalProductUom(
+                    line.productId,
+                    effectiveUomId,
+                    client,
+                );
+
+                const baseQuantity = pending.baseQuantity;
+
                 // lineTotal = quantity × unitCost (both in purchase-UOM units).
-                // Do NOT use baseQuantity × unitCost — that mixes base-unit qty
-                // with purchase-UOM price, producing a 10× or 100× overstatement.
                 const lineTotal = Money.toNumber(
                     Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitCost))
                 );
@@ -161,7 +211,7 @@ export const returnGrnService = {
                 const created = await returnGrnRepository.createLine(client, {
                     rgrnId: returnGrn.id,
                     productId: line.productId,
-                    batchId: line.batchId || null,
+                    batchId: resolvedBatchId,
                     uomId: effectiveUomId,
                     quantity: line.quantity,
                     baseQuantity,
@@ -213,6 +263,18 @@ export const returnGrnService = {
             const lines = await returnGrnRepository.getLines(client, rgrnId);
             if (lines.length === 0) throw new Error('Return GRN has no line items');
 
+            const returnableSnapshot = await returnGrnRepository.getReturnableItems(client, rgrn.grnId);
+
+            validateReturnLinesAgainstSnapshot(
+                returnableSnapshot,
+                lines.map((l) => ({
+                    productId: l.productId,
+                    batchId: l.batchId,
+                    baseQuantity: l.baseQuantity,
+                    productName: l.productName,
+                })),
+            );
+
             // 3. Process each line
             // Also accumulate the GL amount from actual batch.cost_price (not line.unitCost).
             // line.unitCost is user-entered on the return document and can be wrong;
@@ -221,46 +283,22 @@ export const returnGrnService = {
             let returnTotalFromBatch = new Decimal(0);
 
             for (const line of lines) {
-                // 3a. Resolve batch — prefer explicit batchId, otherwise look up via GR linkage
+                // 3a. Batch must match draft line (resolved at create); FIFO fallback for legacy drafts
                 let effectiveBatchId = line.batchId;
                 if (!effectiveBatchId) {
-                    const batchLookup = await client.query(
-                        `SELECT ib.id FROM inventory_batches ib
-                         WHERE ib.goods_receipt_id = $1
-                           AND ib.product_id = $2
-                           AND ib.status = 'ACTIVE'
-                           AND ib.remaining_quantity > 0
-                         ORDER BY ib.expiry_date ASC NULLS LAST, ib.created_at ASC
-                         LIMIT 1`,
-                        [rgrn.grnId, line.productId]
-                    );
-                    if (batchLookup.rows.length > 0) {
-                        effectiveBatchId = batchLookup.rows[0].id;
-                    }
+                    effectiveBatchId = pickReturnableRow(
+                        returnableSnapshot,
+                        line.productId,
+                        null,
+                    )?.batchId ?? null;
                 }
 
-                // 3b. Validate returnable quantity
-                const alreadyReturned = await returnGrnRepository.getReturnedQuantity(
-                    client, rgrn.grnId, line.productId, effectiveBatchId,
+                // 3b. Re-check limits against live snapshot row (defense in depth)
+                assertWithinReturnableLimits(
+                    pickReturnableRow(returnableSnapshot, line.productId, effectiveBatchId ?? null),
+                    line.baseQuantity,
+                    line.productName ?? 'product',
                 );
-
-                // Get originally received quantity for this product from the GR
-                const receivedResult = await client.query(
-                    `SELECT COALESCE(SUM(gri.received_quantity), 0) AS received
-           FROM goods_receipt_items gri
-           WHERE gri.goods_receipt_id = $1
-             AND gri.product_id = $2`,
-                    [rgrn.grnId, line.productId]
-                );
-                const received = Number(receivedResult.rows[0].received) || 0;
-                const returnable = received - alreadyReturned;
-
-                if (line.baseQuantity > returnable) {
-                    throw new Error(
-                        `Cannot return ${line.baseQuantity} of ${line.productName}. ` +
-                        `Received: ${received}, already returned: ${alreadyReturned}, returnable: ${returnable}`
-                    );
-                }
 
                 // 3c. Reduce batch remaining_quantity and capture batch.cost_price for GL
                 let batchCostPrice = new Decimal(line.unitCost || 0); // fallback to line.unitCost
@@ -274,8 +312,17 @@ export const returnGrnService = {
                         [line.baseQuantity, effectiveBatchId]
                     );
                     if (batchUpdate.rows.length === 0) {
-                        throw new Error(
-                            `Insufficient batch quantity for ${line.productName} (batch ${line.batchNumber || 'auto'})`
+                        assertWithinReturnableLimits(
+                            pickReturnableRow(
+                                returnableSnapshot,
+                                line.productId,
+                                effectiveBatchId ?? null,
+                            ),
+                            line.baseQuantity,
+                            line.productName ?? 'product',
+                        );
+                        throw new ValidationError(
+                            `Insufficient on-hand batch quantity for ${line.productName} (batch ${line.batchNumber || 'auto'}).`,
                         );
                     }
                     // Use actual batch cost_price for GL — this is the authoritative cost

@@ -307,7 +307,15 @@ export const returnGrnRepository = {
         receivedQuantity: number;
         unitCost: number;
         returnedQuantity: number;
+        /** Received (or batch qty) minus prior posted returns — document entitlement */
+        documentReturnableQuantity: number;
+        /** Active batch remaining_quantity — physical stock available */
+        onHandQuantity: number;
+        /** Sold, consumed, or otherwise not on hand (document − returnable) */
+        consumedQuantity: number;
+        /** min(documentReturnable, onHand) — quantity that may be returned now */
         returnableQuantity: number;
+        returnBlockReason: string | null;
     }>> {
         // Join batches via goods_receipt_id+product_id (batch_number on GR items is often NULL
         // because batches are auto-generated during finalization, not written back to GR items).
@@ -324,10 +332,64 @@ export const returnGrnRepository = {
          COALESCE(u.name, def_u.name)   AS "uomName",
          COALESCE(u.symbol, def_u.symbol) AS "uomSymbol",
          COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric AS "conversionFactor",
-         gri.received_quantity     AS "receivedQuantity",
+         CASE
+           WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric
+           ELSE gri.received_quantity::numeric
+         END AS "receivedQuantity",
          ROUND(gri.cost_price::numeric, 2) AS "unitCost",
          COALESCE(returned.qty, 0) AS "returnedQuantity",
-         gri.received_quantity - COALESCE(returned.qty, 0) AS "returnableQuantity"
+         GREATEST(0,
+           CASE
+             WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
+             ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+           END
+         ) AS "documentReturnableQuantity",
+         COALESCE(ib.remaining_quantity, 0)::numeric AS "onHandQuantity",
+         LEAST(
+           GREATEST(0,
+             CASE
+               WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
+               ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+             END
+           ),
+           COALESCE(ib.remaining_quantity, 0)::numeric
+         ) AS "returnableQuantity",
+         GREATEST(0,
+           GREATEST(0,
+             CASE
+               WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
+               ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+             END
+           ) - LEAST(
+             GREATEST(0,
+               CASE
+                 WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
+                 ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+               END
+             ),
+             COALESCE(ib.remaining_quantity, 0)::numeric
+           )
+         ) AS "consumedQuantity",
+         CASE
+           WHEN (
+             CASE
+               WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric
+               ELSE gri.received_quantity::numeric
+             END
+           ) <= COALESCE(returned.qty, 0)
+             THEN 'Already fully returned to supplier'
+           WHEN ib.id IS NULL
+             THEN 'No active receipt batch — stock is not available for a supplier return'
+           WHEN COALESCE(ib.remaining_quantity, 0) <= 0
+             AND GREATEST(0,
+               CASE
+                 WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
+                 ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+               END
+             ) > 0
+             THEN 'Sold or consumed — only on-hand quantity can be returned to the supplier'
+           ELSE NULL
+         END AS "returnBlockReason"
        FROM goods_receipt_items gri
        JOIN products p ON p.id = gri.product_id
        LEFT JOIN inventory_batches ib

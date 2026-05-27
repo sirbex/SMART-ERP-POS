@@ -173,7 +173,11 @@ export function AdjustSupplierInvoiceModal({ open, onClose, invoiceId, invoiceNu
                 const q = safeNum(l.quantity);
                 if (q <= 0) return `Quantity for ${l.item.productName} must be positive.`;
                 if (q > l.item.returnableQuantity) {
-                    return `Quantity for ${l.item.productName} exceeds returnable amount.`;
+                    const consumed = l.item.consumedQuantity ?? 0;
+                    if (consumed > 0) {
+                        return `${l.item.productName}: only ${l.item.returnableQuantity} on hand can be returned; ${consumed} were sold or consumed.`;
+                    }
+                    return `Quantity for ${l.item.productName} exceeds returnable amount (${l.item.returnableQuantity}).`;
                 }
             }
             if (!returnReason.trim()) return 'Reason is required.';
@@ -382,8 +386,17 @@ export function AdjustSupplierInvoiceModal({ open, onClose, invoiceId, invoiceNu
                                                             <label htmlFor={`line-${line.item.grItemId}`} className="flex-1 min-w-0 cursor-pointer">
                                                                 <div className="text-sm font-medium truncate">{line.item.productName}</div>
                                                                 <div className="text-xs text-gray-500">
-                                                                    Batch: {line.item.batchNumber ?? '—'} | Expiry: {line.item.expiryDate ?? '—'} | Cost: {formatCurrency(line.item.unitCost)}
+                                                                    Batch: {line.item.batchNumber ?? '—'} | On hand: {line.item.onHandQuantity ?? '—'}
+                                                                    {(line.item.consumedQuantity ?? 0) > 0 && (
+                                                                        <span className="text-amber-700">
+                                                                            {' '}| Sold/used: {line.item.consumedQuantity}
+                                                                        </span>
+                                                                    )}
+                                                                    {' '}| Max return: {line.item.returnableQuantity}
                                                                 </div>
+                                                                {line.item.returnBlockReason && (
+                                                                    <div className="text-xs text-amber-700 mt-0.5">{line.item.returnBlockReason}</div>
+                                                                )}
                                                             </label>
                                                             <div className="flex items-center gap-1 flex-shrink-0">
                                                                 <span className="text-xs text-gray-500">Qty</span>
@@ -394,7 +407,7 @@ export function AdjustSupplierInvoiceModal({ open, onClose, invoiceId, invoiceNu
                                                                     step="0.001"
                                                                     value={line.quantity}
                                                                     onChange={e => updateQty(globalIdx, e.target.value)}
-                                                                    disabled={!line.selected}
+                                                                    disabled={!line.selected || line.item.returnableQuantity <= 0}
                                                                     className="w-24 text-right text-sm border border-gray-300 rounded px-2 py-1 disabled:opacity-50"
                                                                 />
                                                                 <span className="text-xs text-gray-400">/ {line.item.returnableQuantity}</span>

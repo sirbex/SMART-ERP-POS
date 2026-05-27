@@ -40,11 +40,33 @@ const mockLine = {
   lineTotal: 500,
 };
 
+const mockReturnableRow = {
+  grItemId: 'gri-1',
+  productId: 'prod-1',
+  productName: 'Test Product',
+  batchId: 'batch-1',
+  batchNumber: 'B-001',
+  expiryDate: null,
+  uomId: null,
+  uomName: null,
+  uomSymbol: null,
+  conversionFactor: 1,
+  receivedQuantity: 100,
+  unitCost: 100,
+  returnedQuantity: 0,
+  documentReturnableQuantity: 100,
+  onHandQuantity: 100,
+  consumedQuantity: 0,
+  returnableQuantity: 100,
+  returnBlockReason: null,
+};
+
 jest.unstable_mockModule('./returnGrnRepository.js', () => ({
   returnGrnRepository: {
     getById: jest.fn<AnyMock>().mockResolvedValue(mockRgrn),
     getLines: jest.fn<AnyMock>().mockResolvedValue([mockLine]),
     getReturnedQuantity: jest.fn<AnyMock>().mockResolvedValue(0),
+    getReturnableItems: jest.fn<AnyMock>().mockResolvedValue([mockReturnableRow]),
     post: jest.fn<AnyMock>().mockResolvedValue({ ...mockRgrn, status: 'POSTED' }),
   },
 }));

@@ -19,7 +19,11 @@ export interface ReturnableItem {
     uomSymbol: string | null;
     receivedQuantity: number;
     returnedQuantity: number;
+    documentReturnableQuantity?: number;
+    onHandQuantity?: number;
+    consumedQuantity?: number;
     returnableQuantity: number;
+    returnBlockReason?: string | null;
     unitCost: number;
 }
 
