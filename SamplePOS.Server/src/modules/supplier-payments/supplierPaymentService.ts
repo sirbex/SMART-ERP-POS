@@ -4,7 +4,7 @@
  * PRECISION: All currency calculations use Decimal.js for accuracy
  */
 
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import * as supplierPaymentRepository from './supplierPaymentRepository.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
@@ -12,7 +12,9 @@ import * as glEntryService from '../../services/glEntryService.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
-import { AccountingCore } from '../../services/accountingCore.js';
+import { AccountingCore, AccountingError } from '../../services/accountingCore.js';
+import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
@@ -1325,7 +1327,7 @@ export async function importSupplierOpeningBalance(
         );
         if (existing.rows.length > 0) {
             throw new Error(
-                'This supplier already has an opening balance record. Void the existing record first.'
+                'This supplier already has an opening balance. Use Replace opening balance to correct the amount.'
             );
         }
 
@@ -1429,4 +1431,123 @@ export async function importSupplierOpeningBalance(
             amount: amount.toNumber(),
         };
     });
+}
+
+async function loadSupplierOpeningBalanceForCancel(
+    client: PoolClient,
+    invoiceId: string,
+): Promise<{ Id: string; SupplierId: string; SupplierInvoiceNumber: string; AmountPaid: string | number }> {
+    const invRes = await client.query(
+        `SELECT "Id", "SupplierId", "SupplierInvoiceNumber", "AmountPaid", "Status", document_type
+         FROM supplier_invoices
+         WHERE "Id" = $1 AND deleted_at IS NULL`,
+        [invoiceId],
+    );
+    const inv = invRes.rows[0];
+    if (!inv || inv.document_type !== 'OPENING_BALANCE') {
+        throw new Error('Supplier opening balance record not found');
+    }
+    const status = String(inv.Status || '').toUpperCase();
+    if (['CANCELLED', 'VOIDED', 'DELETED'].includes(status)) {
+        throw new Error('Opening balance is already cancelled');
+    }
+    const paid = new Decimal(inv.AmountPaid || 0);
+    if (paid.greaterThan(0.01)) {
+        throw new Error('Cannot cancel opening balance with payments applied.');
+    }
+    const alloc = await client.query(
+        `SELECT 1 FROM supplier_payment_allocations
+         WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL LIMIT 1`,
+        [invoiceId],
+    );
+    if (alloc.rows.length > 0) {
+        throw new Error('Cannot cancel opening balance with payment allocations.');
+    }
+    return inv;
+}
+
+export async function cancelSupplierOpeningBalance(
+    pool: Pool,
+    invoiceId: string,
+    userId: string,
+    reason: string,
+): Promise<{ invoiceId: string; invoiceNumber: string }> {
+    if (!reason || reason.trim().length < 5) {
+        throw new Error('Cancellation reason is required (min 5 characters)');
+    }
+
+    return UnitOfWork.run(pool, async (client) => {
+        const inv = await loadSupplierOpeningBalanceForCancel(client, invoiceId);
+        await checkAccountingPeriodOpen(client, getBusinessDate());
+
+        const glTxn = await client.query<{ Id: string }>(
+            `SELECT "Id" FROM ledger_transactions
+             WHERE "ReferenceType" = 'SUPPLIER_OPENING_BALANCE'
+               AND "ReferenceId" = $1
+               AND "IsReversed" = FALSE
+             LIMIT 1`,
+            [invoiceId],
+        );
+
+        if (glTxn.rows[0]) {
+            try {
+                await AccountingCore.reverseTransaction(
+                    {
+                        originalTransactionId: glTxn.rows[0].Id,
+                        reversalDate: getBusinessDate(),
+                        reason: `CANCEL ${inv.SupplierInvoiceNumber}: ${reason.trim()}`,
+                        userId,
+                        idempotencyKey: `SUPPLIER_OB_CANCEL-${invoiceId}`,
+                    },
+                    pool,
+                    client,
+                );
+            } catch (error: unknown) {
+                if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
+                    logger.info('Supplier OB GL already reversed', { invoiceId });
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        await client.query(
+            `UPDATE supplier_invoices
+             SET "Status" = 'Cancelled', "OutstandingBalance" = 0, "UpdatedAt" = NOW()
+             WHERE "Id" = $1`,
+            [invoiceId],
+        );
+
+        await recalcSupplierBalance(client, inv.SupplierId);
+
+        return { invoiceId, invoiceNumber: inv.SupplierInvoiceNumber as string };
+    });
+}
+
+export async function replaceSupplierOpeningBalance(
+    pool: Pool,
+    data: ImportSupplierOpeningBalanceInput & { replaceReason: string },
+): Promise<{ invoiceNumber: string; amount: number; replaced: boolean }> {
+    const existing = await pool.query<{ Id: string }>(
+        `SELECT "Id" FROM supplier_invoices
+         WHERE "SupplierId" = $1
+           AND document_type = 'OPENING_BALANCE'
+           AND deleted_at IS NULL
+           AND UPPER("Status") NOT IN ('CANCELLED', 'VOIDED', 'DELETED')`,
+        [data.supplierId],
+    );
+
+    let replaced = false;
+    if (existing.rows[0]) {
+        await cancelSupplierOpeningBalance(
+            pool,
+            existing.rows[0].Id,
+            data.userId,
+            data.replaceReason || 'Replaced opening balance with corrected amount',
+        );
+        replaced = true;
+    }
+
+    const created = await importSupplierOpeningBalance(pool, data);
+    return { ...created, replaced };
 }

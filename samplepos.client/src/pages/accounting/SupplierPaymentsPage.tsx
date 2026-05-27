@@ -302,6 +302,8 @@ const SupplierPaymentsPage: React.FC = () => {
     const [obDate, setObDate] = useState('');
     const [obDueDate, setObDueDate] = useState('');
     const [obNotes, setObNotes] = useState('');
+    const [obReplaceReason, setObReplaceReason] = useState('');
+    const [obCorrectMode, setObCorrectMode] = useState(false);
     const [obPosting, setObPosting] = useState(false);
 
     const handlePostOpeningBalance = async () => {
@@ -310,17 +312,31 @@ const SupplierPaymentsPage: React.FC = () => {
         if (!amt || amt <= 0) { toast.error('Enter a positive amount'); return; }
         if (!obDate) { toast.error('As-of date is required'); return; }
         if (obDueDate && obDueDate > obDate) { toast.error('Original invoice date cannot be after the as-of (cutover) date'); return; }
+        if (obCorrectMode && obReplaceReason.trim().length < 5) {
+            toast.error('Enter a correction reason (min 5 characters)');
+            return;
+        }
         setObPosting(true);
         try {
-            await api.supplierPayments.importOpeningBalance({
+            const payload = {
                 supplierId: obSupplierId,
                 amount: amt,
                 asOfDate: obDate,
                 dueDate: obDueDate || undefined,
                 notes: obNotes || undefined,
-            });
-            toast.success('Opening balance posted');
+            };
+            if (obCorrectMode) {
+                await api.supplierPayments.replaceOpeningBalance({
+                    ...payload,
+                    replaceReason: obReplaceReason.trim(),
+                });
+                toast.success('Opening balance corrected (previous OB reversed and re-posted)');
+            } else {
+                await api.supplierPayments.importOpeningBalance(payload);
+                toast.success('Opening balance posted');
+            }
             setObAmount(''); setObNotes(''); setObSupplierId(''); setObDate(''); setObDueDate('');
+            setObReplaceReason(''); setObCorrectMode(false);
         } catch (err) {
             const axErr = err as AxiosError<{ error?: string }>;
             toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
@@ -1550,7 +1566,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                 Import Supplier Opening Balance
                             </h3>
                             <p className="text-xs text-gray-500 mb-4">
-                                Post a historical balance brought forward as a single Opening Balance journal (DR Opening Balance Equity / CR Accounts Payable). Each supplier may only have one opening balance.
+                                Post cutover AP (DR Opening Balance Equity / CR 2100). Wrong amount? Use Correct existing OB to reverse and re-post (audit trail). Manual journals cannot adjust AP subledger directly.
                             </p>
                             <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end">
                                 <div className="sm:col-span-2">
@@ -1583,10 +1599,30 @@ const SupplierPaymentsPage: React.FC = () => {
                                     <Input value={obNotes} onChange={e => setObNotes(e.target.value)} placeholder="Optional" />
                                 </div>
                             </div>
-                            <div className="flex justify-end mt-3">
-                                <Button onClick={() => void handlePostOpeningBalance()} disabled={obPosting} variant="outline">
-                                    {obPosting ? 'Posting…' : 'Post Opening Balance'}
-                                </Button>
+                            <div className="mt-3 space-y-3">
+                                <label className="flex items-center gap-2 text-sm text-gray-700">
+                                    <input
+                                        type="checkbox"
+                                        checked={obCorrectMode}
+                                        onChange={(e) => setObCorrectMode(e.target.checked)}
+                                    />
+                                    Correct existing opening balance
+                                </label>
+                                {obCorrectMode && (
+                                    <div>
+                                        <Label className="text-xs text-gray-600 mb-1 block">Correction reason *</Label>
+                                        <Input
+                                            value={obReplaceReason}
+                                            onChange={(e) => setObReplaceReason(e.target.value)}
+                                            placeholder="Why the cutover figure is being changed"
+                                        />
+                                    </div>
+                                )}
+                                <div className="flex justify-end">
+                                    <Button onClick={() => void handlePostOpeningBalance()} disabled={obPosting} variant="outline">
+                                        {obPosting ? 'Posting…' : obCorrectMode ? 'Replace Opening Balance' : 'Post Opening Balance'}
+                                    </Button>
+                                </div>
                             </div>
                         </CardContent>
                     </Card>

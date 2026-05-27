@@ -5,7 +5,7 @@ import type { Pool } from 'pg';
 import type pg from 'pg';
 import * as customerRepository from './customerRepository.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
-import { AccountingCore } from '../../services/accountingCore.js';
+import { AccountingCore, AccountingError } from '../../services/accountingCore.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { syncCustomerBalanceFromInvoices } from '../../utils/customerBalanceSync.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
@@ -582,7 +582,7 @@ export async function importCustomerOpeningBalance(
     );
     if (existing.rows.length > 0) {
       throw new Error(
-        'This customer already has an opening balance record. Cancel the existing OB invoice first.'
+        'This customer already has an opening balance. Use Replace opening balance to correct the amount.'
       );
     }
 
@@ -676,4 +676,163 @@ export async function importCustomerOpeningBalance(
 
     return { invoiceId, invoiceNumber, amount: amount.toNumber() };
   });
+}
+
+const OB_TERMINAL_STATUSES = ['CANCELLED', 'VOIDED'];
+
+type OpeningBalanceInvoiceRow = {
+  id: string;
+  customer_id: string;
+  invoice_number: string;
+  status: string;
+  amount_paid: string | number;
+};
+
+async function loadCustomerOpeningBalanceForCancel(
+  client: pg.PoolClient,
+  invoiceId: string,
+  customerId?: string,
+): Promise<OpeningBalanceInvoiceRow> {
+  const invRes = await client.query<OpeningBalanceInvoiceRow>(
+    `SELECT id, customer_id, invoice_number, status, amount_paid
+     FROM invoices
+     WHERE id = $1 AND COALESCE(document_type, 'INVOICE') = 'OPENING_BALANCE'`,
+    [invoiceId],
+  );
+  const inv = invRes.rows[0];
+  if (!inv) {
+    throw new Error('Opening balance invoice not found');
+  }
+  if (customerId && inv.customer_id !== customerId) {
+    throw new Error('Opening balance does not belong to this customer');
+  }
+  if (OB_TERMINAL_STATUSES.includes(String(inv.status).toUpperCase())) {
+    throw new Error('Opening balance is already cancelled');
+  }
+  const paid = new Decimal(inv.amount_paid || 0);
+  if (paid.greaterThan(0.01)) {
+    throw new Error(
+      'Cannot cancel opening balance with payments applied. Reverse payments first.',
+    );
+  }
+  const alloc = await client.query(
+    `SELECT 1 FROM ar_payment_allocations WHERE invoice_id = $1 LIMIT 1`,
+    [invoiceId],
+  );
+  if (alloc.rows.length > 0) {
+    throw new Error(
+      'Cannot cancel opening balance with AR allocations. Unallocate payments first.',
+    );
+  }
+  const legacyPay = await client.query(
+    `SELECT 1 FROM invoice_payments WHERE invoice_id = $1 LIMIT 1`,
+    [invoiceId],
+  );
+  if (legacyPay.rows.length > 0) {
+    throw new Error('Cannot cancel opening balance with invoice payments recorded.');
+  }
+  return inv;
+}
+
+/**
+ * Cancel a posted customer opening balance (SAP FB08 / Odoo reverse move pattern).
+ * Reverses GL, cancels OB invoice, recalculates customer.balance.
+ */
+export async function cancelCustomerOpeningBalance(
+  pool: Pool,
+  invoiceId: string,
+  userId: string,
+  reason: string,
+): Promise<{ invoiceId: string; invoiceNumber: string }> {
+  if (!reason || reason.trim().length < 5) {
+    throw new Error('Cancellation reason is required (min 5 characters)');
+  }
+
+  return UnitOfWork.run(pool, async (client) => {
+    const inv = await loadCustomerOpeningBalanceForCancel(client, invoiceId);
+    await checkAccountingPeriodOpen(client, getBusinessDate());
+
+    const glTxn = await client.query<{ Id: string }>(
+      `SELECT "Id" FROM ledger_transactions
+       WHERE "ReferenceType" = 'CUSTOMER_OPENING_BALANCE'
+         AND "ReferenceId" = $1
+         AND "IsReversed" = FALSE
+       LIMIT 1`,
+      [invoiceId],
+    );
+
+    if (glTxn.rows[0]) {
+      try {
+        await AccountingCore.reverseTransaction(
+          {
+            originalTransactionId: glTxn.rows[0].Id,
+            reversalDate: getBusinessDate(),
+            reason: `CANCEL ${inv.invoice_number}: ${reason.trim()}`,
+            userId,
+            idempotencyKey: `CUSTOMER_OB_CANCEL-${invoiceId}`,
+          },
+          pool,
+          client,
+        );
+      } catch (error: unknown) {
+        if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
+          logger.info('Customer OB GL already reversed', { invoiceId });
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    await client.query(
+      `UPDATE invoices
+       SET status = 'CANCELLED', amount_due = 0, updated_at = NOW()
+       WHERE id = $1`,
+      [invoiceId],
+    );
+
+    await syncCustomerBalanceFromInvoices(
+      client,
+      inv.customer_id,
+      'CUSTOMER_OPENING_BALANCE_CANCEL',
+    );
+
+    logger.info('Customer opening balance cancelled', {
+      invoiceId,
+      invoiceNumber: inv.invoice_number,
+      customerId: inv.customer_id,
+    });
+
+    return { invoiceId, invoiceNumber: inv.invoice_number };
+  });
+}
+
+/**
+ * Replace customer opening balance: cancel existing active OB (if any) then post new amount.
+ * Use when the cutover figure was entered incorrectly.
+ */
+export async function replaceCustomerOpeningBalance(
+  pool: Pool,
+  data: ImportCustomerOpeningBalanceInput & { replaceReason: string },
+): Promise<{ invoiceId: string; invoiceNumber: string; amount: number; replaced: boolean }> {
+  const existing = await pool.query<{ id: string }>(
+    `SELECT id FROM invoices
+     WHERE customer_id = $1
+       AND document_type = 'OPENING_BALANCE'
+       AND status NOT IN ('CANCELLED', 'VOIDED')`,
+    [data.customerId],
+  );
+
+  let replaced = false;
+  if (existing.rows[0]) {
+    await cancelCustomerOpeningBalance(
+      pool,
+      existing.rows[0].id,
+      data.userId,
+      data.replaceReason || 'Replaced opening balance with corrected amount',
+    );
+    replaced = true;
+  }
+
+  const created = await importCustomerOpeningBalance(pool, data);
+  return { ...created, replaced };
 }

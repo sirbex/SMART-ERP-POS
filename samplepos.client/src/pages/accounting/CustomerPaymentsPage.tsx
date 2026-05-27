@@ -123,6 +123,8 @@ const CustomerPaymentsPage: React.FC = () => {
   const [obDate, setObDate] = useState('');
   const [obDueDate, setObDueDate] = useState('');
   const [obNotes, setObNotes] = useState('');
+  const [obReplaceReason, setObReplaceReason] = useState('');
+  const [obCorrectMode, setObCorrectMode] = useState(false);
   const [obPosting, setObPosting] = useState(false);
 
   const handlePostCustomerOpeningBalance = async () => {
@@ -143,21 +145,36 @@ const CustomerPaymentsPage: React.FC = () => {
       toast.error('Original invoice date cannot be after the as-of (cutover) date');
       return;
     }
+    if (obCorrectMode && obReplaceReason.trim().length < 5) {
+      toast.error('Enter a correction reason (min 5 characters) — required for audit trail');
+      return;
+    }
     setObPosting(true);
     try {
-      await api.customers.importOpeningBalance({
+      const payload = {
         customerId: obCustomerId,
         amount: amt,
         asOfDate: obDate,
         dueDate: obDueDate || undefined,
         notes: obNotes || undefined,
-      });
-      toast.success('Customer opening balance posted');
+      };
+      if (obCorrectMode) {
+        await api.customers.replaceOpeningBalance({
+          ...payload,
+          replaceReason: obReplaceReason.trim(),
+        });
+        toast.success('Opening balance corrected (previous OB reversed and re-posted)');
+      } else {
+        await api.customers.importOpeningBalance(payload);
+        toast.success('Customer opening balance posted');
+      }
       setObAmount('');
       setObNotes('');
       setObCustomerId('');
       setObDate('');
       setObDueDate('');
+      setObReplaceReason('');
+      setObCorrectMode(false);
       if (formData.customerId === obCustomerId && isCreateModalOpen) {
         await loadOpenInvoicesForCustomer(obCustomerId);
       }
@@ -505,10 +522,10 @@ const CustomerPaymentsPage: React.FC = () => {
               Import Customer Opening Balance
             </h3>
             <p className="text-xs text-gray-500 mb-4">
-              Post a historical balance brought forward as a single Opening Balance journal (DR
-              Accounts Receivable / CR Opening Balance Equity). Each customer may only have one
-              opening balance. Open items appear here for allocation and on Customer Center
-              invoices.
+              Post cutover AR (DR 1200 / CR Opening Balance Equity). One active OB per customer.
+              Wrong amount? Enable <strong>Correct existing OB</strong> — reverses the prior journal
+              and posts the new figure (SAP/Odoo reverse-and-re-enter). Manual journals cannot post
+              to AR; use this flow instead.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end">
               <div className="sm:col-span-2">
@@ -556,14 +573,38 @@ const CustomerPaymentsPage: React.FC = () => {
                 />
               </div>
             </div>
-            <div className="flex justify-end mt-3">
-              <Button
-                onClick={() => void handlePostCustomerOpeningBalance()}
-                disabled={obPosting}
-                variant="outline"
-              >
-                {obPosting ? 'Posting…' : 'Post Opening Balance'}
-              </Button>
+            <div className="mt-3 space-y-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={obCorrectMode}
+                  onChange={(e) => setObCorrectMode(e.target.checked)}
+                />
+                Correct existing opening balance (reverse prior OB and post new amount)
+              </label>
+              {obCorrectMode && (
+                <div>
+                  <Label className="text-xs text-gray-600 mb-1 block">Correction reason *</Label>
+                  <Input
+                    value={obReplaceReason}
+                    onChange={(e) => setObReplaceReason(e.target.value)}
+                    placeholder="e.g. Wrong cutover figure from legacy system"
+                  />
+                </div>
+              )}
+              <div className="flex justify-end">
+                <Button
+                  onClick={() => void handlePostCustomerOpeningBalance()}
+                  disabled={obPosting}
+                  variant="outline"
+                >
+                  {obPosting
+                    ? 'Posting…'
+                    : obCorrectMode
+                      ? 'Replace Opening Balance'
+                      : 'Post Opening Balance'}
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

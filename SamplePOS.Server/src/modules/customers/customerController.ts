@@ -19,6 +19,15 @@ const CustomerOpeningBalanceSchema = z.object({
   notes: z.string().optional(),
 });
 
+const CustomerOpeningBalanceReplaceSchema = CustomerOpeningBalanceSchema.extend({
+  replaceReason: z.string().min(5, 'Reason must be at least 5 characters'),
+});
+
+const CustomerOpeningBalanceCancelSchema = z.object({
+  invoiceId: z.string().uuid(),
+  reason: z.string().min(5, 'Reason must be at least 5 characters'),
+});
+
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const LedgerQuerySchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'startDate must be YYYY-MM-DD'),
@@ -54,6 +63,33 @@ export const importCustomerOpeningBalance = asyncHandler(async (req: Request, re
     userId: req.user!.id,
   });
   res.status(201).json({ success: true, data: result });
+});
+
+export const replaceCustomerOpeningBalance = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const validated = CustomerOpeningBalanceReplaceSchema.parse(req.body);
+  const result = await customerService.replaceCustomerOpeningBalance(pool, {
+    customerId: validated.customerId,
+    amount: new Decimal(validated.amount).toNumber(),
+    asOfDate: validated.asOfDate,
+    dueDate: validated.dueDate,
+    notes: validated.notes,
+    userId: req.user!.id,
+    replaceReason: validated.replaceReason,
+  });
+  res.status(201).json({ success: true, data: result });
+});
+
+export const cancelCustomerOpeningBalance = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const validated = CustomerOpeningBalanceCancelSchema.parse(req.body);
+  const result = await customerService.cancelCustomerOpeningBalance(
+    pool,
+    validated.invoiceId,
+    req.user!.id,
+    validated.reason,
+  );
+  res.json({ success: true, data: result });
 });
 
 export const getCustomers = asyncHandler(async (req: Request, res: Response) => {

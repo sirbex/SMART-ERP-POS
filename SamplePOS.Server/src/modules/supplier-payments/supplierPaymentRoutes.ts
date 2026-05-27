@@ -766,6 +766,47 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         })
     );
 
+    const OpeningBalanceReplaceSchema = OpeningBalanceSchema.extend({
+        replaceReason: z.string().min(5),
+    });
+    const OpeningBalanceCancelSchema = z.object({
+        invoiceId: z.string().uuid(),
+        reason: z.string().min(5),
+    });
+
+    router.post(
+        '/invoices/opening-balance/replace',
+        requirePermission('suppliers.create'),
+        asyncHandler(async (req, res) => {
+            const validated = OpeningBalanceReplaceSchema.parse(req.body);
+            const result = await supplierPaymentService.replaceSupplierOpeningBalance(p(req), {
+                supplierId: validated.supplierId,
+                amount: new Decimal(validated.amount).toNumber(),
+                asOfDate: validated.asOfDate,
+                dueDate: validated.dueDate,
+                notes: validated.notes,
+                userId: req.user!.id,
+                replaceReason: validated.replaceReason,
+            });
+            res.status(201).json({ success: true, data: result });
+        }),
+    );
+
+    router.post(
+        '/invoices/opening-balance/cancel',
+        requirePermission('suppliers.create'),
+        asyncHandler(async (req, res) => {
+            const validated = OpeningBalanceCancelSchema.parse(req.body);
+            const result = await supplierPaymentService.cancelSupplierOpeningBalance(
+                p(req),
+                validated.invoiceId,
+                req.user!.id,
+                validated.reason,
+            );
+            res.json({ success: true, data: result });
+        }),
+    );
+
     // Get supplier invoice by ID
     router.get(
         '/invoices/:id',

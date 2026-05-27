@@ -20,6 +20,7 @@ import type pg from 'pg';
 import { pool as globalPool } from '../db/pool.js';
 import { Money, Decimal } from '../utils/money.js';
 import logger from '../utils/logger.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 
 // =============================================================================
 // TYPES
@@ -330,12 +331,12 @@ export class GLIntegrityChecker {
     const result = await pool.query(`
       SELECT
         COALESCE(
-          (SELECT SUM("DebitAmount") - SUM("CreditAmount")
+          (SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
            FROM ledger_entries le
            JOIN accounts a ON a."Id" = le."AccountId"
            JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
            WHERE a."AccountCode" = '1200'
-             AND lt."Status" = 'POSTED'), 0
+             AND ${LEDGER_NET_ACTIVE_SQL}), 0
         ) as gl_balance,
         COALESCE(
           (SELECT SUM(balance) FROM customers), 0

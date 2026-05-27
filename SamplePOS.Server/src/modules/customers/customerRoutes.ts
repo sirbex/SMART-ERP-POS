@@ -33,6 +33,16 @@ router.post(
   requirePermission('customers.create'),
   customerController.importCustomerOpeningBalance
 );
+router.post(
+  '/opening-balance/replace',
+  requirePermission('customers.create'),
+  customerController.replaceCustomerOpeningBalance
+);
+router.post(
+  '/opening-balance/cancel',
+  requirePermission('customers.create'),
+  customerController.cancelCustomerOpeningBalance
+);
 router.get('/', customerController.getCustomers);
 router.get('/search', customerController.searchCustomers);
 router.get('/by-number/:customerNumber', customerController.getCustomerByNumber);

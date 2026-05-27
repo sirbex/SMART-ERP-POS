@@ -354,6 +354,16 @@ export const api = {
       dueDate?: string;
       notes?: string;
     }) => apiClient.post<ApiResponse>('customers/opening-balance', data),
+    replaceOpeningBalance: (data: {
+      customerId: string;
+      amount: number;
+      asOfDate: string;
+      dueDate?: string;
+      notes?: string;
+      replaceReason: string;
+    }) => apiClient.post<ApiResponse>('customers/opening-balance/replace', data),
+    cancelOpeningBalance: (data: { invoiceId: string; reason: string }) =>
+      apiClient.post<ApiResponse>('customers/opening-balance/cancel', data),
   },
 
   // Suppliers
@@ -839,6 +849,16 @@ export const api = {
       dueDate?: string;
       notes?: string;
     }) => apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance', data),
+    replaceOpeningBalance: (data: {
+      supplierId: string;
+      amount: number;
+      asOfDate: string;
+      dueDate?: string;
+      notes?: string;
+      replaceReason: string;
+    }) => apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance/replace', data),
+    cancelOpeningBalance: (data: { invoiceId: string; reason: string }) =>
+      apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance/cancel', data),
   },
 
   // Generic HTTP methods for backward compatibility

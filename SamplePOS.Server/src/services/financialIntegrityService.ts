@@ -20,6 +20,9 @@ import Decimal from 'decimal.js';
 import { pool as globalPool } from '../db/pool.js';
 import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 
+/** @deprecated Use LEDGER_NET_ACTIVE_SQL — kept as alias for subqueries using `lt` alias */
+const NET_ACTIVE_TXNS = LEDGER_NET_ACTIVE_SQL;
+
 export type IntegrityCheckStatus = 'PASS' | 'WARN' | 'FAIL';
 export type IntegrityOverallStatus = 'HEALTHY' | 'WARNING' | 'DRIFT_DETECTED';
 
@@ -75,29 +78,6 @@ function summarize(checks: IntegrityCheck[]): IntegrityBlock['summary'] {
     failed: checks.filter((c) => c.status === 'FAIL').length,
   };
 }
-
-/**
- * SQL predicate (assumes alias `lt`) that keeps only ledger transactions
- * whose effect on GL balances is still "live" — i.e. excludes BOTH sides of
- * every reversal pair.
- *
- *   • The ORIGINAL reversed transaction has `IsReversed = TRUE` (→ excluded
- *     by the first clause).
- *   • The REVERSAL transaction has `IsReversed = FALSE` but its Id appears
- *     in another row's `ReversedByTransactionId` (→ excluded by NOT IN).
- *
- * A naive `IsReversed = FALSE` filter excludes the original but still counts
- * the reversal, producing a net double-subtraction. This constant implements
- * the correct paired-exclusion required to detect true drift.
- */
-const NET_ACTIVE_TXNS = `
-  lt."IsReversed" = FALSE
-  AND lt."Id" NOT IN (
-    SELECT "ReversedByTransactionId"
-    FROM ledger_transactions
-    WHERE "ReversedByTransactionId" IS NOT NULL
-  )
-`;
 
 // ── Atomic checks (reused across statements) ──────────────────────────────────
 

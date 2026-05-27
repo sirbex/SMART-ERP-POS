@@ -19,6 +19,7 @@
 import type pg from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 
 // ============================================================================
 // SINGLE-ACCOUNT-PERIOD REBUILD
@@ -28,11 +29,8 @@ import logger from '../utils/logger.js';
  * Recompute a single gl_period_balances row from ledger_entries.
  *
  * Uses absolute (replace) totals — NEVER incremental addition.
- * Covers POSTED transactions only.
- * REVERSED transactions are excluded: when AccountingCore.reverseTransaction() properly
- * reverses a transaction, a new POSTED reversal entry is created with opposite amounts.
- * Including REVERSED would double-count those entries. Orphaned REVERSED transactions
- * (manually status-flipped without a counter entry) would also inflate totals.
+ * Uses net-active POSTED entries (excludes both legs of reversal pairs) — same as
+ * balance sheet and financial integrity checks.
  *
  * @param pool        Tenant pool — caller provides the correct pool.
  * @param accountId   UUID of the account.
@@ -67,7 +65,7 @@ export async function rebuildSingleAccountPeriod(
          WHERE le."AccountId" = $1
            AND EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = $2
            AND EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = $3
-           AND lt."Status" = 'POSTED'`,
+           AND ${LEDGER_NET_ACTIVE_SQL}`,
         [accountId, fiscalYear, fiscalPeriod],
     );
 
