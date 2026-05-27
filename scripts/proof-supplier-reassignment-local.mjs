@@ -77,12 +77,38 @@ async function main() {
     process.exit(1);
   }
   const json = JSON.parse(body);
-  if (!json.success || json.data?.amount == null) {
+  const data = json.data;
+  if (!json.success || data?.amount == null) {
     console.error('FAIL response', body.slice(0, 2000));
     process.exit(1);
   }
+  if (!Array.isArray(data.wizardSteps) || data.wizardSteps.length < 1) {
+    console.error('FAIL missing wizardSteps');
+    process.exit(1);
+  }
+  if (!Array.isArray(data.invoicesToReverse)) {
+    console.error('FAIL missing invoicesToReverse');
+    process.exit(1);
+  }
+  const hasReclass = data.wizardSteps.some((s) => s.code === 'RECLASS_GRIR');
+  if (!hasReclass) {
+    console.error('FAIL wizardSteps must include RECLASS_GRIR');
+    process.exit(1);
+  }
+  if (data.purchaseOrderId && !data.wizardSteps.some((s) => s.code === 'UPDATE_PURCHASE_ORDER')) {
+    console.error('FAIL wizardSteps must include UPDATE_PURCHASE_ORDER when PO linked');
+    process.exit(1);
+  }
   console.log(
-    `PASS supplier-reassignment preview GR=${gr.grNumber ?? gr.id} amount=${json.data.amount} blockers=${json.data.blockers?.length ?? 0}`,
+    `PASS supplier-reassignment preview GR=${gr.grNumber ?? gr.id} amount=${data.amount} blockers=${data.blockers?.length ?? 0} invoicesToReverse=${data.invoicesToReverse.length} wizardSteps=${data.wizardSteps.length}`,
+  );
+  if (data.invoicesToReverse.length > 0) {
+    console.log(
+      `  → planned bill reversal: ${data.invoicesToReverse.map((i) => i.invoiceNumber).join(', ')}`,
+    );
+  }
+  console.log(
+    `  → wizard: ${data.wizardSteps.map((s) => s.title).join(' → ')}`,
   );
 }
 

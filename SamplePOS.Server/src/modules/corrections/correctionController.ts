@@ -11,7 +11,10 @@ import {
 } from '../../../../shared/zod/correction.js';
 import { correctionEligibilityService } from './correctionEligibilityService.js';
 import { supplierReassignmentService } from './supplierReassignmentService.js';
-import { SupplierReassignmentBodySchema } from '../../../../shared/zod/supplierReassignment.js';
+import {
+    SupplierReassignmentBodySchema,
+    SupplierReassignmentExecuteSchema,
+} from '../../../../shared/zod/supplierReassignment.js';
 
 export const correctionController = {
 
@@ -63,7 +66,7 @@ export const correctionController = {
     }),
 
     executeSupplierReassignment: asyncHandler(async (req: Request, res: Response) => {
-        const body = SupplierReassignmentBodySchema.safeParse(req.body);
+        const body = SupplierReassignmentExecuteSchema.safeParse(req.body);
         if (!body.success) {
             throw new ValidationError(
                 body.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; '),

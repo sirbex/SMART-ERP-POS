@@ -1513,36 +1513,55 @@ async function loadSupplierOpeningBalanceForCancel(
     return inv;
 }
 
-async function unallocateSupplierObPaymentsBeforeCancel(
+/**
+ * Remove all payment allocations from an invoice (SAP: reset payment reconciliation).
+ * Payments remain on the supplier as unallocated cash — user can re-apply after correction.
+ */
+export async function unallocateAllPaymentsFromInvoice(
     client: PoolClient,
     invoiceId: string,
     supplierId: string,
-): Promise<number> {
-    const allocs = await client.query<{ Id: string }>(
-        `SELECT "Id" FROM supplier_payment_allocations
+): Promise<{ allocationCount: number; amountUnallocated: number }> {
+    const allocs = await client.query<{ Id: string; AmountAllocated: string | number }>(
+        `SELECT "Id", "AmountAllocated" FROM supplier_payment_allocations
          WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL`,
         [invoiceId],
     );
 
+    let amountUnallocated = new Decimal(0);
+
     for (const row of allocs.rows) {
+        amountUnallocated = amountUnallocated.plus(row.AmountAllocated || 0);
         const deleted = await supplierPaymentRepository.deleteAllocation(client, row.Id);
         if (!deleted) continue;
-
-        const sumResult = await client.query<{ total_paid: string | number }>(
-            `SELECT COALESCE(SUM("AmountAllocated"), 0) as total_paid
-             FROM supplier_payment_allocations
-             WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL`,
-            [invoiceId],
-        );
-        const newPaidAmount = new Decimal(sumResult.rows[0]?.total_paid ?? 0).toNumber();
-        await supplierPaymentRepository.updateInvoicePaidAmount(client, invoiceId, newPaidAmount);
     }
+
+    const sumResult = await client.query<{ total_paid: string | number }>(
+        `SELECT COALESCE(SUM("AmountAllocated"), 0) as total_paid
+         FROM supplier_payment_allocations
+         WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL`,
+        [invoiceId],
+    );
+    const newPaidAmount = new Decimal(sumResult.rows[0]?.total_paid ?? 0).toNumber();
+    await supplierPaymentRepository.updateInvoicePaidAmount(client, invoiceId, newPaidAmount);
 
     if (allocs.rows.length > 0) {
         await recalcSupplierBalance(client, supplierId);
     }
 
-    return allocs.rows.length;
+    return {
+        allocationCount: allocs.rows.length,
+        amountUnallocated: amountUnallocated.toNumber(),
+    };
+}
+
+async function unallocateSupplierObPaymentsBeforeCancel(
+    client: PoolClient,
+    invoiceId: string,
+    supplierId: string,
+): Promise<number> {
+    const { allocationCount } = await unallocateAllPaymentsFromInvoice(client, invoiceId, supplierId);
+    return allocationCount;
 }
 
 export type CancelSupplierOpeningBalanceOptions = {
@@ -1651,6 +1670,143 @@ export async function cancelSupplierOpeningBalance(
 
         return { invoiceId, invoiceNumber: inv.SupplierInvoiceNumber as string };
     });
+}
+
+export type CancelSupplierInvoiceForCorrectionOptions = {
+    /** When set, runs inside an existing transaction (e.g. supplier reassignment wizard). */
+    client?: PoolClient;
+    grnId?: string;
+    /** SAP/Odoo: unapply payment allocations before reversing the bill (reassignment wizard). */
+    unallocatePaymentsFirst?: boolean;
+};
+
+/**
+ * Cancel an unpaid supplier invoice for correction workflows (SAP/Odoo: reverse vendor bill).
+ * Reverses posted GL (SUPPLIER_INVOICE) then marks invoice Cancelled — reopens GR/IR when GR-linked.
+ */
+export async function cancelSupplierInvoiceForCorrection(
+    pool: Pool,
+    invoiceId: string,
+    userId: string,
+    reason: string,
+    options?: CancelSupplierInvoiceForCorrectionOptions,
+): Promise<{ invoiceId: string; invoiceNumber: string; glReversed: boolean }> {
+    if (!reason || reason.trim().length < 3) {
+        throw new ValidationError('Cancellation reason is required (min 3 characters)');
+    }
+
+    const run = async (client: PoolClient) => {
+        const result = await client.query<{
+            Id: string;
+            SupplierInvoiceNumber: string;
+            SupplierId: string;
+            Status: string;
+            document_type: string | null;
+            AmountPaid: string | number;
+            is_posted_to_gl: boolean;
+        }>(
+            `SELECT "Id", "SupplierInvoiceNumber", "SupplierId", "Status", document_type,
+                    COALESCE("AmountPaid", 0) AS "AmountPaid", COALESCE(is_posted_to_gl, false) AS is_posted_to_gl
+             FROM supplier_invoices
+             WHERE "Id" = $1 AND deleted_at IS NULL
+             FOR UPDATE`,
+            [invoiceId],
+        );
+
+        if (result.rows.length === 0) {
+            throw new ValidationError('Supplier invoice not found');
+        }
+
+        const inv = result.rows[0];
+        const status = String(inv.Status || '').toUpperCase();
+        if (status === 'CANCELLED' || status === 'VOIDED' || status === 'DELETED') {
+            return {
+                invoiceId,
+                invoiceNumber: inv.SupplierInvoiceNumber,
+                glReversed: false,
+            };
+        }
+
+        const amountPaid = Number(inv.AmountPaid) || 0;
+        if (amountPaid > 0.01 && !options?.unallocatePaymentsFirst) {
+            throw new ValidationError(
+                `Cannot auto-reverse supplier invoice ${inv.SupplierInvoiceNumber}: payments exist. Use credit note workflow or enable payment unallocation.`,
+            );
+        }
+
+        if (amountPaid > 0.01 && options?.unallocatePaymentsFirst) {
+            await unallocateAllPaymentsFromInvoice(client, invoiceId, inv.SupplierId);
+        }
+
+        const docType = inv.document_type ?? '';
+        if (docType === 'OPENING_BALANCE') {
+            throw new ValidationError('Use opening balance cancel for opening balance documents.');
+        }
+        if (docType === 'SUPPLIER_CREDIT_NOTE' || docType === 'SUPPLIER_DEBIT_NOTE') {
+            throw new ValidationError(`Cannot auto-reverse ${docType} via supplier reassignment.`);
+        }
+
+        await checkAccountingPeriodOpen(client, getBusinessDate());
+
+        let glReversed = false;
+        if (inv.is_posted_to_gl) {
+            const glTxn = await client.query<{ Id: string }>(
+                `SELECT "Id" FROM ledger_transactions
+                 WHERE "ReferenceType" = 'SUPPLIER_INVOICE'
+                   AND "ReferenceId" = $1
+                   AND "IsReversed" = FALSE
+                 ORDER BY "CreatedAt" DESC
+                 LIMIT 1`,
+                [invoiceId],
+            );
+
+            if (glTxn.rows[0]) {
+                const suffix = options?.grnId ? `-${options.grnId}` : '';
+                try {
+                    await AccountingCore.reverseTransaction(
+                        {
+                            originalTransactionId: glTxn.rows[0].Id,
+                            reversalDate: getBusinessDate(),
+                            reason: `REASSIGN GR: cancel ${inv.SupplierInvoiceNumber}: ${reason.trim()}`,
+                            userId,
+                            idempotencyKey: `SUPPLIER_INV_CANCEL-${invoiceId}${suffix}`,
+                        },
+                        pool,
+                        client,
+                    );
+                    glReversed = true;
+                } catch (error: unknown) {
+                    if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
+                        glReversed = true;
+                    } else {
+                        throw error;
+                    }
+                }
+            }
+        }
+
+        await client.query(
+            `UPDATE supplier_invoices
+             SET "Status" = 'Cancelled',
+                 "OutstandingBalance" = 0,
+                 "UpdatedAt" = NOW()
+             WHERE "Id" = $1`,
+            [invoiceId],
+        );
+
+        await recalcSupplierBalance(client, inv.SupplierId);
+
+        return {
+            invoiceId,
+            invoiceNumber: inv.SupplierInvoiceNumber,
+            glReversed,
+        };
+    };
+
+    if (options?.client) {
+        return run(options.client);
+    }
+    return UnitOfWork.run(pool, run);
 }
 
 export async function replaceSupplierOpeningBalance(

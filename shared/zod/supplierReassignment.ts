@@ -8,3 +8,10 @@ export const SupplierReassignmentBodySchema = z.object({
 });
 
 export type SupplierReassignmentBody = z.infer<typeof SupplierReassignmentBodySchema>;
+
+/** Execute: reverse unpaid GR-linked bills automatically, then reclass GR/IR (default on). */
+export const SupplierReassignmentExecuteSchema = SupplierReassignmentBodySchema.extend({
+    autoReverseInvoices: z.boolean().optional().default(true),
+});
+
+export type SupplierReassignmentExecuteBody = z.infer<typeof SupplierReassignmentExecuteSchema>;

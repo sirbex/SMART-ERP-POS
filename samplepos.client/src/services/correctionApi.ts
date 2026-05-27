@@ -24,9 +24,31 @@ export interface CorrectionEligibility {
     suggestedActions: string[];
 }
 
+export interface SupplierReassignmentInvoicePlan {
+    invoiceId: string;
+    invoiceNumber: string;
+    totalAmount: number;
+    amountPaid?: number;
+    isPostedToGl: boolean;
+    action: 'REVERSE_AND_CANCEL' | 'UNALLOCATE_PAYMENTS_AND_CANCEL';
+}
+
+export interface SupplierReassignmentWizardStep {
+    order: number;
+    code:
+        | 'UNALLOCATE_PAYMENTS'
+        | 'REVERSE_INVOICES'
+        | 'RECLASS_GRIR'
+        | 'UPDATE_PURCHASE_ORDER'
+        | 'COMPLETE';
+    title: string;
+    description: string;
+}
+
 export interface SupplierReassignmentPreview {
     grnId: string;
     grNumber: string;
+    purchaseOrderId: string | null;
     fromSupplierId: string;
     fromSupplierName: string | null;
     toSupplierId: string;
@@ -36,6 +58,8 @@ export interface SupplierReassignmentPreview {
     accountScope: 'GRIR';
     eligibility: CorrectionEligibility;
     journalLines: Array<{ accountCode: string; debit: number; credit: number; entityId: string }>;
+    invoicesToReverse: SupplierReassignmentInvoicePlan[];
+    wizardSteps: SupplierReassignmentWizardStep[];
     blockers: string[];
     warnings: string[];
 }
@@ -45,6 +69,16 @@ export interface SupplierReassignmentResult {
     glTransactionId: string;
     amount: number;
     accountScope: 'GRIR';
+    purchaseOrderId: string | null;
+    poSupplierUpdated: boolean;
+    toSupplierId: string;
+    toSupplierName: string | null;
+    reversedInvoices: Array<{
+        invoiceId: string;
+        invoiceNumber: string;
+        glReversed: boolean;
+        paymentsUnallocated?: number;
+    }>;
     warnings: string[];
 }
 
@@ -73,6 +107,7 @@ export const correctionApi = {
         fromSupplierId: string;
         toSupplierId: string;
         reason: string;
+        autoReverseInvoices?: boolean;
     }) {
         return api.post<{ success: boolean; data: SupplierReassignmentResult }>(
             '/corrections/supplier-reassignment/execute',

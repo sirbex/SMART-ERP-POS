@@ -1644,7 +1644,9 @@ export default function GoodsReceiptsPage() {
           onClose={() => setShowSupplierReassignModal(false)}
           onSuccess={() => {
             void detailsQuery.refetch();
-            alert('Supplier reassignment posted to GL. Review supplier statements and GR/IR clearing.');
+            alert(
+              'Supplier correction complete: purchase order and receipt now show the new vendor; bill(s) reversed (if any) and GR/IR reclass posted. Create a new supplier bill for the correct vendor when ready.',
+            );
           }}
         />
       )}

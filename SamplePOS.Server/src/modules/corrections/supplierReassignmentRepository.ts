@@ -73,4 +73,22 @@ export const supplierReassignmentRepository = {
         );
         return result.rows[0].id as string;
     },
+
+    /** Align PO vendor with corrected GR (SAP: PO header follows vendor correction). */
+    async updatePurchaseOrderSupplier(
+        client: PoolClient,
+        purchaseOrderId: string,
+        supplierId: string,
+    ): Promise<boolean> {
+        const result = await client.query(
+            `UPDATE purchase_orders
+             SET supplier_id = $2,
+                 version = version + 1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $1
+             RETURNING id`,
+            [purchaseOrderId, supplierId],
+        );
+        return (result.rowCount ?? 0) > 0;
+    },
 };
