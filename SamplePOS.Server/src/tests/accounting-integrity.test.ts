@@ -224,9 +224,14 @@ async function runTests() {
       AND lt."ReferenceType" IN (
         'SUPPLIER_INVOICE','SUPPLIER_PAYMENT',
         'SUPPLIER_DEBIT_NOTE','SUPPLIER_CREDIT_NOTE',
-        'RETURN_GRN','EXPENSE','EXPENSE_PAYMENT'
+        'RETURN_GRN','SUPPLIER_OPENING_BALANCE'
       )
       AND lt."IsReversed" = FALSE
+      AND lt."Id" NOT IN (
+        SELECT "ReversedByTransactionId"
+        FROM ledger_transactions
+        WHERE "ReversedByTransactionId" IS NOT NULL
+      )
   `);
 
   // Advisory: how much legacy GR is sitting in AP instead of GRIR 2150
