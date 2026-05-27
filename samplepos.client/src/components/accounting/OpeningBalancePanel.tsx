@@ -44,8 +44,6 @@ type Props = {
   defaultExpanded?: boolean;
 };
 
-const todayIso = () => new Date().toLocaleDateString('en-CA');
-
 export const OpeningBalancePanel: React.FC<Props> = ({
   partyType,
   partyId,

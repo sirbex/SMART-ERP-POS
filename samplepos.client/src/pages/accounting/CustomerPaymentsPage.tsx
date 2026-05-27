@@ -370,6 +370,9 @@ const CustomerPaymentsPage: React.FC = () => {
               onClick={() => {
                 setShowObPanel(true);
                 setIsCreateModalOpen(true);
+                if (selectedCustomerId && selectedCustomerId !== 'all') {
+                  setFormData((p) => ({ ...p, customerId: selectedCustomerId }));
+                }
               }}
             >
               <Wallet className="h-4 w-4" />

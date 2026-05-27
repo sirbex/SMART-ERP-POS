@@ -13,46 +13,61 @@ import {
     DialogHeader,
     DialogTitle,
 } from '../components/ui/dialog';
+import { AxiosError } from 'axios';
+import { apiClient, type ApiResponse } from '../utils/api';
 
-// Auth helper for fetch calls
-const authHeaders = (): HeadersInit => {
-    const token = localStorage.getItem('auth_token');
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
+function reconciliationErrorMessage(err: unknown, fallback: string): string {
+    const ax = err as AxiosError<ApiResponse>;
+    const status = ax.response?.status;
+    const apiMsg = ax.response?.data?.error ?? ax.response?.data?.message;
+    if (status === 403) {
+        return apiMsg ?? 'You need the accounting.reconcile permission (Admin → Roles).';
+    }
+    if (status === 401) {
+        return 'Session expired — sign in again.';
+    }
+    return apiMsg ?? (err instanceof Error ? err.message : fallback);
+}
+
+// API functions (shared api client: auth refresh, tenant routing)
+const fetchReconciliationSummary = async (
+    asOfDate?: string,
+): Promise<ApiResponse<ReconciliationSummary>> => {
+    const response = await apiClient.get<ApiResponse<ReconciliationSummary>>(
+        '/erp-accounting/reconciliation/summary',
+        { params: asOfDate ? { asOfDate } : undefined },
+    );
+    return response.data;
 };
 
-// API functions
-const fetchReconciliationSummary = async (asOfDate?: string) => {
-    const url = asOfDate
-        ? `/api/erp-accounting/reconciliation/summary?asOfDate=${asOfDate}`
-        : '/api/erp-accounting/reconciliation/summary';
-    const response = await fetch(url, { headers: authHeaders() });
-    if (!response.ok) throw new Error('Failed to fetch reconciliation summary');
-    return response.json();
+const fetchAccountReconciliation = async (
+    account: string,
+    asOfDate?: string,
+): Promise<ApiResponse<ReconciliationDetail>> => {
+    const response = await apiClient.get<ApiResponse<ReconciliationDetail>>(
+        `/erp-accounting/reconciliation/${account}`,
+        { params: asOfDate ? { asOfDate } : undefined },
+    );
+    return response.data;
 };
 
-const fetchAccountReconciliation = async (account: string, asOfDate?: string) => {
-    const url = asOfDate
-        ? `/api/erp-accounting/reconciliation/${account}?asOfDate=${asOfDate}`
-        : `/api/erp-accounting/reconciliation/${account}`;
-    const response = await fetch(url, { headers: authHeaders() });
-    if (!response.ok) throw new Error(`Failed to fetch ${account} reconciliation`);
-    return response.json();
-};
-
-const fetchDiscrepancyDetails = async (accountCode: string, asOfDate?: string) => {
-    const url = asOfDate
-        ? `/api/erp-accounting/reconciliation/${accountCode}/discrepancies?asOfDate=${asOfDate}`
-        : `/api/erp-accounting/reconciliation/${accountCode}/discrepancies`;
-    const response = await fetch(url, { headers: authHeaders() });
-    if (!response.ok) throw new Error('Failed to fetch discrepancy details');
-    return response.json();
+const fetchDiscrepancyDetails = async (
+    accountCode: string,
+    asOfDate?: string,
+): Promise<ApiResponse<DiscrepancyListResponse>> => {
+    const response = await apiClient.get<ApiResponse<DiscrepancyListResponse>>(
+        `/erp-accounting/reconciliation/${accountCode}/discrepancies`,
+        { params: asOfDate ? { asOfDate } : undefined },
+    );
+    return response.data;
 };
 
 const fetchActiveAccounts = async (): Promise<ChartAccount[]> => {
-    const response = await fetch('/api/accounting/chart-of-accounts?isPostingAccount=true&isActive=true', { headers: authHeaders() });
-    if (!response.ok) throw new Error('Failed to fetch accounts');
-    const data = await response.json();
-    return data.data || [];
+    const response = await apiClient.get<ApiResponse<ChartAccount[]>>(
+        '/accounting/chart-of-accounts',
+        { params: { isPostingAccount: true, isActive: true } },
+    );
+    return response.data.data ?? [];
 };
 
 type AccountType = 'cash' | 'accounts-receivable' | 'inventory' | 'accounts-payable';
@@ -64,6 +79,39 @@ interface ReconciliationAccount {
     difference: number;
     status: 'MATCHED' | 'DISCREPANCY';
     recommendation: string;
+}
+
+interface ReconciliationSummary {
+    asOfDate: string;
+    generatedAt: string;
+    accounts: ReconciliationAccount[];
+    overallStatus: 'ALL_RECONCILED' | 'HAS_DISCREPANCIES';
+    discrepancyCount: number;
+}
+
+interface ReconciliationDetail {
+    accountName: string;
+    glBalance: number;
+    subledgerBalance: number;
+    difference: number;
+    status: string;
+    items?: Array<{
+        source: string;
+        description: string;
+        amount: number;
+        difference: number;
+        status: string;
+    }>;
+    recommendations?: string[];
+}
+
+interface DiscrepancyListResponse {
+    discrepancies: Array<{
+        entityName: string;
+        glBalance: number;
+        subledgerBalance: number;
+        difference: number;
+    }>;
 }
 
 interface ChartAccount {
@@ -86,10 +134,17 @@ export default function ReconciliationPage() {
     const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
 
     // Queries
-    const { data: summaryData, isLoading: summaryLoading, refetch: refetchSummary } = useQuery({
+    const {
+        data: summaryData,
+        isLoading: summaryLoading,
+        isError: summaryError,
+        error: summaryQueryError,
+        refetch: refetchSummary,
+    } = useQuery({
         queryKey: ['reconciliation-summary', asOfDate],
         queryFn: () => fetchReconciliationSummary(asOfDate),
         staleTime: 30_000,
+        retry: 1,
     });
 
     const { data: accountData, isLoading: accountLoading, refetch: refetchAccount } = useQuery({
@@ -120,8 +175,8 @@ export default function ReconciliationPage() {
     });
     const chartAccounts: ChartAccount[] = accountsData || [];
 
-    const summary = summaryData?.data;
-    const accountDetail = accountData?.data;
+    const summary = summaryData?.data as ReconciliationSummary | undefined;
+    const accountDetail = accountData?.data as ReconciliationDetail | undefined;
 
     /**
      * Navigate to Journal Entries page with pre-filled adjusting entry data.
@@ -273,11 +328,33 @@ export default function ReconciliationPage() {
             )}
 
             {/* Summary Table */}
-            {summaryLoading ? (
+            {summaryError ? (
+                <div className="mb-6 p-4 rounded-lg border border-red-200 bg-red-50">
+                    <div className="flex items-start gap-3">
+                        <AlertTriangle className="h-5 w-5 text-red-600 shrink-0 mt-0.5" />
+                        <div>
+                            <p className="font-semibold text-red-800">Could not load reconciliation</p>
+                            <p className="text-sm text-red-700 mt-1">
+                                {reconciliationErrorMessage(
+                                    summaryQueryError,
+                                    'Failed to fetch reconciliation summary',
+                                )}
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => void refetchSummary()}
+                                className="mt-3 text-sm font-medium text-red-800 underline hover:no-underline"
+                            >
+                                Try again
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            ) : summaryLoading ? (
                 <div className="flex justify-center py-12">
                     <RefreshCw className="h-8 w-8 text-gray-400 animate-spin" />
                 </div>
-            ) : summary?.accounts ? (
+            ) : summary?.accounts && summary.accounts.length > 0 ? (
                 <div className="bg-white rounded-lg shadow-sm border mb-6">
                     <div className="px-6 py-4 border-b">
                         <h2 className="text-lg font-semibold">Reconciliation Summary</h2>
@@ -405,6 +482,13 @@ export default function ReconciliationPage() {
                         })}
                     </div>
                 </div>
+            ) : !summaryLoading && !summaryError ? (
+                <div className="mb-6 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+                    No reconciliation data returned for {asOfDate}. If this persists after Refresh,
+                    ask an admin to verify the database function{' '}
+                    <code className="text-xs bg-amber-100 px-1 rounded">fn_full_reconciliation_report</code>{' '}
+                    is deployed for this tenant.
+                </div>
             ) : null}
 
             {/* Reconciliation Details Modal */}
@@ -489,11 +573,11 @@ export default function ReconciliationPage() {
                             </div>
 
                             {/* Recommendations */}
-                            {accountDetail.recommendations?.length > 0 && (
+                            {(accountDetail.recommendations?.length ?? 0) > 0 && (
                                 <div className="p-4 bg-yellow-50 rounded-lg border border-yellow-200">
                                     <h3 className="font-semibold text-yellow-800 mb-2">Recommendations</h3>
                                     <ul className="list-disc list-inside space-y-1">
-                                        {accountDetail.recommendations.map((rec: string, idx: number) => (
+                                        {(accountDetail.recommendations ?? []).map((rec: string, idx: number) => (
                                             <li key={idx} className="text-sm text-yellow-700">{rec}</li>
                                         ))}
                                     </ul>

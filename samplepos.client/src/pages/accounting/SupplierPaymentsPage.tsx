@@ -985,6 +985,12 @@ const SupplierPaymentsPage: React.FC = () => {
                             onClick={() => {
                                 setShowObPanel(true);
                                 setIsPaymentModalOpen(true);
+                                if (selectedSupplierId) {
+                                    setPaymentFormData((p) => ({
+                                        ...p,
+                                        supplierId: selectedSupplierId,
+                                    }));
+                                }
                             }}
                         >
                             <Wallet className="h-4 w-4" />
@@ -1569,7 +1575,10 @@ const SupplierPaymentsPage: React.FC = () => {
                                     partyType="supplier"
                                     partyId={paymentFormData.supplierId}
                                     onPartyIdChange={(v) => setPaymentFormData((p) => ({ ...p, supplierId: v }))}
-                                    parties={suppliers.map((s) => ({ id: s.id, name: s.name }))}
+                                    parties={suppliers.map((s) => ({
+                                        id: s.id,
+                                        name: s.name || s.supplierNumber || 'Supplier',
+                                    }))}
                                     defaultExpanded
                                     onSuccess={() => void loadPayments()}
                                 />

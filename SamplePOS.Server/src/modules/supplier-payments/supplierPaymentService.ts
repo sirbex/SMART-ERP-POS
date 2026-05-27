@@ -1373,14 +1373,14 @@ export async function importSupplierOpeningBalance(
                "Subtotal", "TaxAmount", "TotalAmount",
                "AmountPaid", "OutstandingBalance",
                "Status", "CurrencyCode", document_type,
-               "Notes", created_by_id, "CreatedAt", "UpdatedAt"
+               "Notes", "CreatedAt", "UpdatedAt"
              ) VALUES (
                gen_random_uuid(), $1, $2,
                $3, $4,
                $5, 0, $5,
                0, $5,
                'Pending', 'UGX', 'OPENING_BALANCE',
-               $6, $7, NOW(), NOW()
+               $6, NOW(), NOW()
              ) RETURNING "Id", "SupplierInvoiceNumber"`,
             [
                 invoiceNumber,
@@ -1389,7 +1389,6 @@ export async function importSupplierOpeningBalance(
                 dueDate,
                 amount.toNumber(),
                 data.notes ?? `Opening balance as of ${data.asOfDate}`,
-                data.userId,
             ]
         );
         const invoice = invoiceResult.rows[0];
