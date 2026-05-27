@@ -10,23 +10,11 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import Decimal from 'decimal.js';
-
-const CustomerOpeningBalanceSchema = z.object({
-  customerId: z.string().uuid(),
-  amount: z.union([z.number().positive(), z.string().transform(Number)]),
-  asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  notes: z.string().optional(),
-});
-
-const CustomerOpeningBalanceReplaceSchema = CustomerOpeningBalanceSchema.extend({
-  replaceReason: z.string().min(5, 'Reason must be at least 5 characters'),
-});
-
-const CustomerOpeningBalanceCancelSchema = z.object({
-  invoiceId: z.string().uuid(),
-  reason: z.string().min(5, 'Reason must be at least 5 characters'),
-});
+import {
+  CustomerOpeningBalanceSchema,
+  CustomerOpeningBalanceReplaceSchema,
+  CustomerOpeningBalanceCancelSchema,
+} from '../../../../shared/zod/customerOpeningBalance.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const LedgerQuerySchema = z.object({

@@ -16,6 +16,11 @@ import Money from '../../utils/money.js';
 import { amountToWords } from '../../utils/amountToWords.js';
 import { formatBusinessTimestamp } from '../../utils/dateRange.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import {
+    SupplierOpeningBalanceSchema,
+    SupplierOpeningBalanceReplaceSchema,
+    SupplierOpeningBalanceCancelSchema,
+} from '../../../../shared/zod/supplierOpeningBalance.js';
 
 // Zod schemas for validation
 const UuidParamSchema = z.object({ id: z.string().uuid() });
@@ -741,19 +746,11 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     // SUPPLIER OPENING BALANCE IMPORT
     // ============================================================
 
-    const OpeningBalanceSchema = z.object({
-        supplierId: z.string().uuid(),
-        amount: z.union([z.number().positive(), z.string().transform(Number)]),
-        asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-        dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-        notes: z.string().optional(),
-    });
-
     router.post(
         '/invoices/opening-balance',
         requirePermission('suppliers.create'),
         asyncHandler(async (req, res) => {
-            const validated = OpeningBalanceSchema.parse(req.body);
+            const validated = SupplierOpeningBalanceSchema.parse(req.body);
             const result = await supplierPaymentService.importSupplierOpeningBalance(p(req), {
                 supplierId: validated.supplierId,
                 amount: new Decimal(validated.amount).toNumber(),
@@ -766,19 +763,11 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         })
     );
 
-    const OpeningBalanceReplaceSchema = OpeningBalanceSchema.extend({
-        replaceReason: z.string().min(5),
-    });
-    const OpeningBalanceCancelSchema = z.object({
-        invoiceId: z.string().uuid(),
-        reason: z.string().min(5),
-    });
-
     router.post(
         '/invoices/opening-balance/replace',
         requirePermission('suppliers.create'),
         asyncHandler(async (req, res) => {
-            const validated = OpeningBalanceReplaceSchema.parse(req.body);
+            const validated = SupplierOpeningBalanceReplaceSchema.parse(req.body);
             const result = await supplierPaymentService.replaceSupplierOpeningBalance(p(req), {
                 supplierId: validated.supplierId,
                 amount: new Decimal(validated.amount).toNumber(),
@@ -796,7 +785,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         '/invoices/opening-balance/cancel',
         requirePermission('suppliers.create'),
         asyncHandler(async (req, res) => {
-            const validated = OpeningBalanceCancelSchema.parse(req.body);
+            const validated = SupplierOpeningBalanceCancelSchema.parse(req.body);
             const result = await supplierPaymentService.cancelSupplierOpeningBalance(
                 p(req),
                 validated.invoiceId,
