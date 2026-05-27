@@ -20,6 +20,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import { Money } from '../utils/money.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -817,39 +818,33 @@ export async function getBalanceSheet(
 }> {
   const pool = dbPool || globalPool;
   try {
-    // Parse asOfDate to fiscal year/month for gl_period_balances lookup
-    const [yearStr, monthStr] = asOfDate.split('-');
-    const year = parseInt(yearStr, 10);
-    const month = parseInt(monthStr, 10);
-
-    // Get account balances from gl_period_balances (SAP totals table)
-    // Use uniform debit-perspective raw balance: SUM(debits) - SUM(credits)
-    // Then apply sign convention per AccountType in code to handle contra accounts
-    // correctly (e.g., Accumulated Depreciation is ASSET type with CREDIT normal
-    // balance — raw balance is negative, which correctly reduces total assets).
+    // Point-in-time balances from net-active posted ledger (matches customer/supplier
+    // subledgers and integrity checks). Raw gpb sums all POSTED rows including reversal
+    // pairs and can overstate AR/AP after voids and corrections.
+    const asOfEnd = `${asOfDate} 23:59:59`;
     const query = `
       SELECT 
         a."AccountCode" as "accountCode",
         a."AccountName" as "accountName",
         a."AccountType" as "accountType",
         a."NormalBalance" as "normalBalance",
-        COALESCE(SUM(gpb.debit_total), 0) as total_debits,
-        COALESCE(SUM(gpb.credit_total), 0) as total_credits,
-        COALESCE(SUM(gpb.debit_total), 0)
-          - COALESCE(SUM(gpb.credit_total), 0) as raw_balance
+        COALESCE(SUM(le."DebitAmount"), 0) as total_debits,
+        COALESCE(SUM(le."CreditAmount"), 0) as total_credits,
+        COALESCE(SUM(le."DebitAmount"), 0) - COALESCE(SUM(le."CreditAmount"), 0) as raw_balance
       FROM accounts a
-      LEFT JOIN gl_period_balances gpb 
-        ON gpb.account_id = a."Id"
-        AND (gpb.fiscal_year < $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period <= $2))
+      LEFT JOIN ledger_entries le ON le."AccountId" = a."Id"
+      LEFT JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+        AND (${LEDGER_NET_ACTIVE_SQL})
+        AND lt."TransactionDate" <= $1
       WHERE a."IsActive" = true 
         AND a."IsPostingAccount" = true
       GROUP BY a."AccountCode", a."AccountName", a."AccountType", a."NormalBalance"
-      HAVING COALESCE(SUM(gpb.debit_total), 0) != 0 
-          OR COALESCE(SUM(gpb.credit_total), 0) != 0
+      HAVING COALESCE(SUM(le."DebitAmount"), 0) != 0 
+          OR COALESCE(SUM(le."CreditAmount"), 0) != 0
       ORDER BY a."AccountType", a."AccountCode"
     `;
 
-    const result = await pool.query(query, [year, month]);
+    const result = await pool.query(query, [asOfEnd]);
 
     // SAP/Odoo account classification by code range
     const currentAssets: { accountCode: string; accountName: string; amount: number }[] = [];

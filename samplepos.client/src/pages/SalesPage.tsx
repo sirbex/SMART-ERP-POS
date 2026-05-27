@@ -1626,7 +1626,7 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
           : Array.isArray(body) ? body
             : [];
         const rows = salesArray as Record<string, unknown>[];
-        setSales(rows.map((sale) => ({
+        const mapped = rows.map((sale) => ({
           id: String(sale.id || ''),
           saleNumber: String(sale.saleNumber || sale.sale_number || ''),
           saleDate: String(sale.saleDate || sale.sale_date || ''),
@@ -1641,7 +1641,21 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
           cashierName: String(sale.cashierName || sale.cashier_name || ''),
           amountPaid: Number(sale.amountPaid || sale.amount_paid || 0),
           paymentReceived: Number(sale.amountPaid || sale.amount_paid || sale.paymentReceived || 0),
-        }) as SaleRow));
+        }) as SaleRow);
+
+        // "Credit Sales" should reflect credit docs that still have an outstanding AR balance.
+        const filtered = mapped.filter((s) => {
+          const st = String(s.status || '').toUpperCase();
+          if (['CANCELLED', 'VOID', 'REFUNDED', 'VOIDED_BY_RETURN'].includes(st)) return false;
+
+          const total = new Decimal(s.totalAmount || 0);
+          const paid = new Decimal(s.paymentReceived || s.amountPaid || 0);
+          const outstanding = total.minus(paid);
+
+          return outstanding.greaterThan(0.01);
+        });
+
+        setSales(filtered);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -1807,11 +1821,16 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
           amountPaid: Number(sale.amountPaid || sale.amount_paid || 0),
           paymentReceived: Number(sale.amountPaid || sale.amount_paid || sale.paymentReceived || 0),
         }) as SaleRow);
-        // Filter for partial: paid > 0 but less than total
+        // Filter for partial: paid > 0 AND outstanding > 0 (with tolerance).
         setSales(allCredit.filter((s) => {
-          const paid = new Decimal(s.paymentReceived || s.amountPaid || 0);
+          const st = String(s.status || '').toUpperCase();
+          if (['CANCELLED', 'VOID', 'REFUNDED', 'VOIDED_BY_RETURN'].includes(st)) return false;
+
           const total = new Decimal(s.totalAmount || 0);
-          return paid.greaterThan(0) && paid.lessThan(total);
+          const paid = new Decimal(s.paymentReceived || s.amountPaid || 0);
+          const outstanding = total.minus(paid);
+
+          return paid.greaterThan(0.01) && outstanding.greaterThan(0.01);
         }));
       })
       .catch((err) => {

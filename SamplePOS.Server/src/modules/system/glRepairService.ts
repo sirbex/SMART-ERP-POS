@@ -25,6 +25,7 @@ import * as glEntryService from '../../services/glEntryService.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import { Money } from '../../utils/money.js';
 import { AccountingCore } from '../../services/accountingCore.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 
 export interface RepairTypeResult {
     found: number;
@@ -891,13 +892,8 @@ export async function rebuildPeriodBalances(
         );
         const beforeOpen: number = beforeCount.rows[0]?.n ?? 0;
 
-        // 2. Recompute totals from ledger_entries and UPSERT.
-        //    Includes POSTED transactions only. REVERSED transactions are excluded:
-        //    when AccountingCore.reverseTransaction() properly reverses a transaction,
-        //    a new POSTED reversal entry is created with opposite amounts — so including
-        //    REVERSED would double-count those entries. Orphaned REVERSED transactions
-        //    (manually status-flipped without a counter entry) would also inflate totals.
-        //    DRAFT is excluded because jeApprovalService reverses its gpb contribution when parking.
+        // 2. Recompute totals from net-active POSTED ledger_entries and UPSERT.
+        //    Uses the same reversal-pair exclusion as balance sheet / integrity checks.
         //    Locked/closed periods are filtered out via NOT EXISTS clause.
         const upsertRes = await client.query(
             `WITH fresh AS (
@@ -909,7 +905,7 @@ export async function rebuildPeriodBalances(
                  COALESCE(SUM(le."CreditAmount"), 0)                                        AS credits
                FROM ledger_entries le
                JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-               WHERE lt."Status" = 'POSTED'
+               WHERE ${LEDGER_NET_ACTIVE_SQL}
                GROUP BY le."AccountId",
                         EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT,
                         EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT
@@ -954,7 +950,7 @@ export async function rebuildPeriodBalances(
                  FROM ledger_entries le
                  JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
                  WHERE le."AccountId" = gpb.account_id
-                   AND lt."Status" = 'POSTED'
+                   AND ${LEDGER_NET_ACTIVE_SQL}
                    AND EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = gpb.fiscal_year
                    AND EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = gpb.fiscal_period
                )`,
