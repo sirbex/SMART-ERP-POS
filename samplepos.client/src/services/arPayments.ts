@@ -13,6 +13,8 @@ export interface ArCustomerPayment {
   status: string;
   reference: string | null;
   notes: string | null;
+  createdById?: string | null;
+  createdByName?: string | null;
 }
 
 export interface ArOpenInvoice {

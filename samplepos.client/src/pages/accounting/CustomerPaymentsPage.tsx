@@ -5,7 +5,8 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { AxiosError } from 'axios';
-import { Plus, Search, DollarSign, FileText, ArrowUpRight, Wallet } from 'lucide-react';
+import { Plus, Search, DollarSign, FileText, ArrowUpRight, Wallet, User } from 'lucide-react';
+import { OpeningBalancePanel } from '../../components/accounting/OpeningBalancePanel';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import {
@@ -63,7 +64,7 @@ const todayIso = () => new Date().toLocaleDateString('en-CA');
 
 const CustomerPaymentsPage: React.FC = () => {
   const canCreate = useCanAccess([], ['customers.update']);
-  const canImportOpeningBalance = useCanAccess([], ['customers.create']);
+  const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
 
   const [payments, setPayments] = useState<ArCustomerPayment[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -118,73 +119,7 @@ const CustomerPaymentsPage: React.FC = () => {
   });
   const [createAllocations, setCreateAllocations] = useState<AllocationRow[]>([]);
 
-  const [obCustomerId, setObCustomerId] = useState('');
-  const [obAmount, setObAmount] = useState('');
-  const [obDate, setObDate] = useState('');
-  const [obDueDate, setObDueDate] = useState('');
-  const [obNotes, setObNotes] = useState('');
-  const [obReplaceReason, setObReplaceReason] = useState('');
-  const [obCorrectMode, setObCorrectMode] = useState(false);
-  const [obPosting, setObPosting] = useState(false);
-
-  const handlePostCustomerOpeningBalance = async () => {
-    if (!obCustomerId) {
-      toast.error('Select a customer');
-      return;
-    }
-    const amt = parseFloat(obAmount);
-    if (!amt || amt <= 0) {
-      toast.error('Enter a positive amount');
-      return;
-    }
-    if (!obDate) {
-      toast.error('As-of date is required');
-      return;
-    }
-    if (obDueDate && obDueDate > obDate) {
-      toast.error('Original invoice date cannot be after the as-of (cutover) date');
-      return;
-    }
-    if (obCorrectMode && obReplaceReason.trim().length < 5) {
-      toast.error('Enter a correction reason (min 5 characters) — required for audit trail');
-      return;
-    }
-    setObPosting(true);
-    try {
-      const payload = {
-        customerId: obCustomerId,
-        amount: amt,
-        asOfDate: obDate,
-        dueDate: obDueDate || undefined,
-        notes: obNotes || undefined,
-      };
-      if (obCorrectMode) {
-        await api.customers.replaceOpeningBalance({
-          ...payload,
-          replaceReason: obReplaceReason.trim(),
-        });
-        toast.success('Opening balance corrected (previous OB reversed and re-posted)');
-      } else {
-        await api.customers.importOpeningBalance(payload);
-        toast.success('Customer opening balance posted');
-      }
-      setObAmount('');
-      setObNotes('');
-      setObCustomerId('');
-      setObDate('');
-      setObDueDate('');
-      setObReplaceReason('');
-      setObCorrectMode(false);
-      if (formData.customerId === obCustomerId && isCreateModalOpen) {
-        await loadOpenInvoicesForCustomer(obCustomerId);
-      }
-    } catch (err) {
-      const axErr = err as AxiosError<{ error?: string }>;
-      toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
-    } finally {
-      setObPosting(false);
-    }
-  };
+  const [showObPanel, setShowObPanel] = useState(false);
 
   const selectedCustomer = customers.find((c) => c.id === formData.customerId);
   const openInvoicesTotal = useMemo(
@@ -415,12 +350,33 @@ const CustomerPaymentsPage: React.FC = () => {
             </p>
           )}
         </div>
-        {canCreate && (
-          <Button className="flex items-center gap-2" onClick={() => setIsCreateModalOpen(true)}>
-            <Plus className="h-4 w-4" />
-            Record Payment
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {canCreate && (
+            <Button
+              className="flex items-center gap-2"
+              onClick={() => {
+                setShowObPanel(false);
+                setIsCreateModalOpen(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              Record Payment
+            </Button>
+          )}
+          {canManageOpeningBalance && (
+            <Button
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={() => {
+                setShowObPanel(true);
+                setIsCreateModalOpen(true);
+              }}
+            >
+              <Wallet className="h-4 w-4" />
+              Opening Balance
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4">
@@ -475,7 +431,7 @@ const CustomerPaymentsPage: React.FC = () => {
                         </Badge>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-gray-600">
+                    <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 text-sm text-gray-600">
                       <div>
                         <span className="font-medium">Customer</span>
                         <div>{payment.customerName ?? '—'}</div>
@@ -493,6 +449,13 @@ const CustomerPaymentsPage: React.FC = () => {
                       <div>
                         <span className="font-medium">Date</span>
                         <div>{formatTimestampDate(payment.paymentDate)}</div>
+                      </div>
+                      <div>
+                        <span className="font-medium flex items-center gap-1">
+                          <User className="h-3 w-3" />
+                          Recorded by
+                        </span>
+                        <div>{payment.createdByName ?? '—'}</div>
                       </div>
                     </div>
                   </div>
@@ -514,116 +477,47 @@ const CustomerPaymentsPage: React.FC = () => {
         )}
       </div>
 
-      {canImportOpeningBalance && (
-        <Card>
-          <CardContent className="pt-4">
-            <h3 className="font-semibold text-gray-800 mb-1 flex items-center gap-2">
-              <Wallet className="h-4 w-4 text-gray-500" />
-              Import Customer Opening Balance
-            </h3>
-            <p className="text-xs text-gray-500 mb-4">
-              Post cutover AR (DR 1200 / CR Opening Balance Equity). One active OB per customer.
-              Wrong amount? Enable <strong>Correct existing OB</strong> — reverses the prior journal
-              and posts the new figure (SAP/Odoo reverse-and-re-enter). Manual journals cannot post
-              to AR; use this flow instead.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end">
-              <div className="sm:col-span-2">
-                <Label className="text-xs text-gray-600 mb-1 block">Customer *</Label>
-                <Select value={obCustomerId} onValueChange={setObCustomerId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select customer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customers.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs text-gray-600 mb-1 block">Amount *</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={obAmount}
-                  onChange={(e) => setObAmount(e.target.value)}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <Label className="text-xs text-gray-600 mb-1 block">As-Of Date *</Label>
-                <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
-                <p className="text-[10px] text-gray-400 mt-0.5">Posting / cutover date</p>
-              </div>
-              <div>
-                <Label className="text-xs text-gray-600 mb-1 block">Original Invoice Date</Label>
-                <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
-                <p className="text-[10px] text-gray-400 mt-0.5">Baseline for aging (defaults to As-Of)</p>
-              </div>
-              <div>
-                <Label className="text-xs text-gray-600 mb-1 block">Notes</Label>
-                <Input
-                  value={obNotes}
-                  onChange={(e) => setObNotes(e.target.value)}
-                  placeholder="Optional"
-                />
-              </div>
-            </div>
-            <div className="mt-3 space-y-3">
-              <label className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={obCorrectMode}
-                  onChange={(e) => setObCorrectMode(e.target.checked)}
-                />
-                Correct existing opening balance (reverse prior OB and post new amount)
-              </label>
-              {obCorrectMode && (
-                <div>
-                  <Label className="text-xs text-gray-600 mb-1 block">Correction reason *</Label>
-                  <Input
-                    value={obReplaceReason}
-                    onChange={(e) => setObReplaceReason(e.target.value)}
-                    placeholder="e.g. Wrong cutover figure from legacy system"
-                  />
-                </div>
-              )}
-              <div className="flex justify-end">
-                <Button
-                  onClick={() => void handlePostCustomerOpeningBalance()}
-                  disabled={obPosting}
-                  variant="outline"
-                >
-                  {obPosting
-                    ? 'Posting…'
-                    : obCorrectMode
-                      ? 'Replace Opening Balance'
-                      : 'Post Opening Balance'}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       <Dialog
         open={isCreateModalOpen}
-        onOpenChange={setIsCreateModalOpen}
+        onOpenChange={(open) => {
+          setIsCreateModalOpen(open);
+          if (!open) setShowObPanel(false);
+        }}
         zIndex={createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}
       >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Record Customer Payment</DialogTitle>
+            <DialogTitle>
+              {showObPanel ? 'Opening balance (cutover)' : 'Record customer payment'}
+            </DialogTitle>
             <DialogDescription>
-              Posts receipt to GL (undeposited funds → AR). Allocate to open invoices below or use
-              FIFO auto-allocation.
+              {showObPanel
+                ? 'Post or correct legacy AR brought forward. All changes are audited with your user and reason.'
+                : 'Posts receipt to GL (undeposited funds → AR). Allocate to open invoices or use FIFO.'}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
+            {showObPanel && canManageOpeningBalance ? (
+              <>
+                <OpeningBalancePanel
+                  partyType="customer"
+                  partyId={formData.customerId}
+                  onPartyIdChange={(v) => setFormData((p) => ({ ...p, customerId: v }))}
+                  parties={customers.map((c) => ({ id: c.id, name: c.name }))}
+                  defaultExpanded
+                  onSuccess={() => {
+                    void loadPayments();
+                    if (formData.customerId) void loadOpenInvoicesForCustomer(formData.customerId);
+                  }}
+                />
+                {canCreate && (
+                  <Button type="button" variant="link" className="text-sm p-0 h-auto" onClick={() => setShowObPanel(false)}>
+                    ← Record a customer payment instead
+                  </Button>
+                )}
+              </>
+            ) : (
+            <>
             <div>
               <Label>Customer</Label>
               <Select
@@ -761,7 +655,20 @@ const CustomerPaymentsPage: React.FC = () => {
                 onChange={(e) => setFormData((p) => ({ ...p, notes: e.target.value }))}
               />
             </div>
+            {canManageOpeningBalance && (
+              <Button
+                type="button"
+                variant="link"
+                className="text-sm p-0 h-auto justify-start text-indigo-700"
+                onClick={() => setShowObPanel(true)}
+              >
+                Opening balance (cutover) instead →
+              </Button>
+            )}
+            </>
+            )}
           </div>
+          {!showObPanel && (
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>
               Cancel
@@ -770,6 +677,14 @@ const CustomerPaymentsPage: React.FC = () => {
               Post Payment
             </Button>
           </DialogFooter>
+          )}
+          {showObPanel && (
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreateModalOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -48,7 +48,10 @@ export const importCustomerOpeningBalance = asyncHandler(async (req: Request, re
     asOfDate: validated.asOfDate,
     dueDate: validated.dueDate,
     notes: validated.notes,
+    postReason: validated.postReason,
     userId: req.user!.id,
+    userName: req.user!.fullName,
+    userRole: req.user!.role,
   });
   res.status(201).json({ success: true, data: result });
 });
@@ -62,7 +65,10 @@ export const replaceCustomerOpeningBalance = asyncHandler(async (req: Request, r
     asOfDate: validated.asOfDate,
     dueDate: validated.dueDate,
     notes: validated.notes,
+    postReason: validated.replaceReason,
     userId: req.user!.id,
+    userName: req.user!.fullName,
+    userRole: req.user!.role,
     replaceReason: validated.replaceReason,
   });
   res.status(201).json({ success: true, data: result });
@@ -76,8 +82,16 @@ export const cancelCustomerOpeningBalance = asyncHandler(async (req: Request, re
     validated.invoiceId,
     req.user!.id,
     validated.reason,
+    { userName: req.user!.fullName, userRole: req.user!.role },
   );
   res.json({ success: true, data: result });
+});
+
+export const getCustomerOpeningBalanceHistory = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const customerId = z.string().uuid().parse(req.query.customerId);
+  const result = await customerService.getCustomerOpeningBalanceHistory(pool, customerId);
+  res.json({ success: true, data: result.data, total: result.total });
 });
 
 export const getCustomers = asyncHandler(async (req: Request, res: Response) => {

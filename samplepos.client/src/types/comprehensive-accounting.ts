@@ -176,6 +176,8 @@ export interface SupplierPayment {
     allocatedAmount: string | Decimal;
     unallocatedAmount: string | Decimal;
     notes?: string;
+    createdById?: string | null;
+    createdByName?: string | null;
     createdAt: string;
     updatedAt: string;
 

@@ -75,6 +75,12 @@ export const PERMISSIONS: Record<string, Permission> = {
   ACCOUNTING_RECONCILE: p('accounting.reconcile', 'accounting', 'reconcile', 'Perform account reconciliations (AR, AP, cash, inventory)'),
   ACCOUNTING_CHART_MANAGE: p('accounting.chart_manage', 'accounting', 'chart_manage', 'Manage chart of accounts (create, edit, deactivate accounts)'),
   ACCOUNTING_MANAGE: p('accounting.manage', 'accounting', 'manage', 'Manage accounting configuration (cost centers, periods, currencies, WHT, assets, dunning)'),
+  ACCOUNTING_OPENING_BALANCE: p(
+    'accounting.opening_balance',
+    'accounting',
+    'post',
+    'Post or correct customer/supplier cutover opening balances (admin assigns to accountants)',
+  ),
 
   REPORTS_READ: p('reports.read', 'reports', 'read', 'Access reports dashboard'),
   REPORTS_CREATE: p('reports.create', 'reports', 'create', 'Create custom reports'),

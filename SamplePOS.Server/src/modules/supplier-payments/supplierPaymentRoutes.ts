@@ -746,9 +746,22 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
     // SUPPLIER OPENING BALANCE IMPORT
     // ============================================================
 
+    router.get(
+        '/invoices/opening-balance/history',
+        requirePermission('accounting.opening_balance'),
+        asyncHandler(async (req, res) => {
+            const supplierId = z.string().uuid().parse(req.query.supplierId);
+            const result = await supplierPaymentService.getSupplierOpeningBalanceHistory(
+                p(req),
+                supplierId,
+            );
+            res.json({ success: true, data: result.data, total: result.total });
+        }),
+    );
+
     router.post(
         '/invoices/opening-balance',
-        requirePermission('suppliers.create'),
+        requirePermission('accounting.opening_balance'),
         asyncHandler(async (req, res) => {
             const validated = SupplierOpeningBalanceSchema.parse(req.body);
             const result = await supplierPaymentService.importSupplierOpeningBalance(p(req), {
@@ -757,7 +770,10 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 asOfDate: validated.asOfDate,
                 dueDate: validated.dueDate,
                 notes: validated.notes,
+                postReason: validated.postReason,
                 userId: req.user!.id,
+                userName: req.user!.fullName,
+                userRole: req.user!.role,
             });
             res.status(201).json({ success: true, data: result });
         })
@@ -765,7 +781,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     router.post(
         '/invoices/opening-balance/replace',
-        requirePermission('suppliers.create'),
+        requirePermission('accounting.opening_balance'),
         asyncHandler(async (req, res) => {
             const validated = SupplierOpeningBalanceReplaceSchema.parse(req.body);
             const result = await supplierPaymentService.replaceSupplierOpeningBalance(p(req), {
@@ -774,7 +790,10 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 asOfDate: validated.asOfDate,
                 dueDate: validated.dueDate,
                 notes: validated.notes,
+                postReason: validated.replaceReason,
                 userId: req.user!.id,
+                userName: req.user!.fullName,
+                userRole: req.user!.role,
                 replaceReason: validated.replaceReason,
             });
             res.status(201).json({ success: true, data: result });
@@ -783,7 +802,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
 
     router.post(
         '/invoices/opening-balance/cancel',
-        requirePermission('suppliers.create'),
+        requirePermission('accounting.opening_balance'),
         asyncHandler(async (req, res) => {
             const validated = SupplierOpeningBalanceCancelSchema.parse(req.body);
             const result = await supplierPaymentService.cancelSupplierOpeningBalance(
@@ -791,6 +810,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 validated.invoiceId,
                 req.user!.id,
                 validated.reason,
+                { userName: req.user!.fullName, userRole: req.user!.role },
             );
             res.json({ success: true, data: result });
         }),

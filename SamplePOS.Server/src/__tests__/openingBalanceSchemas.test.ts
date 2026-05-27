@@ -14,12 +14,14 @@ const validCustomerOb = {
   customerId: '11111111-1111-1111-1111-111111111111',
   amount: 1000,
   asOfDate: '2026-01-15',
+  postReason: 'Legacy AR cutover from prior ERP',
 };
 
 const validSupplierOb = {
   supplierId: '22222222-2222-2222-2222-222222222222',
   amount: 500,
   asOfDate: '2026-01-15',
+  postReason: 'Legacy AP cutover from prior ERP',
 };
 
 describe('Customer opening balance Zod schemas', () => {
@@ -34,6 +36,15 @@ describe('Customer opening balance Zod schemas', () => {
       amount: '2500.5',
     });
     expect(r.amount).toBe(2500.5);
+  });
+
+  it('import requires postReason length >= 5', () => {
+    expect(() =>
+      CustomerOpeningBalanceSchema.parse({
+        ...validCustomerOb,
+        postReason: 'ab',
+      }),
+    ).toThrow();
   });
 
   it('replace requires replaceReason length >= 5', () => {

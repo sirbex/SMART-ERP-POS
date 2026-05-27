@@ -9,6 +9,11 @@ import { AccountingCore, AccountingError } from '../../services/accountingCore.j
 import * as glEntryService from '../../services/glEntryService.js';
 import { syncCustomerBalanceFromInvoices } from '../../utils/customerBalanceSync.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
+import * as arPaymentRepository from '../ar-payments/arPaymentRepository.js';
+import { invoiceRepository } from '../invoices/invoiceRepository.js';
+import * as openItemEngine from '../ar-payments/openItemAllocationEngine.js';
+import { logOpeningBalanceAudit } from '../../utils/openingBalanceAudit.js';
+import * as auditRepository from '../audit/auditRepository.js';
 import { CustomerStatementSchema } from '../../../../shared/zod/customerStatement.js';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
 import { SalesBusinessRules } from '../../middleware/businessRules.js';
@@ -554,6 +559,10 @@ export interface ImportCustomerOpeningBalanceInput {
   dueDate?: string;
   notes?: string;
   userId: string;
+  userName?: string;
+  userRole?: string;
+  postReason: string;
+  skipAudit?: boolean;
 }
 
 /**
@@ -613,14 +622,14 @@ export async function importCustomerOpeningBalance(
          subtotal, tax_amount, total_amount,
          amount_paid, amount_due,
          status, payment_terms, document_type, notes, source_module,
-         created_at, updated_at
+         created_by_id, created_at, updated_at
        ) VALUES (
          $1, $2, $3,
          $4, $5,
          $6, 0, $6,
          0, $6,
          'UNPAID', 0, 'OPENING_BALANCE', $7, 'CUTOVER',
-         NOW(), NOW()
+         $8, NOW(), NOW()
        ) RETURNING id`,
       [
         invoiceNumber,
@@ -630,6 +639,7 @@ export async function importCustomerOpeningBalance(
         dueDate,
         amount.toNumber(),
         data.notes ?? `Opening balance as of ${data.asOfDate}`,
+        data.userId,
       ]
     );
     const invoiceId = invoiceResult.rows[0].id as string;
@@ -667,6 +677,22 @@ export async function importCustomerOpeningBalance(
 
     await syncCustomerBalanceFromInvoices(client, data.customerId, 'CUSTOMER_OPENING_BALANCE');
 
+    if (!data.skipAudit) {
+      await logOpeningBalanceAudit(client, {
+        party: 'customer',
+        partyId: data.customerId,
+        partyName: customerName,
+        action: 'IMPORT',
+        invoiceId,
+        invoiceNumber,
+        amount: amount.toNumber(),
+        reason: data.postReason,
+        userId: data.userId,
+        userName: data.userName,
+        userRole: data.userRole,
+      });
+    }
+
     logger.info('Customer opening balance posted', {
       customerId: data.customerId,
       customerName,
@@ -675,6 +701,21 @@ export async function importCustomerOpeningBalance(
     });
 
     return { invoiceId, invoiceNumber, amount: amount.toNumber() };
+  });
+}
+
+export async function getCustomerOpeningBalanceHistory(
+  pool: Pool,
+  customerId: string,
+): Promise<{ data: import('../../../../shared/types/audit.js').AuditLog[]; total: number }> {
+  return auditRepository.getAuditLogs(pool, {
+    entityType: 'CUSTOMER',
+    entityId: customerId,
+    tags: ['OPENING_BALANCE'],
+    page: 1,
+    limit: 50,
+    sortBy: 'createdAt',
+    sortOrder: 'desc',
   });
 }
 
@@ -716,7 +757,7 @@ async function loadCustomerOpeningBalanceForCancel(
     );
   }
   const alloc = await client.query(
-    `SELECT 1 FROM ar_payment_allocations WHERE invoice_id = $1 LIMIT 1`,
+    `SELECT 1 FROM ar_payment_allocations WHERE invoice_id = $1 AND status = 'ACTIVE' LIMIT 1`,
     [invoiceId],
   );
   if (alloc.rows.length > 0) {
@@ -725,7 +766,18 @@ async function loadCustomerOpeningBalanceForCancel(
     );
   }
   const legacyPay = await client.query(
-    `SELECT 1 FROM invoice_payments WHERE invoice_id = $1 LIMIT 1`,
+    `SELECT 1 FROM invoice_payments ip
+     WHERE ip.invoice_id = $1
+       AND (
+         NOT EXISTS (
+           SELECT 1 FROM ar_payment_allocations a WHERE a.invoice_payment_id = ip.id
+         )
+         OR EXISTS (
+           SELECT 1 FROM ar_payment_allocations a
+           WHERE a.invoice_payment_id = ip.id AND a.status = 'ACTIVE'
+         )
+       )
+     LIMIT 1`,
     [invoiceId],
   );
   if (legacyPay.rows.length > 0) {
@@ -734,21 +786,86 @@ async function loadCustomerOpeningBalanceForCancel(
   return inv;
 }
 
+/** Reverse ACTIVE AR allocations on OB invoice (replace flow only). */
+async function unallocateCustomerObPaymentsBeforeCancel(
+  client: pg.PoolClient,
+  invoiceId: string,
+  customerId: string,
+  userId: string,
+): Promise<number> {
+  const allocs = await client.query<{ id: string; payment_date: string }>(
+    `SELECT a.id, p.payment_date
+     FROM ar_payment_allocations a
+     JOIN ar_customer_payments p ON p.id = a.payment_id
+     WHERE a.invoice_id = $1 AND a.status = 'ACTIVE'`,
+    [invoiceId],
+  );
+
+  for (const row of allocs.rows) {
+    await checkAccountingPeriodOpen(client, String(row.payment_date).slice(0, 10));
+    await arPaymentRepository.reverseAllocation(client, row.id, userId);
+    await invoiceRepository.recalcInvoice(client, invoiceId);
+  }
+
+  if (allocs.rows.length > 0) {
+    await openItemEngine.syncCustomerBalanceFromOpenItems(
+      client,
+      customerId,
+      'CUSTOMER_OB_REPLACE_UNALLOCATE',
+    );
+  }
+
+  return allocs.rows.length;
+}
+
 /**
  * Cancel a posted customer opening balance (SAP FB08 / Odoo reverse move pattern).
  * Reverses GL, cancels OB invoice, recalculates customer.balance.
  */
+export type CancelCustomerOpeningBalanceOptions = {
+  /** When true (replace OB), auto-reverse allocations on this invoice before cancel. */
+  forReplace?: boolean;
+  skipAudit?: boolean;
+  userName?: string;
+  userRole?: string;
+};
+
 export async function cancelCustomerOpeningBalance(
   pool: Pool,
   invoiceId: string,
   userId: string,
   reason: string,
+  options?: CancelCustomerOpeningBalanceOptions,
 ): Promise<{ invoiceId: string; invoiceNumber: string }> {
   if (!reason || reason.trim().length < 5) {
     throw new Error('Cancellation reason is required (min 5 characters)');
   }
 
   return UnitOfWork.run(pool, async (client) => {
+    if (options?.forReplace) {
+      const meta = await client.query<{ customer_id: string }>(
+        `SELECT customer_id FROM invoices
+         WHERE id = $1 AND COALESCE(document_type, 'INVOICE') = 'OPENING_BALANCE'`,
+        [invoiceId],
+      );
+      if (!meta.rows[0]) {
+        throw new Error('Opening balance invoice not found');
+      }
+      const unallocated = await unallocateCustomerObPaymentsBeforeCancel(
+        client,
+        invoiceId,
+        meta.rows[0].customer_id,
+        userId,
+      );
+      if (unallocated > 0) {
+        logger.info('Unallocated AR payments from OB before replace', {
+          invoiceId,
+          customerId: meta.rows[0].customer_id,
+          count: unallocated,
+        });
+      }
+    }
+
     const inv = await loadCustomerOpeningBalanceForCancel(client, invoiceId);
     await checkAccountingPeriodOpen(client, getBusinessDate());
 
@@ -796,6 +913,25 @@ export async function cancelCustomerOpeningBalance(
       'CUSTOMER_OPENING_BALANCE_CANCEL',
     );
 
+    if (!options?.skipAudit) {
+      const custRes = await client.query<{ name: string }>(
+        'SELECT name FROM customers WHERE id = $1',
+        [inv.customer_id],
+      );
+      await logOpeningBalanceAudit(client, {
+        party: 'customer',
+        partyId: inv.customer_id,
+        partyName: custRes.rows[0]?.name ?? 'Customer',
+        action: 'CANCEL',
+        invoiceId,
+        invoiceNumber: inv.invoice_number,
+        reason,
+        userId,
+        userName: options?.userName,
+        userRole: options?.userRole,
+      });
+    }
+
     logger.info('Customer opening balance cancelled', {
       invoiceId,
       invoiceNumber: inv.invoice_number,
@@ -823,16 +959,53 @@ export async function replaceCustomerOpeningBalance(
   );
 
   let replaced = false;
+  let previousAmount: number | undefined;
+
   if (existing.rows[0]) {
+    const oldInv = await pool.query<{ total_amount: string | number; invoice_number: string }>(
+      `SELECT total_amount, invoice_number FROM invoices WHERE id = $1`,
+      [existing.rows[0].id],
+    );
+    previousAmount = Number(oldInv.rows[0]?.total_amount ?? 0);
+
     await cancelCustomerOpeningBalance(
       pool,
       existing.rows[0].id,
       data.userId,
       data.replaceReason || 'Replaced opening balance with corrected amount',
+      { forReplace: true, skipAudit: true },
     );
     replaced = true;
   }
 
-  const created = await importCustomerOpeningBalance(pool, data);
+  const created = await importCustomerOpeningBalance(pool, {
+    ...data,
+    postReason: data.replaceReason,
+    skipAudit: replaced,
+  });
+
+  if (replaced) {
+    const custRes = await pool.query<{ name: string }>(
+      'SELECT name FROM customers WHERE id = $1',
+      [data.customerId],
+    );
+    await UnitOfWork.run(pool, async (client) => {
+      await logOpeningBalanceAudit(client, {
+        party: 'customer',
+        partyId: data.customerId,
+        partyName: custRes.rows[0]?.name ?? 'Customer',
+        action: 'UPDATE',
+        invoiceId: created.invoiceId,
+        invoiceNumber: created.invoiceNumber,
+        amount: created.amount,
+        previousAmount,
+        reason: data.replaceReason,
+        userId: data.userId,
+        userName: data.userName,
+        userRole: data.userRole,
+      });
+    });
+  }
+
   return { ...created, replaced };
 }

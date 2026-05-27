@@ -17,7 +17,8 @@ import Decimal from 'decimal.js';
 import { AxiosError } from 'axios';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
-import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks, FileMinus } from 'lucide-react';
+import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks, FileMinus, User } from 'lucide-react';
+import { OpeningBalancePanel } from '../../components/accounting/OpeningBalancePanel';
 import { useNavigate } from 'react-router-dom';
 import { downloadFile } from '../../utils/download';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
@@ -41,6 +42,7 @@ import {
     Card,
     CardContent,
     Badge,
+    Textarea,
     Tabs,
     TabsContent,
     TabsList,
@@ -106,6 +108,8 @@ const SupplierPaymentsPage: React.FC = () => {
     // Permission checks (hide actions user cannot perform)
     const canCreatePayment = useCanAccess([], ['suppliers.create']);
     const canCreateBill = useCanAccess([], ['purchasing.create']);
+    const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
+    const [showObPanel, setShowObPanel] = useState(false);
 
     const [activeTab, setActiveTab] = useState('payments');
     const [payments, setPayments] = useState<SupplierPayment[]>([]);
@@ -177,7 +181,7 @@ const SupplierPaymentsPage: React.FC = () => {
     const [allocatingPayment, setAllocatingPayment] = useState(false);
     const [paymentReceipt, setPaymentReceipt] = useState<SupplierPaymentReceipt | null>(null);
     // Note: isRecordingPayment could be used to show loading state during payment creation
-    const [_isRecordingPayment, setIsRecordingPayment] = useState(false);
+    const [isRecordingPayment, setIsRecordingPayment] = useState(false);
     const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
 
     // Ref for printing
@@ -295,56 +299,6 @@ const SupplierPaymentsPage: React.FC = () => {
             setMassPosting(false);
         }
     };
-
-    // ── Opening Balance state ────────────────────────────────────────────────────
-    const [obSupplierId, setObSupplierId] = useState('');
-    const [obAmount, setObAmount] = useState('');
-    const [obDate, setObDate] = useState('');
-    const [obDueDate, setObDueDate] = useState('');
-    const [obNotes, setObNotes] = useState('');
-    const [obReplaceReason, setObReplaceReason] = useState('');
-    const [obCorrectMode, setObCorrectMode] = useState(false);
-    const [obPosting, setObPosting] = useState(false);
-
-    const handlePostOpeningBalance = async () => {
-        if (!obSupplierId) { toast.error('Select a supplier'); return; }
-        const amt = parseFloat(obAmount);
-        if (!amt || amt <= 0) { toast.error('Enter a positive amount'); return; }
-        if (!obDate) { toast.error('As-of date is required'); return; }
-        if (obDueDate && obDueDate > obDate) { toast.error('Original invoice date cannot be after the as-of (cutover) date'); return; }
-        if (obCorrectMode && obReplaceReason.trim().length < 5) {
-            toast.error('Enter a correction reason (min 5 characters)');
-            return;
-        }
-        setObPosting(true);
-        try {
-            const payload = {
-                supplierId: obSupplierId,
-                amount: amt,
-                asOfDate: obDate,
-                dueDate: obDueDate || undefined,
-                notes: obNotes || undefined,
-            };
-            if (obCorrectMode) {
-                await api.supplierPayments.replaceOpeningBalance({
-                    ...payload,
-                    replaceReason: obReplaceReason.trim(),
-                });
-                toast.success('Opening balance corrected (previous OB reversed and re-posted)');
-            } else {
-                await api.supplierPayments.importOpeningBalance(payload);
-                toast.success('Opening balance posted');
-            }
-            setObAmount(''); setObNotes(''); setObSupplierId(''); setObDate(''); setObDueDate('');
-            setObReplaceReason(''); setObCorrectMode(false);
-        } catch (err) {
-            const axErr = err as AxiosError<{ error?: string }>;
-            toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
-        } finally {
-            setObPosting(false);
-        }
-    };
-    // ────────────────────────────────────────────────────────────────────────────
 
     // Form states
     const [paymentFormData, setPaymentFormData] = useState<CreateSupplierPaymentRequest>({
@@ -1013,9 +967,28 @@ const SupplierPaymentsPage: React.FC = () => {
                     )}
 
                     {canCreatePayment && (
-                        <Button className="flex items-center gap-2" onClick={() => setIsPaymentModalOpen(true)}>
+                        <Button
+                            className="flex items-center gap-2"
+                            onClick={() => {
+                                setShowObPanel(false);
+                                setIsPaymentModalOpen(true);
+                            }}
+                        >
                             <Plus className="h-4 w-4" />
                             Make Payment
+                        </Button>
+                    )}
+                    {canManageOpeningBalance && (
+                        <Button
+                            variant="outline"
+                            className="flex items-center gap-2"
+                            onClick={() => {
+                                setShowObPanel(true);
+                                setIsPaymentModalOpen(true);
+                            }}
+                        >
+                            <Wallet className="h-4 w-4" />
+                            Opening Balance
                         </Button>
                     )}
                 </div>
@@ -1208,7 +1181,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     )}
                                                 </div>
 
-                                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 text-sm text-gray-600">
+                                                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 text-sm text-gray-600">
                                                     <div>
                                                         <span className="font-medium">Supplier:</span>
                                                         <div>{payment.supplierName || 'Unknown'}</div>
@@ -1226,6 +1199,13 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     <div>
                                                         <span className="font-medium">Reference:</span>
                                                         <div>{payment.reference || 'N/A'}</div>
+                                                    </div>
+                                                    <div>
+                                                        <span className="font-medium flex items-center gap-1">
+                                                            <User className="h-3 w-3" />
+                                                            Paid by
+                                                        </span>
+                                                        <div>{payment.createdByName || '—'}</div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -1558,74 +1538,6 @@ const SupplierPaymentsPage: React.FC = () => {
                         </Card>
                     )}
 
-                    {/* Opening Balance Import */}
-                    <Card>
-                        <CardContent className="pt-4">
-                            <h3 className="font-semibold text-gray-800 mb-1 flex items-center gap-2">
-                                <Wallet className="h-4 w-4 text-gray-500" />
-                                Import Supplier Opening Balance
-                            </h3>
-                            <p className="text-xs text-gray-500 mb-4">
-                                Post cutover AP (DR Opening Balance Equity / CR 2100). Wrong amount? Use Correct existing OB to reverse and re-post (audit trail). Manual journals cannot adjust AP subledger directly.
-                            </p>
-                            <div className="grid grid-cols-1 sm:grid-cols-6 gap-3 items-end">
-                                <div className="sm:col-span-2">
-                                    <Label className="text-xs text-gray-600 mb-1 block">Supplier *</Label>
-                                    <Select value={obSupplierId} onValueChange={setObSupplierId}>
-                                        <SelectTrigger><SelectValue placeholder="Select supplier" /></SelectTrigger>
-                                        <SelectContent>
-                                            {suppliers.map(s => (
-                                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <Label className="text-xs text-gray-600 mb-1 block">Amount *</Label>
-                                    <Input type="number" min="0" step="1" value={obAmount} onChange={e => setObAmount(e.target.value)} placeholder="0" />
-                                </div>
-                                <div>
-                                    <Label className="text-xs text-gray-600 mb-1 block">As-Of Date *</Label>
-                                    <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
-                                    <p className="text-[10px] text-gray-400 mt-0.5">Posting / cutover date</p>
-                                </div>
-                                <div>
-                                    <Label className="text-xs text-gray-600 mb-1 block">Original Invoice Date</Label>
-                                    <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
-                                    <p className="text-[10px] text-gray-400 mt-0.5">Baseline for aging (defaults to As-Of)</p>
-                                </div>
-                                <div>
-                                    <Label className="text-xs text-gray-600 mb-1 block">Notes</Label>
-                                    <Input value={obNotes} onChange={e => setObNotes(e.target.value)} placeholder="Optional" />
-                                </div>
-                            </div>
-                            <div className="mt-3 space-y-3">
-                                <label className="flex items-center gap-2 text-sm text-gray-700">
-                                    <input
-                                        type="checkbox"
-                                        checked={obCorrectMode}
-                                        onChange={(e) => setObCorrectMode(e.target.checked)}
-                                    />
-                                    Correct existing opening balance
-                                </label>
-                                {obCorrectMode && (
-                                    <div>
-                                        <Label className="text-xs text-gray-600 mb-1 block">Correction reason *</Label>
-                                        <Input
-                                            value={obReplaceReason}
-                                            onChange={(e) => setObReplaceReason(e.target.value)}
-                                            placeholder="Why the cutover figure is being changed"
-                                        />
-                                    </div>
-                                )}
-                                <div className="flex justify-end">
-                                    <Button onClick={() => void handlePostOpeningBalance()} disabled={obPosting} variant="outline">
-                                        {obPosting ? 'Posting…' : obCorrectMode ? 'Replace Opening Balance' : 'Post Opening Balance'}
-                                    </Button>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
                 </TabsContent>
 
             </Tabs>
@@ -1633,237 +1545,286 @@ const SupplierPaymentsPage: React.FC = () => {
             {/* Payment Modal — guarded: cancellable=false, ERP locked during payment */}
             <Dialog open={isPaymentModalOpen} onOpenChange={(open) => {
                 setIsPaymentModalOpen(open);
-                if (!open) resetPaymentForm();
+                if (!open) {
+                    resetPaymentForm();
+                    setShowObPanel(false);
+                }
             }} zIndex={paymentGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
-                <DialogContent className="max-w-md">
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>Record Supplier Payment</DialogTitle>
+                        <DialogTitle>
+                            {showObPanel ? 'Opening balance (cutover)' : 'Record supplier payment'}
+                        </DialogTitle>
                         <DialogDescription>
-                            Record a payment made to a supplier
+                            {showObPanel
+                                ? 'Post or correct legacy AP brought forward. All changes are audited with your user and reason.'
+                                : 'Posts payment to GL and allocates to open supplier bills (FIFO).'}
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="grid gap-4 py-4">
-                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
-                            <Label htmlFor="supplier" className="text-right">Supplier</Label>
-                            <div className="col-span-3 space-y-2">
-                                {/* Supplier search filter */}
-                                <Input
-                                    placeholder="Type to search suppliers..."
-                                    value={supplierSearchFilter}
-                                    onChange={(e) => setSupplierSearchFilter(e.target.value)}
-                                    className="mb-1"
+                    <div className="grid gap-4 py-2">
+                        {showObPanel && canManageOpeningBalance ? (
+                            <>
+                                <OpeningBalancePanel
+                                    partyType="supplier"
+                                    partyId={paymentFormData.supplierId}
+                                    onPartyIdChange={(v) => setPaymentFormData((p) => ({ ...p, supplierId: v }))}
+                                    parties={suppliers.map((s) => ({ id: s.id, name: s.name }))}
+                                    defaultExpanded
+                                    onSuccess={() => void loadPayments()}
                                 />
-                                <Select
-                                    value={paymentFormData.supplierId}
-                                    onValueChange={handlePaymentSupplierChange}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select supplier" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {filteredSuppliers.length === 0 ? (
-                                            <div className="px-2 py-3 text-sm text-gray-500 text-center">
-                                                No suppliers found
-                                            </div>
-                                        ) : (
-                                            filteredSuppliers.map(supplier => (
-                                                <SelectItem key={supplier.id} value={supplier.id}>
-                                                    <div className="flex items-center justify-between w-full gap-2">
-                                                        <span>{supplier.name}</span>
-                                                        {safeParseFloat(supplier.outstandingBalance) > 0 && (
-                                                            <span className="text-xs text-amber-600 font-medium">
-                                                                {formatCurrency(safeParseFloat(supplier.outstandingBalance))} due
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                </SelectItem>
-                                            ))
-                                        )}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-
-                        {/* Outstanding Balance Display */}
-                        {selectedSupplierOutstanding && (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                                <div className="flex items-center justify-between">
-                                    <div className="text-sm text-amber-800">
-                                        <span className="font-medium">Outstanding Balance:</span>
-                                        <span className="ml-2 text-lg font-bold text-amber-900">
-                                            {formatCurrency(selectedSupplierOutstanding.totalOutstanding)}
-                                        </span>
-                                    </div>
-                                    <Badge variant="outline" className="bg-amber-100 text-amber-800">
-                                        {selectedSupplierOutstanding.invoiceCount === -1
-                                            ? 'Loading...'
-                                            : `${selectedSupplierOutstanding.invoiceCount} invoice${selectedSupplierOutstanding.invoiceCount !== 1 ? 's' : ''}`
-                                        }
-                                    </Badge>
-                                </div>
-                                {selectedSupplierOutstanding.totalOutstanding > 0 && (
+                                {canCreatePayment && (
                                     <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="text-amber-700 border-amber-300 hover:bg-amber-50 px-2 h-auto mt-1"
-                                        onClick={() => setPaymentFormData(prev => ({
-                                            ...prev,
-                                            amount: selectedSupplierOutstanding.totalOutstanding
-                                        }))}
+                                        type="button"
+                                        variant="link"
+                                        className="text-sm p-0 h-auto justify-start"
+                                        onClick={() => setShowObPanel(false)}
                                     >
-                                        Pay full balance
+                                        ← Make a supplier payment instead
                                     </Button>
                                 )}
-
-                                {/* Outstanding Invoices List */}
-                                {selectedSupplierOutstanding.invoices && selectedSupplierOutstanding.invoices.length > 0 && (
-                                    <div className="mt-3 border-t border-amber-200 pt-3">
-                                        <p className="text-xs font-medium text-amber-700 mb-2">Outstanding Invoices:</p>
-                                        <div className="space-y-2 max-h-32 overflow-y-auto">
-                                            {selectedSupplierOutstanding.invoices.map((inv) => (
-                                                <div
-                                                    key={inv.id}
-                                                    className="flex justify-between items-center text-xs bg-white p-2 rounded border border-amber-100 cursor-pointer hover:bg-amber-50"
-                                                    onClick={() => setPaymentFormData(prev => ({
-                                                        ...prev,
-                                                        amount: safeParseFloat(inv.outstandingBalance),
-                                                        notes: `Payment for ${inv.invoiceNumber || inv.supplierInvoiceNumber}`
-                                                    }))}
-                                                >
-                                                    <div>
-                                                        <span className="font-medium text-gray-900">{inv.invoiceNumber || inv.supplierInvoiceNumber}</span>
-                                                        {inv.dueDate && (
-                                                            <span className="ml-2 text-gray-500">
-                                                                Due: {formatTimestampDate(inv.dueDate)}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <span className="font-semibold text-amber-800">
-                                                        {formatCurrency(safeParseFloat(inv.outstandingBalance))}
-                                                    </span>
+                            </>
+                        ) : (
+                            <>
+                                <div className="space-y-2">
+                                    <Label htmlFor="supplier-payment-search">Supplier</Label>
+                                    <Input
+                                        id="supplier-payment-search"
+                                        placeholder="Type to search suppliers..."
+                                        value={supplierSearchFilter}
+                                        onChange={(e) => setSupplierSearchFilter(e.target.value)}
+                                    />
+                                    <Select
+                                        value={paymentFormData.supplierId}
+                                        onValueChange={handlePaymentSupplierChange}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Select supplier" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {filteredSuppliers.length === 0 ? (
+                                                <div className="px-2 py-3 text-sm text-gray-500 text-center">
+                                                    No suppliers found
                                                 </div>
-                                            ))}
+                                            ) : (
+                                                filteredSuppliers.map((supplier) => (
+                                                    <SelectItem key={supplier.id} value={supplier.id}>
+                                                        <div className="flex items-center justify-between w-full gap-2">
+                                                            <span>{supplier.name}</span>
+                                                            {safeParseFloat(supplier.outstandingBalance) > 0 && (
+                                                                <span className="text-xs text-amber-600 font-medium">
+                                                                    {formatCurrency(safeParseFloat(supplier.outstandingBalance))}{' '}
+                                                                    due
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </SelectItem>
+                                                ))
+                                            )}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                {selectedSupplierOutstanding && (
+                                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="text-sm text-amber-900">
+                                                <span className="font-medium">Outstanding:</span>{' '}
+                                                <span className="text-lg font-bold">
+                                                    {formatCurrency(selectedSupplierOutstanding.totalOutstanding)}
+                                                </span>
+                                            </div>
+                                            <Badge variant="outline" className="bg-amber-100 text-amber-800">
+                                                {selectedSupplierOutstanding.invoiceCount === -1
+                                                    ? 'Loading…'
+                                                    : `${selectedSupplierOutstanding.invoiceCount} bill${selectedSupplierOutstanding.invoiceCount !== 1 ? 's' : ''}`}
+                                            </Badge>
                                         </div>
-                                        <p className="text-xs text-gray-500 mt-2">Click an invoice to pay that amount</p>
+                                        {selectedSupplierOutstanding.totalOutstanding > 0 && (
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-8 border-amber-300 text-amber-800 hover:bg-amber-100"
+                                                onClick={() =>
+                                                    setPaymentFormData((prev) => ({
+                                                        ...prev,
+                                                        amount: selectedSupplierOutstanding.totalOutstanding,
+                                                    }))
+                                                }
+                                            >
+                                                Use full balance
+                                            </Button>
+                                        )}
+                                        {selectedSupplierOutstanding.invoices &&
+                                            selectedSupplierOutstanding.invoices.length > 0 && (
+                                                <div className="border-t border-amber-200 pt-2 space-y-1 max-h-28 overflow-y-auto">
+                                                    {selectedSupplierOutstanding.invoices.map((inv) => (
+                                                        <button
+                                                            key={inv.id}
+                                                            type="button"
+                                                            className="w-full flex justify-between items-center text-xs bg-white px-2 py-1.5 rounded border border-amber-100 hover:bg-amber-50 text-left"
+                                                            onClick={() =>
+                                                                setPaymentFormData((prev) => ({
+                                                                    ...prev,
+                                                                    amount: safeParseFloat(inv.outstandingBalance),
+                                                                    notes: `Payment for ${inv.invoiceNumber || inv.supplierInvoiceNumber}`,
+                                                                }))
+                                                            }
+                                                        >
+                                                            <span className="font-medium text-gray-900 truncate pr-2">
+                                                                {inv.invoiceNumber || inv.supplierInvoiceNumber}
+                                                            </span>
+                                                            <span className="font-semibold text-amber-800 shrink-0">
+                                                                {formatCurrency(safeParseFloat(inv.outstandingBalance))}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
                                     </div>
                                 )}
-                            </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="payment-amount">Amount</Label>
+                                        <Input
+                                            id="payment-amount"
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={paymentFormData.amount.toString()}
+                                            onChange={(e) =>
+                                                setPaymentFormData((prev) => ({
+                                                    ...prev,
+                                                    amount: parseFloat(e.target.value) || 0,
+                                                }))
+                                            }
+                                            placeholder="0.00"
+                                        />
+                                        {selectedSupplierOutstanding &&
+                                            selectedSupplierOutstanding.totalOutstanding > 0 && (
+                                                <div className="flex flex-wrap gap-1">
+                                                    {[0.25, 0.5, 0.75, 1].map((pct) => (
+                                                        <button
+                                                            key={pct}
+                                                            type="button"
+                                                            className={`text-xs px-2 py-0.5 rounded ${
+                                                                pct === 1
+                                                                    ? 'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                                                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                            }`}
+                                                            onClick={() =>
+                                                                setPaymentFormData((prev) => ({
+                                                                    ...prev,
+                                                                    amount: Math.round(
+                                                                        selectedSupplierOutstanding.totalOutstanding *
+                                                                            pct,
+                                                                    ),
+                                                                }))
+                                                            }
+                                                        >
+                                                            {pct === 1 ? '100%' : `${pct * 100}%`}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="payment-method">Payment method</Label>
+                                        <Select
+                                            value={paymentFormData.paymentMethod}
+                                            onValueChange={(value: string) =>
+                                                setPaymentFormData((prev) => ({
+                                                    ...prev,
+                                                    paymentMethod: value as CreateSupplierPaymentRequest['paymentMethod'],
+                                                }))
+                                            }
+                                        >
+                                            <SelectTrigger id="payment-method">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {PAYMENT_METHODS.map((method) => (
+                                                    <SelectItem key={method.value} value={method.value}>
+                                                        {method.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="payment-date">Payment date</Label>
+                                    <DatePicker
+                                        value={paymentFormData.paymentDate}
+                                        onChange={(date) =>
+                                            setPaymentFormData((prev) => ({ ...prev, paymentDate: date }))
+                                        }
+                                        placeholder="Select payment date"
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="payment-reference">Reference</Label>
+                                    <Input
+                                        id="payment-reference"
+                                        value={paymentFormData.reference || ''}
+                                        onChange={(e) =>
+                                            setPaymentFormData((prev) => ({ ...prev, reference: e.target.value }))
+                                        }
+                                        placeholder="Cheque #, transfer ref, etc."
+                                    />
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="payment-notes">Notes</Label>
+                                    <Textarea
+                                        id="payment-notes"
+                                        value={paymentFormData.notes || ''}
+                                        onChange={(e) =>
+                                            setPaymentFormData((prev) => ({ ...prev, notes: e.target.value }))
+                                        }
+                                        placeholder="Optional"
+                                        rows={2}
+                                    />
+                                </div>
+                            </>
                         )}
-
-                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
-                            <Label htmlFor="amount" className="text-right">Amount</Label>
-                            <div className="col-span-3 space-y-2">
-                                <Input
-                                    id="amount"
-                                    type="number"
-                                    step="0.01"
-                                    value={paymentFormData.amount.toString()}
-                                    onChange={(e) => setPaymentFormData(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
-                                    placeholder="Enter payment amount"
-                                />
-                                {/* Quick partial payment buttons */}
-                                {selectedSupplierOutstanding && selectedSupplierOutstanding.totalOutstanding > 0 && (
-                                    <div className="flex flex-wrap gap-1">
-                                        <span className="text-xs text-gray-500 mr-1">Quick:</span>
-                                        <button
-                                            type="button"
-                                            className="text-xs px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-700"
-                                            onClick={() => setPaymentFormData(prev => ({
-                                                ...prev,
-                                                amount: Math.round(selectedSupplierOutstanding.totalOutstanding * 0.25)
-                                            }))}
-                                        >
-                                            25%
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="text-xs px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-700"
-                                            onClick={() => setPaymentFormData(prev => ({
-                                                ...prev,
-                                                amount: Math.round(selectedSupplierOutstanding.totalOutstanding * 0.50)
-                                            }))}
-                                        >
-                                            50%
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="text-xs px-2 py-0.5 bg-gray-100 hover:bg-gray-200 rounded text-gray-700"
-                                            onClick={() => setPaymentFormData(prev => ({
-                                                ...prev,
-                                                amount: Math.round(selectedSupplierOutstanding.totalOutstanding * 0.75)
-                                            }))}
-                                        >
-                                            75%
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="text-xs px-2 py-0.5 bg-blue-100 hover:bg-blue-200 rounded text-blue-700"
-                                            onClick={() => setPaymentFormData(prev => ({
-                                                ...prev,
-                                                amount: selectedSupplierOutstanding.totalOutstanding
-                                            }))}
-                                        >
-                                            100%
-                                        </button>
-                                    </div>
-                                )}
-                                <p className="text-xs text-gray-500">Enter any amount for partial payment</p>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
-                            <Label htmlFor="method" className="text-right">Method</Label>
-                            <div className="col-span-3">
-                                <Select
-                                    value={paymentFormData.paymentMethod}
-                                    onValueChange={(value: string) => setPaymentFormData(prev => ({ ...prev, paymentMethod: value as CreateSupplierPaymentRequest['paymentMethod'] }))}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {PAYMENT_METHODS.map(method => (
-                                            <SelectItem key={method.value} value={method.value}>
-                                                {method.label}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
-                            <Label htmlFor="date" className="text-right">Date</Label>
-                            <div className="col-span-3">
-                                <DatePicker
-                                    value={paymentFormData.paymentDate}
-                                    onChange={(date) => setPaymentFormData(prev => ({ ...prev, paymentDate: date }))}
-                                    placeholder="Select payment date"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-4 items-center gap-4">
-                            <Label htmlFor="reference" className="text-right">Reference</Label>
-                            <Input
-                                id="reference"
-                                value={paymentFormData.reference || ''}
-                                onChange={(e) => setPaymentFormData(prev => ({ ...prev, reference: e.target.value }))}
-                                className="col-span-3"
-                                placeholder="Payment reference"
-                            />
-                        </div>
                     </div>
 
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsPaymentModalOpen(false)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleCreatePayment}>
-                            Record Payment
-                        </Button>
-                    </DialogFooter>
+                    {showObPanel ? (
+                        <DialogFooter className="gap-2 sm:gap-0">
+                            <Button variant="outline" onClick={() => setIsPaymentModalOpen(false)}>
+                                Close
+                            </Button>
+                        </DialogFooter>
+                    ) : (
+                        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between sm:items-center">
+                            <div className="w-full sm:w-auto">
+                                {canManageOpeningBalance && (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        className="w-full sm:w-auto text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50"
+                                        onClick={() => setShowObPanel(true)}
+                                    >
+                                        <Wallet className="h-4 w-4 mr-2" />
+                                        Opening balance instead
+                                    </Button>
+                                )}
+                            </div>
+                            <div className="flex w-full sm:w-auto gap-2 justify-end">
+                                <Button variant="outline" onClick={() => setIsPaymentModalOpen(false)}>
+                                    Cancel
+                                </Button>
+                                <Button onClick={handleCreatePayment} disabled={isRecordingPayment}>
+                                    {isRecordingPayment ? 'Posting…' : 'Record payment'}
+                                </Button>
+                            </div>
+                        </DialogFooter>
+                    )}
                 </DialogContent>
             </Dialog>
 

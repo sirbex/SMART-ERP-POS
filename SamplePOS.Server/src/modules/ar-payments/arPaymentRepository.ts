@@ -13,6 +13,8 @@ export interface ArCustomerPayment {
   status: string;
   reference: string | null;
   notes: string | null;
+  createdById?: string | null;
+  createdByName?: string | null;
 }
 
 export interface ArPaymentAllocation {
@@ -96,9 +98,11 @@ export async function listPayments(
   params.push(limit, offset);
 
   const res = await client.query(
-    `SELECT p.*, c.name AS customer_name
+    `SELECT p.*, c.name AS customer_name,
+            COALESCE(u.full_name, u.email, 'Unknown') AS created_by_name
      FROM ar_customer_payments p
      JOIN customers c ON c.id = p.customer_id
+     LEFT JOIN users u ON u.id = p.created_by_id
      WHERE ${conditions.join(' AND ')}
      ORDER BY p.payment_date DESC, p.created_at DESC
      LIMIT $${params.length - 1} OFFSET $${params.length}`,
@@ -107,6 +111,7 @@ export async function listPayments(
   return res.rows.map((row) => ({
     ...mapPayment(row),
     customerName: row.customer_name as string,
+    createdByName: row.created_by_name as string,
   }));
 }
 
@@ -222,6 +227,8 @@ function mapPayment(row: Record<string, unknown>): ArCustomerPayment {
     status: row.status as string,
     reference: (row.reference as string) ?? null,
     notes: (row.notes as string) ?? null,
+    createdById: (row.created_by_id as string) ?? null,
+    createdByName: (row.created_by_name as string) ?? undefined,
   };
 }
 

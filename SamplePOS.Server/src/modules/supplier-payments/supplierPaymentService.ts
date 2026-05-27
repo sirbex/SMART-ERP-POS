@@ -15,6 +15,8 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { AccountingCore, AccountingError } from '../../services/accountingCore.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import { logOpeningBalanceAudit } from '../../utils/openingBalanceAudit.js';
+import * as auditRepository from '../audit/auditRepository.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
@@ -181,6 +183,7 @@ export async function createSupplierPayment(
             amount: paymentAmount.toNumber(),
             reference: data.reference,
             notes: data.notes,
+            createdById: userId,
         });
 
         // Auto-allocate to outstanding invoices (FIFO by due date)
@@ -1187,6 +1190,7 @@ export async function massPaymentRun(
                 amount: supplierTotal.toNumber(),
                 reference: data.reference,
                 notes: data.notes,
+                createdById: userId,
             });
 
             // Apply each allocation — validate against ledger BEFORE writing
@@ -1292,10 +1296,14 @@ export async function massPaymentRun(
 export interface ImportSupplierOpeningBalanceInput {
     supplierId: string;
     amount: number;
-    asOfDate: string;   // YYYY-MM-DD — posting date (cutover)
-    dueDate?: string;   // YYYY-MM-DD — original invoice/baseline date for aging (SAP ZFBDT / Odoo date_maturity). Defaults to asOfDate.
+    asOfDate: string;
+    dueDate?: string;
     notes?: string;
-    userId: string;     // performing operator (for audit_log FK)
+    userId: string;
+    userName?: string;
+    userRole?: string;
+    postReason: string;
+    skipAudit?: boolean;
 }
 
 /**
@@ -1310,7 +1318,7 @@ export interface ImportSupplierOpeningBalanceInput {
 export async function importSupplierOpeningBalance(
     pool: Pool,
     data: ImportSupplierOpeningBalanceInput
-): Promise<{ invoiceNumber: string; amount: number }> {
+): Promise<{ invoiceId: string; invoiceNumber: string; amount: number }> {
     const amount = new Decimal(data.amount);
     if (amount.lessThanOrEqualTo(0)) {
         throw new Error('Opening balance amount must be greater than zero');
@@ -1365,14 +1373,14 @@ export async function importSupplierOpeningBalance(
                "Subtotal", "TaxAmount", "TotalAmount",
                "AmountPaid", "OutstandingBalance",
                "Status", "CurrencyCode", document_type,
-               "Notes", "CreatedAt", "UpdatedAt"
+               "Notes", created_by_id, "CreatedAt", "UpdatedAt"
              ) VALUES (
                gen_random_uuid(), $1, $2,
                $3, $4,
                $5, 0, $5,
                0, $5,
                'Pending', 'UGX', 'OPENING_BALANCE',
-               $6, NOW(), NOW()
+               $6, $7, NOW(), NOW()
              ) RETURNING "Id", "SupplierInvoiceNumber"`,
             [
                 invoiceNumber,
@@ -1381,6 +1389,7 @@ export async function importSupplierOpeningBalance(
                 dueDate,
                 amount.toNumber(),
                 data.notes ?? `Opening balance as of ${data.asOfDate}`,
+                data.userId,
             ]
         );
         const invoice = invoiceResult.rows[0];
@@ -1426,10 +1435,42 @@ export async function importSupplierOpeningBalance(
             [invoice.Id]
         );
 
+        if (!data.skipAudit) {
+            await logOpeningBalanceAudit(client, {
+                party: 'supplier',
+                partyId: data.supplierId,
+                partyName: supplierName,
+                action: 'IMPORT',
+                invoiceId: invoice.Id as string,
+                invoiceNumber,
+                amount: amount.toNumber(),
+                reason: data.postReason,
+                userId: data.userId,
+                userName: data.userName,
+                userRole: data.userRole,
+            });
+        }
+
         return {
+            invoiceId: invoice.Id as string,
             invoiceNumber,
             amount: amount.toNumber(),
         };
+    });
+}
+
+export async function getSupplierOpeningBalanceHistory(
+    pool: Pool,
+    supplierId: string,
+): Promise<{ data: import('../../../../shared/types/audit.js').AuditLog[]; total: number }> {
+    return auditRepository.getAuditLogs(pool, {
+        entityType: 'SUPPLIER',
+        entityId: supplierId,
+        tags: ['OPENING_BALANCE'],
+        page: 1,
+        limit: 50,
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
     });
 }
 
@@ -1466,17 +1507,80 @@ async function loadSupplierOpeningBalanceForCancel(
     return inv;
 }
 
+async function unallocateSupplierObPaymentsBeforeCancel(
+    client: PoolClient,
+    invoiceId: string,
+    supplierId: string,
+): Promise<number> {
+    const allocs = await client.query<{ Id: string }>(
+        `SELECT "Id" FROM supplier_payment_allocations
+         WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL`,
+        [invoiceId],
+    );
+
+    for (const row of allocs.rows) {
+        const deleted = await supplierPaymentRepository.deleteAllocation(client, row.Id);
+        if (!deleted) continue;
+
+        const sumResult = await client.query<{ total_paid: string | number }>(
+            `SELECT COALESCE(SUM("AmountAllocated"), 0) as total_paid
+             FROM supplier_payment_allocations
+             WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL`,
+            [invoiceId],
+        );
+        const newPaidAmount = new Decimal(sumResult.rows[0]?.total_paid ?? 0).toNumber();
+        await supplierPaymentRepository.updateInvoicePaidAmount(client, invoiceId, newPaidAmount);
+    }
+
+    if (allocs.rows.length > 0) {
+        await recalcSupplierBalance(client, supplierId);
+    }
+
+    return allocs.rows.length;
+}
+
+export type CancelSupplierOpeningBalanceOptions = {
+    forReplace?: boolean;
+    skipAudit?: boolean;
+    userName?: string;
+    userRole?: string;
+};
+
 export async function cancelSupplierOpeningBalance(
     pool: Pool,
     invoiceId: string,
     userId: string,
     reason: string,
+    options?: CancelSupplierOpeningBalanceOptions,
 ): Promise<{ invoiceId: string; invoiceNumber: string }> {
     if (!reason || reason.trim().length < 5) {
         throw new Error('Cancellation reason is required (min 5 characters)');
     }
 
     return UnitOfWork.run(pool, async (client) => {
+        if (options?.forReplace) {
+            const meta = await client.query<{ SupplierId: string }>(
+                `SELECT "SupplierId" FROM supplier_invoices
+                 WHERE "Id" = $1 AND document_type = 'OPENING_BALANCE' AND deleted_at IS NULL`,
+                [invoiceId],
+            );
+            if (!meta.rows[0]) {
+                throw new Error('Supplier opening balance record not found');
+            }
+            const unallocated = await unallocateSupplierObPaymentsBeforeCancel(
+                client,
+                invoiceId,
+                meta.rows[0].SupplierId,
+            );
+            if (unallocated > 0) {
+                logger.info('Unallocated supplier payments from OB before replace', {
+                    invoiceId,
+                    supplierId: meta.rows[0].SupplierId,
+                    count: unallocated,
+                });
+            }
+        }
+
         const inv = await loadSupplierOpeningBalanceForCancel(client, invoiceId);
         await checkAccountingPeriodOpen(client, getBusinessDate());
 
@@ -1520,6 +1624,25 @@ export async function cancelSupplierOpeningBalance(
 
         await recalcSupplierBalance(client, inv.SupplierId);
 
+        if (!options?.skipAudit) {
+            const supRes = await client.query<{ CompanyName: string }>(
+                'SELECT "CompanyName" FROM suppliers WHERE "Id" = $1',
+                [inv.SupplierId],
+            );
+            await logOpeningBalanceAudit(client, {
+                party: 'supplier',
+                partyId: inv.SupplierId,
+                partyName: supRes.rows[0]?.CompanyName ?? 'Supplier',
+                action: 'CANCEL',
+                invoiceId,
+                invoiceNumber: inv.SupplierInvoiceNumber as string,
+                reason,
+                userId,
+                userName: options?.userName,
+                userRole: options?.userRole,
+            });
+        }
+
         return { invoiceId, invoiceNumber: inv.SupplierInvoiceNumber as string };
     });
 }
@@ -1538,16 +1661,53 @@ export async function replaceSupplierOpeningBalance(
     );
 
     let replaced = false;
+    let previousAmount: number | undefined;
+
     if (existing.rows[0]) {
+        const oldInv = await pool.query<{ TotalAmount: string | number }>(
+            `SELECT "TotalAmount" FROM supplier_invoices WHERE "Id" = $1`,
+            [existing.rows[0].Id],
+        );
+        previousAmount = Number(oldInv.rows[0]?.TotalAmount ?? 0);
+
         await cancelSupplierOpeningBalance(
             pool,
             existing.rows[0].Id,
             data.userId,
             data.replaceReason || 'Replaced opening balance with corrected amount',
+            { forReplace: true, skipAudit: true },
         );
         replaced = true;
     }
 
-    const created = await importSupplierOpeningBalance(pool, data);
+    const created = await importSupplierOpeningBalance(pool, {
+        ...data,
+        postReason: data.replaceReason,
+        skipAudit: replaced,
+    });
+
+    if (replaced) {
+        const supRes = await pool.query<{ CompanyName: string }>(
+            'SELECT "CompanyName" FROM suppliers WHERE "Id" = $1',
+            [data.supplierId],
+        );
+        await UnitOfWork.run(pool, async (client) => {
+            await logOpeningBalanceAudit(client, {
+                party: 'supplier',
+                partyId: data.supplierId,
+                partyName: supRes.rows[0]?.CompanyName ?? 'Supplier',
+                action: 'UPDATE',
+                invoiceId: created.invoiceId,
+                invoiceNumber: created.invoiceNumber,
+                amount: created.amount,
+                previousAmount,
+                reason: data.replaceReason,
+                userId: data.userId,
+                userName: data.userName,
+                userRole: data.userRole,
+            });
+        });
+    }
+
     return { ...created, replaced };
 }

@@ -28,19 +28,24 @@ router.post(
 );
 
 // ── Customer routes ──
+router.get(
+  '/opening-balance/history',
+  requirePermission('accounting.opening_balance'),
+  customerController.getCustomerOpeningBalanceHistory,
+);
 router.post(
   '/opening-balance',
-  requirePermission('customers.create'),
+  requirePermission('accounting.opening_balance'),
   customerController.importCustomerOpeningBalance
 );
 router.post(
   '/opening-balance/replace',
-  requirePermission('customers.create'),
+  requirePermission('accounting.opening_balance'),
   customerController.replaceCustomerOpeningBalance
 );
 router.post(
   '/opening-balance/cancel',
-  requirePermission('customers.create'),
+  requirePermission('accounting.opening_balance'),
   customerController.cancelCustomerOpeningBalance
 );
 router.get('/', customerController.getCustomers);

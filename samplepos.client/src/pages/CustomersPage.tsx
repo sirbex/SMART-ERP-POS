@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import Decimal from 'decimal.js';
 import type { AxiosError } from 'axios';
 import { toast } from 'sonner';
@@ -67,6 +68,7 @@ export default function CustomersPage() {
 
   // Permission gating
   const canCreateCustomer = useCanAccess([], ['customers.create']);
+  const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
 
   // Customer detail modal state
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -117,54 +119,6 @@ export default function CustomersPage() {
   const activeCustomers = customers.filter((c: Customer) => c.isActive).length;
   const totalBalance = customers.reduce((sum: number, c: Customer) => new Decimal(sum).plus(toNumber(c.balance)).toNumber(), 0);
   const customersWithDebt = customers.filter((c: Customer) => toNumber(c.balance) > 0).length; // Balance > 0 = customer owes money
-
-  const [obCustomerId, setObCustomerId] = useState('');
-  const [obAmount, setObAmount] = useState('');
-  const [obDate, setObDate] = useState('');
-  const [obDueDate, setObDueDate] = useState('');
-  const [obNotes, setObNotes] = useState('');
-  const [obPosting, setObPosting] = useState(false);
-
-  const handlePostCustomerOpeningBalance = async () => {
-    if (!obCustomerId) {
-      toast.error('Select a customer');
-      return;
-    }
-    const amt = parseFloat(obAmount);
-    if (!amt || amt <= 0) {
-      toast.error('Enter a positive amount');
-      return;
-    }
-    if (!obDate) {
-      toast.error('As-of date is required');
-      return;
-    }
-    if (obDueDate && obDueDate > obDate) {
-      toast.error('Original invoice date cannot be after the as-of (cutover) date');
-      return;
-    }
-    setObPosting(true);
-    try {
-      await api.customers.importOpeningBalance({
-        customerId: obCustomerId,
-        amount: amt,
-        asOfDate: obDate,
-        dueDate: obDueDate || undefined,
-        notes: obNotes || undefined,
-      });
-      toast.success('Customer opening balance posted');
-      setObAmount('');
-      setObNotes('');
-      setObCustomerId('');
-      setObDate('');
-      setObDueDate('');
-    } catch (err) {
-      const axErr = err as AxiosError<{ error?: string }>;
-      toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
-    } finally {
-      setObPosting(false);
-    }
-  };
 
   return (
     <Layout>
@@ -279,68 +233,18 @@ export default function CustomersPage() {
               </div>
             </div>
 
-            {canCreateCustomer && (
-              <div className="bg-white rounded-lg shadow border border-gray-200 p-4 sm:p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-1">Import Customer Opening Balance</h2>
-                <p className="text-sm text-gray-500 mb-4">
-                  Post a balance brought forward from another system (DR Accounts Receivable / CR Opening Balance Equity).
-                  One opening balance record per customer.
+            {canManageOpeningBalance && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 sm:p-6 mb-6">
+                <h2 className="text-lg font-semibold text-indigo-900 mb-1">Customer opening balance</h2>
+                <p className="text-sm text-indigo-800 mb-3">
+                  Cutover AR is posted from Customer Payments (audited, permission-controlled). Use Record Payment → Opening balance.
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 items-end">
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Customer *</label>
-                    <select
-                      value={obCustomerId}
-                      onChange={(e) => setObCustomerId(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option value="">Select customer</option>
-                      {customers.map((c: Customer) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Amount (UGX) *</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={obAmount}
-                      onChange={(e) => setObAmount(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      placeholder="0"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">As-of date *</label>
-                    <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Original invoice date</label>
-                    <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
-                    <input
-                      type="text"
-                      value={obNotes}
-                      onChange={(e) => setObNotes(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      placeholder="Optional"
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end mt-4">
-                  <button
-                    type="button"
-                    onClick={() => void handlePostCustomerOpeningBalance()}
-                    disabled={obPosting}
-                    className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    {obPosting ? 'Posting…' : 'Post Opening Balance'}
-                  </button>
-                </div>
+                <Link
+                  to="/accounting/customer-payments"
+                  className="inline-flex text-sm font-medium text-indigo-700 hover:text-indigo-900 underline"
+                >
+                  Go to Customer Payments
+                </Link>
               </div>
             )}
 

@@ -505,49 +505,8 @@ export default function CustomerDetailPage() {
   const [detailsInvoice, setDetailsInvoice] = useState<NormalizedInvoice | null>(null);
   const [adjustInvoiceOpen, setAdjustInvoiceOpen] = useState(false);
   const canAdjustInvoices = useHasAnyPermission(['customers.adjust']);
-  const canPostOpeningBalance = useCanAccess([], ['customers.create']);
+  const canPostOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
 
-  const [obAmount, setObAmount] = useState('');
-  const [obDate, setObDate] = useState('');
-  const [obDueDate, setObDueDate] = useState('');
-  const [obNotes, setObNotes] = useState('');
-  const [obPosting, setObPosting] = useState(false);
-
-  const handlePostOpeningBalanceForCustomer = async () => {
-    const amt = parseFloat(obAmount);
-    if (!amt || amt <= 0) {
-      toast.error('Enter a positive amount');
-      return;
-    }
-    if (!obDate) {
-      toast.error('As-of date is required');
-      return;
-    }
-    if (obDueDate && obDueDate > obDate) {
-      toast.error('Original invoice date cannot be after the as-of (cutover) date');
-      return;
-    }
-    setObPosting(true);
-    try {
-      await api.customers.importOpeningBalance({
-        customerId: id,
-        amount: amt,
-        asOfDate: obDate,
-        dueDate: obDueDate || undefined,
-        notes: obNotes || undefined,
-      });
-      toast.success('Opening balance posted for this customer');
-      setObAmount('');
-      setObNotes('');
-      setObDate('');
-      setObDueDate('');
-    } catch (err) {
-      const axErr = err as AxiosError<{ error?: string }>;
-      toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
-    } finally {
-      setObPosting(false);
-    }
-  };
   const detailsRef = useModalAccessibility(isDetailsOpen, () => setDetailsOpen(false));
   const { data: paymentHistory, isLoading: isLoadingPayments } = useInvoicePayments(detailsInvoice?.id || '',);
   // Fetch full invoice detail (includes items + payments)
@@ -831,53 +790,17 @@ export default function CustomerDetailPage() {
 
               {canPostOpeningBalance && (
                 <div className="mt-6 p-4 border border-indigo-200 bg-indigo-50/50 rounded-lg">
-                  <h4 className="text-sm font-semibold text-gray-900 mb-1">Opening balance (cutover)</h4>
-                  <p className="text-xs text-gray-600 mb-3">
-                    Post historical AR for <strong>{(customer as CustomerDetailData).name}</strong> so the
-                    ledger matches your books. DR Accounts Receivable / CR Opening Balance Equity. One OB
-                    per customer; appears in Accounting → Customer Payments for allocation.
+                  <h4 className="text-sm font-semibold text-indigo-900 mb-1">Opening balance (cutover)</h4>
+                  <p className="text-xs text-indigo-800 mb-2">
+                    Post or correct AR for <strong>{(customer as CustomerDetailData).name}</strong> from
+                    Customer Payments (audited).
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Amount (UGX) *</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={obAmount}
-                        onChange={(e) => setObAmount(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-                        placeholder="0"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">As-of date *</label>
-                      <DatePicker value={obDate} onChange={setObDate} placeholder="Cutover date" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 mb-1">Original invoice date</label>
-                      <DatePicker value={obDueDate} onChange={setObDueDate} placeholder="Optional" />
-                    </div>
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => void handlePostOpeningBalanceForCustomer()}
-                        disabled={obPosting}
-                        className="w-full px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
-                      >
-                        {obPosting ? 'Posting…' : 'Post Opening Balance'}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2">
-                    <input
-                      type="text"
-                      value={obNotes}
-                      onChange={(e) => setObNotes(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
-                      placeholder="Optional notes"
-                    />
-                  </div>
+                  <a
+                    href="/accounting/customer-payments"
+                    className="text-sm font-medium text-indigo-700 hover:text-indigo-900 underline"
+                  >
+                    Open Customer Payments → Opening balance
+                  </a>
                 </div>
               )}
             </div>
