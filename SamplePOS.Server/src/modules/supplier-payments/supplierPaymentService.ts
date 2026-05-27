@@ -1157,7 +1157,7 @@ export async function massPaymentRun(
     userId?: string
 ): Promise<MassPaymentRunResult> {
     if (!data.allocations || data.allocations.length === 0) {
-        throw new Error('No allocations provided');
+        throw new ValidationError('No allocations provided');
     }
 
     // Validate total > 0
@@ -1166,7 +1166,7 @@ export async function massPaymentRun(
         new Decimal(0)
     );
     if (grandTotal.lessThanOrEqualTo(0)) {
-        throw new Error('Total payment amount must be greater than zero');
+        throw new ValidationError('Total payment amount must be greater than zero');
     }
 
     // Group by supplier
@@ -1208,16 +1208,20 @@ export async function massPaymentRun(
                     alloc.invoiceId
                 );
                 if (!ledger) {
-                    throw new Error(`Invoice ${alloc.invoiceId} not found or has been deleted`);
+                    throw new ValidationError(
+                        `Invoice ${alloc.invoiceId} not found or has been deleted`
+                    );
                 }
                 if (['Cancelled', 'CANCELLED'].includes(ledger.status)) {
-                    throw new Error(`Cannot pay a cancelled invoice (${ledger.invoiceNumber})`);
+                    throw new ValidationError(
+                        `Cannot pay a cancelled invoice (${ledger.invoiceNumber})`
+                    );
                 }
                 const allocAmount = new Decimal(alloc.amount);
                 const trueOutstanding = ledger.outstandingBalance;
 
                 if (trueOutstanding.lessThanOrEqualTo(0)) {
-                    throw new Error(
+                    throw new ValidationError(
                         `Invoice ${ledger.invoiceNumber} is already fully paid or credited ` +
                         `(original: ${ledger.originalAmount.toFixed(2)}, ` +
                         `paid: ${ledger.paidAmount.toFixed(2)}, ` +
@@ -1226,7 +1230,7 @@ export async function massPaymentRun(
                 }
                 // Allow a 1-cent tolerance for rounding differences
                 if (allocAmount.greaterThan(trueOutstanding.plus(new Decimal('0.01')))) {
-                    throw new Error(
+                    throw new ValidationError(
                         `Allocation of ${allocAmount.toFixed(2)} for invoice ${ledger.invoiceNumber} ` +
                         `exceeds ledger outstanding ${trueOutstanding.toFixed(2)} ` +
                         `(original: ${ledger.originalAmount.toFixed(2)}, ` +

@@ -1145,7 +1145,9 @@ function SupplierDetailModal({
       setInvoices([]);
       loadInvoices();
     } catch (err: unknown) {
-      setMultiError(err instanceof Error ? err.message : 'Payment run failed');
+      const axiosErr = err as { response?: { data?: { error?: string; message?: string } } };
+      const apiError = axiosErr.response?.data?.error || axiosErr.response?.data?.message;
+      setMultiError(apiError || (err instanceof Error ? err.message : 'Payment run failed'));
     } finally {
       setMultiPosting(false);
     }
