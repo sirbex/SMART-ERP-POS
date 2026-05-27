@@ -939,34 +939,37 @@ export async function allocatePayment(pool: Pool, data: AllocatePaymentInput, us
         const allocationAmount = new Decimal(data.amount);
 
         // Validate payment exists and has enough unallocated amount
-        const payment = await supplierPaymentRepository.findPaymentById(pool, data.supplierPaymentId);
+        const payment = await supplierPaymentRepository.findPaymentById(client, data.supplierPaymentId);
         if (!payment) {
-            throw new Error('Payment not found');
+            throw new ValidationError('Payment not found');
         }
 
         const unallocatedAmount = new Decimal(payment.unallocatedAmount);
         if (unallocatedAmount.lessThan(allocationAmount)) {
-            throw new Error(
+            throw new ValidationError(
                 `Insufficient unallocated amount. Available: ${unallocatedAmount.toFixed(2)}, Requested: ${allocationAmount.toFixed(2)}`
             );
         }
 
         // Validate invoice exists and has enough outstanding amount
-        const invoice = await supplierPaymentRepository.findInvoiceById(pool, data.supplierInvoiceId);
+        const invoice = await supplierPaymentRepository.findInvoiceById(client, data.supplierInvoiceId);
         if (!invoice) {
-            throw new Error('Invoice not found');
+            throw new ValidationError('Invoice not found');
+        }
+        if (invoice.supplierId !== payment.supplierId) {
+            throw new ValidationError('Invoice does not belong to this payment supplier');
         }
 
         const outstandingBalance = new Decimal(invoice.outstandingBalance);
         if (outstandingBalance.lessThan(allocationAmount)) {
-            throw new Error(
+            throw new ValidationError(
                 `Allocation amount exceeds outstanding amount. Outstanding: ${outstandingBalance.toFixed(2)}, Requested: ${allocationAmount.toFixed(2)}`
             );
         }
 
         // Validate amount is positive
         if (allocationAmount.lessThanOrEqualTo(0)) {
-            throw new Error('Allocation amount must be greater than zero');
+            throw new ValidationError('Allocation amount must be greater than zero');
         }
 
         const allocation = await supplierPaymentRepository.createAllocation(client, {

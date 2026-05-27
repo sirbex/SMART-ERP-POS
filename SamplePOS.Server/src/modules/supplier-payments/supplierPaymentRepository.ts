@@ -898,18 +898,43 @@ export async function createAllocation(
     // Use Decimal.js for precise currency calculations
     const allocationAmount = new Decimal(data.amount);
 
-    const result = await client.query(
-        `INSERT INTO supplier_payment_allocations (
-       "Id", "PaymentId", "SupplierInvoiceId", "AmountAllocated", "AllocationDate"
-     ) VALUES (gen_random_uuid(), $1, $2, $3, NOW())
-     RETURNING 
-       "Id" as id,
-       "PaymentId" as "supplierPaymentId",
-       "SupplierInvoiceId" as "supplierInvoiceId",
-       "AmountAllocated" as amount,
-       "AllocationDate" as "allocatedAt"`,
-        [data.supplierPaymentId, data.supplierInvoiceId, allocationAmount.toNumber()]
+    const existing = await client.query(
+        `SELECT "Id", "AmountAllocated"
+         FROM supplier_payment_allocations
+         WHERE "PaymentId" = $1
+           AND "SupplierInvoiceId" = $2
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [data.supplierPaymentId, data.supplierInvoiceId]
     );
+
+    const result =
+        existing.rows.length > 0
+            ? await client.query(
+                  `UPDATE supplier_payment_allocations
+                   SET "AmountAllocated" = COALESCE("AmountAllocated", 0) + $1,
+                       "AllocationDate" = NOW()
+                   WHERE "Id" = $2
+                   RETURNING
+                       "Id" as id,
+                       "PaymentId" as "supplierPaymentId",
+                       "SupplierInvoiceId" as "supplierInvoiceId",
+                       "AmountAllocated" as amount,
+                       "AllocationDate" as "allocatedAt"`,
+                  [allocationAmount.toNumber(), existing.rows[0].Id]
+              )
+            : await client.query(
+                  `INSERT INTO supplier_payment_allocations (
+                     "Id", "PaymentId", "SupplierInvoiceId", "AmountAllocated", "AllocationDate"
+                   ) VALUES (gen_random_uuid(), $1, $2, $3, NOW())
+                   RETURNING
+                     "Id" as id,
+                     "PaymentId" as "supplierPaymentId",
+                     "SupplierInvoiceId" as "supplierInvoiceId",
+                     "AmountAllocated" as amount,
+                     "AllocationDate" as "allocatedAt"`,
+                  [data.supplierPaymentId, data.supplierInvoiceId, allocationAmount.toNumber()]
+              );
 
     // Update payment allocated/unallocated amounts
     await client.query(
