@@ -722,10 +722,11 @@ export default function ProductsPage() {
 
   // Product UoM Handlers
   const handleAddUomClick = () => {
+    const hasBaseUom = productUoms.some((u) => u.isDefault);
     setUomFormData({
       uomId: '',
       conversionFactor: '1',
-      isDefault: false,
+      isDefault: !hasBaseUom,
     });
     setUomAutoApplied(false);
     setEditingUomIndex(null);
@@ -883,10 +884,11 @@ export default function ProductsPage() {
   const handleCancelUom = () => {
     setShowAddUomForm(false);
     setEditingUomIndex(null);
+    const hasBaseUom = productUoms.some((u) => u.isDefault);
     setUomFormData({
       uomId: '',
       conversionFactor: '1',
-      isDefault: false,
+      isDefault: !hasBaseUom,
     });
     setUomAutoApplied(false);
   };
@@ -2092,8 +2094,13 @@ export default function ProductsPage() {
                   className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                 />
                 <label htmlFor="uom-default" className="text-sm text-gray-700">
-                  Set as default unit for this product
+                  Base stock unit (required before other units)
                 </label>
+                {!productUoms.some((u) => u.isDefault) && (
+                  <p className="text-xs text-amber-700 mt-1">
+                    First unit is saved as the base stock UoM (factor 1). Add pack/box units after that.
+                  </p>
+                )}
               </div>
             </div>
 

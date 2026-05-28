@@ -272,8 +272,8 @@ export async function createProductUom(data: {
   isDefault?: boolean;
   priceOverride?: number | null;
   costOverride?: number | null;
-}, dbPool?: pg.Pool): Promise<DbProductUom> {
-  const pool = dbPool || globalPool;
+}, db?: Queryable): Promise<DbProductUom> {
+  const pool = db || globalPool;
   const res = await pool.query(
     `INSERT INTO product_uoms (
       product_id, uom_id, conversion_factor, barcode, is_default, price_override, cost_override
@@ -304,12 +304,30 @@ export async function createProductUom(data: {
   return res.rows[0];
 }
 
-export async function unsetDefaultForProduct(productId: string, dbPool?: pg.Pool) {
-  const pool = dbPool || globalPool;
+export async function unsetDefaultForProduct(productId: string, db?: Queryable) {
+  const pool = db || globalPool;
   await pool.query(
     `UPDATE product_uoms SET is_default = false WHERE product_id = $1 AND is_default = true`,
     [productId]
   );
+}
+
+/** Promote one product_uoms row as the canonical base stock UoM (factor = 1). */
+export async function setProductUomAsBase(
+  productId: string,
+  productUomId: string,
+  uomId: string,
+  db?: Queryable,
+): Promise<void> {
+  const pool = db || globalPool;
+  await unsetDefaultForProduct(productId, pool);
+  await pool.query(
+    `UPDATE product_uoms
+     SET is_default = true, conversion_factor = 1
+     WHERE id = $1 AND product_id = $2`,
+    [productUomId, productId],
+  );
+  await setProductBaseUomId(productId, uomId, pool);
 }
 
 export async function updateProductUom(

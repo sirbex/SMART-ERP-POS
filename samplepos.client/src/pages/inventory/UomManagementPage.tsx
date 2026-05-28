@@ -112,7 +112,7 @@ export default function UomManagementPage() {
     queryFn: () => fetchProductUoms(productId),
   });
 
-  const [newProductUom, setNewProductUom] = useState<{ uomId: string; conversionFactor: string; isDefault: boolean; priceOverride?: string; costOverride?: string; barcode?: string }>({ uomId: '', conversionFactor: '1', isDefault: false, priceOverride: '', costOverride: '', barcode: '' });
+  const [newProductUom, setNewProductUom] = useState<{ uomId: string; conversionFactor: string; isDefault: boolean; priceOverride?: string; costOverride?: string; barcode?: string }>({ uomId: '', conversionFactor: '1', isDefault: true, priceOverride: '', costOverride: '', barcode: '' });
   const addProductUomMutation = useMutation({
     mutationFn: () => addProductUom(productId, {
       uomId: newProductUom.uomId,
@@ -122,9 +122,17 @@ export default function UomManagementPage() {
       costOverride: newProductUom.costOverride ? Number(newProductUom.costOverride) : null,
       barcode: newProductUom.barcode || null,
     }),
-    onSuccess: () => {
-      setNewProductUom({ uomId: '', conversionFactor: '1', isDefault: false, priceOverride: '', costOverride: '', barcode: '' });
-      refetchProductUoms();
+    onSuccess: async () => {
+      const { data: refreshed } = await refetchProductUoms();
+      const hasBase = (refreshed ?? []).some((u) => u.isDefault);
+      setNewProductUom({
+        uomId: '',
+        conversionFactor: '1',
+        isDefault: !hasBase,
+        priceOverride: '',
+        costOverride: '',
+        barcode: '',
+      });
     },
   });
 

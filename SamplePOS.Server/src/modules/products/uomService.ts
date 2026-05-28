@@ -18,6 +18,42 @@ import {
 
 type Queryable = pg.Pool | pg.PoolClient;
 
+/**
+ * SAP MUoM: every item needs a base stock UoM (products.base_uom_id + one is_default row).
+ * Legacy rows may have product_uoms without base_uom_id; the UI often omits isDefault on first add.
+ */
+async function ensureProductBaseUomContext(
+  productId: string,
+  db: Queryable,
+  incoming?: { isDefault: boolean; conversionFactor: number },
+): Promise<{ isDefault: boolean; conversionFactor: number }> {
+  let baseUomId = await repo.getProductBaseUomId(productId, db);
+  const existingUoms = await repo.listProductUoms(productId, db as pg.Pool);
+
+  if (!baseUomId && existingUoms.length > 0) {
+    const candidate = existingUoms.find((uom) => uom.isDefault) ?? existingUoms[0];
+    await repo.setProductUomAsBase(productId, candidate.id, candidate.uomId, db);
+    baseUomId = candidate.uomId;
+  }
+
+  if (!incoming) {
+    return { isDefault: false, conversionFactor: 1 };
+  }
+
+  if (!baseUomId) {
+    return { isDefault: true, conversionFactor: 1 };
+  }
+
+  if (incoming.isDefault) {
+    return { isDefault: true, conversionFactor: 1 };
+  }
+
+  return {
+    isDefault: false,
+    conversionFactor: incoming.conversionFactor,
+  };
+}
+
 async function assertNoCanonicalDuplicateMeaning(
   productId: string,
   uomId: string,
@@ -265,82 +301,90 @@ export async function getProductUoms(productId: string, dbPool?: pg.Pool) {
 
 export async function addProductUom(input: unknown, auditContext?: AuditContext, dbPool?: pg.Pool) {
   const pool = dbPool || globalPool;
-  const data = ProductUomSchema.parse(input);
+  const parsed = ProductUomSchema.parse(input);
 
-  await assertNoCanonicalDuplicateMeaning(data.productId, data.uomId, pool);
+  return UnitOfWork.run(pool, async (client) => {
+    const effective = await ensureProductBaseUomContext(parsed.productId, client, {
+      isDefault: parsed.isDefault ?? false,
+      conversionFactor: parsed.conversionFactor,
+    });
 
-  if (data.isDefault) {
-    await repo.unsetDefaultForProduct(data.productId, dbPool);
-  }
+    const data = {
+      ...parsed,
+      isDefault: effective.isDefault,
+      conversionFactor: effective.conversionFactor,
+    };
 
-  // Safeguard: clear redundant overrides (formula handles the conversion)
-  let costOverride = data.costOverride ?? null;
-  let priceOverride = data.priceOverride ?? null;
-  ({ costOverride, priceOverride } = await clearRedundantOverrides(
-    pool, data.productId, data.conversionFactor, costOverride, priceOverride
-  ));
+    await assertNoCanonicalDuplicateMeaning(data.productId, data.uomId, client);
 
-  const result = await repo.createProductUom(
-    {
-      productId: data.productId,
-      uomId: data.uomId,
-      conversionFactor: data.conversionFactor,
-      barcode: data.barcode ?? null,
-      isDefault: data.isDefault ?? false,
-      priceOverride,
-      costOverride,
-    },
-    dbPool
-  );
-
-  await syncCanonicalConversion(
-    data.productId,
-    data.uomId,
-    data.conversionFactor,
-    data.isDefault ?? false,
-    pool,
-  );
-
-  // Log price override if set
-  if (data.priceOverride !== null && data.priceOverride !== undefined && auditContext) {
-    try {
-      // Get product and UOM details for logging
-      const productUoms = await repo.listProductUoms(data.productId, dbPool);
-      const uom = productUoms.find((pu) => pu.uomId === data.uomId);
-
-      // Get product details
-      const productResult = await pool.query(
-        'SELECT p.name, pv.selling_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
-        [data.productId]
-      );
-      const product = productResult.rows[0];
-
-      if (uom && product) {
-        // Calculate selling price based on conversion factor and product base price
-        const basePrice = parseFloat(product.selling_price || '0');
-        const conversionFactor = parseFloat(uom.conversionFactor || '1');
-        const calculatedPrice = new Decimal(basePrice).times(conversionFactor).toNumber();
-
-        await auditService.logUomPriceOverride(
-          pool,
-          data.productId,
-          data.uomId,
-          {
-            productName: product.name || 'Unknown Product',
-            uomName: uom.uomName || 'Unknown UOM',
-            calculatedPrice: calculatedPrice,
-            overridePrice: data.priceOverride,
-            reason: 'UOM price override added',
-          },
-          auditContext
-        );
-      }
-    } catch (auditError) {
-      console.error('⚠️ Audit logging failed for UOM price override (non-fatal):', auditError);
+    if (data.isDefault) {
+      await repo.unsetDefaultForProduct(data.productId, client);
     }
-  }
 
-  return result;
+    let costOverride = data.costOverride ?? null;
+    let priceOverride = data.priceOverride ?? null;
+    ({ costOverride, priceOverride } = await clearRedundantOverrides(
+      pool, data.productId, data.conversionFactor, costOverride, priceOverride
+    ));
+
+    const result = await repo.createProductUom(
+      {
+        productId: data.productId,
+        uomId: data.uomId,
+        conversionFactor: data.conversionFactor,
+        barcode: data.barcode ?? null,
+        isDefault: data.isDefault,
+        priceOverride,
+        costOverride,
+      },
+      client,
+    );
+
+    await syncCanonicalConversion(
+      data.productId,
+      data.uomId,
+      data.conversionFactor,
+      data.isDefault,
+      client,
+    );
+
+    if (data.priceOverride !== null && data.priceOverride !== undefined && auditContext) {
+      try {
+        const productUoms = await repo.listProductUoms(data.productId, client as unknown as pg.Pool);
+        const uom = productUoms.find((pu) => pu.uomId === data.uomId);
+
+        const productResult = await client.query(
+          'SELECT p.name, pv.selling_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
+          [data.productId],
+        );
+        const product = productResult.rows[0];
+
+        if (uom && product) {
+          const basePrice = parseFloat(product.selling_price || '0');
+          const conversionFactor = parseFloat(uom.conversionFactor || '1');
+          const calculatedPrice = new Decimal(basePrice).times(conversionFactor).toNumber();
+
+          await auditService.logUomPriceOverride(
+            pool,
+            data.productId,
+            data.uomId,
+            {
+              productName: product.name || 'Unknown Product',
+              uomName: uom.uomName || 'Unknown UOM',
+              calculatedPrice,
+              overridePrice: data.priceOverride,
+              reason: 'UOM price override added',
+            },
+            auditContext,
+          );
+        }
+      } catch (auditError) {
+        console.error('⚠️ Audit logging failed for UOM price override (non-fatal):', auditError);
+      }
+    }
+
+    return result;
+  });
 }
 
 export async function updateProductUom(
@@ -356,6 +400,8 @@ export async function updateProductUom(
   if (!existing) {
     return null;
   }
+
+  await ensureProductBaseUomContext(existing.productId, pool);
 
   // Determine effective uomId: use the incoming one if supplied, else keep existing
   const effectiveUomId = parsed.uomId ?? existing.uomId;
