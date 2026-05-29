@@ -166,7 +166,7 @@ try {
       p.amount - COALESCE(g.ap_debit, 0) AS amount_minus_gl,
       p.allocated - COALESCE(g.ap_debit, 0) AS allocated_minus_gl
     FROM pay p
-    LEFT JOIN gl g ON g.payment_id = p."Id"::text
+    LEFT JOIN gl g ON g.payment_id::uuid = p."Id"
     WHERE ABS(p.amount - COALESCE(g.ap_debit, 0)) > 0.01
        OR ABS(p.allocated - COALESCE(g.ap_debit, 0)) > 0.01
        OR p.unallocated > 0.01
