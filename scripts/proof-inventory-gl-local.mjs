@@ -228,6 +228,42 @@ async function main() {
   const token = await login();
   ok('Login');
 
+  if (HEAL_ONLY) {
+    const bsBefore = await apiGet('/api/accounting/balance-sheet', token);
+    const invBefore = bsBefore.json.data?.integrity?.checks?.find(
+      (c) => c.id === 'inventory_reconciliation',
+    );
+    info(
+      `Before heal: GL=${Number(invBefore?.glBalance ?? 0).toLocaleString()} `
+        + `sub=${Number(invBefore?.subledgerBalance ?? 0).toLocaleString()} `
+        + `drift=${Number(invBefore?.difference ?? 0).toLocaleString()}`,
+    );
+
+    console.log('\nHealing: POST /api/system/gl/heal-inventory-drift ...');
+    const healRes = await fetch(`${BASE}/api/system/gl/heal-inventory-drift`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const healJson = await healRes.json();
+    if (!healRes.ok) {
+      bad('heal-inventory-drift', healJson.error || String(healRes.status));
+      process.exit(1);
+    }
+    ok('heal-inventory-drift', healJson.message || healJson.data?.action || '');
+
+    const bs2 = await apiGet('/api/accounting/balance-sheet', token);
+    const inv2 = bs2.json.data?.integrity?.checks?.find((c) => c.id === 'inventory_reconciliation');
+    if (inv2?.status === 'PASS') {
+      ok('Inventory reconciled after heal', `drift=${Number(inv2?.difference ?? 0).toLocaleString()}`);
+      process.exit(0);
+    }
+    bad('Drift remains after heal', inv2?.message || `drift=${inv2?.difference}`);
+    process.exit(1);
+  }
+
   // 1. Balance sheet integrity (financialIntegrityService — net-active GL vs batches)
   const bs = await apiGet('/api/accounting/balance-sheet', token);
   assert(bs.res.ok, 'GET balance-sheet');
@@ -347,24 +383,6 @@ async function main() {
   lines.push('- **GL** = net-active POSTED entries on account 1300 (excludes reversed pairs).');
   lines.push('- **Positive drift** = GL inventory asset **overstated** vs physical batch valuation.');
   lines.push('- **Permanent heal:** `POST /api/system/gl/heal-inventory-drift` (idempotent per business date).\n');
-
-  if (HEAL_ONLY) {
-    console.log('\nHealing: POST /api/system/gl/heal-inventory-drift ...');
-    const healRes = await fetch(`${BASE}/api/system/gl/heal-inventory-drift`, {
-      method: 'POST',
-      headers,
-    });
-    const healJson = await healRes.json();
-    if (healRes.ok) {
-      ok('heal-inventory-drift', healJson.message || '');
-      const bs2 = await apiGet('/api/accounting/balance-sheet', token);
-      const inv2 = bs2.json.data?.integrity?.checks?.find((c) => c.id === 'inventory_reconciliation');
-      if (inv2?.status === 'PASS') ok('Inventory reconciled after heal');
-      else bad('Drift remains after heal', inv2?.message);
-    } else {
-      bad('heal-inventory-drift', healJson.error || String(healRes.status));
-    }
-  }
 
   const summary = `\n---\n**Result:** ${pass} passed, ${fail} failed → ${fail === 0 ? 'PROOF OK' : 'PROOF INCOMPLETE'}\n`;
   lines.push(summary);
