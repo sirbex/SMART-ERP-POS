@@ -148,6 +148,27 @@ router.post('/rebuild-product-daily-summary', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// POST /api/system/gl/heal-inventory-drift
+// Align GL 1300 with inventory_batches subledger (idempotent per business date).
+// ============================================================================
+router.post('/heal-inventory-drift', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    logger.info('Inventory GL drift heal triggered', {
+        userId: req.user?.id,
+        role: req.user?.role,
+    });
+    const result = await glRepairService.healInventoryGlDrift(pool, req.user?.id);
+    res.json({
+        success: true,
+        data: result,
+        message:
+            result.action === 'no-op'
+                ? `Inventory GL within tolerance (drift ${result.drift.toFixed(2)})`
+                : `Posted ${result.action} correction ${result.transactionNumber} for drift ${result.drift.toFixed(2)}`,
+    });
+}));
+
+// ============================================================================
 // POST /api/system/gl/heal-ap-drift
 // Post a CORRECTION journal entry that brings GL 2100 into alignment with
 // the supplier subledger. Idempotent per UTC date (one heal per day).

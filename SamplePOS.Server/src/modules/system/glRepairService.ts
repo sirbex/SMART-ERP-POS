@@ -626,15 +626,16 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
     const invResult = await pool.query(`
     SELECT
       COALESCE(
-        (SELECT SUM(
-           CASE
-             WHEN le."EntryType" IS NOT NULL AND le."Amount" IS NOT NULL
-             THEN CASE WHEN le."EntryType"='DEBIT' THEN le."Amount" ELSE -le."Amount" END
-             ELSE COALESCE(le."DebitAmount",0) - COALESCE(le."CreditAmount",0)
-           END)
+        (SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
          FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
          JOIN accounts a ON a."Id" = le."AccountId"
-         WHERE a."AccountCode" = '1300'), 0
+         WHERE a."AccountCode" = '1300'
+           AND lt."Status" = 'POSTED' AND lt."IsReversed" = FALSE
+           AND lt."Id" NOT IN (
+             SELECT "ReversedByTransactionId" FROM ledger_transactions
+             WHERE "ReversedByTransactionId" IS NOT NULL
+           )), 0
       ) AS gl_balance,
       COALESCE(
         (SELECT SUM(remaining_quantity * cost_price)
@@ -834,6 +835,7 @@ export const glRepairService = {
     rebuildInventoryBalances,
     rebuildProductDailySummary,
     healAPDrift,
+    healInventoryGlDrift,
 };
 
 // ============================================================================
@@ -1339,6 +1341,171 @@ export async function healAPDrift(
         drift,
         subledgerBalance: subBalance,
         glBalance,
+        action,
+        transactionNumber: tx.transactionNumber,
+        transactionId: tx.transactionId,
+        durationMs: Date.now() - startedAt,
+    };
+}
+
+// ============================================================================
+// HEAL: Inventory GL 1300 ↔ inventory_batches subledger
+// ----------------------------------------------------------------------------
+// Brings net-active GL 1300 in line with SUM(batch remaining × cost_price).
+// Drift > 0 (GL overstated): DR 5110 shrinkage / CR 1300.
+// Drift < 0 (GL understated): DR 1300 / CR 4110 stock overage.
+// Idempotent per business date (one correction per day).
+// ============================================================================
+
+export interface HealInventoryGlDriftResult {
+    drift: number;
+    glBalance: number;
+    subledgerBalance: number;
+    materialityThreshold: number;
+    action: 'no-op' | 'credit-inventory' | 'debit-inventory';
+    transactionNumber?: string;
+    transactionId?: string;
+    durationMs: number;
+}
+
+export async function healInventoryGlDrift(
+    dbPool?: pg.Pool,
+    userId?: string,
+): Promise<HealInventoryGlDriftResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+
+    const balRes = await pool.query(`
+      SELECT
+        COALESCE(
+          (SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
+           FROM ledger_entries le
+           JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+           JOIN accounts a ON a."Id" = le."AccountId"
+           WHERE a."AccountCode" = '1300'
+             AND lt."Status" = 'POSTED' AND lt."IsReversed" = FALSE
+             AND lt."Id" NOT IN (
+               SELECT "ReversedByTransactionId" FROM ledger_transactions
+               WHERE "ReversedByTransactionId" IS NOT NULL
+             )), 0
+        ) AS gl_balance,
+        COALESCE(
+          (SELECT SUM(remaining_quantity * cost_price)
+           FROM inventory_batches WHERE remaining_quantity > 0), 0
+        ) AS sub_balance
+    `);
+    const glBalance = Money.toNumber(Money.parseDb(balRes.rows[0].gl_balance));
+    const subBalance = Money.toNumber(Money.parseDb(balRes.rows[0].sub_balance));
+    const drift = Money.toNumber(Money.subtract(Money.parseDb(glBalance), Money.parseDb(subBalance)));
+    const materialityThreshold = Math.max(5000, Math.abs(glBalance) * 0.0001);
+
+    if (Math.abs(drift) <= materialityThreshold) {
+        return {
+            drift,
+            glBalance,
+            subledgerBalance: subBalance,
+            materialityThreshold,
+            action: 'no-op',
+            durationMs: Date.now() - startedAt,
+        };
+    }
+
+    const shrinkageCode = '5110';
+    const overageCode = '4110';
+    const accRes = await pool.query(
+        `SELECT "AccountCode" FROM accounts WHERE "AccountCode" = ANY($1::text[])`,
+        [[shrinkageCode, overageCode, '1300']],
+    );
+    const found = new Set(accRes.rows.map((r: { AccountCode: string }) => r.AccountCode));
+    if (!found.has('1300')) {
+        throw new Error('Account 1300 (Inventory) not found');
+    }
+    let expenseCode = shrinkageCode;
+    if (!found.has(shrinkageCode)) {
+        const fallback = await pool.query(
+            `SELECT "AccountCode" FROM accounts WHERE "AccountType" = 'EXPENSE' ORDER BY "AccountCode" LIMIT 1`,
+        );
+        if ((fallback.rowCount ?? 0) === 0) {
+            throw new Error('No expense account for inventory drift correction');
+        }
+        expenseCode = fallback.rows[0].AccountCode;
+    }
+    let overageAccount = overageCode;
+    if (!found.has(overageCode)) {
+        const rev = await pool.query(
+            `SELECT "AccountCode" FROM accounts WHERE "AccountType" = 'REVENUE' ORDER BY "AccountCode" LIMIT 1`,
+        );
+        overageAccount = rev.rows[0]?.AccountCode ?? expenseCode;
+    }
+
+    const absDrift = Math.abs(drift);
+    const today = getBusinessDate();
+    const idempotencyKey = `INV-GL-DRIFT-HEAL-${today}`;
+    const action: HealInventoryGlDriftResult['action'] =
+        drift > 0 ? 'credit-inventory' : 'debit-inventory';
+
+    const description =
+        `Inventory subledger alignment: GL 1300 (${glBalance.toFixed(2)}) `
+        + `vs batches (${subBalance.toFixed(2)}); drift=${drift.toFixed(2)}`;
+
+    const lines =
+        drift > 0
+            ? [
+                  {
+                      accountCode: expenseCode,
+                      debitAmount: absDrift,
+                      creditAmount: 0,
+                      description: 'Inventory shrinkage — GL 1300 overstated vs FEFO batches',
+                  },
+                  {
+                      accountCode: '1300',
+                      debitAmount: 0,
+                      creditAmount: absDrift,
+                      description: 'Inventory subledger alignment (credit overstated GL)',
+                  },
+              ]
+            : [
+                  {
+                      accountCode: '1300',
+                      debitAmount: absDrift,
+                      creditAmount: 0,
+                      description: 'Inventory subledger alignment (debit understated GL)',
+                  },
+                  {
+                      accountCode: overageAccount,
+                      debitAmount: 0,
+                      creditAmount: absDrift,
+                      description: 'Stock overage — GL 1300 understated vs FEFO batches',
+                  },
+              ];
+
+    const tx = await AccountingCore.createJournalEntry(
+        {
+            entryDate: today,
+            description,
+            referenceType: 'CORRECTION',
+            referenceId: '00000000-0000-0000-0000-000000000000',
+            referenceNumber: idempotencyKey,
+            idempotencyKey,
+            userId: userId ?? '00000000-0000-0000-0000-000000000001',
+            lines,
+            source: 'SYSTEM_CORRECTION',
+        },
+        pool,
+    );
+
+    logger.info('Inventory GL drift heal posted', {
+        drift,
+        glBalance,
+        subBalance,
+        transactionNumber: tx.transactionNumber,
+    });
+
+    return {
+        drift,
+        glBalance,
+        subledgerBalance: subBalance,
+        materialityThreshold,
         action,
         transactionNumber: tx.transactionNumber,
         transactionId: tx.transactionId,

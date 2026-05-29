@@ -13,3 +13,9 @@ export const LEDGER_NET_ACTIVE_SQL = `
     WHERE "ReversedByTransactionId" IS NOT NULL
   )
 `;
+
+/** Fiscal year from transaction date (UTC) — must match glPeriodRebuildService / rebuildPeriodBalances. */
+export const LEDGER_FISCAL_YEAR_SQL = `EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT`;
+
+/** Fiscal month 1–12 from transaction date (UTC). */
+export const LEDGER_FISCAL_PERIOD_SQL = `EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT`;

@@ -72,8 +72,16 @@ import {
     type PostingSource,
     type GovernanceJournalLine,
 } from './postingGovernanceService.js';
-import { scheduleGlRebuildJobs } from './glPeriodRebuildService.js';
+import {
+    rebuildSingleAccountPeriodOnClient,
+    scheduleGlRebuildJobs,
+} from './glPeriodRebuildService.js';
 import { writeProjectionEvent, scheduleImmediateRebuild } from './periodBalanceWorker.js';
+import {
+    LEDGER_FISCAL_PERIOD_SQL,
+    LEDGER_FISCAL_YEAR_SQL,
+    LEDGER_NET_ACTIVE_SQL,
+} from '../utils/ledgerNetActive.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -412,6 +420,7 @@ export class AccountingCore {
         // Phase 3b: collect (accountId, year, period) for post-commit rebuild.
         // Populated only when LEGACY_GL_PERIOD_WRITES !== 'true' AND no txClient.
         const pendingRebuildJobs: Array<{ accountId: string; fiscalYear: number; fiscalPeriod: number }> = [];
+        const txClientRebuildKeys = new Set<string>();
 
         // If caller provided a transactional client, execute directly (atomic with caller).
         // Otherwise, start our own UnitOfWork transaction (backward compatible).
@@ -428,6 +437,7 @@ export class AccountingCore {
                 source: governanceSource,
                 lines: request.lines as GovernanceJournalLine[],
                 accounts: governanceAccounts,
+                idempotencyKey: request.idempotencyKey,
             });
 
             // 3b. Check idempotency by key - return existing if already processed
@@ -626,31 +636,8 @@ export class AccountingCore {
                         throw new PeriodLockedError(request.entryDate, 'LOCKED');
                     }
                 } else if (txClient) {
-                    // txClient path: absolute recompute from ledger_entries inside the caller's
-                    // transaction (read-your-own-writes — sees uncommitted entries from same txClient).
-                    // NEVER incremental — recomputes the full period total from source of truth.
-                    await client.query(
-                        `INSERT INTO gl_period_balances
-                             (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
-                         SELECT
-                             $1, $2, $3,
-                             COALESCE(SUM(le."DebitAmount"),  0),
-                             COALESCE(SUM(le."CreditAmount"), 0),
-                             COALESCE(SUM(le."DebitAmount"),  0) - COALESCE(SUM(le."CreditAmount"), 0),
-                             NOW()
-                         FROM ledger_entries le
-                         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-                         WHERE le."AccountId" = $1
-                           AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = $2
-                           AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = $3
-                           AND lt."Status" = 'POSTED'
-                         ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
-                             debit_total     = EXCLUDED.debit_total,
-                             credit_total    = EXCLUDED.credit_total,
-                             running_balance = EXCLUDED.running_balance,
-                             last_updated    = NOW()`,
-                        [account.Id, entryYear, entryMonth]
-                    );
+                    // Deferred: recompute from net-active ledger after all lines are written.
+                    txClientRebuildKeys.add(`${account.Id}|${entryYear}|${entryMonth}`);
                 } else {
                     // Phase 3b path: write durable outbox event INSIDE this transaction
                     // (outbox pattern — commits atomically with the ledger entry).
@@ -692,9 +679,9 @@ export class AccountingCore {
                                AND gpb.fiscal_year  = $2
                                AND gpb.fiscal_period = $3
                              WHERE le."AccountId" = $1
-                               AND EXTRACT(YEAR  FROM lt."TransactionDate")::int = $2
-                               AND EXTRACT(MONTH FROM lt."TransactionDate")::int = $3
-                               AND lt."Status" = 'POSTED'`,
+                               AND ${LEDGER_FISCAL_YEAR_SQL} = $2
+                               AND ${LEDGER_FISCAL_PERIOD_SQL} = $3
+                               AND ${LEDGER_NET_ACTIVE_SQL}`,
                             [account.Id, entryYear, entryMonth]
                         );
                         const vRow = vr.rows[0];
@@ -748,6 +735,19 @@ export class AccountingCore {
                     }),
                 ]
             );
+
+            // txClient path: recompute gl_period_balances from net-active ledger (same as async rebuild).
+            if (txClient && txClientRebuildKeys.size > 0) {
+                for (const key of txClientRebuildKeys) {
+                    const [accountId, yearStr, periodStr] = key.split('|');
+                    await rebuildSingleAccountPeriodOnClient(
+                        client,
+                        accountId,
+                        parseInt(yearStr, 10),
+                        parseInt(periodStr, 10),
+                    );
+                }
+            }
 
             logger.info('Journal entry created', {
                 transactionId,
@@ -826,6 +826,7 @@ export class AccountingCore {
 
         // Phase 3b: collect (accountId, year, period) for post-commit rebuild.
         const pendingReversalRebuildJobs: Array<{ accountId: string; fiscalYear: number; fiscalPeriod: number }> = [];
+        const txReversalRebuildKeys = new Set<string>();
 
         const doReversal = async (client: pg.PoolClient) => {
             // 1. Check idempotency
@@ -856,6 +857,12 @@ export class AccountingCore {
             }
 
             const original = originalResult.rows[0];
+            const origDateStr =
+                original.TransactionDate instanceof Date
+                    ? original.TransactionDate.toISOString()
+                    : String(original.TransactionDate);
+            const origYear = parseInt(origDateStr.substring(0, 4), 10);
+            const origMonth = parseInt(origDateStr.substring(5, 7), 10);
 
             if (original.Status === 'REVERSED') {
                 throw new AccountingError('Transaction already reversed', 'ALREADY_REVERSED');
@@ -1010,33 +1017,12 @@ export class AccountingCore {
                         throw new PeriodLockedError(request.reversalDate, 'LOCKED');
                     }
                 } else if (txClient) {
-                    // txClient path: absolute recompute from ledger_entries inside the caller's
-                    // transaction (read-your-own-writes — sees uncommitted reversal entries).
-                    await client.query(
-                        `INSERT INTO gl_period_balances
-                             (account_id, fiscal_year, fiscal_period, debit_total, credit_total, running_balance, last_updated)
-                         SELECT
-                             $1, $2, $3,
-                             COALESCE(SUM(le."DebitAmount"),  0),
-                             COALESCE(SUM(le."CreditAmount"), 0),
-                             COALESCE(SUM(le."DebitAmount"),  0) - COALESCE(SUM(le."CreditAmount"), 0),
-                             NOW()
-                         FROM ledger_entries le
-                         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-                         WHERE le."AccountId" = $1
-                           AND EXTRACT(YEAR  FROM lt."TransactionDate")::INT = $2
-                           AND EXTRACT(MONTH FROM lt."TransactionDate")::INT = $3
-                           AND lt."Status" = 'POSTED'
-                         ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
-                             debit_total     = EXCLUDED.debit_total,
-                             credit_total    = EXCLUDED.credit_total,
-                             running_balance = EXCLUDED.running_balance,
-                             last_updated    = NOW()`,
-                        [account.Id, revYear, revMonth]
-                    );
+                    txReversalRebuildKeys.add(`${account.Id}|${revYear}|${revMonth}`);
+                    txReversalRebuildKeys.add(`${account.Id}|${origYear}|${origMonth}`);
                 } else {
                     // Phase 3b path: collect for post-commit rebuild.
                     pendingReversalRebuildJobs.push({ accountId: account.Id, fiscalYear: revYear, fiscalPeriod: revMonth });
+                    pendingReversalRebuildJobs.push({ accountId: account.Id, fiscalYear: origYear, fiscalPeriod: origMonth });
                 }
 
                 // PHASE 3a SHADOW VERIFY (reverseTransaction mirror)
@@ -1058,9 +1044,9 @@ export class AccountingCore {
                                AND gpb.fiscal_year  = $2
                                AND gpb.fiscal_period = $3
                              WHERE le."AccountId" = $1
-                               AND EXTRACT(YEAR  FROM lt."TransactionDate")::int = $2
-                               AND EXTRACT(MONTH FROM lt."TransactionDate")::int = $3
-                               AND lt."Status" = 'POSTED'`,
+                               AND ${LEDGER_FISCAL_YEAR_SQL} = $2
+                               AND ${LEDGER_FISCAL_PERIOD_SQL} = $3
+                               AND ${LEDGER_NET_ACTIVE_SQL}`,
                             [account.Id, revYear, revMonth]
                         );
                         const vRow = vr.rows[0];
@@ -1106,6 +1092,19 @@ export class AccountingCore {
       `,
                 [request.originalTransactionId, transactionId]
             );
+
+            // Rebuild period balances after original is REVERSED (net-active excludes both legs).
+            if (txClient && txReversalRebuildKeys.size > 0) {
+                for (const key of txReversalRebuildKeys) {
+                    const [accountId, yearStr, periodStr] = key.split('|');
+                    await rebuildSingleAccountPeriodOnClient(
+                        client,
+                        accountId,
+                        parseInt(yearStr, 10),
+                        parseInt(periodStr, 10),
+                    );
+                }
+            }
 
             // 10. Audit log
             await client.query(

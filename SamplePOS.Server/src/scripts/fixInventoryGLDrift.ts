@@ -40,8 +40,8 @@
 
 import { randomUUID } from 'crypto';
 import pg from 'pg';
-import * as AccountingCore from '../services/accountingCore.js';
 import { runInventoryGLIntegrityCheck } from '../services/inventoryGLIntegrityCheckService.js';
+import { healInventoryGlDrift } from '../modules/system/glRepairService.js';
 import logger from '../utils/logger.js';
 import { getBusinessDate } from '../utils/dateRange.js';
 
@@ -108,38 +108,14 @@ async function main(): Promise<void> {
             return;
         }
 
-        // Step 3: post the correction
-        const result = await AccountingCore.createJournalEntry(
-            {
-                entryDate: asOfDate,
-                description,
-                referenceType: 'ADJUSTMENT',
-                referenceId,
-                referenceNumber,
-                idempotencyKey,
-                source: 'SYSTEM_CORRECTION' as const,
-                userId: ADMIN_USER_ID,
-                lines: [
-                    {
-                        accountCode: debitAccount,
-                        description: `Drift correction DR ${debitAccount}`,
-                        debitAmount: absDrift,
-                        creditAmount: 0,
-                    },
-                    {
-                        accountCode: creditAccount,
-                        description: `Drift correction CR ${creditAccount}`,
-                        debitAmount: 0,
-                        creditAmount: absDrift,
-                    },
-                ],
-            },
-            pool,
-        );
+        // Step 3: post via canonical heal (same as POST /api/system/gl/heal-inventory-drift)
+        const healResult = await healInventoryGlDrift(pool, ADMIN_USER_ID);
+        if (healResult.action === 'no-op') {
+            console.warn('Heal reported no-op after drift check — nothing posted.');
+            return;
+        }
+        console.warn(`✅ Posted correction: transaction ${healResult.transactionNumber}`);
 
-        console.warn(`✅ Posted correction: transaction ${result.transactionNumber}`);
-
-        // Step 4: verify
         const verify = await runInventoryGLIntegrityCheck(pool);
         console.warn('');
         console.warn('Post-correction state:');

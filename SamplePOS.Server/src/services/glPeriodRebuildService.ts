@@ -17,9 +17,14 @@
  */
 
 import type pg from 'pg';
+import type { PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
-import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
+import {
+  LEDGER_FISCAL_PERIOD_SQL,
+  LEDGER_FISCAL_YEAR_SQL,
+  LEDGER_NET_ACTIVE_SQL,
+} from '../utils/ledgerNetActive.js';
 
 // ============================================================================
 // SINGLE-ACCOUNT-PERIOD REBUILD
@@ -63,8 +68,8 @@ export async function rebuildSingleAccountPeriod(
          FROM ledger_entries le
          JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
          WHERE le."AccountId" = $1
-           AND EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = $2
-           AND EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT = $3
+           AND ${LEDGER_FISCAL_YEAR_SQL} = $2
+           AND ${LEDGER_FISCAL_PERIOD_SQL} = $3
            AND ${LEDGER_NET_ACTIVE_SQL}`,
         [accountId, fiscalYear, fiscalPeriod],
     );
@@ -83,6 +88,64 @@ export async function rebuildSingleAccountPeriod(
     } else {
         // UPSERT with ABSOLUTE values — replaces incremental approach
         await pool.query(
+            `INSERT INTO gl_period_balances
+                 (account_id, fiscal_year, fiscal_period,
+                  debit_total, credit_total, running_balance, last_updated)
+             VALUES ($1, $2, $3, $4, $5, $4::numeric - $5::numeric, NOW())
+             ON CONFLICT (account_id, fiscal_year, fiscal_period) DO UPDATE SET
+                 debit_total     = EXCLUDED.debit_total,
+                 credit_total    = EXCLUDED.credit_total,
+                 running_balance = EXCLUDED.running_balance,
+                 last_updated    = NOW()`,
+            [accountId, fiscalYear, fiscalPeriod, d.toFixed(2), c.toFixed(2)],
+        );
+    }
+}
+
+/**
+ * Same as rebuildSingleAccountPeriod but runs on a caller's PoolClient (SAP LUW).
+ * Call after reversal marks the original REVERSED so net-active totals are correct.
+ */
+export async function rebuildSingleAccountPeriodOnClient(
+    client: PoolClient,
+    accountId: string,
+    fiscalYear: number,
+    fiscalPeriod: number,
+): Promise<void> {
+    const lockCheck = await client.query(
+        `SELECT 1 FROM financial_periods
+         WHERE period_year = $1 AND period_month = $2
+           AND "Status" IN ('CLOSED', 'LOCKED')
+         LIMIT 1`,
+        [fiscalYear, fiscalPeriod],
+    );
+    if ((lockCheck.rowCount ?? 0) > 0) return;
+
+    const sums = await client.query<{ debits: string; credits: string }>(
+        `SELECT
+           COALESCE(SUM(le."DebitAmount"),  0) AS debits,
+           COALESCE(SUM(le."CreditAmount"), 0) AS credits
+         FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+         WHERE le."AccountId" = $1
+           AND ${LEDGER_FISCAL_YEAR_SQL} = $2
+           AND ${LEDGER_FISCAL_PERIOD_SQL} = $3
+           AND ${LEDGER_NET_ACTIVE_SQL}`,
+        [accountId, fiscalYear, fiscalPeriod],
+    );
+
+    const row = sums.rows[0];
+    const d = new Decimal(row?.debits ?? '0');
+    const c = new Decimal(row?.credits ?? '0');
+
+    if (d.isZero() && c.isZero()) {
+        await client.query(
+            `DELETE FROM gl_period_balances
+             WHERE account_id = $1 AND fiscal_year = $2 AND fiscal_period = $3`,
+            [accountId, fiscalYear, fiscalPeriod],
+        );
+    } else {
+        await client.query(
             `INSERT INTO gl_period_balances
                  (account_id, fiscal_year, fiscal_period,
                   debit_total, credit_total, running_balance, last_updated)
@@ -153,8 +216,8 @@ export function scheduleGlRebuildForTransaction(pool: pg.Pool, transactionId: st
             .query<{ AccountId: string; year: number; period: number }>(
                 `SELECT DISTINCT
                    le."AccountId",
-                   EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT AS year,
-                   EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT AS period
+                   ${LEDGER_FISCAL_YEAR_SQL} AS year,
+                   ${LEDGER_FISCAL_PERIOD_SQL} AS period
                  FROM ledger_entries le
                  JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
                  WHERE le."TransactionId" = $1`,

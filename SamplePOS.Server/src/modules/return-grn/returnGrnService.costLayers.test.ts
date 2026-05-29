@@ -135,6 +135,12 @@ describe('returnGrnService.post cost_layers sync', () => {
       if (s.includes('FROM goods_receipts g')) {
         return { rows: [{ supplier_id: 'sup-1', supplier_name: 'Supplier A', gr_number: 'GR-2026-0001' }] };
       }
+      if (s.includes('"AccountCode" = \'1300\'')) {
+        return { rows: [{ balance: '1000' }] };
+      }
+      if (s.includes('inventory_batches') && s.includes('remaining_quantity * cost_price')) {
+        return { rows: [{ total: '1000' }] };
+      }
       return { rows: [] };
     });
   });
@@ -171,6 +177,12 @@ describe('returnGrnService.post cost_layers sync', () => {
       }
       if (s.includes('FROM goods_receipts g')) {
         return { rows: [{ supplier_id: 'sup-1', supplier_name: 'Supplier A', gr_number: 'GR-2026-0001' }] };
+      }
+      if (s.includes('"AccountCode" = \'1300\'')) {
+        return { rows: [{ balance: '1000' }] };
+      }
+      if (s.includes('inventory_batches') && s.includes('remaining_quantity * cost_price')) {
+        return { rows: [{ total: '1000' }] };
       }
       return { rows: [] };
     });

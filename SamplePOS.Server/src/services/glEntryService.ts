@@ -130,6 +130,11 @@ export interface SaleData {
   customerName?: string;
   // NEW: Line items for proper revenue/cost classification
   saleItems?: SaleItemData[];
+  /**
+   * When set, COGS/Inventory journals use this total (sum of actual FEFO batch deductions)
+   * instead of item-level preview costs. Prevents GL 1300 vs inventory_batches drift.
+   */
+  actualInventoryCost?: number;
 }
 
 export interface SaleItemData {
@@ -268,7 +273,10 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
     // Convert Decimal values to numbers at the boundary for JournalLine interface
     const invRevenueNum = inventoryRevenue.toNumber();
     const svcRevenueNum = serviceRevenue.toNumber();
-    let invCostNum = inventoryCost.toNumber();
+    let invCostNum =
+      sale.actualInventoryCost !== undefined && sale.actualInventoryCost >= 0
+        ? sale.actualInventoryCost
+        : inventoryCost.toNumber();
     // Fallback: when all sale items had unitCost=0 (e.g. items were loaded without
     // cost data), inventoryCost stays 0 and shouldPostCogs=false would silently skip
     // the COGS/Inventory journal. Use sale.costAmount as a fallback so COGS is always

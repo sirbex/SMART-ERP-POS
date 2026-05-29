@@ -83,6 +83,19 @@ export interface GovernanceJournalRequest {
     source: PostingSource;
     lines: GovernanceJournalLine[];
     accounts: GovernanceAccount[];   // Pre-fetched from DB — one entry per unique account used
+    /** Required when SYSTEM_CORRECTION touches account 1300 (inventory drift heal only). */
+    idempotencyKey?: string;
+}
+
+/** Approved idempotency keys for SYSTEM_CORRECTION journals that credit/debit 1300. */
+export const INVENTORY_DRIFT_HEAL_KEY_PATTERNS: readonly RegExp[] = [
+    /^INV-GL-DRIFT-HEAL-\d{4}-\d{2}-\d{2}$/,
+    /^inventory-gl-drift-fix-\d{4}-\d{2}-\d{2}$/,
+];
+
+export function isApprovedInventoryDriftHealKey(key: string | undefined): boolean {
+    if (!key) return false;
+    return INVENTORY_DRIFT_HEAL_KEY_PATTERNS.some((re) => re.test(key));
 }
 
 // =============================================================================
@@ -134,7 +147,7 @@ export class PostingGovernanceService {
      * Call this BEFORE any database write.
      */
     static validate(request: GovernanceJournalRequest): void {
-        const { source, lines, accounts } = request;
+        const { source, lines, accounts, idempotencyKey } = request;
 
         for (const line of lines) {
             const account = findAccount(accounts, line.accountCode);
@@ -400,6 +413,18 @@ export class PostingGovernanceService {
                             `INVENTORY_MOVE engine instead of bundling it into a business-document journal.`,
                             'GOV_RULE_H_INVENTORY_STRICT',
                             { accountCode: account.accountCode, source }
+                        );
+                    }
+                    if (
+                        source === 'SYSTEM_CORRECTION' &&
+                        !isApprovedInventoryDriftHealKey(idempotencyKey)
+                    ) {
+                        throw new PostingGovernanceError(
+                            `SYSTEM_CORRECTION cannot post to Inventory (1300) except via the ` +
+                            `approved inventory drift heal workflow (idempotency key INV-GL-DRIFT-HEAL-YYYY-MM-DD). ` +
+                            `Received key: '${idempotencyKey ?? '(none)'}'.`,
+                            'GOV_RULE_H_INVENTORY_HEAL_ONLY',
+                            { accountCode: account.accountCode, idempotencyKey },
                         );
                     }
                 }

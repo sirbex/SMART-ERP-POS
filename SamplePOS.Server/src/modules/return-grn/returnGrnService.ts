@@ -33,6 +33,10 @@ import {
 } from '../credit-debit-notes/creditDebitNoteRepository.js';
 import { supplierCreditDebitNoteService } from '../credit-debit-notes/creditDebitNoteService.js';
 import { recordSupplierCreditNoteToGL, AccountCodes } from '../../services/glEntryService.js';
+import {
+    assertInventoryCouplingUnchanged,
+    captureInventoryCoupling,
+} from '../../services/inventorySubledgerCoupling.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
@@ -275,6 +279,8 @@ export const returnGrnService = {
                 })),
             );
 
+            const inventoryCouplingBefore = await captureInventoryCoupling(client);
+
             // 3. Process each line
             // Also accumulate the GL amount from actual batch.cost_price (not line.unitCost).
             // line.unitCost is user-entered on the return document and can be wrong;
@@ -448,6 +454,12 @@ export const returnGrnService = {
                     client,    // atomic: GL commits/rolls back with inventory
                 );
             }
+
+            assertInventoryCouplingUnchanged(
+                inventoryCouplingBefore,
+                await captureInventoryCoupling(client),
+                `return GRN ${posted.returnGrnNumber || rgrnId}`,
+            );
 
             // NOTE: supplier balance is NOT updated here.
             // AP (2100) is untouched by a Return GRN.

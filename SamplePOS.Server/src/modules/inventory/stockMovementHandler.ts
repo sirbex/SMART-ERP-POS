@@ -21,6 +21,10 @@ import * as masterDataGuard from '../../services/masterDataGuard.js';
 import logger from '../../utils/logger.js';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
+import {
+  assertInventoryCouplingUnchanged,
+  captureInventoryCoupling,
+} from '../../services/inventorySubledgerCoupling.js';
 
 export type StockMovementType =
   | 'GOODS_RECEIPT'
@@ -127,6 +131,11 @@ export class StockMovementHandler {
       const isInbound = this.isInboundMovement(params.movementType);
       const quantityChange = isInbound ? params.quantity : -params.quantity;
 
+      const inventoryCouplingBefore =
+        GL_MOVEMENT_TYPES.has(params.movementType)
+          ? await captureInventoryCoupling(client)
+          : null;
+
       // Step 3: Get or select batch
       const batch = await this.resolveBatch(client, params);
 
@@ -231,6 +240,14 @@ export class StockMovementHandler {
             movementValue,
             productName,
           }, undefined, client);  // pass client → atomic with inventory
+        }
+
+        if (inventoryCouplingBefore) {
+          assertInventoryCouplingUnchanged(
+            inventoryCouplingBefore,
+            await captureInventoryCoupling(client),
+            `stock movement ${movementResult.rows[0].movement_number}`,
+          );
         }
       }
 

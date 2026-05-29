@@ -20,7 +20,11 @@ import type pg from 'pg';
 import { pool as globalPool } from '../db/pool.js';
 import { Money, Decimal } from '../utils/money.js';
 import logger from '../utils/logger.js';
-import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
+import {
+  LEDGER_FISCAL_PERIOD_SQL,
+  LEDGER_FISCAL_YEAR_SQL,
+  LEDGER_NET_ACTIVE_SQL,
+} from '../utils/ledgerNetActive.js';
 
 // =============================================================================
 // TYPES
@@ -73,6 +77,7 @@ export class GLIntegrityChecker {
       sequenceGaps,
       negativeBalances,
       periodBalancesRecon,
+      projectionEventsBacklog,
       runningBalanceInvariant,
       productDailySummaryRecon,
       inventoryBalancesRecon,
@@ -92,6 +97,7 @@ export class GLIntegrityChecker {
       this.checkSequenceGaps(pool),
       this.checkNegativeAssetBalances(pool),
       this.checkPeriodBalancesReconciliation(pool),
+      this.checkGlProjectionEventsBacklog(pool),
       this.checkRunningBalanceInvariant(pool),
       this.checkProductDailySummaryReconciliation(pool),
       this.checkInventoryBalancesReconciliation(pool),
@@ -113,6 +119,7 @@ export class GLIntegrityChecker {
       ...sequenceGaps,
       ...negativeBalances,
       ...periodBalancesRecon,
+      ...projectionEventsBacklog,
       ...runningBalanceInvariant,
       ...productDailySummaryRecon,
       ...inventoryBalancesRecon,
@@ -431,12 +438,12 @@ export class GLIntegrityChecker {
     const result = await pool.query(`
       SELECT
         COALESCE(
-          (SELECT SUM("DebitAmount") - SUM("CreditAmount")
+          (SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
            FROM ledger_entries le
            JOIN accounts a ON a."Id" = le."AccountId"
            JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
            WHERE a."AccountCode" = '1300'
-             AND lt."Status" = 'POSTED'), 0
+             AND ${LEDGER_NET_ACTIVE_SQL}), 0
         ) as gl_balance,
         COALESCE(
           (SELECT SUM(remaining_quantity * cost_price)
@@ -672,21 +679,21 @@ export class GLIntegrityChecker {
   ): Promise<IntegrityFinding[]> {
     const findings: IntegrityFinding[] = [];
 
-    // Compare SUM(ledger_entries) per account/year/month vs gl_period_balances
-    // Only compare periods 1-12 (in-period activity, not period-0 carry-forward)
+    // Compare net-active POSTED ledger_entries vs gl_period_balances (same rules as
+    // glPeriodRebuildService.rebuildSingleAccountPeriod and rebuildPeriodBalances).
+    // Only compare periods 1-12 (in-period activity, not period-0 carry-forward).
     const result = await pool.query(`
       WITH ledger_totals AS (
         SELECT
-          le."AccountId"                                                          AS account_id,
-          EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT       AS fiscal_year,
-          EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT       AS fiscal_period,
-          COALESCE(SUM(le."DebitAmount"),  0)                                    AS le_debits,
-          COALESCE(SUM(le."CreditAmount"), 0)                                    AS le_credits
+          le."AccountId"                    AS account_id,
+          ${LEDGER_FISCAL_YEAR_SQL}         AS fiscal_year,
+          ${LEDGER_FISCAL_PERIOD_SQL}       AS fiscal_period,
+          COALESCE(SUM(le."DebitAmount"),  0) AS le_debits,
+          COALESCE(SUM(le."CreditAmount"), 0) AS le_credits
         FROM ledger_entries le
         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-        GROUP BY le."AccountId",
-                 EXTRACT(YEAR  FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT,
-                 EXTRACT(MONTH FROM lt."TransactionDate" AT TIME ZONE 'UTC')::INT
+        WHERE ${LEDGER_NET_ACTIVE_SQL}
+        GROUP BY le."AccountId", ${LEDGER_FISCAL_YEAR_SQL}, ${LEDGER_FISCAL_PERIOD_SQL}
       )
       SELECT
         a."AccountCode"    AS account_code,
@@ -727,6 +734,9 @@ export class GLIntegrityChecker {
         message: `${result.rows.length} account/period(s) have drifted between gl_period_balances and ledger_entries.`,
         details: {
           driftCount: result.rows.length,
+          remediation:
+            'POST /api/system/gl/rebuild-period-balances — recomputes open periods from net-active ledger. '
+            + 'If drift persists, check gl_projection_events for FAILED rows or manual SQL ledger edits.',
           samples: result.rows.slice(0, 10).map(r => ({
             accountCode: r.account_code,
             accountName: r.account_name,
@@ -743,6 +753,64 @@ export class GLIntegrityChecker {
       });
     }
 
+    return findings;
+  }
+
+  // ===========================================================================
+  // CHECK 12b: gl_projection_events backlog (stale gl_period_balances risk)
+  // ===========================================================================
+
+  private static async checkGlProjectionEventsBacklog(
+    pool: pg.Pool
+  ): Promise<IntegrityFinding[]> {
+    const findings: IntegrityFinding[] = [];
+    try {
+      const result = await pool.query<{ pending: string; failed: string }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE status IN ('PENDING', 'PROCESSING'))::TEXT AS pending,
+           COUNT(*) FILTER (WHERE status = 'FAILED')::TEXT AS failed
+         FROM gl_projection_events`,
+      );
+      const pending = parseInt(result.rows[0]?.pending ?? '0', 10);
+      const failed = parseInt(result.rows[0]?.failed ?? '0', 10);
+      if (failed > 0) {
+        findings.push({
+          check: 'gl_projection_events_failed',
+          severity: 'ERROR',
+          message: `${failed} gl_projection_events row(s) in FAILED state — period balances may be stale.`,
+          details: { failed, pending, remediation: 'POST /api/system/gl/process-projection-events then rebuild-period-balances' },
+        });
+      } else if (pending > 50) {
+        findings.push({
+          check: 'gl_projection_events_backlog',
+          severity: 'WARNING',
+          message: `${pending} pending gl_projection_events — period balance worker may be behind.`,
+          details: { pending },
+        });
+      } else {
+        findings.push({
+          check: 'gl_projection_events_backlog',
+          severity: 'INFO',
+          message: 'gl_projection_events queue is healthy.',
+          details: { pending, failed },
+        });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('does not exist')) {
+        findings.push({
+          check: 'gl_projection_events_backlog',
+          severity: 'INFO',
+          message: 'gl_projection_events table not present (pre-migration tenant).',
+        });
+      } else {
+        findings.push({
+          check: 'gl_projection_events_backlog',
+          severity: 'WARNING',
+          message: `Could not read gl_projection_events: ${msg}`,
+        });
+      }
+    }
     return findings;
   }
 

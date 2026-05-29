@@ -195,6 +195,12 @@ describe('returnGrnService return flow', () => {
             if (s.includes('FROM goods_receipts g') && s.includes('supplier')) {
                 return { rows: [{ supplier_id: 'sup-1', supplier_name: 'S', gr_number: 'GR-1' }] };
             }
+            if (s.includes('"AccountCode" = \'1300\'')) {
+                return { rows: [{ balance: '0' }] };
+            }
+            if (s.includes('inventory_batches') && s.includes('remaining_quantity * cost_price')) {
+                return { rows: [{ total: '0' }] };
+            }
             return { rows: [] };
         });
     });

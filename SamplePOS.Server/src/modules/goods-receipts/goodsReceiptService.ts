@@ -30,6 +30,10 @@ import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../../util
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { resolveCanonicalProductUom } from '../products/uomService.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
+import {
+  assertInventoryCouplingUnchanged,
+  captureInventoryCoupling,
+} from '../../services/inventorySubledgerCoupling.js';
 
 // Alert shape consumed by controller for finalize response
 export interface CostPriceChangeAlert {
@@ -515,6 +519,8 @@ export const goodsReceiptService = {
       // Without this guard the trigger creates duplicate SM- movements for each batch INSERT.
       await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
 
+      const inventoryCouplingBefore = await captureInventoryCoupling(client);
+
       for (const item of items) {
         const productId: string = item.productId;
         const productName: string = item.productName;
@@ -901,6 +907,12 @@ export const goodsReceiptService = {
           client,    // atomic: GL commits/rolls back with inventory
         );
       }
+
+      assertInventoryCouplingUnchanged(
+        inventoryCouplingBefore,
+        await captureInventoryCoupling(client),
+        `goods receipt ${grNumber || id}`,
+      );
 
       return { alerts, warnings };
     });

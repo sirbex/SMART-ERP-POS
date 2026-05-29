@@ -73,7 +73,12 @@ export async function runInventoryGLIntegrityCheck(
         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
         JOIN accounts a ON le."AccountId" = a."Id"
         WHERE a."AccountCode" = '1300'
+          AND lt."Status" = 'POSTED'
           AND lt."IsReversed" = FALSE
+          AND lt."Id" NOT IN (
+            SELECT "ReversedByTransactionId" FROM ledger_transactions
+            WHERE "ReversedByTransactionId" IS NOT NULL
+          )
     `);
     const glBalance = Money.toNumber(Money.parseDb(glResult.rows[0].balance));
 

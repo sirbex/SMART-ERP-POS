@@ -52,6 +52,10 @@ import {
 } from './saleIntegrity.js';
 import { computeSaleItemBaseQuantity } from './saleItemBaseQuantity.js';
 import { detectCogsDrift } from '../../utils/cogsDriftGuard.js';
+import {
+  assertInventoryCouplingUnchanged,
+  captureInventoryCoupling,
+} from '../../services/inventorySubledgerCoupling.js';
 import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
 
 export interface SaleItemInput {
@@ -1053,47 +1057,11 @@ export const salesService = {
       // Create sale items
       const items = await salesRepository.addSaleItems(client, itemsWithCosts);
 
-      // GL POSTING: Application-layer double-entry (replaces database trigger)
-      // Post AFTER items exist so revenue/COGS split is accurate.
-      // CRITICAL: pass `client` (the active transaction) so GL journals are
-      // atomic with the sale. Without txClient each journal opens its own
-      // inner transaction, causing phantom GL entries when the outer TX rolls back.
-      try {
-        await glEntryService.recordSaleToGL(
-          {
-            saleId: sale.id,
-            saleNumber: sale.saleNumber,
-            saleDate: sale.saleDate || getBusinessDate(),
-            totalAmount: sale.totalAmount,
-            costAmount: sale.totalCost || 0,
-            paymentMethod: sale.paymentMethod as SaleData['paymentMethod'],
-            amountPaid: sale.amountPaid ?? 0,
-            taxAmount: sale.taxAmount || 0,
-            customerId: sale.customerId || undefined,
-            saleItems: itemsWithCosts.map((item) => ({
-              productType: item.productId?.startsWith('custom_')
-                ? ('service' as const)
-                : ('inventory' as const),
-              totalPrice: item.lineTotal,
-              unitCost: item.costPrice || 0,
-              quantity: item.quantity,
-            })),
-          },
-          pool,
-          client
-        );
-      } catch (glError: unknown) {
-        logger.error('GL posting failed for sale — transaction will rollback', {
-          saleId: sale.id,
-          saleNumber: sale.saleNumber,
-          error: glError instanceof Error ? glError.message : String(glError),
-        });
-        throw glError;
-      }
-
       // Map to accumulate actual FEFO batch deduction costs per productId.
       // Used after all deductions to verify GL COGS matches actual batch costs (drift guard).
       const actualBatchCostMap = new Map<string, Decimal>();
+
+      const inventoryCouplingBefore = await captureInventoryCoupling(client);
 
       // Deduct from cost layers AND inventory batches for each item
       for (const item of input.items) {
@@ -1343,19 +1311,58 @@ export const salesService = {
       // detectCogsDrift() is a pure function (tested in cogsDriftGuard.test.ts)
       // that returns all items whose |GL cost − actual batch cost| > 0.01.
       const cogsDrifts = detectCogsDrift(itemsWithCosts, actualBatchCostMap);
-      for (const d of cogsDrifts) {
-        logger.warn('[COGS DRIFT DETECTED] GL COGS does not match actual FEFO batch deduction', {
+      if (cogsDrifts.length > 0) {
+        const first = cogsDrifts[0];
+        logger.error('[COGS DRIFT] Sale blocked — preview cost ≠ FEFO batch deduction', {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
-          productId: d.productId,
-          productName: d.productName,
-          glCostPosted: d.glCost,
-          actualBatchCost: d.actualBatchCost,
-          drift: d.drift,
-          likelyCause: 'Concurrent sale modified FEFO batches between cost preview and deduction.',
-          action: 'Run /api/accounting/integrity to quantify impact.',
+          drifts: cogsDrifts,
         });
-        warnings.push(d.message);
+        throw new BusinessError(
+          `Inventory cost mismatch for "${first.productName}": cannot complete sale. Retry.`,
+          'ERR_SALE_COGS_DRIFT',
+          { productId: first.productId, drift: first.drift },
+        );
+      }
+
+      let actualInventoryCost = 0;
+      for (const cost of actualBatchCostMap.values()) {
+        actualInventoryCost = Money.toNumber(Money.add(Money.parseDb(actualInventoryCost), cost));
+      }
+
+      // GL POSTING: AFTER physical FEFO deduction so COGS credits 1300 at actual batch cost.
+      try {
+        await glEntryService.recordSaleToGL(
+          {
+            saleId: sale.id,
+            saleNumber: sale.saleNumber,
+            saleDate: sale.saleDate || getBusinessDate(),
+            totalAmount: sale.totalAmount,
+            costAmount: sale.totalCost || 0,
+            actualInventoryCost,
+            paymentMethod: sale.paymentMethod as SaleData['paymentMethod'],
+            amountPaid: sale.amountPaid ?? 0,
+            taxAmount: sale.taxAmount || 0,
+            customerId: sale.customerId || undefined,
+            saleItems: itemsWithCosts.map((item) => ({
+              productType: item.productId?.startsWith('custom_')
+                ? ('service' as const)
+                : ('inventory' as const),
+              totalPrice: item.lineTotal,
+              unitCost: item.costPrice || 0,
+              quantity: item.quantity,
+            })),
+          },
+          pool,
+          client
+        );
+      } catch (glError: unknown) {
+        logger.error('GL posting failed for sale — transaction will rollback', {
+          saleId: sale.id,
+          saleNumber: sale.saleNumber,
+          error: glError instanceof Error ? glError.message : String(glError),
+        });
+        throw glError;
       }
 
       // BR-SAL-002: Update customer balance for CREDIT sales (split payment support)
@@ -1965,6 +1972,12 @@ export const salesService = {
           logger.warn('Document flow link ORDER→SALE failed (non-fatal)', { orderId: input.fromOrderId, saleId: sale.id, error: dfErr });
         }
       }
+
+      assertInventoryCouplingUnchanged(
+        inventoryCouplingBefore,
+        await captureInventoryCoupling(client),
+        `sale ${sale.saleNumber}`,
+      );
 
       await client.query('COMMIT');
 

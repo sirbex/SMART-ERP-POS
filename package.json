@@ -37,6 +37,8 @@
     "proof:at-cost-fifo-split-policy": "node scripts/proof-at-cost-fifo-split-policy.mjs",
     "proof:enterprise-phase-b": "node scripts/proof-enterprise-phase-b.mjs",
     "proof:smart-customer-statement:local": "node scripts/proof-smart-customer-statement-local.mjs",
+    "proof:inventory-gl:local": "node scripts/proof-inventory-gl-local.mjs",
+    "proof:inventory-gl:heal": "node scripts/proof-inventory-gl-local.mjs --heal-only",
     "proof:enterprise-phase-c": "node scripts/proof-enterprise-phase-c.mjs",
     "proof:enterprise-phase-d": "node scripts/proof-enterprise-phase-d.mjs",
     "proof:correction-eligibility:local": "node scripts/proof-correction-eligibility-local.mjs",

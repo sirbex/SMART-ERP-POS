@@ -107,8 +107,9 @@ const revenueAccount = makeAccount({
 const makeRequest = (
     source: PostingSource,
     lines: GovernanceJournalLine[],
-    accounts: GovernanceAccount[]
-): GovernanceJournalRequest => ({ source, lines, accounts });
+    accounts: GovernanceAccount[],
+    idempotencyKey?: string,
+): GovernanceJournalRequest => ({ source, lines, accounts, idempotencyKey });
 
 // =============================================================================
 // TESTS
@@ -530,14 +531,15 @@ describe('PostingGovernanceService', () => {
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
 
-        it('allows SYSTEM_CORRECTION to post to OBE (admin remediation)', () => {
+        it('allows SYSTEM_CORRECTION with heal key to post inventory + OBE', () => {
             const req = makeRequest(
                 'SYSTEM_CORRECTION',
                 [
                     { accountCode: '1300', debitAmount: 100, creditAmount: 0 },
                     { accountCode: '3050', debitAmount: 0, creditAmount: 100 },
                 ],
-                [inventoryAccount, obeAccount]
+                [inventoryAccount, obeAccount],
+                'INV-GL-DRIFT-HEAL-2026-05-28',
             );
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
@@ -630,7 +632,28 @@ describe('PostingGovernanceService', () => {
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
 
-        it('allows SYSTEM_CORRECTION to post to account tagged INVENTORY (drift fix path)', () => {
+        it('allows SYSTEM_CORRECTION with approved heal key to post to INVENTORY', () => {
+            const shrinkageAccount = makeAccount({
+                accountCode: '5110',
+                accountType: 'EXPENSE',
+                normalBalance: 'DEBIT',
+                allowManualPosting: true,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const req = makeRequest(
+                'SYSTEM_CORRECTION',
+                [
+                    { accountCode: '5110', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '1300', debitAmount: 0, creditAmount: 100 },
+                ],
+                [shrinkageAccount, inventoryAccount],
+                'INV-GL-DRIFT-HEAL-2026-05-28',
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('blocks SYSTEM_CORRECTION on INVENTORY without approved heal idempotency key', () => {
             const shrinkageAccount = makeAccount({
                 accountCode: '5110',
                 accountType: 'EXPENSE',
@@ -647,7 +670,12 @@ describe('PostingGovernanceService', () => {
                 ],
                 [shrinkageAccount, inventoryAccount],
             );
-            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+            expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
+            try {
+                PostingGovernanceService.validate(req);
+            } catch (err) {
+                expect((err as PostingGovernanceError).code).toBe('GOV_RULE_H_INVENTORY_HEAL_ONLY');
+            }
         });
 
         it('allows OPENING_BALANCE_WIZARD to post to account tagged INVENTORY', () => {
