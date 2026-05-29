@@ -12,15 +12,32 @@ import pg from 'pg';
 import { healInventoryGlDrift } from '/app/dist/SamplePOS.Server/src/modules/system/glRepairService.js';
 import { runInventoryGLIntegrityCheck } from '/app/dist/SamplePOS.Server/src/services/inventoryGLIntegrityCheckService.js';
 
-const pool = new pg.Pool({
-  connectionString:
-    process.env.DATABASE_URL
-    ?? 'postgresql://postgres:55b9bed51c599b26e7115ab126a974e8@postgres:5432/pos_tenant_henber_pharmacy',
-});
+function henberDatabaseUrl() {
+  if (process.env.HENBER_DATABASE_URL) return process.env.HENBER_DATABASE_URL;
+  const base = process.env.DATABASE_URL;
+  if (base) {
+    return base.replace(/\/([^/?]+)(\?.*)?$/, '/pos_tenant_henber_pharmacy$2');
+  }
+  return 'postgresql://postgres:55b9bed51c599b26e7115ab126a974e8@postgres:5432/pos_tenant_henber_pharmacy';
+}
 
-const ADMIN_USER_ID = process.env.ADMIN_USER_ID ?? '4971ceff-c094-41b0-bfaf-a3d88ea634a1';
+const pool = new pg.Pool({ connectionString: henberDatabaseUrl() });
+
+async function resolveAdminUserId(client) {
+  if (process.env.ADMIN_USER_ID) return process.env.ADMIN_USER_ID;
+  const res = await client.query(
+    `SELECT id FROM users WHERE is_active = true ORDER BY created_at ASC LIMIT 1`,
+  );
+  const id = res.rows[0]?.id;
+  if (!id) throw new Error('No active user in pos_tenant_henber_pharmacy for audit trail');
+  return id;
+}
 
 try {
+  const adminUserId = await resolveAdminUserId(pool);
+  console.log('Henber DB:', henberDatabaseUrl().replace(/\/\/[^@]+@/, '//***@'));
+  console.log('Admin user:', adminUserId);
+
   const before = await runInventoryGLIntegrityCheck(pool);
   console.log('Before:', {
     gl: before.glBalance,
@@ -29,7 +46,7 @@ try {
     isDrifting: before.isDrifting,
   });
 
-  const heal = await healInventoryGlDrift(pool, ADMIN_USER_ID);
+  const heal = await healInventoryGlDrift(pool, adminUserId);
   console.log('Heal result:', heal);
 
   const after = await runInventoryGLIntegrityCheck(pool);
