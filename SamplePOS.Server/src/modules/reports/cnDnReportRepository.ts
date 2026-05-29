@@ -150,6 +150,44 @@ export async function getPurchaseReturnsReport(
 }
 
 // ─── 3. AR Ledger (GL view from Accounts Receivable 1200) ──────────
+export async function getGlobalArOpeningBalance(
+  pool: Pool,
+  beforeDate: string,
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT COALESCE(
+           SUM(le."DebitAmount") - SUM(le."CreditAmount"), 0
+         ) AS opening
+         FROM ledger_entries le
+         JOIN accounts a ON le."AccountId" = a."Id"
+         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+         WHERE a."AccountCode" = '1200'
+           AND lt."Status" = 'POSTED'
+           AND le."EntryDate"::date < $1::date`,
+    [beforeDate],
+  );
+  return toNum(result.rows[0]?.opening);
+}
+
+export async function getGlobalApOpeningBalance(
+  pool: Pool,
+  beforeDate: string,
+): Promise<number> {
+  const result = await pool.query(
+    `SELECT COALESCE(
+           SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0
+         ) AS opening
+         FROM ledger_entries le
+         JOIN accounts a ON le."AccountId" = a."Id"
+         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+         WHERE a."AccountCode" IN ('2100', '2150')
+           AND lt."Status" = 'POSTED'
+           AND le."EntryDate"::date < $1::date`,
+    [beforeDate],
+  );
+  return toNum(result.rows[0]?.opening);
+}
+
 export async function getArLedger(
   pool: Pool,
   startDate: string,
@@ -160,7 +198,7 @@ export async function getArLedger(
   let customerFilter = '';
   if (customerId) {
     params.push(customerId);
-    customerFilter = `AND le."EntityId" = $${params.length}`;
+    customerFilter = `AND ${customerArScopeSql('le', 'lt', '$3')}`;
   }
 
   const result = await pool.query(
@@ -222,7 +260,7 @@ export async function getApLedger(
      FROM ledger_transactions lt
      JOIN ledger_entries le ON le."TransactionId" = lt."Id"
      JOIN accounts a ON a."Id" = le."AccountId"
-     WHERE a."AccountCode" = '2100'
+     WHERE a."AccountCode" IN ('2100', '2150')
        AND lt."Status" = 'POSTED'
        AND lt."IsReversed" = false
        AND lt."TransactionDate" >= $1::date
@@ -667,7 +705,7 @@ export async function getSupplierAging(
        FROM ledger_entries le
        JOIN accounts a ON le."AccountId" = a."Id"
        JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-       WHERE a."AccountCode" = '2100'
+       WHERE a."AccountCode" IN ('2100', '2150')
          AND le."EntityType" = 'supplier'
          AND le."EntityId" IS NOT NULL
          AND lt."Status" = 'POSTED'

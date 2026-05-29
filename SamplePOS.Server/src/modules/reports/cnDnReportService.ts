@@ -99,26 +99,46 @@ export async function getArLedger(
     customerId?: string,
 ): Promise<{
     data: LedgerEntryRow[];
-    summary: { totalDebit: number; totalCredit: number; netBalance: number };
+    summary: { openingBalance: number; totalDebit: number; totalCredit: number; netBalance: number; closingBalance: number };
 }> {
+    const openingBalance = customerId
+        ? await repo.getCustomerStatementOpeningBalance(pool, customerId, startDate)
+        : await repo.getGlobalArOpeningBalance(pool, startDate);
     const rows = await repo.getArLedger(pool, startDate, endDate, customerId);
 
-    let runBal = new Decimal(0);
+    let runBal = new Decimal(openingBalance);
     let totalDebit = new Decimal(0);
     let totalCredit = new Decimal(0);
-    const data: LedgerEntryRow[] = rows.map((r) => {
+    const data: LedgerEntryRow[] = [];
+
+    if (Math.abs(openingBalance) > 0.001) {
+        data.push({
+            date: startDate,
+            transactionNumber: 'OPENING',
+            referenceType: 'OPENING_BALANCE',
+            referenceNumber: '',
+            description: 'Opening balance brought forward',
+            debit: openingBalance > 0 ? openingBalance : 0,
+            credit: openingBalance < 0 ? Math.abs(openingBalance) : 0,
+            balance: runBal.toDecimalPlaces(2).toNumber(),
+        });
+    }
+
+    for (const r of rows) {
         totalDebit = totalDebit.plus(r.debit);
         totalCredit = totalCredit.plus(r.credit);
         runBal = runBal.plus(r.debit).minus(r.credit);
-        return { ...r, balance: runBal.toDecimalPlaces(2).toNumber() };
-    });
+        data.push({ ...r, balance: runBal.toDecimalPlaces(2).toNumber() });
+    }
 
     return {
         data,
         summary: {
+            openingBalance: new Decimal(openingBalance).toDecimalPlaces(2).toNumber(),
             totalDebit: totalDebit.toDecimalPlaces(2).toNumber(),
             totalCredit: totalCredit.toDecimalPlaces(2).toNumber(),
-            netBalance: runBal.toDecimalPlaces(2).toNumber(),
+            netBalance: runBal.minus(openingBalance).toDecimalPlaces(2).toNumber(),
+            closingBalance: runBal.toDecimalPlaces(2).toNumber(),
         },
     };
 }
@@ -131,27 +151,47 @@ export async function getApLedger(
     supplierId?: string,
 ): Promise<{
     data: LedgerEntryRow[];
-    summary: { totalDebit: number; totalCredit: number; netBalance: number };
+    summary: { openingBalance: number; totalDebit: number; totalCredit: number; netBalance: number; closingBalance: number };
 }> {
+    const openingBalance = supplierId
+        ? await repo.getSupplierStatementOpeningBalance(pool, supplierId, startDate)
+        : await repo.getGlobalApOpeningBalance(pool, startDate);
     const rows = await repo.getApLedger(pool, startDate, endDate, supplierId);
 
-    let runBal = new Decimal(0);
+    let runBal = new Decimal(openingBalance);
     let totalDebit = new Decimal(0);
     let totalCredit = new Decimal(0);
-    const data: LedgerEntryRow[] = rows.map((r) => {
+    const data: LedgerEntryRow[] = [];
+
+    if (Math.abs(openingBalance) > 0.001) {
+        data.push({
+            date: startDate,
+            transactionNumber: 'OPENING',
+            referenceType: 'OPENING_BALANCE',
+            referenceNumber: '',
+            description: 'Opening balance brought forward',
+            debit: 0,
+            credit: 0,
+            balance: runBal.toDecimalPlaces(2).toNumber(),
+        });
+    }
+
+    for (const r of rows) {
         totalDebit = totalDebit.plus(r.debit);
         totalCredit = totalCredit.plus(r.credit);
         // AP is a liability: credit increases, debit decreases
         runBal = runBal.plus(r.credit).minus(r.debit);
-        return { ...r, balance: runBal.toDecimalPlaces(2).toNumber() };
-    });
+        data.push({ ...r, balance: runBal.toDecimalPlaces(2).toNumber() });
+    }
 
     return {
         data,
         summary: {
+            openingBalance: new Decimal(openingBalance).toDecimalPlaces(2).toNumber(),
             totalDebit: totalDebit.toDecimalPlaces(2).toNumber(),
             totalCredit: totalCredit.toDecimalPlaces(2).toNumber(),
-            netBalance: runBal.toDecimalPlaces(2).toNumber(),
+            netBalance: runBal.minus(openingBalance).toDecimalPlaces(2).toNumber(),
+            closingBalance: runBal.toDecimalPlaces(2).toNumber(),
         },
     };
 }

@@ -12,6 +12,7 @@ import Layout from '../../../components/Layout';
 import { ResponsiveTableWrapper } from '../../../components/ui/ResponsiveTableWrapper';
 import apiClient from '../../../utils/api';
 import { downloadFile } from '../../../utils/download';
+import { getBusinessDate } from '../../../utils/businessDate';
 
 type MovementClass = 'FAST' | 'MEDIUM' | 'SLOW' | 'DEAD';
 type AbcClass = 'A' | 'B' | 'C';
@@ -48,7 +49,7 @@ interface AnalyticsReport {
 }
 
 export default function InventoryAnalyticsReportPage() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getBusinessDate();
   const [asOfDate, setAsOfDate] = useState(today);
   const [classFilter, setClassFilter] = useState<'ALL' | MovementClass>('ALL');
   const [abcFilter, setAbcFilter] = useState<'ALL' | AbcClass>('ALL');

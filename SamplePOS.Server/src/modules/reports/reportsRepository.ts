@@ -2512,7 +2512,7 @@ export const reportsRepository = {
         FROM ledger_entries le
         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
         JOIN accounts a ON le."AccountId" = a."Id"
-        WHERE a."AccountCode" = '2100'
+        WHERE a."AccountCode" IN ('2100', '2150')
           AND UPPER(le."EntityType") = 'SUPPLIER'
           AND lt."Status" = 'POSTED'
         GROUP BY le."EntityId"

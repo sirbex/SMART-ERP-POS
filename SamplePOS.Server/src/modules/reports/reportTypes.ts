@@ -114,6 +114,8 @@ export interface CustomerAccountStatementData {
         totalSales: number;
         totalPaid: number;
         totalOutstanding: number;
+        openingBalance?: number;
+        closingBalance?: number;
     };
 }
 

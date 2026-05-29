@@ -111,7 +111,7 @@ export const cnDnReportsController = {
     async getSupplierStatement(req: Request, res: Response, pool: Pool) {
         const supplierId = z.string().uuid().parse(req.params.supplierId);
         const { startDate, endDate } = DateRangeSchema.parse(req.query);
-        const data = await cnDnReportService.getSupplierStatement(pool, supplierId, startDate, endDate);
+        const data = await cnDnReportService.getSmartSupplierStatementData(pool, supplierId, startDate, endDate);
         res.json({
             success: true,
             data: envelope('SUPPLIER_STATEMENT', `Supplier Statement — ${data.supplierName}`, data.entries, {

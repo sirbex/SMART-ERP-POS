@@ -11,6 +11,7 @@
 import { useQuery } from '@tanstack/react-query';
 import apiClient from '../utils/api';
 import { getBusinessDate as getLocalBusinessDate } from '../utils/businessDate';
+import { setServerBusinessDate } from '../utils/businessDateCache';
 
 interface ServerTimeResponse {
     businessDate: string;       // 'YYYY-MM-DD' in Africa/Kampala
@@ -22,7 +23,11 @@ interface ServerTimeResponse {
 
 async function fetchServerTime(): Promise<ServerTimeResponse> {
     const response = await apiClient.get('/server-time');
-    return response.data.data;
+    const data = response.data.data as ServerTimeResponse;
+    if (data?.businessDate) {
+        setServerBusinessDate(data.businessDate);
+    }
+    return data;
 }
 
 /**

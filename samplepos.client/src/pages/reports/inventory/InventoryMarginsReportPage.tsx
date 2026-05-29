@@ -13,6 +13,7 @@ import { ResponsiveTableWrapper } from '../../../components/ui/ResponsiveTableWr
 import { formatCurrency } from '../../../utils/currency';
 import apiClient from '../../../utils/api';
 import { downloadFile } from '../../../utils/download';
+import { getBusinessDate } from '../../../utils/businessDate';
 
 interface MarginRow {
   productId: string;
@@ -41,7 +42,7 @@ interface MarginReport {
 }
 
 export default function InventoryMarginsReportPage() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getBusinessDate();
   const [asOfDate, setAsOfDate] = useState(today);
   const [data, setData] = useState<MarginReport | null>(null);
   const [loading, setLoading] = useState(false);

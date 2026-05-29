@@ -6,6 +6,7 @@ import { useAuth } from './hooks/useAuth';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBanner from './components/NetworkStatusBanner';
+import BusinessDateSync from './components/BusinessDateSync';
 import OfflineAutoSync from './components/OfflineAutoSync';
 
 // Layouts stay static (small, shared across routes)
@@ -219,6 +220,7 @@ function App() {
     <PlatformAuthProvider>
       <BrowserRouter>
         <NetworkStatusBanner />
+        <BusinessDateSync />
         <OfflineAutoSync />
         <Toaster
           position="top-right"

@@ -15,8 +15,10 @@ export interface BusinessReportFilters {
   includeExpenses?: boolean;
 }
 
-/** Section 1 — Money In: how cash / receivables were settled */
+/** Section 1 — Money In: sales settlement, customer collections, opening AR */
 export interface MoneyInRow {
+  flow_type: string;
+  flow_label: string;
   account_code: string;
   account_name: string;
   transaction_count: number;
@@ -99,7 +101,7 @@ function dateParams(f: BusinessReportFilters): (string | null)[] {
 }
 
 // ---------------------------------------------------------------------------
-// Section 1 — Money In (DR side of SALE transactions, grouped by settlement account)
+// Section 1 — Money In (SAP/Odoo: settlement + collections + opening AR)
 // ---------------------------------------------------------------------------
 
 export async function getMoneyIn(
@@ -108,31 +110,89 @@ export async function getMoneyIn(
 ): Promise<MoneyInRow[]> {
   const db = dbPool || globalPool;
 
-  // Debit side of sales shows WHERE money landed (Cash 1010, AR 1200, etc.)
-  // Always join sales to exclude void/returned sales; optionally filter by payment method
-  const query = `
-    SELECT
-      a."AccountCode"  AS account_code,
-      a."AccountName"  AS account_name,
-      COUNT(DISTINCT lt."Id")::integer AS transaction_count,
-      ROUND(COALESCE(SUM(le."DebitAmount"), 0)::numeric, 2) AS total_amount
-    FROM ledger_entries le
-    JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-    JOIN accounts a ON a."Id" = le."AccountId"
-    LEFT JOIN sales s ON lt."ReferenceNumber" = s.sale_number
-    WHERE lt."ReferenceType" = 'SALE'
-      AND lt."Status" = 'POSTED'
-      AND le."DebitAmount" > 0
-      AND a."AccountType" = 'ASSET'
-      AND (s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
-      ${filters.paymentMethod ? `AND s.payment_method = $3` : ''}
-      ${dateClause(1)}
-    GROUP BY a."AccountCode", a."AccountName"
-    ORDER BY total_amount DESC
-  `;
-
   const params: (string | null)[] = dateParams(filters);
+  const paymentFilter = filters.paymentMethod ? `AND s.payment_method = $${params.length + 1}` : '';
   if (filters.paymentMethod) params.push(filters.paymentMethod);
+
+  // Three GL flows that increase cash or receivables (debits on asset accounts):
+  // 1. SALE_SETTLEMENT — cash/credit sale invoice (DR 1010 or DR 1200)
+  // 2. CUSTOMER_COLLECTION — payment received (DR cash/bank, CR AR elsewhere)
+  // 3. OPENING_BALANCE — customer AR brought forward (DR 1200)
+  const query = `
+    SELECT flow_type, flow_label, account_code, account_name,
+           SUM(transaction_count)::integer AS transaction_count,
+           ROUND(SUM(total_amount)::numeric, 2) AS total_amount
+    FROM (
+      SELECT
+        'SALE_SETTLEMENT' AS flow_type,
+        'Sales settlement (invoice)' AS flow_label,
+        a."AccountCode" AS account_code,
+        a."AccountName" AS account_name,
+        COUNT(DISTINCT lt."Id")::integer AS transaction_count,
+        COALESCE(SUM(le."DebitAmount"), 0) AS total_amount
+      FROM ledger_entries le
+      JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+      JOIN accounts a ON a."Id" = le."AccountId"
+      LEFT JOIN sales s ON lt."ReferenceNumber" = s.sale_number
+      WHERE lt."ReferenceType" = 'SALE'
+        AND lt."Status" = 'POSTED'
+        AND le."DebitAmount" > 0
+        AND a."AccountType" = 'ASSET'
+        AND (s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
+        ${paymentFilter}
+        ${dateClause(1)}
+      GROUP BY a."AccountCode", a."AccountName"
+
+      UNION ALL
+
+      SELECT
+        'CUSTOMER_COLLECTION' AS flow_type,
+        'Customer payment received' AS flow_label,
+        a."AccountCode" AS account_code,
+        a."AccountName" AS account_name,
+        COUNT(DISTINCT lt."Id")::integer AS transaction_count,
+        COALESCE(SUM(le."DebitAmount"), 0) AS total_amount
+      FROM ledger_entries le
+      JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+      JOIN accounts a ON a."Id" = le."AccountId"
+      WHERE lt."ReferenceType" IN ('CUSTOMER_PAYMENT', 'INVOICE_PAYMENT')
+        AND lt."Status" = 'POSTED'
+        AND le."DebitAmount" > 0
+        AND a."AccountType" = 'ASSET'
+        AND a."AccountCode" IN ('1010', '1020', '1030', '1040', '1050')
+        ${dateClause(1)}
+      GROUP BY a."AccountCode", a."AccountName"
+
+      UNION ALL
+
+      SELECT
+        'OPENING_BALANCE' AS flow_type,
+        'Customer opening balance (AR)' AS flow_label,
+        a."AccountCode" AS account_code,
+        a."AccountName" AS account_name,
+        COUNT(DISTINCT lt."Id")::integer AS transaction_count,
+        COALESCE(SUM(le."DebitAmount"), 0) AS total_amount
+      FROM ledger_entries le
+      JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+      JOIN accounts a ON a."Id" = le."AccountId"
+      WHERE lt."ReferenceType" = 'CUSTOMER_OPENING_BALANCE'
+        AND lt."Status" = 'POSTED'
+        AND a."AccountCode" = '1200'
+        AND le."DebitAmount" > 0
+        ${dateClause(1)}
+      GROUP BY a."AccountCode", a."AccountName"
+    ) combined
+  WHERE total_amount > 0
+  GROUP BY flow_type, flow_label, account_code, account_name
+  ORDER BY
+    CASE flow_type
+      WHEN 'SALE_SETTLEMENT' THEN 1
+      WHEN 'CUSTOMER_COLLECTION' THEN 2
+      WHEN 'OPENING_BALANCE' THEN 3
+      ELSE 4
+    END,
+    account_code
+  `;
 
   const result = await db.query(query, params);
   return result.rows;
@@ -148,13 +208,10 @@ export async function getCostAndStock(
 ): Promise<CostAndStockRow[]> {
   const db = dbPool || globalPool;
 
-  // Include all reference types that affect cost/stock accounts
-  const refTypes = ['SALE', 'STOCK_MOVEMENT', 'GOODS_RECEIPT'];
-  if (!filters.includeStockAdjustments) {
-    // If not including adjustments, only show SALE COGS
-    refTypes.length = 0;
-    refTypes.push('SALE');
-  }
+  // COGS is posted as SALE_COGS (separate journal from revenue SALE).
+  const refTypes = filters.includeStockAdjustments !== false
+    ? ['SALE_COGS', 'STOCK_MOVEMENT', 'GOODS_RECEIPT']
+    : ['SALE_COGS'];
 
   const query = `
     SELECT
@@ -171,13 +228,13 @@ export async function getCostAndStock(
     FROM ledger_entries le
     JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
     JOIN accounts a ON a."Id" = le."AccountId"
-    LEFT JOIN sales s ON lt."ReferenceType" = 'SALE' AND lt."ReferenceNumber" = s.sale_number
+    LEFT JOIN sales s ON lt."ReferenceType" = 'SALE_COGS' AND lt."ReferenceId" = s.id
     WHERE lt."Status" = 'POSTED'
       AND lt."ReferenceType" = ANY($3::text[])
       AND (
         a."AccountCode" IN ('5000','5010','5110','5120','5130','4110')
       )
-      AND (lt."ReferenceType" != 'SALE' OR s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
+      AND (lt."ReferenceType" != 'SALE_COGS' OR s.status IS NULL OR s.status NOT IN ('VOID', 'VOIDED_BY_RETURN', 'REFUNDED'))
       ${dateClause(1)}
     GROUP BY a."AccountCode", a."AccountName", a."NormalBalance"
     ORDER BY a."AccountCode"
@@ -335,16 +392,15 @@ export async function getSummaryTotals(
       ${dateClause(1)}
   `;
 
-  // Total COGS from GL (DR on account 5000 for SALE reference type)
-  // Exclude void/returned sales so COGS is not inflated
+  // Total COGS from GL — goods-issue journal (referenceType SALE_COGS, account 5000)
   const cogsQuery = `
     SELECT
       ROUND(COALESCE(SUM(le."DebitAmount"), 0)::numeric, 2) AS total_cogs
     FROM ledger_entries le
     JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
     JOIN accounts a ON a."Id" = le."AccountId"
-    LEFT JOIN sales s ON lt."ReferenceNumber" = s.sale_number
-    WHERE lt."ReferenceType" = 'SALE'
+    LEFT JOIN sales s ON lt."ReferenceType" = 'SALE_COGS' AND lt."ReferenceId" = s.id
+    WHERE lt."ReferenceType" = 'SALE_COGS'
       AND lt."Status" = 'POSTED'
       AND a."AccountCode" = '5000'
       AND le."DebitAmount" > 0

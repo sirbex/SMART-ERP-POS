@@ -48,19 +48,14 @@ import { formatCurrency } from '../utils/currency';
 import { api } from '../services/api';
 import CustomerAgingReport from '../components/reports/CustomerAgingReport';
 import { DateRangeFilter } from '../components/ui/DateRangeFilter';
-import { formatTimestamp } from '../utils/businessDate';
+import { formatTimestamp, formatTimestampDate, getBusinessDate } from '../utils/businessDate';
 
-// TIMEZONE STRATEGY: Display dates without conversion
-// Backend returns DATE as YYYY-MM-DD string (no timezone)
-// Frontend displays as-is without parsing to Date object
+// TIMEZONE STRATEGY: DATE columns stay as YYYY-MM-DD; TIMESTAMPTZ uses business TZ display.
 const formatDisplayDate = (dateString: string | null | undefined): string => {
   if (!dateString) return 'N/A';
-
-  // If it's an ISO string, extract the date part
   if (dateString.includes('T')) {
-    return dateString.split('T')[0];
+    return formatTimestampDate(dateString);
   }
-
   return dateString;
 };
 
@@ -171,7 +166,7 @@ const formatFieldValue = (key: string, value: unknown): string => {
 
   // Date fields
   if (value instanceof Date) {
-    return value.toLocaleDateString();
+    return formatTimestampDate(value.toISOString());
   }
 
   // String date fields (ISO format or YYYY-MM-DD)
@@ -1325,7 +1320,7 @@ export default function ReportsPage() {
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = `${selectedReport.toLowerCase()}-${new Date().toLocaleDateString('en-CA')}.pdf`;
+      a.download = `${selectedReport.toLowerCase()}-${getBusinessDate()}.pdf`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1360,7 +1355,7 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${selectedReport}_${new Date().toLocaleDateString('en-CA')}.csv`;
+    a.download = `${selectedReport}_${getBusinessDate()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -2456,7 +2451,7 @@ export default function ReportsPage() {
                           </td>
                           <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(sale.totalAmount))}</td>
                           <td className="px-4 py-3 text-sm text-right font-semibold text-green-600">{formatCurrency(Number(sale.profit))}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500">{sale.createdAt ? new Date(String(sale.createdAt)).toLocaleTimeString() : '—'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{sale.createdAt ? formatTimestamp(String(sale.createdAt)) : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2496,7 +2491,7 @@ export default function ReportsPage() {
                           <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(mv.amount))}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{String(mv.reason || '—')}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{String(mv.createdByName || '—')}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500">{mv.createdAt ? new Date(String(mv.createdAt)).toLocaleTimeString() : '—'}</td>
+                          <td className="px-4 py-3 text-sm text-gray-500">{mv.createdAt ? formatTimestamp(String(mv.createdAt)) : '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2642,8 +2637,8 @@ export default function ReportsPage() {
                               'bg-yellow-100 text-yellow-800'
                             }`}>{String(s.status)}</span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-500">{s.openedAt ? new Date(String(s.openedAt)).toLocaleString() : '—'}</td>
-                        <td className="px-4 py-3 text-sm text-gray-500">{s.closedAt ? new Date(String(s.closedAt)).toLocaleString() : '—'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{s.openedAt ? formatTimestamp(String(s.openedAt)) : '—'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-500">{s.closedAt ? formatTimestamp(String(s.closedAt)) : '—'}</td>
                         <td className="px-4 py-3 text-sm text-right font-semibold">{formatCurrency(Number(s.openingFloat))}</td>
                         <td className="px-4 py-3 text-sm text-right font-semibold text-blue-600">{formatCurrency(Number(s.totalSales))}</td>
                         <td className="px-4 py-3 text-sm text-right">{s.expectedClosing != null ? formatCurrency(Number(s.expectedClosing)) : '—'}</td>

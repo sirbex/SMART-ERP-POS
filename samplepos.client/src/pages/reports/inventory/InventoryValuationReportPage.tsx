@@ -13,6 +13,7 @@ import { ResponsiveTableWrapper } from '../../../components/ui/ResponsiveTableWr
 import { formatCurrency } from '../../../utils/currency';
 import apiClient from '../../../utils/api';
 import { downloadFile } from '../../../utils/download';
+import { getBusinessDate } from '../../../utils/businessDate';
 
 interface ValuationRow {
   productId: string;
@@ -31,7 +32,7 @@ interface ValuationReport {
 }
 
 export default function InventoryValuationReportPage() {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getBusinessDate();
   const [asOfDate, setAsOfDate] = useState(today);
   const [data, setData] = useState<ValuationReport | null>(null);
   const [loading, setLoading] = useState(false);

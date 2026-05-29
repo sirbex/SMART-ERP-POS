@@ -3,6 +3,7 @@
 
 import { Pool } from 'pg';
 import { reportsRepository } from './reportsRepository.js';
+import * as cnDnReportService from './cnDnReportService.js';
 import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import { SystemSettings } from '../../../../shared/types/systemSettings.js';
 import Decimal from 'decimal.js';
@@ -1149,14 +1150,70 @@ export const reportsService = {
     }
   ) {
     const startTime = Date.now();
+    const startDate = options.startDate || getBusinessDate();
+    const endDate = options.endDate || getBusinessDate();
 
-    const data = await reportsRepository.getCustomerAccountStatement(pool, options);
+    const smart = await cnDnReportService.getSmartCustomerStatementData(
+      pool,
+      options.customerId,
+      startDate,
+      endDate,
+    );
+
+    const customerRow = await pool.query(
+      `SELECT id, customer_number, name, email, phone, credit_limit,
+              COALESCE(balance, 0) AS balance, customer_group_id
+       FROM customers WHERE id = $1`,
+      [options.customerId],
+    );
+    const customer = customerRow.rows[0];
+
+    let totalDebit = new Decimal(0);
+    let totalCredit = new Decimal(0);
+    const transactions = smart.entries.map((entry) => {
+      totalDebit = totalDebit.plus(entry.debit);
+      totalCredit = totalCredit.plus(entry.credit);
+      return {
+        saleId: entry.transactionId,
+        saleNumber: entry.vchNo || entry.particulars,
+        saleDate: entry.date,
+        totalAmount: entry.debit,
+        amountPaid: entry.credit,
+        balanceDue: entry.balanceAfter ?? 0,
+        paymentStatus: entry.itemStatus,
+        items: [{ product_name: entry.particulars, quantity: 1, unit_price: entry.debit, subtotal: entry.debit }],
+      };
+    });
+
+    const data = {
+      customer: {
+        id: customer.id,
+        customerNumber: customer.customer_number,
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        creditLimit: new Decimal(customer.credit_limit || 0).toDecimalPlaces(2).toNumber(),
+        currentBalance: smart.closingBalance,
+        customerGroupId: customer.customer_group_id,
+      },
+      transactions,
+      transactionSummary: {
+        openingBalance: smart.openingBalance,
+        closingBalance: smart.closingBalance,
+        totalTransactions: transactions.length,
+        totalSales: totalDebit.toDecimalPlaces(2).toNumber(),
+        totalPaid: totalCredit.toDecimalPlaces(2).toNumber(),
+        totalOutstanding: smart.closingBalance,
+      },
+    };
 
     const summary = {
-      totalTransactions: data.transactionSummary.totalTransactions,
-      totalSales: data.transactionSummary.totalSales,
-      totalPaid: data.transactionSummary.totalPaid,
-      totalOutstanding: data.transactionSummary.totalOutstanding,
+      openingBalance: smart.openingBalance,
+      closingBalance: smart.closingBalance,
+      totalTransactions: transactions.length,
+      totalSales: totalDebit.toDecimalPlaces(2).toNumber(),
+      totalPaid: totalCredit.toDecimalPlaces(2).toNumber(),
+      totalOutstanding: smart.closingBalance,
     };
 
     const executionTime = Date.now() - startTime;
@@ -1166,9 +1223,9 @@ export const reportsService = {
       reportName: 'Customer Account Statement',
       parameters: options,
       generatedById: options.userId || null,
-      startDate: options.startDate || null,
-      endDate: options.endDate || null,
-      recordCount: data.transactions.length,
+      startDate,
+      endDate,
+      recordCount: transactions.length,
       fileFormat: options.format || 'json',
       executionTimeMs: executionTime,
     });
@@ -1185,10 +1242,10 @@ export const reportsService = {
         second: '2-digit',
         hour12: false, timeZone: 'Africa/Kampala',
       }),
-      parameters: options,
+      parameters: { ...options, startDate, endDate },
       data,
       summary,
-      recordCount: data.transactions.length,
+      recordCount: transactions.length,
       executionTimeMs: executionTime,
     };
   },

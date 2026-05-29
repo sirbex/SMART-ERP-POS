@@ -22,6 +22,8 @@ import { useBusinessPerformance } from '../../hooks/useApi';
 // ---------------------------------------------------------------------------
 
 interface MoneyInEntry {
+  flowType: string;
+  flowLabel: string;
   accountCode: string;
   accountName: string;
   transactionCount: number;
@@ -307,7 +309,7 @@ const BusinessPerformancePage: React.FC = () => {
                     </h2>
                   </div>
                   <p className="text-sm text-gray-500 mt-1">
-                    How sales settled — Cash vs Accounts Receivable vs other asset accounts
+                    Cash and receivables from sales, customer payments received, and opening balances (GL 1010 / 1200)
                   </p>
                 </div>
                 <div className="overflow-x-auto">
@@ -320,6 +322,9 @@ const BusinessPerformancePage: React.FC = () => {
                       <table className="min-w-full">
                         <thead className="bg-gray-50">
                           <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
+                              Source
+                            </th>
                             <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">
                               Account
                             </th>
@@ -336,7 +341,13 @@ const BusinessPerformancePage: React.FC = () => {
                         </thead>
                         <tbody className="divide-y divide-gray-100">
                           {report.moneyIn.map((row) => (
-                            <tr key={row.accountCode} className="hover:bg-gray-50">
+                            <tr key={`${row.flowType}-${row.accountCode}`} className="hover:bg-gray-50">
+                              <td className="px-4 py-3 text-sm text-gray-700">
+                                {row.flowLabel}
+                                {row.accountCode === '1200' && row.flowType === 'SALE_SETTLEMENT' && (
+                                  <span className="ml-1 text-xs text-amber-700">(credit sale)</span>
+                                )}
+                              </td>
                               <td className="px-4 py-3 text-sm font-mono text-gray-600">
                                 {row.accountCode}
                               </td>
@@ -354,7 +365,7 @@ const BusinessPerformancePage: React.FC = () => {
                         </tbody>
                         <tfoot className="bg-gray-50 border-t-2 border-gray-300">
                           <tr className="font-bold">
-                            <td colSpan={2} className="px-4 py-3 text-sm text-gray-900">
+                            <td colSpan={3} className="px-4 py-3 text-sm text-gray-900">
                               TOTAL MONEY IN
                             </td>
                             <td className="px-4 py-3 text-sm text-right text-gray-600">

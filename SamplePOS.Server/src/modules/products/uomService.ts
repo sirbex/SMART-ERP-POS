@@ -142,6 +142,20 @@ async function syncCanonicalConversion(
   );
 }
 
+export async function requireProductBaseUom(
+  productId: string,
+  db: Queryable,
+): Promise<{ baseUomId: string; conversionFactor: number }> {
+  await ensureProductBaseUomContext(productId, db);
+  const resolved = await resolveCanonicalProductUom(productId, null, db);
+  if (!resolved.baseUomId) {
+    throw new ValidationError(
+      'Item must have a base stock unit of measure before inventory or sales transactions.',
+    );
+  }
+  return { baseUomId: resolved.baseUomId, conversionFactor: resolved.conversionFactor };
+}
+
 export async function resolveCanonicalProductUom(
   productId: string,
   selectedUomId: string | null | undefined,

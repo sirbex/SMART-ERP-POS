@@ -12,9 +12,11 @@ const dtf = new Intl.DateTimeFormat('en-CA', {
     day: '2-digit',
 });
 
-/** Returns today's date in business timezone as 'YYYY-MM-DD' */
+import { getServerBusinessDateCached } from './businessDateCache';
+
+/** Returns today's date in business timezone as 'YYYY-MM-DD' (server cache when available). */
 export function getBusinessDate(): string {
-    return dtf.format(new Date());
+    return getServerBusinessDateCached() ?? dtf.format(new Date());
 }
 
 /**
