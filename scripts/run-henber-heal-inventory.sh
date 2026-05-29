@@ -9,6 +9,6 @@ echo "==> Copy heal script to backend container on $HOST"
 ssh "$USER@$HOST" bash -s <<'REMOTE'
 set -euo pipefail
 cd /opt/smarterp
-docker cp scripts/henber-heal-inventory-gl.mjs smarterp-backend:/tmp/henber-heal-inventory-gl.mjs
-docker exec smarterp-backend node /tmp/henber-heal-inventory-gl.mjs
+docker cp scripts/henber-heal-inventory-gl.mjs smarterp-backend:/app/SamplePOS.Server/scripts/henber-heal-inventory-gl.mjs
+docker exec -w /app/SamplePOS.Server smarterp-backend node scripts/henber-heal-inventory-gl.mjs
 REMOTE

@@ -22,8 +22,8 @@ jobs:
           cd /opt/smarterp
           git fetch origin main
           git checkout origin/main -- scripts/henber-heal-inventory-gl.mjs
-          docker cp scripts/henber-heal-inventory-gl.mjs smarterp-backend:/tmp/henber-heal-inventory-gl.mjs
-          docker exec smarterp-backend node /tmp/henber-heal-inventory-gl.mjs
+          docker cp scripts/henber-heal-inventory-gl.mjs smarterp-backend:/app/SamplePOS.Server/scripts/henber-heal-inventory-gl.mjs
+          docker exec -w /app/SamplePOS.Server smarterp-backend node scripts/henber-heal-inventory-gl.mjs
           REMOTE
 
       - name: Cleanup SSH key
