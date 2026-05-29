@@ -10,5 +10,7 @@ ssh "$USER@$HOST" bash -s <<'REMOTE'
 set -euo pipefail
 cd /opt/smarterp
 docker cp scripts/henber-heal-inventory-gl.mjs smarterp-backend:/tmp/henber-heal-inventory-gl.mjs
-docker exec -w /app -e NODE_PATH=/app/node_modules smarterp-backend node /tmp/henber-heal-inventory-gl.mjs
+docker exec -u root smarterp-backend cp /tmp/henber-heal-inventory-gl.mjs /app/heal-inventory-gl.mjs
+docker exec -u root smarterp-backend chown nodejs:nodejs /app/heal-inventory-gl.mjs
+docker exec -w /app smarterp-backend node heal-inventory-gl.mjs
 REMOTE
