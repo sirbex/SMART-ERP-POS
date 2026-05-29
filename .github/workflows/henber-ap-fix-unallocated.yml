@@ -1,0 +1,47 @@
+name: Henber AP Fix Unallocated
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview only (1) or apply fix (0)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '0'
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Investigate and fix AP unallocated payments
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<REMOTE
+          set -euo pipefail
+          cd /opt/smarterp
+          git fetch origin main
+          git checkout origin/main -- scripts/henber-ap-payment-investigate.mjs scripts/henber-ap-fix-unallocated.mjs
+          for f in henber-ap-payment-investigate.mjs henber-ap-fix-unallocated.mjs; do
+            docker cp scripts/\$f smarterp-backend:/tmp/\$f
+            docker exec -u root smarterp-backend cp /tmp/\$f /app/\$f
+            docker exec -u root smarterp-backend chown nodejs:nodejs /app/\$f
+          done
+          docker exec -w /app smarterp-backend node henber-ap-payment-investigate.mjs
+          docker exec -w /app -e DRY_RUN=${DRY_RUN} smarterp-backend node henber-ap-fix-unallocated.mjs
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key

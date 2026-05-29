@@ -1,0 +1,33 @@
+name: Henber AP Payment Investigate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Run AP payment investigation on Henber
+        run: |
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<'REMOTE'
+          set -euo pipefail
+          cd /opt/smarterp
+          git fetch origin main
+          git checkout origin/main -- scripts/henber-ap-payment-investigate.mjs
+          docker cp scripts/henber-ap-payment-investigate.mjs smarterp-backend:/tmp/henber-ap-payment-investigate.mjs
+          docker exec -u root smarterp-backend cp /tmp/henber-ap-payment-investigate.mjs /app/henber-ap-payment-investigate.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/henber-ap-payment-investigate.mjs
+          docker exec -w /app smarterp-backend node henber-ap-payment-investigate.mjs
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key
