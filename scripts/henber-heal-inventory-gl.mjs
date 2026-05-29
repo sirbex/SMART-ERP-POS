@@ -9,8 +9,8 @@
  * Or from repo root via SSH one-liner (see scripts/run-henber-heal-inventory.sh).
  */
 import pg from 'pg';
-import { healInventoryGlDrift } from './dist/modules/system/glRepairService.js';
-import { runInventoryGLIntegrityCheck } from './dist/services/inventoryGLIntegrityCheckService.js';
+import { healInventoryGlDrift } from '/app/dist/SamplePOS.Server/src/modules/system/glRepairService.js';
+import { runInventoryGLIntegrityCheck } from '/app/dist/SamplePOS.Server/src/services/inventoryGLIntegrityCheckService.js';
 
 const pool = new pg.Pool({
   connectionString:
