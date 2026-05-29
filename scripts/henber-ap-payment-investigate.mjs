@@ -135,7 +135,7 @@ try {
         COALESCE((
           SELECT SUM(spa."AmountAllocated")
           FROM supplier_payment_allocations spa
-          WHERE spa."SupplierPaymentId" = sp."Id"
+          WHERE spa."PaymentId" = sp."Id"
         ), 0)::numeric AS alloc_rows_sum
       FROM supplier_payments sp
       JOIN suppliers s ON s."Id" = sp."SupplierId"
