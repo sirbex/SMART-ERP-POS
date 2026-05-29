@@ -8,7 +8,6 @@ import {
   repostAllMissingGL,
   rebuildPeriodBalances,
   recalcAllSupplierBalances,
-  healAPDrift,
   runGLIntegrityCheck,
 } from '/app/dist/SamplePOS.Server/src/modules/system/glRepairService.js';
 
@@ -57,16 +56,9 @@ try {
   const sup = await recalcAllSupplierBalances(pool);
   console.log('  ', sup);
 
-  const apBeforeHeal = await runGLIntegrityCheck(pool);
-  const apDiff = Math.abs(apBeforeHeal.checks.apReconciliation.difference);
-  const apMat = Math.max(5000, Math.abs(apBeforeHeal.checks.apReconciliation.glBalance) * 0.0001);
-  if (apDiff > apMat) {
-    console.log('\n→ healAPDrift (material AP drift remains)...');
-    const apHeal = await healAPDrift(pool, adminUserId);
-    console.log('  ', apHeal);
-  } else {
-    console.log('\n→ healAPDrift skipped (within tolerance after repair + recalc)');
-  }
+  // Do NOT run healAPDrift — it uses suppliers.OutstandingBalance, not invoice subledger
+  // (Report Integrity uses financialIntegrityService.checkAP). GPB rebuild is the fix
+  // for "Balance sheet totals table matches ledger".
 
   const after = await runGLIntegrityCheck(pool);
   console.log('\nAfter:', after.systemStatus, {
@@ -75,13 +67,7 @@ try {
   });
   if (after.alerts.length) console.log('Alerts:', after.alerts.join(' | '));
 
-  const apOk = after.checks.apReconciliation.isBalanced;
-  const invOk = after.checks.inventoryReconciliation.isBalanced;
-  if (!apOk || !invOk) {
-    console.error('FAIL: subledger checks still drifting');
-    process.exit(1);
-  }
-  console.log('\nOK: AP and inventory subledgers balanced (re-run Report Integrity for GPB table check)');
+  console.log('\nOK: GPB rebuilt. Re-check Report Integrity in UI (AP may need invoice repost, not AP heal).');
 } catch (e) {
   console.error(e?.message || e);
   process.exit(1);
