@@ -109,15 +109,30 @@ async function diagnoseOb(client, ob) {
   return { allocCount: alloc.rows[0]?.n ?? 0, glTxn: glTxn.rows, entries: entries.rows };
 }
 
+const distRoot = process.env.SAMPLEPOS_DIST_ROOT || '/app/dist/SamplePOS.Server/src';
+const localDist = new URL('../SamplePOS.Server/dist/', import.meta.url).pathname;
+
+async function loadModule(relativePath) {
+  const candidates = [
+    `${distRoot}/${relativePath}`,
+    `${localDist}${relativePath}`,
+  ];
+  let lastErr;
+  for (const href of candidates) {
+    try {
+      return await import(href);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
+
 try {
-  const { cancelSupplierOpeningBalance } = await import(
-    '/app/SamplePOS.Server/dist/modules/supplier-payments/supplierPaymentService.js'
-  ).catch(() =>
-    import('../SamplePOS.Server/dist/modules/supplier-payments/supplierPaymentService.js'),
+  const { cancelSupplierOpeningBalance } = await loadModule(
+    'modules/supplier-payments/supplierPaymentService.js',
   );
-  const { recalcAllSupplierBalances } = await import(
-    '/app/SamplePOS.Server/dist/modules/system/glRepairService.js'
-  ).catch(() => import('../SamplePOS.Server/dist/modules/system/glRepairService.js'));
+  const { recalcAllSupplierBalances } = await loadModule('modules/system/glRepairService.js');
 
   const client = await pool.connect();
   try {
