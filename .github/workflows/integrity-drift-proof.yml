@@ -1,0 +1,46 @@
+name: Integrity Drift Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: 'Tenant database'
+        required: true
+        default: 'dynamics'
+        type: choice
+        options:
+          - dynamics
+          - henber
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Run integrity drift proof on production
+        env:
+          TENANT: ${{ github.event.inputs.tenant }}
+        run: |
+          scp -i ~/.ssh/prod_key -o ConnectTimeout=30 \
+            scripts/integrity-drift-proof.mjs \
+            root@209.38.203.138:/tmp/integrity-drift-proof.mjs
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<REMOTE
+          set -euo pipefail
+          docker cp /tmp/integrity-drift-proof.mjs smarterp-backend:/tmp/integrity-drift-proof.mjs
+          docker exec -u root smarterp-backend cp /tmp/integrity-drift-proof.mjs /app/integrity-drift-proof.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/integrity-drift-proof.mjs
+          docker exec -w /app -e TENANT=${TENANT} smarterp-backend node integrity-drift-proof.mjs
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key
