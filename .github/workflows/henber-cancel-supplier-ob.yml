@@ -1,0 +1,60 @@
+name: Henber Cancel Supplier Opening Balance
+
+on:
+  workflow_dispatch:
+    inputs:
+      ob_number:
+        description: 'Supplier OB invoice number (e.g. OB-000001)'
+        required: true
+        default: 'OB-000001'
+      supplier_search:
+        description: 'Supplier name substring (e.g. SALUD)'
+        required: true
+        default: 'SALUD'
+      dry_run:
+        description: 'Preview only (1) or cancel + GL reverse (0)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '0'
+
+jobs:
+  cancel-ob:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Cancel supplier opening balance on Henber
+        env:
+          OB_NUMBER: ${{ github.event.inputs.ob_number }}
+          SUPPLIER_SEARCH: ${{ github.event.inputs.supplier_search }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          scp -i ~/.ssh/prod_key -o ConnectTimeout=30 \
+            scripts/henber-cancel-supplier-ob.mjs \
+            root@209.38.203.138:/tmp/henber-cancel-supplier-ob.mjs
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<REMOTE
+          set -euo pipefail
+          docker cp /tmp/henber-cancel-supplier-ob.mjs smarterp-backend:/tmp/henber-cancel-supplier-ob.mjs
+          docker exec -u root smarterp-backend cp /tmp/henber-cancel-supplier-ob.mjs /app/henber-cancel-supplier-ob.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/henber-cancel-supplier-ob.mjs
+          docker exec -w /app \
+            -e OB_NUMBER=${OB_NUMBER} \
+            -e SUPPLIER_SEARCH=${SUPPLIER_SEARCH} \
+            -e DRY_RUN=${DRY_RUN} \
+            smarterp-backend node henber-cancel-supplier-ob.mjs
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key
