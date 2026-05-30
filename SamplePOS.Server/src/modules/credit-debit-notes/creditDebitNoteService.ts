@@ -29,7 +29,7 @@ import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
 import { SYSTEM_USER_ID } from '../../utils/constants.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
-import { recordMovement } from '../stock-movements/stockMovementRepository.js';
+import { restoreInventoryForCustomerCreditNoteReturn } from '../../utils/customerReturnInventory.js';
 import type {
     CreateCustomerCreditNote,
     CreateCustomerDebitNote,
@@ -37,7 +37,6 @@ import type {
     CreateSupplierDebitNote,
 } from '../../../../shared/zod/creditDebitNote.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
-import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 
 // ============================================================
@@ -255,51 +254,21 @@ export const creditDebitNoteService = {
                     let inventoryCostTotal = Money.zero();
 
                     for (const line of productLines) {
-                        // Find the most recent active batch for this product (FEFO order)
-                        const batchRes = await client.query(
-                            `SELECT id, cost_price, remaining_quantity
-                             FROM inventory_batches
-                             WHERE product_id = $1 AND status = 'ACTIVE'
-                             ORDER BY expiry_date ASC NULLS LAST, received_date DESC
-                             LIMIT 1`,
-                            [line.productId]
-                        );
-                        const batch = batchRes.rows[0] as { id: string; cost_price: string; remaining_quantity: string } | undefined;
-                        const unitCost = batch
-                            ? Money.toNumber(Money.parseDb(batch.cost_price))
-                            : line.unitPrice; // fallback: use note line price as cost proxy
-
-                        // Create RETURN stock movement (positive qty = goods IN)
-                        await recordMovement(client, {
+                        const restored = await restoreInventoryForCustomerCreditNoteReturn(client, {
                             productId: line.productId,
-                            batchId: batch?.id ?? null,
-                            movementType: 'RETURN',
-                            quantity: line.quantity,
-                            unitCost,
-                            referenceType: 'CREDIT_NOTE',
-                            referenceId: note.id,
-                            notes: `Customer return: ${note.invoiceNumber} — ${line.productName} × ${line.quantity}`,
+                            enteredQty: line.quantity,
+                            lineDescription: line.description,
+                            noteId: note.id,
+                            noteNumber: note.invoiceNumber,
+                            fallbackUnitCost: Money.toNumber(Money.parseDb(line.unitPrice)),
                         });
 
-                        // Increase batch remaining_quantity (if batch found)
-                        if (batch) {
-                            await client.query(
-                                `UPDATE inventory_batches
-                                 SET remaining_quantity = remaining_quantity + $1,
-                                     status = CASE WHEN remaining_quantity + $1 > 0 THEN 'ACTIVE' ELSE status END,
-                                     updated_at = CURRENT_TIMESTAMP
-                                 WHERE id = $2`,
-                                [line.quantity, batch.id]
-                            );
-                        }
-
-                        // Recalculate product quantities from batches
-                        await syncProductQuantity(client, line.productId);
-
-                        // Accumulate cost for inventory GL reversal
                         inventoryCostTotal = Money.add(
                             inventoryCostTotal,
-                            Money.multiply(Money.parseDb(line.quantity), Money.parseDb(unitCost)),
+                            Money.multiply(
+                                Money.parseDb(restored.baseQty),
+                                Money.parseDb(restored.unitCost),
+                            ),
                         );
                     }
 
