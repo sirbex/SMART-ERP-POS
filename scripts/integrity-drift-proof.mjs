@@ -176,13 +176,14 @@ try {
                   < ili."Quantity" - 0.001 THEN 'MOVEMENT_QTY_GAP'
              WHEN COALESCE((
                SELECT SUM(ib.remaining_quantity) FROM inventory_batches ib
-               WHERE ib.product_id = ili."ProductId" AND ib.remaining_quantity > 0
+               WHERE ib.product_id = NULLIF(TRIM(ili."ProductId"), '')::uuid
+               AND ib.remaining_quantity > 0
              ), 0) < ili."Quantity" - 0.001 THEN 'BATCH_QTY_GAP'
              ELSE 'OK'
            END AS flag
     FROM invoices i
     JOIN invoice_line_items ili ON ili."InvoiceId" = i.id
-    JOIN products p ON p.id = ili."ProductId"
+    JOIN products p ON p.id = NULLIF(TRIM(ili."ProductId"), '')::uuid
     LEFT JOIN stock_movements sm
       ON sm.reference_type = 'CREDIT_NOTE'
      AND sm.reference_id = i.id
