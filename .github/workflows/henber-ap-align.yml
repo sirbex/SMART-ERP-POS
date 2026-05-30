@@ -1,0 +1,35 @@
+name: Henber AP Align
+
+on:
+  workflow_dispatch:
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Recalc supplier balances and rebuild GPB on Henber
+        run: |
+          scp -i ~/.ssh/prod_key -o ConnectTimeout=30 \
+            scripts/henber-ap-align.mjs \
+            root@209.38.203.138:/tmp/henber-ap-align.mjs
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<'REMOTE'
+          set -euo pipefail
+          docker cp /tmp/henber-ap-align.mjs smarterp-backend:/tmp/henber-ap-align.mjs
+          docker exec -u root smarterp-backend cp /tmp/henber-ap-align.mjs /app/henber-ap-align.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/henber-ap-align.mjs
+          docker exec -w /app smarterp-backend node henber-ap-align.mjs
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key

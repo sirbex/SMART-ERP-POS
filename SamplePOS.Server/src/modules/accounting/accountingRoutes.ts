@@ -832,14 +832,26 @@ router.get(
     FROM customers
     WHERE balance > 0
       `),
-      // Accounts payable — from GL account 2100 balance
+      // Accounts payable — supplier invoice subledger (matches Supplier Payments / Report Integrity)
       pool.query(`
     SELECT 
-      (SELECT COUNT(*) FROM suppliers WHERE "IsActive" = true)::int as supplier_count,
-      COALESCE(SUM(gpb.credit_total) - SUM(gpb.debit_total), 0) as total_payables
-    FROM gl_period_balances gpb
-    JOIN accounts a ON a."Id" = gpb.account_id
-    WHERE a."AccountCode" = '2100'
+      (SELECT COUNT(*) FROM suppliers WHERE "IsActive" = true)::int AS supplier_count,
+      GREATEST(COALESCE((
+        SELECT SUM(
+          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+               THEN -COALESCE(si."OutstandingBalance", 0)
+               ELSE  COALESCE(si."OutstandingBalance", 0) END
+        )
+        FROM supplier_invoices si
+        WHERE si.deleted_at IS NULL
+          AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED')
+      ), 0), 0) AS total_payables,
+      COALESCE((
+        SELECT SUM(gpb.credit_total) - SUM(gpb.debit_total)
+        FROM gl_period_balances gpb
+        JOIN accounts a ON a."Id" = gpb.account_id
+        WHERE a."AccountCode" = '2100'
+      ), 0) AS gl_2100_total
       `),
       // Recent ledger transactions count (where actual data lives)
       pool.query(`
@@ -921,6 +933,7 @@ router.get(
         payables: {
           supplierCount: parseInt(payablesData.supplier_count || '0'),
           totalAmount: Money.parseDb(payablesData.total_payables).toNumber(),
+          gl2100Total: Money.parseDb(payablesData.gl_2100_total).toNumber(),
         },
         depositLiabilities: {
           depositCount: parseInt(depositData.deposit_count || '0'),

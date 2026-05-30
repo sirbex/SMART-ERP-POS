@@ -126,7 +126,7 @@ const SupplierPaymentsPage: React.FC = () => {
     const [endDate, setEndDate] = useState<string>('');
 
     // SINGLE SOURCE OF TRUTH: Use the same useSuppliers hook as SuppliersPage
-    const { data: suppliersData, isLoading: suppliersLoading, error: suppliersError, refetch: refetchSuppliers } = useSuppliers({ page: 1, limit: 100 });
+    const { data: suppliersData, isLoading: suppliersLoading, error: suppliersError, refetch: refetchSuppliers } = useSuppliers({ page: 1, limit: 500 });
 
     // Extract suppliers from response (same pattern as SuppliersPage)
     const suppliers: Supplier[] = useMemo(() => {
@@ -513,9 +513,10 @@ const SupplierPaymentsPage: React.FC = () => {
     );
 
     // Calculate totals for summary cards
-    const totalOutstandingAllSuppliers = suppliers.reduce((sum, s) =>
-        sum + safeParseFloat(s.outstandingBalance), 0
-    );
+    // Invoice subledger total (SSOT) — do not sum paginated supplier rows
+    const totalOutstandingAllSuppliers = invoiceSummary.totalOutstanding > 0
+        ? invoiceSummary.totalOutstanding
+        : suppliers.reduce((sum, s) => sum + safeParseFloat(s.outstandingBalance), 0);
     const suppliersWithBalance = suppliers.filter(s => safeParseFloat(s.outstandingBalance) > 0).length;
     const totalAllocatedAmount = payments.reduce((sum, p) => new Decimal(sum).plus(safeParseFloat(p.allocatedAmount)).toNumber(), 0);
     const totalUnallocatedCredit = payments.reduce((sum, p) => new Decimal(sum).plus(safeParseFloat(p.unallocatedAmount)).toNumber(), 0);

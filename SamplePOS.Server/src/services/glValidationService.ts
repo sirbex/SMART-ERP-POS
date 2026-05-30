@@ -267,20 +267,27 @@ export async function checkAPReconciliation(dbPool?: pg.Pool): Promise<Reconcili
   const result = await pool.query(`
     SELECT 
       COALESCE(
-        -- Only compare supplier-facing AP entries (GR, returns, payments).
-        -- EXPENSE / EXPENSE_PAYMENT entries also post to 2100 but are NOT
-        -- tracked in suppliers.OutstandingBalance — excluding them prevents
-        -- a false drift equal to net-unpaid-expense obligations.
         (SELECT SUM(le."CreditAmount") - SUM(le."DebitAmount")
          FROM ledger_entries le
          JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
          JOIN accounts a ON a."Id" = le."AccountId"
          WHERE a."AccountCode" = '2100'
-           AND lt."ReferenceType" IN ('GOODS_RECEIPT', 'RETURN_GRN', 'SUPPLIER_PAYMENT')), 0
+           AND lt."ReferenceType" NOT IN ('EXPENSE', 'EXPENSE_PAYMENT')
+           AND lt."Status" = 'POSTED'
+           AND COALESCE(lt."IsReversed", false) = false), 0
       ) as gl_balance,
-      COALESCE(
-        (SELECT SUM("OutstandingBalance") FROM suppliers), 0
-      ) as subledger_balance
+      COALESCE((
+        SELECT SUM(
+          CASE
+            WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+              THEN -COALESCE(si."OutstandingBalance", 0)
+            ELSE COALESCE(si."OutstandingBalance", 0)
+          END
+        )
+        FROM supplier_invoices si
+        WHERE si.deleted_at IS NULL
+          AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED')
+      ), 0) as subledger_balance
   `);
 
   const glBalance = new Decimal(result.rows[0]?.gl_balance || 0).toNumber();
