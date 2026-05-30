@@ -13,7 +13,7 @@ import {
   getRefreshToken,
   getAccessToken,
   clearTokens,
-  refreshAccessToken,
+  refreshAccessTokenDeduped,
 } from '../hooks/useTokenRefresh';
 import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
@@ -92,7 +92,7 @@ apiClient.interceptors.request.use(
       try { await waitForAuthenticated(); } catch { /* EXPIRED — response interceptor handles */ }
     } else if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
       try {
-        await refreshAccessToken();
+        await refreshAccessTokenDeduped();
       } catch {
         // Refresh failed while online — response interceptor handles the resulting 401
       }
@@ -143,17 +143,28 @@ apiClient.interceptors.response.use(
     return response;
   },
   async (error: AxiosError<ApiResponse>) => {
-    // Log error
-    console.error('[API Response Error]', {
-      url: error.config?.url,
-      method: error.config?.method,
-      status: error.response?.status,
-      data: error.response?.data,
-    });
+    // Log error (status undefined = no HTTP response: network, timeout, or aborted)
+    const isNetworkFailure = !error.response;
+    if (isNetworkFailure) {
+      console.warn('[API Network Error]', {
+        url: error.config?.url,
+        method: error.config?.method,
+        code: error.code,
+        message: error.message,
+        online: navigator.onLine,
+      });
+    } else {
+      console.error('[API Response Error]', {
+        url: error.config?.url,
+        method: error.config?.method,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+    }
 
     // ── Offline: enqueue mutations for later replay ──
-    const isNetworkFailure = !error.response && !navigator.onLine;
-    if (isNetworkFailure && error.config) {
+    const isOfflineMutation = !error.response && !navigator.onLine;
+    if (isOfflineMutation && error.config) {
       const cfg = error.config as InternalAxiosRequestConfig & { headers: Record<string, string> };
       const idempotencyKey = cfg.headers?.['X-Idempotency-Key'] as string | undefined;
       if (idempotencyKey) {
@@ -204,7 +215,7 @@ apiClient.interceptors.response.use(
       if (originalRequest && !originalRequest._retry && getRefreshToken()) {
         originalRequest._retry = true;
         try {
-          await refreshAccessToken();
+          await refreshAccessTokenDeduped();
           const token = getAccessToken();
           if (token && originalRequest.headers) {
             originalRequest.headers.Authorization = `Bearer ${token}`;

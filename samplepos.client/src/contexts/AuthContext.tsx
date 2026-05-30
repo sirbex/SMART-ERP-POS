@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo } from 'react';
-import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessToken, resetAuthState } from '../hooks/useTokenRefresh';
+import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessToken, refreshAccessTokenDeduped, resetAuthState } from '../hooks/useTokenRefresh';
 import { apiClient } from '../utils/api';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
 import { setupAuthBroadcastListener, onAuthBroadcast, broadcastAuthEvent } from '../lib/authBroadcast';
@@ -92,7 +92,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // expiry so the profile validation gets a fresh token, not a 401.
           if (navigator.onLine && (isTokenExpired() || willExpireInNext(2)) && getRefreshToken()) {
             try {
-              await refreshAccessToken();
+              await refreshAccessTokenDeduped();
               // Re-read the freshly stored token for the profile check below
               token = localStorage.getItem('auth_token') || token;
             } catch {
@@ -108,7 +108,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // This prevents: expired sessions, revoked accounts, spoofed localStorage.
           if (navigator.onLine) {
             try {
-              const validationRes = await apiClient.get('/auth/profile');
+              const profileController = new AbortController();
+              const profileTimeout = setTimeout(() => profileController.abort(), 12_000);
+              const validationRes = await apiClient.get('/auth/profile', {
+                signal: profileController.signal,
+              });
+              clearTimeout(profileTimeout);
               // 200: sync role/id from server to prevent localStorage role spoofing
               if (validationRes.data?.success && validationRes.data?.data) {
                 const serverUser = validationRes.data.data;
@@ -119,8 +124,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 localStorage.setItem('user', JSON.stringify(userData));
               }
             } catch (err) {
-              const status = (err as AxiosError)?.response?.status;
-              if (status === 401 || status === 403) {
+              const axErr = err as AxiosError;
+              const status = axErr?.response?.status;
+              const aborted =
+                axErr?.code === 'ERR_CANCELED' ||
+                axErr?.code === 'ECONNABORTED' ||
+                axErr?.message?.includes('aborted');
+              if (aborted) {
+                // Slow/unreachable API — use cached session; do not block the app
+              } else if (status === 401 || status === 403) {
                 // Token is invalid/revoked — interceptor already called clearTokens().
                 // Just bail out of initAuth so we don't set isAuthenticated.
                 return;

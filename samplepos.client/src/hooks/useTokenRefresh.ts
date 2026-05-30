@@ -19,7 +19,11 @@ import { broadcastAuthEvent } from '../lib/authBroadcast';
 // build401Handler → _refreshOnce → refreshAccessToken loop that clears tokens
 // before the pending request can read them (root cause of "Authentication
 // token required" on the next request after a session expiry).
-const _refreshHttp = axios.create();
+const REFRESH_HTTP_TIMEOUT_MS = 15_000;
+
+const _refreshHttp = axios.create({
+    timeout: REFRESH_HTTP_TIMEOUT_MS,
+});
 
 export { resetAuthState };
 
@@ -210,7 +214,7 @@ function _refreshOnce(): Promise<void> {
                 broadcastAuthEvent({ type: 'TOKEN_REFRESH' });
             })
             .catch((err: unknown) => {
-                // Network error → keep AUTHENTICATED so requests can retry later
+                // Network error / timeout → keep AUTHENTICATED so requests can retry later
                 const isNetworkError = err instanceof Error &&
                     (!('response' in err) || (err as AxiosError).response == null);
                 if (navigator.onLine && !isNetworkError) {
@@ -226,6 +230,11 @@ function _refreshOnce(): Promise<void> {
             });
     }
     return _inProcessRefresh;
+}
+
+/** Deduplicated refresh — use from apiClient interceptors (same as attachAuthInterceptors). */
+export function refreshAccessTokenDeduped(): Promise<void> {
+    return _refreshOnce();
 }
 
 /**

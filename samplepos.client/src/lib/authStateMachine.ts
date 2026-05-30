@@ -75,13 +75,36 @@ export function onAuthStateChange(fn: StateListener): () => void {
  * any request interceptor can `await waitForAuthenticated()` and the request
  * will hold until the refresh resolves.
  */
-export function waitForAuthenticated(): Promise<void> {
+/**
+ * Wait until auth is ready to send API requests.
+ * @param timeoutMs Max wait while REFRESHING (0 = no limit). Prevents hung interceptors.
+ */
+export function waitForAuthenticated(timeoutMs = 20_000): Promise<void> {
     if (_current === 'AUTHENTICATED') return Promise.resolve();
     if (_current === 'EXPIRED') return Promise.reject(new Error('Session expired'));
 
-    // REFRESHING — park the caller until state changes
+    // REFRESHING — park the caller until state changes or timeout
     return new Promise<void>((resolve, reject) => {
-        _waiters.push({ resolve, reject });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const waiter: Waiter = {
+            resolve: () => {
+                if (timer) clearTimeout(timer);
+                resolve();
+            },
+            reject: (err) => {
+                if (timer) clearTimeout(timer);
+                reject(err);
+            },
+        };
+        _waiters.push(waiter);
+
+        if (timeoutMs > 0) {
+            timer = setTimeout(() => {
+                const idx = _waiters.indexOf(waiter);
+                if (idx >= 0) _waiters.splice(idx, 1);
+                reject(new Error('Auth refresh wait timed out'));
+            }, timeoutMs);
+        }
     });
 }
 
