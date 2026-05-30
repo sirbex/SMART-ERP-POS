@@ -65,7 +65,7 @@ import type pg from 'pg';
 import { PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { Money, Decimal } from '../utils/money.js';
-import { safeParseInt } from '../utils/safeParse.js';
+import { fiscalPartsFromIsoDate, safeParseInt } from '../utils/safeParse.js';
 import logger from '../utils/logger.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import {
@@ -845,7 +845,7 @@ export class AccountingCore {
             const originalResult = await client.query(
                 `
         SELECT 
-          lt."Id", lt."TransactionNumber", lt."Description", lt."Status",
+          lt."Id", lt."TransactionNumber", lt."TransactionDate", lt."Description", lt."Status",
           lt."ReferenceType", lt."ReferenceId", lt."ReferenceNumber"
         FROM ledger_transactions lt
         WHERE lt."Id" = $1
@@ -860,10 +860,16 @@ export class AccountingCore {
             const original = originalResult.rows[0];
             const origDateStr =
                 original.TransactionDate instanceof Date
-                    ? original.TransactionDate.toISOString()
-                    : String(original.TransactionDate);
-            const origYear = parseInt(origDateStr.substring(0, 4), 10);
-            const origMonth = parseInt(origDateStr.substring(5, 7), 10);
+                    ? original.TransactionDate.toISOString().slice(0, 10)
+                    : String(original.TransactionDate).slice(0, 10);
+            const { year: origYear, month: origMonth } = fiscalPartsFromIsoDate(
+                origDateStr,
+                'Original transaction date',
+            );
+            const { year: revYear, month: revMonth } = fiscalPartsFromIsoDate(
+                request.reversalDate,
+                'Reversal date',
+            );
 
             if (original.Status === 'REVERSED') {
                 throw new AccountingError('Transaction already reversed', 'ALREADY_REVERSED');
@@ -992,9 +998,6 @@ export class AccountingCore {
                 // UPSERT gl_period_balances (SAP FAGLFLEXT) — reversal uses reversalDate
                 //     Defense-in-depth: isPeriodOpen() already gates this function,
                 //     but the WHERE clause below provides a DB-level safety net.
-                const revYear = parseInt(request.reversalDate.substring(0, 4), 10);
-                const revMonth = parseInt(request.reversalDate.substring(5, 7), 10);
-
                 if (process.env.LEGACY_GL_PERIOD_WRITES === 'true') {
                     // LEGACY escape hatch: inline incremental UPSERT (set env var to revert).
                     const revUpsertResult = await client.query(
