@@ -53,22 +53,19 @@ async function assertOnHandAfterCustomerReturn(
   }
 }
 
+type SaleItemBatchRow = {
+  id: string;
+  batch_id: string | null;
+  conversion_factor: string | number | null;
+  unit_cost: string | number | null;
+};
+
 async function resolveSaleItemFromNote(
   client: PoolClient,
   noteId: string,
   productId: string,
-): Promise<{
-  saleItemId: string;
-  batch_id: string | null;
-  conversion_factor: string | number | null;
-  unit_cost: string | number | null;
-} | null> {
-  const res = await client.query<{
-    id: string;
-    batch_id: string | null;
-    conversion_factor: string | number | null;
-    unit_cost: string | number | null;
-  }>(
+): Promise<SaleItemBatchRow | null> {
+  const res = await client.query<SaleItemBatchRow>(
     `SELECT si.id, si.batch_id, si.conversion_factor, si.unit_cost
      FROM invoices cn
      JOIN invoices inv ON inv.id = cn.reference_invoice_id
@@ -120,7 +117,11 @@ async function resolveReturnQuantities(
     const linked = await resolveSaleItemFromNote(client, params.noteId, params.productId);
     if (linked) {
       saleItemId = linked.id;
-      si = linked;
+      si = {
+        batch_id: linked.batch_id,
+        conversion_factor: linked.conversion_factor,
+        unit_cost: linked.unit_cost,
+      };
     }
   }
 
