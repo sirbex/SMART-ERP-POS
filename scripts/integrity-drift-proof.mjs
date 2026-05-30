@@ -167,7 +167,8 @@ try {
            COALESCE((
              SELECT SUM(ib.remaining_quantity)
              FROM inventory_batches ib
-             WHERE ib.product_id = ili."ProductId" AND ib.remaining_quantity > 0
+             WHERE ib.product_id = NULLIF(TRIM(ili."ProductId"), '')::uuid
+             AND ib.remaining_quantity > 0
            ), 0) AS batch_qty,
            (ili."Quantity" * ili."UnitPrice") AS cn_line_value,
            CASE
@@ -185,10 +186,11 @@ try {
     LEFT JOIN stock_movements sm
       ON sm.reference_type = 'CREDIT_NOTE'
      AND sm.reference_id = i.id
-     AND sm.product_id = ili."ProductId"
+     AND sm.product_id = NULLIF(TRIM(ili."ProductId"), '')::uuid
     WHERE i.document_type = 'CREDIT_NOTE'
       AND i.returns_goods = true
       AND i.status = 'POSTED'
+      AND NULLIF(TRIM(ili."ProductId"), '') IS NOT NULL
     GROUP BY i.id, i.invoice_number, p.name, ili."ProductId", ili."Quantity", ili."UnitPrice"
     ORDER BY i.invoice_number
     LIMIT 30
