@@ -26,6 +26,14 @@ import { PoolClient } from 'pg';
  * @param productId - UUID of the product to sync
  */
 export async function syncProductQuantity(client: PoolClient, productId: string): Promise<void> {
+    // Ensure aggregate row exists (legacy products may lack product_inventory)
+    await client.query(
+        `INSERT INTO product_inventory (product_id, quantity_on_hand, updated_at)
+         VALUES ($1, 0, CURRENT_TIMESTAMP)
+         ON CONFLICT (product_id) DO NOTHING`,
+        [productId],
+    );
+
     // Step 1: Fix batch statuses before aggregating — prevents the DEPLETED-with-stock bug
     await client.query(
         `UPDATE inventory_batches

@@ -1,0 +1,53 @@
+name: Heal Customer Return On-Hand (CN)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: 'Tenant database'
+        required: true
+        default: 'henber'
+        type: choice
+        options:
+          - henber
+          - dynamics
+      cn_number:
+        description: 'Posted credit note number (e.g. CN-2026-0003)'
+        required: true
+
+jobs:
+  heal-cn:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Heal on-hand for posted customer return CN
+        env:
+          TENANT: ${{ github.event.inputs.tenant }}
+          CN_NUMBER: ${{ github.event.inputs.cn_number }}
+        run: |
+          scp -i ~/.ssh/prod_key -o ConnectTimeout=30 \
+            scripts/heal-cn-return-on-hand.mjs \
+            root@209.38.203.138:/tmp/heal-cn-return-on-hand.mjs
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<REMOTE
+          set -euo pipefail
+          docker cp /tmp/heal-cn-return-on-hand.mjs smarterp-backend:/tmp/heal-cn-return-on-hand.mjs
+          docker exec -u root smarterp-backend cp /tmp/heal-cn-return-on-hand.mjs /app/heal-cn-return-on-hand.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/heal-cn-return-on-hand.mjs
+          docker exec -w /app \
+            -e TENANT=${TENANT} \
+            -e CN_NUMBER=${CN_NUMBER} \
+            smarterp-backend node heal-cn-return-on-hand.mjs "${CN_NUMBER}"
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key

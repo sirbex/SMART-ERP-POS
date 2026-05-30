@@ -27,16 +27,28 @@ describe('restoreInventoryForCustomerCreditNoteReturn', () => {
     const batchId = '22222222-2222-2222-2222-222222222222';
     const productId = '33333333-3333-3333-3333-333333333333';
 
+    let onHandReads = 0;
     mockQuery.mockImplementation(async (sql: string) => {
-      if (sql.includes('FROM sale_items')) {
+      if (sql.includes('FROM products') && sql.includes('quantity_on_hand')) {
+        onHandReads += 1;
+        const qty = onHandReads <= 1 ? '0' : '2';
+        return { rows: [{ qty }] } as QueryResult;
+      }
+      if (sql.includes('FROM sale_items WHERE id')) {
         return {
           rows: [{ batch_id: batchId, conversion_factor: '1', unit_cost: '45000' }],
         } as QueryResult;
+      }
+      if (sql.includes('INSERT INTO product_inventory')) {
+        return { rows: [] } as QueryResult;
       }
       if (sql.includes('UPDATE inventory_batches') && sql.includes('remaining_quantity')) {
         return { rows: [], rowCount: 1 } as QueryResult;
       }
       if (sql.includes('INSERT INTO cost_layers')) {
+        return { rows: [] } as QueryResult;
+      }
+      if (sql.includes('UPDATE product_inventory') || sql.includes('UPDATE products')) {
         return { rows: [] } as QueryResult;
       }
       return { rows: [] } as QueryResult;
