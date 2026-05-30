@@ -184,7 +184,7 @@ try {
     JOIN products p ON p.id = ili."ProductId"
     LEFT JOIN stock_movements sm
       ON sm.reference_type = 'CREDIT_NOTE'
-     AND sm.reference_id::text = i.id::text
+     AND sm.reference_id = i.id
      AND sm.product_id = ili."ProductId"
     WHERE i.document_type = 'CREDIT_NOTE'
       AND i.returns_goods = true
@@ -280,23 +280,28 @@ try {
 
   await section(
     pool,
-    'AP PROOF: completed GRs without supplier invoice (GL posted, subledger missing)',
+    'AP PROOF: completed GRs without posted supplier bill (3-way match gap)',
     `
-    SELECT COUNT(*)::int AS gr_without_bill,
-           COALESCE(SUM(gr_totals.gr_value), 0) AS est_gr_value
+    SELECT COUNT(*)::int AS gr_without_posted_bill,
+           COALESCE(SUM(gr_value), 0) AS est_gr_value
     FROM (
       SELECT gr.id,
-             COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) AS gr_value
+             COALESCE(SUM(gri.received_quantity * gri.cost_price)
+               FILTER (WHERE NOT COALESCE(gri.is_bonus, false)), 0) AS gr_value
       FROM goods_receipts gr
       JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
       WHERE gr.status = 'COMPLETED'
         AND NOT EXISTS (
-          SELECT 1 FROM supplier_invoices si
-          WHERE si.grn_id = gr.id AND si.deleted_at IS NULL
-            AND UPPER(si."Status") NOT IN ('CANCELLED', 'DELETED')
+          SELECT 1 FROM supplier_invoice_grn_links sigl
+          JOIN supplier_invoices si ON si."Id" = sigl.invoice_id
+          WHERE sigl.grn_id = gr.id
+            AND si.is_posted_to_gl = TRUE
+            AND si.deleted_at IS NULL
         )
       GROUP BY gr.id
-    ) gr_totals
+      HAVING COALESCE(SUM(gri.received_quantity * gri.cost_price)
+        FILTER (WHERE NOT COALESCE(gri.is_bonus, false)), 0) > 0
+    ) t
     `,
   );
 
