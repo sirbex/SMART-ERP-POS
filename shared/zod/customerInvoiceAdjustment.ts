@@ -3,6 +3,7 @@
  * SAP/Odoo-style: price correction (CN, no stock) or return goods (CN + RETURN stock)
  */
 import { z } from 'zod';
+import { positiveFiniteQuantity } from './numeric.js';
 
 export const PriceCorrectionLineSchema = z.object({
     /** sale_items.id — server recalculates credit from pricing engine */
@@ -19,7 +20,7 @@ export const AdjustCustomerPriceCorrectionSchema = z.object({
 
 export const ReturnGoodsLineSchema = z.object({
     saleItemId: z.string().uuid('Sale item ID must be a valid UUID'),
-    quantity: z.number().positive('Quantity must be positive'),
+    quantity: positiveFiniteQuantity,
 }).strict();
 
 export const AdjustCustomerReturnSchema = z.object({

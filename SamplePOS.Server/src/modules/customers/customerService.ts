@@ -13,6 +13,7 @@ import * as arPaymentRepository from '../ar-payments/arPaymentRepository.js';
 import { invoiceRepository } from '../invoices/invoiceRepository.js';
 import * as openItemEngine from '../ar-payments/openItemAllocationEngine.js';
 import { logOpeningBalanceAudit } from '../../utils/openingBalanceAudit.js';
+import { assertPositiveFinite } from '../../utils/safeParse.js';
 import * as auditRepository from '../audit/auditRepository.js';
 import { CustomerStatementSchema } from '../../../../shared/zod/customerStatement.js';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
@@ -574,10 +575,8 @@ export async function importCustomerOpeningBalance(
   pool: Pool,
   data: ImportCustomerOpeningBalanceInput
 ): Promise<{ invoiceId: string; invoiceNumber: string; amount: number }> {
-  const amount = new Decimal(data.amount);
-  if (amount.lessThanOrEqualTo(0)) {
-    throw new Error('Opening balance amount must be greater than zero');
-  }
+  const amountNum = assertPositiveFinite(data.amount, 'Opening balance amount');
+  const amount = new Decimal(amountNum);
 
   return UnitOfWork.run(pool, async (client) => {
     await checkAccountingPeriodOpen(client, data.asOfDate);
@@ -628,7 +627,7 @@ export async function importCustomerOpeningBalance(
          $4, $5,
          $6, 0, $6,
          0, $6,
-         'UNPAID', 0, 'OPENING_BALANCE', $7, 'CUTOVER',
+         'UNPAID', 30, 'OPENING_BALANCE', $7, 'CUTOVER',
          $8, NOW(), NOW()
        ) RETURNING id`,
       [

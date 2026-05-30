@@ -9,12 +9,12 @@ import { pool as globalPool } from '../../db/pool.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
-import Decimal from 'decimal.js';
 import {
   CustomerOpeningBalanceSchema,
   CustomerOpeningBalanceReplaceSchema,
   CustomerOpeningBalanceCancelSchema,
 } from '../../../../shared/zod/customerOpeningBalance.js';
+import { assertPositiveFinite } from '../../utils/safeParse.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const LedgerQuerySchema = z.object({
@@ -44,7 +44,7 @@ export const importCustomerOpeningBalance = asyncHandler(async (req: Request, re
   const validated = CustomerOpeningBalanceSchema.parse(req.body);
   const result = await customerService.importCustomerOpeningBalance(pool, {
     customerId: validated.customerId,
-    amount: new Decimal(validated.amount).toNumber(),
+    amount: assertPositiveFinite(validated.amount, 'Opening balance amount'),
     asOfDate: validated.asOfDate,
     dueDate: validated.dueDate,
     notes: validated.notes,
@@ -61,7 +61,7 @@ export const replaceCustomerOpeningBalance = asyncHandler(async (req: Request, r
   const validated = CustomerOpeningBalanceReplaceSchema.parse(req.body);
   const result = await customerService.replaceCustomerOpeningBalance(pool, {
     customerId: validated.customerId,
-    amount: new Decimal(validated.amount).toNumber(),
+    amount: assertPositiveFinite(validated.amount, 'Opening balance amount'),
     asOfDate: validated.asOfDate,
     dueDate: validated.dueDate,
     notes: validated.notes,

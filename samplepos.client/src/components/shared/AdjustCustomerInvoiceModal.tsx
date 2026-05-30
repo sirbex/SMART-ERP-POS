@@ -330,10 +330,16 @@ export function AdjustCustomerInvoiceModal({
                     invoiceId,
                     reason: returnReason,
                     notes: returnNotes || undefined,
-                    lines: selectedReturnLines.map(l => ({
-                        saleItemId: l.line.saleItemId,
-                        quantity: parseFloat(l.quantity),
-                    })),
+                    lines: selectedReturnLines.map(l => {
+                        const q = parseFloat(l.quantity);
+                        if (!Number.isFinite(q) || q <= 0) {
+                            throw new Error(`Invalid return quantity for ${l.line.productName}`);
+                        }
+                        return {
+                            saleItemId: l.line.saleItemId,
+                            quantity: q,
+                        };
+                    }),
                 });
             }
 

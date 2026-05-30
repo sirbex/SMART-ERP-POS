@@ -2961,9 +2961,9 @@ export const salesService = {
         const remainingQty = new Decimal(saleItem.remainingQty);
         const refundQty = new Decimal(refundItem.quantity);
 
-        if (refundQty.lessThanOrEqualTo(0)) {
+        if (!refundQty.isFinite() || refundQty.lessThanOrEqualTo(0)) {
           throw new BusinessError(
-            'Refund quantity must be positive',
+            'Refund quantity must be a positive finite number',
             'ERR_REFUND_007',
             { saleItemId: refundItem.saleItemId, quantity: refundItem.quantity }
           );
@@ -3040,7 +3040,7 @@ export const salesService = {
 
       // Increment refunded_qty on each sale_item
       for (const { saleItem, refundQty } of validatedItems) {
-        await salesRepository.incrementRefundedQty(client, saleItem.id, refundQty.toNumber());
+        await salesRepository.incrementRefundedQty(client, saleItem.id, Money.toNumber(refundQty));
       }
 
       // ── 5. Restore inventory for each refunded item ─────────────
@@ -3052,9 +3052,16 @@ export const salesService = {
         // refundQty is expressed in the original selling UoM (display units).
         // Multiply by conversionFactor to get the physical base-unit quantity to restore.
         const storedConvFactor = saleItem.conversionFactor
-          ? new Decimal(saleItem.conversionFactor).toNumber()
+          ? Money.toNumber(Money.parseDb(saleItem.conversionFactor))
           : 1;
-        const quantity = Money.toNumber(new Decimal(refundQty).times(storedConvFactor));
+        const quantity = Money.toNumber(Money.multiply(refundQty, storedConvFactor));
+        if (!Number.isFinite(quantity) || quantity <= 0) {
+          throw new BusinessError(
+            'Invalid refund quantity after unit conversion',
+            'ERR_REFUND_007',
+            { saleItemId: saleItem.id, refundQty: refundQty.toNumber(), conversionFactor: storedConvFactor }
+          );
+        }
         const unitCost = Money.toNumber(Money.parseDb(saleItem.unitCost));
 
         // Skip custom items (no inventory)

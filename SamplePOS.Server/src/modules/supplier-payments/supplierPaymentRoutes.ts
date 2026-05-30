@@ -21,6 +21,7 @@ import {
     SupplierOpeningBalanceReplaceSchema,
     SupplierOpeningBalanceCancelSchema,
 } from '../../../../shared/zod/supplierOpeningBalance.js';
+import { assertPositiveFinite } from '../../utils/safeParse.js';
 
 // Zod schemas for validation
 const UuidParamSchema = z.object({ id: z.string().uuid() });
@@ -766,7 +767,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
             const validated = SupplierOpeningBalanceSchema.parse(req.body);
             const result = await supplierPaymentService.importSupplierOpeningBalance(p(req), {
                 supplierId: validated.supplierId,
-                amount: new Decimal(validated.amount).toNumber(),
+                amount: assertPositiveFinite(validated.amount, 'Opening balance amount'),
                 asOfDate: validated.asOfDate,
                 dueDate: validated.dueDate,
                 notes: validated.notes,
@@ -786,7 +787,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
             const validated = SupplierOpeningBalanceReplaceSchema.parse(req.body);
             const result = await supplierPaymentService.replaceSupplierOpeningBalance(p(req), {
                 supplierId: validated.supplierId,
-                amount: new Decimal(validated.amount).toNumber(),
+                amount: assertPositiveFinite(validated.amount, 'Opening balance amount'),
                 asOfDate: validated.asOfDate,
                 dueDate: validated.dueDate,
                 notes: validated.notes,

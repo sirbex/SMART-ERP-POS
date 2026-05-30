@@ -1,9 +1,10 @@
 import { z } from 'zod';
+import { positiveFiniteAmount } from './numeric.js';
 
 /** Body for POST /customers/opening-balance */
 export const CustomerOpeningBalanceSchema = z.object({
   customerId: z.string().uuid(),
-  amount: z.union([z.number().positive(), z.string().transform(Number)]),
+  amount: positiveFiniteAmount,
   asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   notes: z.string().optional(),
@@ -12,7 +13,9 @@ export const CustomerOpeningBalanceSchema = z.object({
 });
 
 /** Body for POST /customers/opening-balance/replace */
-export const CustomerOpeningBalanceReplaceSchema = CustomerOpeningBalanceSchema.extend({
+export const CustomerOpeningBalanceReplaceSchema = CustomerOpeningBalanceSchema.omit({
+  postReason: true,
+}).extend({
   replaceReason: z.string().min(5, 'Reason must be at least 5 characters'),
 });
 

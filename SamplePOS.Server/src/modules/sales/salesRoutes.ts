@@ -101,7 +101,7 @@ const VoidSaleBodySchema = z.object({
 const RefundSaleBodySchema = z.object({
   items: z.array(z.object({
     saleItemId: z.string().uuid(),
-    quantity: z.number().positive(),
+    quantity: z.number().finite('Quantity must be a finite number').positive(),
   })).min(1, 'At least one item is required for refund'),
   reason: z.string().min(1).trim(),
   approvedById: z.string().uuid().optional(),

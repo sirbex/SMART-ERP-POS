@@ -65,6 +65,7 @@ import type pg from 'pg';
 import { PoolClient } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { Money, Decimal } from '../utils/money.js';
+import { safeParseInt } from '../utils/safeParse.js';
 import logger from '../utils/logger.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import {
@@ -509,7 +510,7 @@ export class AccountingCore {
         FROM ledger_transactions
         WHERE "TransactionNumber" ~ '^TXN-[0-9]+$'
       `);
-            const nextNum = parseInt(countResult.rows[0].next_num);
+            const nextNum = safeParseInt(countResult.rows[0].next_num, 1);
             const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
             const transactionId = uuidv4();
 
@@ -907,7 +908,7 @@ export class AccountingCore {
         FROM ledger_transactions
         WHERE "TransactionNumber" ~ '^TXN-[0-9]+$'
       `);
-            const nextNum = parseInt(countResult.rows[0].next_num);
+            const nextNum = safeParseInt(countResult.rows[0].next_num, 1);
             const transactionNumber = `TXN-${String(nextNum).padStart(6, '0')}`;
             const transactionId = uuidv4();
 

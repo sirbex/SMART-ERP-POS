@@ -100,10 +100,11 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
     };
 
     const updateQuantity = (idx: number, qty: number) => {
+        const safeQty = Number.isFinite(qty) ? qty : 1;
         setRefundItems((prev) =>
             prev.map((item, i) =>
                 i === idx
-                    ? { ...item, refundQuantity: Math.max(1, Math.min(qty, item.maxRefundable)) }
+                    ? { ...item, refundQuantity: Math.max(1, Math.min(safeQty, item.maxRefundable)) }
                     : item
             )
         );
@@ -151,6 +152,12 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
         setError(null);
         setIsSubmitting(true);
         try {
+            const invalidQty = selectedItems.some((item) => !Number.isFinite(item.refundQuantity) || item.refundQuantity <= 0);
+            if (invalidQty) {
+                setError('One or more return quantities are invalid');
+                setIsSubmitting(false);
+                return;
+            }
             const response = await api.sales.refundSale(saleId, {
                 items: selectedItems.map((item) => ({
                     saleItemId: item.saleItemId,

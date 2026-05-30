@@ -14,6 +14,7 @@
 import type { Pool, PoolClient } from 'pg';
 import { Money } from '../../utils/money.js';
 import { getBusinessYear, getBusinessDate } from '../../utils/dateRange.js';
+import { safeParseInt } from '../../utils/safeParse.js';
 
 // ============================================================
 // TYPES
@@ -100,7 +101,7 @@ export const creditDebitNoteRepository = {
         );
         if (result.rows.length === 0) return `CN-${year}-0001`;
         const last = result.rows[0].invoice_number as string;
-        const seq = parseInt(last.split('-')[2]) + 1;
+        const seq = safeParseInt(last.split('-')[2], 0) + 1;
         return `CN-${year}-${seq.toString().padStart(4, '0')}`;
     },
 
@@ -115,7 +116,7 @@ export const creditDebitNoteRepository = {
         );
         if (result.rows.length === 0) return `DN-${year}-0001`;
         const last = result.rows[0].invoice_number as string;
-        const seq = parseInt(last.split('-')[2]) + 1;
+        const seq = safeParseInt(last.split('-')[2], 0) + 1;
         return `DN-${year}-${seq.toString().padStart(4, '0')}`;
     },
 
@@ -246,7 +247,7 @@ export const creditDebitNoteRepository = {
       ) VALUES (
         gen_random_uuid(), $1, $2, $3, NULL,
         $4, $4, $5, $6, $7,
-        0, $7, 'DRAFT', 0,
+        0, $7, 'DRAFT', 30,
         $8, $9, $9,
         $10, $11, $12, $13
       ) RETURNING *`,
@@ -559,7 +560,7 @@ export const supplierCreditDebitNoteRepository = {
         );
         if (result.rows.length === 0) return `SCN-${year}-0001`;
         const last = result.rows[0].SupplierInvoiceNumber as string;
-        const seq = parseInt(last.split('-')[2]) + 1;
+        const seq = safeParseInt(last.split('-')[2], 0) + 1;
         return `SCN-${year}-${seq.toString().padStart(4, '0')}`;
     },
 
@@ -574,7 +575,7 @@ export const supplierCreditDebitNoteRepository = {
         );
         if (result.rows.length === 0) return `SDN-${year}-0001`;
         const last = result.rows[0].SupplierInvoiceNumber as string;
-        const seq = parseInt(last.split('-')[2]) + 1;
+        const seq = safeParseInt(last.split('-')[2], 0) + 1;
         return `SDN-${year}-${seq.toString().padStart(4, '0')}`;
     },
 

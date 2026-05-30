@@ -98,7 +98,7 @@ export const OpeningBalancePanel: React.FC<Props> = ({
       return;
     }
     const amt = parseFloat(amount);
-    if (!amt || amt <= 0) {
+    if (!Number.isFinite(amt) || amt <= 0) {
       toast.error('Enter a positive amount');
       return;
     }
@@ -129,7 +129,11 @@ export const OpeningBalancePanel: React.FC<Props> = ({
         const customerPayload = { ...payload, customerId: partyId };
         if (correctMode) {
           await api.customers.replaceOpeningBalance({
-            ...customerPayload,
+            customerId: partyId,
+            amount: amt,
+            asOfDate,
+            dueDate: dueDate || undefined,
+            notes: notes || undefined,
             replaceReason: auditReason,
           });
           toast.success('Customer opening balance corrected');
@@ -141,7 +145,11 @@ export const OpeningBalancePanel: React.FC<Props> = ({
         const supplierPayload = { ...payload, supplierId: partyId };
         if (correctMode) {
           await api.supplierPayments.replaceOpeningBalance({
-            ...supplierPayload,
+            supplierId: partyId,
+            amount: amt,
+            asOfDate,
+            dueDate: dueDate || undefined,
+            notes: notes || undefined,
             replaceReason: auditReason,
           });
           toast.success('Supplier opening balance corrected');

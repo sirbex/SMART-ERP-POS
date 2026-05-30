@@ -4,6 +4,7 @@ import { Money } from '../../utils/money.js';
 import { BusinessError } from '../../middleware/errorHandler.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
+import { safeParseInt } from '../../utils/safeParse.js';
 
 export interface SaleRecord {
   id: string;
@@ -1296,7 +1297,7 @@ export const salesRepository = {
     }
 
     const lastNumber = result.rows[0].refund_number;
-    const sequence = parseInt(lastNumber.split('-')[2]) + 1;
+    const sequence = safeParseInt(lastNumber.split('-')[2], 0) + 1;
     return `REF-${year}-${sequence.toString().padStart(4, '0')}`;
   },
 

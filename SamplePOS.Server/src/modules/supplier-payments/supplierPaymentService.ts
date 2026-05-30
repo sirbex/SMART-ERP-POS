@@ -16,6 +16,7 @@ import { AccountingCore, AccountingError } from '../../services/accountingCore.j
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import { logOpeningBalanceAudit } from '../../utils/openingBalanceAudit.js';
+import { assertPositiveFinite, fiscalPartsFromIsoDate, safeParseInt } from '../../utils/safeParse.js';
 import * as auditRepository from '../audit/auditRepository.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
@@ -1326,10 +1327,8 @@ export async function importSupplierOpeningBalance(
     pool: Pool,
     data: ImportSupplierOpeningBalanceInput
 ): Promise<{ invoiceId: string; invoiceNumber: string; amount: number }> {
-    const amount = new Decimal(data.amount);
-    if (amount.lessThanOrEqualTo(0)) {
-        throw new Error('Opening balance amount must be greater than zero');
-    }
+    const amountNum = assertPositiveFinite(data.amount, 'Opening balance amount');
+    const amount = new Decimal(amountNum);
 
     return UnitOfWork.run(pool, async (client) => {
         // Idempotency: reject if supplier already has an opening balance
@@ -1337,7 +1336,8 @@ export async function importSupplierOpeningBalance(
             `SELECT "Id" FROM supplier_invoices
              WHERE "SupplierId" = $1
                AND document_type = 'OPENING_BALANCE'
-               AND deleted_at IS NULL`,
+               AND deleted_at IS NULL
+               AND UPPER("Status") NOT IN ('CANCELLED', 'VOIDED', 'DELETED')`,
             [data.supplierId]
         );
         if (existing.rows.length > 0) {
@@ -1364,8 +1364,14 @@ export async function importSupplierOpeningBalance(
              FROM supplier_invoices
              WHERE "SupplierInvoiceNumber" LIKE 'OB-%'`
         );
-        const nextNum = seqResult.rows[0].next_num as number;
+        const nextNum = safeParseInt(seqResult.rows[0].next_num, 1);
         const invoiceNumber = `OB-${String(nextNum).padStart(6, '0')}`;
+
+        // Validate dates before GL (prevents NaN fiscal_year/fiscal_period in period balances)
+        fiscalPartsFromIsoDate(data.asOfDate, 'As-of date');
+        if (data.dueDate) {
+            fiscalPartsFromIsoDate(data.dueDate, 'Due date');
+        }
 
         // Create supplier invoice record with document_type = 'OPENING_BALANCE'.
         // This drives supplier balance and aging WITHOUT appearing in the Purchases/Invoices screen.

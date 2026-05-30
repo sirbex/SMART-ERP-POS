@@ -38,6 +38,22 @@ describe('Customer opening balance Zod schemas', () => {
     expect(r.amount).toBe(2500.5);
   });
 
+  it('rejects NaN and non-numeric amount strings', () => {
+    expect(() =>
+      CustomerOpeningBalanceSchema.parse({
+        ...validCustomerOb,
+        amount: 'not-a-number',
+      }),
+    ).toThrow();
+
+    expect(() =>
+      CustomerOpeningBalanceSchema.parse({
+        ...validCustomerOb,
+        amount: Number.NaN,
+      }),
+    ).toThrow();
+  });
+
   it('import requires postReason length >= 5', () => {
     expect(() =>
       CustomerOpeningBalanceSchema.parse({
@@ -47,16 +63,20 @@ describe('Customer opening balance Zod schemas', () => {
     ).toThrow();
   });
 
-  it('replace requires replaceReason length >= 5', () => {
+  it('replace requires replaceReason length >= 5 (postReason not required)', () => {
     expect(() =>
       CustomerOpeningBalanceReplaceSchema.parse({
-        ...validCustomerOb,
+        customerId: validCustomerOb.customerId,
+        amount: 1000,
+        asOfDate: '2026-01-15',
         replaceReason: 'ab',
       }),
     ).toThrow();
 
     const ok = CustomerOpeningBalanceReplaceSchema.parse({
-      ...validCustomerOb,
+      customerId: validCustomerOb.customerId,
+      amount: 1000,
+      asOfDate: '2026-01-15',
       replaceReason: 'Wrong legacy figure',
     });
     expect(ok.replaceReason).toBe('Wrong legacy figure');
@@ -84,19 +104,34 @@ describe('Supplier opening balance Zod schemas', () => {
     expect(r.amount).toBe(500);
   });
 
-  it('replace requires replaceReason length >= 5', () => {
+  it('replace requires replaceReason length >= 5 (postReason not required)', () => {
     expect(() =>
       SupplierOpeningBalanceReplaceSchema.parse({
-        ...validSupplierOb,
+        supplierId: validSupplierOb.supplierId,
+        amount: 500,
+        asOfDate: '2026-01-15',
         replaceReason: 'no',
       }),
     ).toThrow();
 
     const ok = SupplierOpeningBalanceReplaceSchema.parse({
-      ...validSupplierOb,
+      supplierId: validSupplierOb.supplierId,
+      amount: 500,
+      asOfDate: '2026-01-15',
       replaceReason: 'Corrected migration total',
     });
     expect(ok.replaceReason).toBe('Corrected migration total');
+  });
+
+  it('rejects NaN amount on supplier replace', () => {
+    expect(() =>
+      SupplierOpeningBalanceReplaceSchema.parse({
+        supplierId: validSupplierOb.supplierId,
+        amount: Number.NaN,
+        asOfDate: '2026-01-15',
+        replaceReason: 'Corrected amount',
+      }),
+    ).toThrow();
   });
 
   it('cancel validates uuid and reason', () => {

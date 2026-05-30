@@ -361,7 +361,6 @@ export const api = {
       asOfDate: string;
       dueDate?: string;
       notes?: string;
-      postReason: string;
       replaceReason: string;
     }) => apiClient.post<ApiResponse>('customers/opening-balance/replace', data),
     cancelOpeningBalance: (data: { invoiceId: string; reason: string }) =>
@@ -858,7 +857,6 @@ export const api = {
       asOfDate: string;
       dueDate?: string;
       notes?: string;
-      postReason: string;
       replaceReason: string;
     }) => apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance/replace', data),
     cancelOpeningBalance: (data: { invoiceId: string; reason: string }) =>
