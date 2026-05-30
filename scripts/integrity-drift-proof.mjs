@@ -161,43 +161,36 @@ try {
     pool,
     'INVENTORY PROOF: RETURN stock movements vs batch on-hand (posted CNs)',
     `
-    WITH cn_returns AS (
-      SELECT i.invoice_number, ili."ProductId" AS product_id, p.name AS product_name,
-             ili."Quantity" AS qty, ili."UnitPrice" AS unit_price,
-             ili."Description" AS line_desc
-      FROM invoices i
-      JOIN invoice_line_items ili ON ili."InvoiceId" = i.id
-      JOIN products p ON p.id = ili."ProductId"
-      WHERE i.document_type = 'CREDIT_NOTE'
-        AND i.returns_goods = true
-        AND i.status = 'POSTED'
-    ),
-    movements AS (
-      SELECT sm.reference_id, sm.product_id,
-             SUM(CASE WHEN sm.movement_type = 'RETURN' THEN sm.quantity ELSE 0 END) AS return_qty
-      FROM stock_movements sm
-      WHERE sm.reference_type = 'CREDIT_NOTE'
-      GROUP BY sm.reference_id, sm.product_id
-    ),
-    batch_qoh AS (
-      SELECT product_id, COALESCE(SUM(remaining_quantity), 0) AS batch_qty,
-             COALESCE(SUM(remaining_quantity * cost_price), 0) AS batch_value
-      FROM inventory_batches
-      WHERE remaining_quantity > 0
-      GROUP BY product_id
-    )
-    SELECT c.invoice_number, c.product_name, c.qty AS cn_qty, c.unit_price,
-           m.return_qty, b.batch_qty, b.batch_value,
-           (c.qty * c.unit_price) AS cn_line_value,
-           CASE WHEN COALESCE(m.return_qty, 0) < c.qty - 0.001 THEN 'MOVEMENT_QTY_GAP'
-                WHEN COALESCE(b.batch_qty, 0) < c.qty - 0.001 THEN 'BATCH_QTY_GAP'
-                ELSE 'OK' END AS flag
-    FROM cn_returns c
-    LEFT JOIN movements m ON m.reference_id = (
-      SELECT id FROM invoices WHERE invoice_number = c.invoice_number LIMIT 1
-    ) AND m.product_id = c.product_id
-    LEFT JOIN batch_qoh b ON b.product_id = c.product_id
-    ORDER BY c.invoice_number
+    SELECT i.invoice_number, p.name AS product_name,
+           ili."Quantity"::numeric AS cn_qty, ili."UnitPrice"::numeric AS unit_price,
+           COALESCE(SUM(sm.quantity) FILTER (WHERE sm.movement_type = 'RETURN'), 0) AS return_qty,
+           COALESCE((
+             SELECT SUM(ib.remaining_quantity)
+             FROM inventory_batches ib
+             WHERE ib.product_id = ili."ProductId" AND ib.remaining_quantity > 0
+           ), 0) AS batch_qty,
+           (ili."Quantity" * ili."UnitPrice") AS cn_line_value,
+           CASE
+             WHEN COALESCE(SUM(sm.quantity) FILTER (WHERE sm.movement_type = 'RETURN'), 0)
+                  < ili."Quantity" - 0.001 THEN 'MOVEMENT_QTY_GAP'
+             WHEN COALESCE((
+               SELECT SUM(ib.remaining_quantity) FROM inventory_batches ib
+               WHERE ib.product_id = ili."ProductId" AND ib.remaining_quantity > 0
+             ), 0) < ili."Quantity" - 0.001 THEN 'BATCH_QTY_GAP'
+             ELSE 'OK'
+           END AS flag
+    FROM invoices i
+    JOIN invoice_line_items ili ON ili."InvoiceId" = i.id
+    JOIN products p ON p.id = ili."ProductId"
+    LEFT JOIN stock_movements sm
+      ON sm.reference_type = 'CREDIT_NOTE'
+     AND sm.reference_id::text = i.id::text
+     AND sm.product_id = ili."ProductId"
+    WHERE i.document_type = 'CREDIT_NOTE'
+      AND i.returns_goods = true
+      AND i.status = 'POSTED'
+    GROUP BY i.id, i.invoice_number, p.name, ili."ProductId", ili."Quantity", ili."UnitPrice"
+    ORDER BY i.invoice_number
     LIMIT 30
     `,
   );
