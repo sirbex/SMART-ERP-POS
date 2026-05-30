@@ -395,6 +395,38 @@ try {
   console.log(
     'AP Δ>0: GL 2100 > invoices → GR/OB on GL without matching supplier_invoices, or legacy GR→AP postings.',
   );
+  await section(
+    pool,
+    'GPB vs LEDGER (Balance sheet totals check — can show 20k on 1300 if GPB stale)',
+    `
+    WITH gpb AS (
+      SELECT a."AccountCode",
+             COALESCE(SUM(gpb.credit_total) - SUM(gpb.debit_total), 0) AS bal
+      FROM accounts a
+      LEFT JOIN gl_period_balances gpb ON gpb.account_id = a."Id"
+      WHERE a."AccountCode" IN ('1200', '2100', '1300')
+      GROUP BY a."AccountCode"
+    ),
+    le AS (
+      SELECT a."AccountCode",
+             COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS bal
+      FROM accounts a
+      JOIN ledger_entries le ON le."AccountId" = a."Id"
+      JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+      WHERE a."AccountCode" IN ('1200', '2100', '1300')
+        AND ${NET_ACTIVE}
+      GROUP BY a."AccountCode"
+    )
+    SELECT COALESCE(gpb."AccountCode", le."AccountCode") AS code,
+           COALESCE(gpb.bal, 0) AS gpb_balance,
+           COALESCE(le.bal, 0) AS ledger_balance,
+           COALESCE(gpb.bal, 0) - COALESCE(le.bal, 0) AS gpb_minus_ledger
+    FROM gpb
+    FULL OUTER JOIN le ON le."AccountCode" = gpb."AccountCode"
+    ORDER BY 1
+    `,
+  );
+
   console.log('\nDone.');
 } catch (e) {
   console.error(e?.message || e);
