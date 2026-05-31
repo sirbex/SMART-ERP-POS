@@ -21,8 +21,6 @@ import { useProducts } from '../../hooks/useProducts';
 import { useStockMovements } from '../../hooks/useStockMovements';
 import { BatchAdjustmentSchema } from '@shared/zod/inventory';
 import apiClient from '../../utils/api';
-// apiClient reserved for future direct calls
-void apiClient;
 import { handleApiError } from '../../utils/errorHandler';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
@@ -475,19 +473,48 @@ export default function InventoryAdjustmentsPage() {
     return Array.isArray(recentAdjustmentsData.data) ? recentAdjustmentsData.data : [];
   }, [recentAdjustmentsData]);
 
-  // Handle adjustment modal open
-  const handleOpenAdjustModal = (batch: Batch) => {
+  // Handle adjustment modal open — resolve a real inventory_batches row (FEFO) for GL/batch coupling
+  const handleOpenAdjustModal = async (batch: Batch) => {
     if (!canAdjust) {
       alert('You do not have permission to adjust inventory. ADMIN or MANAGER role required.');
       return;
     }
 
-    setSelectedBatch(batch);
+    let resolved = batch;
+    try {
+      const res = await apiClient.get('/inventory/batches', {
+        params: { productId: batch.product_id },
+      });
+      const rows = (res.data?.data ?? []) as Array<{
+        id: string;
+        batch_number: string;
+        remaining_quantity: number | string;
+        cost_price?: number | string;
+        expiry_date?: string | null;
+        status?: string;
+      }>;
+      const withStock = rows.filter((b) => Number(b.remaining_quantity) > 0);
+      const pick = withStock[0] ?? rows[0];
+      if (pick?.id) {
+        resolved = {
+          ...batch,
+          id: pick.id,
+          batch_number: pick.batch_number ?? batch.batch_number,
+          remaining_quantity: Number(pick.remaining_quantity),
+          cost_price: parseFloat(String(pick.cost_price ?? batch.cost_price ?? 0)),
+          expiry_date: pick.expiry_date ?? batch.expiry_date,
+          status: pick.status ?? batch.status,
+        };
+      }
+    } catch {
+      // Fall back to stock-level row; backend will FEFO-select when batchId omitted
+    }
+
+    setSelectedBatch(resolved);
     setMovementCategory('ADJUSTMENT');
     setAdjustmentType('increase');
     setAdjustmentQuantity('');
     setAdjustmentReason('');
-    // Validation done via Zod schema
     setShowAdjustModal(true);
   };
 
@@ -524,8 +551,10 @@ export default function InventoryAdjustmentsPage() {
 
     try {
       const validatedData = BatchAdjustmentSchema.parse({
-        // batchId intentionally omitted — batches here are built from stock levels (no real batch ID).
-        // Backend auto-selects the correct batch via FEFO when batchId is absent.
+        batchId:
+          selectedBatch.id && selectedBatch.id !== selectedBatch.product_id
+            ? selectedBatch.id
+            : undefined,
         productId: selectedBatch.product_id,
         quantity: qty,
         direction,
@@ -559,12 +588,39 @@ export default function InventoryAdjustmentsPage() {
         return;
       }
       // Parse domain errors from the backend
-      const apiErr = error as { response?: { data?: { error_code?: string; details?: { remaining?: number; requested?: number } } } };
+      const apiErr = error as {
+        response?: {
+          data?: {
+            error?: string;
+            error_code?: string;
+            details?: {
+              remaining?: number;
+              requested?: number;
+              deltaGap?: number;
+              batchNumber?: string;
+            };
+          };
+        };
+      };
       const errorCode = apiErr?.response?.data?.error_code;
       const details = apiErr?.response?.data?.details;
       if (errorCode === 'INSUFFICIENT_BATCH_QTY') {
         alert(
           `Cannot reduce stock.\nBatch has ${details?.remaining ?? 0} unit(s) remaining, but ${details?.requested ?? qty} unit(s) were requested.`
+        );
+        return;
+      }
+      if (errorCode === 'ERR_INVENTORY_BATCH_NO_COST') {
+        alert(
+          apiErr?.response?.data?.error ??
+            'This batch has no unit cost. Repair batch valuation or receive stock with cost before reducing inventory.'
+        );
+        return;
+      }
+      if (errorCode === 'ERR_INVENTORY_GL_COUPLING') {
+        alert(
+          apiErr?.response?.data?.error ??
+            `Inventory and GL would drift by ${details?.deltaGap ?? 'unknown'} UGX. Use Repair Valuation or contact support.`
         );
         return;
       }

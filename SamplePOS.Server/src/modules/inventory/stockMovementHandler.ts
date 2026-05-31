@@ -24,7 +24,9 @@ import { syncProductQuantity } from '../../utils/inventorySync.js';
 import {
   assertInventoryCouplingUnchanged,
   captureInventoryCoupling,
+  INVENTORY_COUPLING_TOLERANCE,
 } from '../../services/inventorySubledgerCoupling.js';
+import { Money } from '../../utils/money.js';
 
 export type StockMovementType =
   | 'GOODS_RECEIPT'
@@ -156,11 +158,39 @@ export class StockMovementHandler {
         [newQty.toNumber(), batch.id]
       );
 
-      // Step 7: Calculate inventory value changes
-      // Use the SAME unitCost for GL posting, stock_movements.unit_cost, and cost_layers
-      // to prevent drift between GL balance and cost layer valuation.
-      const unitCost = params.unitCost ?? batch.cost_price ?? 0;
-      const movementValue = new Decimal(Math.abs(quantityChange)).times(unitCost).toNumber();
+      // Step 7: Economic value — MUST match batch subledger (remaining_qty × cost_price).
+      // Coupling guard compares GL(1300) to SUM(batch valuation); FIFO layer cost can differ
+      // from batch.cost_price but only batch rows affect the coupling snapshot.
+      const absQtyDec = Money.parseDb(Math.abs(quantityChange));
+      const unitCostDec = Money.parseDb(params.unitCost ?? batch.cost_price ?? 0);
+
+      if (
+        !isInbound &&
+        GL_MOVEMENT_TYPES.has(params.movementType) &&
+        unitCostDec.lte(INVENTORY_COUPLING_TOLERANCE)
+      ) {
+        const pvRow = await client.query(
+          `SELECT cost_price FROM product_valuation WHERE product_id = $1`,
+          [params.productId],
+        );
+        const pvCost = Money.parseDb(pvRow.rows[0]?.cost_price ?? 0);
+        throw new BusinessError(
+          `Batch ${batch.batch_number} has no unit cost; cannot post a valued stock reduction. ` +
+            (pvCost.gt(INVENTORY_COUPLING_TOLERANCE)
+              ? `Product valuation is ${Money.format(pvCost)} — use Repair Valuation on the batch or select a batch with cost.`
+              : 'Set product cost via goods receipt or opening stock first.'),
+          'ERR_INVENTORY_BATCH_NO_COST',
+          {
+            batchId: batch.id,
+            batchNumber: batch.batch_number,
+            productValuationCost: Money.toNumber(pvCost),
+          },
+        );
+      }
+
+      let movementValueDec = Money.multiply(unitCostDec, absQtyDec);
+      const unitCost = Money.toNumber(unitCostDec);
+      let movementValue = Money.toNumber(movementValueDec);
 
       // Step 8: Generate movement number
       const movementNumber = await this.generateMovementNumber(client);
@@ -190,7 +220,7 @@ export class StockMovementHandler {
       // ADJUSTMENT_IN → create a new cost layer
       // ADJUSTMENT_OUT/DAMAGE/EXPIRY → consume cost layers FIFO
       if (GL_MOVEMENT_TYPES.has(params.movementType)) {
-        const absQty = Math.abs(quantityChange);
+        const absQty = Money.toNumber(absQtyDec);
         if (isInbound) {
           // Create a cost layer for the incoming stock
           await costLayerService.createCostLayer(
@@ -210,13 +240,20 @@ export class StockMovementHandler {
             movementType: params.movementType,
           });
         } else {
-          // Consume cost layers FIFO for outbound adjustments
-          await this.consumeCostLayersFIFO(client, params.productId, absQty);
-          logger.info('Cost layers consumed for stock adjustment', {
-            productId: params.productId,
-            quantity: absQty,
-            movementType: params.movementType,
-          });
+          // Consume cost layers FIFO (economic layers); GL amount stays on batch cost for coupling.
+          const fifoConsumed = await this.consumeCostLayersFIFO(client, params.productId, absQty);
+          if (
+            fifoConsumed.gt(0) &&
+            Money.abs(fifoConsumed.minus(movementValueDec)).gt(INVENTORY_COUPLING_TOLERANCE)
+          ) {
+            logger.warn('[StockMovement] FIFO layer cost differs from batch cost — using batch cost for GL', {
+              productId: params.productId,
+              batchId: batch.id,
+              batchCostTotal: Money.toNumber(movementValueDec),
+              fifoConsumed: Money.toNumber(fifoConsumed),
+              movementType: params.movementType,
+            });
+          }
         }
       }
 
@@ -228,7 +265,8 @@ export class StockMovementHandler {
       // Inventory batch update + GL entry commit atomically.
       // If GL fails → full rollback → no phantom inventory without GL backing.
       if (GL_MOVEMENT_TYPES.has(params.movementType)) {
-        if (movementValue > 0) {
+        movementValue = Money.toNumber(movementValueDec);
+        if (movementValueDec.gt(INVENTORY_COUPLING_TOLERANCE)) {
           const prodRes = await client.query('SELECT name FROM products WHERE id = $1', [params.productId]);
           const productName = prodRes.rows[0]?.name || 'Unknown';
 
@@ -240,6 +278,21 @@ export class StockMovementHandler {
             movementValue,
             productName,
           }, undefined, client);  // pass client → atomic with inventory
+        } else if (
+          !isInbound &&
+          absQtyDec.gt(0) &&
+          unitCostDec.gt(INVENTORY_COUPLING_TOLERANCE)
+        ) {
+          throw new BusinessError(
+            'Inventory GL entry was not created for this stock reduction. Transaction rolled back.',
+            'ERR_INVENTORY_ADJUST_NO_COST',
+            {
+              batchId: batch.id,
+              unitCost,
+              quantity: Money.toNumber(absQtyDec),
+              movementValue,
+            },
+          );
         }
 
         if (inventoryCouplingBefore) {
@@ -511,7 +564,7 @@ export class StockMovementHandler {
     client: PoolClient,
     productId: string,
     quantity: number
-  ): Promise<void> {
+  ): Promise<Decimal> {
     const result = await client.query(
       `SELECT id, remaining_quantity, unit_cost
        FROM cost_layers
@@ -522,12 +575,15 @@ export class StockMovementHandler {
     );
 
     let remaining = new Decimal(quantity);
+    let consumedValue = new Decimal(0);
 
     for (const layer of result.rows) {
       if (remaining.lte(0)) break;
 
       const available = new Decimal(layer.remaining_quantity);
       const consume = Decimal.min(remaining, available);
+      const layerUnitCost = new Decimal(layer.unit_cost);
+      consumedValue = consumedValue.plus(consume.times(layerUnitCost));
       const newQty = available.minus(consume);
 
       await client.query(
@@ -552,6 +608,7 @@ export class StockMovementHandler {
 
     // Recalculate average cost after consumption
     await costLayerService.updateAverageCost(productId, client);
+    return consumedValue;
   }
 
   /**
