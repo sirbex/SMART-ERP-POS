@@ -55,7 +55,9 @@ import { computeSaleItemBaseQuantity } from './saleItemBaseQuantity.js';
 import { reconcileSaleCostsToActualBatchDeduction } from '../../utils/cogsDriftGuard.js';
 import {
   assertInventoryCouplingUnchanged,
+  batchValuationReduction,
   captureInventoryCoupling,
+  INVENTORY_COUPLING_TOLERANCE,
 } from '../../services/inventorySubledgerCoupling.js';
 import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
 
@@ -1292,6 +1294,12 @@ export const salesService = {
         await syncProductQuantity(client, item.productId);
       }
 
+      const couplingAfterDeduction = await captureInventoryCoupling(client);
+      const exactInventoryIssueCost = batchValuationReduction(
+        inventoryCouplingBefore,
+        couplingAfterDeduction,
+      );
+
       // ============================================================
       // ENTERPRISE COGS: physical deduction is source of truth
       // ============================================================
@@ -1311,11 +1319,23 @@ export const salesService = {
         });
       }
 
-      const actualTotalCostNum = Money.toNumber(totalActualCost);
+      const reconciledLineCostNum = Money.toNumber(totalActualCost);
+      if (
+        Math.abs(reconciledLineCostNum - exactInventoryIssueCost) >
+        INVENTORY_COUPLING_TOLERANCE
+      ) {
+        logger.warn('[COGS] Reconciled line cost differs from batch subledger reduction', {
+          saleId: sale.id,
+          saleNumber: sale.saleNumber,
+          reconciledLineCost: reconciledLineCostNum,
+          batchSubledgerReduction: exactInventoryIssueCost,
+        });
+      }
+
       const saleSubtotalDec = new Decimal(sale.subtotal ?? saleData.subtotal ?? 0);
       const saleDiscountDec = new Decimal(sale.discountAmount ?? saleData.discountAmount ?? 0);
       const revenueBeforeTax = saleSubtotalDec.minus(saleDiscountDec);
-      const reconciledProfit = revenueBeforeTax.minus(actualTotalCostNum);
+      const reconciledProfit = revenueBeforeTax.minus(exactInventoryIssueCost);
       const reconciledMargin = revenueBeforeTax.greaterThan(0)
         ? reconciledProfit.dividedBy(revenueBeforeTax).toNumber()
         : 0;
@@ -1324,7 +1344,7 @@ export const salesService = {
         client,
         sale.id,
         {
-          totalCost: actualTotalCostNum,
+          totalCost: exactInventoryIssueCost,
           profit: Money.toNumber(Money.round(reconciledProfit, 2)),
           profitMargin: reconciledMargin,
         },
@@ -1335,9 +1355,9 @@ export const salesService = {
         })),
       );
 
-      sale.totalCost = actualTotalCostNum;
+      sale.totalCost = exactInventoryIssueCost;
 
-      const actualInventoryCost = actualTotalCostNum;
+      const actualInventoryCost = exactInventoryIssueCost;
 
       // GL POSTING: AFTER physical FEFO deduction so COGS credits 1300 at actual batch cost.
       try {

@@ -12,8 +12,8 @@ import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
 
-/** Max allowed change in gap within one transaction (rounding). */
-export const INVENTORY_COUPLING_TOLERANCE = 0.02;
+/** Max allowed change in gap within one transaction (UGX whole-currency rounding). */
+export const INVENTORY_COUPLING_TOLERANCE = 1;
 
 export interface InventoryCouplingSnapshot {
     glNet1300: number;
@@ -47,6 +47,25 @@ export async function captureInventoryCoupling(
     );
 
     return { glNet1300, batchValuation, gap };
+}
+
+/**
+ * Batch subledger cost removed during a sale/issue — same SQL basis as {@link captureInventoryCoupling}.
+ * Use for GL CR Inventory (1300) so ledger credit matches batch valuation delta exactly.
+ */
+export function batchValuationReduction(
+    before: InventoryCouplingSnapshot,
+    after: InventoryCouplingSnapshot,
+): number {
+    return Money.toNumber(
+        Money.round(
+            Money.subtract(
+                Money.parseDb(before.batchValuation),
+                Money.parseDb(after.batchValuation),
+            ),
+            2,
+        ),
+    );
 }
 
 /**
