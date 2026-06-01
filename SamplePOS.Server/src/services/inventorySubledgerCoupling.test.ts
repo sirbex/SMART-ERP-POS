@@ -19,10 +19,10 @@ describe('assertInventoryCouplingUnchanged', () => {
         ).not.toThrow();
     });
 
-    it('allows 1 UGX gap movement (UGX whole-currency rounding)', () => {
+    it('rejects 1 UGX gap movement when GL credit ≠ batch delta (SALE-4872 class)', () => {
         expect(() =>
             assertInventoryCouplingUnchanged(snap(0), snap(1), 'sale SALE-4872'),
-        ).not.toThrow();
+        ).toThrow(BusinessError);
     });
 
     it('throws when gap moves beyond tolerance', () => {

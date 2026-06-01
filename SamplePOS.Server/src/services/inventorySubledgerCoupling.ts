@@ -11,20 +11,18 @@ import { BusinessError } from '../middleware/errorHandler.js';
 import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
+import {
+    batchValuationReduction,
+    INVENTORY_COUPLING_TOLERANCE,
+    type CouplingSnapshot,
+} from './inventoryCouplingMath.js';
 
-/** Max allowed change in gap within one transaction (UGX whole-currency rounding). */
-export const INVENTORY_COUPLING_TOLERANCE = 1;
-
-export interface InventoryCouplingSnapshot {
-    glNet1300: number;
-    batchValuation: number;
-    /** glNet1300 − batchValuation */
-    gap: number;
-}
+export { INVENTORY_COUPLING_TOLERANCE, batchValuationReduction } from './inventoryCouplingMath.js';
+export type { CouplingSnapshot as InventoryCouplingSnapshot } from './inventoryCouplingMath.js';
 
 export async function captureInventoryCoupling(
     client: PoolClient,
-): Promise<InventoryCouplingSnapshot> {
+): Promise<CouplingSnapshot> {
     const glRes = await client.query<{ balance: string }>(`
         SELECT COALESCE(SUM(le."DebitAmount") - SUM(le."CreditAmount"), 0) AS balance
         FROM ledger_entries le
@@ -50,30 +48,11 @@ export async function captureInventoryCoupling(
 }
 
 /**
- * Batch subledger cost removed during a sale/issue — same SQL basis as {@link captureInventoryCoupling}.
- * Use for GL CR Inventory (1300) so ledger credit matches batch valuation delta exactly.
- */
-export function batchValuationReduction(
-    before: InventoryCouplingSnapshot,
-    after: InventoryCouplingSnapshot,
-): number {
-    return Money.toNumber(
-        Money.round(
-            Money.subtract(
-                Money.parseDb(before.batchValuation),
-                Money.parseDb(after.batchValuation),
-            ),
-            2,
-        ),
-    );
-}
-
-/**
  * Roll back the transaction if GL 1300 and batch valuation diverged.
  */
 export function assertInventoryCouplingUnchanged(
-    before: InventoryCouplingSnapshot,
-    after: InventoryCouplingSnapshot,
+    before: CouplingSnapshot,
+    after: CouplingSnapshot,
     context: string,
 ): void {
     const deltaGap = Math.abs(after.gap - before.gap);
