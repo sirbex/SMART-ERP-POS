@@ -19,6 +19,20 @@ export interface ProductValuationForAtCost {
     costingMethod: CostingMethod;
 }
 
+/** Same FEFO ordering as salesService physical deduction (must stay in sync). */
+export interface SaleFefoBatchRow {
+    id: string;
+    remaining_quantity: string;
+    cost_price: string;
+    expiry_date?: string | null;
+}
+
+export interface LoadSaleFefoBatchesOptions {
+    /** Matches products.min_days_before_expiry_sale — same filter as sale deduction. */
+    minDaysBeforeExpiry?: number;
+    forUpdate?: boolean;
+}
+
 const FEFO_BATCH_QUERY = `
     SELECT remaining_quantity, cost_price
     FROM inventory_batches
@@ -95,20 +109,82 @@ async function getProductMaxSellingFactor(conn: Pool | PoolClient, productId: st
     return factor > 1 ? factor : 1;
 }
 
+/**
+ * Load FEFO batches for COGS preview and sale deduction — one code path for both.
+ */
+export async function loadSaleFefoBatchesForIssue(
+    conn: Pool | PoolClient,
+    productId: string,
+    requestedBaseQty: Decimal,
+    masterCostPerBase: Decimal,
+    options: LoadSaleFefoBatchesOptions = {},
+): Promise<SaleFefoBatchRow[]> {
+    const minDays = options.minDaysBeforeExpiry ?? 0;
+    const lockSql = options.forUpdate ? ' FOR UPDATE' : '';
+
+    let result: { rows: SaleFefoBatchRow[] };
+
+    if (minDays > 0) {
+        result = await conn.query<SaleFefoBatchRow>(
+            `SELECT id, remaining_quantity, expiry_date, cost_price
+             FROM inventory_batches
+             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
+               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE + $2 * INTERVAL '1 day')
+             ORDER BY expiry_date ASC NULLS LAST, received_date ASC${lockSql}`,
+            [productId, minDays],
+        );
+    } else {
+        result = { rows: [] };
+    }
+
+    if (!result.rows.length) {
+        result = await conn.query<SaleFefoBatchRow>(
+            `SELECT id, remaining_quantity, expiry_date, cost_price
+             FROM inventory_batches
+             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
+               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
+             ORDER BY expiry_date ASC NULLS LAST, received_date ASC${lockSql}`,
+            [productId],
+        );
+    }
+
+    const sellingFactor = await getProductMaxSellingFactor(conn, productId);
+    const normalized = normalizeLegacyFefoBatchRows(
+        result.rows.map((r) => ({
+            remaining_quantity: r.remaining_quantity,
+            cost_price: r.cost_price,
+        })),
+        requestedBaseQty,
+        sellingFactor,
+        masterCostPerBase,
+    );
+
+    return result.rows.map((r, i) => ({
+        id: r.id,
+        remaining_quantity: normalized[i]?.remaining_quantity ?? r.remaining_quantity,
+        cost_price: normalized[i]?.cost_price ?? r.cost_price,
+        expiry_date: r.expiry_date,
+    }));
+}
+
 async function loadNormalizedFefoBatches(
     conn: Pool | PoolClient,
     productId: string,
     requestedBaseQty: Decimal,
     masterCostPerBase: Decimal,
+    minDaysBeforeExpiry = 0,
 ): Promise<FefoBatchRow[]> {
-    const fefoPreview = await conn.query<FefoBatchRow>(FEFO_BATCH_QUERY, [productId]);
-    const sellingFactor = await getProductMaxSellingFactor(conn, productId);
-    return normalizeLegacyFefoBatchRows(
-        fefoPreview.rows,
+    const rows = await loadSaleFefoBatchesForIssue(
+        conn,
+        productId,
         requestedBaseQty,
-        sellingFactor,
         masterCostPerBase,
+        { minDaysBeforeExpiry, forUpdate: false },
     );
+    return rows.map((r) => ({
+        remaining_quantity: r.remaining_quantity,
+        cost_price: r.cost_price,
+    }));
 }
 
 export interface FefoIssuePreview {
@@ -130,8 +206,15 @@ export async function previewFefoIssueCostForBaseQty(
     productId: string,
     baseQty: Decimal,
     masterCostPerBase: Decimal = new Decimal(0),
+    options: LoadSaleFefoBatchesOptions = {},
 ): Promise<FefoIssuePreview> {
-    const batchRows = await loadNormalizedFefoBatches(conn, productId, baseQty, masterCostPerBase);
+    const batchRows = await loadNormalizedFefoBatches(
+        conn,
+        productId,
+        baseQty,
+        masterCostPerBase,
+        options.minDaysBeforeExpiry ?? 0,
+    );
 
     let remainingForCost = baseQty;
     let totalCost = new Decimal(0);
@@ -160,8 +243,15 @@ export async function previewFefoIssueLayers(
     productId: string,
     baseQty: Decimal,
     masterCostPerBase: Decimal = new Decimal(0),
+    options: LoadSaleFefoBatchesOptions = {},
 ): Promise<FefoIssueLayerSegment[]> {
-    const batchRows = await loadNormalizedFefoBatches(conn, productId, baseQty, masterCostPerBase);
+    const batchRows = await loadNormalizedFefoBatches(
+        conn,
+        productId,
+        baseQty,
+        masterCostPerBase,
+        options.minDaysBeforeExpiry ?? 0,
+    );
 
     const segments: FefoIssueLayerSegment[] = [];
     let remainingForCost = baseQty;

@@ -32,9 +32,10 @@ function item(
     productId: string,
     productName: string,
     costPrice: number,
-    quantity: number
+    quantity: number,
+    allocatedTotalCost?: number,
 ): CogsDriftItem {
-    return { productId, productName, costPrice, quantity };
+    return { productId, productName, costPrice, quantity, allocatedTotalCost };
 }
 
 function batchMap(entries: [string, number][]): Map<string, Decimal> {
@@ -129,33 +130,31 @@ describe('detectCogsDrift', () => {
         expect(detectCogsDrift(items, map)).toHaveLength(0);
     });
 
-    // ── 7. Sub-cent rounding noise tolerated ─────────────────────────────────
-    it('does not flag drift caused purely by rounding noise < 0.01', () => {
-        // GL = 10 × 33.33 = 333.30, actual = 333.30 → diff = 0.00 ✓
-        const items = [item('prod-rnd', 'Capsule 250mg', 33.33, 10)];
-        const map = batchMap([['prod-rnd', 333.30]]);
+    // ── 7. Per-selling-unit rounding vs allocated total (Isofair-class false positive) ─
+    it('uses allocatedTotalCost instead of costPrice×qty when provided', () => {
+        // Preview total 5200; per-selling cost 5200/3 → 1733.33; 1733.33×3 = 5199.99 ≠ 5200
+        const items = [item('prod-rnd', 'Isofair 20mg', 1733.33, 3, 5200)];
+        const map = batchMap([['prod-rnd', 5200]]);
 
         expect(detectCogsDrift(items, map)).toHaveLength(0);
     });
 
-    // ── 8. Drift exactly AT threshold (0.01) NOT flagged ─────────────────────
-    it('does not flag drift of exactly 0.01 (boundary exclusive)', () => {
-        // GL = 100.00, actual = 100.01 → drift = 0.01 — NOT > 0.01, so OK
-        const items = [item('prod-boundary', 'Boundary Product', 100, 1)];
-        const map = batchMap([['prod-boundary', 100.01]]);
+    // ── 8. Drift exactly AT 1 UGX threshold NOT flagged ──────────────────────
+    it('does not flag drift of exactly 1 UGX (UGX tolerance)', () => {
+        const items = [item('prod-boundary', 'Boundary Product', 100, 1, 100)];
+        const map = batchMap([['prod-boundary', 101]]);
 
         expect(detectCogsDrift(items, map)).toHaveLength(0);
     });
 
-    // ── 9. Drift just above threshold IS flagged ─────────────────────────────
-    it('flags drift of 0.02 (just above 0.01 boundary)', () => {
-        // GL = 100.00, actual = 100.02 → drift = 0.02 > 0.01 → flagged
-        const items = [item('prod-just-over', 'Just Over Product', 100, 1)];
-        const map = batchMap([['prod-just-over', 100.02]]);
+    // ── 9. Drift above 1 UGX IS flagged ──────────────────────────────────────
+    it('flags drift above 1 UGX (e.g. batch cost mismatch)', () => {
+        const items = [item('prod-just-over', 'Just Over Product', 100, 1, 100)];
+        const map = batchMap([['prod-just-over', 110]]);
 
         const results = detectCogsDrift(items, map);
         expect(results).toHaveLength(1);
-        expect(results[0].drift).toBe('0.02');
+        expect(results[0].drift).toBe('10.00');
     });
 
     // ── 10. Negative drift (GL overstated) detected ──────────────────────────
@@ -182,9 +181,8 @@ describe('detectCogsDrift', () => {
         //   Total actual = 2,080
         // GL preview saw both at 200 average → GL = 10 × 200 = 2,000
         // drift = 2,080 − 2,000 = +80 → DRIFT
-        const items = [item('prod-multi', 'Amoxicillin 500mg', 200, 10)];
-        // actualBatchCostMap accumulates: 6×200 + 4×220 = 1200 + 880 = 2080
-        const actual = new Decimal(6).times(200).plus(new Decimal(4).times(220)); // 2080
+        const items = [item('prod-multi', 'Amoxicillin 500mg', 200, 10, 2000)];
+        const actual = new Decimal(6).times(200).plus(new Decimal(4).times(220));
         const map = new Map([['prod-multi', actual]]);
 
         const results = detectCogsDrift(items, map);
@@ -193,6 +191,15 @@ describe('detectCogsDrift', () => {
         expect(results[0].glCost).toBe('2000.00');
         expect(results[0].actualBatchCost).toBe('2080.00');
         expect(results[0].drift).toBe('80.00');
+    });
+
+    it('aggregates multiple lines for the same productId before comparing', () => {
+        const items = [
+            item('prod-a', 'Product A', 500, 1, 500),
+            item('prod-a', 'Product A', 300, 2, 600),
+        ];
+        const map = batchMap([['prod-a', 1100]]);
+        expect(detectCogsDrift(items, map)).toHaveLength(0);
     });
 
     // ── 12. Empty inputs produce no results ──────────────────────────────────

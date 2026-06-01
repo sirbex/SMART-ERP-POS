@@ -1,74 +1,89 @@
 /**
  * COGS Drift Guard — Pure utility
  *
- * Compares GL-posted COGS (from FEFO batch preview) against the actual
+ * Compares GL-posted COGS (FEFO preview at sale build) against the actual
  * cost of batches physically deducted (FOR UPDATE) within the same sale
- * transaction. If they diverge by more than 1 cent the sale was subject
- * to a concurrent-inventory race condition and accounting integrity is at risk.
+ * transaction.
  *
- * Extracted as a pure function so it can be unit-tested without any
- * database, pool, or service mocks.
+ * Prefer `allocatedTotalCost` (preview total in base units) over
+ * costPrice × selling quantity — avoids per-selling-unit rounding drift.
  */
 
 import Decimal from 'decimal.js';
+
+/** Whole-currency tolerance (UGX has 0 display decimals). */
+export const COGS_DRIFT_TOLERANCE = 1;
 
 /** Minimal slice of CreateSaleItemData that the guard needs. */
 export interface CogsDriftItem {
     productId: string;
     productName: string;
-    /** Cost per selling-UoM unit as posted to the GL (from FEFO preview). */
+    /** Cost per selling-UoM unit (for GL line display). */
     costPrice: number;
     /** Quantity in selling-UoM units. */
     quantity: number;
+    /** Total FEFO cost allocated at sale build (base-unit walk). Prefer over costPrice×qty. */
+    allocatedTotalCost?: number;
 }
 
 export interface CogsDriftResult {
     productId: string;
     productName: string;
-    /** GL COGS posted = costPrice × quantity (from FEFO preview). */
     glCost: string;
-    /** Actual cost accumulated from physical FEFO batch deductions. */
     actualBatchCost: string;
-    /** actualBatchCost − glCost (positive = GL understated, negative = GL overstated). */
     drift: string;
     message: string;
 }
 
+function glCostForItem(item: CogsDriftItem): Decimal {
+    if (item.allocatedTotalCost != null && Number.isFinite(item.allocatedTotalCost)) {
+        return new Decimal(item.allocatedTotalCost);
+    }
+    return new Decimal(item.costPrice || 0).times(new Decimal(item.quantity));
+}
+
 /**
- * Detect any divergence between GL-posted COGS and actual batch deduction costs.
- *
- * @param itemsWithCosts  Sale items as recorded in the GL (costPrice is per selling unit).
- * @param actualBatchCostMap  Map<productId, Decimal> accumulated during the physical deduction loop.
- * @returns Array of CogsDriftResult for every item where |drift| > 0.01.
- *          Returns an empty array when everything is in sync.
+ * Detect divergence between GL-posted COGS and actual batch deduction costs.
+ * Aggregates multiple sale lines for the same productId before comparing.
  */
 export function detectCogsDrift(
     itemsWithCosts: CogsDriftItem[],
-    actualBatchCostMap: Map<string, Decimal>
+    actualBatchCostMap: Map<string, Decimal>,
 ): CogsDriftResult[] {
-    const drifts: CogsDriftResult[] = [];
+    const glByProduct = new Map<string, { total: Decimal; productName: string }>();
 
     for (const item of itemsWithCosts) {
-        // Custom / service items never touch inventory_batches — skip
         if (item.productId?.startsWith('custom_')) continue;
 
-        const actualCost = actualBatchCostMap.get(item.productId);
-        // No entry = item was skipped during deduction (service, custom) — skip
+        const lineGl = glCostForItem(item);
+        const existing = glByProduct.get(item.productId);
+        if (existing) {
+            existing.total = existing.total.plus(lineGl);
+        } else {
+            glByProduct.set(item.productId, {
+                total: lineGl,
+                productName: item.productName,
+            });
+        }
+    }
+
+    const drifts: CogsDriftResult[] = [];
+
+    for (const [productId, { total: glCost, productName }] of glByProduct) {
+        const actualCost = actualBatchCostMap.get(productId);
         if (actualCost === undefined) continue;
 
-        // GL cost = what was posted to ledger_entries as the inventory credit
-        const glCost = new Decimal(item.costPrice || 0).times(new Decimal(item.quantity));
         const drift = actualCost.minus(glCost);
 
-        if (drift.abs().greaterThan(0.01)) {
+        if (drift.abs().greaterThan(COGS_DRIFT_TOLERANCE)) {
             drifts.push({
-                productId: item.productId,
-                productName: item.productName,
+                productId,
+                productName,
                 glCost: glCost.toFixed(2),
                 actualBatchCost: actualCost.toFixed(2),
                 drift: drift.toFixed(2),
                 message:
-                    `ACCOUNTING ALERT: Inventory cost mismatch for "${item.productName}" — ` +
+                    `ACCOUNTING ALERT: Inventory cost mismatch for "${productName}" — ` +
                     `GL posted ${glCost.toFixed(2)} but actual batch deduction was ${actualCost.toFixed(2)} ` +
                     `(drift: ${drift.toFixed(2)}). Run an inventory integrity check.`,
             });

@@ -169,6 +169,8 @@ export interface CreateSaleItemData {
   baseQty?: number | null; // SAP UoM snapshot: quantity in base unit
   baseUomId?: string | null; // SAP UoM snapshot: base UoM ID at posting time
   conversionFactor?: number; // SAP UoM snapshot: conversion factor at posting time
+  /** FEFO total cost at sale build — used by COGS drift guard (not persisted). */
+  allocatedTotalCost?: number;
 }
 
 export const salesRepository = {

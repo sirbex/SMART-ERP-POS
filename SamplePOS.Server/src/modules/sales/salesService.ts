@@ -43,6 +43,7 @@ import { assertSaleLineNotBelowAllocatedCost } from './saleBelowCostGuard.js';
 import { recordSaleLinePriceEvent } from './salePriceAuditService.js';
 import {
   previewFefoIssueCostForBaseQty,
+  loadSaleFefoBatchesForIssue,
   type ProductValuationForAtCost,
 } from '../pricing/atCostIssuePrice.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
@@ -580,6 +581,14 @@ export const salesService = {
           baseQty.toNumber()
         );
 
+        const expiryRuleRes = await client.query(
+          `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days
+           FROM products WHERE id = $1`,
+          [item.productId],
+        );
+        const minDaysBeforeExpiry = parseInt(expiryRuleRes.rows[0]?.min_days ?? '0', 10);
+        const masterCostPerBase = Money.parseDb(productData.cost_price || '0');
+
         // Calculate actual cost from FEFO inventory batches (same source as stock movements).
         // Using batch.cost_price directly ensures sale_items.unit_cost = SM unit_cost,
         // keeping GL COGS in sync with the batch subledger and preventing reconciliation drift.
@@ -598,7 +607,8 @@ export const salesService = {
             client,
             item.productId,
             baseQty,
-            Money.parseDb(productData.cost_price || '0'),
+            masterCostPerBase,
+            { minDaysBeforeExpiry },
           );
           itemCostDecimal = batchTotal;
 
@@ -728,6 +738,7 @@ export const salesService = {
           baseQty: baseQty.toNumber(), // SAP UoM snapshot: base quantity at posting time
           baseUomId: snapshotBaseUomId, // SAP UoM snapshot: base UoM ID at posting time
           conversionFactor: snapshotConversionFactor.toNumber(), // SAP UoM snapshot: conversion factor at posting time
+          allocatedTotalCost: Money.toNumber(itemCost),
         });
       }
 
@@ -1138,42 +1149,26 @@ export const salesService = {
         // This is critical for products with expiry dates and physical stock tracking
         let remainingQty = new Decimal(baseQty.toNumber());
 
-        // Fetch min_days_before_expiry_sale for this product
         const expiryRuleRes = await client.query(
           `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days
            FROM products WHERE id = $1`,
-          [item.productId]
+          [item.productId],
         );
         const minDaysBeforeExpiry = parseInt(expiryRuleRes.rows[0]?.min_days ?? '0', 10);
 
-        // Get batches ordered by expiry date (FEFO)
-        // When min_days_before_expiry_sale > 0, first try excluding near-expiry batches
-        // If that yields no results, fall back to all active batches so the sale isn't blocked
-        let batchesResult;
-        if (minDaysBeforeExpiry > 0) {
-          batchesResult = await client.query(
-            `SELECT id, remaining_quantity, expiry_date, cost_price
-             FROM inventory_batches
-             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
-               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE + $2 * INTERVAL '1 day')
-             ORDER BY expiry_date ASC NULLS LAST, received_date ASC
-             FOR UPDATE`,
-            [item.productId, minDaysBeforeExpiry]
-          );
-        }
+        const costRow = await client.query(
+          'SELECT cost_price FROM product_valuation WHERE product_id = $1',
+          [item.productId],
+        );
+        const masterCostPerBase = Money.parseDb(costRow.rows[0]?.cost_price ?? 0);
 
-        // Fallback: if no non-expiring batches or no threshold configured, use all active non-expired batches
-        if (!batchesResult || batchesResult.rows.length === 0) {
-          batchesResult = await client.query(
-            `SELECT id, remaining_quantity, expiry_date, cost_price
-             FROM inventory_batches
-             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
-               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
-             ORDER BY expiry_date ASC NULLS LAST, received_date ASC
-             FOR UPDATE`,
-            [item.productId]
-          );
-        }
+        const batchRows = await loadSaleFefoBatchesForIssue(
+          client,
+          item.productId,
+          baseQty,
+          masterCostPerBase,
+          { minDaysBeforeExpiry, forUpdate: true },
+        );
 
         // Generate movement number ONCE for all batch deductions per item
         // This drastically reduces DB queries (from O(batches) to O(1) per item)
@@ -1191,12 +1186,13 @@ export const salesService = {
         );
         let movementSeq = parseInt(movNumRes.rows[0]?.movement_number?.split('-')[2] || '1');
 
-        for (const batch of batchesResult.rows) {
+        for (const batch of batchRows) {
           if (remainingQty.lessThanOrEqualTo(0)) break;
 
           const batchQty = new Decimal(batch.remaining_quantity || 0);
           const qtyToDeduct = Decimal.min(remainingQty, batchQty);
           const qtyToDeductStr = qtyToDeduct.toFixed(4); // String for PostgreSQL NUMERIC
+          const batchCostDec = Money.parseDb(batch.cost_price ?? 0);
 
           // Update batch quantity
           await client.query(
@@ -1215,8 +1211,7 @@ export const salesService = {
           const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
           movementSeq++;
 
-          // Determine unit cost from batch with bank precision
-          const batchUnitCost = new Decimal(batch.cost_price ?? batch.costPrice ?? 0).toFixed(2);
+          const batchUnitCost = Money.toNumber(Money.round(batchCostDec));
 
           // Record stock movement with batch reference and unit cost
           await client.query(
@@ -1244,11 +1239,11 @@ export const salesService = {
 
           remainingQty = remainingQty.minus(qtyToDeduct);
 
-          // Drift guard: accumulate actual batch cost so we can compare against GL after deductions
+          // Drift guard: accumulate actual batch cost (same cost walk as COGS preview)
           const _prevActual = actualBatchCostMap.get(item.productId) ?? new Decimal(0);
           actualBatchCostMap.set(
             item.productId,
-            _prevActual.plus(qtyToDeduct.times(new Decimal(batch.cost_price ?? 0)))
+            _prevActual.plus(Money.multiply(batchCostDec, qtyToDeduct)),
           );
 
           logger.info(`Inventory batch deducted for product ${item.productId}`, {
@@ -1261,15 +1256,15 @@ export const salesService = {
 
         if (remainingQty.greaterThan(0)) {
           const nearestExpiry =
-            batchesResult.rows.length > 0 ? batchesResult.rows[0].expiry_date : null;
-          const totalAvailable = batchesResult.rows.reduce(
+            batchRows.length > 0 ? batchRows[0].expiry_date : null;
+          const totalAvailable = batchRows.reduce(
             (sum: Decimal, b: { remaining_quantity: string | number }) =>
               sum.plus(new Decimal(String(b.remaining_quantity || 0))),
             new Decimal(0)
           );
           const isExpiryBlock = minDaysBeforeExpiry > 0 && nearestExpiry;
           const errorCode =
-            batchesResult.rows.length === 0
+            batchRows.length === 0
               ? 'ERR_STOCK_001'
               : isExpiryBlock
                 ? 'ERR_EXPIRY_001'
@@ -1288,7 +1283,7 @@ export const salesService = {
               shortBy: Money.toNumber(remainingQty),
               expiryDate: nearestExpiry,
               minDaysBeforeExpiry: minDaysBeforeExpiry > 0 ? minDaysBeforeExpiry : undefined,
-              batchCount: batchesResult.rows.length,
+              batchCount: batchRows.length,
             }
           );
         }
