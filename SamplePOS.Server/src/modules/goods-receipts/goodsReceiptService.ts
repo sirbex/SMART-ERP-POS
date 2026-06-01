@@ -33,6 +33,8 @@ import { PricingEngine } from '../../utils/pricingEngine.js';
 import {
   assertInventoryCouplingUnchanged,
   captureInventoryCoupling,
+  documentTotalDiffersFromSubledger,
+  resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
 
 // Alert shape consumed by controller for finalize response
@@ -881,12 +883,27 @@ export const goodsReceiptService = {
       }
 
       // ============================================================
-      // GL POSTING — INSIDE transaction (SAP LUW pattern)
+      // GL POSTING — INSIDE transaction (SAP LUW: stock receipt → FI from subledger)
       // DR Inventory (1300), CR GRN/IR Clearing (2150)
-      // Atomic: if GL fails, entire GR + inventory rollback together.
-      // AP (2100) is NOT touched here — only when Supplier Invoice is posted.
+      // Amount = batch subledger increase (not PO line JS total).
       // ============================================================
-      if (totalAmount > 0 && supplierId) {
+      const couplingAfterReceipt = await captureInventoryCoupling(client);
+      const glInventoryAmount = resolveGl1300FromBatchSubledgerDelta(
+        inventoryCouplingBefore,
+        couplingAfterReceipt,
+        'receipt',
+      );
+
+      if (documentTotalDiffersFromSubledger(totalAmount, glInventoryAmount)) {
+        logger.warn('[GR] PO line total differs from batch subledger increase — posting GL from subledger', {
+          grId: id,
+          grNumber,
+          poLineTotal: totalAmount,
+          batchSubledgerIncrease: glInventoryAmount,
+        });
+      }
+
+      if (glInventoryAmount > 0 && supplierId) {
         const supplierRes = await client.query(
           'SELECT "CompanyName" FROM suppliers WHERE "Id" = $1',
           [supplierId]
@@ -898,7 +915,7 @@ export const goodsReceiptService = {
             grId: id,
             grNumber: grNumber || id,
             grDate: gr.receivedDate || getBusinessDate(),
-            totalAmount,
+            totalAmount: glInventoryAmount,
             supplierId,
             supplierName,
             poNumber: gr.purchaseOrderId || undefined,
@@ -1283,6 +1300,8 @@ export const goodsReceiptService = {
       // Immediately finalize
       await goodsReceiptRepository.finalizeGR(client, gr.id);
 
+      const inventoryCouplingBefore = await captureInventoryCoupling(client);
+
       // For UPDATE re-imports, capture existing batch state for delta calculation
       const existingBatchState = new Map<string, { qty: number; cost: number }>();
       if (duplicateStrategy === 'UPDATE') {
@@ -1458,50 +1477,44 @@ export const goodsReceiptService = {
         }
       }
 
+      const couplingAfterImport = await captureInventoryCoupling(client);
+      const glInventoryAmount = resolveGl1300FromBatchSubledgerDelta(
+        inventoryCouplingBefore,
+        couplingAfterImport,
+        'receipt',
+      );
+      const jsMovementTotal = stockMovements.reduce((s, sm) => s + sm.movementValue, 0);
+
+      if (documentTotalDiffersFromSubledger(jsMovementTotal, glInventoryAmount)) {
+        logger.warn('[OPENING STOCK] JS movement totals differ from batch subledger — posting GL from SQL delta', {
+          grId: gr.id,
+          grNumber: gr.grNumber,
+          jsMovementTotal,
+          batchSubledgerIncrease: glInventoryAmount,
+        });
+      }
+
+      if (glInventoryAmount !== 0) {
+        await glEntryService.recordOpeningStockImportSummaryToGL(
+          {
+            grId: gr.id,
+            grNumber: gr.grNumber || gr.id,
+            importDate: getBusinessDate(),
+            totalValue: glInventoryAmount,
+          },
+          pool,
+          client,
+        );
+      }
+
+      assertInventoryCouplingUnchanged(
+        inventoryCouplingBefore,
+        couplingAfterImport,
+        `opening stock import ${gr.grNumber || gr.id}`,
+      );
+
       return { grId: gr.id, grNumber: gr.grNumber || '' };
     });
-
-    // ── GL posting: DR Inventory (1300) / CR Opening Balance Equity (3050) ──
-    // Per SAP/Odoo/Tally best practices, runs AFTER transaction commits
-    if (stockMovements.length > 0) {
-      const productIds = [...new Set(stockMovements.map((sm) => sm.productId))];
-      const nameRes = await pool.query(
-        `SELECT id, name FROM products WHERE id = ANY($1::uuid[])`,
-        [productIds]
-      );
-      const nameMap = new Map<string, string>();
-      for (const r of nameRes.rows) {
-        nameMap.set(r.id as string, r.name as string);
-      }
-
-      const importDate = getBusinessDate();
-      for (const sm of stockMovements) {
-        if (sm.movementValue === 0) continue;
-        try {
-          await glEntryService.recordOpeningStockToGL(
-            {
-              movementId: sm.movementId,
-              movementNumber: sm.movementNumber,
-              movementDate: importDate,
-              movementValue: sm.movementValue,
-              productId: sm.productId,
-              batchNumber: sm.batchNumber,
-              productName: nameMap.get(sm.productId) || 'Imported product',
-            },
-            pool
-          );
-        } catch (glErr) {
-          const errMsg = glErr instanceof Error ? glErr.message : String(glErr);
-          logger.error('GL posting failed for opening balance movement', {
-            movementId: sm.movementId,
-            error: errMsg,
-          });
-          warnings.push(
-            `GL posting failed for movement ${sm.movementNumber}: ${errMsg}`
-          );
-        }
-      }
-    }
 
     return { grId, grNumber, stockMovements, warnings };
   },

@@ -36,6 +36,8 @@ import { recordSupplierCreditNoteToGL, AccountCodes } from '../../services/glEnt
 import {
     assertInventoryCouplingUnchanged,
     captureInventoryCoupling,
+    documentTotalDiffersFromSubledger,
+    resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
@@ -390,10 +392,22 @@ export const returnGrnService = {
             const posted = await returnGrnRepository.post(client, rgrnId);
             if (!posted) throw new Error('Failed to post Return GRN');
 
-            // 5. GL posting — INSIDE transaction (SAP LUW: atomic with inventory)
-            //    DR Accounts Payable (2100) / CR Inventory (1300)
-            //    Use batch-derived total (returnTotalFromBatch) not line.unitCost total.
-            const returnTotalNum = Money.toNumber(returnTotalFromBatch);
+            // 5. GL posting — INSIDE transaction (SAP LUW: issue from subledger valuation)
+            const couplingAfterReturn = await captureInventoryCoupling(client);
+            const glInventoryAmount = resolveGl1300FromBatchSubledgerDelta(
+                inventoryCouplingBefore,
+                couplingAfterReturn,
+                'issue',
+            );
+            const returnTotalNum = glInventoryAmount;
+
+            if (documentTotalDiffersFromSubledger(Money.toNumber(returnTotalFromBatch), glInventoryAmount)) {
+                logger.warn('[RETURN GRN] JS batch walk total differs from subledger — posting GL from SQL delta', {
+                    rgrnId,
+                    jsTotal: Money.toNumber(returnTotalFromBatch),
+                    batchSubledgerReduction: glInventoryAmount,
+                });
+            }
 
             // Look up supplier name for GL description (hoisted for use in both step 5 and step 6)
             const grResult = await client.query(

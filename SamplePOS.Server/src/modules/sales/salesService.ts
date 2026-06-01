@@ -55,9 +55,10 @@ import { computeSaleItemBaseQuantity } from './saleItemBaseQuantity.js';
 import { reconcileSaleCostsToActualBatchDeduction } from '../../utils/cogsDriftGuard.js';
 import {
   assertInventoryCouplingUnchanged,
-  batchValuationReduction,
   captureInventoryCoupling,
+  documentTotalDiffersFromSubledger,
   INVENTORY_COUPLING_TOLERANCE,
+  resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
 import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
 
@@ -1295,9 +1296,10 @@ export const salesService = {
       }
 
       const couplingAfterDeduction = await captureInventoryCoupling(client);
-      const exactInventoryIssueCost = batchValuationReduction(
+      const exactInventoryIssueCost = resolveGl1300FromBatchSubledgerDelta(
         inventoryCouplingBefore,
         couplingAfterDeduction,
+        'issue',
       );
 
       // ============================================================
@@ -1321,8 +1323,7 @@ export const salesService = {
 
       const reconciledLineCostNum = Money.toNumber(totalActualCost);
       if (
-        Math.abs(reconciledLineCostNum - exactInventoryIssueCost) >
-        INVENTORY_COUPLING_TOLERANCE
+        documentTotalDiffersFromSubledger(reconciledLineCostNum, exactInventoryIssueCost)
       ) {
         logger.warn('[COGS] Reconciled line cost differs from batch subledger reduction', {
           saleId: sale.id,

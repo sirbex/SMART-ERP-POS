@@ -12,6 +12,12 @@ import logger from '../../utils/logger.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { recordDeliveryNoteGoodsIssueToGL } from '../../services/glEntryService.js';
+import {
+  assertInventoryCouplingUnchanged,
+  captureInventoryCoupling,
+  documentTotalDiffersFromSubledger,
+  resolveGl1300FromBatchSubledgerDelta,
+} from '../../services/inventorySubledgerCoupling.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import {
   DeliveryNoteWithLines,
@@ -383,7 +389,8 @@ export const deliveryNoteService = {
       }
 
       // ── FEFO batch deduction per line (shared utility) ───────
-      let totalCost = new Decimal(0);
+      const inventoryCouplingBefore = await captureInventoryCoupling(client);
+      let documentCostEstimate = new Decimal(0);
 
       for (const line of linesResult.rows) {
         const productId = line.product_id as string;
@@ -403,7 +410,7 @@ export const deliveryNoteService = {
           productName,
         });
 
-        totalCost = totalCost.plus(fefoResult.totalCost);
+        documentCostEstimate = documentCostEstimate.plus(fefoResult.totalCost);
 
         // ── Update quotation_items.delivered_quantity ───────────
         await deliveryNoteRepository.syncDeliveredQuantity(client, line.quotation_item_id);
@@ -418,32 +425,53 @@ export const deliveryNoteService = {
       const result = await deliveryNoteRepository.getById(client, deliveryNoteId);
       if (!result) throw new NotFoundError('Failed to retrieve posted delivery note');
 
+      const couplingAfterIssue = await captureInventoryCoupling(client);
+      const exactInventoryCost = resolveGl1300FromBatchSubledgerDelta(
+        inventoryCouplingBefore,
+        couplingAfterIssue,
+        'issue',
+      );
+      const jsCostEstimate = Money.toNumber(documentCostEstimate);
+
+      if (documentTotalDiffersFromSubledger(jsCostEstimate, exactInventoryCost)) {
+        logger.warn('[DN PGI] FEFO JS total differs from batch subledger — posting GL from SQL delta', {
+          deliveryNoteId,
+          jsCostEstimate,
+          batchSubledgerReduction: exactInventoryCost,
+        });
+      }
+
+      // ── Post COGS GL inside transaction (SAP LUW: goods issue + FI atomic) ──
+      if (exactInventoryCost > 0) {
+        await recordDeliveryNoteGoodsIssueToGL(
+          {
+            deliveryNoteId,
+            deliveryNoteNumber: result.deliveryNoteNumber,
+            postingDate: getBusinessDate(),
+            totalCost: exactInventoryCost,
+          },
+          pool,
+          client,
+        );
+      }
+
+      assertInventoryCouplingUnchanged(
+        inventoryCouplingBefore,
+        couplingAfterIssue,
+        `delivery note ${result.deliveryNoteNumber}`,
+      );
+
       logger.info('Delivery note posted', {
         deliveryNoteId,
         deliveryNoteNumber: result.deliveryNoteNumber,
         quotationId: dn.quotation_id,
         lineCount: linesResult.rows.length,
         totalAmount: result.totalAmount,
-        totalCost: totalCost.toNumber(),
+        totalCost: exactInventoryCost,
       });
 
-      return { dn: result, totalCost: totalCost.toNumber() };
+      return { dn: result, totalCost: exactInventoryCost };
     });
-
-    // ── Post COGS GL entry after transaction commits ─────────
-    // SAP: Goods Issue posts DR COGS / CR Inventory in the same period.
-    // GL failure is FATAL (not silently swallowed) — same behaviour as salesService.
-    // recordDeliveryNoteGoodsIssueToGL uses idempotency key DN_PGI_COGS-<id>,
-    // so a retry after transient failure will not double-post.
-    // (Issue #2 forensic audit — GL error was previously ignored, causing silent drift)
-    if (pgiResult.totalCost > 0) {
-      await recordDeliveryNoteGoodsIssueToGL({
-        deliveryNoteId,
-        deliveryNoteNumber: pgiResult.dn.deliveryNoteNumber,
-        postingDate: getBusinessDate(),
-        totalCost: pgiResult.totalCost,
-      }, pool);
-    }
 
     return pgiResult.dn;
   },

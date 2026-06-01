@@ -12,13 +12,18 @@ import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
 import {
-    batchValuationReduction,
     INVENTORY_COUPLING_TOLERANCE,
     type CouplingSnapshot,
 } from './inventoryCouplingMath.js';
 
-export { INVENTORY_COUPLING_TOLERANCE, batchValuationReduction } from './inventoryCouplingMath.js';
-export type { CouplingSnapshot as InventoryCouplingSnapshot } from './inventoryCouplingMath.js';
+export {
+    INVENTORY_COUPLING_TOLERANCE,
+    batchValuationIncrease,
+    batchValuationReduction,
+    documentTotalDiffersFromSubledger,
+    resolveGl1300FromBatchSubledgerDelta,
+} from './inventoryCouplingMath.js';
+export type { CouplingSnapshot as InventoryCouplingSnapshot, InventoryGlDirection } from './inventoryCouplingMath.js';
 
 export async function captureInventoryCoupling(
     client: PoolClient,

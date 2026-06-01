@@ -13,6 +13,7 @@ import {
     computeGap,
     couplingAssertWouldPass,
     INVENTORY_COUPLING_TOLERANCE,
+    resolveGl1300FromBatchSubledgerDelta,
     simulateGapAfterTransaction,
     sumJsBatchDeductionCost,
     UNGUARDED_DRIFT_SOURCES,
@@ -70,6 +71,27 @@ describe('inventory drift — per-transaction rounding (SALE-2026-4872 class)', 
     });
 });
 
+import {
+    batchValuationIncrease,
+    batchValuationReduction,
+    documentTotalDiffersFromSubledger,
+    resolveGl1300FromBatchSubledgerDelta,
+} from './inventoryCouplingMath.js';
+
+describe('resolveGl1300FromBatchSubledgerDelta (SAP/Odoo subledger posting)', () => {
+    it('issue direction uses batch reduction', () => {
+        const before = snap(1000, 1000);
+        const after = snap(1000, 900);
+        expect(resolveGl1300FromBatchSubledgerDelta(before, after, 'issue')).toBe(100);
+    });
+
+    it('receipt direction uses batch increase', () => {
+        const before = snap(1000, 1000);
+        const after = snap(1000, 1150);
+        expect(resolveGl1300FromBatchSubledgerDelta(before, after, 'receipt')).toBe(150);
+    });
+});
+
 describe('inventory drift — goods receipt symmetry', () => {
     it('batchValuationIncrease matches inbound batch delta for GL DR 1300', () => {
         const before = snap(100_000, 100_000);
@@ -88,24 +110,24 @@ describe('inventory drift — goods receipt symmetry', () => {
 
 describe('inventory drift — unguarded historical sources (catalog)', () => {
     it('documents guarded workflows (coupling assert in code)', () => {
-        expect(COUPLING_GUARDED_WORKFLOWS.length).toBeGreaterThanOrEqual(4);
-        expect(COUPLING_GUARDED_WORKFLOWS.some((w) => w.includes('SALE'))).toBe(true);
+        expect(COUPLING_GUARDED_WORKFLOWS.length).toBeGreaterThanOrEqual(6);
+        expect(COUPLING_GUARDED_WORKFLOWS.some((w) => w.includes('DELIVERY_NOTE'))).toBe(true);
+        expect(COUPLING_GUARDED_WORKFLOWS.some((w) => w.includes('OPENING_STOCK'))).toBe(true);
     });
 
     it('documents unguarded drift sources for tenant forensics', () => {
-        expect(UNGUARDED_DRIFT_SOURCES.length).toBeGreaterThanOrEqual(8);
-        expect(UNGUARDED_DRIFT_SOURCES.some((s) => s.includes('OPENING_STOCK'))).toBe(true);
-        expect(UNGUARDED_DRIFT_SOURCES.some((s) => s.includes('DELIVERY_NOTE'))).toBe(true);
+        expect(UNGUARDED_DRIFT_SOURCES.length).toBeGreaterThanOrEqual(5);
+        expect(UNGUARDED_DRIFT_SOURCES.some((s) => s.includes('SALE_VOID'))).toBe(true);
         expect(UNGUARDED_DRIFT_SOURCES.some((s) => s.includes('CORRECTION'))).toBe(true);
     });
 
-    it('opening stock GL-only failure increases GL vs batches (GL > batch drift direction)', () => {
+    it('opening stock GL-only failure increases GL vs batches (historical pattern)', () => {
         const before = snap(100_000, 100_000);
         const after = simulateGapAfterTransaction(before, 50_000, 0);
         expect(after.gap - before.gap).toBe(50_000);
     });
 
-    it('delivery note PGI after commit: batch down without GL widens gap (GL > batch)', () => {
+    it('delivery note PGI after commit: batch down without GL widens gap (historical — now guarded)', () => {
         const before = snap(100_000, 100_000);
         const after = simulateGapAfterTransaction(before, 0, -10_000);
         expect(after.gap - before.gap).toBe(10_000);

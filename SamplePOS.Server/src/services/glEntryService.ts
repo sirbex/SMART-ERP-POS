@@ -1470,6 +1470,7 @@ export interface DeliveryNoteGoodsIssueData {
 export async function recordDeliveryNoteGoodsIssueToGL(
   data: DeliveryNoteGoodsIssueData,
   pool?: pg.Pool,
+  txClient?: pg.PoolClient,
 ): Promise<void> {
   try {
     if (data.totalCost <= 0) {
@@ -1504,7 +1505,7 @@ export async function recordDeliveryNoteGoodsIssueToGL(
       userId: SYSTEM_USER_ID,
       idempotencyKey: `DN_PGI_COGS-${data.deliveryNoteId}`,
       source: 'INVENTORY_MOVE' as const,
-    }, pool);
+    }, pool, txClient);
 
     logger.info('Recorded DN goods issue COGS to GL', {
       deliveryNoteId: data.deliveryNoteId,
@@ -2291,6 +2292,71 @@ export async function recordStockMovementToGL(movement: StockMovementData, pool?
 // =============================================================================
 // OPENING STOCK / BULK IMPORT JOURNAL ENTRIES
 // =============================================================================
+
+export interface OpeningStockImportSummaryData {
+  grId: string;
+  grNumber: string;
+  importDate: string;
+  /** Total DR Inventory (1300) — must equal batch subledger increase. */
+  totalValue: number;
+}
+
+/**
+ * Single FI document for bulk opening stock import (SAP/Odoo: one material + one accounting doc).
+ * Posts inside the same LUW as batch creation when txClient is provided.
+ */
+export async function recordOpeningStockImportSummaryToGL(
+  data: OpeningStockImportSummaryData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<void> {
+  if (data.totalValue === 0) return;
+
+  const absValue = Math.abs(data.totalValue);
+  const isReversal = data.totalValue < 0;
+
+  const lines: JournalLine[] = isReversal
+    ? [
+        {
+          accountCode: AccountCodes.OPENING_BALANCE_EQUITY,
+          description: `Opening stock import reversal: ${data.grNumber}`,
+          debitAmount: absValue,
+          creditAmount: 0,
+        },
+        {
+          accountCode: AccountCodes.INVENTORY,
+          description: `Inventory decrease (opening import): ${data.grNumber}`,
+          debitAmount: 0,
+          creditAmount: absValue,
+        },
+      ]
+    : [
+        {
+          accountCode: AccountCodes.INVENTORY,
+          description: `Inventory increase (opening import): ${data.grNumber}`,
+          debitAmount: absValue,
+          creditAmount: 0,
+        },
+        {
+          accountCode: AccountCodes.OPENING_BALANCE_EQUITY,
+          description: `Opening balance equity: ${data.grNumber}`,
+          debitAmount: 0,
+          creditAmount: absValue,
+        },
+      ];
+
+  await AccountingCore.createJournalEntry({
+    entryDate: data.importDate,
+    description: `Opening stock import ${data.grNumber}`,
+    referenceType: 'OPENING_STOCK',
+    referenceId: data.grId,
+    referenceNumber: data.grNumber,
+    lines,
+    userId: SYSTEM_USER_ID,
+    idempotencyKey: `OPENING_STOCK_IMPORT-${data.grId}`,
+    source: 'OPENING_BALANCE_WIZARD' as const,
+  }, pool, txClient);
+}
 
 export interface OpeningStockData {
   movementId: string;

@@ -67,6 +67,33 @@ export function batchValuationIncrease(
     );
 }
 
+export type InventoryGlDirection = 'receipt' | 'issue';
+
+/**
+ * SAP MM-FI / Odoo stock.valuation layer pattern:
+ * inventory GL posting amount = batch subledger valuation change
+ * (same SQL as {@link captureInventoryCoupling} — never a parallel JS total).
+ */
+export function resolveGl1300FromBatchSubledgerDelta(
+    before: CouplingSnapshot,
+    after: CouplingSnapshot,
+    direction: InventoryGlDirection,
+): number {
+    const amount =
+        direction === 'receipt'
+            ? batchValuationIncrease(before, after)
+            : batchValuationReduction(before, after);
+    return Math.max(0, amount);
+}
+
+export function documentTotalDiffersFromSubledger(
+    documentTotal: number,
+    subledgerAmount: number,
+    tolerance = INVENTORY_COUPLING_TOLERANCE,
+): boolean {
+    return Math.abs(documentTotal - subledgerAmount) > tolerance;
+}
+
 /**
  * Simulate gap after an inventory transaction when GL 1300 and batch subledger
  * change by given deltas (debits positive on GL asset account).
@@ -97,19 +124,19 @@ export function sumJsBatchDeductionCost(
  * New drift from these paths is limited to INVENTORY_COUPLING_TOLERANCE per txn.
  */
 export const COUPLING_GUARDED_WORKFLOWS = [
-    'SALE (salesService.createSale)',
-    'GOODS_RECEIPT (goodsReceiptService.finalize)',
-    'RETURN_GRN (returnGrnService.post)',
-    'STOCK_ADJUSTMENT_IN|OUT|DAMAGE|EXPIRY (stockMovementHandler)',
+    'SALE (salesService.createSale) — GL from batchValuationReduction',
+    'GOODS_RECEIPT (goodsReceiptService.finalize) — GL from batchValuationIncrease',
+    'RETURN_GRN (returnGrnService.post) — GL from batchValuationReduction',
+    'STOCK_ADJUSTMENT_IN|OUT|DAMAGE|EXPIRY (stockMovementHandler) — GL from subledger delta',
+    'DELIVERY_NOTE_PGI (deliveryNoteService.post) — GL inside TX from batchValuationReduction',
+    'OPENING_STOCK_IMPORT (goodsReceiptService.importOpeningStock) — GL inside TX from batchValuationIncrease',
 ] as const;
 
 /**
- * Workflows that can add historical / unbounded GL ↔ batch drift (no coupling assert).
- * Forensics: classify-inventory-gl-drift.mjs buckets by ReferenceType.
+ * Residual drift sources (void/refund/heal/corrections) — tenant forensics only.
+ * These do not block new sales; historical gap may remain until heal API.
  */
 export const UNGUARDED_DRIFT_SOURCES = [
-    'OPENING_STOCK — GL after COMMIT; errors swallowed (goodsReceiptService)',
-    'DELIVERY_NOTE_PGI — GL after COMMIT (deliveryNoteService)',
     'SALE_VOID — batch restore vs GL reversal, no coupling (salesService.voidSale)',
     'SALE_REFUND / CREDIT_NOTE_RETURN — restore 1300 without coupling',
     'recordStockAdjustmentToGL — legacy path without stockMovementHandler',

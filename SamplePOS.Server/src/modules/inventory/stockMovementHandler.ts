@@ -25,6 +25,7 @@ import {
   assertInventoryCouplingUnchanged,
   captureInventoryCoupling,
   INVENTORY_COUPLING_TOLERANCE,
+  resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
 import { Money } from '../../utils/money.js';
 
@@ -149,6 +150,9 @@ export class StockMovementHandler {
       // Step 5: Validate resulting quantity
       await this.validateResultingQuantity(client, newQty, batch.product_id, previousQty, params.quantity);
 
+      const absQtyDec = Money.parseDb(Math.abs(quantityChange));
+      const unitCostDec = Money.parseDb(params.unitCost ?? batch.cost_price ?? 0);
+
       // Step 6: Update batch quantity
       await client.query(
         `UPDATE inventory_batches 
@@ -158,11 +162,19 @@ export class StockMovementHandler {
         [newQty.toNumber(), batch.id]
       );
 
-      // Step 7: Economic value — MUST match batch subledger (remaining_qty × cost_price).
-      // Coupling guard compares GL(1300) to SUM(batch valuation); FIFO layer cost can differ
-      // from batch.cost_price but only batch rows affect the coupling snapshot.
-      const absQtyDec = Money.parseDb(Math.abs(quantityChange));
-      const unitCostDec = Money.parseDb(params.unitCost ?? batch.cost_price ?? 0);
+      // Step 7: GL amount from batch subledger delta (SAP MM-FI — same SQL as coupling guard)
+      let movementValueDec = Money.multiply(unitCostDec, absQtyDec);
+      if (inventoryCouplingBefore) {
+        const couplingAfterBatch = await captureInventoryCoupling(client);
+        const subledgerAmount = resolveGl1300FromBatchSubledgerDelta(
+          inventoryCouplingBefore,
+          couplingAfterBatch,
+          isInbound ? 'receipt' : 'issue',
+        );
+        if (subledgerAmount > 0) {
+          movementValueDec = Money.parseDb(subledgerAmount);
+        }
+      }
 
       if (
         !isInbound &&
@@ -188,7 +200,6 @@ export class StockMovementHandler {
         );
       }
 
-      let movementValueDec = Money.multiply(unitCostDec, absQtyDec);
       const unitCost = Money.toNumber(unitCostDec);
       let movementValue = Money.toNumber(movementValueDec);
 
