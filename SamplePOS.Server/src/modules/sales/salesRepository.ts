@@ -408,6 +408,42 @@ export const salesRepository = {
   },
 
   /**
+   * After FEFO batch deduction, align sale header and line costs with actual issue cost.
+   */
+  async updatePostedSaleCostsAfterDeduction(
+    pool: Pool | PoolClient,
+    saleId: string,
+    header: { totalCost: number; profit: number; profitMargin: number },
+    lineUpdates: Array<{ id: string; unitCost: number; profit: number }>,
+  ): Promise<void> {
+    for (const line of lineUpdates) {
+      await pool.query(
+        `UPDATE sale_items
+         SET unit_cost = $1, profit = $2
+         WHERE id = $3 AND sale_id = $4`,
+        [
+          new Decimal(line.unitCost).toFixed(2),
+          new Decimal(line.profit).toFixed(2),
+          line.id,
+          saleId,
+        ],
+      );
+    }
+
+    await pool.query(
+      `UPDATE sales
+       SET total_cost = $1, profit = $2, profit_margin = $3
+       WHERE id = $4`,
+      [
+        new Decimal(header.totalCost).toFixed(2),
+        new Decimal(header.profit).toFixed(2),
+        new Decimal(header.profitMargin).toFixed(4),
+        saleId,
+      ],
+    );
+  },
+
+  /**
    * Get sale by ID with items
    */
   async getSaleById(

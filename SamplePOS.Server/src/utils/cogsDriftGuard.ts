@@ -1,15 +1,15 @@
 /**
- * COGS Drift Guard — Pure utility
+ * COGS cost alignment — preview vs physical FEFO deduction.
  *
- * Compares GL-posted COGS (FEFO preview at sale build) against the actual
- * cost of batches physically deducted (FOR UPDATE) within the same sale
- * transaction.
+ * Enterprise rule: batches deducted under lock are the source of truth.
+ * Preview may differ (concurrency, rounding); sales reconcile to actual
+ * and log preview drift — they must not block checkout.
  *
- * Prefer `allocatedTotalCost` (preview total in base units) over
- * costPrice × selling quantity — avoids per-selling-unit rounding drift.
+ * Prefer `allocatedTotalCost` over costPrice × quantity for comparisons.
  */
 
 import Decimal from 'decimal.js';
+import { Money } from './money.js';
 
 /** Whole-currency tolerance (UGX has 0 display decimals). */
 export const COGS_DRIFT_TOLERANCE = 1;
@@ -91,4 +91,90 @@ export function detectCogsDrift(
     }
 
     return drifts;
+}
+
+/** Line fields updated when reconciling to actual batch deduction. */
+export interface ReconcilableSaleLine extends CogsDriftItem {
+    lineTotal?: number;
+    profit?: number;
+}
+
+export interface ReconcileSaleCostsResult {
+    /** Preview vs actual mismatches (audit only — sale proceeds after reconcile). */
+    previewDrifts: CogsDriftResult[];
+    /** Sum of reconciled line costs (inventory + unchanged custom lines). */
+    totalActualCost: Decimal;
+}
+
+/**
+ * Rewrite sale line costs from locked FEFO deduction totals.
+ * Call after physical batch deduction, before GL posting.
+ */
+export function reconcileSaleCostsToActualBatchDeduction(
+    items: ReconcilableSaleLine[],
+    actualBatchCostMap: Map<string, Decimal>,
+): ReconcileSaleCostsResult {
+    const previewDrifts = detectCogsDrift(items, actualBatchCostMap);
+
+    const indicesByProduct = new Map<string, number[]>();
+    items.forEach((item, index) => {
+        if (item.productId?.startsWith('custom_')) return;
+        const list = indicesByProduct.get(item.productId) ?? [];
+        list.push(index);
+        indicesByProduct.set(item.productId, list);
+    });
+
+    for (const [productId, indices] of indicesByProduct) {
+        const actualTotal = actualBatchCostMap.get(productId);
+        if (actualTotal === undefined) continue;
+
+        const previewParts = indices.map((i) => glCostForItem(items[i]!));
+        const previewSum = previewParts.reduce((s, p) => s.plus(p), new Decimal(0));
+
+        let allocated = new Decimal(0);
+
+        for (let j = 0; j < indices.length; j++) {
+            const idx = indices[j]!;
+            const item = items[idx]!;
+            const isLast = j === indices.length - 1;
+
+            let lineActual: Decimal;
+            if (isLast) {
+                lineActual = actualTotal.minus(allocated);
+            } else if (previewSum.greaterThan(0)) {
+                lineActual = actualTotal
+                    .times(previewParts[j]!.dividedBy(previewSum))
+                    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+                allocated = allocated.plus(lineActual);
+            } else {
+                lineActual = actualTotal
+                    .dividedBy(indices.length)
+                    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+                allocated = allocated.plus(lineActual);
+            }
+
+            const previewLine = previewParts[j]!;
+            const costDelta = previewLine.minus(lineActual);
+
+            item.allocatedTotalCost = Money.toNumber(Money.round(lineActual, 2));
+            item.costPrice =
+                item.quantity > 0
+                    ? Money.toNumber(Money.round(lineActual.dividedBy(item.quantity), 2))
+                    : 0;
+
+            if (item.profit !== undefined) {
+                item.profit = Money.toNumber(
+                    Money.round(new Decimal(item.profit).plus(costDelta), 2),
+                );
+            }
+        }
+    }
+
+    let totalActualCost = new Decimal(0);
+    for (const item of items) {
+        if (item.productId?.startsWith('custom_')) continue;
+        totalActualCost = totalActualCost.plus(glCostForItem(item));
+    }
+
+    return { previewDrifts, totalActualCost };
 }

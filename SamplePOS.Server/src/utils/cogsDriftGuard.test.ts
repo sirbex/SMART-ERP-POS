@@ -21,7 +21,10 @@
 
 import { describe, it, expect } from '@jest/globals';
 import Decimal from 'decimal.js';
-import { detectCogsDrift } from './cogsDriftGuard.js';
+import {
+    detectCogsDrift,
+    reconcileSaleCostsToActualBatchDeduction,
+} from './cogsDriftGuard.js';
 import type { CogsDriftItem } from './cogsDriftGuard.js';
 
 // ---------------------------------------------------------------------------
@@ -211,6 +214,71 @@ describe('detectCogsDrift', () => {
     it('handles zero-cost items (free samples) without false positive', () => {
         const items = [item('prod-free', 'Free Sample', 0, 5)];
         const map = batchMap([['prod-free', 0]]);
+        expect(detectCogsDrift(items, map)).toHaveLength(0);
+    });
+});
+
+describe('reconcileSaleCostsToActualBatchDeduction', () => {
+    it('rewrites line costs to actual batch total (Isofair 10 UGX preview drift)', () => {
+        const items = [
+            {
+                ...item('prod-rnd', 'Isofair 20mg', 1733.33, 3, 5200),
+                profit: 1000,
+                lineTotal: 6200,
+            },
+        ];
+        const map = batchMap([['prod-rnd', 5210]]);
+
+        const { previewDrifts, totalActualCost } = reconcileSaleCostsToActualBatchDeduction(
+            items,
+            map,
+        );
+
+        expect(previewDrifts).toHaveLength(1);
+        expect(previewDrifts[0].drift).toBe('10.00');
+        expect(items[0].allocatedTotalCost).toBe(5210);
+        // 5210 / 3 → Money rounds per-selling unit to 1737 (UGX)
+        expect(items[0].costPrice).toBe(1737);
+        expect(items[0].profit).toBe(990);
+        expect(totalActualCost.toNumber()).toBe(5210);
+
+        // After reconcile, sale must not block on drift (enterprise contract)
+        expect(detectCogsDrift(items, map)).toHaveLength(0);
+    });
+
+    it('splits actual cost across multiple lines for the same product', () => {
+        const items = [
+            { ...item('prod-a', 'Product A', 500, 1, 500), profit: 50, lineTotal: 550 },
+            { ...item('prod-a', 'Product A', 300, 2, 600), profit: 60, lineTotal: 660 },
+        ];
+        const map = batchMap([['prod-a', 1100]]);
+
+        const { previewDrifts, totalActualCost } = reconcileSaleCostsToActualBatchDeduction(
+            items,
+            map,
+        );
+
+        expect(previewDrifts).toHaveLength(0);
+        expect(items[0].allocatedTotalCost).toBe(500);
+        expect(items[1].allocatedTotalCost).toBe(600);
+        expect(totalActualCost.toNumber()).toBe(1100);
+    });
+
+    it('eliminates post-reconcile drift after concurrent batch change (600 UGX race)', () => {
+        const items = [
+            {
+                ...item('prod-001', 'Glucophage 500mg', 1000, 3, 3000),
+                profit: 2000,
+                lineTotal: 5000,
+            },
+        ];
+        const map = batchMap([['prod-001', 3600]]);
+
+        const { previewDrifts } = reconcileSaleCostsToActualBatchDeduction(items, map);
+
+        expect(previewDrifts).toHaveLength(1);
+        expect(previewDrifts[0].drift).toBe('600.00');
+        expect(items[0].allocatedTotalCost).toBe(3600);
         expect(detectCogsDrift(items, map)).toHaveLength(0);
     });
 });

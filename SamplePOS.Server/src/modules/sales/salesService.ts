@@ -52,7 +52,7 @@ import {
   deriveUnitPriceFromLineTotal,
 } from './saleIntegrity.js';
 import { computeSaleItemBaseQuantity } from './saleItemBaseQuantity.js';
-import { detectCogsDrift } from '../../utils/cogsDriftGuard.js';
+import { reconcileSaleCostsToActualBatchDeduction } from '../../utils/cogsDriftGuard.js';
 import {
   assertInventoryCouplingUnchanged,
   captureInventoryCoupling,
@@ -1293,37 +1293,51 @@ export const salesService = {
       }
 
       // ============================================================
-      // PERMANENT DRIFT GUARD: GL COGS vs actual FEFO batch deductions
+      // ENTERPRISE COGS: physical deduction is source of truth
       // ============================================================
-      // PERMANENT DRIFT GUARD: GL COGS vs actual FEFO batch deductions
-      // ============================================================
-      // The FEFO preview (no lock) and the actual deduction (FOR UPDATE) run
-      // in separate query rounds within the same transaction. Under PostgreSQL
-      // READ COMMITTED, a concurrent sale that commits between the preview and
-      // the deduction can change which batches are available — causing the GL
-      // to post a cost different from what was physically deducted.
-      //
-      // detectCogsDrift() is a pure function (tested in cogsDriftGuard.test.ts)
-      // that returns all items whose |GL cost − actual batch cost| > 0.01.
-      const cogsDrifts = detectCogsDrift(itemsWithCosts, actualBatchCostMap);
-      if (cogsDrifts.length > 0) {
-        const first = cogsDrifts[0];
-        logger.error('[COGS DRIFT] Sale blocked — preview cost ≠ FEFO batch deduction', {
+      // Preview (early in TX) may differ from locked FEFO deduction under
+      // concurrency or rounding. Reconcile sale lines + header to actual cost;
+      // log preview drift for ops — never block checkout.
+      const { previewDrifts, totalActualCost } = reconcileSaleCostsToActualBatchDeduction(
+        itemsWithCosts,
+        actualBatchCostMap,
+      );
+
+      if (previewDrifts.length > 0) {
+        logger.warn('[COGS PREVIEW DRIFT] Reconciled sale to actual FEFO deduction', {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
-          drifts: cogsDrifts,
+          drifts: previewDrifts,
         });
-        throw new BusinessError(
-          `Inventory cost mismatch for "${first.productName}": cannot complete sale. Retry.`,
-          'ERR_SALE_COGS_DRIFT',
-          { productId: first.productId, drift: first.drift },
-        );
       }
 
-      let actualInventoryCost = 0;
-      for (const cost of actualBatchCostMap.values()) {
-        actualInventoryCost = Money.toNumber(Money.add(Money.parseDb(actualInventoryCost), cost));
-      }
+      const actualTotalCostNum = Money.toNumber(totalActualCost);
+      const saleSubtotalDec = new Decimal(sale.subtotal ?? saleData.subtotal ?? 0);
+      const saleDiscountDec = new Decimal(sale.discountAmount ?? saleData.discountAmount ?? 0);
+      const revenueBeforeTax = saleSubtotalDec.minus(saleDiscountDec);
+      const reconciledProfit = revenueBeforeTax.minus(actualTotalCostNum);
+      const reconciledMargin = revenueBeforeTax.greaterThan(0)
+        ? reconciledProfit.dividedBy(revenueBeforeTax).toNumber()
+        : 0;
+
+      await salesRepository.updatePostedSaleCostsAfterDeduction(
+        client,
+        sale.id,
+        {
+          totalCost: actualTotalCostNum,
+          profit: Money.toNumber(Money.round(reconciledProfit, 2)),
+          profitMargin: reconciledMargin,
+        },
+        items.map((postedItem, index) => ({
+          id: postedItem.id,
+          unitCost: itemsWithCosts[index]?.costPrice ?? 0,
+          profit: itemsWithCosts[index]?.profit ?? 0,
+        })),
+      );
+
+      sale.totalCost = actualTotalCostNum;
+
+      const actualInventoryCost = actualTotalCostNum;
 
       // GL POSTING: AFTER physical FEFO deduction so COGS credits 1300 at actual batch cost.
       try {
