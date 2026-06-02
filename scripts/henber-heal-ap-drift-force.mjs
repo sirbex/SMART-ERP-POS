@@ -10,7 +10,7 @@ import { computeApReconciliationSnapshot, apMaterialityThreshold, isApDriftExpla
 import { AccountingCore } from '/app/dist/SamplePOS.Server/src/services/accountingCore.js';
 import { getBusinessDate } from '/app/dist/SamplePOS.Server/src/utils/dateRange.js';
 
-const AP_DRIFT_HEAL_NS = 'a1b2c3d4-e5f6-4789-a012-3456789ap00';
+const AP_DRIFT_HEAL_NS = 'a1b2c3d4-e5f6-4789-a012-3456789ab00';
 const ADMIN_USER_ID = process.env.ADMIN_USER_ID || '4971ceff-c094-41b0-bfaf-a3d88ea634a1';
 
 function henberDatabaseUrl() {

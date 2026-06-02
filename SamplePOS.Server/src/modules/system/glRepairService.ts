@@ -1284,7 +1284,7 @@ export async function healAPDrift(
     const today = getBusinessDate();
     const idempotencyKey = `AP-DRIFT-HEAL-${today}`;
     // Deterministic UUID — must NOT use all-zero referenceId (collides with other CORRECTION entries).
-    const referenceId = uuidv5(idempotencyKey, 'a1b2c3d4-e5f6-4789-a012-3456789ap00');
+    const referenceId = uuidv5(idempotencyKey, 'a1b2c3d4-e5f6-4789-a012-3456789ab00');
 
     const description =
         `AP drift correction: align GL 2100 (${glBalance.toFixed(2)}) `
