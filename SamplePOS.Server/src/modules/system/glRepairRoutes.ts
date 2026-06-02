@@ -19,6 +19,11 @@ import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler, ValidationError, NotFoundError } from '../../middleware/errorHandler.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { glRepairService } from './glRepairService.js';
+import {
+    findDuplicateInventoryGlPostings,
+    remediateDuplicateInventoryGlPostings,
+    healInventoryGlComplete,
+} from '../../services/inventoryGlDuplicateRemediation.js';
 import { AccountingCore } from '../../services/accountingCore.js';
 import logger from '../../utils/logger.js';
 
@@ -148,16 +153,77 @@ router.post('/rebuild-product-daily-summary', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// GET /api/system/gl/inventory-duplicates
+// List duplicate active GL postings on account 1300 (same ReferenceType + ReferenceId).
+// ============================================================================
+router.get('/inventory-duplicates', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    logger.info('Inventory GL duplicate scan requested', { userId: req.user?.id });
+    const result = await findDuplicateInventoryGlPostings(pool);
+    res.json({
+        success: true,
+        data: result,
+        message: result.groups.length === 0
+            ? 'No duplicate inventory GL postings found'
+            : `${result.groups.length} duplicate group(s), ${result.totalDuplicateTransactions} extra posting(s), ~${result.estimated1300Inflation.toFixed(2)} UGX inflation on 1300`,
+    });
+}));
+
+// ============================================================================
+// POST /api/system/gl/remediate-inventory-duplicates
+// Reverse duplicate 1300 postings (keeps earliest active journal per reference).
+// ============================================================================
+router.post('/remediate-inventory-duplicates', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const userId = req.user?.id;
+    if (!userId) throw new ValidationError('User not authenticated');
+    const dryRun = req.body?.dryRun === true;
+    logger.info('Inventory GL duplicate remediation triggered', { userId, dryRun });
+    const found = dryRun ? await findDuplicateInventoryGlPostings(pool) : null;
+    const result = await remediateDuplicateInventoryGlPostings(pool, userId, { dryRun });
+    const extraCount = found?.totalDuplicateTransactions ?? result.reversed;
+    res.json({
+        success: true,
+        data: result,
+        message: dryRun
+            ? `Dry run: ${result.groupsFound} duplicate group(s), ${extraCount} extra posting(s) would be reversed`
+            : `Reversed ${result.reversed} duplicate posting(s) across ${result.groupsFound} group(s)`,
+    });
+}));
+
+// ============================================================================
 // POST /api/system/gl/heal-inventory-drift
-// Align GL 1300 with inventory_batches subledger (idempotent per business date).
+// Reverse duplicate 1300 postings (optional), then align GL 1300 with batch subledger.
+// Body: { dryRun?: boolean, skipDuplicateRemediation?: boolean }
 // ============================================================================
 router.post('/heal-inventory-drift', asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
+    const userId = req.user?.id;
+    if (!userId) throw new ValidationError('User not authenticated');
+    const dryRun = req.body?.dryRun === true;
+    const skipDuplicateRemediation = req.body?.skipDuplicateRemediation === true;
     logger.info('Inventory GL drift heal triggered', {
         userId: req.user?.id,
         role: req.user?.role,
+        dryRun,
+        skipDuplicateRemediation,
     });
-    const result = await glRepairService.healInventoryGlDrift(pool, req.user?.id);
+
+    if (dryRun || !skipDuplicateRemediation) {
+        const result = await healInventoryGlComplete(pool, userId, { dryRun, skipDuplicateRemediation });
+        res.json({
+            success: true,
+            data: result,
+            message: dryRun
+                ? `Dry run: ${result.duplicates.groups.length} duplicate group(s), drift ${result.couplingAfterDuplicates.gap.toFixed(2)}`
+                : result.heal.action === 'no-op'
+                    ? `Inventory GL within tolerance after remediation (drift ${result.heal.drift.toFixed(2)})`
+                    : `Remediated duplicates + posted ${result.heal.action} correction ${result.heal.transactionNumber} for drift ${result.heal.drift.toFixed(2)}`,
+        });
+        return;
+    }
+
+    const result = await glRepairService.healInventoryGlDrift(pool, userId);
     res.json({
         success: true,
         data: result,

@@ -6,7 +6,12 @@ type AnyMock = jest.Mock<(...args: unknown[]) => Promise<unknown>>;
 const mockDeductFromCostLayers = jest.fn<AnyMock>().mockResolvedValue(undefined);
 const mockRecordMovement = jest.fn<AnyMock>().mockResolvedValue(undefined);
 const mockSyncProductQuantity = jest.fn<AnyMock>().mockResolvedValue(undefined);
-const mockRecordReturnGrnToGL = jest.fn<AnyMock>().mockResolvedValue(undefined);
+const mockRecordReturnGrnToGL = jest.fn<AnyMock>().mockImplementation(async () => {
+  // Mimic GL(1300) update so inventory coupling invariant holds:
+  // gap = glNet1300 - batchValuation must remain unchanged.
+  glTotal = batchTotal;
+  return undefined;
+});
 
 const mockRgrn = {
   id: 'rgrn-1',
@@ -105,6 +110,9 @@ const mockClient = {
   query: jest.fn<(...args: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>>(),
 } as unknown as PoolClient;
 
+let batchTotal = 1000;
+let glTotal = 1000;
+
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   UnitOfWork: {
     run: jest.fn(async (_pool: unknown, fn: (client: PoolClient) => Promise<unknown>) => fn(mockClient)),
@@ -118,6 +126,8 @@ describe('returnGrnService.post cost_layers sync', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    batchTotal = 1000;
+    glTotal = 1000;
     (mockClient.query as jest.Mock).mockImplementation(async (sql: string) => {
       const s = String(sql);
       if (s.includes('costing_method')) {
@@ -127,7 +137,9 @@ describe('returnGrnService.post cost_layers sync', () => {
         return { rows: [{ received: 100 }] };
       }
       if (s.includes('UPDATE inventory_batches')) {
-        return { rows: [{ remaining_quantity: 95, cost_price: 100 }] };
+        // Ensure remaining valuation decreases so GL(1300) issue is non-zero.
+        batchTotal = 500;
+        return { rows: [{ remaining_quantity: 5, cost_price: 100 }] };
       }
       if (s.includes('has_invoice')) {
         return { rows: [{ has_invoice: false }] };
@@ -136,10 +148,10 @@ describe('returnGrnService.post cost_layers sync', () => {
         return { rows: [{ supplier_id: 'sup-1', supplier_name: 'Supplier A', gr_number: 'GR-2026-0001' }] };
       }
       if (s.includes('"AccountCode" = \'1300\'')) {
-        return { rows: [{ balance: '1000' }] };
+        return { rows: [{ balance: String(glTotal) }] };
       }
       if (s.includes('inventory_batches') && s.includes('remaining_quantity * cost_price')) {
-        return { rows: [{ total: '1000' }] };
+        return { rows: [{ total: String(batchTotal) }] };
       }
       return { rows: [] };
     });
@@ -161,6 +173,8 @@ describe('returnGrnService.post cost_layers sync', () => {
   });
 
   test('skips cost_layers for AVCO products', async () => {
+    batchTotal = 1000;
+    glTotal = 1000;
     (mockClient.query as jest.Mock).mockImplementation(async (sql: string) => {
       const s = String(sql);
       if (s.includes('costing_method')) {
@@ -170,7 +184,8 @@ describe('returnGrnService.post cost_layers sync', () => {
         return { rows: [{ received: 100 }] };
       }
       if (s.includes('UPDATE inventory_batches')) {
-        return { rows: [{ remaining_quantity: 95, cost_price: 100 }] };
+        batchTotal = 500;
+        return { rows: [{ remaining_quantity: 5, cost_price: 100 }] };
       }
       if (s.includes('has_invoice')) {
         return { rows: [{ has_invoice: false }] };
@@ -179,10 +194,10 @@ describe('returnGrnService.post cost_layers sync', () => {
         return { rows: [{ supplier_id: 'sup-1', supplier_name: 'Supplier A', gr_number: 'GR-2026-0001' }] };
       }
       if (s.includes('"AccountCode" = \'1300\'')) {
-        return { rows: [{ balance: '1000' }] };
+        return { rows: [{ balance: String(glTotal) }] };
       }
       if (s.includes('inventory_batches') && s.includes('remaining_quantity * cost_price')) {
-        return { rows: [{ total: '1000' }] };
+        return { rows: [{ total: String(batchTotal) }] };
       }
       return { rows: [] };
     });

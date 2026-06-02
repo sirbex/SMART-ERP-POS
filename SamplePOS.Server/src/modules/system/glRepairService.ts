@@ -26,6 +26,7 @@ import { getBusinessDate } from '../../utils/dateRange.js';
 import { Money } from '../../utils/money.js';
 import { AccountingCore } from '../../services/accountingCore.js';
 import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
+import { ACTIVE_GL_REFERENCE_PREDICATE } from '../../utils/activeGlReference.js';
 
 export interface RepairTypeResult {
     found: number;
@@ -170,6 +171,7 @@ async function repairGoodsReceipts(pool: pg.Pool): Promise<RepairTypeResult> {
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'GOODS_RECEIPT'
           AND lt."ReferenceId" = gr.id
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
   `);
 
@@ -221,6 +223,7 @@ async function repairReturnGrns(pool: pg.Pool): Promise<RepairTypeResult> {
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'RETURN_GRN'
           AND lt."ReferenceId" = r.id
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
     GROUP BY r.id, r.return_grn_number, r.return_date, r.supplier_id, s."CompanyName", gr.receipt_number
     HAVING COALESCE(SUM(rl.line_total), 0) > 0
@@ -276,6 +279,7 @@ async function repairSupplierInvoices(pool: pg.Pool): Promise<RepairTypeResult> 
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'SUPPLIER_INVOICE'
           AND lt."ReferenceId" = si."Id"
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
   `);
 
@@ -338,6 +342,7 @@ async function repairSupplierPayments(pool: pg.Pool): Promise<RepairTypeResult> 
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'SUPPLIER_PAYMENT'
           AND lt."ReferenceId" = sp."Id"
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
   `);
 
@@ -390,6 +395,7 @@ async function repairStockMovements(pool: pg.Pool): Promise<RepairTypeResult> {
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'STOCK_MOVEMENT'
           AND lt."ReferenceId" = sm.id
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
     ORDER BY sm.created_at
   `);
@@ -449,6 +455,7 @@ async function repairOpeningStock(pool: pg.Pool): Promise<RepairTypeResult> {
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'OPENING_STOCK'
           AND lt."ReferenceId" = sm.id
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
     ORDER BY sm.created_at
   `);
@@ -501,6 +508,7 @@ async function repairSales(pool: pg.Pool): Promise<RepairTypeResult> {
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'SALE'
           AND lt."ReferenceId" = s.id
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
     ORDER BY s.sale_date
   `);
@@ -683,6 +691,7 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
          AND NOT EXISTS (
            SELECT 1 FROM ledger_transactions lt
            WHERE lt."ReferenceType" = 'GOODS_RECEIPT' AND lt."ReferenceId" = gr.id
+             AND ${ACTIVE_GL_REFERENCE_PREDICATE}
          )
       ) AS grs_without_gl,
 
@@ -691,6 +700,7 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
          AND NOT EXISTS (
            SELECT 1 FROM ledger_transactions lt
            WHERE lt."ReferenceType" = 'RETURN_GRN' AND lt."ReferenceId" = r.id
+             AND ${ACTIVE_GL_REFERENCE_PREDICATE}
          )
       ) AS returns_without_gl,
 
@@ -700,6 +710,7 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
          AND NOT EXISTS (
            SELECT 1 FROM ledger_transactions lt
            WHERE lt."ReferenceType" = 'SUPPLIER_INVOICE' AND lt."ReferenceId" = si."Id"
+             AND ${ACTIVE_GL_REFERENCE_PREDICATE}
          )
       ) AS invoices_without_gl,
 
@@ -709,6 +720,7 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
          AND NOT EXISTS (
            SELECT 1 FROM ledger_transactions lt
            WHERE lt."ReferenceType" = 'SUPPLIER_PAYMENT' AND lt."ReferenceId" = sp."Id"
+             AND ${ACTIVE_GL_REFERENCE_PREDICATE}
          )
       ) AS payments_without_gl,
 
@@ -718,6 +730,7 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
          AND NOT EXISTS (
            SELECT 1 FROM ledger_transactions lt
            WHERE lt."ReferenceType" = 'STOCK_MOVEMENT' AND lt."ReferenceId" = sm.id
+             AND ${ACTIVE_GL_REFERENCE_PREDICATE}
          )
       ) AS stock_movements_without_gl,
 
@@ -727,6 +740,7 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
          AND NOT EXISTS (
            SELECT 1 FROM ledger_transactions lt
            WHERE lt."ReferenceType" = 'SALE' AND lt."ReferenceId" = s.id
+             AND ${ACTIVE_GL_REFERENCE_PREDICATE}
          )
       ) AS sales_without_gl
   `);

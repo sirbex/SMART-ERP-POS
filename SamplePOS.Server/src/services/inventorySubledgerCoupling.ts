@@ -6,7 +6,7 @@
  * Any inventory + GL workflow must leave `gap` unchanged (within tolerance).
  * Pre-existing tenant drift is allowed; new drift from a bug is not.
  */
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { BusinessError } from '../middleware/errorHandler.js';
 import { LEDGER_NET_ACTIVE_SQL } from '../utils/ledgerNetActive.js';
 import { Money } from '../utils/money.js';
@@ -26,7 +26,7 @@ export {
 export type { CouplingSnapshot as InventoryCouplingSnapshot, InventoryGlDirection } from './inventoryCouplingMath.js';
 
 export async function captureInventoryCoupling(
-    client: PoolClient,
+    client: PoolClient | Pool,
 ): Promise<CouplingSnapshot> {
     const glRes = await client.query<{ balance: string }>(`
         SELECT COALESCE(SUM(le."DebitAmount") - SUM(le."CreditAmount"), 0) AS balance

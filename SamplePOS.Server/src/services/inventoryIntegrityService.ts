@@ -24,10 +24,11 @@ import type { Pool } from 'pg';
 import logger from '../utils/logger.js';
 import { Money } from '../utils/money.js';
 import { getBusinessDate } from '../utils/dateRange.js';
+import { ACTIVE_GL_REFERENCE_PREDICATE } from '../utils/activeGlReference.js';
 
 /** Represents a single operation that may have a GL/subledger mismatch */
 export interface IntegrityIssue {
-    issueType: 'MISSING_GL' | 'MISSING_SUBLEDGER' | 'AMOUNT_MISMATCH' | 'ROUNDING_NOISE';
+    issueType: 'MISSING_GL' | 'MISSING_SUBLEDGER' | 'AMOUNT_MISMATCH' | 'ROUNDING_NOISE' | 'DUPLICATE_GL';
     severity: 'CRITICAL' | 'WARNING' | 'INFO';
     referenceType: string;
     referenceId: string;
@@ -71,6 +72,7 @@ export async function checkInventoryIntegrity(pool: Pool): Promise<IntegrityRepo
         JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
         JOIN accounts a ON le."AccountId" = a."Id"
         WHERE a."AccountCode" = '1300'
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
     `);
     const glBalance = Money.toNumber(Money.parseDb(glResult.rows[0].balance));
 
@@ -103,7 +105,7 @@ export async function checkInventoryIntegrity(pool: Pool): Promise<IntegrityRepo
         JOIN ledger_entries le ON le."TransactionId" = lt."Id"
         JOIN accounts a ON le."AccountId" = a."Id"
         WHERE a."AccountCode" = '1300'
-          AND lt."IsReversed" = FALSE
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
         GROUP BY lt."ReferenceType", lt."ReferenceId", lt."ReferenceNumber", lt."Description"
     `);
 
@@ -176,11 +178,49 @@ export async function checkInventoryIntegrity(pool: Pool): Promise<IntegrityRepo
           AND sm.movement_type != 'OPENING_BALANCE'
           AND NOT EXISTS (
             SELECT 1 FROM ledger_transactions lt
-            WHERE lt."ReferenceId" = sm.reference_id
-              AND lt."IsReversed" = FALSE
+            WHERE lt."ReferenceType" = sm.reference_type
+              AND lt."ReferenceId" = sm.reference_id
+              AND ${ACTIVE_GL_REFERENCE_PREDICATE}
           )
         GROUP BY sm.reference_type, sm.reference_id
     `);
+
+    // 4e. Detect duplicate active GL docs for same business reference (SAP/Odoo anti-dup rule)
+    const duplicateRefs = await pool.query(`
+        SELECT
+            lt."ReferenceType" AS reference_type,
+            lt."ReferenceId" AS reference_id,
+            MAX(lt."ReferenceNumber") AS reference_number,
+            COUNT(*)::int AS txn_count,
+            COALESCE(SUM(le."DebitAmount" - le."CreditAmount"), 0) AS net_1300
+        FROM ledger_transactions lt
+        JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+        JOIN accounts a ON a."Id" = le."AccountId"
+        WHERE a."AccountCode" = '1300'
+          AND lt."ReferenceType" IS NOT NULL
+          AND lt."ReferenceId" IS NOT NULL
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
+        GROUP BY lt."ReferenceType", lt."ReferenceId"
+        HAVING COUNT(*) > 1
+        ORDER BY COUNT(*) DESC, ABS(SUM(le."DebitAmount" - le."CreditAmount")) DESC
+    `);
+
+    for (const row of duplicateRefs.rows) {
+        const net = Money.toNumber(Money.parseDb(row.net_1300));
+        issues.push({
+            issueType: 'DUPLICATE_GL',
+            severity: 'CRITICAL',
+            referenceType: row.reference_type,
+            referenceId: row.reference_id,
+            referenceNumber: row.reference_number || '',
+            description:
+                `Duplicate active GL postings for ${row.reference_type} ${row.reference_number || row.reference_id} ` +
+                `(count=${row.txn_count})`,
+            glAmount: net,
+            subledgerAmount: 0,
+            difference: net,
+        });
+    }
 
     for (const row of unpostedOps.rows) {
         const val = Money.toNumber(Money.parseDb(row.movement_value));
@@ -209,8 +249,11 @@ export async function checkInventoryIntegrity(pool: Pool): Promise<IntegrityRepo
     });
 
     const criticalCount = issues.filter(i => i.severity === 'CRITICAL').length;
+    const duplicateCount = issues.filter(i => i.issueType === 'DUPLICATE_GL').length;
     const summary = isWithinTolerance && criticalCount === 0
         ? `Inventory integrity OK — GL and subledger within tolerance (${materialityThreshold.toLocaleString()} UGX)`
+        : duplicateCount > 0
+            ? `${duplicateCount} duplicate active GL reference(s) detected — remediation required before heal`
         : criticalCount > 0
             ? `${criticalCount} CRITICAL issue(s) found — stock movements without GL entries`
             : `GL-subledger difference (${Math.abs(netDifference).toLocaleString()}) exceeds tolerance (${materialityThreshold.toLocaleString()})`;

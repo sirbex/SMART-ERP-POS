@@ -38,10 +38,9 @@
  *   • Refuses to post without an ADMIN_USER_ID for the audit trail.
  */
 
-import { randomUUID } from 'crypto';
 import pg from 'pg';
 import { runInventoryGLIntegrityCheck } from '../services/inventoryGLIntegrityCheckService.js';
-import { healInventoryGlDrift } from '../modules/system/glRepairService.js';
+import { healInventoryGlComplete } from '../services/inventoryGlDuplicateRemediation.js';
 import logger from '../utils/logger.js';
 import { getBusinessDate } from '../utils/dateRange.js';
 
@@ -90,7 +89,6 @@ async function main(): Promise<void> {
             ? 'Inventory write-down: GL 1300 reconciled to cost_layer subledger (drift correction)'
             : 'Inventory write-up: GL 1300 reconciled to cost_layer subledger (drift correction)';
 
-        const referenceId = randomUUID();
         const referenceNumber = `ADJ-DRIFT-${asOfDate.replace(/-/g, '')}`;
         const idempotencyKey = `inventory-gl-drift-fix-${asOfDate}`;
 
@@ -104,12 +102,21 @@ async function main(): Promise<void> {
         console.warn('');
 
         if (dryRun) {
-            console.warn('Dry run complete. Re-run with --apply to post the correction.');
+            const preview = await healInventoryGlComplete(pool, ADMIN_USER_ID, { dryRun: true });
+            console.warn(`Duplicate groups          : ${preview.duplicates.groups.length}`);
+            console.warn(`Extra postings to reverse : ${preview.duplicates.totalDuplicateTransactions}`);
+            console.warn(`Estimated 1300 inflation  : ${preview.duplicates.estimated1300Inflation.toLocaleString()}`);
+            console.warn(`Gap after duplicate fix   : ${preview.couplingAfterDuplicates.gap.toLocaleString()} (estimate — no writes)`);
+            console.warn('');
+            console.warn('Dry run complete. Re-run with --apply to reverse duplicates and post drift correction.');
             return;
         }
 
-        // Step 3: post via canonical heal (same as POST /api/system/gl/heal-inventory-drift)
-        const healResult = await healInventoryGlDrift(pool, ADMIN_USER_ID);
+        const complete = await healInventoryGlComplete(pool, ADMIN_USER_ID);
+        if (complete.remediation && complete.remediation.reversed > 0) {
+            console.warn(`Reversed ${complete.remediation.reversed} duplicate GL posting(s).`);
+        }
+        const healResult = complete.heal;
         if (healResult.action === 'no-op') {
             console.warn('Heal reported no-op after drift check — nothing posted.');
             return;

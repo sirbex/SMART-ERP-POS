@@ -83,6 +83,7 @@ import {
     LEDGER_FISCAL_YEAR_SQL,
     LEDGER_NET_ACTIVE_SQL,
 } from '../utils/ledgerNetActive.js';
+import { ACTIVE_GL_REFERENCE_PREDICATE_BARE } from '../utils/activeGlReference.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -460,34 +461,56 @@ export class AccountingCore {
                 );
             }
 
-            // 3c. Second-layer duplicate guard: check by (ReferenceType, ReferenceNumber).
-            // This catches the case where the same business document was already posted
-            // under a DIFFERENT idempotency key (e.g. UUID-based keys from old code,
-            // or a different code path posting the same sale).  If found, return the
-            // existing transaction rather than creating a phantom duplicate.
-            if (request.referenceType && request.referenceNumber) {
+            // 3c. Second-layer duplicate guard: one active FI document per business reference.
+            // Checks ReferenceType + ReferenceId first (canonical SAP key), then ReferenceNumber.
+            // Only considers POSTED, non-reversed transactions — reversed docs may be reposted.
+            const returnExistingByReference = async (
+                whereSql: string,
+                params: string[],
+                logField: string,
+                logValue: string,
+            ): Promise<JournalEntryResult | null> => {
                 const refCheck = await client.query<{ Id: string }>(
                     `SELECT "Id" FROM ledger_transactions
-                     WHERE "ReferenceType" = $1 AND "ReferenceNumber" = $2
+                     WHERE ${whereSql}
+                       AND ${ACTIVE_GL_REFERENCE_PREDICATE_BARE}
                      LIMIT 1`,
-                    [request.referenceType, request.referenceNumber]
+                    params,
                 );
-                if (refCheck.rows.length > 0) {
-                    const existingById = await this.getTransaction(refCheck.rows[0].Id, dbPool);
-                    if (existingById) {
-                        logger.warn(
-                            'Duplicate GL posting blocked by reference check (different idempotency key). ' +
-                            'This indicates a code path that bypassed the primary idempotency guard.',
-                            {
-                                referenceType: request.referenceType,
-                                referenceNumber: request.referenceNumber,
-                                idempotencyKey: request.idempotencyKey,
-                                existingTransactionId: refCheck.rows[0].Id,
-                            }
-                        );
-                        return existingById;
-                    }
-                }
+                if (refCheck.rows.length === 0) return null;
+                const existingById = await this.getTransaction(refCheck.rows[0].Id, dbPool);
+                if (!existingById) return null;
+                logger.warn(
+                    'Duplicate GL posting blocked by reference check (different idempotency key). ' +
+                    'This indicates a code path that bypassed the primary idempotency guard.',
+                    {
+                        referenceType: request.referenceType,
+                        [logField]: logValue,
+                        idempotencyKey: request.idempotencyKey,
+                        existingTransactionId: refCheck.rows[0].Id,
+                    },
+                );
+                return existingById;
+            };
+
+            if (request.referenceType && request.referenceId) {
+                const existing = await returnExistingByReference(
+                    `"ReferenceType" = $1 AND "ReferenceId" = $2`,
+                    [request.referenceType, request.referenceId],
+                    'referenceId',
+                    request.referenceId,
+                );
+                if (existing) return existing;
+            }
+
+            if (request.referenceType && request.referenceNumber) {
+                const existing = await returnExistingByReference(
+                    `"ReferenceType" = $1 AND "ReferenceNumber" = $2`,
+                    [request.referenceType, request.referenceNumber],
+                    'referenceNumber',
+                    request.referenceNumber,
+                );
+                if (existing) return existing;
             }
 
             // 4. Check period is open
