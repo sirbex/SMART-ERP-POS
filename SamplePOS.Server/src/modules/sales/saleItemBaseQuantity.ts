@@ -1,10 +1,18 @@
 /**
  * Base quantity for a sale line (selling qty × UoM factor-to-base).
- * Shared by salesService COGS/stock and AT_COST bulk pricing.
+ *
+ * Wave 4: sale posting MUST use resolveSaleItemUom (uomService) — DB-backed
+ * canonical graph with merged product_uoms + item_uom_conversions.
+ *
+ * computeSaleItemBaseQuantity remains for fast in-memory tests / legacy callers
+ * that already hold a product_uoms snapshot (no DB).
  */
 import Decimal from 'decimal.js';
 import type { ProductUomRow } from '../../db/batchFetch.js';
 import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
+
+export type { SaleItemUomSnapshot, SaleLineUomInput } from '../products/uomService.js';
+export { resolveSaleItemUom } from '../products/uomService.js';
 
 export interface SaleItemQtyInput {
     quantity: number;
@@ -17,6 +25,7 @@ export interface SaleItemBaseQuantityResult {
     conversionFactor: Decimal;
 }
 
+/** @deprecated Prefer resolveSaleItemUom for production sale/inventory posting. */
 export function computeSaleItemBaseQuantity(
     item: SaleItemQtyInput,
     productUoms: ProductUomRow[],

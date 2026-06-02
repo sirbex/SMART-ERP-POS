@@ -192,7 +192,8 @@ try {
       AND i.returns_goods = true
       AND i.status = 'POSTED'
       AND NULLIF(TRIM(ili."ProductId"), '') IS NOT NULL
-    GROUP BY i.id, i.invoice_number, p.name, ili."ProductId", ili."Quantity", ili."UnitPrice"
+    GROUP BY i.id, i.invoice_number, p.name,
+             NULLIF(TRIM(ili."ProductId"), '')::uuid, ili."Quantity", ili."UnitPrice"
     ORDER BY i.invoice_number
     LIMIT 30
     `,
@@ -333,7 +334,7 @@ try {
     'AP PROOF: top 15 suppliers GL(entity) minus invoice outstanding (|drift| > 10k)',
     `
     WITH gl_by_supplier AS (
-      SELECT le."EntityId"::uuid AS supplier_id,
+      SELECT NULLIF(TRIM(le."EntityId"), '')::uuid AS supplier_id,
              COALESCE(SUM(le."CreditAmount" - le."DebitAmount"), 0) AS gl_bal
       FROM ledger_entries le
       JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"

@@ -32,7 +32,7 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   },
 }));
 
-const { addProductUom, resolveCanonicalProductUom } = await import('./uomService.js');
+const { addProductUom, resolveCanonicalProductUom, resolveSaleItemUom } = await import('./uomService.js');
 
 const mockPool = {} as Pool;
 
@@ -198,5 +198,71 @@ describe('resolveCanonicalProductUom', () => {
       mockDb as unknown as Pool,
     );
     expect(result.conversionFactor).toBe(12);
+  });
+});
+
+describe('resolveSaleItemUom — Wave 4 MUoM hardening', () => {
+  const productId = '099172ce-f327-4e1f-8ce4-b10e61d5bc50';
+  const baseUomId = 'b0000000-0000-4000-8000-000000000001';
+  const packUomId = 'b0000000-0000-4000-8000-000000000002';
+
+  const mockDb = {
+    query: jest.fn<MockFn>().mockResolvedValue({ rows: [{ name: 'Test Product' }] }),
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRepo.getProductBaseUomId.mockResolvedValue(baseUomId);
+    mockRepo.listProductUoms.mockResolvedValue([
+      {
+        id: 'pu-base',
+        productId,
+        uomId: baseUomId,
+        uomName: 'Piece',
+        uomSymbol: 'PC',
+        conversionFactor: '1',
+        isDefault: true,
+      },
+      {
+        id: 'pu-pack',
+        productId,
+        uomId: packUomId,
+        uomName: 'Pack',
+        uomSymbol: 'PK',
+        conversionFactor: '12',
+        isDefault: false,
+      },
+    ]);
+    mockRepo.listItemUomConversions.mockResolvedValue([]);
+    mockRepo.getUomById.mockImplementation(async (id: string) => ({
+      id,
+      name: id === baseUomId ? 'Piece' : 'Pack',
+    }));
+  });
+
+  it('computes base quantity for pack UoM via canonical graph', async () => {
+    const result = await resolveSaleItemUom(
+      productId,
+      { quantity: 2, uomId: packUomId },
+      mockDb as unknown as Pool,
+    );
+    expect(result.baseUomId).toBe(baseUomId);
+    expect(result.conversionFactor).toBe(12);
+    expect(result.baseQuantity).toBe(24);
+    expect(result.sellingUomId).toBe(packUomId);
+  });
+
+  it('throws when base UoM is missing', async () => {
+    mockRepo.getProductBaseUomId.mockResolvedValue(null);
+    mockRepo.listProductUoms.mockResolvedValue([]);
+    await expect(
+      resolveSaleItemUom(productId, { quantity: 1 }, mockDb as unknown as Pool),
+    ).rejects.toThrow(/base stock unit/i);
+  });
+
+  it('throws when selling UoM label is not configured', async () => {
+    await expect(
+      resolveSaleItemUom(productId, { quantity: 1, uom: 'CARTON' }, mockDb as unknown as Pool),
+    ).rejects.toThrow(/not configured/i);
   });
 });

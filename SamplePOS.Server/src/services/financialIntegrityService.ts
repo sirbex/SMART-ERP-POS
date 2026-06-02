@@ -116,67 +116,37 @@ async function checkAR(pool: pg.Pool): Promise<IntegrityCheck> {
 }
 
 async function checkAP(pool: pg.Pool): Promise<IntegrityCheck> {
-  // 3-way match (SAP) model: GRs credit GRIR Clearing (2150), NOT AP (2100).
-  // Supplier subledger = live supplier_invoices (not cached suppliers.OutstandingBalance).
-  // GL (supplier scope) = 2100 net-active entries EXCEPT EXPENSE / EXPENSE_PAYMENT
-  // (standalone expenses on 2100 are valid GL but not in the supplier subledger).
-  // When drift ≈ expense-on-2100, treat as PASS — not missing GR postings.
-  const r = await pool.query(`
-    SELECT
-      COALESCE((SELECT SUM(le."CreditAmount") - SUM(le."DebitAmount")
-                FROM ledger_entries le
-                JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-                JOIN accounts a ON le."AccountId" = a."Id"
-                WHERE a."AccountCode" = '2100'
-                  AND lt."ReferenceType" NOT IN ('EXPENSE', 'EXPENSE_PAYMENT')
-                  AND ${NET_ACTIVE_TXNS}), 0) AS gl,
-      COALESCE((
-        SELECT SUM(
-          CASE
-            WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-              THEN -COALESCE(si."OutstandingBalance", 0)
-            ELSE COALESCE(si."OutstandingBalance", 0)
-          END
-        )
-        FROM supplier_invoices si
-        WHERE si.deleted_at IS NULL
-          AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED')
-      ), 0) AS sub,
-      COALESCE((SELECT SUM(le."CreditAmount") - SUM(le."DebitAmount")
-                FROM ledger_entries le
-                JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-                JOIN accounts a ON le."AccountId" = a."Id"
-                WHERE a."AccountCode" = '2100'
-                  AND lt."ReferenceType" IN ('EXPENSE', 'EXPENSE_PAYMENT')
-                  AND ${NET_ACTIVE_TXNS}), 0) AS expense_on_ap
-  `);
-  const gl = new Decimal(r.rows[0].gl || 0);
-  const sub = new Decimal(r.rows[0].sub || 0);
-  const expenseOnAp = new Decimal(r.rows[0].expense_on_ap || 0);
-  const diff = gl.minus(sub);
-  const threshold = materialityThreshold(gl);
-  const explainedByExpenses = diff.plus(expenseOnAp).abs().lessThanOrEqualTo(threshold);
-  let status = classifyDifference(diff, threshold);
+  const { computeApReconciliationSnapshot, apMaterialityThreshold, isApDriftExplainedByExpenses } =
+    await import('../modules/supplier-payments/apReconciliationEngine.js');
+
+  const snapshot = await computeApReconciliationSnapshot(pool);
+  const threshold = apMaterialityThreshold(snapshot.glBalance);
+  const explainedByExpenses = isApDriftExplainedByExpenses(snapshot, threshold);
+  let status = classifyDifference(snapshot.drift, threshold);
   if (status === 'FAIL' && explainedByExpenses) {
     status = 'PASS';
   }
+
   return {
     id: 'ap_reconciliation',
-    name: 'Accounts Payable reconciles to GL 2100 (supplier scope)',
+    name: 'Accounts Payable reconciles to GL 2100 (supplier open-item scope)',
     status,
     message:
       status === 'PASS'
-        ? explainedByExpenses && !diff.abs().lessThanOrEqualTo(threshold)
-          ? `Supplier AP reconciled; ${expenseOnAp.toFixed(2)} of standalone expenses on 2100 excluded from supplier subledger`
-          : `AP is fully reconciled (${gl.toFixed(2)} = supplier invoices subledger)`
-        : `AP drift of ${diff.toFixed(2)} — GL ${gl.toFixed(2)} vs supplier invoices ${sub.toFixed(2)}`,
-    glBalance: gl.toDecimalPlaces(2).toNumber(),
-    subledgerBalance: sub.toDecimalPlaces(2).toNumber(),
-    difference: diff.toDecimalPlaces(2).toNumber(),
+        ? explainedByExpenses && !new Decimal(snapshot.drift).abs().lessThanOrEqualTo(threshold)
+          ? `Supplier AP reconciled; ${snapshot.expenseOnAp.toFixed(2)} of standalone expenses on 2100 excluded from supplier subledger`
+          : `AP is fully reconciled (${snapshot.glBalance.toFixed(2)} = open-item subledger ${snapshot.subledgerBalance.toFixed(2)})`
+        : `AP drift of ${snapshot.drift.toFixed(2)} — GL ${snapshot.glBalance.toFixed(2)} vs subledger ${snapshot.subledgerBalance.toFixed(2)}`
+            + (snapshot.unallocatedPayments > 0
+              ? ` (${snapshot.unallocatedPayments.toFixed(2)} unallocated payments)`
+              : ''),
+    glBalance: snapshot.glBalance,
+    subledgerBalance: snapshot.subledgerBalance,
+    difference: snapshot.drift,
     threshold,
     remediation:
       status === 'FAIL'
-        ? 'Check for goods receipts without GL posting; run repostMissingGL'
+        ? 'Run POST /api/system/gl/recalc-supplier-balances then POST /api/system/gl/heal-ap-drift if residual drift remains'
         : undefined,
   };
 }

@@ -3,6 +3,7 @@
 
 import { Pool, PoolClient } from 'pg';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
+import { syncSupplierBalanceFromOpenItems } from '../supplier-payments/apReconciliationEngine.js';
 
 export interface Supplier {
   id: string;
@@ -367,46 +368,22 @@ export async function softDeleteSupplier(client: PoolClient, id: string): Promis
 /**
  * Recalculate supplier outstanding balance from the invoice sub-ledger.
  *
- * Formula: SUM(supplier_invoices.OutstandingBalance) for active (non-paid, non-cancelled)
- *   SUPPLIER_INVOICE and SUPPLIER_DEBIT_NOTE documents, minus
- *   SUPPLIER_CREDIT_NOTE outstanding (unapplied credit).
- *
- * This is the single source of truth for all AP-related UI displays:
- * - SuppliersPage "Total Outstanding" aggregate
- * - SupplierPaymentsPage per-supplier balance
- * - Accounting Dashboard AP card
- *
- * By deriving from supplier_invoices (same table the SupplierPaymentsPage reads),
- * it is definitionally impossible for the cache to diverge from the sub-ledger.
+ * Wave 5 SSOT: open supplier invoices − unallocated completed payments.
  *
  * Must be called within a transaction (PoolClient) after any operation that
  * changes the supplier's financial position: GR finalization, payment, allocation.
  */
 export async function recalculateOutstandingBalance(
   client: PoolClient,
-  supplierId: string
+  supplierId: string,
+  changeSource = 'SUPPLIER_BALANCE_RECALC',
 ): Promise<number> {
-  const result = await client.query(
-    `WITH invoice_net AS (
-       SELECT COALESCE(SUM(
-         CASE
-           WHEN document_type = 'SUPPLIER_CREDIT_NOTE' THEN -COALESCE("OutstandingBalance", 0)
-           ELSE  COALESCE("OutstandingBalance", 0)
-         END
-       ), 0) AS net_outstanding
-       FROM supplier_invoices
-       WHERE "SupplierId" = $1
-         AND deleted_at IS NULL
-         AND "Status" NOT IN ('Paid', 'PAID', 'Cancelled', 'CANCELLED', 'DELETED')
-     )
-     UPDATE suppliers
-     SET "OutstandingBalance" = GREATEST((SELECT net_outstanding FROM invoice_net), 0),
-         "UpdatedAt" = NOW()
-     WHERE "Id" = $1
-     RETURNING "OutstandingBalance" as "outstandingBalance"`,
-    [supplierId]
+  const { newBalance } = await syncSupplierBalanceFromOpenItems(
+    client,
+    supplierId,
+    changeSource,
   );
-  return parseFloat(result.rows[0]?.outstandingBalance ?? '0');
+  return newBalance;
 }
 
 /**
@@ -438,25 +415,33 @@ export async function countAll(pool: Pool, search?: string, includeInactive: boo
  * Used for the "Total Outstanding" summary card on SuppliersPage.
  */
 export async function getTotalOutstanding(pool: Pool): Promise<number> {
-  // Live-derived from the invoice subledger so the "Total Outstanding"
-  // summary card stays in sync with per-supplier balances and with the
-  // invoice list, without depending on the cached suppliers.OutstandingBalance.
   const result = await pool.query(
     `SELECT COALESCE(SUM(
-       GREATEST(COALESCE((
-         SELECT SUM(
-           CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-                THEN -COALESCE(si."OutstandingBalance", 0)
-                ELSE  COALESCE(si."OutstandingBalance", 0) END
-         )
-         FROM supplier_invoices si
-         WHERE si."SupplierId" = s."Id"
-           AND si.deleted_at IS NULL
-           AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
-       ), 0), 0)
-     ), 0) as total
+       GREATEST(0, COALESCE(inv.net_outstanding, 0) - COALESCE(pay.unallocated, 0))
+     ), 0) AS total
      FROM suppliers s
-     WHERE s."IsActive" = true`
+     LEFT JOIN LATERAL (
+       SELECT SUM(
+         CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+              THEN -COALESCE(si."OutstandingBalance", 0)
+              ELSE  COALESCE(si."OutstandingBalance", 0) END
+       ) AS net_outstanding
+       FROM supplier_invoices si
+       WHERE si."SupplierId" = s."Id"
+         AND si.deleted_at IS NULL
+         AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+     ) inv ON TRUE
+     LEFT JOIN LATERAL (
+       SELECT SUM(
+         COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0))
+       ) AS unallocated
+       FROM supplier_payments sp
+       WHERE sp."SupplierId" = s."Id"
+         AND sp.deleted_at IS NULL
+         AND sp."Status" = 'COMPLETED'
+         AND COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0)) > 0.009
+     ) pay ON TRUE
+     WHERE s."IsActive" = true`,
   );
   return parseFloat(result.rows[0].total);
 }

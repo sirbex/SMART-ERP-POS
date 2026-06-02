@@ -19,7 +19,7 @@ import { StockMovementHandler } from './stockMovementHandler.js';
 import { inventoryRepository } from './inventoryRepository.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
-import { resolveCanonicalProductUom } from '../products/uomService.js';
+import { resolveCanonicalProductUom, requireProductBaseUom } from '../products/uomService.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
 
 export const stockCountService = {
@@ -262,8 +262,9 @@ export const stockCountService = {
     quantity: number,
     uom: string
   ): Promise<number> {
-    // If UOM is 'BASE' or empty, no conversion needed
+    // If UOM is 'BASE' or empty, quantity is already in base units — still require base UoM exists.
     if (!uom || uom === 'BASE') {
+      await requireProductBaseUom(productId, client);
       return quantity;
     }
 
@@ -281,11 +282,14 @@ export const stockCountService = {
       throw new Error(`UOM ${uom} not found for product ${productId}`);
     }
 
-    const { conversionFactor } = await resolveCanonicalProductUom(
+    const { conversionFactor, baseUomId } = await resolveCanonicalProductUom(
       productId,
       uomResult.rows[0].id,
       client,
     );
+    if (!baseUomId) {
+      await requireProductBaseUom(productId, client);
+    }
     return PricingEngine.calculateBaseQuantity(quantity, conversionFactor).toNumber();
   },
 

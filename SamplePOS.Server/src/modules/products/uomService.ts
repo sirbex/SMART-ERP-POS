@@ -275,14 +275,127 @@ export async function requireProductBaseUom(
   productId: string,
   db: Queryable,
 ): Promise<{ baseUomId: string; conversionFactor: number }> {
-  await ensureProductBaseUomContext(productId, db);
-  const resolved = await resolveCanonicalProductUom(productId, null, db);
-  if (!resolved.baseUomId) {
+  const snapshot = await resolveSaleItemUom(productId, { quantity: 1 }, db);
+  return { baseUomId: snapshot.baseUomId, conversionFactor: snapshot.conversionFactor };
+}
+
+export interface SaleLineUomInput {
+  quantity: number;
+  uomId?: string | null;
+  uom?: string | null;
+}
+
+export interface SaleItemUomSnapshot {
+  baseUomId: string;
+  sellingUomId: string | null;
+  conversionFactor: number;
+  baseQuantity: number;
+}
+
+async function resolveSaleLineSelectedMasterUomId(
+  productId: string,
+  input: Pick<SaleLineUomInput, 'uomId' | 'uom'>,
+  db: Queryable,
+): Promise<string | null> {
+  if (input.uomId) {
+    const normalized = await normalizeSelectedMasterUomId(productId, input.uomId, db);
+    return normalized ?? null;
+  }
+
+  const selectedUom = (input.uom || '').trim();
+  if (!selectedUom) {
+    return null;
+  }
+
+  const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  const defaultUom = productUoms.find((uom) => uom.isDefault) ?? productUoms[0];
+  const baseLabel = (defaultUom?.uomSymbol || defaultUom?.uomName || '').toUpperCase();
+  if (selectedUom.toUpperCase() === baseLabel) {
+    return null;
+  }
+
+  const match = productUoms.find((row) => {
+    const name = (row.uomName || '').toUpperCase();
+    const symbol = (row.uomSymbol || '').toUpperCase();
+    const want = selectedUom.toUpperCase();
+    return name === want || (symbol && symbol === want);
+  });
+
+  return match?.uomId ?? null;
+}
+
+async function assertResolvableSaleLineUom(
+  productId: string,
+  input: Pick<SaleLineUomInput, 'uomId' | 'uom'>,
+  selectedMasterUomId: string | null,
+  db: Queryable,
+): Promise<void> {
+  if (input.uomId) {
+    return;
+  }
+
+  const selectedUom = (input.uom || '').trim();
+  if (!selectedUom) {
+    return;
+  }
+
+  const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  const defaultUom = productUoms.find((uom) => uom.isDefault) ?? productUoms[0];
+  const baseLabel = (defaultUom?.uomSymbol || defaultUom?.uomName || 'base unit').toUpperCase();
+  if (selectedUom.toUpperCase() === baseLabel) {
+    return;
+  }
+
+  if (!selectedMasterUomId) {
+    const productRes = await db.query<{ name: string }>(
+      `SELECT name FROM products WHERE id = $1`,
+      [productId],
+    );
+    const productName = productRes.rows[0]?.name ?? 'Item';
     throw new ValidationError(
-      'Item must have a base stock unit of measure before inventory or sales transactions.',
+      `Unit "${selectedUom}" is not configured for "${productName}". ` +
+        `Open the product → Units of Measure and add "${selectedUom}" with a conversion to the base unit, ` +
+        `or choose the base unit on this line.`,
     );
   }
-  return { baseUomId: resolved.baseUomId, conversionFactor: resolved.conversionFactor };
+}
+
+/**
+ * SAP MUoM SSOT for sales/POS/stock: merged product_uoms + item_uom_conversions.
+ * Blocks posting when base UoM or conversion path is missing (no silent factor=1).
+ */
+export async function resolveSaleItemUom(
+  productId: string,
+  input: SaleLineUomInput,
+  db: Queryable,
+): Promise<SaleItemUomSnapshot> {
+  await ensureProductBaseUomContext(productId, db);
+
+  const selectedMasterUomId = await resolveSaleLineSelectedMasterUomId(productId, input, db);
+  await assertResolvableSaleLineUom(productId, input, selectedMasterUomId, db);
+
+  const { baseUomId, conversionFactor } = await resolveCanonicalProductUom(
+    productId,
+    selectedMasterUomId,
+    db,
+  );
+
+  if (!baseUomId) {
+    throw new ValidationError(
+      'Item must have a base stock unit of measure before inventory or sales transactions. ' +
+        'Open the product → Units of Measure and set a base unit.',
+    );
+  }
+
+  const factor = new Decimal(conversionFactor);
+  const qty = new Decimal(input.quantity);
+
+  return {
+    baseUomId,
+    sellingUomId: selectedMasterUomId ?? baseUomId,
+    conversionFactor: factor.toNumber(),
+    baseQuantity: qty.times(factor).toNumber(),
+  };
 }
 
 export async function resolveCanonicalProductUom(

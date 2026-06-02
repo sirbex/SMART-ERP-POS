@@ -29,9 +29,7 @@ import { getBusinessDate, getBusinessYear, addDaysToDateString } from '../../uti
 import type { SaleData, SaleRefundData } from '../../services/glEntryService.js';
 import {
   batchFetchProducts,
-  batchFetchProductUoms,
   type ProductBatchRow,
-  type ProductUomRow,
 } from '../../db/batchFetch.js';
 import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
@@ -51,7 +49,7 @@ import {
   assertSaleHeaderMatchesCalculatedTotal,
   deriveUnitPriceFromLineTotal,
 } from './saleIntegrity.js';
-import { computeSaleItemBaseQuantity } from './saleItemBaseQuantity.js';
+import { resolveSaleItemUom, type SaleItemUomSnapshot } from './saleItemBaseQuantity.js';
 import { reconcileSaleCostsToActualBatchDeduction } from '../../utils/cogsDriftGuard.js';
 import {
   assertInventoryCouplingUnchanged,
@@ -60,7 +58,6 @@ import {
   INVENTORY_COUPLING_TOLERANCE,
   resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
-import { resolveFactorToBase, type ItemUomConversion } from '../products/uomGraphService.js';
 
 export interface SaleItemInput {
   productId: string;
@@ -295,10 +292,20 @@ export const salesService = {
         .filter((it) => !it.productId?.startsWith('custom_'))
         .map((it) => it.productId);
 
-      const [productsMap, uomsMap] = await Promise.all([
+      const [productsMap] = await Promise.all([
         batchFetchProducts(client, regularProductIds),
-        batchFetchProductUoms(client, regularProductIds),
       ]);
+
+      // Wave 4 MUoM SSOT: resolve canonical UoM once per line (no silent factor=1 fallback).
+      const saleUomSnapshots = new Map<number, SaleItemUomSnapshot>();
+      for (let lineIdx = 0; lineIdx < input.items.length; lineIdx++) {
+        const line = input.items[lineIdx];
+        if (line.productId?.startsWith('custom_')) continue;
+        saleUomSnapshots.set(
+          lineIdx,
+          await resolveSaleItemUom(line.productId, line, client),
+        );
+      }
 
       // ========== PRICING ENGINE RESOLUTION ==========
       // Resolve prices through the full cascade (tier → rule → group discount → formula → base)
@@ -315,17 +322,18 @@ export const salesService = {
         // (pgCode 25P02) and every subsequent query fails, killing the sale.
         await client.query('SAVEPOINT before_pricing');
         try {
-          const bulkItems = input.items
-            .filter((it) => !it.productId?.startsWith('custom_'))
-            .map((it) => {
-              const productUoms = uomsMap.get(it.productId) || [];
-              const { baseQuantity } = computeSaleItemBaseQuantity(it, productUoms);
-              return {
-                productId: it.productId,
-                quantity: it.quantity,
-                baseQuantity,
-              };
+          const bulkItems: Array<{ productId: string; quantity: number; baseQuantity: number }> = [];
+          for (let lineIdx = 0; lineIdx < input.items.length; lineIdx++) {
+            const it = input.items[lineIdx];
+            if (it.productId?.startsWith('custom_')) continue;
+            const snap = saleUomSnapshots.get(lineIdx);
+            if (!snap) continue;
+            bulkItems.push({
+              productId: it.productId,
+              quantity: it.quantity,
+              baseQuantity: snap.baseQuantity,
             });
+          }
 
           const resolved = await getFinalPricesBulk(
             bulkItems,
@@ -386,7 +394,8 @@ export const salesService = {
         });
       }
 
-      for (const item of input.items) {
+      for (let lineIdx = 0; lineIdx < input.items.length; lineIdx++) {
+        const item = input.items[lineIdx];
         // ========== CUSTOM ITEM DETECTION ==========
         // Custom items (service/one-off items from quotations) have custom_* IDs
         // They don't exist in products table, so skip all product-based validations
@@ -424,78 +433,29 @@ export const salesService = {
         }
 
         // ========== REGULAR PRODUCT PROCESSING ==========
-        // Determine base-unit quantity using MUoM conversion (if any)
-        let baseQty = new Decimal(item.quantity);
-        const selectedUom = (item.uom || '').trim();
-        let baseUnit = 'PIECE';
-        let snapshotConversionFactor = new Decimal(1); // SAP UoM snapshot
-        let snapshotBaseUomId: string | null = null; // SAP UoM snapshot
-        let snapshotSellingUomId: string | null = null; // Resolved uoms.id for the selling UoM
-        try {
-          // Use pre-fetched product data (batch query instead of per-item)
-          const prefetchedProduct = productsMap.get(item.productId);
-          if (!prefetchedProduct) {
-            throw new NotFoundError(`Product ${item.productId}`);
-          }
-          // Use pre-fetched UoMs (batch query instead of per-item)
-          const productUoms = uomsMap.get(item.productId) || [];
-          const defaultUom = productUoms.find((u) => u.is_default);
-          baseUnit = defaultUom?.symbol || 'PIECE';
-          snapshotBaseUomId = defaultUom?.uom_id || null; // Capture base UoM ID at posting time
-
-          // Use selected UoM -> base UoM canonical path to compute factor-to-base.
-          let convMatch: ProductUomRow | undefined;
-          if (item.uomId) {
-            convMatch = productUoms.find((r: ProductUomRow) => r.id === item.uomId || r.uom_id === item.uomId);
-          }
-          if (!convMatch && selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
-            convMatch = productUoms.find((r: ProductUomRow) => {
-              const name = (r.name || '').toString().toUpperCase();
-              const symbol = (r.symbol || '').toString().toUpperCase();
-              const want = selectedUom.toUpperCase();
-              return name === want || (symbol && symbol === want);
-            });
-          }
-
-          const selectedMasterUomId = convMatch?.uom_id || null;
-          if (snapshotBaseUomId && selectedMasterUomId && selectedMasterUomId !== snapshotBaseUomId) {
-            const conversions: ItemUomConversion[] = productUoms
-              .filter((r: ProductUomRow) => !r.is_default)
-              .map((r: ProductUomRow) => ({
-                itemId: item.productId,
-                fromUomId: r.uom_id,
-                toUomId: snapshotBaseUomId as string,
-                factor: r.conversion_factor || '1',
-                isCanonical: true,
-              }));
-
-            const resolved = resolveFactorToBase(snapshotBaseUomId, selectedMasterUomId, conversions);
-            snapshotConversionFactor = resolved.factorToBase;
-            baseQty = new Decimal(item.quantity).times(snapshotConversionFactor);
-            snapshotSellingUomId = selectedMasterUomId;
-          } else if (selectedMasterUomId) {
-            snapshotSellingUomId = selectedMasterUomId;
-          }
-
-          logger.info('UoM conversion resolved', {
-            productId: item.productId,
-            inputUom: selectedUom,
-            inputUomId: item.uomId,
-            baseUnit,
-            matchedById: convMatch ? convMatch.id === item.uomId : false,
-            conversionFactor: snapshotConversionFactor.toNumber(),
-            enteredQty: item.quantity,
-            baseQty: baseQty.toNumber(),
-          });
-          // Use productResult later below
-        } catch (e) {
-          logger.warn('UoM conversion failed, falling back to base unit', {
-            productId: item.productId,
-            uom: item.uom,
-            error: (e as Error).message,
-          });
-          baseQty = new Decimal(item.quantity);
+        const uomSnapshot = saleUomSnapshots.get(lineIdx);
+        if (!uomSnapshot) {
+          throw new ValidationError(
+            `UoM snapshot missing for product ${item.productId} — cannot post sale.`,
+          );
         }
+
+        let baseQty = new Decimal(uomSnapshot.baseQuantity);
+        const snapshotConversionFactor = new Decimal(uomSnapshot.conversionFactor);
+        const snapshotBaseUomId = uomSnapshot.baseUomId;
+        const snapshotSellingUomId = uomSnapshot.sellingUomId;
+
+        logger.info('UoM conversion resolved (canonical SSOT)', {
+          productId: item.productId,
+          inputUom: item.uom,
+          inputUomId: item.uomId,
+          baseUomId: snapshotBaseUomId,
+          sellingUomId: snapshotSellingUomId,
+          conversionFactor: snapshotConversionFactor.toNumber(),
+          enteredQty: item.quantity,
+          baseQty: baseQty.toNumber(),
+        });
+
         // BR-INV-002: Validate positive quantity
         InventoryBusinessRules.validatePositiveQuantity(item.quantity, 'sale item');
 
@@ -1078,7 +1038,8 @@ export const salesService = {
       const inventoryCouplingBefore = await captureInventoryCoupling(client);
 
       // Deduct from cost layers AND inventory batches for each item
-      for (const item of input.items) {
+      for (let lineIdx = 0; lineIdx < input.items.length; lineIdx++) {
+        const item = input.items[lineIdx];
         // Skip custom items - they don't have inventory or cost layers
         const isCustomItem = item.productId?.startsWith('custom_');
         if (isCustomItem) {
@@ -1090,46 +1051,16 @@ export const salesService = {
         }
 
         // ========== REGULAR PRODUCT INVENTORY DEDUCTION ==========
-        // Recompute base quantity to deduct from inventory and cost layers
-        let baseQty = new Decimal(item.quantity);
-        const selectedUom = (item.uom || '').trim();
-        let baseUnit = 'PIECE';
-        let deductConversionFactor = new Decimal(1); // SAP UoM snapshot for stock movements
-        let deductBaseUomId: string | null = null; // SAP UoM snapshot for stock movements
-
-        const productUoms = uomsMap.get(item.productId) || [];
-        const defaultUom = productUoms.find((u) => u.is_default);
-        baseUnit = defaultUom?.symbol || 'PIECE';
-        deductBaseUomId = defaultUom?.uom_id || null;
-
-        let deductMatch: ProductUomRow | undefined;
-        if (item.uomId) {
-          deductMatch = productUoms.find((r: ProductUomRow) => r.id === item.uomId || r.uom_id === item.uomId);
-        }
-        if (!deductMatch && selectedUom && selectedUom.toUpperCase() !== String(baseUnit).toUpperCase()) {
-          deductMatch = productUoms.find((r: ProductUomRow) => {
-            const name = (r.name || '').toString().toUpperCase();
-            const symbol = (r.symbol || '').toString().toUpperCase();
-            const want = selectedUom.toUpperCase();
-            return name === want || (symbol && symbol === want);
-          });
+        const uomSnapshot = saleUomSnapshots.get(lineIdx);
+        if (!uomSnapshot) {
+          throw new ValidationError(
+            `UoM snapshot missing for inventory deduction on product ${item.productId}.`,
+          );
         }
 
-        const selectedMasterUomId = deductMatch?.uom_id || null;
-        if (deductBaseUomId && selectedMasterUomId && selectedMasterUomId !== deductBaseUomId) {
-          const conversions: ItemUomConversion[] = productUoms
-            .filter((r: ProductUomRow) => !r.is_default)
-            .map((r: ProductUomRow) => ({
-              itemId: item.productId,
-              fromUomId: r.uom_id,
-              toUomId: deductBaseUomId as string,
-              factor: r.conversion_factor || '1',
-              isCanonical: true,
-            }));
-          const resolved = resolveFactorToBase(deductBaseUomId, selectedMasterUomId, conversions);
-          deductConversionFactor = resolved.factorToBase;
-          baseQty = new Decimal(item.quantity).times(deductConversionFactor);
-        }
+        const baseQty = new Decimal(uomSnapshot.baseQuantity);
+        const deductConversionFactor = new Decimal(uomSnapshot.conversionFactor);
+        const deductBaseUomId = uomSnapshot.baseUomId;
         // Get product costing method again
         const productResult = await client.query(
           'SELECT costing_method FROM product_valuation WHERE product_id = $1',
@@ -3207,9 +3138,9 @@ export const salesService = {
 
       if (sale.customer_id && sale.payment_method === 'CREDIT') {
         // Step 6a: Reduce the invoice's amount_due by the refund amount FIRST.
-        // syncCustomerBalanceFromInvoices reads SUM(invoices.amount_due) — if the
-        // invoice is not updated here, the balance recalc returns the same number
-        // and customer.balance is never reduced (the bug that caused AR drift).
+        // syncCustomerBalanceFromInvoices (Wave 3 open-item SSOT) reads open invoice
+        // due minus unallocated AR receipts — invoice amount_due must be updated here
+        // or customer.balance will not reflect the refund.
         //
         // NOTE: We reduce amount_due directly (not via amount_paid) because a refund
         // is a forgiveness of debt, not a cash receipt. Incrementing amount_paid would

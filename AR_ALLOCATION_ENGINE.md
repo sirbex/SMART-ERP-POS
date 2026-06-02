@@ -6,7 +6,7 @@
 |-------|----------------|--------|
 | AP | `supplier_payments` + `supplier_payment_allocations` | ✅ Reference model |
 | AR | Per-invoice `invoice_payments` only; lump `customer_credit_transactions` | `ar_customer_payments` + `ar_payment_allocations` |
-| Balance SSOT | `SUM(invoices.amount_due)` | Open items − unallocated receipts |
+| Balance SSOT | Open items − unallocated receipts | ✅ Enforced via `syncCustomerBalanceFromOpenItems` (Wave 3) |
 | GL | Per-invoice or lump customer payment | **One** receipt journal; allocations link only |
 
 ## Architecture (strict separation)
@@ -42,7 +42,7 @@
 |-------|--------|--------|
 | **1** | Tables 418, engine, `ar-payments` API, FIFO/manual allocate, reversal, proof | Done |
 | **2** | Customer Payments UI (`/accounting/customer-payments`) | Done |
-| **3** | Retire lump `recordCustomerPayment` without allocation | Next |
+| **3** | Retire lump `recordCustomerPayment` without allocation; unify balance sync on open-item engine | **Done** (Wave 1–3) |
 | **4** | Multi-currency FX journals | Next |
 | **5** | Statement/aging from allocations only; integrity diagnostics | Next |
 

@@ -27,6 +27,12 @@ import { Money } from '../../utils/money.js';
 import { AccountingCore } from '../../services/accountingCore.js';
 import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 import { ACTIVE_GL_REFERENCE_PREDICATE } from '../../utils/activeGlReference.js';
+import {
+  computeApReconciliationSnapshot,
+  apMaterialityThreshold,
+  isApDriftExplainedByExpenses,
+  syncSupplierBalanceFromOpenItems,
+} from '../supplier-payments/apReconciliationEngine.js';
 
 export interface RepairTypeResult {
     found: number;
@@ -570,56 +576,15 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
     const checkedAt = new Date().toISOString();
     const alerts: string[] = [];
 
-    // ── AP reconciliation (2100 vs suppliers.OutstandingBalance) ──────────────
-    // NOTE: Under the 3-way match (SAP) model, GOODS_RECEIPT entries go to GRIR
-    // Clearing (2150), NOT AP (2100). Legacy EF Core–era GRs posted directly to
-    // 2100 and are excluded here so that the AP reconciliation only covers the
-    // current procure-to-pay AP lifecycle.  The legacy GR amount is reported
-    // separately as `legacyGrInAp` so operators know a GRIR correction is pending.
-    const apResult = await pool.query(`
-    SELECT
-      -- AP GL balance: all entries EXCEPT legacy GOODS_RECEIPT (belongs to GRIR)
-      COALESCE(
-        (SELECT SUM(
-           CASE
-             WHEN le."EntryType" IS NOT NULL AND le."Amount" IS NOT NULL
-             THEN CASE WHEN le."EntryType"='CREDIT' THEN le."Amount" ELSE -le."Amount" END
-             ELSE COALESCE(le."CreditAmount",0) - COALESCE(le."DebitAmount",0)
-           END)
-         FROM ledger_entries le
-         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-         JOIN accounts a ON a."Id" = le."AccountId"
-         WHERE a."AccountCode" = '2100'
-           AND lt."ReferenceType" IN (
-             'SUPPLIER_INVOICE','SUPPLIER_PAYMENT',
-             'SUPPLIER_DEBIT_NOTE','SUPPLIER_CREDIT_NOTE',
-             'RETURN_GRN','EXPENSE','EXPENSE_PAYMENT'
-           )
-           AND lt."IsReversed" = FALSE), 0
-      ) AS gl_balance,
-      -- Legacy GOODS_RECEIPT credits sitting in AP that should be in GRIR 2150
-      COALESCE(
-        (SELECT SUM(
-           CASE
-             WHEN le."EntryType" IS NOT NULL AND le."Amount" IS NOT NULL
-             THEN CASE WHEN le."EntryType"='CREDIT' THEN le."Amount" ELSE -le."Amount" END
-             ELSE COALESCE(le."CreditAmount",0) - COALESCE(le."DebitAmount",0)
-           END)
-         FROM ledger_entries le
-         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-         JOIN accounts a ON a."Id" = le."AccountId"
-         WHERE a."AccountCode" = '2100'
-           AND lt."ReferenceType" = 'GOODS_RECEIPT'
-           AND lt."IsReversed" = FALSE), 0
-      ) AS legacy_gr_in_ap,
-      -- Supplier subledger: sum of all supplier outstanding balances
-      COALESCE((SELECT SUM("OutstandingBalance") FROM suppliers), 0) AS subledger_balance
-  `);
-    const apGL = new Decimal(apResult.rows[0]?.gl_balance ?? 0).toNumber();
-    const apSub = new Decimal(apResult.rows[0]?.subledger_balance ?? 0).toNumber();
-    const legacyGrInAp = new Decimal(apResult.rows[0]?.legacy_gr_in_ap ?? 0).toNumber();
-    const apDiff = new Decimal(apGL).minus(apSub).toNumber();
-    const apBalanced = new Decimal(apDiff).abs().lessThan('0.01');
+    // ── AP reconciliation (2100 supplier scope vs open-item subledger) ────────
+    const apSnapshot = await computeApReconciliationSnapshot(pool);
+    const apGL = apSnapshot.glBalance;
+    const apSub = apSnapshot.subledgerBalance;
+    const legacyGrInAp = apSnapshot.legacyGrInAp;
+    const apDiff = apSnapshot.drift;
+    const apThreshold = apMaterialityThreshold(apGL);
+    const apExplained = isApDriftExplainedByExpenses(apSnapshot, apThreshold);
+    const apBalanced = Math.abs(apDiff) < 0.01 || apExplained;
     if (legacyGrInAp > 0.01) {
         alerts.push(
             `AP contains ${legacyGrInAp.toFixed(2)} of legacy GR credits that belong in GRIR Clearing (2150). ` +
@@ -627,7 +592,13 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
         );
     }
     if (!apBalanced) {
-        alerts.push(`AP drift: GL=${apGL.toFixed(2)}, Subledger=${apSub.toFixed(2)}, Diff=${apDiff.toFixed(2)}`);
+        alerts.push(
+            `AP drift: GL=${apGL.toFixed(2)}, Open-item subledger=${apSub.toFixed(2)}, `
+            + `Diff=${apDiff.toFixed(2)}`
+            + (apSnapshot.unallocatedPayments > 0
+              ? `, Unallocated payments=${apSnapshot.unallocatedPayments.toFixed(2)}`
+              : ''),
+        );
     }
 
     // ── Inventory reconciliation (1300 vs batch subledger) ────────────────────
@@ -1043,37 +1014,33 @@ export async function recalcAllSupplierBalances(
     const scanRes = await pool.query(`SELECT COUNT(*)::INT AS n FROM suppliers`);
     const suppliersScanned: number = scanRes.rows[0]?.n ?? 0;
 
-    const updateRes = await pool.query(
-        `WITH per_supplier AS (
-           SELECT s."Id" AS supplier_id,
-                  COALESCE(SUM(
-                    CASE
-                      WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-                        THEN -COALESCE(si."OutstandingBalance", 0)
-                      ELSE
-                            COALESCE(si."OutstandingBalance", 0)
-                    END
-                  ), 0) AS net_outstanding
-           FROM suppliers s
-           LEFT JOIN supplier_invoices si
-             ON si."SupplierId" = s."Id"
-            AND si.deleted_at IS NULL
-            AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED')
-           GROUP BY s."Id"
-         )
-         UPDATE suppliers s
-         SET "OutstandingBalance" = GREATEST(per_supplier.net_outstanding, 0),
-             "UpdatedAt"          = NOW()
-         FROM per_supplier
-         WHERE s."Id" = per_supplier.supplier_id
-           AND ABS(COALESCE(s."OutstandingBalance", 0) - GREATEST(per_supplier.net_outstanding, 0)) > 0.01`,
-    );
+    const client = await pool.connect();
+    let suppliersUpdated = 0;
+    try {
+        await client.query('BEGIN');
+        const suppliers = await client.query<{ Id: string }>(`SELECT "Id" FROM suppliers`);
+        for (const row of suppliers.rows) {
+            const { oldBalance, newBalance } = await syncSupplierBalanceFromOpenItems(
+                client,
+                row.Id,
+                'RECALC_ALL_SUPPLIER_BALANCES',
+            );
+            if (Math.abs(oldBalance - newBalance) > 0.01) {
+                suppliersUpdated++;
+            }
+        }
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
 
-    const durationMs = Date.now() - startedAt;
     return {
         suppliersScanned,
-        suppliersUpdated: updateRes.rowCount ?? 0,
-        durationMs,
+        suppliersUpdated,
+        durationMs: Date.now() - startedAt,
     };
 }
 
@@ -1261,25 +1228,28 @@ export async function healAPDrift(
     const pool = dbPool || globalPool;
     const startedAt = Date.now();
 
-    // Compute drift exactly as the audit does
-    const balRes = await pool.query(`
-      SELECT
-        COALESCE(
-          (SELECT SUM("CreditAmount") - SUM("DebitAmount")
-             FROM ledger_entries le
-             JOIN accounts a ON a."Id" = le."AccountId"
-             JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-            WHERE a."AccountCode" = '2100' AND lt."Status" = 'POSTED'), 0
-        ) AS gl_balance,
-        COALESCE((SELECT SUM("OutstandingBalance") FROM suppliers), 0) AS sub_balance
-    `);
-    const glBalance = Money.toNumber(Money.parseDb(balRes.rows[0].gl_balance));
-    const subBalance = Money.toNumber(Money.parseDb(balRes.rows[0].sub_balance));
-    const drift = Money.toNumber(Money.subtract(glBalance, subBalance));
+    const snapshot = await computeApReconciliationSnapshot(pool);
+    const glBalance = snapshot.glBalance;
+    const subBalance = snapshot.subledgerBalance;
+    const threshold = apMaterialityThreshold(glBalance);
 
-    if (Math.abs(drift) < 0.01) {
+    if (isApDriftExplainedByExpenses(snapshot, threshold)) {
         return {
-            drift, subledgerBalance: subBalance, glBalance,
+            drift: snapshot.drift,
+            subledgerBalance: subBalance,
+            glBalance,
+            action: 'no-op',
+            durationMs: Date.now() - startedAt,
+        };
+    }
+
+    const drift = snapshot.drift;
+
+    if (Math.abs(drift) < threshold) {
+        return {
+            drift: snapshot.drift,
+            subledgerBalance: subBalance,
+            glBalance,
             action: 'no-op',
             durationMs: Date.now() - startedAt,
         };
@@ -1315,7 +1285,7 @@ export async function healAPDrift(
 
     const description =
         `AP drift correction: align GL 2100 (${glBalance.toFixed(2)}) `
-        + `to supplier subledger (${subBalance.toFixed(2)}); drift=${drift.toFixed(2)}`;
+        + `to open-item subledger (${subBalance.toFixed(2)}); drift=${drift.toFixed(2)}`;
 
     const lines = action === 'debit-ap'
         ? [
@@ -1352,7 +1322,7 @@ export async function healAPDrift(
     }, pool);
 
     return {
-        drift,
+        drift: snapshot.drift,
         subledgerBalance: subBalance,
         glBalance,
         action,

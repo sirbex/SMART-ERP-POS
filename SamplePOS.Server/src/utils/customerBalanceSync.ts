@@ -1,96 +1,43 @@
 /**
  * customerBalanceSync.ts
  * ═══════════════════════════════════════════════════════════════
- * SINGLE SOURCE OF TRUTH — Customer Balance & AR Account Sync
+ * SINGLE SOURCE OF TRUTH — Customer Balance (AR subledger)
  * ═══════════════════════════════════════════════════════════════
  *
- * SAP-style canonical pattern: ONE function, ONE formula, called
- * from EVERY code path that modifies invoice amounts/statuses.
+ * Wave 3: all callers route through the AR open-item engine formula.
  *
- * Formula:
- *   customer.balance = SUM(amount_due) FROM invoices
- *                      WHERE document_type IN ('INVOICE', 'OPENING_BALANCE')
- *                        AND status NOT IN ('CANCELLED','VOIDED','DRAFT')
+ * Formula (SAP/Odoo open-item parity):
+ *   customer.balance = GREATEST(0,
+ *     SUM(invoice amount_due for INVOICE + OPENING_BALANCE, non-cancelled)
+ *     − SUM(unallocated_amount on posted AR receipts)
+ *   )
  *
- * Credit/debit notes live in the same table but adjust the original invoice's
- * amount_due on post — they must not be summed again into customer.balance.
+ * Credit/debit notes adjust the parent invoice's amount_due on post — they are
+ * not summed separately into customer.balance.
  *
- * Why NOT IN ('CANCELLED','VOIDED','DRAFT') and NOT filtering PAID?
- *   - A PAID invoice has amount_due = 0, so it contributes zero.
- *   - Including PAID is intentional: if a recalc ever computes
- *     a nonzero remainder on a "PAID" invoice (e.g., rounding),
- *     it would still surface correctly instead of being silently hidden.
- *   - CANCELLED/VOIDED/DRAFT are explicitly excluded because they
- *     represent non-active documents that must never affect AR.
- *
- * AR Account (1200) is always derived from SUM(customers.balance).
+ * AR control account (1200) is maintained by AccountingCore via ledger_entries.
+ * customers.balance tracks per-customer net open AR for credit-limit / UI.
  */
 
 import type { Pool, PoolClient } from 'pg';
-import logger from './logger.js';
-import { Money } from './money.js';
+import { syncCustomerBalanceFromOpenItems } from '../modules/ar-payments/openItemAllocationEngine.js';
 
-type DbConn = Pool | PoolClient;
+export type CustomerBalanceDbConn = Pool | PoolClient;
 
 /**
- * Recalculate a single customer's balance from invoices, then
- * sync the AR control account. Writes an audit trail row.
+ * Recalculate customer balance from open items − unallocated receipts.
+ * Must run inside a transaction (PoolClient) when paired with other mutations.
  *
- * Must be called inside a transaction (PoolClient) for atomicity.
+ * @deprecated Prefer the name syncCustomerBalanceFromOpenItems in new code;
+ * this export preserves every legacy import path (Wave 3 SSOT redirect).
  */
 export async function syncCustomerBalanceFromInvoices(
-  conn: DbConn,
+  conn: CustomerBalanceDbConn,
   customerId: string,
   changeSource: string,
 ): Promise<{ oldBalance: number; newBalance: number }> {
-  // Step 1: Recalculate customer balance from invoices
-  const balanceUpdate = await conn.query(
-    `WITH old AS (SELECT balance, name FROM customers WHERE id = $1)
-     UPDATE customers SET balance = (
-       SELECT COALESCE(SUM(amount_due), 0)
-       FROM invoices
-       WHERE customer_id = $1
-         AND COALESCE(document_type, 'INVOICE') IN ('INVOICE', 'OPENING_BALANCE')
-         AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
-     )
-     WHERE id = $1
-     RETURNING balance,
-               (SELECT balance FROM old) AS old_balance,
-               (SELECT name FROM old) AS customer_name`,
-    [customerId],
-  );
-
-  const row = balanceUpdate.rows[0];
-  if (!row) {
-    logger.warn('syncCustomerBalanceFromInvoices: customer not found', { customerId });
-    return { oldBalance: 0, newBalance: 0 };
-  }
-
-  const oldBalance = Money.toNumber(Money.parseDb(row.old_balance ?? 0));
-  const newBalance = Money.toNumber(Money.parseDb(row.balance ?? 0));
-
-  // Step 2: Audit trail (only if balance changed)
-  if (oldBalance !== newBalance) {
-    const changeAmount = Money.toNumber(Money.subtract(newBalance, oldBalance));
-    await conn.query(
-      `INSERT INTO customer_balance_audit
-       (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [customerId, row.customer_name, oldBalance, newBalance, changeAmount, changeSource],
-    );
-  }
-
-  // NOTE: AR control account (1200) CurrentBalance is maintained exclusively by
-  // AccountingCore via ledger_entries. customers.balance tracks per-customer
-  // open AR for credit-limit purposes. The two are separate; syncing one to the
-  // other bypasses the GL and causes reconciliation drift.
-
-  logger.info('Customer balance synced from invoices (SSOT)', {
-    customerId,
-    oldBalance,
-    newBalance,
-    changeSource,
-  });
-
-  return { oldBalance, newBalance };
+  return syncCustomerBalanceFromOpenItems(conn, customerId, changeSource);
 }
+
+/** Canonical alias — same implementation as syncCustomerBalanceFromInvoices. */
+export const syncCustomerArBalance = syncCustomerBalanceFromInvoices;

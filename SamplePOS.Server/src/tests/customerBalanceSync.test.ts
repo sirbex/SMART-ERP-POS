@@ -5,8 +5,8 @@
  * ═══════════════════════════════════════════════════════════════
  *
  * Proves:
- *  1. The canonical formula is used everywhere (no divergent SQL)
- *  2. Customer balance matches SUM(amount_due) from non-cancelled invoices
+ *  1. The canonical open-item formula is used everywhere (Wave 3 SSOT)
+ *  2. Customer balance matches open invoices − unallocated AR receipts
  *  3. AR control account (1200) matches SUM(customer.balance)
  *  4. Invoice status transitions only produce valid values
  *  5. Distribution invoices are included in balance calculations

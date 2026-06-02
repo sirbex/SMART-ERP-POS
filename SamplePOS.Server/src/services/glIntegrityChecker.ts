@@ -384,42 +384,32 @@ export class GLIntegrityChecker {
     pool: pg.Pool
   ): Promise<IntegrityFinding[]> {
     const findings: IntegrityFinding[] = [];
+    const { computeApReconciliationSnapshot, apMaterialityThreshold, isApDriftExplainedByExpenses } =
+      await import('../modules/supplier-payments/apReconciliationEngine.js');
 
-    const result = await pool.query(`
-      SELECT
-        COALESCE(
-          (SELECT SUM("CreditAmount") - SUM("DebitAmount")
-           FROM ledger_entries le
-           JOIN accounts a ON a."Id" = le."AccountId"
-           JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
-           WHERE a."AccountCode" = '2100'
-             AND lt."Status" = 'POSTED'), 0
-        ) as gl_balance,
-        COALESCE(
-          (SELECT SUM("OutstandingBalance") FROM suppliers), 0
-        ) as subledger_balance
-    `);
+    const snapshot = await computeApReconciliationSnapshot(pool);
+    const threshold = apMaterialityThreshold(snapshot.glBalance);
+    const diff = new Decimal(snapshot.drift).abs();
+    const ok = diff.lessThanOrEqualTo('0.01') || isApDriftExplainedByExpenses(snapshot, threshold);
 
-    const glBalance = new Decimal(result.rows[0]?.gl_balance || 0);
-    const subBalance = new Decimal(result.rows[0]?.subledger_balance || 0);
-    const diff = glBalance.minus(subBalance).abs();
-
-    if (diff.greaterThan('0.01')) {
+    if (!ok) {
       findings.push({
         check: 'ap_reconciliation',
         severity: 'WARNING',
-        message: `AP GL (2100) differs from supplier subledger by ${diff.toFixed(2)}`,
+        message: `AP GL (2100) differs from open-item subledger by ${snapshot.drift.toFixed(2)}`,
         details: {
-          glBalance: glBalance.toNumber(),
-          subledgerBalance: subBalance.toNumber(),
-          difference: diff.toNumber(),
+          glBalance: snapshot.glBalance,
+          subledgerBalance: snapshot.subledgerBalance,
+          difference: snapshot.drift,
+          unallocatedPayments: snapshot.unallocatedPayments,
+          expenseOnAp: snapshot.expenseOnAp,
         },
       });
     } else {
       findings.push({
         check: 'ap_reconciliation',
         severity: 'INFO',
-        message: 'AP reconciliation: GL matches supplier subledger.',
+        message: 'AP reconciliation: GL matches open-item supplier subledger.',
       });
     }
 

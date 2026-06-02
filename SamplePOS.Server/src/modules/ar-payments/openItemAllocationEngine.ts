@@ -3,10 +3,14 @@
  * All services MUST use this module — no duplicate reconciliation math.
  */
 
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
+import logger from '../../utils/logger.js';
 import { invoiceRepository } from '../invoices/invoiceRepository.js';
+
+/** Pool or transaction client — query interface is identical. */
+export type OpenItemDbConn = Pool | PoolClient;
 
 export type AllocationType = 'MANUAL' | 'FIFO' | 'EXACT' | 'DUE_DATE';
 
@@ -171,11 +175,11 @@ export function buildFifoAllocations(
  * Customer AR balance = open invoice due − unallocated posted receipts (on-account credit).
  */
 export async function syncCustomerBalanceFromOpenItems(
-  client: PoolClient,
+  conn: OpenItemDbConn,
   customerId: string,
   changeSource: string,
 ): Promise<{ oldBalance: number; newBalance: number }> {
-  const balanceUpdate = await client.query(
+  const balanceUpdate = await conn.query(
     `WITH old AS (SELECT balance, name FROM customers WHERE id = $1),
      open_inv AS (
        SELECT COALESCE(SUM(amount_due), 0) AS due
@@ -199,17 +203,22 @@ export async function syncCustomerBalanceFromOpenItems(
   );
 
   const row = balanceUpdate.rows[0];
-  const oldBalance = Money.toNumber(Money.parseDb(row?.old_balance ?? 0));
-  const newBalance = Money.toNumber(Money.parseDb(row?.balance ?? 0));
+  if (!row) {
+    logger.warn('syncCustomerBalanceFromOpenItems: customer not found', { customerId, changeSource });
+    return { oldBalance: 0, newBalance: 0 };
+  }
+
+  const oldBalance = Money.toNumber(Money.parseDb(row.old_balance ?? 0));
+  const newBalance = Money.toNumber(Money.parseDb(row.balance ?? 0));
 
   if (oldBalance !== newBalance) {
-    await client.query(
+    await conn.query(
       `INSERT INTO customer_balance_audit
        (customer_id, customer_name, old_balance, new_balance, change_amount, change_source)
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         customerId,
-        row?.customer_name,
+        row.customer_name,
         oldBalance,
         newBalance,
         newBalance - oldBalance,
@@ -217,6 +226,13 @@ export async function syncCustomerBalanceFromOpenItems(
       ],
     );
   }
+
+  logger.info('Customer balance synced from open items (SSOT)', {
+    customerId,
+    oldBalance,
+    newBalance,
+    changeSource,
+  });
 
   return { oldBalance, newBalance };
 }
@@ -231,7 +247,7 @@ export async function assertArIntegrity(
     `SELECT c.id, c.name, c.balance,
             COALESCE(inv.due, 0) AS invoice_due,
             COALESCE(pay.unalloc, 0) AS unallocated_payments,
-            COALESCE(inv.due, 0) - COALESCE(pay.unalloc, 0) AS expected_balance
+            GREATEST(0, COALESCE(inv.due, 0) - COALESCE(pay.unalloc, 0)) AS expected_balance
      FROM customers c
      LEFT JOIN LATERAL (
        SELECT SUM(amount_due) AS due
