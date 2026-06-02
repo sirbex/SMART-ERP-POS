@@ -20,14 +20,14 @@ jobs:
       - name: Recalc suppliers, heal AP drift, rebuild GPB
         run: |
           scp -i ~/.ssh/prod_key -o ConnectTimeout=30 \
-            scripts/henber-heal-ap-drift.mjs \
-            root@209.38.203.138:/tmp/henber-heal-ap-drift.mjs
+            scripts/henber-heal-ap-drift-force.mjs \
+            root@209.38.203.138:/tmp/henber-heal-ap-drift-force.mjs
           ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<'REMOTE'
           set -euo pipefail
-          docker cp /tmp/henber-heal-ap-drift.mjs smarterp-backend:/tmp/henber-heal-ap-drift.mjs
-          docker exec -u root smarterp-backend cp /tmp/henber-heal-ap-drift.mjs /app/henber-heal-ap-drift.mjs
-          docker exec -u root smarterp-backend chown nodejs:nodejs /app/henber-heal-ap-drift.mjs
-          docker exec -w /app smarterp-backend node henber-heal-ap-drift.mjs
+          docker cp /tmp/henber-heal-ap-drift-force.mjs smarterp-backend:/tmp/henber-heal-ap-drift-force.mjs
+          docker exec -u root smarterp-backend cp /tmp/henber-heal-ap-drift-force.mjs /app/henber-heal-ap-drift-force.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/henber-heal-ap-drift-force.mjs
+          docker exec -w /app smarterp-backend node henber-heal-ap-drift-force.mjs
           REMOTE
 
       - name: Verify AP reconciliation

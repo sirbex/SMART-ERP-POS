@@ -27,6 +27,7 @@ import { Money } from '../../utils/money.js';
 import { AccountingCore } from '../../services/accountingCore.js';
 import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 import { ACTIVE_GL_REFERENCE_PREDICATE } from '../../utils/activeGlReference.js';
+import { v5 as uuidv5 } from 'uuid';
 import {
   computeApReconciliationSnapshot,
   apMaterialityThreshold,
@@ -1282,6 +1283,8 @@ export async function healAPDrift(
     const absDrift = Math.abs(drift);
     const today = getBusinessDate();
     const idempotencyKey = `AP-DRIFT-HEAL-${today}`;
+    // Deterministic UUID — must NOT use all-zero referenceId (collides with other CORRECTION entries).
+    const referenceId = uuidv5(idempotencyKey, 'a1b2c3d4-e5f6-4789-a012-3456789ap00');
 
     const description =
         `AP drift correction: align GL 2100 (${glBalance.toFixed(2)}) `
@@ -1313,7 +1316,7 @@ export async function healAPDrift(
         entryDate: today,
         description,
         referenceType: 'CORRECTION',
-        referenceId: '00000000-0000-0000-0000-000000000000',
+        referenceId,
         referenceNumber: idempotencyKey,
         idempotencyKey,
         userId: userId ?? '00000000-0000-0000-0000-000000000000',
