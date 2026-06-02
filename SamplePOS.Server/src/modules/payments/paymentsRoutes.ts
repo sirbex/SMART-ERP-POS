@@ -1,5 +1,10 @@
 /**
  * Payments Routes - API endpoints for split payment system
+ *
+ * SSOT note (ERP stabilization):
+ * - POST /customer/:customerId/payment → legacy entry; delegates to arPaymentService (Wave 1).
+ * - Canonical customer receipt path: POST /api/ar-payments (arPaymentRoutes).
+ * - Invoice-level receipts: POST /api/invoices/:id/payments → AR SSOT for CASH/CARD/MOBILE/BANK (Wave 2).
  */
 
 import express from 'express';
@@ -33,6 +38,7 @@ export function createPaymentsRoutes() {
   router.post(
     '/customer/:customerId/payment',
     requirePermission('pos.create'),
+    /** @deprecated Prefer POST /api/ar-payments — kept for POS/legacy clients; SSOT redirect active. */
     paymentsController.recordCustomerPayment
   );
 

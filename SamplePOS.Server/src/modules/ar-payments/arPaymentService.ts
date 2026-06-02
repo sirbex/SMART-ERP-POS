@@ -9,6 +9,29 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
+import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
+import { Money } from '../../utils/money.js';
+import * as documentFlowService from '../document-flow/documentFlowService.js';
+import type { InvoicePaymentRecord } from '../invoices/invoiceRepository.js';
+
+const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000001';
+
+/** Standard clearing methods routed through AR open-item SSOT (not legacy INVOICE_PAYMENT GL). */
+export const AR_SSOT_INVOICE_PAYMENT_METHODS = new Set([
+  'CASH',
+  'CARD',
+  'MOBILE_MONEY',
+  'BANK_TRANSFER',
+]);
+
+export interface RecordInvoicePaymentViaArInput {
+  amount: number;
+  paymentMethod: string;
+  paymentDate?: Date | string | null;
+  referenceNumber?: string | null;
+  notes?: string | null;
+  processedById?: string | null;
+}
 
 export interface CreateArPaymentInput {
   customerId: string;
@@ -265,6 +288,121 @@ export async function reverseAllocation(
 
     return { success: true, allocationId };
   });
+}
+
+/**
+ * Record payment against a specific invoice via AR SSOT.
+ * Posts one CUSTOMER_PAYMENT GL document, creates invoice_payment via allocation,
+ * and syncs customer balance through open-item engine.
+ */
+export async function recordInvoicePaymentViaArSsot(
+  pool: Pool,
+  invoiceId: string,
+  input: RecordInvoicePaymentViaArInput,
+): Promise<{
+  invoice: Awaited<ReturnType<typeof invoiceRepository.getInvoiceById>>;
+  payment: InvoicePaymentRecord;
+  arPaymentId: string;
+}> {
+  const inv = await invoiceRepository.getInvoiceById(pool, invoiceId);
+  if (!inv) {
+    throw new ValidationError(
+      `GHOST PAYMENT PREVENTION: Invoice ${invoiceId} does not exist.`,
+    );
+  }
+  if (!inv.customer_id) {
+    throw new ValidationError(
+      `Invoice ${inv.invoice_number} has no customer — cannot post AR payment.`,
+    );
+  }
+
+  const customerCheck = await pool.query('SELECT id FROM customers WHERE id = $1', [inv.customer_id]);
+  if (customerCheck.rows.length === 0) {
+    throw new ValidationError(
+      `GHOST CUSTOMER: Invoice ${inv.invoice_number} is linked to non-existent customer ${inv.customer_id}.`,
+    );
+  }
+
+  const paymentAmount = new Decimal(input.amount);
+  if (paymentAmount.lessThanOrEqualTo(0)) {
+    throw new ValidationError('Payment amount must be positive and greater than zero');
+  }
+
+  const settlement = await invoiceRepository.getInvoiceSettlement(pool, invoiceId);
+  if (!settlement) {
+    throw new ValidationError(`Cannot resolve settlement for invoice ${invoiceId}`);
+  }
+  const amountDueDec = Money.parseDb(settlement.amountDue);
+  if (paymentAmount.greaterThan(amountDueDec)) {
+    throw new ValidationError(
+      `OVERPAYMENT PREVENTION: Payment of ${paymentAmount.toFixed(2)} exceeds outstanding balance ` +
+        `(${amountDueDec.toFixed(2)}) on invoice ${inv.invoice_number}.`,
+    );
+  }
+
+  const paymentDateStr =
+    input.paymentDate instanceof Date
+      ? formatDateBusiness(input.paymentDate)
+      : typeof input.paymentDate === 'string'
+        ? input.paymentDate.slice(0, 10)
+        : getBusinessDate();
+
+  const arResult = await createCustomerPayment(pool, {
+    customerId: inv.customer_id,
+    amount: paymentAmount.toNumber(),
+    paymentDate: paymentDateStr,
+    paymentMethod: input.paymentMethod,
+    reference: input.referenceNumber ?? undefined,
+    notes: input.notes ?? undefined,
+    createdById: input.processedById || SYSTEM_USER_ID,
+    autoAllocate: false,
+    allocations: [{ invoiceId, amount: paymentAmount.toNumber() }],
+    allocationType: 'MANUAL',
+  });
+
+  const allocation = arResult.allocations[0];
+  const invoicePaymentId = allocation?.invoicePaymentId;
+  if (!invoicePaymentId) {
+    throw new ValidationError('AR payment posted but invoice allocation row was not created');
+  }
+
+  const paymentRows = await pool.query<InvoicePaymentRecord>(
+    'SELECT * FROM invoice_payments WHERE id = $1',
+    [invoicePaymentId],
+  );
+  const payment = paymentRows.rows[0];
+  if (!payment) {
+    throw new ValidationError(`Invoice payment row ${invoicePaymentId} not found after allocation`);
+  }
+
+  await documentFlowService.linkDocuments(
+    pool,
+    'INVOICE',
+    invoiceId,
+    'PAYMENT',
+    invoicePaymentId,
+    'PAYS',
+  );
+
+  const fresh = await invoiceRepository.getInvoiceById(pool, invoiceId);
+  if (!fresh) {
+    throw new ValidationError('Invoice not found after payment allocation');
+  }
+
+  logger.info('Invoice payment recorded via AR SSOT', {
+    invoiceId,
+    invoiceNumber: inv.invoice_number,
+    invoicePaymentId,
+    arPaymentId: arResult.payment?.id,
+    amount: paymentAmount.toNumber(),
+    paymentMethod: input.paymentMethod,
+  });
+
+  return {
+    invoice: fresh,
+    payment,
+    arPaymentId: arResult.payment?.id ?? '',
+  };
 }
 
 export async function getPaymentWithAllocations(pool: Pool, paymentId: string) {

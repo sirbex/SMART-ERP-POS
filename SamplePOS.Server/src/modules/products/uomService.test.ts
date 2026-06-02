@@ -14,6 +14,7 @@ const mockRepo = {
   unsetDefaultForProduct: jest.fn<MockFn>(),
   createProductUom: jest.fn<MockFn>(),
   deleteItemUomConversionBySource: jest.fn<MockFn>(),
+  deleteAllItemUomConversionsForProduct: jest.fn<MockFn>(),
   upsertItemUomConversion: jest.fn<MockFn>(),
   listItemUomConversions: jest.fn<MockFn>(),
   setProductBaseUomId: jest.fn<MockFn>(),
@@ -31,7 +32,7 @@ jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   },
 }));
 
-const { addProductUom } = await import('./uomService.js');
+const { addProductUom, resolveCanonicalProductUom } = await import('./uomService.js');
 
 const mockPool = {} as Pool;
 
@@ -119,5 +120,83 @@ describe('uomService.addProductUom base UoM', () => {
       }),
       expect.anything(),
     );
+  });
+});
+
+describe('resolveCanonicalProductUom', () => {
+  const productId = '099172ce-f327-4e1f-8ce4-b10e61d5bc50';
+  const baseUomId = 'c0000000-0000-4000-8000-000000000003';
+  const packUomId = 'b0000000-0000-4000-8000-000000000002';
+
+  const mockDb = {
+    query: jest.fn<MockFn>().mockResolvedValue({ rows: [{ name: 'Test Product' }] }),
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockRepo.getProductBaseUomId.mockResolvedValue(baseUomId);
+    mockRepo.listProductUoms.mockResolvedValue([
+      {
+        id: 'd0000000-0000-4000-8000-000000000004',
+        productId,
+        uomId: baseUomId,
+        uomName: 'TABLET',
+        conversionFactor: '1',
+        isDefault: true,
+      },
+      {
+        id: 'e0000000-0000-4000-8000-000000000005',
+        productId,
+        uomId: packUomId,
+        uomName: 'PACK',
+        conversionFactor: '12',
+        isDefault: false,
+      },
+    ]);
+    mockRepo.listItemUomConversions.mockResolvedValue([]);
+    mockRepo.getUomById.mockImplementation(async (id: unknown) => {
+      if (id === baseUomId) return { id: baseUomId, name: 'TABLET' };
+      if (id === packUomId) return { id: packUomId, name: 'PACK' };
+      return null;
+    });
+  });
+
+  it('resolves from product_uoms when item_uom_conversions is empty', async () => {
+    const result = await resolveCanonicalProductUom(productId, packUomId, mockDb as unknown as Pool);
+    expect(result.conversionFactor).toBe(12);
+    expect(result.baseUomId).toBe(baseUomId);
+  });
+
+  it('merges product_uoms over partial item_uom_conversions (PO multi-line fix)', async () => {
+    mockRepo.listItemUomConversions.mockResolvedValue([
+      {
+        id: 'conv-1',
+        itemId: productId,
+        fromUomId: 'stale-uom',
+        toUomId: 'old-base',
+        factor: '6',
+        isCanonical: true,
+      },
+    ]);
+
+    const result = await resolveCanonicalProductUom(productId, packUomId, mockDb as unknown as Pool);
+    expect(result.conversionFactor).toBe(12);
+    expect(mockRepo.upsertItemUomConversion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromUomId: packUomId,
+        toUomId: baseUomId,
+        factor: 12,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('maps legacy product_uoms row id to master uom id', async () => {
+    const result = await resolveCanonicalProductUom(
+      productId,
+      'e0000000-0000-4000-8000-000000000005',
+      mockDb as unknown as Pool,
+    );
+    expect(result.conversionFactor).toBe(12);
   });
 });

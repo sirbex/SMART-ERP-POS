@@ -16,6 +16,7 @@ invoiceRoutes.get('/:id/export.pdf', authenticate, (req, res) =>
 invoiceRoutes.post('/', authenticate, requirePermission('accounting.create'), invoiceController.createInvoice);
 
 // Payments - record & list - requires sales.create permission
+// Standard methods (CASH/CARD/MOBILE/BANK) route through AR SSOT via invoiceService.addPayment.
 invoiceRoutes.post(
   '/:id/payments',
   authenticate,

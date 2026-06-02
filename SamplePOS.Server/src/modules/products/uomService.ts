@@ -142,6 +142,135 @@ async function syncCanonicalConversion(
   );
 }
 
+function parseConversionFactor(value: number | string): number {
+  const factor = Number(value);
+  if (!Number.isFinite(factor) || factor < 1) {
+    return 1;
+  }
+  return factor;
+}
+
+/**
+ * Map product_uoms.id (legacy client payloads) to master uoms.id.
+ */
+async function normalizeSelectedMasterUomId(
+  productId: string,
+  selectedUomId: string | null | undefined,
+  db: Queryable,
+): Promise<string | null | undefined> {
+  if (!selectedUomId) return selectedUomId;
+
+  const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  if (productUoms.some((uom) => uom.uomId === selectedUomId)) {
+    return selectedUomId;
+  }
+
+  const byProductUomRow = productUoms.find((uom) => uom.id === selectedUomId);
+  return byProductUomRow?.uomId ?? selectedUomId;
+}
+
+/**
+ * SSOT for canonical edges: product_uoms (user-facing) merged over item_uom_conversions.
+ * Ignores stale conversion rows that still point at a previous base UoM.
+ */
+async function buildMergedCanonicalConversions(
+  productId: string,
+  baseUomId: string,
+  db: Queryable,
+): Promise<ItemUomConversion[]> {
+  const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  const stored = await repo.listItemUomConversions(productId, db);
+
+  const byFrom = new Map<string, ItemUomConversion>();
+
+  for (const conversion of stored) {
+    if (conversion.toUomId !== baseUomId || conversion.fromUomId === baseUomId) {
+      continue;
+    }
+    byFrom.set(conversion.fromUomId, {
+      itemId: productId,
+      fromUomId: conversion.fromUomId,
+      toUomId: baseUomId,
+      factor: parseConversionFactor(conversion.factor),
+      isCanonical: conversion.isCanonical ?? true,
+    });
+  }
+
+  for (const uom of productUoms) {
+    if (uom.isDefault || uom.uomId === baseUomId) {
+      continue;
+    }
+    byFrom.set(uom.uomId, {
+      itemId: productId,
+      fromUomId: uom.uomId,
+      toUomId: baseUomId,
+      factor: parseConversionFactor(uom.conversionFactor),
+      isCanonical: true,
+    });
+  }
+
+  return Array.from(byFrom.values());
+}
+
+/**
+ * Persist canonical edges from product_uoms (repairs legacy/partial item_uom_conversions).
+ * Idempotent — safe before PO/GR/sales posting.
+ */
+export async function repairCanonicalConversionsFromProductUoms(
+  productId: string,
+  db: Queryable,
+): Promise<void> {
+  await ensureProductBaseUomContext(productId, db);
+  const baseUomId = await repo.getProductBaseUomId(productId, db);
+  if (!baseUomId) return;
+
+  const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  for (const uom of productUoms) {
+    if (uom.isDefault || uom.uomId === baseUomId) {
+      await repo.deleteItemUomConversionBySource(productId, uom.uomId, db);
+      continue;
+    }
+    await repo.upsertItemUomConversion(
+      {
+        itemId: productId,
+        fromUomId: uom.uomId,
+        toUomId: baseUomId,
+        factor: parseConversionFactor(uom.conversionFactor),
+        isCanonical: true,
+      },
+      db,
+    );
+  }
+
+  const stored = await repo.listItemUomConversions(productId, db);
+  for (const conversion of stored) {
+    if (conversion.toUomId !== baseUomId) {
+      await repo.deleteItemUomConversionBySource(productId, conversion.fromUomId, db);
+    }
+  }
+}
+
+async function throwResolvableUomError(
+  productId: string,
+  selectedUomId: string,
+  baseUomId: string,
+  db: Queryable,
+): Promise<never> {
+  const [productRes, selectedUom, baseUom] = await Promise.all([
+    db.query<{ name: string }>(`SELECT name FROM products WHERE id = $1`, [productId]),
+    repo.getUomById(selectedUomId, db),
+    repo.getUomById(baseUomId, db),
+  ]);
+  const productName = productRes.rows[0]?.name ?? 'Item';
+  const selectedLabel = selectedUom?.name ?? selectedUomId;
+  const baseLabel = baseUom?.name ?? baseUomId;
+  throw new ValidationError(
+    `Unit "${selectedLabel}" is not configured for "${productName}" (base stock unit: ${baseLabel}). ` +
+      `Open the product → Units of Measure, add "${selectedLabel}" with a conversion to ${baseLabel}, ` +
+      `or choose Base UoM on this line.`,
+  );
+}
+
 export async function requireProductBaseUom(
   productId: string,
   db: Queryable,
@@ -161,39 +290,37 @@ export async function resolveCanonicalProductUom(
   selectedUomId: string | null | undefined,
   db: Queryable,
 ): Promise<{ baseUomId: string | null; conversionFactor: number }> {
+  await ensureProductBaseUomContext(productId, db);
+  await repairCanonicalConversionsFromProductUoms(productId, db);
+
   const baseUomId = await repo.getProductBaseUomId(productId, db);
   if (!baseUomId) {
     return { baseUomId: null, conversionFactor: 1 };
   }
 
-  if (!selectedUomId || selectedUomId === baseUomId) {
+  const normalizedSelected = await normalizeSelectedMasterUomId(productId, selectedUomId, db);
+
+  if (!normalizedSelected || normalizedSelected === baseUomId) {
     return { baseUomId, conversionFactor: 1 };
   }
 
-  const canonicalConversions = await repo.listItemUomConversions(productId, db);
-  const conversions: ItemUomConversion[] = canonicalConversions.length > 0
-    ? canonicalConversions.map((conversion) => ({
-      itemId: conversion.itemId,
-      fromUomId: conversion.fromUomId,
-      toUomId: conversion.toUomId,
-      factor: conversion.factor,
-      isCanonical: conversion.isCanonical,
-    }))
-    : (await repo.listProductUoms(productId, db as pg.Pool))
-      .filter((uom) => !uom.isDefault)
-      .map((uom) => ({
-        itemId: productId,
-        fromUomId: uom.uomId,
-        toUomId: baseUomId,
-        factor: uom.conversionFactor,
-        isCanonical: true,
-      }));
+  const conversions = await buildMergedCanonicalConversions(productId, baseUomId, db);
 
-  const resolved = resolveFactorToBase(baseUomId, selectedUomId, conversions);
-  return {
-    baseUomId,
-    conversionFactor: resolved.factorToBase.toNumber(),
-  };
+  try {
+    const resolved = resolveFactorToBase(baseUomId, normalizedSelected, conversions);
+    return {
+      baseUomId,
+      conversionFactor: resolved.factorToBase.toNumber(),
+    };
+  } catch (error) {
+    if (
+      error instanceof ValidationError &&
+      error.message.includes('No canonical conversion path')
+    ) {
+      await throwResolvableUomError(productId, normalizedSelected, baseUomId, db);
+    }
+    throw error;
+  }
 }
 
 export async function listMasterUoms(dbPool?: pg.Pool) {

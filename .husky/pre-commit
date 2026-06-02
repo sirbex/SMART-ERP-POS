@@ -148,7 +148,7 @@ if echo "$STAGED_FILES" | grep -qE "\.(ts|tsx|js)$"; then
 fi
 
 # POS pricing regression — when protected pricing, sales guard, or POS cart files change
-PRICING_REGRESSION_FILES=$(echo "$STAGED_FILES" | grep -E "(atCostIssuePrice|pricingEngineService|saleBelowCostGuard|salePriceAuditService|atCostSalePricingGuard|cogsDriftGuard|419_sale_line_price|posCartAtCost|posCartLine|posCartUom|PosUnitPriceInput|POSPage\.tsx|salesService\.ts)" || true)
+PRICING_REGRESSION_FILES=$(echo "$STAGED_FILES" | grep -E "(atCostIssuePrice|pricingEngineService|saleBelowCostGuard|salePriceAuditService|atCostSalePricingGuard|cogsDriftGuard|inventorySubledgerCoupling|419_sale_line_price|posCartAtCost|posCartLine|posCartUom|PosUnitPriceInput|POSPage\.tsx|salesService\.ts)" || true)
 if [ ! -z "$PRICING_REGRESSION_FILES" ]; then
   echo "🛡️  POS pricing regression (protected files changed)..."
   npm run test:pos-pricing-regression 2>&1 | tail -30

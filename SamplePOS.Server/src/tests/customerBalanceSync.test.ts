@@ -63,25 +63,34 @@ describe('Invoice Status Integrity', () => {
   });
 });
 
-// ── Test 2: Customer balance = SUM(amount_due) from invoices ──
+// ── Test 2: Customer balance = open-item SSOT (Wave 2 AR engine) ──
 
 describe('Customer Balance — Single Source of Truth', () => {
-  test('every customer balance matches SUM(amount_due) from non-cancelled invoices', async () => {
+  test('every customer balance matches open invoices minus unallocated AR receipts', async () => {
     const result = await pool.query(`
-      SELECT 
+      SELECT
         c.id,
         c.name,
         c.balance AS current_balance,
-        COALESCE(inv.computed_balance, 0) AS computed_balance,
-        ABS(c.balance - COALESCE(inv.computed_balance, 0)) AS drift
+        GREATEST(0, COALESCE(inv.computed_balance, 0) - COALESCE(ar.unallocated, 0)) AS computed_balance,
+        ABS(
+          c.balance
+          - GREATEST(0, COALESCE(inv.computed_balance, 0) - COALESCE(ar.unallocated, 0))
+        ) AS drift
       FROM customers c
       LEFT JOIN (
         SELECT customer_id, SUM(amount_due) AS computed_balance
         FROM invoices
-        WHERE COALESCE(document_type, 'INVOICE') = 'INVOICE'
+        WHERE COALESCE(document_type, 'INVOICE') IN ('INVOICE', 'OPENING_BALANCE')
           AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
         GROUP BY customer_id
       ) inv ON inv.customer_id = c.id
+      LEFT JOIN (
+        SELECT customer_id, SUM(unallocated_amount) AS unallocated
+        FROM ar_customer_payments
+        WHERE status IN ('POSTED', 'PARTIALLY_ALLOCATED', 'FULLY_ALLOCATED')
+        GROUP BY customer_id
+      ) ar ON ar.customer_id = c.id
       WHERE c.is_active = true
       ORDER BY drift DESC
     `);

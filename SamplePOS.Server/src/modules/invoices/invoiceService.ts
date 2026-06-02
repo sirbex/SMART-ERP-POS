@@ -10,6 +10,9 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
+import * as arPaymentService from '../ar-payments/arPaymentService.js';
+import { AR_SSOT_INVOICE_PAYMENT_METHODS } from '../ar-payments/arPaymentService.js';
+import * as openItemEngine from '../ar-payments/openItemAllocationEngine.js';
 
 /** Raw DB row from payment_lines table as returned by salesRepository */
 interface PaymentLineRow {
@@ -74,6 +77,264 @@ interface SaleItemDeliveryRow {
   quantity: number;
   unit_price: string | number;
   line_total: string | number;
+}
+
+type InvoicePaymentInput = {
+  amount: number;
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
+  paymentDate?: Date | string | null;
+  referenceNumber?: string | null;
+  notes?: string | null;
+  processedById?: string | null;
+};
+
+async function syncLinkedSaleAfterInvoicePayment(
+  pool: Pool,
+  inv: { sale_id: string | null; invoice_number: string },
+  fresh: { amount_paid: number | null; total_amount: number | null },
+  paymentMethod: string,
+  paymentAmount: number,
+): Promise<void> {
+  if (!inv.sale_id) return;
+
+  const isFullyPaid = new Decimal(fresh.amount_paid || 0).greaterThanOrEqualTo(
+    new Decimal(fresh.total_amount),
+  );
+  const saleResult = await pool.query('SELECT payment_method FROM sales WHERE id = $1', [inv.sale_id]);
+  const currentPaymentMethod = saleResult.rows[0]?.payment_method;
+  const newPaymentMethod =
+    isFullyPaid && currentPaymentMethod === 'CREDIT' ? paymentMethod : currentPaymentMethod;
+
+  await pool.query(
+    `UPDATE sales
+     SET amount_paid = $1,
+         payment_method = $2::payment_method
+     WHERE id = $3`,
+    [fresh.amount_paid, newPaymentMethod, inv.sale_id],
+  );
+
+  logger.info('Sale payment synchronized', {
+    saleId: inv.sale_id,
+    invoiceNumber: inv.invoice_number,
+    amountPaid: fresh.amount_paid,
+    paymentAmount,
+    isFullyPaid,
+    paymentMethodUpdated: currentPaymentMethod !== newPaymentMethod,
+    newPaymentMethod,
+  });
+}
+
+/** Legacy invoice payment path — DEPOSIT and CREDIT only (special GL/deposit handling). */
+async function addLegacyInvoicePayment(
+  pool: Pool,
+  invoiceId: string,
+  input: InvoicePaymentInput,
+): Promise<{
+  invoice: NonNullable<Awaited<ReturnType<typeof invoiceRepository.getInvoiceById>>>;
+  payment: InvoicePaymentRecord;
+}> {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const inv = await invoiceRepository.getInvoiceById(client, invoiceId);
+    if (!inv) {
+      throw new Error(
+        `GHOST PAYMENT PREVENTION: Invoice ${invoiceId} does not exist. ` +
+          `Cannot record payment against non-existent invoice. This would create orphaned transaction records.`,
+      );
+    }
+
+    if (inv.customer_id) {
+      const customerCheck = await client.query('SELECT id, name FROM customers WHERE id = $1', [
+        inv.customer_id,
+      ]);
+      if (customerCheck.rows.length === 0) {
+        throw new Error(
+          `GHOST CUSTOMER: Invoice ${inv.invoice_number} is linked to non-existent customer ${inv.customer_id}. ` +
+            `Cannot process payment for invoice with orphaned customer linkage. Data integrity violation detected.`,
+        );
+      }
+    }
+
+    if (input.amount <= 0) {
+      throw new Error('Payment amount must be positive and greater than zero');
+    }
+
+    const settlement = await invoiceRepository.getInvoiceSettlement(client, invoiceId);
+    if (!settlement) {
+      throw new Error(`Cannot resolve settlement for invoice ${invoiceId}`);
+    }
+    const amountDueDec = Money.parseDb(settlement.amountDue);
+    const paymentDec = Money.parseDb(input.amount);
+    if (paymentDec.greaterThan(amountDueDec)) {
+      throw new Error(
+        `OVERPAYMENT PREVENTION: Payment of ${paymentDec.toFixed(2)} exceeds outstanding balance. ` +
+          `Invoice ${inv.invoice_number} total: ${Money.parseDb(settlement.totalAmount).toFixed(2)}, ` +
+          `Settled (payments + credit notes): ${Money.parseDb(settlement.amountPaid).toFixed(2)}, ` +
+          `Outstanding: ${amountDueDec.toFixed(2)}`,
+      );
+    }
+
+    if (input.paymentMethod === 'DEPOSIT') {
+      if (!inv.customer_id) {
+        throw new Error('Cannot use deposit payment method for invoices without a customer');
+      }
+
+      const depositBalance = await depositsService.getCustomerDepositBalance(pool, inv.customer_id);
+      if (new Decimal(depositBalance.availableBalance).lessThan(input.amount)) {
+        throw new Error(
+          `INSUFFICIENT DEPOSIT: Customer has ${new Decimal(depositBalance.availableBalance).toFixed(2)} available, ` +
+            `but payment requires ${new Decimal(input.amount).toFixed(2)}`,
+        );
+      }
+
+      const saleIdForDeposit = inv.sale_id || invoiceId;
+      const depositApplicationResult = await depositsService.applyDepositsToSaleInTransaction(
+        client,
+        inv.customer_id,
+        saleIdForDeposit,
+        input.amount,
+        input.processedById || undefined,
+      );
+
+      logger.info('Deposit applied to invoice payment', {
+        invoiceId,
+        invoiceNumber: inv.invoice_number,
+        customerId: inv.customer_id,
+        amount: input.amount,
+        depositBalanceBefore: depositBalance.availableBalance,
+        depositBalanceAfter: Money.toNumber(
+          new Decimal(depositBalance.availableBalance).minus(input.amount),
+        ),
+        applicationsCount: depositApplicationResult.applications.length,
+      });
+
+      const paymentDateStrDeposit =
+        input.paymentDate instanceof Date
+          ? formatDateBusiness(input.paymentDate)
+          : typeof input.paymentDate === 'string'
+            ? input.paymentDate
+            : getBusinessDate();
+      const customerRow = await client.query('SELECT name FROM customers WHERE id = $1', [
+        inv.customer_id,
+      ]);
+      const customerNameForDeposit = customerRow.rows[0]?.name || 'Unknown';
+      for (const app of depositApplicationResult.applications) {
+        await glEntryService.recordDepositApplicationToGL(
+          {
+            applicationId: app.id,
+            depositId: app.depositId,
+            depositNumber: app.depositNumber || '',
+            saleId: saleIdForDeposit,
+            saleNumber: inv.invoice_number,
+            applicationDate: paymentDateStrDeposit,
+            amount: app.amountApplied,
+            customerId: inv.customer_id,
+            customerName: customerNameForDeposit,
+          },
+          pool,
+          client,
+        );
+      }
+    }
+
+    const payment = await invoiceRepository.addPayment(client, {
+      invoiceId,
+      amount: input.amount,
+      paymentMethod: input.paymentMethod,
+      paymentDate: input.paymentDate || getBusinessDate(),
+      referenceNumber: input.referenceNumber || null,
+      notes: input.notes || null,
+      processedById: input.processedById || null,
+    });
+
+    await documentFlowService.linkDocuments(client, 'INVOICE', invoiceId, 'PAYMENT', payment.id, 'PAYS');
+
+    const fresh = await invoiceRepository.recalcInvoice(client, invoiceId);
+    if (!fresh) {
+      throw new Error('Failed to recalculate invoice after recording payment');
+    }
+
+    if (inv.sale_id) {
+      const isFullyPaid = new Decimal(fresh.amount_paid || 0).greaterThanOrEqualTo(
+        new Decimal(fresh.total_amount),
+      );
+      const saleResult = await client.query('SELECT payment_method FROM sales WHERE id = $1', [
+        inv.sale_id,
+      ]);
+      const currentPaymentMethod = saleResult.rows[0]?.payment_method;
+      const newPaymentMethod =
+        isFullyPaid && currentPaymentMethod === 'CREDIT'
+          ? input.paymentMethod
+          : currentPaymentMethod;
+
+      await client.query(
+        `UPDATE sales
+         SET amount_paid = $1,
+             payment_method = $2::payment_method
+         WHERE id = $3`,
+        [fresh.amount_paid, newPaymentMethod, inv.sale_id],
+      );
+
+      logger.info('Sale payment synchronized', {
+        invoiceId,
+        saleId: inv.sale_id,
+        amountPaid: fresh.amount_paid,
+        paymentAmount: input.amount,
+        isFullyPaid,
+        paymentMethodUpdated: currentPaymentMethod !== newPaymentMethod,
+        newPaymentMethod,
+      });
+    }
+
+    if (inv.customer_id) {
+      await openItemEngine.syncCustomerBalanceFromOpenItems(
+        client,
+        inv.customer_id,
+        'INVOICE_PAYMENT',
+      );
+    }
+
+    const paymentDateStr =
+      input.paymentDate instanceof Date
+        ? formatDateBusiness(input.paymentDate)
+        : typeof input.paymentDate === 'string'
+          ? input.paymentDate
+          : getBusinessDate();
+
+    await glEntryService.recordInvoicePaymentToGL(
+      {
+        paymentId: payment.id,
+        receiptNumber: payment.receipt_number,
+        paymentDate: paymentDateStr,
+        amount: input.amount,
+        paymentMethod: input.paymentMethod,
+        invoiceId,
+        invoiceNumber: inv.invoice_number,
+      },
+      pool,
+      client,
+    );
+
+    await client.query('COMMIT');
+
+    logger.info('Legacy invoice payment committed with GL verification', {
+      invoiceId,
+      paymentId: payment.id,
+      receiptNumber: payment.receipt_number,
+      amount: input.amount,
+      paymentMethod: input.paymentMethod,
+    });
+
+    return { invoice: fresh, payment };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export const invoiceService = {
@@ -507,248 +768,25 @@ export const invoiceService = {
   async addPayment(
     pool: Pool,
     invoiceId: string,
-    input: {
-      amount: number;
-      paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
-      paymentDate?: Date | string | null;
-      referenceNumber?: string | null;
-      notes?: string | null;
-      processedById?: string | null;
-    }
+    input: InvoicePaymentInput,
   ) {
-    const client = await pool.connect();
-
-    try {
-      await client.query('BEGIN');
-
-      // ============================================================
-      // CRITICAL: VALIDATE INVOICE EXISTS (PREVENT GHOST PAYMENTS)
-      // ============================================================
-      const inv = await invoiceRepository.getInvoiceById(client, invoiceId);
-      if (!inv) {
-        throw new Error(
-          `GHOST PAYMENT PREVENTION: Invoice ${invoiceId} does not exist. ` +
-          `Cannot record payment against non-existent invoice. This would create orphaned transaction records.`
-        );
-      }
-
-      // Validate customer still exists
-      if (inv.customer_id) {
-        const customerCheck = await client.query('SELECT id, name FROM customers WHERE id = $1', [
-          inv.customer_id,
-        ]);
-
-        if (customerCheck.rows.length === 0) {
-          throw new Error(
-            `GHOST CUSTOMER: Invoice ${inv.invoice_number} is linked to non-existent customer ${inv.customer_id}. ` +
-            `Cannot process payment for invoice with orphaned customer linkage. Data integrity violation detected.`
-          );
-        }
-      }
-
-      // Enforce non-negative balances
-      if (input.amount <= 0) {
-        throw new Error('Payment amount must be positive and greater than zero');
-      }
-
-      // BR-INV-001: Payment cannot exceed outstanding (cash + posted credit/debit notes)
-      const settlement = await invoiceRepository.getInvoiceSettlement(client, invoiceId);
-      if (!settlement) {
-        throw new Error(`Cannot resolve settlement for invoice ${invoiceId}`);
-      }
-      const amountDueDec = Money.parseDb(settlement.amountDue);
-      const paymentDec = Money.parseDb(input.amount);
-      if (paymentDec.greaterThan(amountDueDec)) {
-        throw new Error(
-          `OVERPAYMENT PREVENTION: Payment of ${paymentDec.toFixed(2)} exceeds outstanding balance. ` +
-          `Invoice ${inv.invoice_number} total: ${Money.parseDb(settlement.totalAmount).toFixed(2)}, ` +
-          `Settled (payments + credit notes): ${Money.parseDb(settlement.amountPaid).toFixed(2)}, ` +
-          `Outstanding: ${amountDueDec.toFixed(2)}`
-        );
-      }
-
-      // ============================================================
-      // DEPOSIT PAYMENT HANDLING
-      // ============================================================
-      if (input.paymentMethod === 'DEPOSIT') {
-        if (!inv.customer_id) {
-          throw new Error('Cannot use deposit payment method for invoices without a customer');
-        }
-
-        // Verify customer has sufficient deposit balance
-        const depositBalance = await depositsService.getCustomerDepositBalance(
+    // SSOT: standard clearing methods post through AR open-item engine (one CUSTOMER_PAYMENT GL doc).
+    if (AR_SSOT_INVOICE_PAYMENT_METHODS.has(input.paymentMethod)) {
+      const result = await arPaymentService.recordInvoicePaymentViaArSsot(pool, invoiceId, input);
+      if (result.invoice?.sale_id) {
+        await syncLinkedSaleAfterInvoicePayment(
           pool,
-          inv.customer_id
-        );
-        if (new Decimal(depositBalance.availableBalance).lessThan(input.amount)) {
-          throw new Error(
-            `INSUFFICIENT DEPOSIT: Customer has ${new Decimal(depositBalance.availableBalance).toFixed(2)} available, ` +
-            `but payment requires ${new Decimal(input.amount).toFixed(2)}`
-          );
-        }
-
-        // Apply deposit using FIFO - uses the sale_id from the invoice if available
-        // If no sale_id, we create a reference using the invoice id
-        const saleIdForDeposit = inv.sale_id || invoiceId;
-        const depositApplicationResult = await depositsService.applyDepositsToSaleInTransaction(
-          client,
-          inv.customer_id,
-          saleIdForDeposit,
+          { sale_id: result.invoice.sale_id, invoice_number: result.invoice.invoice_number },
+          result.invoice,
+          input.paymentMethod,
           input.amount,
-          input.processedById || undefined
         );
-
-        logger.info('Deposit applied to invoice payment', {
-          invoiceId,
-          invoiceNumber: inv.invoice_number,
-          customerId: inv.customer_id,
-          amount: input.amount,
-          depositBalanceBefore: depositBalance.availableBalance,
-          depositBalanceAfter: Money.toNumber(
-            new Decimal(depositBalance.availableBalance).minus(input.amount)
-          ),
-          applicationsCount: depositApplicationResult.applications.length,
-        });
-
-        // GL POSTING for DEPOSIT applications: DR Customer Deposits, CR AR
-        // Must be inside the transaction so it rolls back if anything fails
-        const paymentDateStrDeposit =
-          input.paymentDate instanceof Date
-            ? formatDateBusiness(input.paymentDate)
-            : (typeof input.paymentDate === 'string' ? input.paymentDate : getBusinessDate());
-        const customerRow = await client.query('SELECT name FROM customers WHERE id = $1', [inv.customer_id]);
-        const customerNameForDeposit = customerRow.rows[0]?.name || 'Unknown';
-        for (const app of depositApplicationResult.applications) {
-          await glEntryService.recordDepositApplicationToGL(
-            {
-              applicationId: app.id,
-              depositId: app.depositId,
-              depositNumber: app.depositNumber || '',
-              saleId: saleIdForDeposit,
-              saleNumber: inv.invoice_number,
-              applicationDate: paymentDateStrDeposit,
-              amount: app.amountApplied,
-              customerId: inv.customer_id,
-              customerName: customerNameForDeposit,
-            },
-            pool,
-            client
-          );
-        }
       }
-
-      // Record the payment
-      const payment = await invoiceRepository.addPayment(client, {
-        invoiceId,
-        amount: input.amount,
-        paymentMethod: input.paymentMethod,
-        paymentDate: input.paymentDate || getBusinessDate(),
-        referenceNumber: input.referenceNumber || null,
-        notes: input.notes || null,
-        processedById: input.processedById || null,
-      });
-
-      // Document Flow: Invoice → Payment
-      await documentFlowService.linkDocuments(client, 'INVOICE', invoiceId, 'PAYMENT', payment.id, 'PAYS');
-
-      // Recalculate invoice aggregates & status
-      const fresh = await invoiceRepository.recalcInvoice(client, invoiceId);
-
-      if (!fresh) {
-        throw new Error('Failed to recalculate invoice after recording payment');
-      }
-
-      // BR-INV-002: Synchronize payment to linked sale (if exists)
-      // Note: Database trigger also handles this, but we do it here for immediate consistency
-      if (inv.sale_id) {
-        // Check if sale is now fully paid - if so, we need to update payment_method
-        // to avoid violating chk_sales_credit_has_debt constraint which requires
-        // CREDIT sales to have amount_paid < total_amount
-        const isFullyPaid = new Decimal(fresh.amount_paid || 0).greaterThanOrEqualTo(
-          new Decimal(fresh.total_amount)
-        );
-
-        // Get current sale payment method to determine if update is needed
-        const saleResult = await client.query('SELECT payment_method FROM sales WHERE id = $1', [
-          inv.sale_id,
-        ]);
-        const currentPaymentMethod = saleResult.rows[0]?.payment_method;
-
-        // If sale was CREDIT and is now fully paid, change to the payment method used
-        // This satisfies the constraint: CREDIT must have amount_paid < total_amount
-        const newPaymentMethod =
-          isFullyPaid && currentPaymentMethod === 'CREDIT'
-            ? input.paymentMethod
-            : currentPaymentMethod;
-
-        await client.query(
-          `UPDATE sales 
-           SET amount_paid = $1,
-               payment_method = $2::payment_method
-           WHERE id = $3`,
-          [fresh.amount_paid, newPaymentMethod, inv.sale_id]
-        );
-
-        logger.info('Sale payment synchronized', {
-          invoiceId,
-          saleId: inv.sale_id,
-          amountPaid: fresh.amount_paid,
-          paymentAmount: input.amount,
-          isFullyPaid,
-          paymentMethodUpdated: currentPaymentMethod !== newPaymentMethod,
-          newPaymentMethod,
-        });
-      }
-
-      // BR-INV-003: Recalculate customer balance from invoices (SSOT)
-      if (inv.customer_id) {
-        const { syncCustomerBalanceFromInvoices } = await import('../../utils/customerBalanceSync.js');
-        await syncCustomerBalanceFromInvoices(client, inv.customer_id, 'INVOICE_PAYMENT');
-      }
-
-      // ============================================================
-      // GL POSTING: Record invoice payment via glEntryService
-      // DR Cash/Card/Bank | CR Accounts Receivable
-      // MUST be inside the transaction (txClient=client) so GL and payment
-      // commit or rollback atomically — prevents ghost payments without GL.
-      // DEPOSIT payments: GL was already posted above via recordDepositApplicationToGL.
-      // ============================================================
-      const paymentDateStr =
-        input.paymentDate instanceof Date
-          ? formatDateBusiness(input.paymentDate)
-          : (typeof input.paymentDate === 'string' ? input.paymentDate : getBusinessDate());
-
-      await glEntryService.recordInvoicePaymentToGL(
-        {
-          paymentId: payment.id,
-          receiptNumber: payment.receipt_number,
-          paymentDate: paymentDateStr,
-          amount: input.amount,
-          paymentMethod: input.paymentMethod,
-          invoiceId: invoiceId,
-          invoiceNumber: inv.invoice_number,
-        },
-        pool,
-        client
-      );
-
-      await client.query('COMMIT');
-
-      logger.info('Invoice payment committed with GL verification', {
-        invoiceId,
-        paymentId: payment.id,
-        receiptNumber: payment.receipt_number,
-        amount: input.amount,
-        paymentMethod: input.paymentMethod,
-      });
-
-      return { invoice: fresh, payment };
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+      return { invoice: result.invoice, payment: result.payment };
     }
+
+    // DEPOSIT / CREDIT retain legacy path until deposit/credit GL is folded into AR engine.
+    return addLegacyInvoicePayment(pool, invoiceId, input);
   },
 
   async listPayments(pool: Pool, invoiceId: string) {

@@ -10,12 +10,11 @@ import Decimal from 'decimal.js';
 import {
   paymentsRepository,
   CreateSalePaymentData,
-  CreateCreditTransactionData,
 } from './paymentsRepository.js';
 import * as auditService from '../audit/auditService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
-import * as glEntryService from '../../services/glEntryService.js';
+import * as arPaymentService from '../ar-payments/arPaymentService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 import { Money } from '../../utils/money.js';
@@ -228,7 +227,10 @@ export const paymentsService = {
   },
 
   /**
-   * Record a customer credit payment (customer paying down their balance)
+   * Record a customer credit payment (customer paying down their balance).
+   *
+   * @deprecated Internal callers should use arPaymentService.createCustomerPayment directly.
+   * Kept as a thin SSOT redirect for legacy modules and POST /api/payments/customer/:id/payment.
    */
   async recordCustomerPayment(
     pool: Pool,
@@ -241,63 +243,26 @@ export const paymentsService = {
       processedBy?: string;
     }
   ): Promise<{ newBalance: number; transactionId: string }> {
-    const result = await UnitOfWork.run(pool, async (client) => {
-      // Layer 2: Lock customer row to serialize concurrent balance updates
-      await client.query('SELECT id FROM customers WHERE id = $1 FOR UPDATE', [input.customerId]);
-
-      // Get current balance (already uses FOR UPDATE on customer_credit_transactions)
-      const currentBalance = await paymentsRepository.getCustomerBalance(client, input.customerId);
-      const paymentAmount = new Decimal(input.amount);
-      const newBalance = new Decimal(currentBalance).minus(paymentAmount);
-
-      if (newBalance.lessThan(0) && newBalance.abs().greaterThan('0.01')) {
-        throw new Error('Payment amount exceeds outstanding balance');
-      }
-
-      // Create credit transaction
-      const transaction = await paymentsRepository.createCreditTransaction(client, {
-        customerId: input.customerId,
-        transactionType: 'PAYMENT',
-        amount: -paymentAmount.toNumber(), // Negative for payment
-        balanceAfter: Money.toNumber(Money.max(0, newBalance)), // Don't go negative
-        referenceNumber: input.reference || null,
-        notes: input.notes || `Payment via ${input.paymentMethod}`,
-        processedBy: input.processedBy || null,
-      });
-
-      // ============================================================
-      // GL POSTING: Record customer payment reducing AR
-      // DR Cash/Card/Bank | CR Accounts Receivable
-      // Atomic with the credit transaction — inside UnitOfWork
-      // ============================================================
-      const custRow = await client.query('SELECT name FROM customers WHERE id = $1', [
-        input.customerId,
-      ]);
-      const customerName = (custRow.rows[0]?.name as string) || 'Unknown';
-
-      await glEntryService.recordCustomerPaymentToGL(
-        {
-          paymentId: transaction.id,
-          paymentNumber: input.reference || `CPAY-${transaction.id.slice(0, 8)}`,
-          paymentDate: getBusinessDate(),
-          amount: input.amount,
-          paymentMethod:
-            (input.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER') || 'CASH',
-          customerId: input.customerId,
-          customerName,
-          reducesAR: true,
-        },
-        undefined,
-        client
-      );
-
-      return {
-        newBalance: Money.toNumber(Money.max(0, newBalance)),
-        transactionId: transaction.id,
-      };
+    // SSOT redirect: reuse AR payment workflow to avoid duplicate posting/balance logic.
+    const arResult = await arPaymentService.createCustomerPayment(pool, {
+      customerId: input.customerId,
+      amount: input.amount,
+      paymentDate: getBusinessDate(),
+      paymentMethod: input.paymentMethod,
+      reference: input.reference,
+      notes: input.notes,
+      createdById: input.processedBy || '00000000-0000-0000-0000-000000000001',
+      autoAllocate: true,
+      allocationType: 'FIFO',
     });
-
-    return result;
+    const balanceRow = await pool.query<{ balance: string }>(
+      `SELECT COALESCE(balance, 0)::text AS balance FROM customers WHERE id = $1`,
+      [input.customerId],
+    );
+    return {
+      newBalance: Number(balanceRow.rows[0]?.balance ?? 0),
+      transactionId: arResult.payment?.id || '',
+    };
   },
 
   /**

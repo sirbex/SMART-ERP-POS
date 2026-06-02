@@ -159,14 +159,15 @@ export const paymentsController = {
 
   /**
    * POST /api/payments/customer/:customerId/payment
-   * Record a customer credit payment
+   * Record a customer credit payment.
+   *
+   * @deprecated Prefer POST /api/ar-payments — this handler delegates to paymentsService → arPaymentService SSOT.
    */
   recordCustomerPayment: asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const { customerId } = CustomerIdParamSchema.parse(req.params);
     const userId = req.user?.id;
 
-    // Validate request body — ZodError caught by global handler
     const { amount, paymentMethod, reference, notes } = RecordCustomerPaymentSchema.parse(req.body);
 
     const result = await paymentsService.recordCustomerPayment(pool, {
@@ -175,7 +176,7 @@ export const paymentsController = {
       paymentMethod,
       reference,
       notes,
-      processedBy: userId,
+      processedBy: userId || undefined,
     });
 
     res.json({
