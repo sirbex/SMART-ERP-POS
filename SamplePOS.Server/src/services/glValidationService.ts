@@ -11,6 +11,7 @@ import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import * as glEntryService from './glEntryService.js';
 import { getBusinessDate } from '../utils/dateRange.js';
+import { ACTIVE_GL_REFERENCE_PREDICATE } from '../utils/activeGlReference.js';
 
 interface GLValidationResult {
   isValid: boolean;
@@ -398,7 +399,7 @@ export async function runFullIntegrityCheck(dbPool?: pg.Pool): Promise<{
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'SALE'
           AND lt."ReferenceId" = s.id
-          AND lt."IsReversed" = FALSE
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
   `);
 
@@ -408,9 +409,9 @@ export async function runFullIntegrityCheck(dbPool?: pg.Pool): Promise<{
     FROM customer_payments cp
     WHERE NOT EXISTS (
       SELECT 1 FROM ledger_transactions lt
-      WHERE lt."ReferenceType" = 'CUSTOMER_PAYMENT'
+        WHERE lt."ReferenceType" = 'CUSTOMER_PAYMENT'
         AND lt."ReferenceId" = cp."Id"
-        AND lt."IsReversed" = FALSE
+        AND ${ACTIVE_GL_REFERENCE_PREDICATE}
     )
   `);
 
@@ -469,6 +470,7 @@ export async function repostMissingGL(dbPool?: pg.Pool): Promise<{
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'GOODS_RECEIPT'
           AND lt."ReferenceId" = gr.id
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
     GROUP BY gr.id, gr.receipt_number, gr.received_date, po.supplier_id, s."CompanyName"
     HAVING COALESCE(SUM(
@@ -512,6 +514,7 @@ export async function repostMissingGL(dbPool?: pg.Pool): Promise<{
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'SUPPLIER_PAYMENT'
           AND lt."ReferenceId" = sp."Id"
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
   `);
 
@@ -548,6 +551,7 @@ export async function repostMissingGL(dbPool?: pg.Pool): Promise<{
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'SALE'
           AND lt."ReferenceId" = s.id
+          AND ${ACTIVE_GL_REFERENCE_PREDICATE}
       )
     ORDER BY s.sale_date
   `);
