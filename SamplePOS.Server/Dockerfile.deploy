@@ -3,7 +3,7 @@
 # so that ../shared/ is accessible during TypeScript compilation.
 
 FROM node:22-alpine AS base
-RUN apk add --no-cache dumb-init postgresql16-client
+RUN apk add --no-cache dumb-init postgresql16-client su-exec
 
 # Install production dependencies
 FROM base AS deps
@@ -52,13 +52,11 @@ COPY --from=builder /app/shared/sql ../shared/sql
 RUN mkdir -p /app/dist/SamplePOS.Server/logs /app/backups /app/uploads/imports \
     && chown -R nodejs:nodejs /app/dist/SamplePOS.Server/logs /app/backups /app/uploads
 
-# Entrypoint script: ensure bind-mounted directories have required subdirs.
-# Bind mounts override the container FS, so we must create subdirs at runtime.
-# Uses || true because the nodejs user may not own the parent (host creates it).
-RUN printf '#!/bin/sh\nmkdir -p /app/uploads/imports /app/logs 2>/dev/null || true\nexec "$@"\n' \
+# Entrypoint script: ensure bind-mounted directories are writable at runtime.
+# In production, host bind mounts can override image ownership and block startup.
+RUN printf '#!/bin/sh\nset -eu\nmkdir -p /app/uploads /app/logs /app/uploads/imports || true\nif [ \"$(id -u)\" = \"0\" ]; then\n  chown -R nodejs:nodejs /app/uploads /app/logs 2>/dev/null || true\n  exec su-exec nodejs \"$@\"\nfi\nexec \"$@\"\n' \
     > /app/entrypoint.sh && chmod 755 /app/entrypoint.sh
 
-USER nodejs
 EXPOSE 3001
 
 ENTRYPOINT ["dumb-init", "--", "/app/entrypoint.sh"]
