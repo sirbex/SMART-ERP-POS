@@ -59,7 +59,22 @@ try {
   const referenceId = uuidv5(idempotencyKey, AP_DRIFT_HEAL_NS);
   const absDrift = Math.abs(drift);
   const action = drift > 0 ? 'debit-ap' : 'credit-ap';
-  const offsetCode = '5900';
+
+  const accRes = await pool.query(
+    `SELECT "AccountCode" FROM accounts WHERE "AccountCode" = ANY($1::text[])`,
+    [['2100', '5900']],
+  );
+  const found = new Set(accRes.rows.map((r) => r.AccountCode));
+  if (!found.has('2100')) throw new Error('Account 2100 not found');
+  let offsetCode = '5900';
+  if (!found.has('5900')) {
+    const fallback = await pool.query(
+      `SELECT "AccountCode" FROM accounts WHERE "AccountType" = 'EXPENSE' ORDER BY "AccountCode" LIMIT 1`,
+    );
+    if (fallback.rowCount === 0) throw new Error('No expense account for AP drift offset');
+    offsetCode = fallback.rows[0].AccountCode;
+  }
+  console.log(`  Offset account: ${offsetCode}`);
 
   const lines = action === 'debit-ap'
     ? [
