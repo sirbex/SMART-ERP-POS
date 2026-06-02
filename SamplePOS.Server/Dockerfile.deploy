@@ -54,7 +54,7 @@ RUN mkdir -p /app/dist/SamplePOS.Server/logs /app/backups /app/uploads/imports \
 
 # Entrypoint script: ensure bind-mounted directories are writable at runtime.
 # In production, host bind mounts can override image ownership and block startup.
-RUN printf '#!/bin/sh\nset -eu\nmkdir -p /app/uploads /app/logs /app/uploads/imports || true\nif [ \"$(id -u)\" = \"0\" ]; then\n  chown -R nodejs:nodejs /app/uploads /app/logs 2>/dev/null || true\n  exec su-exec nodejs \"$@\"\nfi\nexec \"$@\"\n' \
+RUN printf '#!/bin/sh\nset -eu\nmkdir -p /app/uploads /app/logs /app/uploads/imports || true\nif [ "$(id -u)" = "0" ]; then\n  chown -R nodejs:nodejs /app/uploads /app/logs 2>/dev/null || true\n  exec su-exec nodejs "$@"\nfi\nexec "$@"\n' \
     > /app/entrypoint.sh && chmod 755 /app/entrypoint.sh
 
 EXPOSE 3001
