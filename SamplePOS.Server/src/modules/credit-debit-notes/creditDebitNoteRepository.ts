@@ -15,6 +15,7 @@ import type { Pool, PoolClient } from 'pg';
 import { Money } from '../../utils/money.js';
 import { getBusinessYear, getBusinessDate } from '../../utils/dateRange.js';
 import { safeParseInt } from '../../utils/safeParse.js';
+import { applyInvoiceLedgerOutstanding } from '../supplier-payments/supplierPaymentRepository.js';
 
 // ============================================================
 // TYPES
@@ -948,6 +949,7 @@ export const supplierCreditDebitNoteRepository = {
              WHERE "Id" = $1`,
             [billId, applied],
         );
+        await applyInvoiceLedgerOutstanding(client as PoolClient, billId);
         return { applied, billOutstandingAfter: Math.max(open - applied, 0) };
     },
 

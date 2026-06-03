@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       repair_cache:
-        description: 'Repair SALUD suppliers.OutstandingBalance cache'
+        description: 'Heal SALUD invoice outstanding from ledger + sync cache'
         type: boolean
-        default: true
+        default: false
 
 jobs:
   investigate:
@@ -33,7 +33,7 @@ jobs:
           docker exec -u root smarterp-backend cp /tmp/henber-salud-ap-investigate.mjs /app/henber-salud-ap-investigate.mjs
           docker exec -u root smarterp-backend chown nodejs:nodejs /app/henber-salud-ap-investigate.mjs
           ARGS=""
-          if [ "${{ inputs.repair_cache }}" = "true" ]; then ARGS="--repair"; fi
+          if [ "${{ inputs.repair_cache }}" = "true" ]; then ARGS="--heal"; fi
           docker exec -w /app smarterp-backend node henber-salud-ap-investigate.mjs \$ARGS
           REMOTE
 

@@ -13,6 +13,10 @@ import { PricingEngine } from '../../utils/pricingEngine.js';
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
 
+function toNum(v: unknown): number {
+    return new Decimal(String(v ?? 0)).toDecimalPlaces(2).toNumber();
+}
+
 export interface SupplierPayment {
     id: string;
     paymentNumber: string;
@@ -744,40 +748,17 @@ export async function createInvoice(
 }
 
 /**
- * Update supplier invoice paid amount and status
- * Uses Decimal.js for precise currency calculations
+ * Update supplier invoice paid amount and status — re-derives from ledger SSOT
+ * (payment allocations + posted credit notes), not from the passed amount alone.
  */
 export async function updateInvoicePaidAmount(
     client: PoolClient,
     id: string,
-    paidAmount: number
+    _paidAmount?: number
 ): Promise<SupplierInvoice | null> {
-    // Get current invoice to determine status
-    const current = await client.query(
-        'SELECT "TotalAmount" FROM supplier_invoices WHERE "Id" = $1',
-        [id]
-    );
-
-    if (current.rows.length === 0) return null;
-
-    // Use Decimal.js for precise calculations
-    const totalAmount = new Decimal(current.rows[0].TotalAmount);
-    const paidDecimal = new Decimal(paidAmount);
-    const outstandingBalance = totalAmount.minus(paidDecimal);
-
-    // Determine status based on precise comparisons
-    let status = 'Pending';
-    if (paidDecimal.greaterThanOrEqualTo(totalAmount)) {
-        status = 'Paid';
-    } else if (paidDecimal.greaterThan(0)) {
-        status = 'PartiallyPaid';
-    }
-
+    await applyInvoiceLedgerOutstanding(client, id);
     const result = await client.query(
-        `UPDATE supplier_invoices 
-     SET "AmountPaid" = $1, "OutstandingBalance" = $2, "Status" = $3, "UpdatedAt" = NOW() 
-     WHERE "Id" = $4
-     RETURNING 
+        `SELECT
        "Id" as id,
        "SupplierInvoiceNumber" as "invoiceNumber",
        "InternalReferenceNumber" as "supplierInvoiceNumber",
@@ -792,8 +773,9 @@ export async function updateInvoicePaidAmount(
        "Status" as status,
        "Notes" as notes,
        "CreatedAt" as "createdAt",
-       "UpdatedAt" as "updatedAt"`,
-        [paidDecimal.toNumber(), outstandingBalance.toNumber(), status, id]
+       "UpdatedAt" as "updatedAt"
+     FROM supplier_invoices WHERE "Id" = $1`,
+        [id],
     );
     return result.rows[0] || null;
 }
@@ -1321,6 +1303,116 @@ export async function lockAndComputeInvoiceOutstanding(
         creditNotes,
         outstandingBalance,
     };
+}
+
+function deriveInvoiceStatus(
+    outstanding: Decimal,
+    paid: Decimal,
+    credits: Decimal,
+    documentType?: string,
+): string {
+    if (outstanding.lessThanOrEqualTo(0.009)) {
+        return documentType === 'SUPPLIER_CREDIT_NOTE' ? 'APPLIED' : 'PAID';
+    }
+    if (paid.greaterThan(0) || credits.greaterThan(0)) {
+        return 'PARTIALLY_PAID';
+    }
+    return 'Pending';
+}
+
+/**
+ * Persist invoice AmountPaid / OutstandingBalance / Status from ledger SSOT
+ * (allocations + posted credit notes). Safe to re-run (idempotent).
+ */
+export async function applyInvoiceLedgerOutstanding(
+    client: PoolClient,
+    invoiceId: string,
+): Promise<{ changed: boolean; before: number; after: number } | null> {
+    const beforeRes = await client.query<{ OutstandingBalance: string; document_type: string }>(
+        `SELECT "OutstandingBalance", document_type FROM supplier_invoices WHERE "Id" = $1 AND deleted_at IS NULL`,
+        [invoiceId],
+    );
+    if (!beforeRes.rows[0]) return null;
+
+    const docType = beforeRes.rows[0].document_type;
+    const before = toNum(beforeRes.rows[0].OutstandingBalance);
+
+    if (docType === 'SUPPLIER_CREDIT_NOTE' || docType === 'SUPPLIER_DEBIT_NOTE') {
+        const row = await client.query<{ TotalAmount: string; AmountPaid: string }>(
+            `SELECT "TotalAmount", COALESCE("AmountPaid", 0) AS "AmountPaid"
+             FROM supplier_invoices WHERE "Id" = $1 FOR UPDATE`,
+            [invoiceId],
+        );
+        const total = new Decimal(row.rows[0]?.TotalAmount ?? 0);
+        const paid = new Decimal(row.rows[0]?.AmountPaid ?? 0);
+        const outstanding = total.minus(paid).lessThan(0) ? new Decimal(0) : total.minus(paid);
+        const status =
+            outstanding.lessThanOrEqualTo(0.009)
+                ? docType === 'SUPPLIER_CREDIT_NOTE'
+                    ? 'APPLIED'
+                    : 'PAID'
+                : 'POSTED';
+        await client.query(
+            `UPDATE supplier_invoices
+             SET "OutstandingBalance" = $1, "Status" = $2, "UpdatedAt" = NOW()
+             WHERE "Id" = $3`,
+            [outstanding.toDecimalPlaces(2).toNumber(), status, invoiceId],
+        );
+        const after = outstanding.toDecimalPlaces(2).toNumber();
+        return { changed: Math.abs(before - after) > 0.009, before, after };
+    }
+
+    const ledger = await lockAndComputeInvoiceOutstanding(client, invoiceId);
+    if (!ledger) return null;
+
+    const after = ledger.outstandingBalance.toDecimalPlaces(2).toNumber();
+    const credits = ledger.returnCredits.plus(ledger.creditNotes);
+    const status = deriveInvoiceStatus(
+        ledger.outstandingBalance,
+        ledger.paidAmount,
+        credits,
+        docType,
+    );
+
+    await client.query(
+        `UPDATE supplier_invoices
+         SET "AmountPaid" = $1,
+             "OutstandingBalance" = $2,
+             "Status" = $3,
+             "UpdatedAt" = NOW()
+         WHERE "Id" = $4`,
+        [
+            ledger.paidAmount.toDecimalPlaces(2).toNumber(),
+            after,
+            status,
+            invoiceId,
+        ],
+    );
+
+    return { changed: Math.abs(before - after) > 0.009, before, after };
+}
+
+/**
+ * Re-align every open supplier invoice row from ledger SSOT before cache sync.
+ */
+export async function repairSupplierInvoiceOutstandingFromLedger(
+    client: PoolClient,
+    supplierId: string,
+): Promise<{ repaired: number; scanned: number }> {
+    const rows = await client.query<{ Id: string }>(
+        `SELECT "Id" FROM supplier_invoices
+         WHERE "SupplierId" = $1
+           AND deleted_at IS NULL
+           AND UPPER("Status") NOT IN ('CANCELLED', 'DELETED')`,
+        [supplierId],
+    );
+
+    let repaired = 0;
+    for (const row of rows.rows) {
+        const result = await applyInvoiceLedgerOutstanding(client, row.Id);
+        if (result?.changed) repaired++;
+    }
+    return { repaired, scanned: rows.rows.length };
 }
 
 /**

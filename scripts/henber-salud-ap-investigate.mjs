@@ -88,19 +88,60 @@ try {
     gap_gl_position_minus_open_item: fmt(glPosition - openItem),
   });
 
-  if (process.argv.includes('--repair')) {
+  if (process.argv.includes('--repair') || process.argv.includes('--heal')) {
+    const { repairSupplierInvoiceOutstandingFromLedger } = await import(
+      '/app/dist/SamplePOS.Server/src/modules/supplier-payments/supplierPaymentRepository.js'
+    );
     const { syncSupplierBalanceFromOpenItems } = await import(
       '/app/dist/SamplePOS.Server/src/modules/supplier-payments/apReconciliationEngine.js'
     );
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const r = await syncSupplierBalanceFromOpenItems(client, id, 'SALUD_INVESTIGATE_REPAIR');
+      const inv = await repairSupplierInvoiceOutstandingFromLedger(client, id);
+      const r = await syncSupplierBalanceFromOpenItems(client, id, 'SALUD_HEAL');
       await client.query('COMMIT');
-      console.log('Cache repaired:', r);
+      console.log('Invoice repair:', inv);
+      console.log('Supplier cache:', r);
     } finally {
       client.release();
     }
+
+    const after = await pool.query(
+      `SELECT a."AccountCode" AS acct,
+              COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS net
+       FROM ledger_entries le
+       JOIN accounts a ON le."AccountId" = a."Id"
+       JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+       WHERE a."AccountCode" IN ('2100', '2150')
+         AND le."EntityId" = $1
+         AND UPPER(le."EntityType") = 'SUPPLIER'
+         AND lt."Status" = 'POSTED'
+         AND lt."IsReversed" = FALSE
+       GROUP BY a."AccountCode"`,
+      [id],
+    );
+    const ap2100After = Number(after.rows.find((r) => r.acct === '2100')?.net ?? 0);
+    const grirAfter = Number(after.rows.find((r) => r.acct === '2150')?.net ?? 0);
+    const br2 = await pool.query(
+      `SELECT COALESCE(SUM(
+         CASE WHEN document_type = 'SUPPLIER_CREDIT_NOTE'
+           THEN -COALESCE("OutstandingBalance", 0)
+           ELSE COALESCE("OutstandingBalance", 0) END
+       ), 0) AS open_item
+       FROM supplier_invoices
+       WHERE "SupplierId" = $1 AND deleted_at IS NULL
+         AND UPPER("Status") NOT IN ('PAID','CANCELLED','DELETED','DRAFT')`,
+      [id],
+    );
+    const openAfter = Number(br2.rows[0]?.open_item ?? 0);
+    console.log('After heal:', {
+      open_item: fmt(openAfter),
+      gl_2100: fmt(ap2100After),
+      grir_2150: fmt(grirAfter),
+      gl_position: fmt(ap2100After + grirAfter),
+      gap_gl_minus_open: fmt(ap2100After + grirAfter - openAfter),
+    });
   }
 } finally {
   await pool.end();

@@ -79,7 +79,19 @@ Standalone expenses on 2100 are **valid GL** but excluded from supplier subledge
 | Report Integrity | `computeApReconciliationSnapshot()` | Balance sheet AP check |
 | GL integrity API | `runGLIntegrityCheck()` | Same snapshot |
 | `heal-ap-drift` | `healAPDrift()` | Posts CORRECTION JE only when subledger is truth |
-| Heal script | `heal-supplier-open-item-balances.ts` | One-shot cache sync |
+| Heal script | `heal-supplier-open-item-balances.ts` | Invoice ledger repair + cache sync |
+
+### Invoice row SSOT (prevents subledger drift)
+
+Before syncing `suppliers.OutstandingBalance`, `syncSupplierBalanceFromOpenItems()` calls
+`repairSupplierInvoiceOutstandingFromLedger()` which persists each invoice from:
+
+```
+Outstanding = TotalAmount − SUM(payment allocations) − SUM(posted SCN on reference)
+```
+
+`updateInvoicePaidAmount()` and credit-note application use `applyInvoiceLedgerOutstanding()` —
+never `TotalAmount − AmountPaid` alone (misses credit notes).
 
 ---
 
@@ -100,6 +112,7 @@ Standalone expenses on 2100 are **valid GL** but excluded from supplier subledge
 |-------|--------|-----|
 | AP integrity FAIL 1,557,560 | GL > open-item subledger | `heal-ap-drift` (TXN-013389); `healAPDrift` referenceId collision fixed |
 | SALUD 15,589,543 vs 14,702,423 | Performance API used raw invoice SUM | `computeSupplierOpenItemBalance()` + read-repair cache |
+| SALUD ledger vs open-item gap | Stale invoice `OutstandingBalance`; CN apply used `AmountPaid` without allocation rows | `applyInvoiceLedgerOutstanding()` + heal on sync |
 | Unallocated = 0 on henber | Not the 1.56M drift | Formula visibility ruled out |
 
 ---

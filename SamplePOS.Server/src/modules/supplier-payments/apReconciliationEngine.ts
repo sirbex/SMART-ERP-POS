@@ -277,7 +277,20 @@ export async function syncSupplierBalanceFromOpenItems(
   conn: PoolClient,
   supplierId: string,
   _changeSource: string,
-): Promise<{ oldBalance: number; newBalance: number }> {
+): Promise<{ oldBalance: number; newBalance: number; invoicesRepaired?: number }> {
+  const { repairSupplierInvoiceOutstandingFromLedger } = await import(
+    './supplierPaymentRepository.js'
+  );
+  const repair = await repairSupplierInvoiceOutstandingFromLedger(conn, supplierId);
+  if (repair.repaired > 0) {
+    const { default: logger } = await import('../../utils/logger.js');
+    logger.warn('Supplier invoice outstanding repaired from ledger before cache sync', {
+      supplierId,
+      ...repair,
+      changeSource: _changeSource,
+    });
+  }
+
   const balanceUpdate = await conn.query(
     `WITH old AS (
        SELECT "OutstandingBalance" AS balance, "CompanyName" AS name
@@ -320,5 +333,5 @@ export async function syncSupplierBalanceFromOpenItems(
   const oldBalance = Money.toNumber(Money.parseDb(row?.old_balance ?? 0));
   const newBalance = Money.toNumber(Money.parseDb(row?.balance ?? 0));
 
-  return { oldBalance, newBalance };
+  return { oldBalance, newBalance, invoicesRepaired: repair.repaired };
 }
