@@ -368,8 +368,22 @@ export async function getSmartSupplierStatementData(
     );
     const supplierName = (nameResult.rows[0]?.CompanyName as string | undefined) || 'Unknown';
 
-    const openingBalance = await repo.getSupplierStatementOpeningBalance(pool, supplierId, startDate);
-    const rawEntries = await repo.getSmartSupplierStatementEntries(pool, supplierId, startDate, endDate);
+    const [
+        openingBalance,
+        rawEntries,
+        { total: unallocatedPrepaymentsTotal, prepayments: unallocatedPrepayments },
+        { ap2100, grir2150 },
+    ] = await Promise.all([
+        repo.getSupplierStatementOpeningBalance(pool, supplierId, startDate),
+        repo.getSmartSupplierStatementEntries(pool, supplierId, startDate, endDate),
+        repo.getSupplierUnallocatedPrepayments(pool, supplierId),
+        repo.getSupplierEntityGlBalances(pool, supplierId, endDate),
+    ]);
+
+    const { computeSupplierOpenItemBalance } = await import(
+        '../supplier-payments/apReconciliationEngine.js'
+    );
+    const { openItemBalance } = await computeSupplierOpenItemBalance(pool, supplierId);
 
     // Compute running balance in service layer
     let runBal = new Decimal(openingBalance);
@@ -386,6 +400,11 @@ export async function getSmartSupplierStatementData(
         openingBalance,
         closingBalance: runBal.toDecimalPlaces(2).toNumber(),
         entries,
+        openItemBalance,
+        ap2100EntityBalance: ap2100,
+        grirBalance: grir2150,
+        unallocatedPrepaymentsTotal,
+        unallocatedPrepayments,
     };
 }
 

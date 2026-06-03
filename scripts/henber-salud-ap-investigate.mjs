@@ -52,6 +52,28 @@ try {
   );
   const b = br.rows[0];
   const openItem = Math.max(0, Number(b.open_item_invoices) - Number(b.unallocated));
+  const gl = await pool.query(
+    `SELECT a."AccountCode" AS acct,
+            COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS net
+     FROM ledger_entries le
+     JOIN accounts a ON le."AccountId" = a."Id"
+     JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+     WHERE a."AccountCode" IN ('2100', '2150')
+       AND le."EntityId" = $1
+       AND UPPER(le."EntityType") = 'SUPPLIER'
+       AND lt."Status" = 'POSTED'
+       AND lt."IsReversed" = FALSE
+       AND lt."Id" NOT IN (
+         SELECT "ReversedByTransactionId" FROM ledger_transactions
+         WHERE "ReversedByTransactionId" IS NOT NULL
+       )
+     GROUP BY a."AccountCode"`,
+    [id],
+  );
+  const ap2100 = Number(gl.rows.find((r) => r.acct === '2100')?.net ?? 0);
+  const grir2150 = Number(gl.rows.find((r) => r.acct === '2150')?.net ?? 0);
+  const glPosition = ap2100 + grir2150;
+
   console.table({
     cached_column: fmt(b.cached),
     wrong_performance_formula: fmt(b.raw_sum_no_scn),
@@ -60,6 +82,10 @@ try {
     unallocated_payments: fmt(b.unallocated),
     open_item_balance: fmt(openItem),
     gap_wrong_minus_correct: fmt(Number(b.raw_sum_no_scn) - openItem),
+    gl_2100_entity: fmt(ap2100),
+    gl_2150_grir_entity: fmt(grir2150),
+    gl_supplier_position_2100_plus_2150: fmt(glPosition),
+    gap_gl_position_minus_open_item: fmt(glPosition - openItem),
   });
 
   if (process.argv.includes('--repair')) {

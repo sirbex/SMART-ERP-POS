@@ -26,6 +26,7 @@ import type {
   SupplierAgingRow,
   SmartStatementEntry,
   CustomerUnallocatedReceipt,
+  SupplierUnallocatedPrepayment,
 } from './cnDnReportTypes.js';
 
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -1163,4 +1164,69 @@ export async function getCustomerUnallocatedReceipts(
   });
 
   return { total: total.toDecimalPlaces(2).toNumber(), receipts };
+}
+
+/** Current unallocated supplier prepayments (open-item; GL already posted on payment). */
+export async function getSupplierUnallocatedPrepayments(
+  pool: Pool,
+  supplierId: string,
+): Promise<{ total: number; prepayments: SupplierUnallocatedPrepayment[] }> {
+  const result = await pool.query(
+    `SELECT "Id" AS id,
+            "PaymentNumber" AS payment_number,
+            "PaymentDate"::date AS payment_date,
+            COALESCE("UnallocatedAmount", "Amount" - COALESCE("AllocatedAmount", 0)) AS unallocated_amount
+     FROM supplier_payments
+     WHERE "SupplierId" = $1
+       AND deleted_at IS NULL
+       AND "Status" = 'COMPLETED'
+       AND COALESCE("UnallocatedAmount", "Amount" - COALESCE("AllocatedAmount", 0)) > 0.009
+     ORDER BY "PaymentDate" ASC`,
+    [supplierId],
+  );
+
+  let total = new Decimal(0);
+  const prepayments = result.rows.map((r) => {
+    const unallocatedAmount = toNum(r.unallocated_amount);
+    total = total.plus(unallocatedAmount);
+    return {
+      paymentId: r.id as string,
+      paymentNumber: r.payment_number as string,
+      paymentDate: String(r.payment_date).slice(0, 10),
+      unallocatedAmount,
+    };
+  });
+
+  return { total: total.toDecimalPlaces(2).toNumber(), prepayments };
+}
+
+/** Net entity GL balance on 2100 and 2150 as of endDate (supplier position components). */
+export async function getSupplierEntityGlBalances(
+  pool: Pool,
+  supplierId: string,
+  asOfDate: string,
+): Promise<{ ap2100: number; grir2150: number }> {
+  const result = await pool.query(
+    `SELECT a."AccountCode" AS acct,
+            COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS net
+     FROM ledger_entries le
+     JOIN accounts a ON le."AccountId" = a."Id"
+     JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+     WHERE a."AccountCode" IN ('2100', '2150')
+       AND le."EntityId" = $1
+       AND UPPER(le."EntityType") = 'SUPPLIER'
+       AND lt."Status" = 'POSTED'
+       AND lt."IsReversed" = FALSE
+       AND lt."Id" NOT IN (
+         SELECT "ReversedByTransactionId" FROM ledger_transactions
+         WHERE "ReversedByTransactionId" IS NOT NULL
+       )
+       AND le."EntryDate"::date <= $2::date
+     GROUP BY a."AccountCode"`,
+    [supplierId, asOfDate],
+  );
+
+  const ap2100 = toNum(result.rows.find((r) => r.acct === '2100')?.net);
+  const grir2150 = toNum(result.rows.find((r) => r.acct === '2150')?.net);
+  return { ap2100, grir2150 };
 }

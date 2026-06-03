@@ -153,9 +153,24 @@ export interface SmartStatementData {
     openingBalance: number;
     closingBalance: number;
     entries: SmartStatementEntry[];
+    /** Open-item AP (invoices − credit notes − unallocated prepayments) — SSOT subledger */
+    openItemBalance: number;
+    /** Net entity balance on AP 2100 as of periodEnd */
+    ap2100EntityBalance: number;
+    /** Net entity balance on GR/IR 2150 as of periodEnd (received-not-billed) */
+    grirBalance: number;
+    unallocatedPrepaymentsTotal: number;
+    unallocatedPrepayments: SupplierUnallocatedPrepayment[];
 }
 
 export interface CustomerUnallocatedReceipt {
+    paymentId: string;
+    paymentNumber: string;
+    paymentDate: string;
+    unallocatedAmount: number;
+}
+
+export interface SupplierUnallocatedPrepayment {
     paymentId: string;
     paymentNumber: string;
     paymentDate: string;
