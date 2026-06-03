@@ -4,7 +4,7 @@
 
 | Layer | Today (henber) | Target |
 |-------|----------------|--------|
-| AP | `supplier_payments` + `supplier_payment_allocations` | ✅ Reference model |
+| AP | `supplier_payments` + `supplier_payment_allocations` | ✅ Open-item SSOT — see [AP_OPEN_ITEM_ENGINE.md](./AP_OPEN_ITEM_ENGINE.md) |
 | AR | Per-invoice `invoice_payments` only; lump `customer_credit_transactions` | `ar_customer_payments` + `ar_payment_allocations` |
 | Balance SSOT | Open items − unallocated receipts | ✅ Enforced via `syncCustomerBalanceFromOpenItems` (Wave 3) |
 | GL | Per-invoice or lump customer payment | **One** receipt journal; allocations link only |
