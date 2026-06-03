@@ -1393,7 +1393,7 @@ function SupplierDetailModal({
           .join(','),
       ),
       '',
-      ['', 'Closing Balance', '', '', '', '', smartLedger.closingBalance, '', ''].map(escapeCell).join(','),
+      ['', 'Outstanding Amount', '', '', '', '', smartLedger.openItemBalance ?? smartLedger.closingBalance, '', ''].map(escapeCell).join(','),
     ];
     const csv = rows.join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -1725,9 +1725,6 @@ function SupplierDetailModal({
                       <div className="text-sm text-gray-600 mb-2">Outstanding Amount</div>
                       <div className="text-3xl font-bold text-red-600">
                         {formatCurrency(performance.outstandingAmount)}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-2">
-                        Open-item AP (invoices − credit notes − unallocated prepayments)
                       </div>
                     </div>
                   </div>
@@ -2515,61 +2512,13 @@ function SupplierDetailModal({
                       </div>
                     </div>
                     <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-center">
-                      <div className="text-xs text-blue-600 mb-1">Closing Balance (GL 2100 + 2150)</div>
-                      <div className={`text-sm font-bold ${smartLedger.closingBalance > 0 ? 'text-red-700' : smartLedger.closingBalance < 0 ? 'text-green-700' : 'text-gray-700'}`}>
-                        {formatCurrency(Math.abs(smartLedger.closingBalance))}
-                        {smartLedger.closingBalance < 0 && <span className="text-xs font-normal ml-1">Cr</span>}
+                      <div className="text-xs text-blue-600 mb-1">Outstanding Amount</div>
+                      <div className={`text-sm font-bold ${(smartLedger.openItemBalance ?? smartLedger.closingBalance) > 0 ? 'text-red-700' : (smartLedger.openItemBalance ?? smartLedger.closingBalance) < 0 ? 'text-green-700' : 'text-gray-700'}`}>
+                        {formatCurrency(Math.abs(smartLedger.openItemBalance ?? smartLedger.closingBalance))}
+                        {(smartLedger.openItemBalance ?? smartLedger.closingBalance) < 0 && <span className="text-xs font-normal ml-1">Cr</span>}
                       </div>
                     </div>
                   </div>
-
-                  {typeof smartLedger.openItemBalance === 'number'
-                    && Math.abs(smartLedger.closingBalance - smartLedger.openItemBalance) > 0.009 && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 mb-4 space-y-2">
-                      <p>
-                        <strong>Why this differs from Performance → Outstanding Amount</strong>{' '}
-                        ({formatCurrency(smartLedger.openItemBalance)} open-item AP):
-                      </p>
-                      <ul className="list-disc pl-5 space-y-1">
-                        {typeof smartLedger.grirBalance === 'number' && smartLedger.grirBalance > 0.009 && (
-                          <li>
-                            GR/IR received-not-billed (2150):{' '}
-                            <strong>{formatCurrency(smartLedger.grirBalance)}</strong> — goods received, invoice pending
-                          </li>
-                        )}
-                        {typeof smartLedger.ap2100EntityBalance === 'number' && (
-                          <li>
-                            Billed AP on GL (2100): {formatCurrency(smartLedger.ap2100EntityBalance)}
-                          </li>
-                        )}
-                        {(smartLedger.unallocatedPrepaymentsTotal ?? 0) > 0.009 && (
-                          <li>
-                            Unallocated prepayments reduce open-item only:{' '}
-                            {formatCurrency(smartLedger.unallocatedPrepaymentsTotal ?? 0)}
-                          </li>
-                        )}
-                      </ul>
-                      <p className="text-xs text-amber-800">
-                        Ledger closing = full supplier position (billed + received-not-billed). Open-item = open invoices
-                        − credit notes − unallocated prepayments (Performance tab).
-                      </p>
-                    </div>
-                  )}
-
-                  {(smartLedger.unallocatedPrepaymentsTotal ?? 0) > 0.009 && (
-                    <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 mb-4">
-                      <strong>Unallocated prepayments:</strong>{' '}
-                      {formatCurrency(smartLedger.unallocatedPrepaymentsTotal ?? 0)} on{' '}
-                      {smartLedger.unallocatedPrepayments?.length ?? 0} payment(s). Posted on GL; allocate in AP payments.
-                      <ul className="mt-2 list-disc pl-5">
-                        {(smartLedger.unallocatedPrepayments ?? []).map((p) => (
-                          <li key={p.paymentId}>
-                            {p.paymentNumber} ({p.paymentDate}): {formatCurrency(p.unallocatedAmount)}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
 
                   {/* ── Smart Statement Table ── */}
                   <div className="overflow-x-auto rounded-xl border border-gray-200 shadow-sm">
@@ -2697,9 +2646,9 @@ function SupplierDetailModal({
                           <tr className="bg-gray-100 border-t border-gray-200">
                             <td className="w-7 px-1"></td>
                             <td className="px-3 py-2.5 text-xs text-gray-500 whitespace-nowrap">{smartLedger.periodEnd}</td>
-                            <td colSpan={5} className="px-3 py-2.5 text-xs text-gray-600 italic font-medium">Closing Balance</td>
+                            <td colSpan={5} className="px-3 py-2.5 text-xs text-gray-600 italic font-medium">Outstanding Amount</td>
                             <td className="px-3 py-2.5 text-right text-xs font-bold text-gray-900 hidden md:table-cell whitespace-nowrap">
-                              {formatCurrency(smartLedger.closingBalance)}
+                              {formatCurrency(smartLedger.openItemBalance ?? smartLedger.closingBalance)}
                             </td>
                             <td></td>
                           </tr>

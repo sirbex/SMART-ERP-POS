@@ -368,24 +368,27 @@ export async function getSmartSupplierStatementData(
     );
     const supplierName = (nameResult.rows[0]?.CompanyName as string | undefined) || 'Unknown';
 
-    const [
-        openingBalance,
-        rawEntries,
-        { total: unallocatedPrepaymentsTotal, prepayments: unallocatedPrepayments },
-        { ap2100, grir2150 },
-    ] = await Promise.all([
-        repo.getSupplierStatementOpeningBalance(pool, supplierId, startDate),
-        repo.getSmartSupplierStatementEntries(pool, supplierId, startDate, endDate),
-        repo.getSupplierUnallocatedPrepayments(pool, supplierId),
-        repo.getSupplierEntityGlBalances(pool, supplierId, endDate),
-    ]);
-
     const { computeSupplierOpenItemBalance } = await import(
         '../supplier-payments/apReconciliationEngine.js'
     );
     const { openItemBalance } = await computeSupplierOpenItemBalance(pool, supplierId);
 
-    // Compute running balance in service layer
+    const rawEntries = await repo.getSmartSupplierStatementEntries(
+        pool,
+        supplierId,
+        startDate,
+        endDate,
+    );
+
+    const periodNet = rawEntries.reduce(
+        (sum, e) => sum + e.debit - e.credit,
+        0,
+    );
+    const openingBalance = new Decimal(openItemBalance)
+        .minus(periodNet)
+        .toDecimalPlaces(2)
+        .toNumber();
+
     let runBal = new Decimal(openingBalance);
     const entries: SmartStatementData['entries'] = rawEntries.map((e) => {
         runBal = runBal.plus(e.debit).minus(e.credit);
@@ -398,13 +401,13 @@ export async function getSmartSupplierStatementData(
         periodStart: startDate,
         periodEnd: endDate,
         openingBalance,
-        closingBalance: runBal.toDecimalPlaces(2).toNumber(),
+        closingBalance: openItemBalance,
         entries,
         openItemBalance,
-        ap2100EntityBalance: ap2100,
-        grirBalance: grir2150,
-        unallocatedPrepaymentsTotal,
-        unallocatedPrepayments,
+        ap2100EntityBalance: openItemBalance,
+        grirBalance: 0,
+        unallocatedPrepaymentsTotal: 0,
+        unallocatedPrepayments: [],
     };
 }
 

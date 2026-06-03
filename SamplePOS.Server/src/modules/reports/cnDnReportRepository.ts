@@ -763,8 +763,8 @@ export async function getSupplierAging(
 
 // ─── 10. Smart Supplier Statement (business-document view) ─────────────────
 /**
- * Groups GL entries by ledger_transaction and applies a HAVING clause to expose
- * ONLY rows with a non-zero net balance effect on accounts 2100 + 2150.
+ * Smart Supplier Statement — open-item AP scope (account 2100 only).
+ * GR/IR (2150) pending receipts belong on PO/GRN workflows, not AP outstanding.
  *
  * What shows (net ≠ 0):
  *   GOODS_RECEIPT          → net CR 2150 → liability increase (goods received)
@@ -802,7 +802,7 @@ export async function getSmartSupplierStatementEntries(
        LEFT JOIN supplier_payments sp
          ON lt."ReferenceType" = 'SUPPLIER_PAYMENT'
          AND sp."PaymentNumber" = lt."ReferenceNumber"
-       WHERE a."AccountCode" IN ('2100', '2150')
+       WHERE a."AccountCode" = '2100'
          AND le."EntityId" = $1
          AND UPPER(le."EntityType") = 'SUPPLIER'
          AND lt."Status" = 'POSTED'

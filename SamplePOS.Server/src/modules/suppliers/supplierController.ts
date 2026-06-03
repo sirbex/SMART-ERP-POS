@@ -327,6 +327,26 @@ export const getSmartSupplierStatement = asyncHandler(async (req: Request, res: 
   const pool = req.tenantPool || globalPool;
   const { id: supplierId } = UuidParamSchema.parse(req.params);
   const { startDate, endDate } = LedgerQuerySchema.parse(req.query);
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { repairSupplierInvoiceOutstandingFromLedger } = await import(
+      '../supplier-payments/supplierPaymentRepository.js'
+    );
+    const { syncSupplierBalanceFromOpenItems } = await import(
+      '../supplier-payments/apReconciliationEngine.js'
+    );
+    await repairSupplierInvoiceOutstandingFromLedger(client, supplierId);
+    await syncSupplierBalanceFromOpenItems(client, supplierId, 'SMART_STATEMENT_READ');
+    await client.query('COMMIT');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
+  }
+
   const data = await cnDnReportService.getSmartSupplierStatementData(pool, supplierId, startDate, endDate);
   res.json({ success: true, data });
 });
