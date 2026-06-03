@@ -17,6 +17,12 @@ name: Deploy to Production
 #          that has access to root@209.38.203.138
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Only one production deploy at a time (parallel runs caused Docker name conflicts
+# and mid-restart health-check failures when several commits landed in quick succession).
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 on:
   push:
     branches: [main, master]
@@ -124,7 +130,7 @@ jobs:
           echo "  The deploy-update.sh script exited non-zero."
           echo "  The script's built-in data integrity check may"
           echo "  have detected a problem. Check the output above."
-          echo "  Server state is unchanged if the script failed"
-          echo "  before any container was restarted."
+          echo "  Containers may have been restarted before health check failed."
+          echo "  Check overlapping deploy runs or re-run deploy after fix."
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           exit 1

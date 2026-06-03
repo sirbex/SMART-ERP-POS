@@ -13,9 +13,6 @@ import { demandForecastService } from './demandForecastService.js';
 import { demandForecastRepository } from './demandForecastRepository.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 
-// Debug: Log available controller methods
-console.log('🔍 reportsController methods:', Object.keys(reportsController));
-
 export function createReportsRouter(pool: Pool) {
   const router = Router();
 

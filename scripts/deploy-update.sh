@@ -149,7 +149,9 @@ docker compose -f docker-compose.deploy.yml build backend frontend
 
 # Restart only app containers (--no-deps = don't touch postgres/redis/nginx)
 echo ">>> Restarting backend + frontend..."
-docker compose -f docker-compose.deploy.yml up -d --no-deps backend frontend
+# Drop stale compose recreate containers (parallel deploys can leave hash-prefixed orphans)
+docker compose -f docker-compose.deploy.yml rm -sf backend frontend 2>/dev/null || true
+docker compose -f docker-compose.deploy.yml up -d --no-deps --remove-orphans backend frontend
 
 # Reload nginx so it picks up the new container IP (containers get new IPs on recreate)
 echo ">>> Reloading nginx to pick up new container IP..."
@@ -165,19 +167,24 @@ echo ">>> Container status:"
 docker ps --format 'table {{.Names}}\t{{.Status}}'
 
 echo ""
-echo ">>> Waiting 15s for backend to start..."
-sleep 15
-
-# Internal health check (avoids nginx cold-start race)
-echo ">>> Internal backend health check:"
+echo ">>> Waiting for backend to become healthy (up to 90s)..."
+BACKEND_HEALTH_OK=0
 if [ -z "$BACKEND_CONTAINER" ]; then
   echo ">>> Backend health: SKIPPED (no backend container found)"
-elif docker exec "$BACKEND_CONTAINER" wget -qO- http://localhost:3001/api/health > /dev/null 2>&1; then
-  echo ">>> Backend health: OK (internal)"
 else
-  echo ">>> Backend health: FAILED — checking logs..."
-  docker logs "$BACKEND_CONTAINER" --tail 30
-  exit 1
+  for attempt in $(seq 1 30); do
+    if docker exec "$BACKEND_CONTAINER" wget -qO- http://localhost:3001/api/health > /dev/null 2>&1; then
+      BACKEND_HEALTH_OK=1
+      echo ">>> Backend health: OK (internal, attempt $attempt)"
+      break
+    fi
+    sleep 3
+  done
+  if [ "$BACKEND_HEALTH_OK" -ne 1 ]; then
+    echo ">>> Backend health: FAILED after 90s — checking logs..."
+    docker logs "$BACKEND_CONTAINER" --tail 50
+    exit 1
+  fi
 fi
 
 # Public HTTPS health check
