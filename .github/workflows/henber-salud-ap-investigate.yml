@@ -1,0 +1,42 @@
+name: Henber Salud AP Investigate
+
+on:
+  workflow_dispatch:
+    inputs:
+      repair_cache:
+        description: 'Repair SALUD suppliers.OutstandingBalance cache'
+        type: boolean
+        default: true
+
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Investigate SALUD AP balances
+        run: |
+          scp -i ~/.ssh/prod_key -o ConnectTimeout=30 \
+            scripts/henber-salud-ap-investigate.mjs \
+            root@209.38.203.138:/tmp/henber-salud-ap-investigate.mjs
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<REMOTE
+          set -euo pipefail
+          docker cp /tmp/henber-salud-ap-investigate.mjs smarterp-backend:/tmp/henber-salud-ap-investigate.mjs
+          docker exec -u root smarterp-backend cp /tmp/henber-salud-ap-investigate.mjs /app/henber-salud-ap-investigate.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/henber-salud-ap-investigate.mjs
+          ARGS=""
+          if [ "${{ inputs.repair_cache }}" = "true" ]; then ARGS="--repair"; fi
+          docker exec -w /app smarterp-backend node henber-salud-ap-investigate.mjs \$ARGS
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key

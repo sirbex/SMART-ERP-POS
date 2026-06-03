@@ -150,15 +150,33 @@ export const getSupplierPerformance = asyncHandler(async (req: Request, res: Res
     [supplierId]
   );
 
-  // Get actual outstanding amount from supplier invoices (bills)
-  const invoiceResult = await pool.query(
-    `SELECT COALESCE(SUM("OutstandingBalance"), 0) as outstanding_amount
-    FROM supplier_invoices
-    WHERE "SupplierId" = $1 
-      AND deleted_at IS NULL
-      AND "Status" NOT IN ('Paid', 'PAID', 'Cancelled', 'CANCELLED')`,
-    [supplierId]
+  const { computeSupplierOpenItemBalance, syncSupplierBalanceFromOpenItems } =
+    await import('../supplier-payments/apReconciliationEngine.js');
+  const openItem = await computeSupplierOpenItemBalance(pool, supplierId);
+
+  const cacheRow = await pool.query(
+    `SELECT COALESCE("OutstandingBalance", 0) AS cached FROM suppliers WHERE "Id" = $1`,
+    [supplierId],
   );
+  const cachedBalance = parseFloat(cacheRow.rows[0]?.cached ?? '0');
+  if (Math.abs(cachedBalance - openItem.openItemBalance) > 0.01) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await syncSupplierBalanceFromOpenItems(client, supplierId, 'PERFORMANCE_READ_REPAIR');
+      await client.query('COMMIT');
+      logger.warn('Supplier cache repaired on performance read', {
+        supplierId,
+        was: cachedBalance,
+        now: openItem.openItemBalance,
+      });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  }
 
   // Get unique products supplied
   const productsResult = await pool.query(
@@ -179,15 +197,15 @@ export const getSupplierPerformance = asyncHandler(async (req: Request, res: Res
 
   // Use Decimal.js for bank-grade precision
   const totalValue = new Decimal(poResult.rows[0].total_value || 0);
-  const outstandingAmount = new Decimal(invoiceResult.rows[0]?.outstanding_amount || 0);
-
   const performance = {
     totalOrders: parseInt(poResult.rows[0].total_orders) || 0,
     draftOrders: parseInt(poResult.rows[0].draft_orders) || 0,
     pendingOrders: parseInt(poResult.rows[0].pending_orders) || 0,
     completedOrders: parseInt(poResult.rows[0].completed_orders) || 0,
     totalValue: totalValue.toNumber(),
-    outstandingAmount: outstandingAmount.toNumber(),
+    outstandingAmount: openItem.openItemBalance,
+    invoiceOpenAmount: openItem.invoiceOpen,
+    unallocatedPayments: openItem.unallocatedPayments,
     uniqueProducts: parseInt(productsResult.rows[0].unique_products) || 0,
     lastOrderDate: lastOrderResult.rows[0].last_order_date || null,
   };
@@ -195,7 +213,9 @@ export const getSupplierPerformance = asyncHandler(async (req: Request, res: Res
   logger.info('Supplier performance calculated', {
     supplierId,
     totalValue: totalValue.toString(),
-    outstandingAmount: outstandingAmount.toString(),
+    outstandingAmount: openItem.openItemBalance,
+    invoiceOpen: openItem.invoiceOpen,
+    unallocated: openItem.unallocatedPayments,
   });
   res.json({ success: true, data: performance });
 });

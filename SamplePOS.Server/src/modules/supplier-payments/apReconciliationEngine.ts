@@ -44,6 +44,44 @@ export interface ApIntegrityResult {
   snapshot: ApReconciliationSnapshot;
 }
 
+export interface SupplierOpenItemBalance {
+  invoiceOpen: number;
+  unallocatedPayments: number;
+  openItemBalance: number;
+}
+
+/**
+ * Correlated SQL for suppliers.* — open-item balance (invoices − unallocated).
+ * Must match syncSupplierBalanceFromOpenItems / getTotalOutstanding.
+ */
+export const SUPPLIER_OPEN_ITEM_BALANCE_SQL = `
+  GREATEST(
+    COALESCE((
+      SELECT SUM(
+        CASE
+          WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+            THEN -COALESCE(si."OutstandingBalance", 0)
+          ELSE COALESCE(si."OutstandingBalance", 0)
+        END
+      )
+      FROM supplier_invoices si
+      WHERE si."SupplierId" = suppliers."Id"
+        AND si.deleted_at IS NULL
+        AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+    ), 0)
+    - COALESCE((
+      SELECT COALESCE(SUM(
+        COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0))
+      ), 0)
+      FROM supplier_payments sp
+      WHERE sp."SupplierId" = suppliers."Id"
+        AND sp.deleted_at IS NULL
+        AND sp."Status" = 'COMPLETED'
+        AND COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0)) > 0.009
+    ), 0),
+    0
+  )`;
+
 function invoiceOpenBalanceSql(supplierIdParam?: string): string {
   const supplierFilter = supplierIdParam
     ? `AND si."SupplierId" = ${supplierIdParam}`
@@ -118,6 +156,18 @@ export async function computeLegacyGrInAp(conn: ApDbConn): Promise<number> {
       AND lt."IsReversed" = FALSE
   `);
   return Money.toNumber(Money.parseDb(res.rows[0]?.legacy_gr ?? 0));
+}
+
+/** Per-supplier open-item balance (SSOT for UI, performance API, cache sync). */
+export async function computeSupplierOpenItemBalance(
+  conn: ApDbConn,
+  supplierId: string,
+): Promise<SupplierOpenItemBalance> {
+  const invoiceOpen = await computeOpenInvoiceBalance(conn, supplierId);
+  const unallocatedPayments = await computeUnallocatedSupplierPayments(conn, supplierId);
+  const sub = new Decimal(invoiceOpen).minus(unallocatedPayments);
+  const openItemBalance = Money.toNumber(sub.lessThan(0) ? new Decimal(0) : sub);
+  return { invoiceOpen, unallocatedPayments, openItemBalance };
 }
 
 export async function computeOpenInvoiceBalance(

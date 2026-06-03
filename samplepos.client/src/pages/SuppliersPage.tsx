@@ -1716,7 +1716,9 @@ function SupplierDetailModal({
                       <div className="text-3xl font-bold text-red-600">
                         {formatCurrency(performance.outstandingAmount)}
                       </div>
-                      <div className="text-xs text-gray-500 mt-2">Money demanded by supplier</div>
+                      <div className="text-xs text-gray-500 mt-2">
+                        Open-item AP (invoices − credit notes − unallocated prepayments)
+                      </div>
                     </div>
                   </div>
 

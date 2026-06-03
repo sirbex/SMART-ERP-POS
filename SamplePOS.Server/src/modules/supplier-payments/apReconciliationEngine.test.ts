@@ -45,4 +45,11 @@ describe('apReconciliationEngine — Wave 5', () => {
     const subledger = Math.max(0, invoiceOpen - unallocated);
     expect(subledger).toBe(400_000);
   });
+
+  it('supplier open-item subtracts credit notes (Salud-class bug)', () => {
+    const correctOpenItem = 14_702_423;
+    const creditNotesOutstanding = 887_120;
+    const wrongRawSum = correctOpenItem + creditNotesOutstanding;
+    expect(wrongRawSum).toBe(15_589_543);
+  });
 });

@@ -3,7 +3,10 @@
 
 import { Pool, PoolClient } from 'pg';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
-import { syncSupplierBalanceFromOpenItems } from '../supplier-payments/apReconciliationEngine.js';
+import {
+  syncSupplierBalanceFromOpenItems,
+  SUPPLIER_OPEN_ITEM_BALANCE_SQL,
+} from '../supplier-payments/apReconciliationEngine.js';
 
 export interface Supplier {
   id: string;
@@ -92,20 +95,8 @@ export async function findAll(pool: Pool, limit: number, offset: number, search?
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      -- Live-derived outstanding balance from the invoice subledger.
-      -- Uses the same formula as recalculateOutstandingBalance() so the
-      -- displayed value is always in sync, even if the cached column is stale.
-      GREATEST(COALESCE((
-        SELECT SUM(
-          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-               THEN -COALESCE(si."OutstandingBalance", 0)
-               ELSE  COALESCE(si."OutstandingBalance", 0) END
-        )
-        FROM supplier_invoices si
-        WHERE si."SupplierId" = suppliers."Id"
-          AND si.deleted_at IS NULL
-          AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
-      ), 0), 0) as "outstandingBalance",
+      -- Open-item SSOT (invoices − unallocated payments); never use cached column in reads.
+      ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
@@ -127,17 +118,7 @@ export async function findById(pool: Pool, id: string): Promise<Supplier | null>
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      GREATEST(COALESCE((
-        SELECT SUM(
-          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-               THEN -COALESCE(si."OutstandingBalance", 0)
-               ELSE  COALESCE(si."OutstandingBalance", 0) END
-        )
-        FROM supplier_invoices si
-        WHERE si."SupplierId" = suppliers."Id"
-          AND si.deleted_at IS NULL
-          AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
-      ), 0), 0) as "outstandingBalance",
+      ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
@@ -156,17 +137,7 @@ export async function findBySupplierNumber(pool: Pool, supplierNumber: string): 
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      GREATEST(COALESCE((
-        SELECT SUM(
-          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-               THEN -COALESCE(si."OutstandingBalance", 0)
-               ELSE  COALESCE(si."OutstandingBalance", 0) END
-        )
-        FROM supplier_invoices si
-        WHERE si."SupplierId" = suppliers."Id"
-          AND si.deleted_at IS NULL
-          AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
-      ), 0), 0) as "outstandingBalance",
+      ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
@@ -185,17 +156,7 @@ export async function searchSuppliers(pool: Pool, searchTerm: string, limit: num
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      GREATEST(COALESCE((
-        SELECT SUM(
-          CASE WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-               THEN -COALESCE(si."OutstandingBalance", 0)
-               ELSE  COALESCE(si."OutstandingBalance", 0) END
-        )
-        FROM supplier_invoices si
-        WHERE si."SupplierId" = suppliers."Id"
-          AND si.deleted_at IS NULL
-          AND si."Status" NOT IN ('Paid','PAID','Cancelled','CANCELLED','DELETED')
-      ), 0), 0) as "outstandingBalance",
+      ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
