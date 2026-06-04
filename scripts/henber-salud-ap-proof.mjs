@@ -44,17 +44,25 @@ try {
     '/app/dist/SamplePOS.Server/src/modules/reports/cnDnReportService.js'
   );
 
-  const client = await pool.connect();
   let invRepair = { repaired: 0, scanned: 0 };
-  try {
-    await client.query('BEGIN');
-    invRepair = await repairSupplierInvoiceOutstandingFromLedger(client, supplierId);
-    const sync = await syncSupplierBalanceFromOpenItems(client, supplierId, 'SALUD_PROOF');
-    await client.query('COMMIT');
-    console.log('Repair:', invRepair, 'Cache sync:', sync);
-  } finally {
-    client.release();
+  if (process.argv.includes('--heal')) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      invRepair = await repairSupplierInvoiceOutstandingFromLedger(client, supplierId);
+      const sync = await syncSupplierBalanceFromOpenItems(client, supplierId, 'SALUD_PROOF');
+      await client.query('COMMIT');
+      console.log('Repair:', invRepair, 'Cache sync:', sync);
+    } finally {
+      client.release();
+    }
   }
+
+  const freshCache = await pool.query(
+    `SELECT COALESCE("OutstandingBalance", 0) AS cached FROM suppliers WHERE "Id" = $1`,
+    [supplierId],
+  );
+  const cached = Number(freshCache.rows[0]?.cached ?? row.cached);
 
   const openItem = await computeSupplierOpenItemBalance(pool, supplierId);
   const endDate = new Date().toISOString().slice(0, 10);
@@ -64,7 +72,6 @@ try {
   const perfOutstanding = openItem.openItemBalance;
   const ledgerOutstanding = stmt.closingBalance;
   const ledgerOpenItemField = stmt.openItemBalance;
-  const cached = Number(row.cached);
 
   console.log('\n=== SALUD AP PROOF ===');
   console.table({
