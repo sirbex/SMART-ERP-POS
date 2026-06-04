@@ -940,6 +940,13 @@ export async function recordReturnGrnToGL(
     //    DR Supplier Return Clearing (2160) / CR Inventory (1300)  ← clean path
     //    A subsequent Supplier Credit Note will: DR AP (2100) / CR 2160.
     // ─────────────────────────────────────────────────────────────────────────
+    if (data.hasInvoice && txClient) {
+      const { ensureSupplierReturnClearingAccount } = await import(
+        '../modules/return-grn/ensureSupplierReturnClearingAccount.js'
+      );
+      await ensureSupplierReturnClearingAccount(txClient);
+    }
+
     const clearingAccountCode = data.hasInvoice
       ? AccountCodes.SUPPLIER_RETURN_CLEARING
       : AccountCodes.GRIR_CLEARING;
@@ -987,8 +994,15 @@ export async function recordReturnGrnToGL(
     });
   } catch (error: unknown) {
     if (error instanceof BusinessRuleException) throw error;
+    const msg = error instanceof Error ? error.message : String(error);
     logger.error('Failed to record return GRN to GL', { error, data });
-    throw new Error(`GL posting failed for return GRN ${data.returnGrnNumber}: ${error instanceof Error ? error.message : String(error)}`);
+    if (msg.includes('2160') && msg.includes('not found')) {
+      throw new BusinessRuleException(
+        'GL account 2160 (Supplier Return Clearing) is missing. Deploy latest migrations or ask an admin to add account 2160, then re-post the return.',
+        'ACCOUNT_2160_MISSING',
+      );
+    }
+    throw new Error(`GL posting failed for return GRN ${data.returnGrnNumber}: ${msg}`);
   }
 }
 
