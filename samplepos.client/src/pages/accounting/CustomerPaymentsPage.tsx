@@ -514,7 +514,7 @@ const CustomerPaymentsPage: React.FC = () => {
                   }}
                 />
                 {canCreate && (
-                  <Button type="button" variant="link" className="text-sm p-0 h-auto" onClick={() => setShowObPanel(false)}>
+                  <Button variant="ghost" className="text-sm p-0 h-auto" onClick={() => setShowObPanel(false)}>
                     ← Record a customer payment instead
                   </Button>
                 )}
@@ -551,7 +551,6 @@ const CustomerPaymentsPage: React.FC = () => {
                   </span>
                   {customerArBalance > 0 && (
                     <Button
-                      type="button"
                       variant="outline"
                       size="sm"
                       className="h-8"
@@ -631,7 +630,7 @@ const CustomerPaymentsPage: React.FC = () => {
                     <Input
                       type="number"
                       className="w-28"
-                      value={row.allocationAmount || ''}
+                      value={row.allocationAmount ? String(row.allocationAmount) : ''}
                       onChange={(e) =>
                         updateCreateAllocation(
                           row.invoiceId,
@@ -660,8 +659,7 @@ const CustomerPaymentsPage: React.FC = () => {
             </div>
             {canManageOpeningBalance && (
               <Button
-                type="button"
-                variant="link"
+                variant="ghost"
                 className="text-sm p-0 h-auto justify-start text-indigo-700"
                 onClick={() => setShowObPanel(true)}
               >
@@ -731,7 +729,7 @@ const CustomerPaymentsPage: React.FC = () => {
                     <Input
                       type="number"
                       className="w-32"
-                      value={row.allocationAmount || ''}
+                      value={row.allocationAmount ? String(row.allocationAmount) : ''}
                       onChange={(e) =>
                         updateAllocation(row.invoiceId, parseFloat(e.target.value) || 0, row.amountDue)
                       }

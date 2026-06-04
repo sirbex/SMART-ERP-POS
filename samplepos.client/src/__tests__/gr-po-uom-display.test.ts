@@ -10,7 +10,8 @@ function grLineDisplay(
   ordered: number,
   received: number,
   unitCost: number,
-  _conversionFactor: number,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- documents PO UoM factor in tests
+  _conversionFactor?: number,
 ) {
   return {
     displayedOrdered: ordered,

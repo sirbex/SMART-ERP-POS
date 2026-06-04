@@ -1,12 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import Decimal from 'decimal.js';
-import type { AxiosError } from 'axios';
-import { toast } from 'sonner';
 import Layout from '../components/Layout';
 import IdDisplay from '../components/IdDisplay';
 import { useCustomers, useCustomerStatement } from '../hooks/useApi';
-import { api } from '../utils/api';
 import { formatCurrency } from '../utils/currency';
 import { downloadFile } from '../utils/download';
 import { DatePicker } from '../components/ui/date-picker';

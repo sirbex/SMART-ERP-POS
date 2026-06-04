@@ -1585,8 +1585,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                 />
                                 {canCreatePayment && (
                                     <Button
-                                        type="button"
-                                        variant="link"
+                                        variant="ghost"
                                         className="text-sm p-0 h-auto justify-start"
                                         onClick={() => setShowObPanel(false)}
                                     >
@@ -1652,7 +1651,6 @@ const SupplierPaymentsPage: React.FC = () => {
                                         </div>
                                         {selectedSupplierOutstanding.totalOutstanding > 0 && (
                                             <Button
-                                                type="button"
                                                 variant="outline"
                                                 size="sm"
                                                 className="h-8 border-amber-300 text-amber-800 hover:bg-amber-100"
@@ -1751,7 +1749,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                                 }))
                                             }
                                         >
-                                            <SelectTrigger id="payment-method">
+                                            <SelectTrigger>
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
@@ -1815,7 +1813,6 @@ const SupplierPaymentsPage: React.FC = () => {
                             <div className="w-full sm:w-auto">
                                 {canManageOpeningBalance && (
                                     <Button
-                                        type="button"
                                         variant="ghost"
                                         className="w-full sm:w-auto text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50"
                                         onClick={() => setShowObPanel(true)}

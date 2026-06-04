@@ -19,7 +19,7 @@ describe('posCartLine', () => {
       quantity: 2,
       unitPrice: 1000,
       costPrice: 800,
-      discount: { type: 'FIXED', value: 200, amount: 200, reason: 'test' },
+      discount: { type: 'FIXED_AMOUNT', value: 200, amount: 200, reason: 'test' },
     });
     expect(r.subtotal).toBe(1800);
     expect(r.unitPrice).toBe(1000);
@@ -30,7 +30,7 @@ describe('posCartLine', () => {
       quantity: 1,
       unitPrice: 100,
       costPrice: 50,
-      discount: { type: 'FIXED', value: 500, amount: 500, reason: 'test' },
+      discount: { type: 'FIXED_AMOUNT', value: 500, amount: 500, reason: 'test' },
     });
     expect(r.subtotal).toBe(0);
     expect(r.discount?.amount).toBe(100);

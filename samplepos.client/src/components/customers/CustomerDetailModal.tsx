@@ -199,7 +199,7 @@ export default function CustomerDetailModal({
     const [stmtStart, setStmtStart] = useState<string>('');
     const [stmtEnd, setStmtEnd] = useState<string>('');
     const [stmtPage, setStmtPage] = useState<number>(1);
-    const [stmtView, setStmtView] = useState<'smart' | 'legacy'>('smart');
+    const [stmtView] = useState<'smart' | 'legacy'>('smart');
     const stmtLimit = 100;
 
     // Data hooks

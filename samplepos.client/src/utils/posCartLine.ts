@@ -1,11 +1,12 @@
 /** POS cart line: unit price edits, subtotals, and catalog-cost validation hints. */
 
 import Decimal from 'decimal.js';
+import type { DiscountType } from '@shared/zod/discount';
 
 const TOLERANCE = new Decimal('0.01');
 
 export interface PosCartLineDiscount {
-  type: string;
+  type: DiscountType;
   value: number;
   amount: number;
   reason: string;

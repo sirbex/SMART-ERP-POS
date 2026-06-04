@@ -61,6 +61,8 @@ interface SaleItemRow {
   subtotal?: number | string;
   totalPrice?: number | string;
   total_price?: number | string;
+  lineTotal?: number | string;
+  line_total?: number | string;
   discountAmount?: number | string;
   discount_amount?: number | string;
   taxAmount?: number | string;

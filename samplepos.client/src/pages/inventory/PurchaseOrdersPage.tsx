@@ -851,7 +851,7 @@ interface EditPOModalProps {
 }
 
 function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
-  const [supplierId, setSupplierId] = useState(po.supplierId || po.supplier_id || '');
+  const [supplierId, setSupplierId] = useState(po.supplierId || '');
 
   // ── Transaction Guard ──────────────────────────────────────────────────
   const { openGuard: openEditGuard, closeGuard: closeEditGuard } = useTransactionGuard();

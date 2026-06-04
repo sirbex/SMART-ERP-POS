@@ -6,7 +6,7 @@
 
 import Decimal from 'decimal.js';
 import { getPosLineConversionFactor } from './posCartUom';
-import { recalcPosCartLineFields } from './posCartLine';
+import { recalcPosCartLineFields, type PosCartLineDiscount } from './posCartLine';
 
 export interface AtCostLayerSegment {
   baseQuantity: number;
@@ -36,12 +36,7 @@ export interface PosAtCostLineTemplate {
   }>;
   selectedUomId?: string;
   baseCost?: number;
-  discount?: {
-    type: string;
-    value: number;
-    amount: number;
-    reason: string;
-  };
+  discount?: PosCartLineDiscount;
   pricingRule?: {
     scope: string;
     ruleName: string | null;

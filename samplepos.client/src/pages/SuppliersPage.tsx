@@ -15,10 +15,6 @@ import { handleApiError } from '../utils/errorHandler';
 import { downloadFile } from '../utils/download';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
 import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline';
-import { DatePicker } from '../components/ui/date-picker';
-import { toast } from 'sonner';
-import type { AxiosError } from 'axios';
-
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
 // Frontend displays as-is without parsing to Date object
@@ -1023,7 +1019,6 @@ function SupplierDetailModal({
   onClose,
   onEdit,
   canPostOpeningBalance = false,
-  onOpeningBalancePosted,
 }: SupplierDetailModalProps) {
   const [activeTab, setActiveTab] = useState<
     'info' | 'performance' | 'orders' | 'products' | 'invoices' | 'ledger'

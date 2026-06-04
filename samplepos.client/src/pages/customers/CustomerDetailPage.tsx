@@ -25,8 +25,6 @@ import {
 import { AdjustCustomerInvoiceModal } from '../../components/shared/AdjustCustomerInvoiceModal';
 import { useHasAnyPermission } from '../../hooks/useRbac';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
-import { toast } from 'react-hot-toast';
-
 // ── Local interfaces for Customer Detail page ──────────────────
 
 /** Raw invoice row from API (supports camelCase, snake_case, PascalCase keys) */
