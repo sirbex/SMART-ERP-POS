@@ -21,6 +21,9 @@ function baseMetrics(overrides: Partial<ApReconciliationMetrics> = {}): ApReconc
     storedBalanceDrift: 0,
     supplierEntityGlDrift: 0,
     integrityGlDrift: -30_920,
+    expenseOnAp: 0,
+    unallocatedPayments: 0,
+    unpostedOpenInvoiceBalance: 0,
     ...overrides,
   };
 }

@@ -3,13 +3,18 @@
  */
 import type { Pool, PoolClient } from 'pg';
 import { Money } from '../../utils/money.js';
+import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 import {
   apMaterialityThreshold,
   computeApGlSupplierScope,
+  computeApGlTotal2100,
   computeApSubledgerBalance,
   computeExpenseOnAp,
   computeSuppliersMasterCacheExpectedSum,
+  computeUnallocatedSupplierPayments,
+  computeUnpostedOpenInvoiceBalance,
   isApDriftExplainedByExpenses,
+  type ApQueryContext,
 } from './apReconciliationEngine.js';
 
 export interface ApReconciliationMetrics {
@@ -32,6 +37,8 @@ export interface ApReconciliationMetrics {
   integrityGlDrift: number;
   /** Standalone expenses on 2100 (not supplier subledger) */
   expenseOnAp: number;
+  unallocatedPayments: number;
+  unpostedOpenInvoiceBalance: number;
 }
 
 export interface ApReconciliationVerification {
@@ -47,27 +54,20 @@ export async function captureApReconciliationMetrics(
   asOfDate?: string,
 ): Promise<ApReconciliationMetrics> {
   const date = asOfDate ?? new Date().toISOString().slice(0, 10);
+  const ctx: ApQueryContext = { asOfDate: date };
 
   const res = await conn.query(
     `
-    WITH gl_total AS (
-      SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS balance
-      FROM ledger_entries le
-      JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-      JOIN accounts a ON le."AccountId" = a."Id"
-      WHERE a."AccountCode" = '2100'
-        AND lt."TransactionDate"::DATE <= $1::date
-        AND lt."Status" = 'POSTED'
-    ),
-    gl_supplier_entity AS (
+    WITH gl_supplier_entity AS (
       SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS balance
       FROM ledger_entries le
       JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
       JOIN accounts a ON le."AccountId" = a."Id"
       WHERE a."AccountCode" = '2100'
         AND UPPER(le."EntityType") = 'SUPPLIER'
+        AND lt."ReferenceType" NOT IN ('EXPENSE', 'EXPENSE_PAYMENT')
+        AND ${LEDGER_NET_ACTIVE_SQL}
         AND lt."TransactionDate"::DATE <= $1::date
-        AND lt."Status" = 'POSTED'
     ),
     supplier_table AS (
       SELECT COALESCE(SUM("OutstandingBalance"), 0) AS balance FROM suppliers
@@ -77,28 +77,36 @@ export async function captureApReconciliationMetrics(
       FROM accounts WHERE "AccountCode" = '2100'
     )
     SELECT
-      gt.balance AS gl_total,
       gse.balance AS gl_supplier_entity,
       st.balance AS supplier_table_sum,
       sb.balance AS stored_balance
-    FROM gl_total gt, gl_supplier_entity gse, supplier_table st, stored_balance sb
+    FROM gl_supplier_entity gse, supplier_table st, stored_balance sb
     `,
     [date],
   );
 
   const row = res.rows[0] ?? {};
-  const glTotal2100 = Money.toNumber(Money.parseDb(row.gl_total ?? 0));
   const glSupplierEntity2100 = Money.toNumber(Money.parseDb(row.gl_supplier_entity ?? 0));
   const suppliersTableSum = Money.toNumber(Money.parseDb(row.supplier_table_sum ?? 0));
   const storedBalance2100 = Money.toNumber(Money.parseDb(row.stored_balance ?? 0));
 
-  const [glSupplierScopeNetActive, openItemSubledger, suppliersCacheExpectedSum, expenseOnAp] =
-    await Promise.all([
-      computeApGlSupplierScope(conn),
-      computeApSubledgerBalance(conn),
-      computeSuppliersMasterCacheExpectedSum(conn),
-      computeExpenseOnAp(conn),
-    ]);
+  const [
+    glTotal2100,
+    glSupplierScopeNetActive,
+    openItemSubledger,
+    suppliersCacheExpectedSum,
+    expenseOnAp,
+    unallocatedPayments,
+    unpostedOpenInvoiceBalance,
+  ] = await Promise.all([
+    computeApGlTotal2100(conn, ctx),
+    computeApGlSupplierScope(conn, ctx),
+    computeApSubledgerBalance(conn, undefined, ctx),
+    computeSuppliersMasterCacheExpectedSum(conn, ctx),
+    computeExpenseOnAp(conn, ctx),
+    computeUnallocatedSupplierPayments(conn, undefined, ctx),
+    computeUnpostedOpenInvoiceBalance(conn),
+  ]);
 
   return {
     asOfDate: date,
@@ -114,6 +122,8 @@ export async function captureApReconciliationMetrics(
     supplierEntityGlDrift: glSupplierEntity2100 - openItemSubledger,
     integrityGlDrift: glSupplierScopeNetActive - openItemSubledger,
     expenseOnAp,
+    unallocatedPayments,
+    unpostedOpenInvoiceBalance,
   };
 }
 
@@ -189,5 +199,7 @@ export function formatApMetricsReport(metrics: ApReconciliationMetrics): string 
     `  Drift cache vs open-item:      ${metrics.supplierCacheDrift.toFixed(2)}`,
     `  Drift entity-GL vs open-item:  ${metrics.supplierEntityGlDrift.toFixed(2)}`,
     `  Drift integrity-GL vs open-item:${metrics.integrityGlDrift.toFixed(2)}`,
+    `  Unallocated payments:          ${metrics.unallocatedPayments.toFixed(2)}`,
+    `  Unposted pipeline:             ${metrics.unpostedOpenInvoiceBalance.toFixed(2)}`,
   ].join('\n');
 }

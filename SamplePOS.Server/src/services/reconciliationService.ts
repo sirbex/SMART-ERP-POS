@@ -338,7 +338,8 @@ export class ReconciliationService {
             const items: ReconciliationItem[] = [
                 {
                     source: 'GL_AP_BALANCE',
-                    description: 'Accounts Payable (2100) total balance from General Ledger',
+                    description:
+                        `Accounts Payable (2100) net-active GL balance as of ${date}`,
                     amount: glBalance,
                     difference: 0,
                     status: 'BASE' as ReconciliationItem['status'],
@@ -347,8 +348,26 @@ export class ReconciliationService {
                 {
                     source: 'NON_SUPPLIER_AP',
                     description:
-                        'Non-supplier AP entries in account 2100 (expense accruals: airtime, allowances, fuel, etc.)',
+                        'Non-supplier AP on 2100 (expense accruals — excluded from supplier subledger)',
                     amount: expenseAccruals,
+                    difference: 0,
+                    status: 'INFO' as ReconciliationItem['status'],
+                    details: null,
+                },
+                {
+                    source: 'UNALLOCATED_PREPAYMENTS',
+                    description:
+                        'Completed supplier payments not yet allocated to invoices (reduces open-item subledger)',
+                    amount: m.unallocatedPayments,
+                    difference: 0,
+                    status: 'INFO' as ReconciliationItem['status'],
+                    details: null,
+                },
+                {
+                    source: 'UNPOSTED_PIPELINE',
+                    description:
+                        'Open supplier invoices not yet posted to GL (excluded from subledger; post bills to clear)',
+                    amount: m.unpostedOpenInvoiceBalance,
                     difference: 0,
                     status: 'INFO' as ReconciliationItem['status'],
                     details: null,
@@ -356,7 +375,8 @@ export class ReconciliationService {
                 {
                     source: 'OPEN_ITEM_SUBLEDGER',
                     description:
-                        'Open-item AP subledger (open supplier invoices − unallocated payments) — Wave 5 SSOT',
+                        'Open-item AP subledger (ledger-derived posted invoices − unallocated payments) as of '
+                        + date,
                     amount: openItemSubledger,
                     difference: 0,
                     status: 'BASE' as ReconciliationItem['status'],
@@ -365,7 +385,9 @@ export class ReconciliationService {
                 {
                     source: 'SUPPLIER_AP_GL',
                     description:
-                        'Supplier AP GL (net-active supplier scope on 2100) vs open-item subledger',
+                        'Supplier AP GL (net-active supplier scope on 2100, as of '
+                        + date
+                        + ') vs open-item subledger',
                     amount: supplierScopeGl,
                     difference: m.integrityGlDrift,
                     status: supplierGlIntegrityOk
@@ -374,6 +396,8 @@ export class ReconciliationService {
                     details: {
                         entityTypeSupplierGl: supplierEntityGl,
                         entityTypeDrift: m.supplierEntityGlDrift,
+                        unallocatedPayments: m.unallocatedPayments,
+                        unpostedOpenInvoiceBalance: m.unpostedOpenInvoiceBalance,
                     },
                 },
                 {

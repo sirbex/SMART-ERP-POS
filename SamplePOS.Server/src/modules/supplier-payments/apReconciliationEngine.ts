@@ -18,6 +18,27 @@ import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 
 export type ApDbConn = Pool | PoolClient;
 
+/** Optional as-of date for point-in-time GL / subledger (YYYY-MM-DD). */
+export type ApQueryContext = { asOfDate?: string };
+
+function asOfDateParam(ctx?: ApQueryContext): string[] {
+  return ctx?.asOfDate ? [ctx.asOfDate] : [];
+}
+
+function glAsOfFilter(ctx?: ApQueryContext, ltAlias = 'lt'): string {
+  return ctx?.asOfDate
+    ? `AND ${ltAlias}."TransactionDate"::DATE <= $1::date`
+    : '';
+}
+
+function invoiceAsOfFilter(ctx?: ApQueryContext): string {
+  return ctx?.asOfDate ? `AND si."InvoiceDate"::DATE <= $1::date` : '';
+}
+
+function paymentAsOfFilter(ctx?: ApQueryContext): string {
+  return ctx?.asOfDate ? `AND sp."PaymentDate"::DATE <= $1::date` : '';
+}
+
 /** Invoice rows excluded from open-item subledger. */
 export const AP_INACTIVE_INVOICE_STATUSES = [
   'PAID',
@@ -91,24 +112,75 @@ export const SUPPLIER_OPEN_ITEM_BALANCE_SQL = `
     0
   )`;
 
-function invoiceOpenBalanceSql(supplierIdParam?: string): string {
+function ledgerDerivedOpenInvoiceSql(
+  supplierIdParam?: string,
+  ctx?: ApQueryContext,
+): string {
   const supplierFilter = supplierIdParam
     ? `AND si."SupplierId" = ${supplierIdParam}`
     : '';
+  const invDateFilter = invoiceAsOfFilter(ctx);
+  const payDateFilter = ctx?.asOfDate
+    ? `AND sp."PaymentDate"::DATE <= $1::date`
+    : '';
   return `
+    WITH inv_paid AS (
+      SELECT spa."SupplierInvoiceId" AS invoice_id,
+        COALESCE(SUM(spa."AmountAllocated"), 0) AS paid_amount
+      FROM supplier_payment_allocations spa
+      JOIN supplier_payments sp ON sp."Id" = spa."PaymentId"
+      WHERE spa.deleted_at IS NULL
+        AND sp.deleted_at IS NULL
+        AND sp."Status" != 'DELETED'
+        ${payDateFilter}
+      GROUP BY spa."SupplierInvoiceId"
+    ),
+    inv_credits AS (
+      SELECT scn.reference_invoice_id AS invoice_id,
+        COALESCE(SUM(CASE WHEN scn.return_grn_id IS NOT NULL THEN scn."TotalAmount" ELSE 0 END), 0) AS return_credits,
+        COALESCE(SUM(CASE WHEN scn.return_grn_id IS NULL THEN scn."TotalAmount" ELSE 0 END), 0) AS credit_notes
+      FROM supplier_invoices scn
+      WHERE scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+        AND scn.deleted_at IS NULL
+        AND UPPER(scn."Status") IN ('POSTED', 'APPLIED')
+        AND scn.reference_invoice_id IS NOT NULL
+        ${ctx?.asOfDate ? `AND scn."InvoiceDate"::DATE <= $1::date` : ''}
+      GROUP BY scn.reference_invoice_id
+    ),
+    open_rows AS (
+      SELECT si.document_type,
+        CASE
+          WHEN si.document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE') THEN
+            GREATEST(0, si."TotalAmount" - COALESCE(si."AmountPaid", 0))
+          ELSE GREATEST(0,
+            si."TotalAmount"
+            - COALESCE(ip.paid_amount, 0)
+            - COALESCE(ic.return_credits, 0)
+            - COALESCE(ic.credit_notes, 0)
+          )
+        END AS ledger_open
+      FROM supplier_invoices si
+      LEFT JOIN inv_paid ip ON ip.invoice_id = si."Id"
+      LEFT JOIN inv_credits ic ON ic.invoice_id = si."Id"
+      WHERE si.deleted_at IS NULL
+        AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+        ${AP_OPEN_INVOICE_GL_POSTED_SQL}
+        ${invDateFilter}
+        ${supplierFilter}
+    )
     SELECT COALESCE(SUM(
       CASE
-        WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-          THEN -COALESCE(si."OutstandingBalance", 0)
-        ELSE COALESCE(si."OutstandingBalance", 0)
+        WHEN document_type = 'SUPPLIER_CREDIT_NOTE' THEN -ledger_open
+        ELSE ledger_open
       END
     ), 0) AS invoice_open
-    FROM supplier_invoices si
-    WHERE si.deleted_at IS NULL
-      AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
-      ${AP_OPEN_INVOICE_GL_POSTED_SQL}
-      ${supplierFilter}
+    FROM open_rows
+    WHERE ledger_open > 0.009
   `;
+}
+
+function invoiceOpenBalanceSql(supplierIdParam?: string, ctx?: ApQueryContext): string {
+  return ledgerDerivedOpenInvoiceSql(supplierIdParam, ctx);
 }
 
 /** Open supplier invoices not yet credited to AP 2100 (3-way match / billing pipeline). */
@@ -138,7 +210,7 @@ export async function computeUnpostedOpenInvoiceBalance(
   return Money.toNumber(Money.parseDb(res.rows[0]?.unposted_open ?? 0));
 }
 
-function unallocatedPaymentsSql(supplierIdParam?: string): string {
+function unallocatedPaymentsSql(supplierIdParam?: string, ctx?: ApQueryContext): string {
   const supplierFilter = supplierIdParam
     ? `AND sp."SupplierId" = ${supplierIdParam}`
     : '';
@@ -150,13 +222,19 @@ function unallocatedPaymentsSql(supplierIdParam?: string): string {
     WHERE sp.deleted_at IS NULL
       AND sp."Status" = 'COMPLETED'
       AND COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0)) > 0.009
+      ${paymentAsOfFilter(ctx)}
       ${supplierFilter}
   `;
 }
 
 /** Net-active GL 2100 for supplier procure-to-pay (excludes standalone expenses). */
-export async function computeApGlSupplierScope(conn: ApDbConn): Promise<number> {
-  const res = await conn.query(`
+export async function computeApGlSupplierScope(
+  conn: ApDbConn,
+  ctx?: ApQueryContext,
+): Promise<number> {
+  const params = asOfDateParam(ctx);
+  const res = await conn.query(
+    `
     SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS gl_balance
     FROM ledger_entries le
     JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
@@ -164,12 +242,40 @@ export async function computeApGlSupplierScope(conn: ApDbConn): Promise<number> 
     WHERE a."AccountCode" = '2100'
       AND lt."ReferenceType" NOT IN ('EXPENSE', 'EXPENSE_PAYMENT')
       AND ${LEDGER_NET_ACTIVE_SQL}
-  `);
+      ${glAsOfFilter(ctx)}
+    `,
+    params,
+  );
   return Money.toNumber(Money.parseDb(res.rows[0]?.gl_balance ?? 0));
 }
 
-export async function computeExpenseOnAp(conn: ApDbConn): Promise<number> {
-  const res = await conn.query(`
+export async function computeApGlTotal2100(
+  conn: ApDbConn,
+  ctx?: ApQueryContext,
+): Promise<number> {
+  const params = asOfDateParam(ctx);
+  const res = await conn.query(
+    `
+    SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS gl_balance
+    FROM ledger_entries le
+    JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+    JOIN accounts a ON le."AccountId" = a."Id"
+    WHERE a."AccountCode" = '2100'
+      AND ${LEDGER_NET_ACTIVE_SQL}
+      ${glAsOfFilter(ctx)}
+    `,
+    params,
+  );
+  return Money.toNumber(Money.parseDb(res.rows[0]?.gl_balance ?? 0));
+}
+
+export async function computeExpenseOnAp(
+  conn: ApDbConn,
+  ctx?: ApQueryContext,
+): Promise<number> {
+  const params = asOfDateParam(ctx);
+  const res = await conn.query(
+    `
     SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS expense_on_ap
     FROM ledger_entries le
     JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
@@ -177,7 +283,10 @@ export async function computeExpenseOnAp(conn: ApDbConn): Promise<number> {
     WHERE a."AccountCode" = '2100'
       AND lt."ReferenceType" IN ('EXPENSE', 'EXPENSE_PAYMENT')
       AND ${LEDGER_NET_ACTIVE_SQL}
-  `);
+      ${glAsOfFilter(ctx)}
+    `,
+    params,
+  );
   return Money.toNumber(Money.parseDb(res.rows[0]?.expense_on_ap ?? 0));
 }
 
@@ -210,11 +319,16 @@ export async function computeSupplierOpenItemBalance(
 export async function computeOpenInvoiceBalance(
   conn: ApDbConn,
   supplierId?: string,
+  ctx?: ApQueryContext,
 ): Promise<number> {
-  const params = supplierId ? [supplierId] : [];
-  const supplierParam = supplierId ? '$1' : undefined;
+  const params = supplierId
+    ? [...asOfDateParam(ctx), supplierId]
+    : asOfDateParam(ctx);
+  const supplierParam = supplierId
+    ? ctx?.asOfDate ? '$2' : '$1'
+    : undefined;
   const res = await conn.query(
-    invoiceOpenBalanceSql(supplierParam),
+    invoiceOpenBalanceSql(supplierParam, ctx),
     params,
   );
   return Money.toNumber(Money.parseDb(res.rows[0]?.invoice_open ?? 0));
@@ -223,11 +337,16 @@ export async function computeOpenInvoiceBalance(
 export async function computeUnallocatedSupplierPayments(
   conn: ApDbConn,
   supplierId?: string,
+  ctx?: ApQueryContext,
 ): Promise<number> {
-  const params = supplierId ? [supplierId] : [];
-  const supplierParam = supplierId ? '$1' : undefined;
+  const params = supplierId
+    ? [...asOfDateParam(ctx), supplierId]
+    : asOfDateParam(ctx);
+  const supplierParam = supplierId
+    ? ctx?.asOfDate ? '$2' : '$1'
+    : undefined;
   const res = await conn.query(
-    unallocatedPaymentsSql(supplierParam),
+    unallocatedPaymentsSql(supplierParam, ctx),
     params,
   );
   return Money.toNumber(Money.parseDb(res.rows[0]?.unallocated ?? 0));
@@ -240,35 +359,95 @@ export async function computeUnallocatedSupplierPayments(
 export async function computeApSubledgerBalance(
   conn: ApDbConn,
   supplierId?: string,
+  ctx?: ApQueryContext,
 ): Promise<number> {
-  const invoiceOpen = await computeOpenInvoiceBalance(conn, supplierId);
-  const unallocated = await computeUnallocatedSupplierPayments(conn, supplierId);
+  const invoiceOpen = await computeOpenInvoiceBalance(conn, supplierId, ctx);
+  const unallocated = await computeUnallocatedSupplierPayments(conn, supplierId, ctx);
   const sub = new Decimal(invoiceOpen).minus(unallocated);
   return Money.toNumber(sub.lessThan(0) ? new Decimal(0) : sub);
+}
+
+/** Scalar subquery: ledger-derived open invoice balance for one supplier. */
+function correlatedLedgerInvoiceOpenSql(supplierIdColumn: string, ctx?: ApQueryContext): string {
+  const payDate = ctx?.asOfDate ? `AND sp."PaymentDate"::DATE <= $1::date` : '';
+  const invDate = invoiceAsOfFilter(ctx);
+  const scnDate = ctx?.asOfDate ? `AND scn."InvoiceDate"::DATE <= $1::date` : '';
+  return `
+    SELECT COALESCE(SUM(
+      CASE
+        WHEN document_type = 'SUPPLIER_CREDIT_NOTE' THEN -ledger_open
+        ELSE ledger_open
+      END
+    ), 0)
+    FROM (
+      SELECT si.document_type,
+        CASE
+          WHEN si.document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE') THEN
+            GREATEST(0, si."TotalAmount" - COALESCE(si."AmountPaid", 0))
+          ELSE GREATEST(0,
+            si."TotalAmount"
+            - COALESCE((
+                SELECT COALESCE(SUM(spa."AmountAllocated"), 0)
+                FROM supplier_payment_allocations spa
+                JOIN supplier_payments sp ON sp."Id" = spa."PaymentId"
+                WHERE spa."SupplierInvoiceId" = si."Id"
+                  AND spa.deleted_at IS NULL
+                  AND sp.deleted_at IS NULL
+                  AND sp."Status" != 'DELETED'
+                  ${payDate}
+              ), 0)
+            - COALESCE((
+                SELECT COALESCE(SUM(
+                  CASE WHEN scn.return_grn_id IS NOT NULL THEN scn."TotalAmount" ELSE 0 END
+                ), 0)
+                FROM supplier_invoices scn
+                WHERE scn.reference_invoice_id = si."Id"
+                  AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+                  AND scn.deleted_at IS NULL
+                  AND UPPER(scn."Status") IN ('POSTED', 'APPLIED')
+                  ${scnDate}
+              ), 0)
+            - COALESCE((
+                SELECT COALESCE(SUM(
+                  CASE WHEN scn.return_grn_id IS NULL THEN scn."TotalAmount" ELSE 0 END
+                ), 0)
+                FROM supplier_invoices scn
+                WHERE scn.reference_invoice_id = si."Id"
+                  AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+                  AND scn.deleted_at IS NULL
+                  AND UPPER(scn."Status") IN ('POSTED', 'APPLIED')
+                  ${scnDate}
+              ), 0)
+          )
+        END AS ledger_open
+      FROM supplier_invoices si
+      WHERE si."SupplierId" = ${supplierIdColumn}
+        AND si.deleted_at IS NULL
+        AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+        ${AP_OPEN_INVOICE_GL_POSTED_SQL}
+        ${invDate}
+    ) open_rows
+    WHERE ledger_open > 0.009
+  `;
 }
 
 /**
  * Expected SUM(suppliers.OutstandingBalance) after recalc — per-supplier floor, then sum.
  * Must match syncSupplierBalanceFromOpenItems (Wave 5 cache SSOT).
  */
-export async function computeSuppliersMasterCacheExpectedSum(conn: ApDbConn): Promise<number> {
-  const res = await conn.query(`
+export async function computeSuppliersMasterCacheExpectedSum(
+  conn: ApDbConn,
+  ctx?: ApQueryContext,
+): Promise<number> {
+  const params = asOfDateParam(ctx);
+  const payDate = paymentAsOfFilter(ctx);
+  const res = await conn.query(
+    `
     SELECT COALESCE(SUM(per_supplier), 0) AS total
     FROM (
       SELECT GREATEST(
         COALESCE((
-          SELECT SUM(
-            CASE
-              WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
-                THEN -COALESCE(si."OutstandingBalance", 0)
-              ELSE COALESCE(si."OutstandingBalance", 0)
-            END
-          )
-          FROM supplier_invoices si
-          WHERE si."SupplierId" = s."Id"
-            AND si.deleted_at IS NULL
-            AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
-            ${AP_OPEN_INVOICE_GL_POSTED_SQL}
+          ${correlatedLedgerInvoiceOpenSql('s."Id"', ctx)}
         ), 0)
         - COALESCE((
           SELECT COALESCE(SUM(
@@ -279,24 +458,28 @@ export async function computeSuppliersMasterCacheExpectedSum(conn: ApDbConn): Pr
             AND sp.deleted_at IS NULL
             AND sp."Status" = 'COMPLETED'
             AND COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0)) > 0.009
+            ${payDate}
         ), 0),
         0
       ) AS per_supplier
       FROM suppliers s
     ) sums
-  `);
+    `,
+    params,
+  );
   return Money.toNumber(Money.parseDb(res.rows[0]?.total ?? 0));
 }
 
 export async function computeApReconciliationSnapshot(
   conn: ApDbConn,
+  ctx?: ApQueryContext,
 ): Promise<ApReconciliationSnapshot> {
   const [glBalance, invoiceOpenBalance, unallocatedPayments, expenseOnAp, legacyGrInAp, unpostedOpenInvoiceBalance] =
     await Promise.all([
-      computeApGlSupplierScope(conn),
-      computeOpenInvoiceBalance(conn),
-      computeUnallocatedSupplierPayments(conn),
-      computeExpenseOnAp(conn),
+      computeApGlSupplierScope(conn, ctx),
+      computeOpenInvoiceBalance(conn, undefined, ctx),
+      computeUnallocatedSupplierPayments(conn, undefined, ctx),
+      computeExpenseOnAp(conn, ctx),
       computeLegacyGrInAp(conn),
       computeUnpostedOpenInvoiceBalance(conn),
     ]);
