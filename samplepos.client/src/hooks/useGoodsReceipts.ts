@@ -20,6 +20,7 @@ export function useGoodsReceipts(params?: {
   search?: string;
   startDate?: string;
   endDate?: string;
+  billingStatus?: 'TO_INVOICE' | 'INVOICED';
 }) {
   return useQuery({
     queryKey: GOODS_RECEIPTS_KEYS.list(params || {}),

@@ -30,6 +30,7 @@ import logger from '../../utils/logger.js';
 import { SYSTEM_USER_ID } from '../../utils/constants.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { restoreInventoryForCustomerCreditNoteReturn } from '../../utils/customerReturnInventory.js';
+import { resolveRgrnClearingAccountCode } from '../return-grn/rgrnClearingAccount.js';
 import type {
     CreateCustomerCreditNote,
     CreateCustomerDebitNote,
@@ -645,7 +646,21 @@ export const supplierCreditDebitNoteService = {
             };
 
             if (note.documentType === 'SUPPLIER_CREDIT_NOTE') {
-                await recordSupplierCreditNoteToGL(glData, pool);
+                let clearingAccountCode: string | undefined;
+                const rgrnLink = await client.query<{ return_grn_id: string | null }>(
+                    `SELECT return_grn_id FROM supplier_invoices WHERE "Id" = $1`,
+                    [noteId],
+                );
+                const returnGrnId = rgrnLink?.rows?.[0]?.return_grn_id as string | null | undefined;
+                if (returnGrnId) {
+                    clearingAccountCode = await resolveRgrnClearingAccountCode(client, returnGrnId);
+                }
+
+                await recordSupplierCreditNoteToGL(
+                    { ...glData, clearingAccountCode },
+                    pool,
+                    client,
+                );
 
                 // SAP/Odoo hybrid model:
                 //  • If the CN points at a specific bill (referenceInvoiceId is
@@ -661,7 +676,7 @@ export const supplierCreditDebitNoteService = {
                     });
                 }
             } else {
-                await recordSupplierDebitNoteToGL(glData, pool);
+                await recordSupplierDebitNoteToGL(glData, pool, client);
                 // Debit notes track their additional AP obligation via the note's own
                 // OutstandingBalance in recalcSupplierBalance. Do NOT adjust the reference
                 // invoice's AmountPaid — that mechanism relies on AmountPaid > 0, and
@@ -734,15 +749,21 @@ export const supplierCreditDebitNoteService = {
                 }
             }
 
-            // 4. Reverse the balance adjustment on the original supplier invoice
+            // 4. Reverse bill application (applySupplierCreditNote path — not adjustSupplierInvoiceBalance)
             if (noteData.documentType === 'SUPPLIER_CREDIT_NOTE') {
-                // Credit note reduced AP → reverse by increasing AP (debit direction)
-                await supplierCreditDebitNoteRepository.adjustSupplierInvoiceBalance(
-                    client,
-                    noteData.referenceInvoiceId,
-                    noteData.totalAmount,
-                    'DEBIT',
+                const cnPaidRes = await client.query<{ amount_paid: string }>(
+                    `SELECT COALESCE("AmountPaid", 0) AS amount_paid
+                     FROM supplier_invoices WHERE "Id" = $1`,
+                    [noteId],
                 );
+                const amountApplied = Number(cnPaidRes?.rows?.[0]?.amount_paid ?? 0);
+                if (amountApplied > 0 && noteData.referenceInvoiceId) {
+                    await supplierCreditDebitNoteRepository.reverseAmountFromSupplierBill(
+                        client,
+                        noteData.referenceInvoiceId,
+                        amountApplied,
+                    );
+                }
             } else {
                 // Debit note: no invoice balance was adjusted during post (see postNote),
                 // so no reversal is needed here. The note's CANCELLED status is sufficient

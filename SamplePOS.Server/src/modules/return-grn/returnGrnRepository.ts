@@ -26,6 +26,8 @@ export interface ReturnGrn {
     createdAt: string;
     updatedAt: string;
     hasCreditNote?: boolean;
+    /** True when a SUPPLIER_INVOICE exists for this return's parent GRN (required before SCN). */
+    hasSupplierBill?: boolean;
 }
 
 export interface ReturnGrnLine {
@@ -444,7 +446,22 @@ export const returnGrnRepository = {
              AND si.document_type = 'SUPPLIER_CREDIT_NOTE'
              AND si.deleted_at IS NULL
              AND UPPER(si."Status") NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
-         ) AS "hasCreditNote"
+         ) AS "hasCreditNote",
+         EXISTS (
+           SELECT 1
+           FROM supplier_invoices si
+           WHERE si.document_type = 'SUPPLIER_INVOICE'
+             AND si.deleted_at IS NULL
+             AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+             AND (
+               si."Id" IN (
+                 SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+                 WHERE sigl.grn_id = r.grn_id
+               )
+               OR si."InternalReferenceNumber" = g.receipt_number
+               OR si."PurchaseOrderId" = g.purchase_order_id
+             )
+         ) AS "hasSupplierBill"
        FROM return_grn r
        JOIN suppliers s ON s."Id" = r.supplier_id
        JOIN goods_receipts g ON g.id = r.grn_id

@@ -25,6 +25,13 @@ export interface GoodsReceipt {
   poStatus?: string | null;
   supplierId?: string | null;
   supplierName?: string | null;
+  /** Latest supplier bill (SBILL) linked to this GRN, if any. */
+  supplierBillNumber?: string | null;
+  /**
+   * SAP/Odoo billing lane on the GR list:
+   * DRAFT_GR = receipt not finalized | TO_INVOICE = received-not-billed (GR/IR) | INVOICED = AP bill exists
+   */
+  billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
 }
 
 export interface GoodsReceiptItem {
@@ -246,11 +253,18 @@ export const goodsReceiptRepository = {
          po.supplier_id as "supplierId",
          s."CompanyName" as "supplierName",
          (SELECT si."SupplierInvoiceNumber"
-            FROM supplier_invoice_grn_links sigl
-            JOIN supplier_invoices si ON si."Id" = sigl.invoice_id
-           WHERE sigl.grn_id = gr.id
+            FROM supplier_invoices si
+           WHERE si.document_type = 'SUPPLIER_INVOICE'
              AND si.deleted_at IS NULL
              AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+             AND (
+               si."Id" IN (
+                 SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+                 WHERE sigl.grn_id = gr.id
+               )
+               OR si."InternalReferenceNumber" = gr.receipt_number
+               OR (gr.purchase_order_id IS NOT NULL AND si."PurchaseOrderId" = gr.purchase_order_id)
+             )
            ORDER BY si."CreatedAt" DESC
            LIMIT 1) AS "supplierBillNumber"
        FROM goods_receipts gr
@@ -500,7 +514,15 @@ export const goodsReceiptRepository = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; purchaseOrderId?: string; search?: string; startDate?: string; endDate?: string }
+    filters?: {
+      status?: string;
+      purchaseOrderId?: string;
+      search?: string;
+      startDate?: string;
+      endDate?: string;
+      /** TO_INVOICE = completed GR with no supplier bill; INVOICED = bill linked */
+      billingStatus?: 'TO_INVOICE' | 'INVOICED';
+    }
   ): Promise<{ grs: GoodsReceipt[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
@@ -536,7 +558,49 @@ export const goodsReceiptRepository = {
       values.push(filters.endDate);
     }
 
+    const supplierBillExistsSql = `EXISTS (
+      SELECT 1
+      FROM supplier_invoices si
+      WHERE si.document_type = 'SUPPLIER_INVOICE'
+        AND si.deleted_at IS NULL
+        AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+        AND (
+          si."Id" IN (
+            SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+            WHERE sigl.grn_id = gr.id
+          )
+          OR si."InternalReferenceNumber" = gr.receipt_number
+          OR (gr.purchase_order_id IS NOT NULL AND si."PurchaseOrderId" = gr.purchase_order_id)
+        )
+    )`;
+
+    if (filters?.billingStatus === 'INVOICED') {
+      whereClauses.push(`gr.status = 'COMPLETED'`);
+      whereClauses.push(supplierBillExistsSql);
+    } else if (filters?.billingStatus === 'TO_INVOICE') {
+      whereClauses.push(`gr.status = 'COMPLETED'`);
+      whereClauses.push(`NOT (${supplierBillExistsSql})`);
+    }
+
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    const supplierBillNumberSql = `(
+      SELECT si."SupplierInvoiceNumber"
+      FROM supplier_invoices si
+      WHERE si.document_type = 'SUPPLIER_INVOICE'
+        AND si.deleted_at IS NULL
+        AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+        AND (
+          si."Id" IN (
+            SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+            WHERE sigl.grn_id = gr.id
+          )
+          OR si."InternalReferenceNumber" = gr.receipt_number
+          OR (gr.purchase_order_id IS NOT NULL AND si."PurchaseOrderId" = gr.purchase_order_id)
+        )
+      ORDER BY si."CreatedAt" DESC
+      LIMIT 1
+    )`;
 
     const countResult = await pool.query(
       `SELECT COUNT(*)
@@ -562,7 +626,16 @@ export const goodsReceiptRepository = {
          gr.version,
          po.order_number AS "poNumber",
          po.status AS "poStatus",
-         s."CompanyName" as "supplierName"
+         po.supplier_id as "supplierId",
+         s."CompanyName" as "supplierName",
+         ${supplierBillNumberSql} AS "supplierBillNumber",
+         CASE
+           WHEN gr.status = 'DRAFT' THEN 'DRAFT_GR'
+           WHEN gr.status = 'CANCELLED' THEN 'CANCELLED'
+           WHEN ${supplierBillNumberSql} IS NOT NULL THEN 'INVOICED'
+           WHEN gr.status = 'COMPLETED' THEN 'TO_INVOICE'
+           ELSE 'NOT_APPLICABLE'
+         END AS "billingStatus"
        FROM goods_receipts gr
        LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
        LEFT JOIN suppliers s ON po.supplier_id = s."Id"

@@ -964,7 +964,14 @@ export const goodsReceiptService = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; purchaseOrderId?: string; search?: string; startDate?: string; endDate?: string }
+    filters?: {
+      status?: string;
+      purchaseOrderId?: string;
+      search?: string;
+      startDate?: string;
+      endDate?: string;
+      billingStatus?: 'TO_INVOICE' | 'INVOICED';
+    }
   ): Promise<ListGRsResult> {
     return goodsReceiptRepository.listGRs(pool, page, limit, filters);
   },

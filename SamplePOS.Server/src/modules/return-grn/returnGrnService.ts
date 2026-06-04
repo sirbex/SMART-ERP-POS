@@ -33,6 +33,7 @@ import {
 } from '../credit-debit-notes/creditDebitNoteRepository.js';
 import { supplierCreditDebitNoteService } from '../credit-debit-notes/creditDebitNoteService.js';
 import { recordSupplierCreditNoteToGL, AccountCodes } from '../../services/glEntryService.js';
+import { resolveRgrnClearingAccountCode } from './rgrnClearingAccount.js';
 import {
     assertInventoryCouplingUnchanged,
     captureInventoryCoupling,
@@ -42,7 +43,11 @@ import {
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
-import { ValidationError } from '../../middleware/errorHandler.js';
+import { BusinessError, ValidationError } from '../../middleware/errorHandler.js';
+import {
+    SUPPLIER_BILL_REQUIRED_FOR_SCN_CODE,
+    SUPPLIER_BILL_REQUIRED_FOR_SCN_MESSAGE,
+} from './returnGrnMessages.js';
 import { resolveCanonicalProductUom } from '../products/uomService.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
 import {
@@ -643,9 +648,10 @@ export const returnGrnService = {
                 referenceInvoiceId = siResult.rows[0]?.Id as string | undefined;
             }
             if (!referenceInvoiceId) {
-                throw new ValidationError(
-                    'Cannot create Supplier Credit Note: no Supplier Invoice has been billed for this Goods Receipt yet. ' +
-                    'Open the Goods Receipt and click "Create Supplier Bill" first, then retry the Credit Note.',
+                throw new BusinessError(
+                    SUPPLIER_BILL_REQUIRED_FOR_SCN_MESSAGE,
+                    SUPPLIER_BILL_REQUIRED_FOR_SCN_CODE,
+                    { grnId: rgrn.grnId, returnGrnId: rgrnId, returnGrnNumber: rgrn.returnGrnNumber },
                 );
             }
 
@@ -694,20 +700,7 @@ export const returnGrnService = {
             //                         \u2192 Credit Note credits 2160
             //
             // Look up the debit leg of the RGRN journal to find which account was used.
-            const rgrnClearingResult = await client.query<{ account_code: string }>(
-                `SELECT a."AccountCode" AS account_code
-                 FROM ledger_transactions lt
-                 JOIN ledger_entries le ON le."TransactionId" = lt."Id"
-                 JOIN accounts a ON a."Id" = le."AccountId"
-                 WHERE lt."ReferenceType" = 'RETURN_GRN'
-                   AND lt."ReferenceId" = $1
-                   AND le."DebitAmount" > 0
-                   AND a."AccountCode" IN ('2150','2160')
-                 LIMIT 1`,
-                [rgrnId],
-            );
-            const rgrnClearingCode: string =
-                rgrnClearingResult.rows[0]?.account_code ?? AccountCodes.GRIR_CLEARING;
+            const rgrnClearingCode = await resolveRgrnClearingAccountCode(client, rgrnId);
 
             await recordSupplierCreditNoteToGL({
                 noteId: postedScn.id,

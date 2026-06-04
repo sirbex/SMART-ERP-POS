@@ -93,6 +93,7 @@ const mockSupplierRepo = {
     getSupplierNoteById: jest.fn<MockFn>(),
     cancelSupplierNote: jest.fn<MockFn>(),
     adjustSupplierInvoiceBalance: jest.fn<MockFn>(),
+    reverseAmountFromSupplierBill: jest.fn<MockFn>().mockResolvedValue({ reversed: 0 }),
     listSupplierNotes: jest.fn<MockFn>(),
 };
 
@@ -242,6 +243,35 @@ const taxedLine = [
     },
 ];
 
+function mockQueryResult<T extends Record<string, unknown>>(rows: T[]): QueryResult {
+    return { rows, rowCount: rows.length } as unknown as QueryResult;
+}
+
+type CustomerCreateCnInput = Parameters<typeof creditDebitNoteService.createCreditNote>[1];
+type SupplierCreateCnInput = Parameters<typeof supplierCreditDebitNoteService.createCreditNote>[1];
+
+/** Fills required Zod fields for customer credit note create payloads in tests. */
+function customerCnInput(
+    input: Omit<CustomerCreateCnInput, 'noteType' | 'returnsGoods'>
+        & Partial<Pick<CustomerCreateCnInput, 'noteType' | 'returnsGoods'>>,
+): CustomerCreateCnInput {
+    return {
+        ...input,
+        noteType: input.noteType ?? 'PARTIAL',
+        returnsGoods: input.returnsGoods ?? false,
+    };
+}
+
+/** Fills default noteType for supplier credit note create payloads in tests. */
+function supplierCnInput(
+    input: Omit<SupplierCreateCnInput, 'noteType'> & Partial<Pick<SupplierCreateCnInput, 'noteType'>>,
+): SupplierCreateCnInput {
+    return {
+        ...input,
+        noteType: input.noteType ?? 'PARTIAL',
+    };
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -280,11 +310,11 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             mockCnRepo.getInvoiceById.mockResolvedValue(null);
 
             await expect(
-                creditDebitNoteService.createCreditNote(mockPool, {
+                creditDebitNoteService.createCreditNote(mockPool, customerCnInput({
                     invoiceId: 'inv-999',
                     reason: 'Price error',
                     lines: singleLine,
-                }),
+                })),
             ).rejects.toThrow('Original invoice not found');
         });
 
@@ -295,11 +325,11 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             });
 
             await expect(
-                creditDebitNoteService.createCreditNote(mockPool, {
+                creditDebitNoteService.createCreditNote(mockPool, customerCnInput({
                     invoiceId: 'cn-001',
                     reason: 'Error',
                     lines: singleLine,
-                }),
+                })),
             ).rejects.toThrow('Cannot create a note against another note');
         });
 
@@ -310,11 +340,11 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             });
 
             await expect(
-                creditDebitNoteService.createCreditNote(mockPool, {
+                creditDebitNoteService.createCreditNote(mockPool, customerCnInput({
                     invoiceId: 'inv-001',
                     reason: 'Cancelled invoice',
                     lines: singleLine,
-                }),
+                })),
             ).rejects.toThrow('Cannot create a note against a cancelled invoice');
         });
 
@@ -325,13 +355,13 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             mockCnRepo.getNotesForInvoice.mockResolvedValue([]);
 
             await expect(
-                creditDebitNoteService.createCreditNote(mockPool, {
+                creditDebitNoteService.createCreditNote(mockPool, customerCnInput({
                     invoiceId: 'inv-001',
                     noteType: 'FULL',
                     reason: 'Full credit',
                     lines: [{ productId: 'p1', productName: 'X', quantity: 3, unitPrice: 10000, taxRate: 0 }],
                     // total = 30000 ≠ 50000 → must throw
-                }),
+                })),
             ).rejects.toThrow(/FULL credit note must equal invoice total/);
         });
 
@@ -341,12 +371,12 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             mockCnRepo.sumPostedCreditNotesForInvoice.mockResolvedValue(40000);
 
             await expect(
-                creditDebitNoteService.createCreditNote(mockPool, {
+                creditDebitNoteService.createCreditNote(mockPool, customerCnInput({
                     invoiceId: 'inv-001',
                     reason: 'Partial correction',
                     lines: [{ productId: 'p1', productName: 'X', quantity: 4, unitPrice: 5000, taxRate: 0 }],
                     // new total = 20000 → 40000 + 20000 = 60000 > 50000
-                }),
+                })),
             ).rejects.toThrow(/would exceed invoice total/);
         });
     });
@@ -375,11 +405,11 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             mockCnRepo.createNote.mockResolvedValue(noteRecord);
             mockCnRepo.createNoteLineItems.mockResolvedValue([]);
 
-            const result = await creditDebitNoteService.createCreditNote(mockPool, {
+            const result = await creditDebitNoteService.createCreditNote(mockPool, customerCnInput({
                 invoiceId: 'inv-001',
                 reason: 'Price correction',
                 lines: singleLine, // 10 × 5000 = 50000
-            });
+            }));
 
             expect(result.note.documentType).toBe('CREDIT_NOTE');
             expect(result.note.status).toBe('Draft');
@@ -399,11 +429,11 @@ describe('creditDebitNoteService — Customer Credit Note', () => {
             mockCnRepo.createNote.mockResolvedValue({ id: 'cn-2', invoiceNumber: 'CN-2026-0002', documentType: 'CREDIT_NOTE', status: 'Draft', subtotal: 50000, taxAmount: 9000, totalAmount: 59000, customerId: 'cust-001', customerName: 'Test Customer', referenceInvoiceId: 'inv-001', issueDate: '2026-05-01', returnsGoods: false });
             mockCnRepo.createNoteLineItems.mockResolvedValue([]);
 
-            await creditDebitNoteService.createCreditNote(mockPool, {
+            await creditDebitNoteService.createCreditNote(mockPool, customerCnInput({
                 invoiceId: 'inv-001',
                 reason: 'Tax correction',
                 lines: taxedLine,
-            });
+            }));
 
             const createArgs = mockCnRepo.createNote.mock.calls[0][1] as Record<string, unknown>;
             expect(createArgs.subtotal).toBe(50000);
@@ -675,11 +705,11 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             mockSupplierRepo.getSupplierInvoiceById.mockResolvedValue(null);
 
             await expect(
-                supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                     invoiceId: 'sinv-999',
                     reason: 'Overcharge',
                     lines: [{ productId: 'p1', productName: 'X', quantity: 1, unitCost: 10000, taxRate: 0 }],
-                }),
+                })),
             ).rejects.toThrow('Supplier invoice not found');
         });
 
@@ -690,11 +720,11 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             });
 
             await expect(
-                supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                     invoiceId: 'scn-001',
                     reason: 'Error',
                     lines: [{ productId: 'p1', productName: 'X', quantity: 1, unitCost: 10000, taxRate: 0 }],
-                }),
+                })),
             ).rejects.toThrow('Cannot create a note against another note');
         });
 
@@ -705,11 +735,11 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             });
 
             await expect(
-                supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                     invoiceId: 'sinv-001',
                     reason: 'Cancelled invoice',
                     lines: [{ productId: 'p1', productName: 'X', quantity: 1, unitCost: 10000, taxRate: 0 }],
-                }),
+                })),
             ).rejects.toThrow('Cannot create a note against a cancelled invoice');
         });
 
@@ -718,13 +748,13 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             mockSupplierRepo.getNotesForSupplierInvoice.mockResolvedValue([]);
 
             await expect(
-                supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                     invoiceId: 'sinv-001',
                     noteType: 'FULL',
                     reason: 'Full reversal',
                     lines: [{ productId: 'p1', productName: 'X', quantity: 1, unitCost: 30000, taxRate: 0 }],
                     // total = 30000 ≠ 80000 → must throw
-                }),
+                })),
             ).rejects.toThrow(/FULL credit note must equal invoice total/);
         });
 
@@ -735,12 +765,12 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             ]);
 
             await expect(
-                supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                     invoiceId: 'sinv-001',
                     reason: 'Overcharge',
                     lines: [{ productId: 'p1', productName: 'X', quantity: 1, unitCost: 20000, taxRate: 0 }],
                     // 70000 + 20000 = 90000 > 80000 → must throw
-                }),
+                })),
             ).rejects.toThrow(/would exceed invoice total/);
         });
 
@@ -749,12 +779,12 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             mockSupplierRepo.getNotesForSupplierInvoice.mockResolvedValue([]);
 
             await expect(
-                supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                     invoiceId: 'sinv-001',
                     reason: 'Goods return to supplier',
                     lines: [{ productId: 'p1', productName: 'X', quantity: 5, unitCost: 16000, taxRate: 0 }],
                     // returnGrnId intentionally omitted
-                }),
+                })),
             ).rejects.toThrow('Supplier credit note for returned goods requires a posted Return GRN reference');
         });
     });
@@ -779,6 +809,7 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let applySpy: any;
         beforeEach(() => {
+            mockClientQuery.mockResolvedValue({ rows: [{ return_grn_id: null }], rowCount: 1 } as QueryResult);
             applySpy = jest.spyOn(supplierCreditDebitNoteService, 'applySupplierCreditNote')
                 .mockResolvedValue({
                     creditNoteId: 'scn-uuid-1',
@@ -794,6 +825,7 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
 
         it('calls recordSupplierCreditNoteToGL with correct supplier data', async () => {
             mockSupplierRepo.postSupplierNote.mockResolvedValue(draftSupplierCN);
+            mockClientQuery.mockResolvedValue({ rows: [{ return_grn_id: null }], rowCount: 1 } as QueryResult);
 
             await supplierCreditDebitNoteService.postNote(mockPool, 'scn-uuid-1');
 
@@ -802,6 +834,25 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             expect(glCall.noteId).toBe('scn-uuid-1');
             expect(glCall.supplierId).toBe('sup-001');
             expect(glCall.totalAmount).toBe(40000);
+        });
+
+        it('passes clearingAccountCode 2160 when SCN is linked to a Return GRN', async () => {
+            mockSupplierRepo.postSupplierNote.mockResolvedValue(draftSupplierCN);
+            mockClientQuery.mockImplementation(async (sql: unknown) => {
+                const s = String(sql);
+                if (s.includes('return_grn_id FROM supplier_invoices')) {
+                    return mockQueryResult([{ return_grn_id: 'rgrn-uuid-1' }]);
+                }
+                if (s.includes("ReferenceType") && s.includes('RETURN_GRN')) {
+                    return mockQueryResult([{ account_code: '2160' }]);
+                }
+                return mockQueryResult([]);
+            });
+
+            await supplierCreditDebitNoteService.postNote(mockPool, 'scn-uuid-1');
+
+            const glCall = mockRecordSupplierCreditNoteToGL.mock.calls[0][0] as Record<string, unknown>;
+            expect(glCall.clearingAccountCode).toBe('2160');
         });
 
         it('calls applySupplierCreditNote with primaryBillId when referenceInvoiceId is set', async () => {
@@ -865,26 +916,44 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             ).rejects.toThrow('Only posted notes can be cancelled');
         });
 
-        it('reverses AP balance in DEBIT direction (undo the CREDIT applied on post)', async () => {
+        it('reverses bill application using AmountPaid (not full totalAmount)', async () => {
             mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedSupplierCN);
             mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedSupplierCN, status: 'CANCELLED' });
             mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
+            mockClientQuery.mockImplementation(async (sql: unknown) => {
+                if (String(sql).includes('COALESCE("AmountPaid"')) {
+                    return mockQueryResult([{ amount_paid: '25000' }]);
+                }
+                return mockQueryResult([]);
+            });
+            mockSupplierRepo.reverseAmountFromSupplierBill.mockResolvedValue({ reversed: 25000 });
 
             await supplierCreditDebitNoteService.cancelNote(mockPool, 'scn-uuid-1', 'Data entry error');
 
-            // SCN was CREDIT direction on post → cancel reverses with DEBIT
-            expect(mockSupplierRepo.adjustSupplierInvoiceBalance).toHaveBeenCalledWith(
+            expect(mockSupplierRepo.reverseAmountFromSupplierBill).toHaveBeenCalledWith(
                 mockClient,
                 'sinv-001',
-                40000,
-                'DEBIT',
+                25000,
             );
+            expect(mockSupplierRepo.adjustSupplierInvoiceBalance).not.toHaveBeenCalled();
+        });
+
+        it('skips bill reversal when SCN was on-account (AmountPaid = 0)', async () => {
+            mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedSupplierCN);
+            mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedSupplierCN, status: 'CANCELLED' });
+            mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
+            mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '0' }], rowCount: 1 } as QueryResult);
+
+            await supplierCreditDebitNoteService.cancelNote(mockPool, 'scn-uuid-1', 'Test');
+
+            expect(mockSupplierRepo.reverseAmountFromSupplierBill).not.toHaveBeenCalled();
         });
 
         it('calls recalcSupplierBalance after cancellation', async () => {
             mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedSupplierCN);
             mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedSupplierCN, status: 'CANCELLED' });
             mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
+            mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '0' }], rowCount: 1 } as QueryResult);
 
             await supplierCreditDebitNoteService.cancelNote(mockPool, 'scn-uuid-1', 'Test');
 
@@ -898,6 +967,7 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
                 rows: [{ Id: 'gl-txn-supp-1' }],
                 rowCount: 1,
             } as unknown as QueryResult);
+            mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '0' }], rowCount: 1 } as QueryResult);
 
             await supplierCreditDebitNoteService.cancelNote(mockPool, 'scn-uuid-1', 'Cancel reason');
 
@@ -928,12 +998,12 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             });
             mockSupplierRepo.createSupplierNoteLineItems.mockResolvedValue([]);
 
-            const result = await supplierCreditDebitNoteService.createCreditNote(mockPool, {
+            const result = await supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                 invoiceId: 'sinv-001',
                 reason: 'Supplier overcharged — unit price correction',
                 noteType: 'PRICE_CORRECTION',
                 amount: 5000,   // no `lines` provided
-            });
+            }));
 
             expect(result.note.documentType).toBe('SUPPLIER_CREDIT_NOTE');
             expect(result.note.status).toBe('DRAFT');
@@ -966,12 +1036,12 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             });
             mockSupplierRepo.createSupplierNoteLineItems.mockResolvedValue([]);
 
-            await supplierCreditDebitNoteService.createCreditNote(mockPool, {
+            await supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                 invoiceId: 'sinv-001',
                 reason: 'Price correction allowance',
                 noteType: 'PRICE_CORRECTION',
                 amount: 10000,
-            });
+            }));
 
             const createArgs = mockSupplierRepo.createSupplierNote.mock.calls[0][1] as Record<string, unknown>;
             // Synthetic line taxRate=0 → taxAmount must be 0, total = subtotal
@@ -987,12 +1057,12 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             ]);
 
             await expect(
-                supplierCreditDebitNoteService.createCreditNote(mockPool, {
+                supplierCreditDebitNoteService.createCreditNote(mockPool, supplierCnInput({
                     invoiceId: 'sinv-001',
                     reason: 'Should fail cumulative check',
                     noteType: 'PRICE_CORRECTION',
                     amount: 10000,  // 75000 + 10000 = 85000 > 80000
-                }),
+                })),
             ).rejects.toThrow(/would exceed invoice total/);
         });
     });
@@ -1249,7 +1319,7 @@ describe('Credit/Debit Note — balance direction invariants', () => {
     /**
      * Supplier CN post is CREDIT, cancel is DEBIT.
      */
-    it('Supplier CN: cancel direction is DEBIT (restores AP balance from CN application)', async () => {
+    it('Supplier CN: cancel reverses bill application via AmountPaid', async () => {
         const noteId = 'scn-inv-1';
         const postedNote = {
             id: noteId, invoiceNumber: 'SCN-2026-0099', documentType: 'SUPPLIER_CREDIT_NOTE',
@@ -1272,10 +1342,11 @@ describe('Credit/Debit Note — balance direction invariants', () => {
             mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedNote);
             mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedNote, status: 'CANCELLED' });
             mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
+            mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '25000' }], rowCount: 1 } as QueryResult);
             await supplierCreditDebitNoteService.cancelNote(mockPool, noteId, 'Test');
-            // Cancel reverses the AP balance with DEBIT direction (restores invoice OB)
-            const cancelCall = mockSupplierRepo.adjustSupplierInvoiceBalance.mock.calls[0] as unknown[];
-            expect(cancelCall[3]).toBe('DEBIT');
+            expect(mockSupplierRepo.reverseAmountFromSupplierBill).toHaveBeenCalledWith(
+                mockClient, 'sinv-x', 25000,
+            );
         } finally {
             postSpy.mockRestore();
         }

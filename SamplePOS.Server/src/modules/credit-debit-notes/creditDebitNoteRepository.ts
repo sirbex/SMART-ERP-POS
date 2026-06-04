@@ -954,6 +954,44 @@ export const supplierCreditDebitNoteRepository = {
     },
 
     /**
+     * Undo credit applied to a bill (cancel / reversal). Caps at current AmountPaid.
+     */
+    async reverseAmountFromSupplierBill(
+        client: Pool | PoolClient,
+        billId: string,
+        requestedAmount: number,
+    ): Promise<{ reversed: number }> {
+        const billRes = await client.query(
+            `SELECT "TotalAmount", COALESCE("AmountPaid", 0) AS "AmountPaid"
+             FROM supplier_invoices
+             WHERE "Id" = $1 AND deleted_at IS NULL
+               AND COALESCE(document_type, 'SUPPLIER_INVOICE') NOT IN ('SUPPLIER_CREDIT_NOTE')
+             FOR UPDATE`,
+            [billId],
+        );
+        if (!billRes.rows[0]) return { reversed: 0 };
+        const paid = Number(billRes.rows[0].AmountPaid);
+        const reversed = Math.min(Math.max(requestedAmount, 0), paid);
+        if (reversed <= 0) return { reversed: 0 };
+
+        await client.query(
+            `UPDATE supplier_invoices
+             SET "AmountPaid" = GREATEST(COALESCE("AmountPaid", 0) - $2, 0),
+                 "OutstandingBalance" = GREATEST("TotalAmount" - GREATEST(COALESCE("AmountPaid", 0) - $2, 0), 0),
+                 "Status" = CASE
+                   WHEN GREATEST("TotalAmount" - GREATEST(COALESCE("AmountPaid", 0) - $2, 0), 0) <= 0 THEN 'PAID'
+                   WHEN GREATEST(COALESCE("AmountPaid", 0) - $2, 0) > 0 THEN 'PARTIALLY_PAID'
+                   ELSE 'RECEIVED'
+                 END,
+                 "UpdatedAt" = NOW()
+             WHERE "Id" = $1`,
+            [billId, reversed],
+        );
+        await applyInvoiceLedgerOutstanding(client as PoolClient, billId);
+        return { reversed };
+    },
+
+    /**
      * Mark a credit note as (fully or partially) applied. Bumps the CN's own
      * AmountPaid / OutstandingBalance and flips Status to 'APPLIED' once the
      * residual reaches zero. Idempotent: capped at TotalAmount.

@@ -323,6 +323,14 @@ function formatByErrorCode(parsed: ParsedApiError): string {
   if (code.startsWith('ERR_JOURNAL_')) return formatJournalError(parsed);
   if (code.startsWith('ERR_COSTLAYER_')) return formatCostLayerError(parsed);
   if (code.startsWith('ERR_PRICING_')) return formatPricingError(parsed);
+  if (code === 'ERR_RETURN_GRN_001') {
+    return (
+      'Supplier bill required before credit note.\n\n' +
+      '1. On this Goods Receipt, click **Create Supplier Bill** (receipt must be finalized).\n' +
+      '2. After the bill exists, click **Create Credit Note** on the posted return.\n\n' +
+      'Credit notes reduce accounts payable against a bill — they cannot be created while the receipt is still unbilled.'
+    );
+  }
 
   // Accounting / governance / inventory rule violations
   if (

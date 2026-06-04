@@ -28,9 +28,14 @@ import { useTenant } from '../../contexts/TenantContext';
 import { formatCurrency } from '../../utils/currency';
 import { api } from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
+import toast from 'react-hot-toast';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { SupplierReassignmentModal } from '../../components/inventory/SupplierReassignmentModal';
+import { GrBillingStatusBadge } from '../../components/inventory/GrBillingStatusBadge';
+import { GrReceiptStatusBadge } from '../../components/inventory/GrReceiptStatusBadge';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
+import { ListSkeleton } from '../../components/ui/ListSkeleton';
+import { MobileListCard, ResponsiveActionBar, mobileActionBtnClass } from '../../components/ui/ResponsiveActionBar';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
 import { ProcurementProductSearch } from '../../components/inventory/shared';
 import type { ProcurementProduct } from '../../components/inventory/shared';
@@ -85,6 +90,7 @@ interface GRRow {
   supplierName?: string;
   supplier_name?: string;
   supplierId?: string;
+  supplier_id?: string;
   status: string;
   receivedDate?: string;
   received_date?: string;
@@ -101,6 +107,10 @@ interface GRRow {
   created_at?: string;
   items?: GRItemRow[];
   totalValue?: number | string;
+  supplierBillNumber?: string | null;
+  supplier_bill_number?: string | null;
+  billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
+  billing_status?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
 }
 
 interface GRItemRow {
@@ -254,6 +264,7 @@ const getDateRange = (preset: DateRangePreset): { start: string; end: string } =
 export default function GoodsReceiptsPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [billingFilter, setBillingFilter] = useState<'' | 'TO_INVOICE' | 'INVOICED'>('');
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('custom');
@@ -273,7 +284,7 @@ export default function GoodsReceiptsPage() {
   }, [searchTerm]);
 
   // Reset page when search/dates change
-  useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter, startDate, endDate]);
+  useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter, billingFilter, startDate, endDate]);
   const detailsGuardRef = useRef<GuardHandle | null>(null);
   const createGuardRef = useRef<GuardHandle | null>(null);
   const returnGuardRef = useRef<GuardHandle | null>(null);
@@ -395,6 +406,7 @@ export default function GoodsReceiptsPage() {
     page,
     limit,
     status: statusFilter || undefined,
+    billingStatus: billingFilter || undefined,
     search: debouncedSearch || undefined,
     startDate: startDate || undefined,
     endDate: endDate || undefined,
@@ -428,7 +440,7 @@ export default function GoodsReceiptsPage() {
   }, [returnableData]);
 
   const existingReturns = useMemo(() => {
-    const raw = (returnGrnData as { data?: { data?: Array<{ id: string; returnGrnNumber: string; return_grn_number?: string; status: string; totalAmount?: number; total_amount?: number; hasCreditNote?: boolean }> } })?.data?.data;
+    const raw = (returnGrnData as { data?: { data?: Array<{ id: string; returnGrnNumber: string; return_grn_number?: string; status: string; totalAmount?: number; total_amount?: number; hasCreditNote?: boolean; hasSupplierBill?: boolean }> } })?.data?.data;
     return Array.isArray(raw) ? raw : [];
   }, [returnGrnData]);
 
@@ -778,12 +790,12 @@ export default function GoodsReceiptsPage() {
       });
 
     if (lines.length === 0) {
-      alert('Please enter quantities for at least one item to return.');
+      toast.error('Please enter quantities for at least one item to return.');
       return;
     }
 
     if (!returnReason.trim()) {
-      alert('Please provide a reason for the return.');
+      toast.error('Please provide a reason for the return.');
       return;
     }
 
@@ -803,7 +815,19 @@ export default function GoodsReceiptsPage() {
       // Post it immediately (stock reduction)
       await postReturnGrnMutation.mutateAsync(rgrnId);
 
-      alert('Return GRN created and posted. Stock has been reduced.\n\nNext step: click "Create Credit Note" on the return to reduce the supplier payable.');
+      const billNum =
+        (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
+      if (billNum) {
+        toast.success(
+          `Return posted. Next: Create Credit Note on the return badge (bill ${billNum}).`,
+          { duration: 7000 },
+        );
+      } else {
+        toast(
+          'Return posted. Create Supplier Bill on this receipt first, then Create Credit Note on the return.',
+          { duration: 8000, icon: '📋' },
+        );
+      }
       setShowReturnModal(false);
       setShowDetailsModal(false);
     } catch (err: unknown) {
@@ -927,42 +951,68 @@ export default function GoodsReceiptsPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
-    const badges: Record<string, { bg: string; text: string }> = {
-      DRAFT: { bg: 'bg-gray-100', text: 'text-gray-800' },
-      FINALIZED: { bg: 'bg-green-100', text: 'text-green-800' },
-      CANCELLED: { bg: 'bg-red-100', text: 'text-red-800' },
-    };
-
-    const badge = badges[status] || badges.DRAFT;
-
-    return (
-      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${badge.bg} ${badge.text}`}>
-        {status}
-      </span>
-    );
-  };
-
   const goodsReceipts = (data?.data?.data || []) as GRRow[];
   const pagination = data?.data?.pagination;
 
+  const billingCounts = useMemo(() => ({
+    toInvoice: goodsReceipts.filter((g) => (g.billingStatus || g.billing_status) === 'TO_INVOICE').length,
+    invoiced: goodsReceipts.filter((g) => (g.billingStatus || g.billing_status) === 'INVOICED').length,
+  }), [goodsReceipts]);
+
+  const renderGrActions = (gr: GRRow, layout: 'row' | 'stack' = 'row') => {
+    const viewBtn = (
+      <button
+        type="button"
+        onClick={() => handleViewDetails(gr)}
+        className="text-sm font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg px-3 transition-colors"
+      >
+        View details
+      </button>
+    );
+    const finalizeBtn = isGrReceivable(gr) && canFinalizeGR ? (
+      <button
+        type="button"
+        onClick={() => handleFinalize(gr.id)}
+        className="text-sm font-medium text-green-800 bg-green-50 hover:bg-green-100 rounded-lg px-3 transition-colors"
+      >
+        Finalize
+      </button>
+    ) : null;
+
+    if (layout === 'stack') {
+      return (
+        <ResponsiveActionBar>
+          {viewBtn}
+          {finalizeBtn}
+        </ResponsiveActionBar>
+      );
+    }
+
+    return (
+      <div className="flex flex-row flex-wrap gap-2">
+        {viewBtn}
+        {finalizeBtn}
+      </div>
+    );
+  };
+
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Goods Receipts</h2>
-          <p className="text-gray-600 mt-1">
+          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Goods Receipts</h2>
+          <p className="text-sm sm:text-base text-gray-600 mt-1">
             Receiving workflow with batch creation and cost change alerts
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-600">Cost variance baseline:</span>
+        <div className="flex flex-col gap-3 w-full sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
+          <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
+            <span className="text-sm text-gray-600 shrink-0">Cost variance baseline:</span>
             <select
               aria-label="Cost variance baseline"
               title="Cost variance baseline"
-              className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+              className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[2.75rem] sm:min-h-0"
               value={baseline}
               onChange={(e) => setBaseline(e.target.value as 'PO' | 'PRODUCT')}
             >
@@ -970,21 +1020,27 @@ export default function GoodsReceiptsPage() {
               <option value="PRODUCT">Product Cost</option>
             </select>
           </div>
-          {canCreateGR && <ManualGRButton />}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:gap-2">
+          {canCreateGR && (
+            <div className="w-full sm:w-auto [&>button]:w-full sm:[&>button]:w-auto">
+              <ManualGRButton />
+            </div>
+          )}
           {canCreateGR && (
             <button
               onClick={openCreateModal}
-              className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+              className={`${mobileActionBtnClass} px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex`}
             >
               + Create from PO
             </button>
           )}
+          </div>
         </div>
       </div>
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
           {/* Search */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1017,6 +1073,26 @@ export default function GoodsReceiptsPage() {
               <option value="DRAFT">Draft</option>
               <option value="COMPLETED">Completed</option>
               <option value="CANCELLED">Cancelled</option>
+            </select>
+          </div>
+
+          {/* Supplier invoice / billing (SAP GR/IR vs AP) */}
+          <div>
+            <label htmlFor="billing-filter" className="block text-sm font-medium text-gray-700 mb-2">
+              Supplier invoice
+            </label>
+            <select
+              id="billing-filter"
+              value={billingFilter}
+              onChange={(e) => {
+                setBillingFilter(e.target.value as '' | 'TO_INVOICE' | 'INVOICED');
+                setPage(1);
+              }}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">All</option>
+              <option value="TO_INVOICE">To invoice (not billed)</option>
+              <option value="INVOICED">Invoiced (bill posted)</option>
             </select>
           </div>
 
@@ -1083,8 +1159,8 @@ export default function GoodsReceiptsPage() {
 
       {/* Loading State */}
       {isLoading && (
-        <div className="text-center py-12">
-          <div className="text-gray-600">Loading goods receipts...</div>
+        <div className="bg-white rounded-lg shadow-sm border border-gray-100">
+          <ListSkeleton rows={6} />
         </div>
       )}
 
@@ -1097,27 +1173,96 @@ export default function GoodsReceiptsPage() {
 
       {/* Goods Receipts Table */}
       {!isLoading && !error && (
-        <div className="bg-white rounded-lg shadow-sm overflow-hidden">
+        <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-100">
+          {/* Quick billing lane filters (SAP/Odoo) */}
+          <div className="px-4 sm:px-6 py-3 border-b border-gray-100 bg-gray-50/80 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="grid grid-cols-1 min-[400px]:grid-cols-3 gap-2 sm:flex sm:flex-wrap">
+              <button
+                type="button"
+                onClick={() => { setBillingFilter(''); setPage(1); }}
+                className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === '' ? 'bg-gray-800 text-white' : 'bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-100'}`}
+              >
+                All billing
+              </button>
+              <button
+                type="button"
+                onClick={() => { setBillingFilter('TO_INVOICE'); setPage(1); }}
+                className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === 'TO_INVOICE' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100'}`}
+              >
+                To invoice{billingCounts.toInvoice > 0 ? ` (${billingCounts.toInvoice})` : ''}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setBillingFilter('INVOICED'); setPage(1); }}
+                className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-lg transition-colors ${billingFilter === 'INVOICED' ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100'}`}
+              >
+                Invoiced{billingCounts.invoiced > 0 ? ` (${billingCounts.invoiced})` : ''}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 leading-relaxed max-w-xl hidden lg:block">
+              <span className="font-medium text-gray-600">Receipt status</span> = physical receipt.
+              {' '}<span className="font-medium text-gray-600">Supplier invoice</span> = billed in AP.
+            </p>
+          </div>
+
+          {/* Mobile card list */}
+          <div className="md:hidden divide-y divide-gray-100">
+            {goodsReceipts.length === 0 ? (
+              <p className="px-4 py-12 text-center text-gray-500 text-sm">No goods receipts found</p>
+            ) : (
+              goodsReceipts.map((gr: GRRow) => (
+                <MobileListCard key={gr.id}>
+                  <div className="flex items-start justify-between gap-3 min-w-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-gray-900 truncate">
+                        {gr.grNumber || gr.receiptNumber || gr.receipt_number}
+                      </p>
+                      <p className="text-sm text-gray-600 truncate">{gr.supplierName || gr.supplier_name || '—'}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        PO {gr.poNumber || gr.po_number || '—'} · {formatDisplayDate(gr.receivedDate || gr.received_date)}
+                      </p>
+                    </div>
+                    <div className="shrink-0 pt-0.5">
+                      <GrReceiptStatusBadge status={gr.status} />
+                    </div>
+                  </div>
+                  <GrBillingStatusBadge
+                    variant="card"
+                    receiptStatus={gr.status}
+                    billingStatus={gr.billingStatus || gr.billing_status}
+                    supplierBillNumber={gr.supplierBillNumber || gr.supplier_bill_number}
+                  />
+                  {renderGrActions(gr, 'stack')}
+                </MobileListCard>
+              ))
+            )}
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden md:block">
           <ResponsiveTableWrapper>
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     GR Number
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
                     PO Number
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Supplier
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">
                     Received Date
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
+                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Receipt
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Invoice
+                  </th>
+                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
@@ -1125,48 +1270,37 @@ export default function GoodsReceiptsPage() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {goodsReceipts.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       No goods receipts found
                     </td>
                   </tr>
                 ) : (
                   goodsReceipts.map((gr: GRRow) => (
-                    <tr key={gr.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    <tr key={gr.id} className="hover:bg-gray-50/80 transition-colors">
+                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                         {gr.grNumber || gr.receiptNumber || gr.receipt_number}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm text-gray-900 hidden lg:table-cell">
                         {gr.poNumber || gr.po_number || '-'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      <td className="px-4 lg:px-6 py-3 text-sm text-gray-900 max-w-[180px] truncate">
                         {gr.supplierName || gr.supplier_name || '-'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm text-gray-500 hidden xl:table-cell">
                         {formatDisplayDate(gr.receivedDate || gr.received_date)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">{getStatusBadge(gr.status)}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleViewDetails(gr)}
-                            className="text-blue-600 hover:text-blue-800 font-medium"
-                          >
-                            👁️ View
-                          </button>
-                          {isGrReceivable(gr) && canFinalizeGR && (
-                            <button
-                              onClick={() => handleFinalize(gr.id)}
-                              className="text-green-600 hover:text-green-800 font-medium"
-                            >
-                              ✓ Finalize
-                            </button>
-                          )}
-                          {gr.status === 'DRAFT' && (gr.poStatus ?? gr.po_status) === 'CANCELLED' && (
-                            <span className="text-xs text-gray-500" title="Purchase order was cancelled">
-                              PO cancelled
-                            </span>
-                          )}
-                        </div>
+                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap">
+                        <GrReceiptStatusBadge status={gr.status} />
+                      </td>
+                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap">
+                        <GrBillingStatusBadge
+                          receiptStatus={gr.status}
+                          billingStatus={gr.billingStatus || gr.billing_status}
+                          supplierBillNumber={gr.supplierBillNumber || gr.supplier_bill_number}
+                        />
+                      </td>
+                      <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm">
+                        {renderGrActions(gr)}
                       </td>
                     </tr>
                   ))
@@ -1174,10 +1308,11 @@ export default function GoodsReceiptsPage() {
               </tbody>
             </table>
           </ResponsiveTableWrapper>
+          </div>
 
           {/* Pagination */}
           {pagination && pagination.totalPages > 1 && (
-            <div className="bg-gray-50 px-6 py-4 flex items-center justify-between border-t border-gray-200">
+            <div className="bg-gray-50 px-4 sm:px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-gray-200">
               <div className="text-sm text-gray-700">
                 Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
               </div>
@@ -1213,15 +1348,14 @@ export default function GoodsReceiptsPage() {
             className="bg-white rounded-xl shadow-2xl max-w-[95vw] sm:max-w-4xl w-full max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-2xl font-bold text-gray-900">
+            <div className="p-4 sm:p-6 border-b border-gray-200">
+              <div className="flex justify-between items-start gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">
                     {selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number}
                   </h3>
-                  <p className="text-gray-600 mt-1">
-                    PO: {selectedGR.poNumber || selectedGR.po_number} | Supplier:{' '}
-                    {selectedGR.supplierName || selectedGR.supplier_name}
+                  <p className="text-sm sm:text-base text-gray-600 mt-1 break-words">
+                    PO: {selectedGR.poNumber || selectedGR.po_number} · {selectedGR.supplierName || selectedGR.supplier_name}
                   </p>
                 </div>
                 <button
@@ -1233,8 +1367,8 @@ export default function GoodsReceiptsPage() {
               </div>
             </div>
 
-            <div className="p-6">
-              <div className="grid grid-cols-2 gap-4 mb-6">
+            <div className="p-4 sm:p-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                 <div>
                   <label className="text-sm font-medium text-gray-700">Received Date</label>
                   <p className="text-gray-900">
@@ -1243,7 +1377,7 @@ export default function GoodsReceiptsPage() {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700">Status</label>
-                  <div className="mt-1">{getStatusBadge(selectedGR.status)}</div>
+                  <div className="mt-1"><GrReceiptStatusBadge status={selectedGR.status} /></div>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-700">Received By</label>
@@ -1479,27 +1613,49 @@ export default function GoodsReceiptsPage() {
                   </p>
                 )}
                 {selectedGR.status === 'DRAFT' && (
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setShowDetailsModal(false)}
-                      className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                    >
-                      Close
-                    </button>
+                  <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
                     {canFinalizeGR && canReceiveThisGR && (
                       <button
                         onClick={() => handleFinalize(selectedGR.id)}
-                        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                        className="text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 px-4"
                       >
                         ✓ Finalize Goods Receipt
                       </button>
                     )}
-                  </div>
+                    <button
+                      onClick={() => setShowDetailsModal(false)}
+                      className="text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 px-4"
+                    >
+                      Close
+                    </button>
+                  </ResponsiveActionBar>
                 )}
                 {(selectedGR.status === 'COMPLETED' || selectedGR.status === 'FINALIZED') && (
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-col gap-2 w-full">
+                    {(() => {
+                      const supplierBillNum =
+                        (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
+                      const hasSupplierBill =
+                        supplierBillNum.length > 0
+                        || existingReturns.some((r) => r.hasSupplierBill);
+                      const pendingCreditReturns = existingReturns.filter(
+                        (r) => r.status === 'POSTED' && !r.hasCreditNote,
+                      );
+                      if (pendingCreditReturns.length > 0 && !hasSupplierBill) {
+                        return (
+                          <div className="text-sm rounded-lg border border-amber-300 bg-amber-50 text-amber-900 px-3 py-2">
+                            <span className="font-semibold">Credit note not available yet.</span>
+                            {' '}Create the <strong>Supplier Bill</strong> for this receipt first — you cannot issue a
+                            supplier credit note until the goods receipt has been billed (accounts payable must exist to reduce).
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                  <div className="flex flex-col gap-3 w-full">
                     {existingReturns.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-col gap-2 w-full">
+                        <div className="flex flex-wrap gap-1.5 items-center">
                         {existingReturns.map((r) => (
                           <span
                             key={r.id}
@@ -1511,33 +1667,59 @@ export default function GoodsReceiptsPage() {
                             {r.returnGrnNumber || r.return_grn_number} ({r.status})
                           </span>
                         ))}
-                        {existingReturns.filter((r) => r.status === 'POSTED' && !r.hasCreditNote).map((r) => (
+                        </div>
+                        <div className="flex flex-col gap-2 w-full sm:flex-row sm:flex-wrap">
+                        {existingReturns.filter((r) => r.status === 'POSTED' && !r.hasCreditNote).map((r) => {
+                          const supplierBillNum =
+                            (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
+                          const canCreateCreditNote =
+                            supplierBillNum.length > 0 || !!r.hasSupplierBill;
+                          if (!canCreateCreditNote) {
+                            return (
+                              <span
+                                key={`cn-blocked-${r.id}`}
+                                className="text-xs px-3 py-2 rounded-lg border border-amber-400 bg-amber-50 text-amber-800 w-full sm:w-auto text-center sm:text-left"
+                                title="Create Supplier Bill on this receipt first, then create the credit note on the return."
+                              >
+                                Bill required before credit note
+                              </span>
+                            );
+                          }
+                          return (
                           <button
                             key={`cn-${r.id}`}
                             onClick={() =>
                               createCreditNoteMutation.mutate(r.id, {
                                 onSuccess: (res) => {
                                   const num = (res as { data?: { data?: { creditNoteNumber?: string } } })?.data?.data?.creditNoteNumber;
-                                  alert(`Supplier Credit Note ${num ?? ''} created. Supplier payable reduced.`);
+                                  toast.success(
+                                    `Supplier Credit Note ${num ?? ''} created. Supplier payable reduced.`,
+                                    { duration: 6000 },
+                                  );
                                 },
                                 onError: (err) =>
-                                  alert(`Error: ${err instanceof Error ? err.message : 'Failed to create Credit Note'}`),
+                                  handleApiError(err, {
+                                    fallback: 'Failed to create credit note',
+                                  }),
                               })
                             }
                             disabled={createCreditNoteMutation.isPending}
-                            title={`Create Credit Note for ${r.returnGrnNumber || r.return_grn_number}`}
-                            className="text-xs px-2 py-1 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                            title={`Create Credit Note for ${r.returnGrnNumber || r.return_grn_number} — reduces AP on the supplier bill`}
+                            className={`${mobileActionBtnClass} text-sm px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex`}
                           >
                             {createCreditNoteMutation.isPending ? 'Creating…' : 'Create Credit Note'}
                           </button>
-                        ))}
+                          );
+                        })}
+                        </div>
                       </div>
                     )}
+                    <ResponsiveActionBar divider={false}>
                     <button
                       onClick={handleOpenReturnModal}
-                      className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
+                      className="text-sm font-medium px-4 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex gap-2"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
                       </svg>
                       Return to Supplier
@@ -1546,7 +1728,7 @@ export default function GoodsReceiptsPage() {
                       <button
                         type="button"
                         onClick={() => setShowSupplierReassignModal(true)}
-                        className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 flex items-center gap-2"
+                        className="text-sm font-medium px-4 bg-violet-600 text-white rounded-lg hover:bg-violet-700 flex gap-2"
                         title="Move GR/IR liability to another supplier (no stock change)"
                       >
                         Reassign supplier
@@ -1566,10 +1748,10 @@ export default function GoodsReceiptsPage() {
                       if (existingBillNum) {
                         return (
                           <div
-                            className="px-4 py-2 bg-green-50 border border-green-300 text-green-800 rounded-lg flex items-center gap-2 text-sm font-semibold"
+                            className={`${mobileActionBtnClass} px-4 bg-green-50 border border-green-300 text-green-800 rounded-lg flex gap-2 text-sm font-semibold`}
                             title={`Bill ${existingBillNum} already exists for ${grNumber}`}
                           >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
                             Billed: {existingBillNum}
@@ -1593,11 +1775,10 @@ export default function GoodsReceiptsPage() {
                           const dataObj = data.data as { invoice?: Record<string, unknown>; invoiceNumber?: string; SupplierInvoiceNumber?: string } | undefined;
                           const inv = dataObj?.invoice ?? dataObj;
                           const invNum = (inv?.invoiceNumber as string | undefined) || (inv?.SupplierInvoiceNumber as string | undefined) || '';
-                          alert(`✅ Supplier bill ${invNum} created from ${grNumber}.`);
+                          toast.success(`Supplier bill ${invNum} created from ${grNumber}.`, { duration: 6000 });
                           await detailsQuery.refetch();
                         } catch (err: unknown) {
                           handleApiError(err);
-                          alert(err instanceof Error ? err.message : 'Failed to create supplier bill');
                         } finally {
                           setCreatingBillForGR(null);
                         }
@@ -1606,16 +1787,18 @@ export default function GoodsReceiptsPage() {
                         <button
                           onClick={handleOneClickBill}
                           disabled={isCreating || !grId}
-                          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2"
+                          className={`${mobileActionBtnClass} text-sm px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 flex gap-2`}
                           title={`One-click create supplier bill for ${grNumber} — ${formatCurrency(totalVal)}`}
                         >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                           </svg>
                           {isCreating ? 'Creating Bill…' : `Create Supplier Bill (${formatCurrency(totalVal)})`}
                         </button>
                       );
                     })()}
+                    </ResponsiveActionBar>
+                  </div>
                   </div>
                 )}
               </div>
@@ -1644,8 +1827,9 @@ export default function GoodsReceiptsPage() {
           onClose={() => setShowSupplierReassignModal(false)}
           onSuccess={() => {
             void detailsQuery.refetch();
-            alert(
-              'Supplier correction complete: purchase order and receipt now show the new vendor; bill(s) reversed (if any) and GR/IR reclass posted. Create a new supplier bill for the correct vendor when ready.',
+            toast.success(
+              'Supplier correction complete. Create a new supplier bill for the correct vendor when ready.',
+              { duration: 7000 },
             );
           }}
         />
@@ -1662,16 +1846,16 @@ export default function GoodsReceiptsPage() {
             className="bg-white rounded-xl shadow-2xl max-w-[95vw] sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-xl font-bold text-gray-900">Return to Supplier</h3>
-                  <p className="text-gray-600 mt-1">
+            <div className="p-4 sm:p-6 border-b border-gray-200">
+              <div className="flex justify-between items-start gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-lg sm:text-xl font-bold text-gray-900">Return to Supplier</h3>
+                  <p className="text-sm text-gray-600 mt-1 break-words">
                     GR: {selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || selectedGR.gr_number}
                     {' — '}
                     {selectedGR.supplierName || selectedGR.supplier_name}
                   </p>
-                  <p className="text-sm text-gray-500 mt-2 max-w-xl">
+                  <p className="text-xs sm:text-sm text-gray-500 mt-2">
                     Wrong product or quantity? Return it here (stock and GR/IR adjust). Receive the correct item on a{' '}
                     <strong>new Goods Receipt</strong> from the same PO. If you already created a supplier bill, post the
                     return then click <strong>Create Credit Note</strong> on the return badge.
@@ -1687,7 +1871,7 @@ export default function GoodsReceiptsPage() {
               </div>
             </div>
 
-            <div className="p-6">
+            <div className="p-4 sm:p-6">
               {/* Reason */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1705,16 +1889,82 @@ export default function GoodsReceiptsPage() {
 
               {/* Returnable Items Table */}
               {returnableLoading ? (
-                <div className="text-center py-8 text-gray-500">Loading returnable items...</div>
+                <ListSkeleton rows={4} />
               ) : returnableItems.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">
                   No items available to return. Stock may be fully sold, consumed, or already returned to the supplier.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <p className="text-xs text-gray-600 mb-2 px-1">
+                <>
+                  <p className="text-xs text-gray-600 mb-3 px-1">
                     Only on-hand quantity from this receipt can be returned (SAP/Odoo). Sold or consumed units cannot be sent back to the supplier.
                   </p>
+
+                  {/* Mobile card list */}
+                  <div className="sm:hidden space-y-3 mb-4">
+                    {returnableItems.map((item) => {
+                      const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+                      const qty = returnQuantities[key] || 0;
+                      const maxReturn = item.returnableQuantity;
+                      const consumed = item.consumedQuantity ?? 0;
+                      const canReturn = maxReturn > 0;
+                      return (
+                        <article
+                          key={key}
+                          className={`rounded-lg border p-3 space-y-2 ${!canReturn ? 'border-amber-200 bg-amber-50/50' : 'border-gray-200'}`}
+                        >
+                          <div>
+                            <p className="font-medium text-sm text-gray-900">{item.productName}</p>
+                            {item.batchNumber && (
+                              <p className="text-xs text-gray-500 mt-0.5">Batch: {item.batchNumber}</p>
+                            )}
+                            {!canReturn && (item.returnBlockReason || consumed > 0) && (
+                              <p className="text-xs text-amber-700 mt-1">
+                                {item.returnBlockReason || `${consumed} sold or consumed — cannot return.`}
+                              </p>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
+                            <span>On hand: <strong>{item.onHandQuantity ?? '—'}</strong></span>
+                            <span>Max return: <strong>{maxReturn}</strong></span>
+                            <span>Unit cost: {formatCurrency(item.unitCost)}</span>
+                            <span>Received: {item.receivedQuantity}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 pt-1">
+                            <label className="text-sm font-medium text-gray-700">Return qty</label>
+                            <input
+                              type="number"
+                              min={0}
+                              max={maxReturn}
+                              step={1}
+                              value={qty || ''}
+                              onChange={(e) => {
+                                const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                setReturnQuantities((prev) => ({
+                                  ...prev,
+                                  [key]: Math.min(Math.max(0, val), maxReturn),
+                                }));
+                              }}
+                              className="w-24 border rounded-lg px-3 py-2 text-right disabled:bg-gray-100"
+                              disabled={returnSubmitting || !canReturn}
+                              aria-label={`Return quantity for ${item.productName}`}
+                            />
+                          </div>
+                        </article>
+                      );
+                    })}
+                    <div className="rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-right">
+                      Total return value:{' '}
+                      {formatCurrency(
+                        returnableItems.reduce((sum, item) => {
+                          const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+                          return sum + (returnQuantities[key] || 0) * item.unitCost;
+                        }, 0),
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-gray-50 border-b">
@@ -1800,27 +2050,22 @@ export default function GoodsReceiptsPage() {
                       </tr>
                     </tfoot>
                   </table>
-                </div>
+                  </div>
+                </>
               )}
             </div>
 
-            <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
-              <button
-                onClick={() => setShowReturnModal(false)}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                disabled={returnSubmitting}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmitReturn}
-                disabled={
-                  returnSubmitting ||
-                  returnableItems.every((i) => i.returnableQuantity <= 0)
-                }
-                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {returnSubmitting ? (
+            <div className="p-4 sm:p-6 border-t border-gray-200">
+              <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
+                <button
+                  onClick={handleSubmitReturn}
+                  disabled={
+                    returnSubmitting ||
+                    returnableItems.every((i) => i.returnableQuantity <= 0)
+                  }
+                  className="text-sm font-medium bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4"
+                >
+                  {returnSubmitting ? (
                   <>
                     <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
@@ -1832,6 +2077,14 @@ export default function GoodsReceiptsPage() {
                   'Create & Post Return'
                 )}
               </button>
+                <button
+                  onClick={() => setShowReturnModal(false)}
+                  className="text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 px-4"
+                  disabled={returnSubmitting}
+                >
+                  Cancel
+                </button>
+              </ResponsiveActionBar>
             </div>
           </div>
         </div>

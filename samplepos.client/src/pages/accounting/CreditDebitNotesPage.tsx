@@ -49,6 +49,16 @@ import {
 } from '../../services/creditDebitNoteService';
 import { api } from '../../services/api';
 import { formatTimestampDate } from '../../utils/businessDate';
+import { ListSkeleton } from '../../components/ui/ListSkeleton';
+import { ResponsiveActionBar, ResponsiveToolbar, ResponsiveToolbarActions } from '../../components/ui/ResponsiveActionBar';
+
+/** Supplier notes use DRAFT/POSTED/APPLIED; customer notes use Draft/Posted. */
+function isNoteDraft(status: string): boolean {
+    return status === 'DRAFT' || status === 'Draft';
+}
+function isSupplierPosted(status: string): boolean {
+    return status === 'POSTED' || status === 'APPLIED';
+}
 
 // ============================================================
 // Main Page
@@ -61,25 +71,23 @@ const CreditDebitNotesPage: React.FC = () => {
     const [activeTab, setActiveTab] = useState(initialTab);
 
     return (
-        <div className="p-6 space-y-6">
-            <div className="flex justify-between items-center">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Credit & Debit Notes</h1>
-                    <p className="text-sm text-gray-500 mt-1">
-                        Manage credit notes (returns/allowances) and debit notes (additional charges)
-                    </p>
-                </div>
+        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+            <div>
+                <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Credit & Debit Notes</h1>
+                <p className="text-sm text-gray-500 mt-1">
+                    Manage credit notes (returns/allowances) and debit notes (additional charges)
+                </p>
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList>
-                    <TabsTrigger value="customer">
-                        <FileText className="h-4 w-4 mr-2" />
-                        Customer Notes (AR)
+                <TabsList className="w-full sm:w-auto flex overflow-x-auto">
+                    <TabsTrigger value="customer" className="flex-shrink-0">
+                        <FileText className="h-4 w-4 mr-1.5 sm:mr-2" />
+                        <span className="whitespace-nowrap">Customer (AR)</span>
                     </TabsTrigger>
-                    <TabsTrigger value="supplier">
-                        <FileText className="h-4 w-4 mr-2" />
-                        Supplier Notes (AP)
+                    <TabsTrigger value="supplier" className="flex-shrink-0">
+                        <FileText className="h-4 w-4 mr-1.5 sm:mr-2" />
+                        <span className="whitespace-nowrap">Supplier (AP)</span>
                     </TabsTrigger>
                 </TabsList>
 
@@ -167,8 +175,8 @@ function CustomerNotesTab() {
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center gap-3">
-                <div className="relative flex-1 max-w-md">
+            <ResponsiveToolbar>
+                <div className="relative flex-1 min-w-0 sm:max-w-md">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                         placeholder="Search notes..."
@@ -179,7 +187,7 @@ function CustomerNotesTab() {
                 </div>
 
                 <Select value={typeFilter} onValueChange={(v: string) => setTypeFilter(v as 'ALL' | 'CREDIT_NOTE' | 'DEBIT_NOTE')}>
-                    <SelectTrigger className="w-48">
+                    <SelectTrigger className="w-full sm:w-48">
                         <SelectValue placeholder="All Types" />
                     </SelectTrigger>
                     <SelectContent>
@@ -189,40 +197,44 @@ function CustomerNotesTab() {
                     </SelectContent>
                 </Select>
 
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => { setCreateType('CREDIT_NOTE'); setIsCreateModalOpen(true); }}
-                    className="flex items-center gap-1"
-                >
-                    <FileMinus className="h-4 w-4" />
-                    Credit Note
-                </Button>
+                <ResponsiveToolbarActions>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setCreateType('CREDIT_NOTE'); setIsCreateModalOpen(true); }}
+                        className="flex items-center gap-1"
+                    >
+                        <FileMinus className="h-4 w-4" />
+                        Credit Note
+                    </Button>
 
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => { setCreateType('DEBIT_NOTE'); setIsCreateModalOpen(true); }}
-                    className="flex items-center gap-1"
-                >
-                    <FilePlus className="h-4 w-4" />
-                    Debit Note
-                </Button>
-            </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setCreateType('DEBIT_NOTE'); setIsCreateModalOpen(true); }}
+                        className="flex items-center gap-1"
+                    >
+                        <FilePlus className="h-4 w-4" />
+                        Debit Note
+                    </Button>
+                </ResponsiveToolbarActions>
+            </ResponsiveToolbar>
 
             {loading ? (
-                <div className="text-center py-8 text-gray-500">Loading...</div>
+                <div className="rounded-lg border border-gray-100 bg-white">
+                    <ListSkeleton rows={5} />
+                </div>
             ) : filteredNotes.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">No notes found</div>
+                <div className="text-center py-12 text-gray-500 text-sm">No notes found</div>
             ) : (
                 <div className="space-y-2">
                     {filteredNotes.map(note => (
                         <Card key={note.id}>
                             <CardContent className="p-4">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-semibold text-lg">{note.invoiceNumber}</span>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <span className="font-semibold text-base sm:text-lg break-all">{note.invoiceNumber}</span>
                                             <Badge variant={note.documentType === 'CREDIT_NOTE' ? 'destructive' : 'default'}>
                                                 {note.documentType === 'CREDIT_NOTE' ? 'Credit Note' : 'Debit Note'}
                                             </Badge>
@@ -230,14 +242,14 @@ function CustomerNotesTab() {
                                                 {note.status}
                                             </Badge>
                                         </div>
-                                        <div className="mt-1 text-sm text-gray-600">
+                                        <div className="mt-1.5 text-sm text-gray-600 break-words">
                                             <span className="font-medium">{note.customerName}</span>
                                             {note.referenceInvoiceNumber && (
-                                                <span className="ml-2">• Ref: {note.referenceInvoiceNumber}</span>
+                                                <span className="block sm:inline sm:ml-2">Ref: {note.referenceInvoiceNumber}</span>
                                             )}
-                                            {note.reason && <span className="ml-2">• {note.reason}</span>}
+                                            {note.reason && <span className="block sm:inline sm:ml-2 text-gray-500">{note.reason}</span>}
                                         </div>
-                                        <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-sm">
                                             <div>
                                                 <span className="text-gray-500">Total:</span>{' '}
                                                 <span className="font-semibold">{formatCurrency(note.totalAmount)}</span>
@@ -245,28 +257,29 @@ function CustomerNotesTab() {
                                             <div>
                                                 <span className="text-gray-500">Tax:</span> {formatCurrency(note.taxAmount)}
                                             </div>
-                                            <div>
+                                            <div className="col-span-2 sm:col-span-1">
                                                 <span className="text-gray-500">Date:</span>{' '}
                                                 {formatTimestampDate(note.issueDate)}
                                             </div>
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center gap-2 ml-4">
+                                    <ResponsiveActionBar className="sm:shrink-0">
                                         <Button
                                             variant="outline"
                                             size="sm"
                                             onClick={() => { setSelectedNote(note); setIsDetailOpen(true); }}
                                         >
-                                            <Eye className="h-4 w-4" />
+                                            <Eye className="h-4 w-4 shrink-0" />
+                                            <span className="ml-2 sm:hidden">View</span>
                                         </Button>
                                         {note.status === 'Draft' && (
                                             <Button
                                                 size="sm"
                                                 onClick={() => handlePost(note.id)}
-                                                className="flex items-center gap-1"
+                                                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
                                             >
-                                                <Check className="h-4 w-4" />
+                                                <Check className="h-4 w-4 shrink-0" />
                                                 Post
                                             </Button>
                                         )}
@@ -277,11 +290,11 @@ function CustomerNotesTab() {
                                                 onClick={() => handleCancel(note.id)}
                                                 className="flex items-center gap-1"
                                             >
-                                                <XCircle className="h-4 w-4" />
+                                                <XCircle className="h-4 w-4 shrink-0" />
                                                 Cancel
                                             </Button>
                                         )}
-                                    </div>
+                                    </ResponsiveActionBar>
                                 </div>
                             </CardContent>
                         </Card>
@@ -299,7 +312,7 @@ function CustomerNotesTab() {
 
             {/* Detail View */}
             <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen} zIndex={detailGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>{selectedNote?.invoiceNumber}</DialogTitle>
                         <DialogDescription>
@@ -377,10 +390,22 @@ function SupplierNotesTab() {
 
     useEffect(() => { fetchNotes(); }, [fetchNotes]);
 
-    const handlePost = async (noteId: string) => {
+    const handlePost = async (note: SupplierCreditDebitNote) => {
         try {
-            await creditDebitNoteService.postSupplierNote(noteId);
-            toast.success('Supplier note posted successfully');
+            await creditDebitNoteService.postSupplierNote(note.id);
+            if (note.documentType === 'SUPPLIER_CREDIT_NOTE' && note.referenceInvoiceId) {
+                toast.success(
+                    `${note.invoiceNumber} posted to GL and applied to bill ${note.referenceInvoiceNumber || 'reference'}.`,
+                    { duration: 6000 },
+                );
+            } else if (note.documentType === 'SUPPLIER_CREDIT_NOTE') {
+                toast.success(
+                    `${note.invoiceNumber} posted. Click "Apply to Open Bills" if this credit is not tied to one bill.`,
+                    { duration: 7000 },
+                );
+            } else {
+                toast.success('Supplier debit note posted successfully');
+            }
             fetchNotes();
         } catch {
             toast.error('Failed to post supplier note');
@@ -405,6 +430,16 @@ function SupplierNotesTab() {
      * Open Bills" action: one-click, residual stays on-account.
      */
     const [applyingNoteId, setApplyingNoteId] = useState<string | null>(null);
+    const [highlightNoteId, setHighlightNoteId] = useState<string | null>(null);
+    const [workflowFilter, setWorkflowFilter] = useState<'ALL' | 'DRAFT' | 'ON_ACCOUNT'>('ALL');
+
+    const draftNotes = notes.filter(n => isNoteDraft(n.status));
+    const onAccountNotes = notes.filter(n =>
+        n.documentType === 'SUPPLIER_CREDIT_NOTE'
+        && n.status === 'POSTED'
+        && n.outstandingBalance > 0,
+    );
+
     const handleApplyFIFO = async (noteId: string) => {
         setApplyingNoteId(noteId);
         try {
@@ -428,16 +463,42 @@ function SupplierNotesTab() {
         }
     };
 
-    const filteredNotes = notes.filter(n =>
-        !search || n.invoiceNumber.toLowerCase().includes(search.toLowerCase()) ||
-        (n.supplierName || '').toLowerCase().includes(search.toLowerCase()) ||
-        (n.reason || '').toLowerCase().includes(search.toLowerCase())
-    );
+    const filteredNotes = notes.filter(n => {
+        const matchesSearch = !search || n.invoiceNumber.toLowerCase().includes(search.toLowerCase()) ||
+            (n.supplierName || '').toLowerCase().includes(search.toLowerCase()) ||
+            (n.reason || '').toLowerCase().includes(search.toLowerCase());
+        if (!matchesSearch) return false;
+        if (workflowFilter === 'DRAFT') return isNoteDraft(n.status);
+        if (workflowFilter === 'ON_ACCOUNT') {
+            return n.documentType === 'SUPPLIER_CREDIT_NOTE'
+                && n.status === 'POSTED'
+                && n.outstandingBalance > 0;
+        }
+        return true;
+    });
 
     return (
         <div className="space-y-4">
-            <div className="flex items-center gap-3">
-                <div className="relative flex-1 max-w-md">
+            {(draftNotes.length > 0 || onAccountNotes.length > 0) && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 sm:p-4 text-sm text-amber-900 space-y-2">
+                    <p className="font-semibold">Supplier credit notes — action required</p>
+                    {draftNotes.length > 0 && (
+                        <p>
+                            <span className="font-medium">{draftNotes.length} draft note{draftNotes.length === 1 ? '' : 's'}</span>
+                            {' '}— not in GL yet. Use the green <strong>Post to GL</strong> button on each row.
+                        </p>
+                    )}
+                    {onAccountNotes.length > 0 && (
+                        <p>
+                            <span className="font-medium">{onAccountNotes.length} on-account credit note{onAccountNotes.length === 1 ? '' : 's'}</span>
+                            {' '}— posted to GL but AP not reduced. Use <strong>Apply to Open Bills</strong>.
+                        </p>
+                    )}
+                </div>
+            )}
+
+            <ResponsiveToolbar>
+                <div className="relative flex-1 min-w-0 sm:max-w-md">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                         placeholder="Search supplier notes..."
@@ -448,7 +509,7 @@ function SupplierNotesTab() {
                 </div>
 
                 <Select value={typeFilter} onValueChange={(v: string) => setTypeFilter(v as 'ALL' | 'SUPPLIER_CREDIT_NOTE' | 'SUPPLIER_DEBIT_NOTE')}>
-                    <SelectTrigger className="w-52">
+                    <SelectTrigger className="w-full sm:w-52">
                         <SelectValue placeholder="All Types" />
                     </SelectTrigger>
                     <SelectContent>
@@ -458,48 +519,92 @@ function SupplierNotesTab() {
                     </SelectContent>
                 </Select>
 
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => { setCreateType('SUPPLIER_CREDIT_NOTE'); setIsCreateModalOpen(true); }}
-                    className="flex items-center gap-1"
-                >
-                    <FileMinus className="h-4 w-4" />
-                    Credit Note
-                </Button>
+                <ResponsiveToolbarActions>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setCreateType('SUPPLIER_CREDIT_NOTE'); setIsCreateModalOpen(true); }}
+                        className="flex items-center gap-1"
+                    >
+                        <FileMinus className="h-4 w-4" />
+                        Credit Note
+                    </Button>
 
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => { setCreateType('SUPPLIER_DEBIT_NOTE'); setIsCreateModalOpen(true); }}
-                    className="flex items-center gap-1"
-                >
-                    <FilePlus className="h-4 w-4" />
-                    Debit Note
-                </Button>
-            </div>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setCreateType('SUPPLIER_DEBIT_NOTE'); setIsCreateModalOpen(true); }}
+                        className="flex items-center gap-1"
+                    >
+                        <FilePlus className="h-4 w-4" />
+                        Debit Note
+                    </Button>
+                </ResponsiveToolbarActions>
+            </ResponsiveToolbar>
+
+            {(draftNotes.length > 0 || onAccountNotes.length > 0) && (
+                <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setWorkflowFilter('ALL')}
+                        className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-full transition-colors text-center ${workflowFilter === 'ALL' ? 'bg-gray-800 text-white' : 'bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-100'}`}
+                    >
+                        All notes
+                    </button>
+                    {draftNotes.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => setWorkflowFilter('DRAFT')}
+                            className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-full transition-colors text-center ${workflowFilter === 'DRAFT' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-900 ring-1 ring-amber-200 hover:bg-amber-100'}`}
+                        >
+                            Needs posting ({draftNotes.length})
+                        </button>
+                    )}
+                    {onAccountNotes.length > 0 && (
+                        <button
+                            type="button"
+                            onClick={() => setWorkflowFilter('ON_ACCOUNT')}
+                            className={`w-full sm:w-auto px-3 py-2 text-xs font-medium rounded-full transition-colors text-center ${workflowFilter === 'ON_ACCOUNT' ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-800 ring-1 ring-purple-200 hover:bg-purple-100'}`}
+                        >
+                            On-account ({onAccountNotes.length})
+                        </button>
+                    )}
+                </div>
+            )}
 
             {loading ? (
-                <div className="text-center py-8 text-gray-500">Loading...</div>
+                <div className="rounded-lg border border-gray-100 bg-white">
+                    <ListSkeleton rows={5} />
+                </div>
             ) : filteredNotes.length === 0 ? (
-                <div className="text-center py-8 text-gray-500">No supplier notes found</div>
+                <div className="text-center py-12 text-gray-500 text-sm">No supplier notes found</div>
             ) : (
                 <div className="space-y-2">
                     {filteredNotes.map(note => (
-                        <Card key={note.id}>
+                        <Card
+                            key={note.id}
+                            className={highlightNoteId === note.id ? 'ring-2 ring-amber-400' : undefined}
+                        >
                             <CardContent className="p-4">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-semibold text-lg">{note.invoiceNumber}</span>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                            <span className="font-semibold text-base sm:text-lg break-all">{note.invoiceNumber}</span>
                                             <Badge variant={note.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'destructive' : 'default'}>
                                                 {note.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'Credit Note' : 'Debit Note'}
                                             </Badge>
-                                            <Badge variant={note.status === 'POSTED' ? 'default' : 'secondary'}>
+                                            <Badge variant={
+                                                note.status === 'APPLIED' ? 'default'
+                                                    : isSupplierPosted(note.status) ? 'default'
+                                                        : 'secondary'
+                                            }>
                                                 {note.status}
                                             </Badge>
-                                            {/* SAP/Odoo-style on-account credit indicator. Visible only for
-                                                posted standalone SCNs that still have residual outstanding. */}
+                                            {isNoteDraft(note.status) && (
+                                                <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-800">
+                                                    Needs posting
+                                                </Badge>
+                                            )}
                                             {note.documentType === 'SUPPLIER_CREDIT_NOTE'
                                                 && note.status === 'POSTED'
                                                 && note.outstandingBalance > 0 && (
@@ -508,14 +613,14 @@ function SupplierNotesTab() {
                                                     </Badge>
                                                 )}
                                         </div>
-                                        <div className="mt-1 text-sm text-gray-600">
+                                        <div className="mt-1.5 text-sm text-gray-600 break-words">
                                             <span className="font-medium">{note.supplierName || 'Unknown supplier'}</span>
                                             {note.referenceInvoiceNumber && (
-                                                <span className="ml-2">• Ref: {note.referenceInvoiceNumber}</span>
+                                                <span className="block sm:inline sm:ml-2">Ref: {note.referenceInvoiceNumber}</span>
                                             )}
-                                            {note.reason && <span className="ml-2">• {note.reason}</span>}
+                                            {note.reason && <span className="block sm:inline sm:ml-2 text-gray-500">{note.reason}</span>}
                                         </div>
-                                        <div className="mt-1 grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-sm">
                                             <div>
                                                 <span className="text-gray-500">Total:</span>{' '}
                                                 <span className="font-semibold">{formatCurrency(note.totalAmount)}</span>
@@ -523,45 +628,43 @@ function SupplierNotesTab() {
                                             <div>
                                                 <span className="text-gray-500">Tax:</span> {formatCurrency(note.taxAmount)}
                                             </div>
-                                            <div>
+                                            <div className="col-span-2 sm:col-span-1">
                                                 <span className="text-gray-500">Date:</span>{' '}
                                                 {formatTimestampDate(note.issueDate)}
                                             </div>
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center gap-2 ml-4">
+                                    <ResponsiveActionBar className="sm:shrink-0">
                                         <Button
                                             variant="outline"
                                             size="sm"
                                             onClick={() => { setSelectedNote(note); setIsDetailOpen(true); }}
                                         >
-                                            <Eye className="h-4 w-4" />
+                                            <Eye className="h-4 w-4 shrink-0" />
+                                            <span className="ml-2 sm:hidden">View</span>
                                         </Button>
-                                        {note.status === 'DRAFT' && (
+                                        {isNoteDraft(note.status) && (
                                             <Button
                                                 size="sm"
-                                                onClick={() => handlePost(note.id)}
-                                                className="flex items-center gap-1"
+                                                onClick={() => handlePost(note)}
+                                                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
                                             >
-                                                <Check className="h-4 w-4" />
-                                                Post
+                                                <Check className="h-4 w-4 shrink-0" />
+                                                Post to GL
                                             </Button>
                                         )}
-                                        {note.status === 'POSTED' && (
+                                        {(note.status === 'POSTED' || note.status === 'APPLIED') && (
                                             <Button
                                                 variant="destructive"
                                                 size="sm"
                                                 onClick={() => handleCancel(note.id)}
                                                 className="flex items-center gap-1"
                                             >
-                                                <XCircle className="h-4 w-4" />
+                                                <XCircle className="h-4 w-4 shrink-0" />
                                                 Cancel
                                             </Button>
                                         )}
-                                        {/* Any posted SCN with residual on-account balance can be
-                                            applied via FIFO. Auto-applied (RGRN-derived) notes already
-                                            have outstandingBalance = 0 and won't show this button. */}
                                         {note.documentType === 'SUPPLIER_CREDIT_NOTE'
                                             && note.status === 'POSTED'
                                             && note.outstandingBalance > 0 && (
@@ -571,11 +674,11 @@ function SupplierNotesTab() {
                                                     disabled={applyingNoteId === note.id}
                                                     className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
                                                 >
-                                                    <Sparkles className="h-4 w-4" />
+                                                    <Sparkles className="h-4 w-4 shrink-0" />
                                                     {applyingNoteId === note.id ? 'Applying…' : 'Apply to Open Bills'}
                                                 </Button>
                                             )}
-                                    </div>
+                                    </ResponsiveActionBar>
                                 </div>
                             </CardContent>
                         </Card>
@@ -589,11 +692,15 @@ function SupplierNotesTab() {
                 onClose={() => setIsCreateModalOpen(false)}
                 noteType={createType}
                 onSuccess={fetchNotes}
+                onCreated={(created) => {
+                    setHighlightNoteId(created.id);
+                    setTimeout(() => setHighlightNoteId(null), 12000);
+                }}
             />
 
             {/* Detail View */}
             <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen} zIndex={detailGuardRefS.current?.panelZIndex ?? ZINDEX.PANEL}>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>{selectedNote?.invoiceNumber}</DialogTitle>
                         <DialogDescription>
@@ -615,6 +722,26 @@ function SupplierNotesTab() {
                             )}
                             {selectedNote.notes && (
                                 <div><span className="text-gray-500">Notes:</span> {selectedNote.notes}</div>
+                            )}
+                            {isNoteDraft(selectedNote.status) && (
+                                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                                    <p className="font-medium">Next step: Post to GL</p>
+                                    <p className="mt-1 text-xs">
+                                        Draft notes do not affect GL or supplier balance. Close this dialog and click
+                                        {' '}<strong>Post to GL</strong> on the list (or use Create &amp; Post when creating).
+                                    </p>
+                                </div>
+                            )}
+                            {selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE'
+                                && selectedNote.status === 'POSTED'
+                                && selectedNote.outstandingBalance > 0 && (
+                                <div className="rounded-md border border-purple-200 bg-purple-50 p-3 text-purple-900">
+                                    <p className="font-medium">Next step: Apply to open bills</p>
+                                    <p className="mt-1 text-xs">
+                                        On-account balance {formatCurrency(selectedNote.outstandingBalance)} —
+                                        use <strong>Apply to Open Bills</strong> on the list.
+                                    </p>
+                                </div>
                             )}
                             <DocumentFlowButton
                                 entityType={selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'CREDIT_NOTE' : 'DEBIT_NOTE'}
@@ -953,9 +1080,10 @@ interface CreateSupplierNoteModalProps {
     onClose: () => void;
     noteType: 'SUPPLIER_CREDIT_NOTE' | 'SUPPLIER_DEBIT_NOTE';
     onSuccess: () => void;
+    onCreated?: (note: { id: string; invoiceNumber: string }) => void;
 }
 
-function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateSupplierNoteModalProps) {
+function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess, onCreated }: CreateSupplierNoteModalProps) {
     const [invoiceId, setInvoiceId] = useState('');
     const [reason, setReason] = useState('');
     const [amount, setAmount] = useState('');
@@ -994,7 +1122,7 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
         }
     };
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (postAfterCreate: boolean) => {
         if (!invoiceId) { toast.error('Please select a supplier invoice'); return; }
         if (!reason.trim()) { toast.error('Reason is required'); return; }
         const parsedAmount = parseFloat(amount);
@@ -1002,6 +1130,9 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
 
         setSubmitting(true);
         try {
+            let noteId: string | undefined;
+            let noteNumber: string | undefined;
+
             if (noteType === 'SUPPLIER_CREDIT_NOTE') {
                 const data: CreateSupplierCreditNoteRequest = {
                     invoiceId,
@@ -1010,8 +1141,10 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
                     amount: parsedAmount,
                     notes: additionalNotes || undefined,
                 };
-                await creditDebitNoteService.createSupplierCreditNote(data);
-                toast.success('Supplier credit note created (Draft)');
+                const res = await creditDebitNoteService.createSupplierCreditNote(data);
+                const note = res.data?.note ?? res.data;
+                noteId = note?.id as string | undefined;
+                noteNumber = note?.invoiceNumber as string | undefined;
             } else {
                 const data: CreateSupplierDebitNoteRequest = {
                     invoiceId,
@@ -1019,8 +1152,31 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
                     amount: parsedAmount,
                     notes: additionalNotes || undefined,
                 };
-                await creditDebitNoteService.createSupplierDebitNote(data);
-                toast.success('Supplier debit note created (Draft)');
+                const res = await creditDebitNoteService.createSupplierDebitNote(data);
+                const note = res.data?.note ?? res.data;
+                noteId = note?.id as string | undefined;
+                noteNumber = note?.invoiceNumber as string | undefined;
+            }
+
+            if (postAfterCreate && noteId) {
+                await creditDebitNoteService.postSupplierNote(noteId);
+                if (noteType === 'SUPPLIER_CREDIT_NOTE') {
+                    toast.success(
+                        `${noteNumber ?? 'Credit note'} posted to GL and applied to the selected bill.`,
+                        { duration: 6000 },
+                    );
+                } else {
+                    toast.success(`${noteNumber ?? 'Debit note'} posted to GL.`);
+                }
+            } else {
+                toast.success(
+                    `${noteNumber ?? 'Note'} saved as Draft — use Post to GL on the list to complete accounting.`,
+                    { duration: 7000 },
+                );
+            }
+
+            if (noteId && noteNumber) {
+                onCreated?.({ id: noteId, invoiceNumber: noteNumber });
             }
             onSuccess();
             resetForm();
@@ -1058,6 +1214,15 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
                 </DialogHeader>
 
                 <div className="space-y-4">
+                    <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                        <p className="font-medium">Workflow</p>
+                        <ol className="mt-1 list-decimal list-inside space-y-0.5 text-xs">
+                            <li><strong>Create</strong> — saves a draft (no GL yet)</li>
+                            <li><strong>Post to GL</strong> — records accounting; linked credits auto-apply to the bill you selected</li>
+                            <li><strong>Apply to Open Bills</strong> — only if posted and still shows on-account balance</li>
+                        </ol>
+                    </div>
+
                     {/* Return Goods Banner (credit notes only) */}
                     {noteType === 'SUPPLIER_CREDIT_NOTE' && (
                         <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm">
@@ -1160,10 +1325,21 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess }: CreateS
                     </div>
                 </div>
 
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>Cancel</Button>
-                    <Button onClick={handleSubmit} disabled={submitting}>
-                        {submitting ? 'Creating...' : `Create ${noteType === 'SUPPLIER_CREDIT_NOTE' ? 'Credit' : 'Debit'} Note`}
+                <DialogFooter className="flex-col sm:flex-row gap-2">
+                    <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+                    <Button
+                        variant="outline"
+                        onClick={() => handleSubmit(false)}
+                        disabled={submitting}
+                    >
+                        {submitting ? 'Saving...' : 'Save as Draft'}
+                    </Button>
+                    <Button
+                        onClick={() => handleSubmit(true)}
+                        disabled={submitting}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                    >
+                        {submitting ? 'Posting...' : 'Create & Post to GL'}
                     </Button>
                 </DialogFooter>
             </DialogContent>
