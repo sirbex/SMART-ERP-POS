@@ -84,6 +84,7 @@ export const tenantMigrationService = {
 
         if (tenantVersion >= CURRENT_SCHEMA_VERSION) {
             verifiedTenants.add(tenantSlug);
+            await this._ensureApGovernance(tenantPool, tenantSlug);
             return;
         }
 
@@ -101,6 +102,19 @@ export const tenantMigrationService = {
 
         verifiedTenants.add(tenantSlug);
         logger.info(`Tenant "${tenantSlug}" migration complete. Now at v${newVersion}.`);
+        await this._ensureApGovernance(tenantPool, tenantSlug);
+    },
+
+    async _ensureApGovernance(tenantPool: Pool, tenantSlug: string): Promise<void> {
+        try {
+            const { ensureTenantApCachesAligned } = await import(
+                '../supplier-payments/apBalanceGovernance.js'
+            );
+            await ensureTenantApCachesAligned(tenantPool, tenantSlug);
+        } catch (err) {
+            logger.error(`Tenant "${tenantSlug}" AP governance check failed`, { err });
+            throw err;
+        }
     },
 
     /**

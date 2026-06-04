@@ -1,5 +1,21 @@
 # AP (2100) Reconciliation — Solutions & Verified Proof
 
+## Permanent fix (service layer, all tenants)
+
+**`apBalanceGovernance.ts`** enforces AP cache integrity without DB triggers:
+
+| Hook | When | Action |
+|------|------|--------|
+| `afterJournalEntryGovernance` | Every `AccountingCore.createJournalEntry` / `reverseTransaction` (same txn) | Rebase touched `accounts.CurrentBalance` from POSTED ledger; sync supplier cache if 2100 + `entityType=supplier` |
+| `syncSupplierApCache` | `postInvoiceToGL` and manual heals | Repair invoice OB from ledger + update `suppliers.OutstandingBalance` |
+| `ensureTenantApCachesAligned` | First request per tenant per process (`tenantMigrationService`) | Auto-heal cache drift (2100 rebase + all suppliers) — no GL correction JE |
+
+Going forward, **STORED_BALANCE** and **SUPPLIER_BALANCE** cache rows stay aligned with ledger/open-item SSOT. True GL vs open-item gaps (expenses on 2100, legacy GR) still use integrity + optional `heal-ap-drift`.
+
+---
+
+# AP (2100) Reconciliation — Solutions & Verified Proof
+
 Enterprise-grade Accounts Payable reconciliation for Henber and all tenants. Three independent drift layers; each has a dedicated heal and a measurable proof.
 
 ## The three layers (Henber example)

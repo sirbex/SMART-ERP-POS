@@ -920,6 +920,9 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
 
         // Mark posted
         await supplierPaymentRepository.markInvoicePostedToGL(client, invoiceId);
+
+        const { syncSupplierApCache } = await import('./apBalanceGovernance.js');
+        await syncSupplierApCache(client, inv.SupplierId, 'POST_INVOICE_TO_GL');
     });
 }
 

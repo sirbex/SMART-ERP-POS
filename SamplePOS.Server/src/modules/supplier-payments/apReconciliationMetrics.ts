@@ -4,9 +4,12 @@
 import type { Pool, PoolClient } from 'pg';
 import { Money } from '../../utils/money.js';
 import {
+  apMaterialityThreshold,
   computeApGlSupplierScope,
   computeApSubledgerBalance,
+  computeExpenseOnAp,
   computeSuppliersMasterCacheExpectedSum,
+  isApDriftExplainedByExpenses,
 } from './apReconciliationEngine.js';
 
 export interface ApReconciliationMetrics {
@@ -27,6 +30,8 @@ export interface ApReconciliationMetrics {
   supplierEntityGlDrift: number;
   /** Net-active supplier-scope GL − open-item (integrity SSOT) */
   integrityGlDrift: number;
+  /** Standalone expenses on 2100 (not supplier subledger) */
+  expenseOnAp: number;
 }
 
 export interface ApReconciliationVerification {
@@ -87,11 +92,12 @@ export async function captureApReconciliationMetrics(
   const suppliersTableSum = Money.toNumber(Money.parseDb(row.supplier_table_sum ?? 0));
   const storedBalance2100 = Money.toNumber(Money.parseDb(row.stored_balance ?? 0));
 
-  const [glSupplierScopeNetActive, openItemSubledger, suppliersCacheExpectedSum] =
+  const [glSupplierScopeNetActive, openItemSubledger, suppliersCacheExpectedSum, expenseOnAp] =
     await Promise.all([
       computeApGlSupplierScope(conn),
       computeApSubledgerBalance(conn),
       computeSuppliersMasterCacheExpectedSum(conn),
+      computeExpenseOnAp(conn),
     ]);
 
   return {
@@ -107,20 +113,40 @@ export async function captureApReconciliationMetrics(
     storedBalanceDrift: glTotal2100 - storedBalance2100,
     supplierEntityGlDrift: glSupplierEntity2100 - openItemSubledger,
     integrityGlDrift: glSupplierScopeNetActive - openItemSubledger,
+    expenseOnAp,
   };
+}
+
+/** Supplier-scope GL vs open-item — same rules as GL integrity check. */
+export function isApSupplierGlIntegrityMatched(metrics: ApReconciliationMetrics): boolean {
+  if (Math.abs(metrics.integrityGlDrift) <= 0.01) return true;
+  const threshold = apMaterialityThreshold(metrics.glSupplierScopeNetActive);
+  return isApDriftExplainedByExpenses(
+    {
+      glBalance: metrics.glSupplierScopeNetActive,
+      invoiceOpenBalance: 0,
+      unallocatedPayments: 0,
+      subledgerBalance: metrics.openItemSubledger,
+      expenseOnAp: metrics.expenseOnAp,
+      legacyGrInAp: 0,
+      drift: metrics.integrityGlDrift,
+      residualAfterExpense: metrics.integrityGlDrift + metrics.expenseOnAp,
+    },
+    threshold,
+  );
 }
 
 /**
  * Post-heal invariants for enterprise AP reconciliation.
  * Cache + stored balance must match SSOT; integrity GL drift may remain if explained by expenses.
  */
-export function verifyApReconciliationMetrics(
+/** Cache-layer only (STORED + SUPPLIER_BALANCE) — independent of GL vs open-item integrity. */
+export function verifyApCacheLayersOnly(
   metrics: ApReconciliationMetrics,
   options?: { tolerance?: number },
-): ApReconciliationVerification {
+): { ok: boolean; failures: string[] } {
   const t = options?.tolerance ?? 0.01;
   const failures: string[] = [];
-
   if (Math.abs(metrics.storedBalanceDrift) > t) {
     failures.push(
       `STORED_BALANCE: CurrentBalance ${metrics.storedBalance2100.toFixed(2)} `
@@ -131,9 +157,19 @@ export function verifyApReconciliationMetrics(
     failures.push(
       `SUPPLIER_BALANCE cache: suppliers sum ${metrics.suppliersTableSum.toFixed(2)} `
         + `≠ expected cache ${metrics.suppliersCacheExpectedSum.toFixed(2)} `
-        + `(drift ${metrics.supplierCacheDrift.toFixed(2)}; run recalc-supplier-balances)`,
+        + `(drift ${metrics.supplierCacheDrift.toFixed(2)})`,
     );
   }
+  return { ok: failures.length === 0, failures };
+}
+
+export function verifyApReconciliationMetrics(
+  metrics: ApReconciliationMetrics,
+  options?: { tolerance?: number },
+): ApReconciliationVerification {
+  const t = options?.tolerance ?? 0.01;
+  const cacheCheck = verifyApCacheLayersOnly(metrics, options);
+  const failures = [...cacheCheck.failures];
 
   return { ok: failures.length === 0, failures, metrics };
 }

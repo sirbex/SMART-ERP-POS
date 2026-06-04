@@ -1153,20 +1153,38 @@ export interface HealApReconciliationCachesResult {
  */
 export async function healApReconciliationCaches(
     dbPool?: pg.Pool,
+    tenantSlug?: string,
 ): Promise<HealApReconciliationCachesResult> {
     const pool = dbPool || globalPool;
     const startedAt = Date.now();
     const before = await captureApReconciliationMetrics(pool);
-    const recalc = await recalcAllSupplierBalances(pool);
-    const rebase = await rebaseAccountBalances(pool, { accountCodes: ['2100'] });
+
+    const { ensureTenantApCachesAligned } = await import(
+        '../supplier-payments/apBalanceGovernance.js'
+    );
+    const heal = await ensureTenantApCachesAligned(
+        pool,
+        tenantSlug ?? 'manual-heal',
+        { force: true },
+    );
+
     const after = await captureApReconciliationMetrics(pool);
     const verification = verifyApReconciliationMetrics(after);
 
     return {
         before,
         after,
-        recalc,
-        rebase,
+        recalc: {
+            suppliersScanned: 0,
+            suppliersUpdated: heal.suppliersUpdated,
+            durationMs: Date.now() - startedAt,
+        },
+        rebase: {
+            accountsScanned: 1,
+            accountsUpdated: heal.accountsRebased,
+            durationMs: 0,
+            updates: [],
+        },
         verification,
         durationMs: Date.now() - startedAt,
     };

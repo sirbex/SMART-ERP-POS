@@ -773,6 +773,19 @@ export class AccountingCore {
                 }
             }
 
+            // Service-layer AP governance (no triggers): snap account caches + supplier master.
+            const { afterJournalEntryGovernance } = await import(
+                '../modules/supplier-payments/apBalanceGovernance.js'
+            );
+            await afterJournalEntryGovernance(
+                client,
+                request.lines.map((l) => ({
+                    accountCode: l.accountCode,
+                    entityType: l.entityType ?? null,
+                    entityId: l.entityId ?? null,
+                })),
+            );
+
             logger.info('Journal entry created', {
                 transactionId,
                 transactionNumber,
@@ -910,10 +923,19 @@ export class AccountingCore {
             }
 
             // 4. Get original entries
-            const entriesResult = await client.query(
+            const entriesResult = await client.query<{
+                AccountId: string;
+                DebitAmount: string;
+                CreditAmount: string;
+                Description: string;
+                AccountCode: string;
+                EntityType: string | null;
+                EntityId: string | null;
+            }>(
                 `
         SELECT 
           le."AccountId", le."DebitAmount", le."CreditAmount", le."Description",
+          le."EntityType", le."EntityId",
           a."AccountCode"
         FROM ledger_entries le
         JOIN accounts a ON le."AccountId" = a."Id"
@@ -923,12 +945,14 @@ export class AccountingCore {
                 [request.originalTransactionId]
             );
 
-            // 5. Create reversed lines (swap debits and credits)
+            // 5. Create reversed lines (swap debits and credits; preserve entity tags)
             const reversedLines: JournalLine[] = entriesResult.rows.map((entry) => ({
                 accountCode: entry.AccountCode,
                 description: `REVERSAL: ${entry.Description}`,
-                debitAmount: Money.parseDb(entry.CreditAmount).toNumber(), // Swap!
-                creditAmount: Money.parseDb(entry.DebitAmount).toNumber(), // Swap!
+                debitAmount: Money.parseDb(entry.CreditAmount).toNumber(),
+                creditAmount: Money.parseDb(entry.DebitAmount).toNumber(),
+                entityType: entry.EntityType?.toLowerCase() as JournalLine['entityType'],
+                entityId: entry.EntityId ?? undefined,
             }));
 
             // 6. Generate reversal transaction number
@@ -972,7 +996,9 @@ export class AccountingCore {
 
             // 8. Create reversal entries
             let lineNumber = 1;
-            for (const line of reversedLines) {
+            for (let i = 0; i < reversedLines.length; i++) {
+                const line = reversedLines[i];
+                const orig = entriesResult.rows[i];
                 const accountResult = await client.query(
                     `
           SELECT "Id", "NormalBalance" FROM accounts WHERE "AccountCode" = $1
@@ -989,8 +1015,9 @@ export class AccountingCore {
                     `
           INSERT INTO ledger_entries (
             "Id", "TransactionId", "AccountId", "EntryType", "Amount",
-            "DebitAmount", "CreditAmount", "Description", "LineNumber", "CreatedAt"
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            "DebitAmount", "CreditAmount", "Description", "LineNumber",
+            "EntityType", "EntityId", "EntryDate", "CreatedAt"
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
         `,
                     [
                         entryId,
@@ -1002,6 +1029,9 @@ export class AccountingCore {
                         line.creditAmount,
                         line.description,
                         lineNumber++,
+                        orig?.EntityType ?? line.entityType ?? null,
+                        orig?.EntityId ?? line.entityId ?? null,
+                        request.reversalDate,
                     ]
                 );
 
@@ -1149,6 +1179,18 @@ export class AccountingCore {
                         reversalReason: request.reason,
                     }),
                 ]
+            );
+
+            const { afterJournalEntryGovernance } = await import(
+                '../modules/supplier-payments/apBalanceGovernance.js'
+            );
+            await afterJournalEntryGovernance(
+                client,
+                reversedLines.map((l) => ({
+                    accountCode: l.accountCode,
+                    entityType: l.entityType ?? null,
+                    entityId: l.entityId ?? null,
+                })),
             );
 
             logger.info('Transaction reversed', {

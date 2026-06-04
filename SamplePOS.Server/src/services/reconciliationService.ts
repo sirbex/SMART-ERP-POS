@@ -13,10 +13,11 @@ import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import { checkInventoryIntegrity, type IntegrityIssue } from './inventoryIntegrityService.js';
 import { getBusinessDate } from '../utils/dateRange.js';
+import { healApCachesIfDrifted } from '../modules/supplier-payments/apBalanceGovernance.js';
 import {
-  computeApSubledgerBalance,
-  computeSuppliersMasterCacheExpectedSum,
-} from '../modules/supplier-payments/apReconciliationEngine.js';
+  captureApReconciliationMetrics,
+  isApSupplierGlIntegrityMatched,
+} from '../modules/supplier-payments/apReconciliationMetrics.js';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -320,64 +321,19 @@ export class ReconciliationService {
         const date = asOfDate || getBusinessDate();
 
         try {
-            // GL-driven reconciliation: compare supplier-scoped AP GL balance
-            // vs suppliers table (subledger) vs account stored balance.
-            // Account 2100 also holds non-supplier payables (expense accruals for
-            // airtime, allowances, fuel, etc.) which are legitimate AP entries but
-            // NOT supplier invoices — these are shown as INFO, not discrepancies.
-            const result = await this.pool.query(
-                `
-                WITH gl_total AS (
-                    SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS balance
-                    FROM ledger_entries le
-                    JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-                    JOIN accounts a ON le."AccountId" = a."Id"
-                    WHERE a."AccountCode" = '2100'
-                      AND lt."TransactionDate"::DATE <= $1
-                      AND lt."Status" = 'POSTED'
-                ),
-                gl_supplier AS (
-                    SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS balance
-                    FROM ledger_entries le
-                    JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-                    JOIN accounts a ON le."AccountId" = a."Id"
-                    WHERE a."AccountCode" = '2100'
-                      AND UPPER(le."EntityType") = 'SUPPLIER'
-                      AND lt."TransactionDate"::DATE <= $1
-                      AND lt."Status" = 'POSTED'
-                ),
-                supplier_table AS (
-                    SELECT COALESCE(SUM("OutstandingBalance"), 0) AS balance
-                    FROM suppliers
-                ),
-                stored_balance AS (
-                    SELECT COALESCE("CurrentBalance", 0) AS balance
-                    FROM accounts
-                    WHERE "AccountCode" = '2100'
-                )
-                SELECT
-                    gt.balance  AS gl_balance,
-                    gs.balance  AS supplier_gl_balance,
-                    st.balance  AS supplier_table_balance,
-                    sb.balance  AS stored_balance
-                FROM gl_total gt, gl_supplier gs, supplier_table st, stored_balance sb
-            `,
-                [date]
-            );
+            // Auto-heal cache layers (STORED + SUPPLIER_BALANCE) before reporting.
+            await healApCachesIfDrifted(this.pool);
 
-            const row = result.rows[0] || {
-                gl_balance: 0,
-                supplier_gl_balance: 0,
-                supplier_table_balance: 0,
-                stored_balance: 0,
-            };
-            const glBalance = parseFloat(row.gl_balance || '0');
-            const supplierGlBalance = parseFloat(row.supplier_gl_balance || '0');
-            const supplierTableBalance = parseFloat(row.supplier_table_balance || '0');
-            const storedBalance = parseFloat(row.stored_balance || '0');
-            const openItemSubledger = await computeApSubledgerBalance(this.pool);
-            const suppliersCacheExpected = await computeSuppliersMasterCacheExpectedSum(this.pool);
-            const expenseAccruals = new Decimal(glBalance).minus(supplierGlBalance).toNumber();
+            const m = await captureApReconciliationMetrics(this.pool, date);
+            const glBalance = m.glTotal2100;
+            const supplierEntityGl = m.glSupplierEntity2100;
+            const supplierScopeGl = m.glSupplierScopeNetActive;
+            const openItemSubledger = m.openItemSubledger;
+            const supplierTableBalance = m.suppliersTableSum;
+            const suppliersCacheExpected = m.suppliersCacheExpectedSum;
+            const storedBalance = m.storedBalance2100;
+            const expenseAccruals = m.expenseOnAp;
+            const supplierGlIntegrityOk = isApSupplierGlIntegrityMatched(m);
 
             const items: ReconciliationItem[] = [
                 {
@@ -408,22 +364,25 @@ export class ReconciliationService {
                 },
                 {
                     source: 'SUPPLIER_AP_GL',
-                    description: 'Supplier-only AP balance from General Ledger (EntityType = SUPPLIER)',
-                    amount: supplierGlBalance,
-                    difference: new Decimal(supplierGlBalance).minus(openItemSubledger).toNumber(),
-                    status:
-                        Math.abs(supplierGlBalance - openItemSubledger) < 0.01
-                            ? ('MATCHED' as ReconciliationItem['status'])
-                            : ('DISCREPANCY' as ReconciliationItem['status']),
-                    details: null,
+                    description:
+                        'Supplier AP GL (net-active supplier scope on 2100) vs open-item subledger',
+                    amount: supplierScopeGl,
+                    difference: m.integrityGlDrift,
+                    status: supplierGlIntegrityOk
+                        ? ('MATCHED' as ReconciliationItem['status'])
+                        : ('DISCREPANCY' as ReconciliationItem['status']),
+                    details: {
+                        entityTypeSupplierGl: supplierEntityGl,
+                        entityTypeDrift: m.supplierEntityGlDrift,
+                    },
                 },
                 {
                     source: 'SUPPLIER_BALANCE',
                     description: 'Sum of per-supplier outstanding balances (suppliers table cache)',
                     amount: supplierTableBalance,
-                    difference: new Decimal(supplierTableBalance).minus(suppliersCacheExpected).toNumber(),
+                    difference: m.supplierCacheDrift,
                     status:
-                        Math.abs(supplierTableBalance - suppliersCacheExpected) < 0.01
+                        Math.abs(m.supplierCacheDrift) < 0.01
                             ? ('MATCHED' as ReconciliationItem['status'])
                             : ('DISCREPANCY' as ReconciliationItem['status']),
                     details: null,
@@ -432,9 +391,9 @@ export class ReconciliationService {
                     source: 'STORED_BALANCE',
                     description: 'Account CurrentBalance stored on accounts table',
                     amount: storedBalance,
-                    difference: new Decimal(glBalance).minus(storedBalance).toNumber(),
+                    difference: m.storedBalanceDrift,
                     status:
-                        Math.abs(glBalance - storedBalance) < 0.01
+                        Math.abs(m.storedBalanceDrift) < 0.01
                             ? ('MATCHED' as ReconciliationItem['status'])
                             : ('DISCREPANCY' as ReconciliationItem['status']),
                     details: null,
@@ -445,14 +404,18 @@ export class ReconciliationService {
 
             const recommendations: string[] = [];
             if (hasDiscrepancy) {
-                recommendations.push(
-                    'POST /api/system/gl/heal-ap-reconciliation-caches — recalc supplier cache + rebase 2100 CurrentBalance',
-                );
-                recommendations.push(
-                    'If SUPPLIER_AP_GL still DISCREPANCY: POST /api/system/gl/heal-ap-drift (GL correction JE)',
-                );
+                if (Math.abs(m.storedBalanceDrift) > 0.01 || Math.abs(m.supplierCacheDrift) > 0.01) {
+                    recommendations.push(
+                        'Cache drift persists — POST /api/system/gl/heal-ap-reconciliation-caches or retry after deploy',
+                    );
+                }
+                if (!supplierGlIntegrityOk) {
+                    recommendations.push(
+                        'SUPPLIER_AP_GL: POST /api/system/gl/heal-ap-drift if drift not explained by expense-on-AP',
+                    );
+                    recommendations.push('Run entity-tag backfill via heal-ap-reconciliation-caches');
+                }
                 recommendations.push('Review supplier payment applications and unallocated payments');
-                recommendations.push('Verify goods receipt / invoice / SCN postings use EntityType = SUPPLIER on 2100');
             }
 
             return {
@@ -460,9 +423,9 @@ export class ReconciliationService {
                 accountCode: '2100',
                 asOfDate: date,
                 generatedAt: new Date().toISOString(),
-                glBalance: supplierGlBalance,
+                glBalance: supplierScopeGl,
                 subledgerBalance: openItemSubledger,
-                difference: new Decimal(supplierGlBalance).minus(openItemSubledger).toNumber(),
+                difference: m.integrityGlDrift,
                 status: hasDiscrepancy ? 'DISCREPANCY' : 'RECONCILED',
                 items,
                 recommendations,
