@@ -13,6 +13,10 @@ import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import { checkInventoryIntegrity, type IntegrityIssue } from './inventoryIntegrityService.js';
 import { getBusinessDate } from '../utils/dateRange.js';
+import {
+  computeApSubledgerBalance,
+  computeSuppliersMasterCacheExpectedSum,
+} from '../modules/supplier-payments/apReconciliationEngine.js';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -371,6 +375,8 @@ export class ReconciliationService {
             const supplierGlBalance = parseFloat(row.supplier_gl_balance || '0');
             const supplierTableBalance = parseFloat(row.supplier_table_balance || '0');
             const storedBalance = parseFloat(row.stored_balance || '0');
+            const openItemSubledger = await computeApSubledgerBalance(this.pool);
+            const suppliersCacheExpected = await computeSuppliersMasterCacheExpectedSum(this.pool);
             const expenseAccruals = new Decimal(glBalance).minus(supplierGlBalance).toNumber();
 
             const items: ReconciliationItem[] = [
@@ -392,20 +398,32 @@ export class ReconciliationService {
                     details: null,
                 },
                 {
-                    source: 'SUPPLIER_AP_GL',
-                    description: 'Supplier-only AP balance from General Ledger (EntityType = SUPPLIER)',
-                    amount: supplierGlBalance,
+                    source: 'OPEN_ITEM_SUBLEDGER',
+                    description:
+                        'Open-item AP subledger (open supplier invoices − unallocated payments) — Wave 5 SSOT',
+                    amount: openItemSubledger,
                     difference: 0,
                     status: 'BASE' as ReconciliationItem['status'],
                     details: null,
                 },
                 {
-                    source: 'SUPPLIER_BALANCE',
-                    description: 'Sum of per-supplier outstanding balances (suppliers table)',
-                    amount: supplierTableBalance,
-                    difference: new Decimal(supplierGlBalance).minus(supplierTableBalance).toNumber(),
+                    source: 'SUPPLIER_AP_GL',
+                    description: 'Supplier-only AP balance from General Ledger (EntityType = SUPPLIER)',
+                    amount: supplierGlBalance,
+                    difference: new Decimal(supplierGlBalance).minus(openItemSubledger).toNumber(),
                     status:
-                        Math.abs(supplierGlBalance - supplierTableBalance) < 0.01
+                        Math.abs(supplierGlBalance - openItemSubledger) < 0.01
+                            ? ('MATCHED' as ReconciliationItem['status'])
+                            : ('DISCREPANCY' as ReconciliationItem['status']),
+                    details: null,
+                },
+                {
+                    source: 'SUPPLIER_BALANCE',
+                    description: 'Sum of per-supplier outstanding balances (suppliers table cache)',
+                    amount: supplierTableBalance,
+                    difference: new Decimal(supplierTableBalance).minus(suppliersCacheExpected).toNumber(),
+                    status:
+                        Math.abs(supplierTableBalance - suppliersCacheExpected) < 0.01
                             ? ('MATCHED' as ReconciliationItem['status'])
                             : ('DISCREPANCY' as ReconciliationItem['status']),
                     details: null,
@@ -427,10 +445,14 @@ export class ReconciliationService {
 
             const recommendations: string[] = [];
             if (hasDiscrepancy) {
-                recommendations.push('Review supplier payment applications');
-                recommendations.push('Check for unapplied supplier payments');
-                recommendations.push('Verify goods receipt postings are syncing to GL');
-                recommendations.push('Investigate suppliers with balance discrepancies');
+                recommendations.push(
+                    'POST /api/system/gl/heal-ap-reconciliation-caches — recalc supplier cache + rebase 2100 CurrentBalance',
+                );
+                recommendations.push(
+                    'If SUPPLIER_AP_GL still DISCREPANCY: POST /api/system/gl/heal-ap-drift (GL correction JE)',
+                );
+                recommendations.push('Review supplier payment applications and unallocated payments');
+                recommendations.push('Verify goods receipt / invoice / SCN postings use EntityType = SUPPLIER on 2100');
             }
 
             return {
@@ -438,11 +460,9 @@ export class ReconciliationService {
                 accountCode: '2100',
                 asOfDate: date,
                 generatedAt: new Date().toISOString(),
-                // Use supplier-scoped GL vs supplier table — consistent with fn_full_reconciliation_report.
-                // The full GL_AP_BALANCE (which includes expense accruals) is visible in the items list.
                 glBalance: supplierGlBalance,
-                subledgerBalance: supplierTableBalance,
-                difference: new Decimal(supplierGlBalance).minus(supplierTableBalance).toNumber(),
+                subledgerBalance: openItemSubledger,
+                difference: new Decimal(supplierGlBalance).minus(openItemSubledger).toNumber(),
                 status: hasDiscrepancy ? 'DISCREPANCY' : 'RECONCILED',
                 items,
                 recommendations,

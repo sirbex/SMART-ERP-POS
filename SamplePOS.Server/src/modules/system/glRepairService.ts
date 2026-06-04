@@ -34,6 +34,11 @@ import {
   isApDriftExplainedByExpenses,
   syncSupplierBalanceFromOpenItems,
 } from '../supplier-payments/apReconciliationEngine.js';
+import {
+  captureApReconciliationMetrics,
+  verifyApReconciliationMetrics,
+  type ApReconciliationMetrics,
+} from '../supplier-payments/apReconciliationMetrics.js';
 
 export interface RepairTypeResult {
     found: number;
@@ -818,6 +823,8 @@ export const glRepairService = {
     runGLIntegrityCheck,
     rebuildPeriodBalances,
     recalcAllSupplierBalances,
+    rebaseAccountBalances,
+    healApReconciliationCaches,
     rebuildInventoryBalances,
     rebuildProductDailySummary,
     healAPDrift,
@@ -1041,6 +1048,126 @@ export async function recalcAllSupplierBalances(
     return {
         suppliersScanned,
         suppliersUpdated,
+        durationMs: Date.now() - startedAt,
+    };
+}
+
+// ============================================================================
+// HEAL: REBASE accounts.CurrentBalance FROM posted ledger_entries
+// ----------------------------------------------------------------------------
+// Fixes STORED_BALANCE drift (e.g. Henber 2100 cache −20M vs GL +17M).
+// Only POSTED transactions; respects NormalBalance (DEBIT vs CREDIT).
+// Idempotent.
+// ============================================================================
+
+export interface RebaseAccountBalancesResult {
+    accountsScanned: number;
+    accountsUpdated: number;
+    durationMs: number;
+    updates: Array<{ accountCode: string; oldBalance: number; newBalance: number }>;
+}
+
+export async function rebaseAccountBalances(
+    dbPool?: pg.Pool,
+    options?: { accountCodes?: string[] },
+): Promise<RebaseAccountBalancesResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+    const codes = options?.accountCodes;
+
+    const params: unknown[] = [];
+    const codeFilter = codes?.length
+        ? (params.push(codes), `AND a."AccountCode" = ANY($1::text[])`)
+        : '';
+
+    const updateRes = await pool.query<{
+        account_code: string;
+        old_balance: string;
+        new_balance: string;
+    }>(
+        `
+        WITH posted AS (
+          SELECT le."AccountId",
+            SUM(le."DebitAmount") - SUM(le."CreditAmount") AS net_debit,
+            SUM(le."CreditAmount") - SUM(le."DebitAmount") AS net_credit
+          FROM ledger_entries le
+          JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+          WHERE lt."Status" = 'POSTED'
+          GROUP BY le."AccountId"
+        ),
+        targets AS (
+          SELECT a."Id", a."AccountCode", a."CurrentBalance" AS old_balance,
+            CASE
+              WHEN a."NormalBalance" = 'DEBIT' THEN COALESCE(p.net_debit, 0)
+              ELSE COALESCE(p.net_credit, 0)
+            END AS new_balance
+          FROM accounts a
+          LEFT JOIN posted p ON p."AccountId" = a."Id"
+          WHERE a."IsActive" = true
+          ${codeFilter}
+        )
+        UPDATE accounts a
+        SET "CurrentBalance" = t.new_balance,
+            "UpdatedAt" = NOW()
+        FROM targets t
+        WHERE a."Id" = t."Id"
+          AND ABS(a."CurrentBalance" - t.new_balance) > 0.01
+        RETURNING a."AccountCode" AS account_code,
+                  t.old_balance::text,
+                  t.new_balance::text
+        `,
+        params,
+    );
+
+    const scanRes = await pool.query<{ n: number }>(
+        `SELECT COUNT(*)::INT AS n FROM accounts a WHERE a."IsActive" = true ${codeFilter}`,
+        params,
+    );
+
+    const updates = updateRes.rows.map((r) => ({
+        accountCode: r.account_code,
+        oldBalance: parseFloat(r.old_balance || '0'),
+        newBalance: parseFloat(r.new_balance || '0'),
+    }));
+
+    return {
+        accountsScanned: scanRes.rows[0]?.n ?? 0,
+        accountsUpdated: updates.length,
+        durationMs: Date.now() - startedAt,
+        updates,
+    };
+}
+
+export interface HealApReconciliationCachesResult {
+    before: ApReconciliationMetrics;
+    after: ApReconciliationMetrics;
+    recalc: RecalcSupplierBalancesResult;
+    rebase: RebaseAccountBalancesResult;
+    verification: ReturnType<typeof verifyApReconciliationMetrics>;
+    durationMs: number;
+}
+
+/**
+ * Phase-1 AP heal: sync supplier cache + rebase 2100 CurrentBalance.
+ * Does NOT post GL correction JEs — use healAPDrift for true GL vs open-item gap.
+ */
+export async function healApReconciliationCaches(
+    dbPool?: pg.Pool,
+): Promise<HealApReconciliationCachesResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+    const before = await captureApReconciliationMetrics(pool);
+    const recalc = await recalcAllSupplierBalances(pool);
+    const rebase = await rebaseAccountBalances(pool, { accountCodes: ['2100'] });
+    const after = await captureApReconciliationMetrics(pool);
+    const verification = verifyApReconciliationMetrics(after);
+
+    return {
+        before,
+        after,
+        recalc,
+        rebase,
+        verification,
         durationMs: Date.now() - startedAt,
     };
 }

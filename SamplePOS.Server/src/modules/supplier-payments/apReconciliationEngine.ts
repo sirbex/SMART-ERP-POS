@@ -197,7 +197,8 @@ export async function computeUnallocatedSupplierPayments(
 }
 
 /**
- * Open-item AP subledger = open invoices − unallocated payments (floored at 0 per supplier).
+ * Open-item AP subledger (global) = open invoices − unallocated payments, floored once at 0.
+ * Used for GL integrity / heal-ap-drift.
  */
 export async function computeApSubledgerBalance(
   conn: ApDbConn,
@@ -207,6 +208,46 @@ export async function computeApSubledgerBalance(
   const unallocated = await computeUnallocatedSupplierPayments(conn, supplierId);
   const sub = new Decimal(invoiceOpen).minus(unallocated);
   return Money.toNumber(sub.lessThan(0) ? new Decimal(0) : sub);
+}
+
+/**
+ * Expected SUM(suppliers.OutstandingBalance) after recalc — per-supplier floor, then sum.
+ * Must match syncSupplierBalanceFromOpenItems (Wave 5 cache SSOT).
+ */
+export async function computeSuppliersMasterCacheExpectedSum(conn: ApDbConn): Promise<number> {
+  const res = await conn.query(`
+    SELECT COALESCE(SUM(per_supplier), 0) AS total
+    FROM (
+      SELECT GREATEST(
+        COALESCE((
+          SELECT SUM(
+            CASE
+              WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+                THEN -COALESCE(si."OutstandingBalance", 0)
+              ELSE COALESCE(si."OutstandingBalance", 0)
+            END
+          )
+          FROM supplier_invoices si
+          WHERE si."SupplierId" = s."Id"
+            AND si.deleted_at IS NULL
+            AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+        ), 0)
+        - COALESCE((
+          SELECT COALESCE(SUM(
+            COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0))
+          ), 0)
+          FROM supplier_payments sp
+          WHERE sp."SupplierId" = s."Id"
+            AND sp.deleted_at IS NULL
+            AND sp."Status" = 'COMPLETED'
+            AND COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0)) > 0.009
+        ), 0),
+        0
+      ) AS per_supplier
+      FROM suppliers s
+    ) sums
+  `);
+  return Money.toNumber(Money.parseDb(res.rows[0]?.total ?? 0));
 }
 
 export async function computeApReconciliationSnapshot(

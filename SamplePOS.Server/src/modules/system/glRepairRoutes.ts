@@ -115,6 +115,63 @@ router.post('/recalc-supplier-balances', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// POST /api/system/gl/rebase-account-balances
+// Recompute accounts.CurrentBalance from POSTED ledger_entries (no GL JEs).
+// Body: { accountCodes?: string[] } — default all active accounts.
+// ============================================================================
+router.post('/rebase-account-balances', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const accountCodes = Array.isArray(req.body?.accountCodes)
+        ? (req.body.accountCodes as string[])
+        : undefined;
+    logger.info('Account balance rebase triggered', {
+        userId: req.user?.id,
+        accountCodes: accountCodes ?? 'ALL',
+    });
+    const result = await glRepairService.rebaseAccountBalances(pool, { accountCodes });
+    res.json({
+        success: true,
+        data: result,
+        message: `Rebased ${result.accountsUpdated}/${result.accountsScanned} account(s) in ${result.durationMs}ms`,
+    });
+}));
+
+// ============================================================================
+// POST /api/system/gl/heal-ap-reconciliation-caches
+// Phase-1 Henber-style fix: recalc suppliers + rebase 2100 cache; returns proof metrics.
+// ============================================================================
+router.post('/heal-ap-reconciliation-caches', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    logger.info('AP reconciliation cache heal triggered', {
+        userId: req.user?.id, role: req.user?.role,
+    });
+    const result = await glRepairService.healApReconciliationCaches(pool);
+    res.json({
+        success: true,
+        data: result,
+        message: result.verification.ok
+            ? `AP caches reconciled in ${result.durationMs}ms (suppliers updated: ${result.recalc.suppliersUpdated}, 2100 rebase: ${result.rebase.accountsUpdated})`
+            : `AP cache heal completed with remaining issues: ${result.verification.failures.join('; ')}`,
+    });
+}));
+
+// ============================================================================
+// GET /api/system/gl/ap-reconciliation-metrics
+// Read-only proof snapshot for AP (2100) — all layers with drift fields.
+// ============================================================================
+router.get('/ap-reconciliation-metrics', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const { captureApReconciliationMetrics, verifyApReconciliationMetrics } =
+        await import('../supplier-payments/apReconciliationMetrics.js');
+    const metrics = await captureApReconciliationMetrics(pool);
+    const verification = verifyApReconciliationMetrics(metrics);
+    res.json({
+        success: true,
+        data: { metrics, verification },
+    });
+}));
+
+// ============================================================================
 // POST /api/system/gl/rebuild-inventory-balances
 // Snap inventory_balances.quantity_on_hand to products.quantity_on_hand for
 // every product. Heals inventory_balances_reconciliation drift. Idempotent.
