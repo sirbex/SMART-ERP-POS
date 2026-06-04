@@ -23,6 +23,7 @@ interface ReorderItem {
     reason: string;
     leadTimeDays: number;
     reorderPoint: number;
+    reorderLevel: number;
     safetyStock: number;
     costPrice: number | null;
     preferredSupplier: string | null;
@@ -37,6 +38,7 @@ interface DashboardSummary {
     highCount: number;
     mediumCount: number;
     deadStockCount: number;
+    itemsToReorderCount: number;
     totalReorderCost: number;
     totalDeadStockValue: number;
 }
@@ -91,6 +93,7 @@ export default function ReorderDashboardPage() {
     const [sortAsc, setSortAsc] = useState(true);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+    const [exportingPdf, setExportingPdf] = useState(false);
 
     const fetchDashboard = useCallback(async () => {
         setLoading(true);
@@ -196,13 +199,22 @@ export default function ReorderDashboardPage() {
 
     const clearSelection = () => setSelectedProductIds([]);
 
-    /** Qty for PO lines — include user-selected rows even when open POs zeroed suggestedOrderQty */
+    /** Qty for PO/PDF — matches server effectiveReorderQty; min 1 only when building PO lines */
     const effectiveOrderQty = useCallback((item: ReorderItem): number => {
         if (item.suggestedOrderQty > 0) return item.suggestedOrderQty;
-        const gap = item.reorderPoint - item.currentStock;
-        if (gap > 0) return Math.ceil(gap);
-        return 1;
+        const net = Math.ceil(item.reorderPoint - item.currentStock - item.qtyOnOrder);
+        if (net > 0) return net;
+        if (item.currentStock <= 0 && item.reorderLevel > 0) return Math.ceil(item.reorderLevel);
+        return 0;
     }, []);
+
+    const effectiveOrderQtyForPo = useCallback(
+        (item: ReorderItem): number => {
+            const q = effectiveOrderQty(item);
+            return q > 0 ? q : 1;
+        },
+        [effectiveOrderQty]
+    );
 
     const buildPurchaseOrderItems = useCallback(
         (productIds: string[]) => {
@@ -219,8 +231,38 @@ export default function ReorderDashboardPage() {
                     preferredSupplierId: i.preferredSupplierId,
                 }));
         },
-        [allDashboardItems, effectiveOrderQty]
+        [allDashboardItems, effectiveOrderQtyForPo]
     );
+
+    const handleExportPdf = useCallback(async () => {
+        if (selectedProductIds.length === 0) {
+            alert('Select at least one product to export PDF.');
+            return;
+        }
+        setExportingPdf(true);
+        try {
+            const resp = await fetch('/api/reports/reorder-dashboard/pdf', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ productIds: selectedProductIds }),
+            });
+            if (!resp.ok) {
+                const errJson = await resp.json().catch(() => ({}));
+                throw new Error(errJson.error || `Export failed (${resp.status})`);
+            }
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `reorder-intelligence-${new Date().toISOString().slice(0, 10)}.pdf`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            alert(err instanceof Error ? err.message : 'PDF export failed');
+        } finally {
+            setExportingPdf(false);
+        }
+    }, [selectedProductIds]);
 
     const handleCreatePurchaseOrder = useCallback(() => {
         const snapshotIds = [...selectedProductIds];
@@ -239,14 +281,10 @@ export default function ReorderDashboardPage() {
         });
     }, [selectedProductIds, buildPurchaseOrderItems, navigate]);
 
+    /** Tab badges always match row arrays (same source as summary after server build) */
     const tabCount = (key: TabKey): number => {
         if (!data) return 0;
-        switch (key) {
-            case 'urgent': return data.summary.urgentCount;
-            case 'high': return data.summary.highCount;
-            case 'deadStock': return data.summary.deadStockCount;
-            case 'medium': return data.summary.mediumCount;
-        }
+        return data[key]?.length ?? 0;
     };
 
     const SortIcon = ({ field }: { field: SortField }) => (
@@ -309,29 +347,33 @@ export default function ReorderDashboardPage() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <SummaryCard
                     label="Critical Restock"
-                    value={summary.urgentCount}
-                    subtitle={summary.urgentCount > 0
-                        ? `${summary.urgentCount} out-of-stock or stockout within 2 days`
+                    value={tabCount('urgent')}
+                    subtitle={tabCount('urgent') > 0
+                        ? `${tabCount('urgent')} out-of-stock or stockout within 2 days`
                         : 'No urgent items'}
                     color="red"
+                    onClick={() => setActiveTab('urgent')}
                 />
                 <SummaryCard
                     label="High Priority"
-                    value={summary.highCount}
-                    subtitle={`Fast movers at risk within lead time`}
+                    value={tabCount('high')}
+                    subtitle="Fast movers at risk within lead time"
                     color="orange"
+                    onClick={() => setActiveTab('high')}
                 />
                 <SummaryCard
                     label="Dead Stock"
-                    value={summary.deadStockCount}
+                    value={tabCount('deadStock')}
                     subtitle={`${formatCurrency(summary.totalDeadStockValue)} tied up`}
                     color="gray"
+                    onClick={() => setActiveTab('deadStock')}
                 />
                 <SummaryCard
                     label="Total Reorder Cost"
                     value={formatCurrency(summary.totalReorderCost)}
-                    subtitle={`${summary.urgentCount + summary.highCount + summary.mediumCount} items to reorder`}
+                    subtitle={`${summary.itemsToReorderCount ?? 0} items with order qty`}
                     color="blue"
+                    onClick={() => setActiveTab('urgent')}
                 />
             </div>
 
@@ -352,6 +394,14 @@ export default function ReorderDashboardPage() {
                             className="px-3 py-1.5 text-sm border border-blue-300 rounded-lg bg-white hover:bg-blue-100 text-blue-800"
                         >
                             Clear all
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleExportPdf}
+                            disabled={exportingPdf}
+                            className="px-3 py-1.5 text-sm border border-blue-400 rounded-lg bg-white hover:bg-blue-100 text-blue-900 font-medium disabled:opacity-50"
+                        >
+                            {exportingPdf ? 'Exporting…' : 'Export PDF'}
                         </button>
                         <button
                             type="button"
@@ -535,12 +585,21 @@ export default function ReorderDashboardPage() {
                                                 )}
                                             </td>
                                             <td className="px-3 py-2.5 text-right tabular-nums font-medium text-gray-900">
-                                                {item.suggestedOrderQty > 0 ? item.suggestedOrderQty : '—'}
+                                                {(() => {
+                                                    const q = effectiveOrderQty(item);
+                                                    return q > 0 ? q : '—';
+                                                })()}
                                             </td>
                                             <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">
-                                                {item.estimatedOrderCost != null && item.estimatedOrderCost > 0
-                                                    ? formatCurrency(item.estimatedOrderCost)
-                                                    : '—'}
+                                                {(() => {
+                                                    const q = effectiveOrderQty(item);
+                                                    const cost = q > 0 && item.costPrice != null
+                                                        ? q * item.costPrice
+                                                        : item.estimatedOrderCost;
+                                                    return cost != null && cost > 0
+                                                        ? formatCurrency(cost)
+                                                        : '—';
+                                                })()}
                                             </td>
                                             <td className="px-3 py-2.5">
                                                 <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${PRIORITY_BADGE[item.priority]}`}>
@@ -600,11 +659,13 @@ function SummaryCard({
     value,
     subtitle,
     color,
+    onClick,
 }: {
     label: string;
     value: number | string;
     subtitle: string;
     color: 'red' | 'orange' | 'gray' | 'blue';
+    onClick?: () => void;
 }) {
     const colorMap = {
         red: 'border-red-200 bg-red-50',
@@ -619,11 +680,16 @@ function SummaryCard({
         blue: 'text-blue-700',
     };
 
+    const Wrapper = onClick ? 'button' : 'div';
     return (
-        <div className={`rounded-xl border p-4 ${colorMap[color]}`}>
+        <Wrapper
+            type={onClick ? 'button' : undefined}
+            onClick={onClick}
+            className={`rounded-xl border p-4 text-left w-full ${colorMap[color]} ${onClick ? 'hover:ring-2 hover:ring-blue-300 cursor-pointer transition-shadow' : ''}`}
+        >
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</p>
             <p className={`text-2xl font-bold mt-1 ${valueColor[color]}`}>{value}</p>
             <p className="text-xs text-gray-500 mt-1 line-clamp-2">{subtitle}</p>
-        </div>
+        </Wrapper>
     );
 }

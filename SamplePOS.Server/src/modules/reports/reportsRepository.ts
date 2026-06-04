@@ -6,6 +6,7 @@ import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness, getBusinessDate } from '../../utils/dateRange.js';
 import { demandForecastRepository, type ProductDemandStats } from './demandForecastRepository.js';
+import { classifyReorderPriority } from './reorderDashboardLogic.js';
 import type {
   SalesReportRow,
   SupplierCostAnalysisRow,
@@ -3443,36 +3444,16 @@ export const reportsRepository = {
         ? new Decimal(suggestedOrderQty).times(costPrice).toDecimalPlaces(2).toNumber()
         : null;
 
-      let priority: ReorderPriority;
-      let reason: string;
-
-      if (currentStock <= 0) {
-        priority = 'URGENT';
-        if (qtyOnOrder > 0) {
-          reason = `Out of stock — ${qtyOnOrder} unit(s) already on open PO`;
-        } else if (effectiveVelocity > 0) {
-          reason = 'Out of stock — immediate reorder (active sales movement)';
-        } else if (reorderLevel > 0) {
-          reason = 'Out of stock — reorder to minimum level';
-        } else {
-          reason = 'Out of stock — review and set reorder level';
-        }
-      } else if (daysUntilStockout !== null && daysUntilStockout <= 2) {
-        priority = 'URGENT';
-        reason = `Will stock out in ${daysUntilStockout} day(s) at current movement`;
-      } else if (effectiveVelocity > 0 && daysUntilStockout !== null && daysUntilStockout <= leadTimeDays) {
-        priority = 'HIGH';
-        reason = `${daysUntilStockout} days left vs ${leadTimeDays}-day supplier lead time`;
-      } else if (currentStock < reorderPoint && currentStock > 0 && effectiveVelocity > 0) {
-        priority = 'MEDIUM';
-        reason = `Stock ${currentStock} below reorder point ${reorderPoint}`;
-      } else if (currentStock > 0 && unitsSold30d === 0) {
-        priority = 'DEAD_STOCK';
-        reason = 'In stock but zero sales in 30 days';
-      } else {
-        priority = 'HEALTHY';
-        reason = 'Adequate stock levels';
-      }
+      const { priority, reason } = classifyReorderPriority({
+        currentStock,
+        unitsSold30d,
+        effectiveVelocity,
+        daysUntilStockout,
+        leadTimeDays,
+        reorderPoint,
+        reorderLevel,
+        qtyOnOrder,
+      });
 
       return {
         productId: row.product_id,
@@ -3491,6 +3472,7 @@ export const reportsRepository = {
         reason,
         leadTimeDays,
         reorderPoint,
+        reorderLevel,
         safetyStock,
         costPrice: costPrice > 0 ? costPrice : null,
         preferredSupplier: row.supplier_name ?? null,

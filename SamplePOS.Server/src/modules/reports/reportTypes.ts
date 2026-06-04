@@ -688,6 +688,7 @@ export interface ReorderDashboardItem {
     reason: string;
     leadTimeDays: number;
     reorderPoint: number;
+    reorderLevel: number;
     safetyStock: number;
     costPrice: number | null;
     preferredSupplier: string | null;
@@ -699,6 +700,8 @@ export interface ReorderDashboardSummary {
     highCount: number;
     mediumCount: number;
     deadStockCount: number;
+    /** Lines with computed order qty > 0 (urgent + high + normal) */
+    itemsToReorderCount: number;
     totalReorderCost: number;
     totalDeadStockValue: number;
 }

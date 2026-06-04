@@ -3,6 +3,8 @@
 
 import { Pool } from 'pg';
 import { reportsRepository } from './reportsRepository.js';
+import { buildReorderDashboardSummary } from './reorderDashboardLogic.js';
+import type { ReorderDashboardItem } from './reportTypes.js';
 import * as cnDnReportService from './cnDnReportService.js';
 import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import { SystemSettings } from '../../../../shared/types/systemSettings.js';
@@ -1799,40 +1801,34 @@ export const reportsService = {
       .filter((i) => i.priority === 'MEDIUM')
       .sort((a, b) => (a.daysUntilStockout ?? 9999) - (b.daysUntilStockout ?? 9999));
 
-    // Summary
-    const allUrgent = allItems.filter((i) => i.priority === 'URGENT');
-    const allHigh = allItems.filter((i) => i.priority === 'HIGH');
-    const allMedium = allItems.filter((i) => i.priority === 'MEDIUM');
-    const allDead = allItems.filter((i) => i.priority === 'DEAD_STOCK');
-
-    const totalReorderCost = [...allUrgent, ...allHigh, ...allMedium]
-      .reduce((sum, i) => sum.plus(i.estimatedOrderCost ?? 0), new Decimal(0))
-      .toDecimalPlaces(2)
-      .toNumber();
-
-    const totalDeadStockValue = allDead
-      .reduce(
-        (sum, i) => sum.plus(new Decimal(i.currentStock).times(i.costPrice ?? 0)),
-        new Decimal(0)
-      )
-      .toDecimalPlaces(2)
-      .toNumber();
+    const summary = buildReorderDashboardSummary(urgent, high, medium, deadStock);
 
     return {
-      summary: {
-        urgentCount: allUrgent.length,
-        highCount: allHigh.length,
-        mediumCount: allMedium.length,
-        deadStockCount: allDead.length,
-        totalReorderCost,
-        totalDeadStockValue,
-      },
+      summary,
       urgent,
       high,
       deadStock,
       medium,
       executionTimeMs: Date.now() - startTime,
     };
+  },
+
+  /**
+   * Selected lines for reorder dashboard PDF (before PO creation).
+   */
+  async getReorderDashboardExportLines(
+    pool: Pool,
+    options: { productIds: string[]; category?: string }
+  ): Promise<ReorderDashboardItem[]> {
+    const idSet = new Set(options.productIds);
+    if (idSet.size === 0) return [];
+    const allItems = await reportsRepository.getReorderDashboard(pool, {
+      category: options.category,
+    });
+    const byId = new Map(allItems.map((i) => [i.productId, i]));
+    return options.productIds
+      .map((id) => byId.get(id))
+      .filter((i): i is ReorderDashboardItem => i != null);
   },
 
   /**
