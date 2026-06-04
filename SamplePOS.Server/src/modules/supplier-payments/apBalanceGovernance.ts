@@ -138,14 +138,19 @@ export async function backfillSupplierEntityTagsOnAp2100(
     `
     UPDATE ledger_entries le
     SET "EntityType" = 'supplier',
-        "EntityId" = si."SupplierId"
-    FROM ledger_transactions lt
-    JOIN accounts a ON a."Id" = le."AccountId"
-    JOIN supplier_invoices si ON si."Id" = lt."ReferenceId"
-    WHERE a."AccountCode" = $1
-      AND lt."Status" = 'POSTED'
-      AND lt."ReferenceType" = 'SUPPLIER_INVOICE'
-      AND (le."EntityType" IS NULL OR le."EntityId" IS NULL)
+        "EntityId" = src."SupplierId"
+    FROM (
+      SELECT le2."Id" AS entry_id, si."SupplierId"
+      FROM ledger_entries le2
+      INNER JOIN ledger_transactions lt ON le2."TransactionId" = lt."Id"
+      INNER JOIN accounts a ON a."Id" = le2."AccountId"
+      INNER JOIN supplier_invoices si ON si."Id" = lt."ReferenceId"
+      WHERE a."AccountCode" = $1
+        AND lt."Status" = 'POSTED'
+        AND lt."ReferenceType" = 'SUPPLIER_INVOICE'
+        AND (le2."EntityType" IS NULL OR le2."EntityId" IS NULL)
+    ) src
+    WHERE le."Id" = src.entry_id
     `,
     [AP_ACCOUNT_CODE],
   );
@@ -155,14 +160,19 @@ export async function backfillSupplierEntityTagsOnAp2100(
     `
     UPDATE ledger_entries le
     SET "EntityType" = 'supplier',
-        "EntityId" = sp."SupplierId"
-    FROM ledger_transactions lt
-    JOIN accounts a ON a."Id" = le."AccountId"
-    JOIN supplier_payments sp ON sp."Id" = lt."ReferenceId"
-    WHERE a."AccountCode" = $1
-      AND lt."Status" = 'POSTED'
-      AND lt."ReferenceType" = 'SUPPLIER_PAYMENT'
-      AND (le."EntityType" IS NULL OR le."EntityId" IS NULL)
+        "EntityId" = src."SupplierId"
+    FROM (
+      SELECT le2."Id" AS entry_id, sp."SupplierId"
+      FROM ledger_entries le2
+      INNER JOIN ledger_transactions lt ON le2."TransactionId" = lt."Id"
+      INNER JOIN accounts a ON a."Id" = le2."AccountId"
+      INNER JOIN supplier_payments sp ON sp."Id" = lt."ReferenceId"
+      WHERE a."AccountCode" = $1
+        AND lt."Status" = 'POSTED'
+        AND lt."ReferenceType" = 'SUPPLIER_PAYMENT'
+        AND (le2."EntityType" IS NULL OR le2."EntityId" IS NULL)
+    ) src
+    WHERE le."Id" = src.entry_id
     `,
     [AP_ACCOUNT_CODE],
   );
@@ -172,14 +182,19 @@ export async function backfillSupplierEntityTagsOnAp2100(
     `
     UPDATE ledger_entries le
     SET "EntityType" = 'supplier',
-        "EntityId" = si."SupplierId"
-    FROM ledger_transactions lt
-    JOIN accounts a ON a."Id" = le."AccountId"
-    JOIN supplier_invoices si ON si."Id" = lt."ReferenceId"
-    WHERE a."AccountCode" = $1
-      AND lt."Status" = 'POSTED'
-      AND lt."ReferenceType" IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')
-      AND (le."EntityType" IS NULL OR le."EntityId" IS NULL)
+        "EntityId" = src."SupplierId"
+    FROM (
+      SELECT le2."Id" AS entry_id, si."SupplierId"
+      FROM ledger_entries le2
+      INNER JOIN ledger_transactions lt ON le2."TransactionId" = lt."Id"
+      INNER JOIN accounts a ON a."Id" = le2."AccountId"
+      INNER JOIN supplier_invoices si ON si."Id" = lt."ReferenceId"
+      WHERE a."AccountCode" = $1
+        AND lt."Status" = 'POSTED'
+        AND lt."ReferenceType" IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')
+        AND (le2."EntityType" IS NULL OR le2."EntityId" IS NULL)
+    ) src
+    WHERE le."Id" = src.entry_id
     `,
     [AP_ACCOUNT_CODE],
   );
