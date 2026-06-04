@@ -52,4 +52,10 @@ describe('apReconciliationEngine — Wave 5', () => {
     const wrongRawSum = correctOpenItem + creditNotesOutstanding;
     expect(wrongRawSum).toBe(15_589_543);
   });
+
+  it('ledger repair counts APPLIED supplier credit notes on reference bills', () => {
+    const billTotal = 452_800;
+    const appliedReturnScns = 56_000 + 22_000 + 22_000;
+    expect(billTotal - appliedReturnScns).toBe(352_800);
+  });
 });
