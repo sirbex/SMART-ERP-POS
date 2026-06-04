@@ -93,7 +93,7 @@ export default function ReorderDashboardPage() {
     const [sortAsc, setSortAsc] = useState(true);
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-    const [exportingPdf, setExportingPdf] = useState(false);
+    const [exporting, setExporting] = useState<'pdf' | 'csv' | null>(null);
 
     const fetchDashboard = useCallback(async () => {
         setLoading(true);
@@ -234,35 +234,39 @@ export default function ReorderDashboardPage() {
         [allDashboardItems, effectiveOrderQtyForPo]
     );
 
-    const handleExportPdf = useCallback(async () => {
-        if (selectedProductIds.length === 0) {
-            alert('Select at least one product to export PDF.');
-            return;
-        }
-        setExportingPdf(true);
-        try {
-            const resp = await fetch('/api/reports/reorder-dashboard/pdf', {
-                method: 'POST',
-                headers: getAuthHeaders(),
-                body: JSON.stringify({ productIds: selectedProductIds }),
-            });
-            if (!resp.ok) {
-                const errJson = await resp.json().catch(() => ({}));
-                throw new Error(errJson.error || `Export failed (${resp.status})`);
+    const handleExport = useCallback(
+        async (format: 'pdf' | 'csv') => {
+            if (selectedProductIds.length === 0) {
+                alert('Select at least one product to export.');
+                return;
             }
-            const blob = await resp.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `reorder-intelligence-${new Date().toISOString().slice(0, 10)}.pdf`;
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch (err) {
-            alert(err instanceof Error ? err.message : 'PDF export failed');
-        } finally {
-            setExportingPdf(false);
-        }
-    }, [selectedProductIds]);
+            setExporting(format);
+            const date = new Date().toISOString().slice(0, 10);
+            try {
+                const resp = await fetch(`/api/reports/reorder-dashboard/${format}`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ productIds: selectedProductIds }),
+                });
+                if (!resp.ok) {
+                    const errJson = await resp.json().catch(() => ({}));
+                    throw new Error(errJson.error || `Export failed (${resp.status})`);
+                }
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `reorder-intelligence-${date}.${format}`;
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                alert(err instanceof Error ? err.message : `${format.toUpperCase()} export failed`);
+            } finally {
+                setExporting(null);
+            }
+        },
+        [selectedProductIds]
+    );
 
     const handleCreatePurchaseOrder = useCallback(() => {
         const snapshotIds = [...selectedProductIds];
@@ -397,11 +401,19 @@ export default function ReorderDashboardPage() {
                         </button>
                         <button
                             type="button"
-                            onClick={handleExportPdf}
-                            disabled={exportingPdf}
+                            onClick={() => handleExport('csv')}
+                            disabled={exporting !== null}
                             className="px-3 py-1.5 text-sm border border-blue-400 rounded-lg bg-white hover:bg-blue-100 text-blue-900 font-medium disabled:opacity-50"
                         >
-                            {exportingPdf ? 'Exporting…' : 'Export PDF'}
+                            {exporting === 'csv' ? 'Exporting…' : 'Export CSV'}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => handleExport('pdf')}
+                            disabled={exporting !== null}
+                            className="px-3 py-1.5 text-sm border border-blue-400 rounded-lg bg-white hover:bg-blue-100 text-blue-900 font-medium disabled:opacity-50"
+                        >
+                            {exporting === 'pdf' ? 'Exporting…' : 'Export PDF'}
                         </button>
                         <button
                             type="button"

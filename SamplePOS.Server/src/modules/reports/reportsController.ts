@@ -20,10 +20,7 @@ import {
   PDFColors,
 } from '../../utils/pdfGenerator.js';
 import { cnDnReportsController } from './cnDnReportController.js';
-import {
-  effectiveReorderQty,
-  estimatedReorderCost,
-} from './reorderDashboardLogic.js';
+import { buildReorderDashboardCsv, buildReorderExportRows } from './reorderDashboardExport.js';
 
 // Helper to get company name from system settings for PDF generation
 async function getCompanyName(pool: Pool): Promise<string> {
@@ -144,6 +141,32 @@ const CashRegisterDateRangeSchema = z.object({
 const CashRegisterSessionHistorySchema = CashRegisterDateRangeSchema.extend({
   status: z.enum(['OPEN', 'CLOSED', 'ALL']).optional().default('ALL'),
 });
+
+async function resolveReorderDashboardExportLines(req: Request, pool: Pool) {
+  const body = req.body as { productIds?: unknown };
+  const productIds = Array.isArray(body?.productIds)
+    ? body.productIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+    : [];
+  if (productIds.length === 0) {
+    throw new ValidationError('Select at least one product to export');
+  }
+
+  const category =
+    typeof req.query.category === 'string'
+      ? req.query.category
+      : typeof req.query.category_id === 'string'
+        ? req.query.category_id
+        : undefined;
+
+  const lines = await reportsService.getReorderDashboardExportLines(pool, {
+    productIds,
+    category,
+  });
+  if (lines.length === 0) {
+    throw new NotFoundError('No matching products found for export');
+  }
+  return lines;
+}
 
 export const reportsController = {
   /**
@@ -2455,38 +2478,14 @@ export const reportsController = {
    * Body: { productIds: string[] }
    */
   async exportReorderDashboardPdf(req: Request, res: Response, pool: Pool) {
-    const body = req.body as { productIds?: unknown };
-    const productIds = Array.isArray(body?.productIds)
-      ? body.productIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
-      : [];
-    if (productIds.length === 0) {
-      throw new ValidationError('Select at least one product to export');
-    }
-
-    const category =
-      typeof req.query.category === 'string'
-        ? req.query.category
-        : typeof req.query.category_id === 'string'
-          ? req.query.category_id
-          : undefined;
-
-    const lines = await reportsService.getReorderDashboardExportLines(pool, {
-      productIds,
-      category,
-    });
-    if (lines.length === 0) {
-      throw new NotFoundError('No matching products found for export');
-    }
-
+    const lines = await resolveReorderDashboardExportLines(req, pool);
     const companyName = await getCompanyName(pool);
     const pdfGen = new ReportPDFGenerator(companyName);
     const doc = pdfGen.getDocument();
     const date = getBusinessDate();
+    const tableRows = buildReorderExportRows(lines);
 
-    const totalCost = lines.reduce((sum, i) => {
-      const qty = effectiveReorderQty(i);
-      return sum + (estimatedReorderCost(qty, i.costPrice) ?? 0);
-    }, 0);
+    const totalCost = tableRows.reduce((sum, r) => sum + r.estCost, 0);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
@@ -2516,38 +2515,42 @@ export const reportsController = {
     ]);
 
     const columns: PDFTableColumn[] = [
-      { header: 'Product', key: 'name', width: 0.2 },
-      { header: 'SKU', key: 'sku', width: 0.1 },
-      { header: 'Stock', key: 'currentStock', width: 0.07, align: 'right' },
-      { header: 'Order Qty', key: 'orderQty', width: 0.08, align: 'right' },
+      { header: 'Product', key: 'name', width: 0.18 },
+      { header: 'Category', key: 'category', width: 0.12 },
+      { header: 'Stock', key: 'currentStock', width: 0.06, align: 'right' },
+      { header: 'On PO', key: 'qtyOnOrder', width: 0.06, align: 'right' },
+      { header: 'Order Qty', key: 'orderQty', width: 0.07, align: 'right' },
       {
         header: 'Est. Cost',
         key: 'estCost',
-        width: 0.1,
+        width: 0.09,
         align: 'right',
         format: (v) => formatCurrencyPDF(v as number),
       },
-      { header: 'Priority', key: 'priority', width: 0.09 },
-      { header: 'Reason', key: 'reason', width: 0.22 },
+      { header: 'Priority', key: 'priority', width: 0.08 },
+      { header: 'Reason', key: 'reason', width: 0.2 },
       { header: 'Supplier', key: 'preferredSupplier', width: 0.14 },
     ];
 
-    const tableRows = lines.map((i) => {
-      const orderQty = effectiveReorderQty(i);
-      return {
-        name: i.name,
-        sku: i.sku || '—',
-        currentStock: i.currentStock,
-        orderQty,
-        estCost: estimatedReorderCost(orderQty, i.costPrice) ?? 0,
-        priority: i.priority === 'DEAD_STOCK' ? 'DEAD' : i.priority,
-        reason: i.reason,
-        preferredSupplier: i.preferredSupplier ?? '—',
-      };
-    });
-
     pdfGen.addTable(columns, tableRows);
     pdfGen.end();
+  },
+
+  /**
+   * Export selected reorder dashboard lines as CSV (no PO required).
+   * POST /api/reports/reorder-dashboard/csv
+   */
+  async exportReorderDashboardCsv(req: Request, res: Response, pool: Pool) {
+    const lines = await resolveReorderDashboardExportLines(req, pool);
+    const date = getBusinessDate();
+    const csv = buildReorderDashboardCsv(lines);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="reorder-intelligence-${date}.csv"`
+    );
+    res.send(csv);
   },
 
   /**

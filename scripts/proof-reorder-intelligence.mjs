@@ -41,6 +41,7 @@ const unit = spawnSync(
         '--experimental-vm-modules',
         './node_modules/jest/bin/jest.js',
         'src/modules/reports/reorderDashboardLogic.test.ts',
+        'src/modules/reports/reorderDashboardExport.test.ts',
         '--runInBand',
     ],
     { cwd: serverDir, stdio: 'inherit', shell: false },
@@ -197,6 +198,26 @@ async function liveProof() {
             pass('PDF rejects empty productIds');
         } else {
             fail(`PDF empty body expected 400, got ${badRes.status}`);
+        }
+
+        const csvRes = await fetch(`${BASE}/api/reports/reorder-dashboard/csv`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ productIds: pdfIds }),
+        });
+        const csvCt = csvRes.headers.get('content-type') || '';
+        if (csvRes.ok && csvCt.includes('text/csv')) {
+            const text = await csvRes.text();
+            const header = text.split('\n')[0] || '';
+            if (header.includes('Category') && !header.includes('SKU')) {
+                pass(`CSV export (${text.length} chars, Category present, no SKU)`);
+            } else {
+                fail(`CSV header wrong: ${header.slice(0, 120)}`);
+            }
+        } else if (csvRes.status === 404) {
+            fail('CSV route missing — deploy POST /api/reports/reorder-dashboard/csv');
+        } else {
+            fail(`CSV export HTTP ${csvRes.status}`);
         }
     }
 }

@@ -218,6 +218,11 @@ export function createReportsRouter(pool: Pool) {
     requirePermission('reports.read'),
     asyncHandler(async (req, res) => reportsController.exportReorderDashboardPdf(req, res, p(req)))
   );
+  router.post(
+    '/reorder-dashboard/csv',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => reportsController.exportReorderDashboardCsv(req, res, p(req)))
+  );
   router.get(
     '/business-position',
     requirePermission('reports.read'),

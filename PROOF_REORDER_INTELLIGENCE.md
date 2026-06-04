@@ -20,7 +20,8 @@ BASE_URL=http://localhost:3001 TEST_EMAIL=... TEST_PASSWORD=... npm run proof:re
 | API | `GET /api/reports/reorder-dashboard` — `summary.*Count` equals each tab array length |
 | API | `summary.itemsToReorderCount` present |
 | API | No inactive OOS (zero sales, zero velocity, no min, no PO) in **urgent** bucket |
-| API | `POST /api/reports/reorder-dashboard/pdf` — `application/pdf`, body > 500 bytes |
+| API | `POST /api/reports/reorder-dashboard/pdf` — `application/pdf`, body > 500 bytes, **Category** column, **no SKU** |
+| API | `POST /api/reports/reorder-dashboard/csv` — `text/csv`, header includes **Category**, no **SKU** |
 | API | Empty `productIds` → HTTP 400 |
 
 ## Last run (local dev)
