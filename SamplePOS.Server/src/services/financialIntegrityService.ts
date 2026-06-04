@@ -116,8 +116,11 @@ async function checkAR(pool: pg.Pool): Promise<IntegrityCheck> {
 }
 
 async function checkAP(pool: pg.Pool): Promise<IntegrityCheck> {
-  const { computeApReconciliationSnapshot, apMaterialityThreshold, isApDriftExplainedByExpenses } =
-    await import('../modules/supplier-payments/apReconciliationEngine.js');
+  const {
+    computeApReconciliationSnapshot,
+    apMaterialityThreshold,
+    isApDriftExplainedByExpenses,
+  } = await import('../modules/supplier-payments/apReconciliationEngine.js');
 
   const snapshot = await computeApReconciliationSnapshot(pool);
   const threshold = apMaterialityThreshold(snapshot.glBalance);
@@ -127,6 +130,11 @@ async function checkAP(pool: pg.Pool): Promise<IntegrityCheck> {
     status = 'PASS';
   }
 
+  const unpostedNote =
+    snapshot.unpostedOpenInvoiceBalance > threshold
+      ? `; ${snapshot.unpostedOpenInvoiceBalance.toFixed(2)} open on invoices not yet posted to GL (excluded from subledger)`
+      : '';
+
   return {
     id: 'ap_reconciliation',
     name: 'Accounts Payable reconciles to GL 2100 (supplier open-item scope)',
@@ -135,18 +143,21 @@ async function checkAP(pool: pg.Pool): Promise<IntegrityCheck> {
       status === 'PASS'
         ? explainedByExpenses && !new Decimal(snapshot.drift).abs().lessThanOrEqualTo(threshold)
           ? `Supplier AP reconciled; ${snapshot.expenseOnAp.toFixed(2)} of standalone expenses on 2100 excluded from supplier subledger`
-          : `AP is fully reconciled (${snapshot.glBalance.toFixed(2)} = open-item subledger ${snapshot.subledgerBalance.toFixed(2)})`
+          : `AP is fully reconciled (${snapshot.glBalance.toFixed(2)} = GL-posted open-item subledger ${snapshot.subledgerBalance.toFixed(2)})`
         : `AP drift of ${snapshot.drift.toFixed(2)} — GL ${snapshot.glBalance.toFixed(2)} vs subledger ${snapshot.subledgerBalance.toFixed(2)}`
             + (snapshot.unallocatedPayments > 0
               ? ` (${snapshot.unallocatedPayments.toFixed(2)} unallocated payments)`
-              : ''),
+              : '')
+            + unpostedNote,
     glBalance: snapshot.glBalance,
     subledgerBalance: snapshot.subledgerBalance,
     difference: snapshot.drift,
     threshold,
     remediation:
       status === 'FAIL'
-        ? 'Run POST /api/system/gl/recalc-supplier-balances then POST /api/system/gl/heal-ap-drift if residual drift remains'
+        ? snapshot.unpostedOpenInvoiceBalance > threshold
+          ? 'Post supplier bills to GL (3-way match / postInvoiceToGL) for open invoices with is_posted_to_gl=false; do not run heal-ap-drift for unposted pipeline gap'
+          : 'Run POST /api/system/gl/recalc-supplier-balances then POST /api/system/gl/heal-ap-drift only if residual drift remains after allocation fixes'
         : undefined,
   };
 }

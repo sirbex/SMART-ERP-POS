@@ -3,9 +3,12 @@
  * All AP integrity checks and supplier balance sync MUST use this module.
  *
  * Formula:
- *   AP subledger = SUM(open supplier invoice obligations)
+ *   AP subledger = SUM(open supplier invoice obligations with is_posted_to_gl)
  *                  − SUM(unallocated completed supplier payments)
  *   AP GL (supplier scope) = net-active 2100 excluding EXPENSE / EXPENSE_PAYMENT
+ *
+ * Invoices not yet posted to GL are excluded from subledger reconciliation (they
+ * have no AP credit in ledger yet). Use computeUnpostedOpenInvoiceBalance for pipeline gap.
  */
 
 import type { Pool, PoolClient } from 'pg';
@@ -26,6 +29,9 @@ export const AP_INACTIVE_INVOICE_STATUSES = [
 /** Standalone expenses on 2100 — valid GL but not supplier subledger. */
 export const AP_NON_SUPPLIER_REFERENCE_TYPES = ['EXPENSE', 'EXPENSE_PAYMENT'] as const;
 
+/** Open-item subledger only counts obligations already credited to AP in the GL. */
+export const AP_OPEN_INVOICE_GL_POSTED_SQL = 'AND COALESCE(si.is_posted_to_gl, FALSE) = TRUE';
+
 export interface ApReconciliationSnapshot {
   glBalance: number;
   invoiceOpenBalance: number;
@@ -33,6 +39,8 @@ export interface ApReconciliationSnapshot {
   subledgerBalance: number;
   expenseOnAp: number;
   legacyGrInAp: number;
+  /** Open invoices not yet posted to GL (excluded from subledgerBalance). */
+  unpostedOpenInvoiceBalance: number;
   drift: number;
   /** Drift after adding expense-on-AP (explains standalone expenses on 2100). */
   residualAfterExpense: number;
@@ -68,6 +76,7 @@ export const SUPPLIER_OPEN_ITEM_BALANCE_SQL = `
       WHERE si."SupplierId" = suppliers."Id"
         AND si.deleted_at IS NULL
         AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+        ${AP_OPEN_INVOICE_GL_POSTED_SQL}
     ), 0)
     - COALESCE((
       SELECT COALESCE(SUM(
@@ -97,8 +106,36 @@ function invoiceOpenBalanceSql(supplierIdParam?: string): string {
     FROM supplier_invoices si
     WHERE si.deleted_at IS NULL
       AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+      ${AP_OPEN_INVOICE_GL_POSTED_SQL}
       ${supplierFilter}
   `;
+}
+
+/** Open supplier invoices not yet credited to AP 2100 (3-way match / billing pipeline). */
+export async function computeUnpostedOpenInvoiceBalance(
+  conn: ApDbConn,
+  supplierId?: string,
+): Promise<number> {
+  const params = supplierId ? [supplierId] : [];
+  const supplierFilter = supplierId ? 'AND si."SupplierId" = $1' : '';
+  const res = await conn.query(
+    `
+    SELECT COALESCE(SUM(
+      CASE
+        WHEN si.document_type = 'SUPPLIER_CREDIT_NOTE'
+          THEN -COALESCE(si."OutstandingBalance", 0)
+        ELSE COALESCE(si."OutstandingBalance", 0)
+      END
+    ), 0) AS unposted_open
+    FROM supplier_invoices si
+    WHERE si.deleted_at IS NULL
+      AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+      AND COALESCE(si.is_posted_to_gl, FALSE) = FALSE
+      ${supplierFilter}
+    `,
+    params,
+  );
+  return Money.toNumber(Money.parseDb(res.rows[0]?.unposted_open ?? 0));
 }
 
 function unallocatedPaymentsSql(supplierIdParam?: string): string {
@@ -231,6 +268,7 @@ export async function computeSuppliersMasterCacheExpectedSum(conn: ApDbConn): Pr
           WHERE si."SupplierId" = s."Id"
             AND si.deleted_at IS NULL
             AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+            ${AP_OPEN_INVOICE_GL_POSTED_SQL}
         ), 0)
         - COALESCE((
           SELECT COALESCE(SUM(
@@ -253,13 +291,14 @@ export async function computeSuppliersMasterCacheExpectedSum(conn: ApDbConn): Pr
 export async function computeApReconciliationSnapshot(
   conn: ApDbConn,
 ): Promise<ApReconciliationSnapshot> {
-  const [glBalance, invoiceOpenBalance, unallocatedPayments, expenseOnAp, legacyGrInAp] =
+  const [glBalance, invoiceOpenBalance, unallocatedPayments, expenseOnAp, legacyGrInAp, unpostedOpenInvoiceBalance] =
     await Promise.all([
       computeApGlSupplierScope(conn),
       computeOpenInvoiceBalance(conn),
       computeUnallocatedSupplierPayments(conn),
       computeExpenseOnAp(conn),
       computeLegacyGrInAp(conn),
+      computeUnpostedOpenInvoiceBalance(conn),
     ]);
 
   const sub = new Decimal(invoiceOpenBalance).minus(unallocatedPayments);
@@ -274,9 +313,21 @@ export async function computeApReconciliationSnapshot(
     subledgerBalance,
     expenseOnAp,
     legacyGrInAp,
+    unpostedOpenInvoiceBalance,
     drift,
     residualAfterExpense,
   };
+}
+
+/** Drift ≈ −unposted when subledger wrongly included pre-GL invoices (do not heal-ap-drift). */
+export function isApDriftExplainedByUnpostedInvoices(
+  snapshot: ApReconciliationSnapshot,
+  threshold?: number,
+): boolean {
+  const t = threshold ?? apMaterialityThreshold(snapshot.glBalance);
+  const unposted = snapshot.unpostedOpenInvoiceBalance;
+  if (unposted < t) return false;
+  return Math.abs(snapshot.drift + unposted) <= t;
 }
 
 export function apMaterialityThreshold(glBalance: number): number {
@@ -349,6 +400,7 @@ export async function syncSupplierBalanceFromOpenItems(
        WHERE si."SupplierId" = $1
          AND si.deleted_at IS NULL
          AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+         ${AP_OPEN_INVOICE_GL_POSTED_SQL}
      ),
      unalloc AS (
        SELECT COALESCE(SUM(

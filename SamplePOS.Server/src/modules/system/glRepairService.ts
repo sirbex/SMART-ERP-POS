@@ -1389,6 +1389,23 @@ export async function healAPDrift(
         };
     }
 
+    const { isApDriftExplainedByUnpostedInvoices } = await import(
+        '../supplier-payments/apReconciliationEngine.js'
+    );
+    if (isApDriftExplainedByUnpostedInvoices(snapshot, threshold)) {
+        logger.warn('heal-ap-drift skipped: drift matches unposted open invoices (post bills to GL instead)', {
+            drift: snapshot.drift,
+            unpostedOpenInvoiceBalance: snapshot.unpostedOpenInvoiceBalance,
+        });
+        return {
+            drift: snapshot.drift,
+            subledgerBalance: subBalance,
+            glBalance,
+            action: 'no-op',
+            durationMs: Date.now() - startedAt,
+        };
+    }
+
     const drift = snapshot.drift;
 
     if (Math.abs(drift) < threshold) {

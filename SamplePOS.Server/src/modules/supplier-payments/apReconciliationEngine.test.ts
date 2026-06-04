@@ -1,7 +1,9 @@
 import { describe, it, expect } from '@jest/globals';
 import {
+  AP_OPEN_INVOICE_GL_POSTED_SQL,
   apMaterialityThreshold,
   isApDriftExplainedByExpenses,
+  isApDriftExplainedByUnpostedInvoices,
   type ApReconciliationSnapshot,
 } from './apReconciliationEngine.js';
 
@@ -19,6 +21,7 @@ describe('apReconciliationEngine — Wave 5', () => {
       subledgerBalance: 10_601_530,
       expenseOnAp: 601_530,
       legacyGrInAp: 0,
+      unpostedOpenInvoiceBalance: 0,
       drift: -601_530,
       residualAfterExpense: 0,
     };
@@ -33,6 +36,7 @@ describe('apReconciliationEngine — Wave 5', () => {
       subledgerBalance: 11_000_000,
       expenseOnAp: 0,
       legacyGrInAp: 0,
+      unpostedOpenInvoiceBalance: 0,
       drift: -1_000_000,
       residualAfterExpense: -1_000_000,
     };
@@ -51,6 +55,29 @@ describe('apReconciliationEngine — Wave 5', () => {
     const creditNotesOutstanding = 887_120;
     const wrongRawSum = correctOpenItem + creditNotesOutstanding;
     expect(wrongRawSum).toBe(15_589_543);
+  });
+
+  it('open-item SSOT only includes invoices posted to GL', () => {
+    expect(AP_OPEN_INVOICE_GL_POSTED_SQL).toContain('is_posted_to_gl');
+  });
+
+  it('blocks heal-ap-drift when drift equals unposted pipeline gap', () => {
+    const snapshot: ApReconciliationSnapshot = {
+      glBalance: 24_567_360,
+      invoiceOpenBalance: 24_567_360,
+      unallocatedPayments: 0,
+      subledgerBalance: 24_567_360,
+      expenseOnAp: 0,
+      legacyGrInAp: 0,
+      unpostedOpenInvoiceBalance: 2_181_275,
+      drift: 0,
+      residualAfterExpense: 0,
+    };
+    expect(isApDriftExplainedByUnpostedInvoices({
+      ...snapshot,
+      subledgerBalance: 26_748_635,
+      drift: -2_181_275,
+    })).toBe(true);
   });
 
   it('ledger repair counts APPLIED supplier credit notes on reference bills', () => {
