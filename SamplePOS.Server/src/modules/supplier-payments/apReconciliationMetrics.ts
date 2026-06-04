@@ -129,6 +129,7 @@ export function isApSupplierGlIntegrityMatched(metrics: ApReconciliationMetrics)
       subledgerBalance: metrics.openItemSubledger,
       expenseOnAp: metrics.expenseOnAp,
       legacyGrInAp: 0,
+      unpostedOpenInvoiceBalance: 0,
       drift: metrics.integrityGlDrift,
       residualAfterExpense: metrics.integrityGlDrift + metrics.expenseOnAp,
     },
