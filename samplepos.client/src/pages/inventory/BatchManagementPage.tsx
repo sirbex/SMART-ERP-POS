@@ -12,6 +12,27 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getBusinessDate } from '../../utils/businessDate';
 import { api } from '../../utils/api';
 import Decimal from 'decimal.js';
+import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
+import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
+import { useColumnSort } from '../../hooks/useColumnSort';
+import { applyTableSort } from '../../lib/tableSortUtils';
+
+type BatchSortField =
+  | 'product'
+  | 'sku'
+  | 'batchNumber'
+  | 'quantity'
+  | 'expiryDate'
+  | 'urgency'
+  | 'value'
+  | 'status';
+
+const BATCH_DESC_DEFAULT = new Set<BatchSortField>([
+  'quantity',
+  'expiryDate',
+  'urgency',
+  'value',
+]);
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -47,6 +68,13 @@ interface InventoryBatch {
 // Expiry urgency levels matching backend calculation
 type ExpiryUrgency = 'CRITICAL' | 'WARNING' | 'NORMAL' | 'NONE';
 
+const URGENCY_SORT_ORDER: Record<ExpiryUrgency, number> = {
+  CRITICAL: 0,
+  WARNING: 1,
+  NORMAL: 2,
+  NONE: 3,
+};
+
 export default function BatchManagementPage() {
   const { data: batchesData, isLoading, error, refetch } = useAllBatches();
 
@@ -55,6 +83,9 @@ export default function BatchManagementPage() {
     'ALL'
   );
   const [filterUrgency, setFilterUrgency] = useState<'ALL' | ExpiryUrgency>('ALL');
+  const [filterQtyOnly, setFilterQtyOnly] = useState(false);
+  const { sortField, sortOrder, handleSort, setSortOrder } =
+    useColumnSort<BatchSortField>('expiryDate', 'asc');
   const [selectedBatch, setSelectedBatch] = useState<InventoryBatch | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
 
@@ -134,21 +165,53 @@ export default function BatchManagementPage() {
     return filtered;
   }, [batches, searchTerm, filterStatus, filterUrgency]);
 
-  // Sort batches by FEFO (First Expiry First Out)
-  const sortedBatches = useMemo(() => {
-    return [...filteredBatches].sort((a, b) => {
-      // Batches with no expiry go to the end
-      if (!a.expiry_date && !b.expiry_date) return 0;
-      if (!a.expiry_date) return 1;
-      if (!b.expiry_date) return -1;
+  const batchSortAccessors = useMemo(
+    () => ({
+      product: (batch: InventoryBatch) => batch.product_name ?? '',
+      sku: (batch: InventoryBatch) => batch.sku ?? '',
+      batchNumber: (batch: InventoryBatch) => batch.batch_number ?? '',
+      quantity: (batch: InventoryBatch) => batch.remaining_quantity ?? 0,
+      expiryDate: (batch: InventoryBatch) => batch.expiry_date ?? '',
+      urgency: (batch: InventoryBatch) =>
+        URGENCY_SORT_ORDER[calculateExpiryUrgency(batch.expiry_date)],
+      value: (batch: InventoryBatch) =>
+        new Decimal(batch.remaining_quantity).times(batch.cost_price).toNumber(),
+      status: (batch: InventoryBatch) => batch.status ?? '',
+    }),
+    [batches],
+  );
 
-      // Sort by expiry date ascending (earliest first)
-      return (
-        new Date(a.expiry_date + 'T00:00:00').getTime() -
-        new Date(b.expiry_date + 'T00:00:00').getTime()
-      );
+  const handleColumnSort = (field: string) => {
+    const f = field as BatchSortField;
+    if (f === 'quantity') {
+      setFilterQtyOnly(true);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterQtyOnly(false);
+    handleSort(f, {
+      defaultOrder: BATCH_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
     });
-  }, [filteredBatches]);
+  };
+
+  const mobileSortOptions = [
+    { value: 'product', label: 'Sort by Product' },
+    { value: 'sku', label: 'Sort by SKU' },
+    { value: 'batchNumber', label: 'Sort by Batch Number' },
+    { value: 'quantity', label: 'Sort by Quantity' },
+    { value: 'expiryDate', label: 'Sort by Expiry Date' },
+    { value: 'urgency', label: 'Sort by Urgency' },
+    { value: 'value', label: 'Sort by Value' },
+    { value: 'status', label: 'Sort by Status' },
+  ];
+
+  const sortedBatches = useMemo(() => {
+    let rows = [...filteredBatches];
+    if (filterQtyOnly) {
+      rows = rows.filter((batch) => (batch.remaining_quantity ?? 0) > 0);
+    }
+    return applyTableSort(rows, sortField, sortOrder, batchSortAccessors);
+  }, [filteredBatches, filterQtyOnly, sortField, sortOrder, batchSortAccessors]);
 
   // Summary statistics
   const stats = useMemo(() => {
@@ -326,8 +389,15 @@ export default function BatchManagementPage() {
         {/* Filter Summary */}
         <div className="flex justify-between items-center mt-4 pt-4 border-t">
           <div className="text-sm text-gray-600">
-            Showing {sortedBatches.length} of {batches.length} batches (FEFO sorted)
+            Showing {sortedBatches.length} of {batches.length} batches
           </div>
+          <MobileSortSelect
+            sortField={sortField}
+            sortOrder={sortOrder}
+            options={mobileSortOptions}
+            onFieldChange={handleColumnSort}
+            onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+          />
           <button
             onClick={() => {
               setSearchTerm('');
@@ -344,36 +414,86 @@ export default function BatchManagementPage() {
       {/* Batches Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="overflow-x-auto">
+          {filterQtyOnly && (
+            <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
+              <span>Showing batches with remaining quantity only ({sortedBatches.length})</span>
+              <button
+                type="button"
+                className="text-amber-800 underline"
+                onClick={() => {
+                  setFilterQtyOnly(false);
+                  handleSort('expiryDate', { defaultOrder: 'asc' });
+                }}
+              >
+                Clear filter
+              </button>
+            </div>
+          )}
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   FEFO Order
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Product
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  SKU
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Batch Number
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Quantity
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Expiry Date
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Urgency
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Value
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Status
-                </th>
+                <SortableTableHeader
+                  label="Product"
+                  field="product"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                />
+                <SortableTableHeader
+                  label="SKU"
+                  field="sku"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                />
+                <SortableTableHeader
+                  label="Batch Number"
+                  field="batchNumber"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                />
+                <SortableTableHeader
+                  label="Quantity"
+                  field="quantity"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  align="right"
+                  filtered={filterQtyOnly}
+                />
+                <SortableTableHeader
+                  label="Expiry Date"
+                  field="expiryDate"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                />
+                <SortableTableHeader
+                  label="Urgency"
+                  field="urgency"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                />
+                <SortableTableHeader
+                  label="Value"
+                  field="value"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                  align="right"
+                />
+                <SortableTableHeader
+                  label="Status"
+                  field="status"
+                  activeField={sortField}
+                  direction={sortOrder}
+                  onSort={handleColumnSort}
+                />
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Actions
                 </th>

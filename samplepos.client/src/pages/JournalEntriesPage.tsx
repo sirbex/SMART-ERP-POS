@@ -8,14 +8,9 @@ import { ClipboardCheck, Plus, RotateCcw, Search, RefreshCw, AlertTriangle, Chec
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
 import { ResponsiveTableWrapper } from '../components/ui/ResponsiveTableWrapper';
+import { api } from '../services/api';
 
-// Auth helper for fetch calls
-const authHeaders = (): HeadersInit => {
-    const token = localStorage.getItem('auth_token');
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
-};
-
-// API functions
+// API functions — axios with token refresh (ERP session policy)
 const fetchJournalEntries = async (params: { dateFrom?: string; dateTo?: string; status?: string; page?: number; limit?: number }) => {
     const searchParams = new URLSearchParams();
     if (params.dateFrom) searchParams.set('dateFrom', params.dateFrom);
@@ -24,15 +19,13 @@ const fetchJournalEntries = async (params: { dateFrom?: string; dateTo?: string;
     if (params.page) searchParams.set('page', params.page.toString());
     if (params.limit) searchParams.set('limit', params.limit.toString());
 
-    const response = await fetch(`/api/erp-accounting/journal-entries?${searchParams}`, { headers: authHeaders() });
-    if (!response.ok) throw new Error('Failed to fetch journal entries');
-    return response.json();
+    const { data } = await api.get(`/erp-accounting/journal-entries?${searchParams}`);
+    return data;
 };
 
 const fetchJournalEntry = async (id: string) => {
-    const response = await fetch(`/api/erp-accounting/journal-entries/${id}`, { headers: authHeaders() });
-    if (!response.ok) throw new Error('Failed to fetch journal entry');
-    return response.json();
+    const { data } = await api.get(`/erp-accounting/journal-entries/${id}`);
+    return data;
 };
 
 const createJournalEntry = async (data: {
@@ -59,45 +52,31 @@ const createJournalEntry = async (data: {
         }))
     };
 
-    const response = await fetch('/api/erp-accounting/journal-entries', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify(payload)
-    });
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to create journal entry');
-    }
-    return response.json();
+    const { data: result } = await api.post('/erp-accounting/journal-entries', payload);
+    return result;
 };
 
 const reverseJournalEntry = async ({ id, reason }: { id: string; reason: string }) => {
-    const response = await fetch(`/api/erp-accounting/journal-entries/${id}/reverse`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ reason })
-    });
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to reverse journal entry');
+    try {
+        const { data: result } = await api.post(`/erp-accounting/journal-entries/${id}/reverse`, { reason });
+        return result;
+    } catch (err: unknown) {
+        const ax = err as { response?: { data?: { error?: string } } };
+        throw new Error(ax.response?.data?.error || 'Failed to reverse journal entry');
     }
-    return response.json();
 };
 
 const fetchAccounts = async () => {
-    const response = await fetch('/api/accounting/chart-of-accounts?isPostingAccount=true&isActive=true', { headers: authHeaders() });
-    if (!response.ok) throw new Error('Failed to fetch accounts');
-    return response.json();
+    const { data } = await api.get('/accounting/chart-of-accounts?isPostingAccount=true&isActive=true');
+    return data;
 };
 
 const checkPeriodOpen = async (date: string): Promise<boolean> => {
     try {
-        const response = await fetch(`/api/erp-accounting/periods/check-open?date=${date}`, { headers: authHeaders() });
-        if (!response.ok) return true; // Default to open if API fails
-        const data = await response.json();
-        return data.data?.isOpen ?? true;
+        const { data } = await api.get(`/erp-accounting/periods/check-open?date=${date}`);
+        return (data as { data?: { isOpen?: boolean } })?.data?.isOpen ?? true;
     } catch {
-        return true; // Default to open if check fails
+        return true;
     }
 };
 

@@ -13,6 +13,10 @@ import { DocumentFlowButton } from '../components/shared/DocumentFlowButton';
 import { VoidSaleModal } from '../components/sales/VoidSaleModal';
 import { RefundSaleModal } from '../components/sales/RefundSaleModal';
 import { useBackendPermission } from '../hooks/useBackendPermission';
+import { SortableTableHeader } from '../components/ui/SortableTableHeader';
+import { MobileSortSelect } from '../components/ui/MobileSortSelect';
+import { useColumnSort } from '../hooks/useColumnSort';
+import { applyTableSort } from '../lib/tableSortUtils';
 
 // ── Local type definitions ──────────────────────────────────────────────
 
@@ -228,6 +232,26 @@ function formatDisplayTime(timestamp: string | null | undefined): string {
   } catch (error) {
     return 'N/A';
   }
+}
+
+type SalesTableSortField = 'saleNumber' | 'date' | 'customer' | 'amount' | 'profit' | 'payment' | 'status';
+type CreditSalesSortField = 'saleNumber' | 'customer' | 'date' | 'total' | 'paid' | 'outstanding';
+type PartialPaymentsSortField = 'saleNumber' | 'customer' | 'date' | 'total' | 'paid' | 'balance';
+type NestedSaleSortField = 'saleNumber' | 'date' | 'customer' | 'amount' | 'payment';
+type OrderedBySortField = 'orderNumber' | 'customer' | 'date' | 'status' | 'amount';
+
+function saleSortDate(sale: { saleDate?: string; createdAt?: string }): string {
+  return sale.createdAt || sale.saleDate || '';
+}
+
+function saleOutstanding(sale: SaleRow): number {
+  return new Decimal(sale.totalAmount || 0)
+    .minus(sale.paymentReceived || sale.amountPaid || 0)
+    .toNumber();
+}
+
+function saleAmountPaid(sale: SaleRow): number {
+  return sale.paymentReceived || sale.amountPaid || 0;
 }
 
 // Utility functions for precise date calculations
@@ -1113,12 +1137,53 @@ function SalesTable({
   onPageChange,
 }: SalesTableProps) {
   const hasDiscounts = sales.some((s) => s.discountAmount > 0);
+  const { sortField, sortOrder, handleSort, setSortOrder } = useColumnSort<SalesTableSortField>('date', 'desc');
+
+  const saleSortAccessors = useMemo(
+    () => ({
+      saleNumber: (s: SaleRow) => s.saleNumber || s.id.slice(0, 8),
+      date: (s: SaleRow) => saleSortDate(s),
+      customer: (s: SaleRow) => s.customerName || 'Walk-in',
+      amount: (s: SaleRow) => s.totalAmount,
+      profit: (s: SaleRow) => s.profit || 0,
+      payment: (s: SaleRow) => s.paymentMethod,
+      status: (s: SaleRow) => s.status,
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    handleSort(field as SalesTableSortField);
+  };
+
+  const sortedSales = useMemo(
+    () => applyTableSort(sales, sortField, sortOrder, saleSortAccessors),
+    [sales, sortField, sortOrder, saleSortAccessors],
+  );
+
+  const mobileSortOptions = [
+    { value: 'saleNumber', label: 'Sort by Sale #' },
+    { value: 'date', label: 'Sort by Date' },
+    { value: 'customer', label: 'Sort by Customer' },
+    { value: 'amount', label: 'Sort by Amount' },
+    { value: 'profit', label: 'Sort by Profit' },
+    { value: 'payment', label: 'Sort by Payment' },
+    { value: 'status', label: 'Sort by Status' },
+  ];
 
   return (
     <div className="space-y-4">
+      <MobileSortSelect
+        sortField={sortField}
+        sortOrder={sortOrder}
+        options={mobileSortOptions}
+        onFieldChange={handleColumnSort}
+        onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+        className="px-2"
+      />
       {/* Mobile Card View */}
       <div className="block sm:hidden space-y-3 px-2">
-        {sales.map((sale: SaleRow) => (
+        {sortedSales.map((sale: SaleRow) => (
           <div
             key={sale.id}
             className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm active:bg-gray-50"
@@ -1154,39 +1219,25 @@ function SalesTable({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Sale #
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Date & Time
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Customer
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Amount
-              </th>
+              <SortableTableHeader label="Sale #" field="saleNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Date & Time" field="date" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Customer" field="customer" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Amount" field="amount" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
               {hasDiscounts && (
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                   Discount
                 </th>
               )}
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Profit (Margin)
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Payment
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Status
-              </th>
+              <SortableTableHeader label="Profit (Margin)" field="profit" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+              <SortableTableHeader label="Payment" field="payment" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                 Actions
               </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sales.map((sale: SaleRow) => (
+            {sortedSales.map((sale: SaleRow) => (
               <tr
                 key={sale.id}
                 className="hover:bg-gray-50 cursor-pointer"
@@ -1291,6 +1342,27 @@ function SalesTable({
 // Customer Sales View Component
 function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) {
   const [expandedCustomer, setExpandedCustomer] = useState<string | null>(null);
+  const { sortField, sortOrder, handleSort } = useColumnSort<NestedSaleSortField>('date', 'desc');
+
+  const nestedSaleSortAccessors = useMemo(
+    () => ({
+      saleNumber: (s: SaleRow) => s.saleNumber || '',
+      date: (s: SaleRow) => saleSortDate(s),
+      customer: (s: SaleRow) => s.customerName || 'Walk-in',
+      amount: (s: SaleRow) => s.totalAmount,
+      payment: (s: SaleRow) => s.paymentMethod,
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    handleSort(field as NestedSaleSortField);
+  };
+
+  const sortCustomerSales = useCallback(
+    (rows: SaleRow[]) => applyTableSort(rows, sortField, sortOrder, nestedSaleSortAccessors),
+    [sortField, sortOrder, nestedSaleSortAccessors],
+  );
 
   return (
     <div className="space-y-4">
@@ -1335,15 +1407,15 @@ function CustomerSalesView({ customers, onSelectSale }: CustomerSalesViewProps) 
               <table className="min-w-full">
                 <thead className="text-xs text-gray-500 uppercase">
                   <tr>
-                    <th className="text-left pb-2">Sale #</th>
-                    <th className="text-left pb-2">Date & Time</th>
-                    <th className="text-right pb-2">Amount</th>
-                    <th className="text-left pb-2">Payment</th>
-                    <th className="text-right pb-2">Actions</th>
+                    <SortableTableHeader label="Sale #" field="saleNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                    <SortableTableHeader label="Date & Time" field="date" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                    <SortableTableHeader label="Amount" field="amount" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" className="px-0 py-2" />
+                    <SortableTableHeader label="Payment" field="payment" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                    <th className="text-right pb-2 px-0 py-2 text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="text-sm">
-                  {customer.sales.map((sale: SaleRow) => (
+                  {sortCustomerSales(customer.sales).map((sale: SaleRow) => (
                     <tr key={sale.id} className="border-t border-gray-100">
                       <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
                       <td className="py-2 whitespace-nowrap">{formatSaleDateTime(sale)}</td>
@@ -1380,6 +1452,27 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [expandedSales, setExpandedSales] = useState<SaleRow[]>([]);
   const [loadingSales, setLoadingSales] = useState(false);
+  const { sortField, sortOrder, handleSort } = useColumnSort<NestedSaleSortField>('date', 'desc');
+
+  const nestedSaleSortAccessors = useMemo(
+    () => ({
+      saleNumber: (s: SaleRow) => s.saleNumber || '',
+      date: (s: SaleRow) => saleSortDate(s),
+      customer: (s: SaleRow) => s.customerName || 'Walk-in',
+      amount: (s: SaleRow) => s.totalAmount,
+      payment: (s: SaleRow) => s.paymentMethod,
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    handleSort(field as NestedSaleSortField);
+  };
+
+  const sortedExpandedSales = useMemo(
+    () => applyTableSort(expandedSales, sortField, sortOrder, nestedSaleSortAccessors),
+    [expandedSales, sortField, sortOrder, nestedSaleSortAccessors],
+  );
 
   // Fetch sales for the expanded cashier on-demand
   useEffect(() => {
@@ -1453,15 +1546,15 @@ function UserSalesView({ users, onSelectSale, startDate, endDate }: UserSalesVie
                 <table className="min-w-full">
                   <thead className="text-xs text-gray-500 uppercase">
                     <tr>
-                      <th className="text-left pb-2">Sale #</th>
-                      <th className="text-left pb-2">Customer</th>
-                      <th className="text-left pb-2">Date & Time</th>
-                      <th className="text-right pb-2">Amount</th>
-                      <th className="text-right pb-2">Actions</th>
+                      <SortableTableHeader label="Sale #" field="saleNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                      <SortableTableHeader label="Customer" field="customer" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                      <SortableTableHeader label="Date & Time" field="date" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                      <SortableTableHeader label="Amount" field="amount" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" className="px-0 py-2" />
+                      <th className="text-right pb-2 px-0 py-2 text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="text-sm">
-                    {expandedSales.map((sale: SaleRow) => (
+                    {sortedExpandedSales.map((sale: SaleRow) => (
                       <tr key={sale.id} className="border-t border-gray-100">
                         <td className="py-2 font-medium text-blue-600">{sale.saleNumber}</td>
                         <td className="py-2">{sale.customerName || 'Walk-in'}</td>
@@ -1495,6 +1588,28 @@ function OrderedByView({ groups, startDate, endDate }: OrderedByViewProps) {
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [expandedOrders, setExpandedOrders] = useState<Record<string, unknown>[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const { sortField, sortOrder, handleSort } = useColumnSort<OrderedBySortField>('date', 'desc');
+
+  const orderSortAccessors = useMemo(
+    () => ({
+      orderNumber: (o: Record<string, unknown>) => String(o.orderNumber || ''),
+      customer: (o: Record<string, unknown>) => String(o.customerName || 'Walk-in'),
+      date: (o: Record<string, unknown>) =>
+        String(o.orderDate || o.order_date || o.createdAt || o.created_at || ''),
+      status: (o: Record<string, unknown>) => String(o.status || ''),
+      amount: (o: Record<string, unknown>) => Number(o.totalAmount || 0),
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    handleSort(field as OrderedBySortField);
+  };
+
+  const sortedExpandedOrders = useMemo(
+    () => applyTableSort(expandedOrders, sortField, sortOrder, orderSortAccessors),
+    [expandedOrders, sortField, sortOrder, orderSortAccessors],
+  );
 
   useEffect(() => {
     if (!expandedUser) {
@@ -1571,16 +1686,16 @@ function OrderedByView({ groups, startDate, endDate }: OrderedByViewProps) {
                 <table className="min-w-full">
                   <thead className="text-xs text-gray-500 uppercase">
                     <tr>
-                      <th className="text-left pb-2">Order #</th>
-                      <th className="text-left pb-2">Customer</th>
-                      <th className="text-left pb-2">Date & Time</th>
-                      <th className="text-left pb-2">Status</th>
-                      <th className="text-right pb-2">Amount</th>
-                      <th className="text-left pb-2">Cancel Reason</th>
+                      <SortableTableHeader label="Order #" field="orderNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                      <SortableTableHeader label="Customer" field="customer" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                      <SortableTableHeader label="Date & Time" field="date" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                      <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-0 py-2" />
+                      <SortableTableHeader label="Amount" field="amount" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" className="px-0 py-2" />
+                      <th className="text-left pb-2 px-0 py-2 text-xs font-medium uppercase tracking-wider text-gray-500">Cancel Reason</th>
                     </tr>
                   </thead>
                   <tbody className="text-sm">
-                    {expandedOrders.map((o) => {
+                    {sortedExpandedOrders.map((o) => {
                       const st = String(o.status || '');
                       const statusColor = st === 'COMPLETED' ? 'text-green-600' : st === 'CANCELLED' ? 'text-red-600' : 'text-yellow-600';
                       const orderDate = formatDisplayDate(String(o.orderDate || o.order_date || ''));
@@ -1612,6 +1727,48 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [filterOutstandingOnly, setFilterOutstandingOnly] = useState(false);
+  const { sortField, sortOrder, handleSort, setSortOrder } = useColumnSort<CreditSalesSortField>('outstanding', 'desc');
+
+  const creditSaleSortAccessors = useMemo(
+    () => ({
+      saleNumber: (s: SaleRow) => s.saleNumber || '',
+      customer: (s: SaleRow) => s.customerName || '',
+      date: (s: SaleRow) => saleSortDate(s),
+      total: (s: SaleRow) => s.totalAmount,
+      paid: (s: SaleRow) => saleAmountPaid(s),
+      outstanding: (s: SaleRow) => saleOutstanding(s),
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    const f = field as CreditSalesSortField;
+    if (f === 'outstanding') {
+      setFilterOutstandingOnly(true);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterOutstandingOnly(false);
+    handleSort(f);
+  };
+
+  const sortedSales = useMemo(() => {
+    let rows = [...sales];
+    if (filterOutstandingOnly) {
+      rows = rows.filter((s) => saleOutstanding(s) > 0);
+    }
+    return applyTableSort(rows, sortField, sortOrder, creditSaleSortAccessors);
+  }, [sales, filterOutstandingOnly, sortField, sortOrder, creditSaleSortAccessors]);
+
+  const mobileSortOptions = [
+    { value: 'saleNumber', label: 'Sort by Sale #' },
+    { value: 'customer', label: 'Sort by Customer' },
+    { value: 'date', label: 'Sort by Date' },
+    { value: 'total', label: 'Sort by Total' },
+    { value: 'paid', label: 'Sort by Paid' },
+    { value: 'outstanding', label: 'Sort by Outstanding' },
+  ];
 
   // Fetch all credit sales on-demand from API
   useEffect(() => {
@@ -1714,38 +1871,34 @@ function CreditSalesView({ onSelectSale, startDate, endDate }: CreditSalesViewPr
         </div>
       </div>
 
+      <MobileSortSelect
+        sortField={sortField}
+        sortOrder={sortOrder}
+        options={mobileSortOptions}
+        onFieldChange={handleColumnSort}
+        onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+      />
+
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Sale #
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Customer
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Date
-              </th>
+              <SortableTableHeader label="Sale #" field="saleNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Customer" field="customer" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Date" field="date" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Time
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Total
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Paid
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Outstanding
-              </th>
+              <SortableTableHeader label="Total" field="total" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+              <SortableTableHeader label="Paid" field="paid" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+              <SortableTableHeader label="Outstanding" field="outstanding" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterOutstandingOnly} />
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                 Actions
               </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sales.map((sale: SaleRow) => {
+            {sortedSales.map((sale: SaleRow) => {
               const total = new Decimal(sale.totalAmount || 0);
               const paid = new Decimal(sale.paymentReceived || sale.amountPaid || 0);
               const outstanding = total.minus(paid);
@@ -1792,6 +1945,48 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [filterBalanceOnly, setFilterBalanceOnly] = useState(false);
+  const { sortField, sortOrder, handleSort, setSortOrder } = useColumnSort<PartialPaymentsSortField>('balance', 'desc');
+
+  const partialPaymentSortAccessors = useMemo(
+    () => ({
+      saleNumber: (s: SaleRow) => s.saleNumber || '',
+      customer: (s: SaleRow) => s.customerName || '',
+      date: (s: SaleRow) => saleSortDate(s),
+      total: (s: SaleRow) => s.totalAmount,
+      paid: (s: SaleRow) => saleAmountPaid(s),
+      balance: (s: SaleRow) => saleOutstanding(s),
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    const f = field as PartialPaymentsSortField;
+    if (f === 'balance') {
+      setFilterBalanceOnly(true);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterBalanceOnly(false);
+    handleSort(f);
+  };
+
+  const sortedSales = useMemo(() => {
+    let rows = [...sales];
+    if (filterBalanceOnly) {
+      rows = rows.filter((s) => saleOutstanding(s) > 0);
+    }
+    return applyTableSort(rows, sortField, sortOrder, partialPaymentSortAccessors);
+  }, [sales, filterBalanceOnly, sortField, sortOrder, partialPaymentSortAccessors]);
+
+  const mobileSortOptions = [
+    { value: 'saleNumber', label: 'Sort by Sale #' },
+    { value: 'customer', label: 'Sort by Customer' },
+    { value: 'date', label: 'Sort by Date' },
+    { value: 'total', label: 'Sort by Total' },
+    { value: 'paid', label: 'Sort by Paid' },
+    { value: 'balance', label: 'Sort by Balance' },
+  ];
 
   // Fetch credit sales, then filter for partial payments client-side
   useEffect(() => {
@@ -1873,31 +2068,27 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
         <div className="text-sm text-yellow-700 mt-1">Require follow-up for remaining balance</div>
       </div>
 
+      <MobileSortSelect
+        sortField={sortField}
+        sortOrder={sortOrder}
+        options={mobileSortOptions}
+        onFieldChange={handleColumnSort}
+        onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+      />
+
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Sale #
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Customer
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                Date
-              </th>
+              <SortableTableHeader label="Sale #" field="saleNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Customer" field="customer" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Date" field="date" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Time
               </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Total
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Paid
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
-                Balance
-              </th>
+              <SortableTableHeader label="Total" field="total" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+              <SortableTableHeader label="Paid" field="paid" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+              <SortableTableHeader label="Balance" field="balance" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterBalanceOnly} />
               <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
                 % Paid
               </th>
@@ -1907,7 +2098,7 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sales.map((sale: SaleRow) => {
+            {sortedSales.map((sale: SaleRow) => {
               const total = new Decimal(sale.totalAmount || 0);
               const paid = new Decimal(sale.paymentReceived || sale.amountPaid || 0);
               const balance = total.minus(paid);

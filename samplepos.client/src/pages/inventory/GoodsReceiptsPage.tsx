@@ -34,6 +34,10 @@ import { SupplierReassignmentModal } from '../../components/inventory/SupplierRe
 import { GrBillingStatusBadge } from '../../components/inventory/GrBillingStatusBadge';
 import { GrReceiptStatusBadge } from '../../components/inventory/GrReceiptStatusBadge';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
+import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
+import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
+import { useColumnSort } from '../../hooks/useColumnSort';
+import { applyTableSort } from '../../lib/tableSortUtils';
 import { ListSkeleton } from '../../components/ui/ListSkeleton';
 import { MobileListCard, ResponsiveActionBar, mobileActionBtnClass } from '../../components/ui/ResponsiveActionBar';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
@@ -112,6 +116,16 @@ interface GRRow {
   billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
   billing_status?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
 }
+
+type GRSortField =
+  | 'grNumber'
+  | 'poNumber'
+  | 'supplier'
+  | 'receivedDate'
+  | 'receiptStatus'
+  | 'invoiceStatus';
+
+const GR_DESC_DEFAULT = new Set<GRSortField>(['receivedDate']);
 
 interface GRItemRow {
   id: string;
@@ -270,6 +284,8 @@ export default function GoodsReceiptsPage() {
   const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('custom');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const { sortField, sortOrder, handleSort, setSortOrder } =
+    useColumnSort<GRSortField>('receivedDate', 'desc');
   const [selectedGR, setSelectedGR] = useState<GRRow | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -954,6 +970,45 @@ export default function GoodsReceiptsPage() {
   const goodsReceipts = (data?.data?.data || []) as GRRow[];
   const pagination = data?.data?.pagination;
 
+  const grSortAccessors = useMemo(
+    () => ({
+      grNumber: (gr: GRRow) => gr.grNumber || gr.receiptNumber || gr.receipt_number || '',
+      poNumber: (gr: GRRow) => gr.poNumber || gr.po_number || '',
+      supplier: (gr: GRRow) => gr.supplierName || gr.supplier_name || '',
+      receivedDate: (gr: GRRow) => gr.receivedDate || gr.received_date || '',
+      receiptStatus: (gr: GRRow) => gr.status ?? '',
+      invoiceStatus: (gr: GRRow) => gr.billingStatus || gr.billing_status || '',
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    const f = field as GRSortField;
+    if (f === 'invoiceStatus') {
+      setBillingFilter('TO_INVOICE');
+      setPage(1);
+      handleSort(f, { defaultOrder: 'asc' });
+      return;
+    }
+    handleSort(f, {
+      defaultOrder: GR_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
+    });
+  };
+
+  const mobileSortOptions = [
+    { value: 'grNumber', label: 'Sort by GR Number' },
+    { value: 'poNumber', label: 'Sort by PO Number' },
+    { value: 'supplier', label: 'Sort by Supplier' },
+    { value: 'receivedDate', label: 'Sort by Received Date' },
+    { value: 'receiptStatus', label: 'Sort by Receipt Status' },
+    { value: 'invoiceStatus', label: 'Sort by Invoice Status' },
+  ];
+
+  const sortedGoodsReceipts = useMemo(
+    () => applyTableSort([...goodsReceipts], sortField, sortOrder, grSortAccessors),
+    [goodsReceipts, sortField, sortOrder, grSortAccessors],
+  );
+
   const billingCounts = useMemo(() => ({
     toInvoice: goodsReceipts.filter((g) => (g.billingStatus || g.billing_status) === 'TO_INVOICE').length,
     invoiced: goodsReceipts.filter((g) => (g.billingStatus || g.billing_status) === 'INVOICED').length,
@@ -1204,13 +1259,20 @@ export default function GoodsReceiptsPage() {
               {' '}<span className="font-medium text-gray-600">Supplier invoice</span> = billed in AP.
             </p>
           </div>
+          <MobileSortSelect
+            sortField={sortField}
+            sortOrder={sortOrder}
+            options={mobileSortOptions}
+            onFieldChange={handleColumnSort}
+            onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+          />
 
           {/* Mobile card list */}
           <div className="md:hidden divide-y divide-gray-100">
-            {goodsReceipts.length === 0 ? (
+            {sortedGoodsReceipts.length === 0 ? (
               <p className="px-4 py-12 text-center text-gray-500 text-sm">No goods receipts found</p>
             ) : (
-              goodsReceipts.map((gr: GRRow) => (
+              sortedGoodsReceipts.map((gr: GRRow) => (
                 <MobileListCard key={gr.id}>
                   <div className="flex items-start justify-between gap-3 min-w-0">
                     <div className="min-w-0 flex-1">
@@ -1240,42 +1302,46 @@ export default function GoodsReceiptsPage() {
 
           {/* Desktop table */}
           <div className="hidden md:block">
+          {billingFilter === 'TO_INVOICE' && sortField === 'invoiceStatus' && (
+            <div className="px-4 lg:px-6 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
+              <span>Showing receipts to invoice ({sortedGoodsReceipts.length} on this page)</span>
+              <button
+                type="button"
+                className="text-amber-800 underline"
+                onClick={() => {
+                  setBillingFilter('');
+                  setPage(1);
+                  handleSort('receivedDate', { defaultOrder: 'desc' });
+                }}
+              >
+                Clear filter
+              </button>
+            </div>
+          )}
           <ResponsiveTableWrapper>
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    GR Number
-                  </th>
-                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden lg:table-cell">
-                    PO Number
-                  </th>
-                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Supplier
-                  </th>
-                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden xl:table-cell">
-                    Received Date
-                  </th>
-                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Receipt
-                  </th>
-                  <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Invoice
-                  </th>
+                  <SortableTableHeader label="GR Number" field="grNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6" />
+                  <SortableTableHeader label="PO Number" field="poNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6 hidden lg:table-cell" />
+                  <SortableTableHeader label="Supplier" field="supplier" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6" />
+                  <SortableTableHeader label="Received Date" field="receivedDate" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6 hidden xl:table-cell" />
+                  <SortableTableHeader label="Receipt" field="receiptStatus" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6" />
+                  <SortableTableHeader label="Invoice" field="invoiceStatus" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 lg:px-6" filtered={billingFilter === 'TO_INVOICE' && sortField === 'invoiceStatus'} />
                   <th className="px-4 lg:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {goodsReceipts.length === 0 ? (
+                {sortedGoodsReceipts.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       No goods receipts found
                     </td>
                   </tr>
                 ) : (
-                  goodsReceipts.map((gr: GRRow) => (
+                  sortedGoodsReceipts.map((gr: GRRow) => (
                     <tr key={gr.id} className="hover:bg-gray-50/80 transition-colors">
                       <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                         {gr.grNumber || gr.receiptNumber || gr.receipt_number}

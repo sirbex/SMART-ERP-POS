@@ -9,7 +9,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
+import { api } from '../../services/api';
 
+type ApiEnvelope<T> = { success?: boolean; data?: T; error?: string };
 
 interface ExpenseCategory {
   id: string;
@@ -22,18 +24,15 @@ interface ExpenseCategory {
 
 const categoryApi = {
   getCategories: async (): Promise<ExpenseCategory[]> => {
-    const response = await fetch('/api/expenses/categories?includeInactive=true', {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch categories');
-    }
-
-    const result = await response.json();
-    return (result.data || []).map((c: { id: string; code: string; name: string; description?: string; is_active?: boolean; isActive?: boolean; expense_count?: number | string; expenseCount?: number | string }) => ({
+    const { data: result } = await api.get<ApiEnvelope<Array<{
+      id: string; code: string; name: string; description?: string;
+      is_active?: boolean; isActive?: boolean; expense_count?: number | string; expenseCount?: number | string;
+    }>>>('/expenses/categories?includeInactive=true');
+    const rows = (result.data ?? result) as Array<{
+      id: string; code: string; name: string; description?: string;
+      is_active?: boolean; isActive?: boolean; expense_count?: number | string; expenseCount?: number | string;
+    }>;
+    return (rows || []).map((c) => ({
       id: c.id,
       code: c.code,
       name: c.name,
@@ -44,55 +43,18 @@ const categoryApi = {
   },
 
   createCategory: async (data: { name: string; code: string; description?: string }): Promise<ExpenseCategory> => {
-    const response = await fetch('/api/expenses/categories', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      },
-      body: JSON.stringify(data)
-    });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to create category');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.post<ApiEnvelope<ExpenseCategory>>('/expenses/categories', data);
+    return (result.data ?? result) as ExpenseCategory;
   },
 
   updateCategory: async (id: string, data: { name?: string; code?: string; description?: string; isActive?: boolean }): Promise<ExpenseCategory> => {
-    const response = await fetch(`/api/expenses/categories/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      },
-      body: JSON.stringify(data)
-    });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.error || 'Failed to update category');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.put<ApiEnvelope<ExpenseCategory>>(`/expenses/categories/${id}`, data);
+    return (result.data ?? result) as ExpenseCategory;
   },
 
   deleteCategory: async (id: string): Promise<void> => {
-    const response = await fetch(`/api/expenses/categories/${id}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to delete category');
-    }
-  }
+    await api.delete(`/expenses/categories/${id}`);
+  },
 };
 
 interface CategoryFormData {

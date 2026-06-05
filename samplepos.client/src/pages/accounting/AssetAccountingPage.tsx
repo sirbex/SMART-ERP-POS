@@ -11,6 +11,7 @@ import {
   CheckCircle, AlertTriangle, Clock, TrendingDown, ShieldAlert,
 } from 'lucide-react';
 import { formatCurrency } from '../../utils/currency';
+import { api } from '../../services/api';
 
 // ─── Types ──────────────────────────────────────────────────────────
 interface AssetCategory {
@@ -181,25 +182,21 @@ export default function AssetAccountingPage() {
 
   // Fetch chart of accounts for GL assignment
   useEffect(() => {
-    const token = localStorage.getItem('auth_token');
-    if (!token) return;
-    fetch('/api/accounting/chart-of-accounts?isActive=true', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(data => {
+    api.get('/accounting/chart-of-accounts?isActive=true')
+      .then((res) => {
+        const data = res.data as { success?: boolean; data?: Record<string, unknown>[] };
         if (data.success && Array.isArray(data.data)) {
-          setAccounts(data.data.map((a: Record<string, unknown>) => ({
-            id: a.Id || a.id,
-            accountCode: a.AccountCode || a.accountCode,
-            accountName: a.AccountName || a.accountName,
-            accountType: a.AccountType || a.accountType,
-            normalBalance: a.NormalBalance || a.normalBalance,
-            isActive: a.IsActive ?? a.isActive ?? true,
+          setAccounts(data.data.map((a) => ({
+            id: (a.Id || a.id) as string,
+            accountCode: (a.AccountCode || a.accountCode) as string,
+            accountName: (a.AccountName || a.accountName) as string,
+            accountType: (a.AccountType || a.accountType) as string,
+            normalBalance: (a.NormalBalance || a.normalBalance) as string,
+            isActive: (a.IsActive ?? a.isActive ?? true) as boolean,
           })));
         }
       })
-      .catch(() => {/* silent */ });
+      .catch(() => { /* silent */ });
   }, []);
 
   // ─── Category Form State ──────────────────────────────────────────

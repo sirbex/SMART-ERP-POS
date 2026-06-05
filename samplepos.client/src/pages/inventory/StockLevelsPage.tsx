@@ -3,6 +3,27 @@ import { useOfflineStockLevels, useOfflineProducts } from '../../hooks/useOfflin
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { formatMultiUomQuantity } from '../../utils/formatQuantity';
 import { formatCurrency } from '../../utils/currency';
+import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
+import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
+import { useColumnSort } from '../../hooks/useColumnSort';
+import { applyTableSort } from '../../lib/tableSortUtils';
+
+type StockLevelSortField =
+  | 'product'
+  | 'category'
+  | 'quantity'
+  | 'price'
+  | 'reorderLevel'
+  | 'expiry'
+  | 'status';
+
+const STOCK_LEVEL_DESC_DEFAULT = new Set<StockLevelSortField>([
+  'quantity',
+  'price',
+  'reorderLevel',
+  'expiry',
+  'status',
+]);
 
 interface StockLevelItem {
   product_id: string;
@@ -54,6 +75,9 @@ export default function StockLevelsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'low' | 'expiring'>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [filterQtyOnly, setFilterQtyOnly] = useState(false);
+  const { sortField, sortOrder, handleSort, setSortOrder } =
+    useColumnSort<StockLevelSortField>('product', 'asc');
 
   // Helper: calculate days until expiry from a date string
   const getDaysUntilExpiry = (expiryDate: string | null | undefined): number | null => {
@@ -148,17 +172,65 @@ export default function StockLevelsPage() {
     return filtered;
   }, [stockLevels, searchTerm, filterStatus, filterCategory, productMap]);
 
+  const stockLevelSortAccessors = useMemo(
+    () => ({
+      product: (item: StockLevelItem) => item.product_name ?? '',
+      category: (item: StockLevelItem) => productMap.get(item.product_id)?.category ?? '',
+      quantity: (item: StockLevelItem) =>
+        parseFloat(String(item.total_stock || item.total_quantity || 0)) || 0,
+      price: (item: StockLevelItem) => parseFloat(String(item.selling_price)) || 0,
+      reorderLevel: (item: StockLevelItem) => parseFloat(String(item.reorder_level)) || 0,
+      expiry: (item: StockLevelItem) => item.nearest_expiry ?? '',
+      status: (item: StockLevelItem) => (item.needs_reorder ? 1 : 0),
+    }),
+    [productMap],
+  );
+
+  const handleColumnSort = (field: string) => {
+    const f = field as StockLevelSortField;
+    if (f === 'quantity') {
+      setFilterQtyOnly(true);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterQtyOnly(false);
+    handleSort(f, {
+      defaultOrder: STOCK_LEVEL_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
+    });
+  };
+
+  const mobileSortOptions = [
+    { value: 'product', label: 'Sort by Product' },
+    { value: 'category', label: 'Sort by Category' },
+    { value: 'quantity', label: 'Sort by Quantity' },
+    { value: 'price', label: 'Sort by Price' },
+    { value: 'reorderLevel', label: 'Sort by Reorder Level' },
+    { value: 'expiry', label: 'Sort by Expiry' },
+    { value: 'status', label: 'Sort by Status' },
+  ];
+
+  const sortedStockLevels = useMemo(() => {
+    let rows = [...filteredStockLevels];
+    if (filterQtyOnly) {
+      rows = rows.filter(
+        (item) =>
+          (parseFloat(String(item.total_stock || item.total_quantity || 0)) || 0) > 0,
+      );
+    }
+    return applyTableSort(rows, sortField, sortOrder, stockLevelSortAccessors);
+  }, [filteredStockLevels, filterQtyOnly, sortField, sortOrder, stockLevelSortAccessors]);
+
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus, filterCategory]);
+  }, [searchTerm, filterStatus, filterCategory, filterQtyOnly, sortField, sortOrder]);
 
   // Paginated stock levels
-  const totalPages = Math.max(1, Math.ceil(filteredStockLevels.length / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(sortedStockLevels.length / ITEMS_PER_PAGE));
   const paginatedStockLevels = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredStockLevels.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredStockLevels, currentPage]);
+    return sortedStockLevels.slice(start, start + ITEMS_PER_PAGE);
+  }, [sortedStockLevels, currentPage]);
 
   if (isLoading) {
     return (
@@ -263,34 +335,90 @@ export default function StockLevelsPage() {
             </select>
           </div>
         </div>
+        <MobileSortSelect
+          className="mt-4"
+          sortField={sortField}
+          sortOrder={sortOrder}
+          options={mobileSortOptions}
+          onFieldChange={handleColumnSort}
+          onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+        />
       </div>
 
       {/* Stock Table */}
       <div className="bg-white rounded-lg shadow overflow-x-auto">
+        {filterQtyOnly && (
+          <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
+            <span>Showing products with stock on hand only ({sortedStockLevels.length})</span>
+            <button
+              type="button"
+              className="text-amber-800 underline"
+              onClick={() => {
+                setFilterQtyOnly(false);
+                handleSort('product', { defaultOrder: 'asc' });
+              }}
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Product
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Category
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Quantity
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Price
-              </th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Reorder Level
-              </th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Expiry
-              </th>
-              <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Status
-              </th>
+              <SortableTableHeader
+                label="Product"
+                field="product"
+                activeField={sortField}
+                direction={sortOrder}
+                onSort={handleColumnSort}
+              />
+              <SortableTableHeader
+                label="Category"
+                field="category"
+                activeField={sortField}
+                direction={sortOrder}
+                onSort={handleColumnSort}
+              />
+              <SortableTableHeader
+                label="Quantity"
+                field="quantity"
+                activeField={sortField}
+                direction={sortOrder}
+                onSort={handleColumnSort}
+                filtered={filterQtyOnly}
+              />
+              <SortableTableHeader
+                label="Price"
+                field="price"
+                activeField={sortField}
+                direction={sortOrder}
+                onSort={handleColumnSort}
+                align="right"
+              />
+              <SortableTableHeader
+                label="Reorder Level"
+                field="reorderLevel"
+                activeField={sortField}
+                direction={sortOrder}
+                onSort={handleColumnSort}
+                align="center"
+              />
+              <SortableTableHeader
+                label="Expiry"
+                field="expiry"
+                activeField={sortField}
+                direction={sortOrder}
+                onSort={handleColumnSort}
+                align="center"
+              />
+              <SortableTableHeader
+                label="Status"
+                field="status"
+                activeField={sortField}
+                direction={sortOrder}
+                onSort={handleColumnSort}
+                align="center"
+              />
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -385,10 +513,10 @@ export default function StockLevelsPage() {
       </div>
 
       {/* Pagination Controls */}
-      {filteredStockLevels.length > ITEMS_PER_PAGE && (
+      {sortedStockLevels.length > ITEMS_PER_PAGE && (
         <div className="flex items-center justify-between px-4 py-4 bg-white rounded-lg shadow mt-4">
           <p className="text-sm text-gray-600">
-            Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredStockLevels.length)} of {filteredStockLevels.length} products
+            Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, sortedStockLevels.length)} of {sortedStockLevels.length} products
           </p>
           <div className="flex items-center gap-2">
             <button

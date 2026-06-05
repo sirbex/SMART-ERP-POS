@@ -24,6 +24,21 @@ import {
 } from '../../hooks/useProductHistory';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import { DamagedItemsBanner, OpeningStockDialog } from '../../components/inventory/DamagedItemsBanner';
+import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
+import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
+import { useColumnSort } from '../../hooks/useColumnSort';
+import { applyTableSort } from '../../lib/tableSortUtils';
+
+type ProductSortField =
+  | 'product'
+  | 'category'
+  | 'sku'
+  | 'pricing'
+  | 'margin'
+  | 'stock'
+  | 'status';
+
+const PRODUCT_DESC_DEFAULT = new Set<ProductSortField>(['pricing', 'margin', 'stock']);
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -164,6 +179,9 @@ export default function ProductsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
+  const [filterStockOnly, setFilterStockOnly] = useState(false);
+  const { sortField, sortOrder, handleSort, setSortOrder } =
+    useColumnSort<ProductSortField>('product', 'asc');
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [formData, setFormData] = useState<ProductFormData>(initialFormData);
@@ -408,17 +426,62 @@ export default function ProductsPage() {
     return filtered;
   }, [products, searchTerm, filterStatus, filterCategory]);
 
+  const productSortAccessors = useMemo(
+    () => ({
+      product: (p: ProductListItem) => p.name ?? '',
+      category: (p: ProductListItem) => p.category ?? '',
+      sku: (p: ProductListItem) => `${p.sku ?? ''} ${p.barcode ?? ''}`.trim(),
+      pricing: (p: ProductListItem) => parseFloat(p.sellingPrice) || 0,
+      margin: (p: ProductListItem) => parseFloat(calculateMargin(p.costPrice, p.sellingPrice)) || 0,
+      stock: (p: ProductListItem) => parseFloat(p.quantityOnHand) || 0,
+      status: (p: ProductListItem) => (p.isActive ? 1 : 0),
+    }),
+    // calculateMargin is stable per render; accessors recreated when products filter changes
+    [products.length, searchTerm, filterStatus, filterCategory],
+  );
+
+  const handleColumnSort = (field: string) => {
+    const f = field as ProductSortField;
+    if (f === 'stock') {
+      setFilterStockOnly(true);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterStockOnly(false);
+    handleSort(f, {
+      defaultOrder: PRODUCT_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
+    });
+  };
+
+  const mobileSortOptions = [
+    { value: 'product', label: 'Sort by Product' },
+    { value: 'category', label: 'Sort by Category' },
+    { value: 'sku', label: 'Sort by SKU/Barcode' },
+    { value: 'pricing', label: 'Sort by Price' },
+    { value: 'margin', label: 'Sort by Margin' },
+    { value: 'stock', label: 'Sort by Stock' },
+    { value: 'status', label: 'Sort by Status' },
+  ];
+
+  const sortedProducts = useMemo(() => {
+    let rows = [...filteredProducts];
+    if (filterStockOnly) {
+      rows = rows.filter((p) => (parseFloat(p.quantityOnHand) || 0) > 0);
+    }
+    return applyTableSort(rows, sortField, sortOrder, productSortAccessors);
+  }, [filteredProducts, filterStockOnly, sortField, sortOrder, productSortAccessors]);
+
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus, filterCategory]);
+  }, [searchTerm, filterStatus, filterCategory, filterStockOnly, sortField, sortOrder]);
 
   // Paginated products
-  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / ITEMS_PER_PAGE));
   const paginatedProducts = useMemo(() => {
     const start = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredProducts.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredProducts, currentPage]);
+    return sortedProducts.slice(start, start + ITEMS_PER_PAGE);
+  }, [sortedProducts, currentPage]);
 
   // Validate form (Zod + duplicate SKU check + UOM check)
   const validateForm = (): boolean => {
@@ -1055,10 +1118,33 @@ export default function ProductsPage() {
             </select>
           </div>
         </div>
+        <MobileSortSelect
+          className="mt-4"
+          sortField={sortField}
+          sortOrder={sortOrder}
+          options={mobileSortOptions}
+          onFieldChange={handleColumnSort}
+          onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+        />
       </div>
 
       {/* Products Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
+        {filterStockOnly && (
+          <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
+            <span>Showing products with stock on hand only ({sortedProducts.length})</span>
+            <button
+              type="button"
+              className="text-amber-800 underline"
+              onClick={() => {
+                setFilterStockOnly(false);
+                handleSort('product', { defaultOrder: 'asc' });
+              }}
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
         {/* Mobile Card View */}
         <div className="block sm:hidden space-y-3 p-3">
           {paginatedProducts.length === 0 ? (
@@ -1120,13 +1206,13 @@ export default function ProductsPage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Product</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU/Barcode</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Pricing</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Margin</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock Levels</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                <SortableTableHeader label="SKU/Barcode" field="sku" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                <SortableTableHeader label="Pricing" field="pricing" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                <SortableTableHeader label="Margin" field="margin" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                <SortableTableHeader label="Stock Levels" field="stock" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" filtered={filterStockOnly} />
+                <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -1233,10 +1319,10 @@ export default function ProductsPage() {
         </div>
 
         {/* Pagination Controls */}
-        {filteredProducts.length > ITEMS_PER_PAGE && (
+        {sortedProducts.length > ITEMS_PER_PAGE && (
           <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200">
             <p className="text-sm text-gray-600">
-              Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredProducts.length)} of {filteredProducts.length} products
+              Showing {((currentPage - 1) * ITEMS_PER_PAGE) + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, sortedProducts.length)} of {sortedProducts.length} products
             </p>
             <div className="flex items-center gap-2">
               <button

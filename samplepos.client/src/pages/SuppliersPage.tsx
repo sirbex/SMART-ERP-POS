@@ -15,6 +15,8 @@ import { handleApiError } from '../utils/errorHandler';
 import { downloadFile } from '../utils/download';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
 import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline';
+import { SortableTableHeader } from '../components/ui/SortableTableHeader';
+import { useColumnSort } from '../hooks/useColumnSort';
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
 // Frontend displays as-is without parsing to Date object
@@ -41,8 +43,13 @@ const PAYMENT_TERMS = [
 
 // View modes
 type ViewMode = 'table' | 'cards';
-type SortField = 'name' | 'createdAt' | 'paymentTerms';
-type SortOrder = 'asc' | 'desc';
+type SortField =
+  | 'name'
+  | 'contactPerson'
+  | 'paymentTerms'
+  | 'status'
+  | 'outstandingBalance'
+  | 'createdAt';
 
 // ============================================================
 // Typed Interfaces (No `any` policy)
@@ -230,9 +237,10 @@ export default function SuppliersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('table');
-  const [sortField, setSortField] = useState<SortField>('name');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  const { sortField, sortOrder, handleSort, resetSort, setSortField, setSortOrder } =
+    useColumnSort<SortField>('name', 'asc');
   const [filterPaymentTerms, setFilterPaymentTerms] = useState<string>('');
+  const [filterOutstandingOnly, setFilterOutstandingOnly] = useState(false);
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [page, setPage] = useState(1);
   const limit = 20;
@@ -263,33 +271,50 @@ export default function SuppliersPage() {
     return Array.isArray(suppliersData) ? suppliersData : [];
   }, [suppliersData]);
 
-  // Filter and sort suppliers
+  // Filter and sort suppliers (client-side on current page — same pattern as Reorder Dashboard)
   const suppliers = useMemo(() => {
     let filtered = [...allSuppliers];
 
-    // Payment terms filter (client-side: lightweight, no DB round-trip per change)
     if (filterPaymentTerms) {
       filtered = filtered.filter(
         (supplier: Supplier) => supplier.paymentTerms === filterPaymentTerms
       );
     }
 
-    // Sorting
+    if (filterOutstandingOnly) {
+      filtered = filtered.filter(
+        (supplier: Supplier) => Number(supplier.outstandingBalance) > 0
+      );
+    }
+
     filtered.sort((a: Supplier, b: Supplier) => {
-      let aVal, bVal;
+      let aVal: string | number | boolean;
+      let bVal: string | number | boolean;
 
       switch (sortField) {
         case 'name':
           aVal = a.name?.toLowerCase() || '';
           bVal = b.name?.toLowerCase() || '';
           break;
-        case 'createdAt':
-          aVal = new Date(a.createdAt || 0).getTime();
-          bVal = new Date(b.createdAt || 0).getTime();
+        case 'contactPerson':
+          aVal = a.contactPerson?.toLowerCase() || '';
+          bVal = b.contactPerson?.toLowerCase() || '';
           break;
         case 'paymentTerms':
           aVal = a.paymentTerms || '';
           bVal = b.paymentTerms || '';
+          break;
+        case 'status':
+          aVal = a.isActive ? 1 : 0;
+          bVal = b.isActive ? 1 : 0;
+          break;
+        case 'outstandingBalance':
+          aVal = Number(a.outstandingBalance) || 0;
+          bVal = Number(b.outstandingBalance) || 0;
+          break;
+        case 'createdAt':
+          aVal = new Date(a.createdAt || 0).getTime();
+          bVal = new Date(b.createdAt || 0).getTime();
           break;
         default:
           return 0;
@@ -301,7 +326,18 @@ export default function SuppliersPage() {
     });
 
     return filtered;
-  }, [allSuppliers, filterPaymentTerms, sortField, sortOrder]);
+  }, [allSuppliers, filterPaymentTerms, filterOutstandingOnly, sortField, sortOrder]);
+
+  const handleColumnSort = (field: string) => {
+    const f = field as SortField;
+    if (f === 'outstandingBalance') {
+      setFilterOutstandingOnly(true);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterOutstandingOnly(false);
+    handleSort(f, { defaultOrder: 'asc' });
+  };
 
   // Debounce search — wait 350ms after last keystroke before firing API call
   useEffect(() => {
@@ -568,12 +604,24 @@ export default function SuppliersPage() {
               <select
                 id="sort-field"
                 value={sortField}
-                onChange={(e) => setSortField(e.target.value as SortField)}
+                onChange={(e) => {
+                  const f = e.target.value as SortField;
+                  setSortField(f);
+                  if (f === 'outstandingBalance') {
+                    setFilterOutstandingOnly(true);
+                    setSortOrder('desc');
+                  } else {
+                    setFilterOutstandingOnly(false);
+                  }
+                }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="name">Sort by Name</option>
-                <option value="createdAt">Sort by Date</option>
+                <option value="contactPerson">Sort by Contact</option>
                 <option value="paymentTerms">Sort by Terms</option>
+                <option value="status">Sort by Status</option>
+                <option value="outstandingBalance">Sort by Balance</option>
+                <option value="createdAt">Sort by Date</option>
               </select>
             </div>
 
@@ -590,8 +638,8 @@ export default function SuppliersPage() {
                 onClick={() => {
                   setSearchQuery('');
                   setFilterPaymentTerms('');
-                  setSortField('name');
-                  setSortOrder('asc');
+                  setFilterOutstandingOnly(false);
+                  resetSort();
                 }}
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
@@ -682,24 +730,60 @@ export default function SuppliersPage() {
             </div>
             {/* Desktop Table View */}
             <div className="hidden sm:block overflow-x-auto">
+              {filterOutstandingOnly && (
+                <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
+                  <span>
+                    Showing suppliers with outstanding balance only ({suppliers.length} on this page)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFilterOutstandingOnly(false)}
+                    className="text-amber-800 underline hover:text-amber-950"
+                  >
+                    Clear balance filter
+                  </button>
+                </div>
+              )}
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Supplier Name
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Contact Person
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Payment Terms
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Outstanding Balance
-                    </th>
+                    <SortableTableHeader
+                      label="Supplier Name"
+                      field="name"
+                      activeField={sortField}
+                      direction={sortOrder}
+                      onSort={handleColumnSort}
+                    />
+                    <SortableTableHeader
+                      label="Contact Person"
+                      field="contactPerson"
+                      activeField={sortField}
+                      direction={sortOrder}
+                      onSort={handleColumnSort}
+                    />
+                    <SortableTableHeader
+                      label="Payment Terms"
+                      field="paymentTerms"
+                      activeField={sortField}
+                      direction={sortOrder}
+                      onSort={handleColumnSort}
+                    />
+                    <SortableTableHeader
+                      label="Status"
+                      field="status"
+                      activeField={sortField}
+                      direction={sortOrder}
+                      onSort={handleColumnSort}
+                    />
+                    <SortableTableHeader
+                      label="Outstanding Balance"
+                      field="outstandingBalance"
+                      activeField={sortField}
+                      direction={sortOrder}
+                      onSort={handleColumnSort}
+                      align="right"
+                      filtered={filterOutstandingOnly}
+                    />
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
                     </th>

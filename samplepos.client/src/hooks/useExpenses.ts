@@ -5,10 +5,10 @@ import {
   UpdateExpenseData,
   ExpenseFilter
 } from '@shared/types/expense';
+import { api } from '../services/api';
 
-const API_BASE = '/api/expenses';
+type ApiEnvelope<T> = { success?: boolean; data?: T; error?: string };
 
-// API functions
 const expenseApi = {
   // Get all expenses with optional filters
   getExpenses: async (filter: ExpenseFilter = {}): Promise<{
@@ -35,20 +35,15 @@ const expenseApi = {
     if (filter.limit) params.append('limit', filter.limit.toString());
     if (filter.includeSummary) params.append('includeSummary', 'true');
 
-    const response = await fetch(`${API_BASE}?${params}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch expenses');
-    }
-
-    const result = await response.json();
-    // Handle nested response structure: { success, data: { data, pagination } }
-    const responseData = result.data || result;
+    const { data: result } = await api.get(`/expenses?${params}`);
+    const envelope = result as {
+      data?: {
+        data: Expense[];
+        pagination?: { total: number; page: number; limit: number; totalPages: number };
+        summary?: { totalAmount: number; count: number; byStatus?: Record<string, { count: number; total: number }>; byCategory?: Record<string, { count: number; total: number }> };
+      };
+    };
+    const responseData = envelope.data ?? (result as { data: Expense[]; pagination?: { total: number; page: number; limit: number; totalPages: number }; summary?: { totalAmount: number; count: number } });
     return {
       expenses: responseData.data || [],
       total: responseData.pagination?.total || 0,
@@ -57,166 +52,47 @@ const expenseApi = {
     };
   },
 
-  // Get single expense by ID or expense number
   getExpense: async (id: string): Promise<Expense> => {
-    const response = await fetch(`${API_BASE}/${id}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch expense');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.get<ApiEnvelope<Expense>>(`/expenses/${id}`);
+    return (result.data ?? result) as Expense;
   },
 
-  // Create new expense
   createExpense: async (data: CreateExpenseData): Promise<Expense> => {
-    const response = await fetch(API_BASE, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      },
-      body: JSON.stringify(data)
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to create expense');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.post<ApiEnvelope<Expense>>('/expenses', data);
+    return (result.data ?? result) as Expense;
   },
 
-  // Update expense
   updateExpense: async (id: string, data: UpdateExpenseData): Promise<Expense> => {
-    const response = await fetch(`${API_BASE}/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      },
-      body: JSON.stringify(data)
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to update expense');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.put<ApiEnvelope<Expense>>(`/expenses/${id}`, data);
+    return (result.data ?? result) as Expense;
   },
 
-  // Delete expense
   deleteExpense: async (id: string): Promise<void> => {
-    const response = await fetch(`${API_BASE}/${id}`, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to delete expense');
-    }
+    await api.delete(`/expenses/${id}`);
   },
 
-  // Submit expense for approval
   submitExpense: async (id: string): Promise<Expense> => {
-    const token = localStorage.getItem('auth_token');
-
-    // Check for missing, null, undefined, or literal string "undefined"
-    if (!token || token === 'undefined' || token === 'null' || token.length < 20) {
-      throw new Error('Session expired. Please log in again.');
-    }
-
-    const response = await fetch(`${API_BASE}/${id}/submit`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to submit expense');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.post<ApiEnvelope<Expense>>(`/expenses/${id}/submit`);
+    return (result.data ?? result) as Expense;
   },
 
-  // Approve expense
   approveExpense: async (id: string, comments?: string): Promise<Expense> => {
-    const response = await fetch(`${API_BASE}/${id}/approve`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      },
-      body: JSON.stringify({ comments })
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to approve expense');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.post<ApiEnvelope<Expense>>(`/expenses/${id}/approve`, { comments });
+    return (result.data ?? result) as Expense;
   },
 
-  // Reject expense
   rejectExpense: async (id: string, reason: string): Promise<Expense> => {
-    const response = await fetch(`${API_BASE}/${id}/reject`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      },
-      body: JSON.stringify({ reason })
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to reject expense');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.post<ApiEnvelope<Expense>>(`/expenses/${id}/reject`, { reason });
+    return (result.data ?? result) as Expense;
   },
 
-  // Mark expense as paid
   markAsPaid: async ({ id, paymentAccountId }: { id: string; paymentAccountId?: string }): Promise<Expense> => {
-    const response = await fetch(`${API_BASE}/${id}/mark-paid`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      },
-      body: JSON.stringify({
-        payment_account_id: paymentAccountId
-      })
+    const { data: result } = await api.post<ApiEnvelope<Expense>>(`/expenses/${id}/mark-paid`, {
+      payment_account_id: paymentAccountId
     });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to mark expense as paid');
-    }
-
-    const result = await response.json();
-    return result.data;
+    return (result.data ?? result) as Expense;
   },
 
-  // Get expenses by category
   getExpensesByCategory: async (startDate?: string, endDate?: string): Promise<{
     category: string;
     total: number;
@@ -226,43 +102,23 @@ const expenseApi = {
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
 
-    const response = await fetch(`${API_BASE}/reports/by-category?${params}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch category data');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.get<ApiEnvelope<{ category: string; total: number; count: number }[]>>(
+      `/expenses/reports/by-category?${params}`
+    );
+    return (result.data ?? result) as { category: string; total: number; count: number }[];
   },
 
-  // Get expenses by month
   getExpensesByMonth: async (year: number): Promise<{
     month: number;
     total: number;
     count: number;
   }[]> => {
-    const response = await fetch(`${API_BASE}/reports/trends?year=${year}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch monthly data');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.get<ApiEnvelope<{ month: number; total: number; count: number }[]>>(
+      `/expenses/reports/trends?year=${year}`
+    );
+    return (result.data ?? result) as { month: number; total: number; count: number }[];
   },
 
-  // Get expenses summary
   getExpensesSummary: async (filter: ExpenseFilter = {}): Promise<{
     totalAmount: number;
     count: number;
@@ -278,22 +134,20 @@ const expenseApi = {
     if (filter.minAmount) params.append('minAmount', filter.minAmount.toString());
     if (filter.maxAmount) params.append('maxAmount', filter.maxAmount.toString());
 
-    const response = await fetch(`${API_BASE}/summary?${params}`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch summary');
-    }
-
-    const result = await response.json();
-    return result.data;
+    const { data: result } = await api.get<ApiEnvelope<{
+      totalAmount: number;
+      count: number;
+      byStatus: Record<string, { count: number; total: number }>;
+      byCategory: Record<string, { count: number; total: number }>;
+    }>>(`/expenses/summary?${params}`);
+    return (result.data ?? result) as {
+      totalAmount: number;
+      count: number;
+      byStatus: Record<string, { count: number; total: number }>;
+      byCategory: Record<string, { count: number; total: number }>;
+    };
   },
 
-  // Get payment accounts (cash/bank accounts for expense payment source)
   getExpenseCategories: async (): Promise<{
     id: string;
     code: string;
@@ -301,15 +155,13 @@ const expenseApi = {
     description?: string;
     isActive: boolean;
   }[]> => {
-    const response = await fetch(`${API_BASE}/categories`, {
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('auth_token')}` }
-    });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch expense categories');
-    }
-    const result = await response.json();
-    return (result.data || []).map((c: { id: string; code: string; name: string; description?: string; is_active?: boolean; isActive?: boolean }) => ({
+    const { data: result } = await api.get<ApiEnvelope<Array<{
+      id: string; code: string; name: string; description?: string; is_active?: boolean; isActive?: boolean;
+    }>>>('/expenses/categories');
+    const rows = (result.data ?? result) as Array<{
+      id: string; code: string; name: string; description?: string; is_active?: boolean; isActive?: boolean;
+    }>;
+    return (rows || []).map((c) => ({
       id: c.id,
       code: c.code,
       name: c.name,
@@ -324,24 +176,17 @@ const expenseApi = {
     name: string;
     type: string;
   }[]> => {
-    const response = await fetch(`${API_BASE}/payment-accounts`, {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-      }
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to fetch payment accounts');
-    }
-
-    const result = await response.json();
-    // Normalize snake_case to camelCase
-    return (result.data || []).map((acc: { id: string; account_code?: string; code?: string; account_name?: string; name?: string; account_type?: string; type?: string }) => ({
+    const { data: result } = await api.get<ApiEnvelope<Array<{
+      id: string; account_code?: string; code?: string; account_name?: string; name?: string; account_type?: string; type?: string;
+    }>>>('/expenses/payment-accounts');
+    const rows = (result.data ?? result) as Array<{
+      id: string; account_code?: string; code?: string; account_name?: string; name?: string; account_type?: string; type?: string;
+    }>;
+    return (rows || []).map((acc) => ({
       id: acc.id,
-      code: acc.account_code || acc.code,
-      name: acc.account_name || acc.name,
-      type: acc.account_type || acc.type
+      code: acc.account_code || acc.code || '',
+      name: acc.account_name || acc.name || '',
+      type: acc.account_type || acc.type || '',
     }));
   }
 };

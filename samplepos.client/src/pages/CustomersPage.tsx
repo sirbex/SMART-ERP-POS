@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
-import IdDisplay from '../components/IdDisplay';
 import { useCustomers, useCustomerStatement } from '../hooks/useApi';
 import { formatCurrency } from '../utils/currency';
 import { downloadFile } from '../utils/download';
@@ -14,6 +13,10 @@ import CustomerGroupsPanel from '../components/customers/CustomerGroupsPanel';
 import { useModalAccessibility } from '../hooks/useFocusTrap';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
 import { getBusinessDate, formatTimestamp } from '../utils/businessDate';
+import { SortableTableHeader } from '../components/ui/SortableTableHeader';
+import { MobileSortSelect } from '../components/ui/MobileSortSelect';
+import { useColumnSort } from '../hooks/useColumnSort';
+import { applyTableSort } from '../lib/tableSortUtils';
 
 interface StatementResponse {
   openingBalance: number | string;
@@ -56,6 +59,7 @@ interface DepositEntry {
 
 type TabType = 'overview' | 'list' | 'groups';
 type CustomerModalTab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'edit';
+type CustomerSortField = 'name' | 'contact' | 'balance' | 'deposits' | 'creditLimit' | 'status';
 
 export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -71,6 +75,46 @@ export default function CustomersPage() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [detailModalTab, setDetailModalTab] = useState<CustomerModalTab>('overview');
+  const [filterBalanceOnly, setFilterBalanceOnly] = useState(false);
+  const { sortField, sortOrder, handleSort, setSortOrder } = useColumnSort<CustomerSortField>('name', 'asc');
+
+  const toNumber = (v: unknown): number => {
+    if (typeof v === 'number') return v;
+    const parsed = parseFloat(String(v ?? '0'));
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
+  const customerSortAccessors = useMemo(
+    () => ({
+      name: (c: Customer) => c.name ?? '',
+      contact: (c: Customer) => `${c.email ?? ''} ${c.phone ?? ''}`.trim(),
+      balance: (c: Customer) => toNumber(c.balance),
+      deposits: (c: Customer) => toNumber(c.depositBalance),
+      creditLimit: (c: Customer) => Number(c.creditLimit) || 0,
+      status: (c: Customer) => (c.isActive ? 1 : 0),
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    const f = field as CustomerSortField;
+    if (f === 'balance') {
+      setFilterBalanceOnly(true);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterBalanceOnly(false);
+    handleSort(f, { defaultOrder: 'asc' });
+  };
+
+  const mobileSortOptions = [
+    { value: 'name', label: 'Sort by Name' },
+    { value: 'contact', label: 'Sort by Contact' },
+    { value: 'balance', label: 'Sort by Balance' },
+    { value: 'deposits', label: 'Sort by Deposits' },
+    { value: 'creditLimit', label: 'Sort by Credit Limit' },
+    { value: 'status', label: 'Sort by Status' },
+  ];
 
   // Statement modal state
   const [statementOpen, setStatementOpen] = useState(false);
@@ -94,13 +138,6 @@ export default function CustomersPage() {
   const customers = (customersResponse?.data || []) as Customer[];
   const pagination = customersResponse?.pagination;
 
-  // Helper to safely coerce numeric-like values (pg numeric may arrive as string)
-  const toNumber = (v: unknown): number => {
-    if (typeof v === 'number') return v;
-    const parsed = parseFloat(String(v ?? '0'));
-    return isNaN(parsed) ? 0 : parsed;
-  };
-
   // Filter customers by search term
   const filteredCustomers = customers.filter((customer: Customer) => {
     const term = searchTerm.toLowerCase();
@@ -110,6 +147,14 @@ export default function CustomersPage() {
       (customer.phone && String(customer.phone).includes(term))
     );
   });
+
+  const sortedCustomers = useMemo(() => {
+    let rows = [...filteredCustomers];
+    if (filterBalanceOnly) {
+      rows = rows.filter((c) => toNumber(c.balance) > 0);
+    }
+    return applyTableSort(rows, sortField, sortOrder, customerSortAccessors);
+  }, [filteredCustomers, filterBalanceOnly, sortField, sortOrder, customerSortAccessors]);
 
   // Calculate summary statistics
   const totalCustomers = pagination?.total || 0;
@@ -250,13 +295,13 @@ export default function CustomersPage() {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Customers</h2>
               {isLoading ? (
                 <div className="text-center py-8 text-gray-500">Loading...</div>
-              ) : filteredCustomers.length === 0 ? (
+              ) : sortedCustomers.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">No customers yet</div>
               ) : (
                 <>
                   {/* Mobile Card View */}
                   <div className="block sm:hidden space-y-3">
-                    {filteredCustomers.slice(0, 10).map((customer: Customer) => (
+                    {sortedCustomers.slice(0, 10).map((customer: Customer) => (
                       <div
                         key={customer.id}
                         className="border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50"
@@ -303,39 +348,21 @@ export default function CustomersPage() {
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead>
                         <tr className="bg-gray-50">
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            ID
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Customer
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Contact
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Balance
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Deposits
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Credit Limit
-                          </th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Status
-                          </th>
+                          <SortableTableHeader label="Customer" field="name" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                          <SortableTableHeader label="Contact" field="contact" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                          <SortableTableHeader label="Balance" field="balance" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterBalanceOnly} />
+                          <SortableTableHeader label="Deposits" field="deposits" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+                          <SortableTableHeader label="Credit Limit" field="creditLimit" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+                          <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredCustomers.slice(0, 10).map((customer: Customer) => (
+                        {sortedCustomers.slice(0, 10).map((customer: Customer) => (
                           <tr
                             key={customer.id}
                             className="hover:bg-gray-50 cursor-pointer"
                             onClick={() => { setSelectedCustomerId(customer.id); setDetailModalTab('overview'); setDetailModalOpen(true); }}
                           >
-                            <td className="px-4 py-3">
-                              <IdDisplay id={customer.customerNumber || customer.id} prefix="CUST" />
-                            </td>
                             <td className="px-4 py-3">
                               <div className="font-medium text-gray-900">{customer.name}</div>
                             </td>
@@ -396,7 +423,14 @@ export default function CustomersPage() {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                 </div>
-                <div className="flex gap-2">
+                <MobileSortSelect
+                  sortField={sortField}
+                  sortOrder={sortOrder}
+                  options={mobileSortOptions}
+                  onFieldChange={handleColumnSort}
+                  onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+                />
+                <div className="hidden sm:flex gap-2">
                   <button className="flex-1 sm:flex-none px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 focus:ring-2 focus:ring-blue-500">
                     🔍 Filter
                   </button>
@@ -407,13 +441,20 @@ export default function CustomersPage() {
               </div>
             </div>
 
+            {filterBalanceOnly && (
+              <div className="mb-4 px-4 py-2 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-900 flex items-center justify-between">
+                <span>Showing customers with outstanding balance only ({sortedCustomers.length})</span>
+                <button type="button" className="text-amber-800 underline" onClick={() => { setFilterBalanceOnly(false); handleSort('name', { defaultOrder: 'asc' }); }}>Clear filter</button>
+              </div>
+            )}
+
             {/* Customer List */}
             <div className="bg-white rounded-lg shadow border border-gray-200">
               {isLoading ? (
                 <div className="text-center py-12 text-gray-500">Loading customers...</div>
               ) : error ? (
                 <div className="text-center py-12 text-red-600">Error loading customers</div>
-              ) : filteredCustomers.length === 0 ? (
+              ) : sortedCustomers.length === 0 ? (
                 <div className="text-center py-12">
                   <p className="text-gray-500 mb-4">No customers found</p>
                   <button
@@ -427,7 +468,7 @@ export default function CustomersPage() {
                 <>
                   {/* Mobile Card View */}
                   <div className="block sm:hidden space-y-3 p-3">
-                    {filteredCustomers.map((customer: Customer) => (
+                    {sortedCustomers.map((customer: Customer) => (
                       <div key={customer.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-3">
@@ -475,31 +516,19 @@ export default function CustomersPage() {
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Customer
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Contact Info
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Balance
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Deposits
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Credit Limit
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Status
-                          </th>
+                          <SortableTableHeader label="Customer" field="name" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                          <SortableTableHeader label="Contact Info" field="contact" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                          <SortableTableHeader label="Balance" field="balance" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" filtered={filterBalanceOnly} />
+                          <SortableTableHeader label="Deposits" field="deposits" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                          <SortableTableHeader label="Credit Limit" field="creditLimit" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                          <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
                           <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Actions
                           </th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredCustomers.map((customer: Customer) => (
+                        {sortedCustomers.map((customer: Customer) => (
                           <tr key={customer.id} className="hover:bg-gray-50">
                             <td className="px-6 py-4">
                               <div className="flex items-center">

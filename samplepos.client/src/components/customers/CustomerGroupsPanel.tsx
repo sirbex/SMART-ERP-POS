@@ -8,7 +8,7 @@
  * - Assign / Unassign customers
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   useCustomerGroupsList,
@@ -26,6 +26,9 @@ import { pricingApi } from '../../api/pricing';
 import { formatCurrency } from '../../utils/currency';
 import { useCanAccess } from '../auth/ProtectedRoute';
 import type { CustomerGroupData } from '../../api/customerGroups';
+import { SortableTableHeader } from '../ui/SortableTableHeader';
+import { useColumnSort } from '../../hooks/useColumnSort';
+import { applyTableSort } from '../../lib/tableSortUtils';
 
 // ============================================================================
 // Main Panel
@@ -240,6 +243,31 @@ function GroupMembersPanel({
   const applyPriceGroupMutation = useApplyDefaultPriceGroup();
   const [showAssign, setShowAssign] = useState(false);
   const [confirmApplyPriceGroup, setConfirmApplyPriceGroup] = useState(false);
+  const [filterBalanceOnly, setFilterBalanceOnly] = useState(false);
+  const { sortField, sortOrder, handleSort } = useColumnSort<'name' | 'contact' | 'balance'>('name', 'asc');
+
+  const handleColumnSort = (field: string) => {
+    const f = field as 'name' | 'contact' | 'balance';
+    if (f === 'balance') {
+      setFilterBalanceOnly(true);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterBalanceOnly(false);
+    handleSort(f, { defaultOrder: 'asc' });
+  };
+
+  const sortedMembers = useMemo(() => {
+    let rows = [...(members || [])];
+    if (filterBalanceOnly) {
+      rows = rows.filter((m) => Number(m.balance) > 0);
+    }
+    return applyTableSort(rows, sortField, sortOrder, {
+      name: (m) => m.name ?? '',
+      contact: (m) => `${m.email ?? ''} ${m.phone ?? ''}`.trim(),
+      balance: (m) => Number(m.balance) || 0,
+    });
+  }, [members, filterBalanceOnly, sortField, sortOrder]);
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-200">
@@ -290,19 +318,25 @@ function GroupMembersPanel({
 
       {members && members.length > 0 && (
         <div className="overflow-x-auto">
+          {filterBalanceOnly && (
+            <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex justify-between">
+              <span>Showing members with balance only ({sortedMembers.length})</span>
+              <button type="button" className="underline" onClick={() => { setFilterBalanceOnly(false); handleSort('name', { defaultOrder: 'asc' }); }}>Clear</button>
+            </div>
+          )}
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
-                <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                <SortableTableHeader label="Customer" field="name" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 py-2" />
+                <SortableTableHeader label="Contact" field="contact" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-4 py-2" />
+                <SortableTableHeader label="Balance" field="balance" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterBalanceOnly} className="px-4 py-2" />
                 {canManage && (
                   <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                 )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {members.map((m) => (
+              {sortedMembers.map((m) => (
                 <tr key={m.id} className="hover:bg-gray-50">
                   <td className="px-4 py-2">
                     <div className="font-medium text-gray-900">{m.name}</div>

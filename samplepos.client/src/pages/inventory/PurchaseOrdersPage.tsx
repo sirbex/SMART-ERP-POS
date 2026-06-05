@@ -24,6 +24,10 @@ import type { GuardHandle } from '../../hooks/useTransactionGuard';
 
 import { DatePicker } from '../../components/ui/date-picker';
 import { downloadFile } from '../../utils/download';
+import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
+import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
+import { useColumnSort } from '../../hooks/useColumnSort';
+import { applyTableSort } from '../../lib/tableSortUtils';
 import type { Supplier } from '../../types';
 import {
   SupplierSelector,
@@ -54,6 +58,20 @@ const PO_STATUSES = {
 } as const;
 
 type POStatus = keyof typeof PO_STATUSES;
+
+type POSortField =
+  | 'poNumber'
+  | 'supplier'
+  | 'orderDate'
+  | 'expectedDelivery'
+  | 'status'
+  | 'totalAmount';
+
+const PO_DESC_DEFAULT = new Set<POSortField>([
+  'orderDate',
+  'expectedDelivery',
+  'totalAmount',
+]);
 
 interface POLineItem {
   id: string;
@@ -1224,6 +1242,8 @@ export default function PurchaseOrdersPage() {
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [page, setPage] = useState(1);
   const limit = 20;
+  const { sortField, sortOrder, handleSort, setSortOrder } =
+    useColumnSort<POSortField>('orderDate', 'desc');
 
   // API queries
   const {
@@ -1331,6 +1351,39 @@ export default function PurchaseOrdersPage() {
 
     return { total, draft, pending, completed, cancelled, totalValue: totalValue.toNumber() };
   }, [purchaseOrders]);
+
+  const poSortAccessors = useMemo(
+    () => ({
+      poNumber: (po: PORow) => po.poNumber || po.order_number || '',
+      supplier: (po: PORow) => po.supplierName || po.supplier_name || '',
+      orderDate: (po: PORow) => po.orderDate || po.order_date || '',
+      expectedDelivery: (po: PORow) => po.expectedDelivery || po.expected_delivery_date || '',
+      status: (po: PORow) => po.status ?? '',
+      totalAmount: (po: PORow) => Number(po.totalAmount ?? po.total_amount ?? 0),
+    }),
+    [],
+  );
+
+  const handleColumnSort = (field: string) => {
+    const f = field as POSortField;
+    handleSort(f, {
+      defaultOrder: PO_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
+    });
+  };
+
+  const mobileSortOptions = [
+    { value: 'poNumber', label: 'Sort by PO Number' },
+    { value: 'supplier', label: 'Sort by Supplier' },
+    { value: 'orderDate', label: 'Sort by Order Date' },
+    { value: 'expectedDelivery', label: 'Sort by Expected Delivery' },
+    { value: 'status', label: 'Sort by Status' },
+    { value: 'totalAmount', label: 'Sort by Total Amount' },
+  ];
+
+  const sortedPurchaseOrders = useMemo(
+    () => applyTableSort([...purchaseOrders], sortField, sortOrder, poSortAccessors),
+    [purchaseOrders, sortField, sortOrder, poSortAccessors],
+  );
 
   // Handle submit PO - automatically sends to supplier and creates goods receipt
   const handleSubmitPO = async (id: string) => {
@@ -1638,20 +1691,28 @@ export default function PurchaseOrdersPage() {
             </button>
           </div>
         </div>
+        <MobileSortSelect
+          className="mt-4"
+          sortField={sortField}
+          sortOrder={sortOrder}
+          options={mobileSortOptions}
+          onFieldChange={handleColumnSort}
+          onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+        />
       </div>
 
       {/* Purchase Orders Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         {/* Mobile Card View */}
         <div className="block sm:hidden space-y-3 p-3">
-          {purchaseOrders.length === 0 ? (
+          {sortedPurchaseOrders.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               {selectedStatus !== 'ALL' || selectedSupplier
                 ? 'No purchase orders match your filters'
                 : 'No purchase orders yet. Create your first PO to get started!'}
             </div>
           ) : (
-            purchaseOrders.map((po: PORow) => {
+            sortedPurchaseOrders.map((po: PORow) => {
               const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
               const totalAmount = new Decimal(po.totalAmount || 0);
               return (
@@ -1700,33 +1761,21 @@ export default function PurchaseOrdersPage() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    PO Number
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Supplier
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Order Date
-                  </th>
+                  <SortableTableHeader label="PO Number" field="poNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                  <SortableTableHeader label="Supplier" field="supplier" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                  <SortableTableHeader label="Order Date" field="orderDate" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
                   {hasDeliveryDates && (
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Expected Delivery
-                    </th>
+                    <SortableTableHeader label="Expected Delivery" field="expectedDelivery" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
                   )}
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Total Amount
-                  </th>
+                  <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                  <SortableTableHeader label="Total Amount" field="totalAmount" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {purchaseOrders.length === 0 ? (
+                {sortedPurchaseOrders.length === 0 ? (
                   <tr>
                     <td colSpan={hasDeliveryDates ? 7 : 6} className="px-6 py-8 text-center text-gray-500">
                       {selectedStatus !== 'ALL' || selectedSupplier
@@ -1735,7 +1784,7 @@ export default function PurchaseOrdersPage() {
                     </td>
                   </tr>
                 ) : (
-                  purchaseOrders.map((po: PORow) => {
+                  sortedPurchaseOrders.map((po: PORow) => {
                     const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
                     const totalAmount = new Decimal(po.totalAmount || 0);
 

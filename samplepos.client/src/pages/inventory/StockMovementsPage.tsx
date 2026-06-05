@@ -5,6 +5,30 @@ import { useProducts } from '../../hooks/useProducts';
 import { formatCurrency } from '../../utils/currency';
 import { DatePicker } from '../../components/ui/date-picker';
 import Decimal from 'decimal.js';
+import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
+import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
+import { useColumnSort } from '../../hooks/useColumnSort';
+import { applyTableSort } from '../../lib/tableSortUtils';
+
+type MovementSortField =
+  | 'dateTime'
+  | 'product'
+  | 'category'
+  | 'type'
+  | 'quantity'
+  | 'unitCost'
+  | 'totalValue'
+  | 'balanceAfter'
+  | 'reference'
+  | 'notes';
+
+const MOVEMENT_DESC_DEFAULT = new Set<MovementSortField>([
+  'dateTime',
+  'quantity',
+  'unitCost',
+  'totalValue',
+  'balanceAfter',
+]);
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -153,6 +177,10 @@ export default function StockMovementsPage() {
   const [endDate, setEndDate] = useState(() => getDateRange('today').end);
   const [page, setPage] = useState(1);
   const limit = 50;
+  const [filterQtyOnly, setFilterQtyOnly] = useState(false);
+  const [filterBalanceOnly, setFilterBalanceOnly] = useState(false);
+  const { sortField, sortOrder, handleSort, setSortOrder } =
+    useColumnSort<MovementSortField>('dateTime', 'desc');
 
   // Debounce search term (300ms) so we don't fire a request on every keystroke
   useEffect(() => {
@@ -212,6 +240,82 @@ export default function StockMovementsPage() {
 
   // Server already filtered by search — use movements directly
   const filteredMovements = movements;
+
+  const movementSortAccessors = useMemo(
+    () => ({
+      dateTime: (m: StockMovementRow) => m.createdAt ?? '',
+      product: (m: StockMovementRow) =>
+        m.productName || productMap.get(m.productId)?.name || '',
+      category: (m: StockMovementRow) =>
+        m.productCategory || productMap.get(m.productId)?.category || '',
+      type: (m: StockMovementRow) => m.movementType ?? '',
+      quantity: (m: StockMovementRow) => Math.abs(Number(m.quantity) || 0),
+      unitCost: (m: StockMovementRow) => Number(m.unitCost) || 0,
+      totalValue: (m: StockMovementRow) => {
+        const qty = Math.abs(Number(m.quantity) || 0);
+        const cost = Number(m.unitCost) || 0;
+        return qty * cost;
+      },
+      balanceAfter: (m: StockMovementRow) =>
+        m.balanceAfter != null ? Number(m.balanceAfter) : null,
+      reference: (m: StockMovementRow) =>
+        m.saleNumber || m.grNumber || m.referenceType || m.referenceId || '',
+      notes: (m: StockMovementRow) => m.notes ?? '',
+    }),
+    [productMap],
+  );
+
+  const handleColumnSort = (field: string) => {
+    const f = field as MovementSortField;
+    if (f === 'quantity') {
+      setFilterQtyOnly(true);
+      setFilterBalanceOnly(false);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    if (f === 'balanceAfter') {
+      setFilterBalanceOnly(true);
+      setFilterQtyOnly(false);
+      handleSort(f, { defaultOrder: 'desc' });
+      return;
+    }
+    setFilterQtyOnly(false);
+    setFilterBalanceOnly(false);
+    handleSort(f, {
+      defaultOrder: MOVEMENT_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
+    });
+  };
+
+  const mobileSortOptions = [
+    { value: 'dateTime', label: 'Sort by Date' },
+    { value: 'product', label: 'Sort by Product' },
+    { value: 'category', label: 'Sort by Category' },
+    { value: 'type', label: 'Sort by Type' },
+    { value: 'quantity', label: 'Sort by Quantity' },
+    { value: 'unitCost', label: 'Sort by Unit Cost' },
+    { value: 'totalValue', label: 'Sort by Total Value' },
+    { value: 'balanceAfter', label: 'Sort by Balance After' },
+    { value: 'reference', label: 'Sort by Reference' },
+    { value: 'notes', label: 'Sort by Notes' },
+  ];
+
+  const sortedMovements = useMemo(() => {
+    let rows = [...filteredMovements];
+    if (filterQtyOnly) {
+      rows = rows.filter((m) => Math.abs(Number(m.quantity) || 0) > 0);
+    }
+    if (filterBalanceOnly) {
+      rows = rows.filter((m) => m.balanceAfter != null && Number(m.balanceAfter) > 0);
+    }
+    return applyTableSort(rows, sortField, sortOrder, movementSortAccessors);
+  }, [
+    filteredMovements,
+    filterQtyOnly,
+    filterBalanceOnly,
+    sortField,
+    sortOrder,
+    movementSortAccessors,
+  ]);
 
   // Calculate summary statistics (for filtered movements)
   const stats = useMemo(() => {
@@ -512,9 +616,17 @@ export default function StockMovementsPage() {
         )}
 
         {/* Filter Actions */}
-        <div className="flex justify-between items-center mt-4 pt-4 border-t">
+        <div className="flex flex-col gap-3 mt-4 pt-4 border-t">
+          <MobileSortSelect
+            sortField={sortField}
+            sortOrder={sortOrder}
+            options={mobileSortOptions}
+            onFieldChange={handleColumnSort}
+            onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+          />
+          <div className="flex justify-between items-center">
           <div className="text-sm text-gray-600">
-            Showing {filteredMovements.length} of {totalCount} movements
+            Showing {sortedMovements.length} of {totalCount} movements
           </div>
           <button
             onClick={handleResetFilters}
@@ -522,6 +634,7 @@ export default function StockMovementsPage() {
           >
             Reset Filters
           </button>
+          </div>
         </div>
       </div>
 
@@ -576,43 +689,43 @@ export default function StockMovementsPage() {
       {/* Movements Table */}
       <div className="bg-white rounded-lg shadow overflow-hidden">
         <div className="overflow-x-auto">
+          {(filterQtyOnly || filterBalanceOnly) && (
+            <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
+              <span>
+                {filterQtyOnly
+                  ? `Showing movements with quantity only (${sortedMovements.length})`
+                  : `Showing movements with balance after > 0 (${sortedMovements.length})`}
+              </span>
+              <button
+                type="button"
+                className="text-amber-800 underline"
+                onClick={() => {
+                  setFilterQtyOnly(false);
+                  setFilterBalanceOnly(false);
+                  handleSort('dateTime', { defaultOrder: 'desc' });
+                }}
+              >
+                Clear filter
+              </button>
+            </div>
+          )}
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Date & Time
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Product
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Category
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Type
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Quantity
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Unit Cost
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Total Value
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Balance After
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Reference
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Notes
-                </th>
+                <SortableTableHeader label="Date & Time" field="dateTime" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                <SortableTableHeader label="Product" field="product" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                <SortableTableHeader label="Category" field="category" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                <SortableTableHeader label="Type" field="type" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                <SortableTableHeader label="Quantity" field="quantity" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterQtyOnly} />
+                <SortableTableHeader label="Unit Cost" field="unitCost" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+                <SortableTableHeader label="Total Value" field="totalValue" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+                <SortableTableHeader label="Balance After" field="balanceAfter" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" filtered={filterBalanceOnly} />
+                <SortableTableHeader label="Reference" field="reference" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+                <SortableTableHeader label="Notes" field="notes" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredMovements.length === 0 ? (
+              {sortedMovements.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || selectedType !== 'ALL' || startDate || endDate
@@ -621,7 +734,7 @@ export default function StockMovementsPage() {
                   </td>
                 </tr>
               ) : (
-                filteredMovements.map((movement: StockMovementRow) => {
+                sortedMovements.map((movement: StockMovementRow) => {
                   const product = productMap.get(movement.productId);
                   const movementConfig = MOVEMENT_TYPES[movement.movementType as MovementType] || {
                     label: movement.movementType,
