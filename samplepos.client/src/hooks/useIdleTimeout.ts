@@ -11,12 +11,16 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
+import { touchSessionActivity } from '../lib/sessionActivity';
 
 /** Events that count as "user activity" */
 const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
     'mousemove',
     'mousedown',
     'keydown',
+    'input',
+    'focusin',
+    'paste',
     'touchstart',
     'scroll',
     'click',
@@ -93,6 +97,7 @@ export function useIdleTimeout({
 
         // Reset on any user activity
         const handleActivity = () => {
+            touchSessionActivity();
             idleStartedAt = Date.now();
             resetTimers();
         };

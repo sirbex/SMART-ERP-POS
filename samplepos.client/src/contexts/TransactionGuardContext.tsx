@@ -38,6 +38,7 @@ import {
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import BackdropOverlay from '../components/ui/BackdropOverlay';
+import { setTransactionGuardDepth } from '../lib/sessionActivity';
 
 // ─── Z-Index Constants (export for panel components to import) ────────────────
 
@@ -182,6 +183,16 @@ export function TransactionGuardProvider({ children }: { children: ReactNode }) 
         document.body.style.overflow = original;
       };
     }
+  }, [stack.length]);
+
+  // Pause idle logout + keep session alive while PO/payment panels are open
+  useEffect(() => {
+    setTransactionGuardDepth(stack.length);
+    window.dispatchEvent(
+      new CustomEvent('app:transaction-guard', {
+        detail: { active: stack.length > 0, depth: stack.length },
+      }),
+    );
   }, [stack.length]);
 
   // ── ESC key handler (capture phase — runs before component key handlers) ──

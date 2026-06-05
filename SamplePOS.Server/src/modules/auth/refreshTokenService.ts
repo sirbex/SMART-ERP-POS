@@ -27,10 +27,15 @@ import logger from '../../utils/logger.js';
 import type { UserRole } from '../../../../shared/types/user.js';
 import type pg from 'pg';
 
-// Configuration
+// Configuration — ACCESS_TOKEN_EXPIRY_MINUTES overridable for long data-entry sessions
+const ACCESS_TOKEN_EXPIRY_MINUTES = Math.max(
+  5,
+  parseInt(process.env.ACCESS_TOKEN_EXPIRY_MINUTES || '60', 10) || 60,
+);
+
 const REFRESH_TOKEN_CONFIG = {
     expiryDays: 30, // Refresh token valid for 30 days
-    accessTokenExpiryMinutes: 15, // Short-lived access tokens (15 min)
+    accessTokenExpiryMinutes: ACCESS_TOKEN_EXPIRY_MINUTES,
     tokenLength: 64, // Bytes for random token
 };
 

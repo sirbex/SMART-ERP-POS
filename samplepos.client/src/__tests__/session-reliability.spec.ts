@@ -7,6 +7,7 @@
  * Fix #2 — Cross-tab mutex: only one tab may hold the refresh lock at a time
  * Fix #3 — useIdleTimeout idleStartedAt: total idle time, not just hidden duration
  * Fix #4 — willExpireInNext(2): proactive refresh at boot for near-expiry tokens
+ * Fix #5 — sessionActivity + keepalive: PO guard keeps session alive during long forms
  *
  * Runs in Vitest node environment with an in-process localStorage mock.
  */
@@ -54,6 +55,13 @@ import {
     willExpireInNext,
     refreshAccessToken,
 } from '../hooks/useTokenRefresh';
+import {
+    touchSessionActivity,
+    getLastActivityAt,
+    setTransactionGuardDepth,
+    isTransactionGuardActive,
+    shouldKeepSessionAlive,
+} from '../lib/sessionActivity';
 
 // Mirror the private key constants from useTokenRefresh.ts
 const TOKEN_EXPIRY_KEY = 'token_expiry';
@@ -280,6 +288,57 @@ describe('Fix #3 — Total idle time math (idleStartedAt)', () => {
         const totalIdleAfter = Date.now() - idleStartedAt;
         expect(totalIdleAfter).toBeLessThan(100); // essentially zero
         expect(TIMEOUT - totalIdleAfter).toBeGreaterThan(TIMEOUT - 100); // full budget restored
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FIX #5 — sessionActivity (keepalive + transaction guard during PO entry)
+// ──────────────────────────────────────────────────────────────────────────────
+describe('Fix #5 — sessionActivity keepalive signals', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        setTransactionGuardDepth(0);
+        touchSessionActivity();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        setTransactionGuardDepth(0);
+    });
+
+    it('touchSessionActivity updates last-activity timestamp', () => {
+        const before = getLastActivityAt();
+        vi.advanceTimersByTime(5 * 60 * 1000);
+        touchSessionActivity();
+        expect(getLastActivityAt()).toBeGreaterThan(before);
+    });
+
+    it('shouldKeepSessionAlive is true within active window after input', () => {
+        const windowMs = 45 * 60 * 1000;
+        vi.advanceTimersByTime(30 * 60 * 1000);
+        expect(shouldKeepSessionAlive(windowMs)).toBe(true);
+    });
+
+    it('shouldKeepSessionAlive is false after active window with no guard', () => {
+        const windowMs = 45 * 60 * 1000;
+        vi.advanceTimersByTime(46 * 60 * 1000);
+        expect(shouldKeepSessionAlive(windowMs)).toBe(false);
+    });
+
+    it('open transaction guard keeps session alive even when idle past window', () => {
+        setTransactionGuardDepth(1);
+        expect(isTransactionGuardActive()).toBe(true);
+        vi.advanceTimersByTime(120 * 60 * 1000);
+        expect(shouldKeepSessionAlive(45 * 60 * 1000)).toBe(true);
+    });
+
+    it('nested guards: depth > 0 until all guards close', () => {
+        setTransactionGuardDepth(2);
+        expect(isTransactionGuardActive()).toBe(true);
+        setTransactionGuardDepth(1);
+        expect(isTransactionGuardActive()).toBe(true);
+        setTransactionGuardDepth(0);
+        expect(isTransactionGuardActive()).toBe(false);
     });
 });
 

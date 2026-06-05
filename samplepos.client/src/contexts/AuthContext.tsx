@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, ReactNode,
 import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessTokenDeduped, resetAuthState } from '../hooks/useTokenRefresh';
 import { apiClient } from '../utils/api';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
+import { useSessionKeepalive } from '../hooks/useSessionKeepalive';
 import { setupAuthBroadcastListener, onAuthBroadcast, broadcastAuthEvent } from '../lib/authBroadcast';
 import { setupOfflineQueueAutoFlush } from '../lib/offlineRequestQueue';
 import type { AxiosError } from 'axios';
@@ -68,8 +69,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [permissionKeys, setPermissionKeys] = useState<string[]>([]);
+  const [idlePausedByGuard, setIdlePausedByGuard] = useState(false);
 
-  // Memoize the Set so consumers don't re-render unnecessarily
+  // Proactive token refresh during long data-entry sessions (PO lines, etc.)
+  useSessionKeepalive(isAuthenticated);
+
+  useEffect(() => {
+    const onGuard = (e: Event) => {
+      const detail = (e as CustomEvent<{ active?: boolean }>).detail;
+      setIdlePausedByGuard(Boolean(detail?.active));
+    };
+    window.addEventListener('app:transaction-guard', onGuard);
+    return () => window.removeEventListener('app:transaction-guard', onGuard);
+  }, []);
   const permissions = useMemo(() => {
     if (permissionKeys.length === 0) return EMPTY_PERMISSIONS;
     return new Set(permissionKeys);
@@ -293,14 +305,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [logout]);
 
   useIdleTimeout({
-    timeoutMs: 30 * 60 * 1000, // 30 minutes — POS users step away frequently
+    timeoutMs: 60 * 60 * 1000, // 60 minutes — data entry (100+ PO lines) must not expire mid-form
     onIdle: idleLogout,
     onWarning: () => {
       // Visible notification — fire event so SessionWarningBanner can react
       window.dispatchEvent(new CustomEvent('app:session-warning'));
       console.warn('[Auth] Session expiring in 60 seconds due to inactivity');
     },
-    enabled: isAuthenticated, // Keep idle timeout active even when offline
+    enabled: isAuthenticated && !idlePausedByGuard,
   });
 
   return (

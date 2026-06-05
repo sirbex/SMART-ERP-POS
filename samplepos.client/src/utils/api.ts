@@ -12,7 +12,7 @@ import {
   isTokenExpired,
   getRefreshToken,
   getAccessToken,
-  clearTokens,
+  build401Handler,
   refreshAccessTokenDeduped,
 } from '../hooks/useTokenRefresh';
 import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
@@ -204,45 +204,9 @@ apiClient.interceptors.response.use(
       return Promise.reject(new HandledApiError(reason));
     }
 
-    // Handle specific error cases
-    if (error.response?.status === 401) {      // Don't clear tokens or redirect when offline — the 401 is expected
-      if (!navigator.onLine) {
-        return Promise.reject(error);
-      }
-
-      // Try to refresh once on 401 (if we haven't already retried this request).
-      const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
-      if (originalRequest && !originalRequest._retry && getRefreshToken()) {
-        originalRequest._retry = true;
-        try {
-          await refreshAccessTokenDeduped();
-          const token = getAccessToken();
-          if (token && originalRequest.headers) {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-          }
-          return apiClient(originalRequest);
-        } catch (refreshErr) {
-          // If refresh failed due to network (no server response), keep tokens —
-          // user may still work offline with cached session data.
-          const isNetworkError = refreshErr instanceof Error &&
-            (!('response' in refreshErr) || (refreshErr as AxiosError).response == null);
-          if (isNetworkError) {
-            return Promise.reject(error);
-          }
-          // Genuine auth rejection — fall through to logout
-        }
-      }
-
-      // Unauthorized - clear token and redirect to login
-      const hasAuthData = localStorage.getItem('auth_token') || localStorage.getItem('user');
-
-      if (hasAuthData) {
-        clearTokens();
-
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login';
-        }
-      }
+    // Handle 401 — single code path with token refresh + retry (useTokenRefresh)
+    if (error.response?.status === 401) {
+      return build401Handler(apiClient)(error);
     }
 
     if (error.response?.status === 403) {
