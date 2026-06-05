@@ -18,6 +18,7 @@
     "test:pricing-phases:live": "node scripts/run-pricing-phase-tests.mjs --live",
     "test:customer-invoice-adjustment:live": "node scripts/test-customer-invoice-adjustment-live.mjs",
     "proof:deploy": "node scripts/proof-deploy-readiness.mjs",
+    "proof:session-active": "node scripts/proof-session-active-no-logout.mjs",
     "proof:corrections": "node scripts/proof-pre-commit-corrections.mjs",
     "proof:at-cost": "cd SamplePOS.Server && npm run proof:at-cost",
     "proof:at-cost:all": "cd SamplePOS.Server && npm run test:pricing-phases && npm run proof:at-cost && cd ../samplepos.client && npm run test:pricing-phases",

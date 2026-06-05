@@ -12,21 +12,10 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { touchSessionActivity } from '../lib/sessionActivity';
+import { GLOBAL_SESSION_ACTIVITY_EVENTS } from '../lib/sessionActivityEvents';
 
-/** Events that count as "user activity" */
-const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
-    'mousemove',
-    'mousedown',
-    'keydown',
-    'input',
-    'focusin',
-    'paste',
-    'touchstart',
-    'scroll',
-    'click',
-    'wheel',        // trackpad / mouse-wheel scroll (bubbles, unlike scroll)
-    'pointerdown',  // covers stylus / pen input not caught by mouse/touch
-];
+/** Events that count as "user activity" — same set as global tracker (all modules). */
+const ACTIVITY_EVENTS = GLOBAL_SESSION_ACTIVITY_EVENTS;
 
 /** Default idle threshold in milliseconds (15 minutes) */
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;

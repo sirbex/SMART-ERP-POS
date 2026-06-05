@@ -15,13 +15,13 @@ import {
   willExpireInNext,
   refreshAccessTokenDeduped,
 } from './useTokenRefresh';
-import { shouldKeepSessionAlive, touchSessionActivity } from '../lib/sessionActivity';
+import { shouldKeepSessionAlive, touchSessionActivity, ACTIVE_SESSION_WINDOW_MS } from '../lib/sessionActivity';
 
 /** Check every 4 minutes; refresh if token expires within 5 minutes. */
 const KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000;
 const REFRESH_WITHIN_MINUTES = 5;
-/** Treat user as "active" if input within the last 45 minutes. */
-const ACTIVE_WINDOW_MS = 45 * 60 * 1000;
+/** Same window as idle timeout — keep heartbeat while user is working (Odoo/SAP pattern). */
+const ACTIVE_WINDOW_MS = ACTIVE_SESSION_WINDOW_MS;
 
 export function useSessionKeepalive(enabled: boolean): void {
   const tickingRef = useRef(false);

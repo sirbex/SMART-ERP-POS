@@ -12,6 +12,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { setAuthState, getAuthState, waitForAuthenticated, resetAuthState } from '../lib/authStateMachine';
 import { broadcastAuthEvent } from '../lib/authBroadcast';
+import { isUserActiveOrGuarded } from '../lib/sessionActivity';
+import {
+    classifyRefreshError,
+    shouldPerformAutoLogout,
+} from '../lib/sessionLogoutPolicy';
 
 // Bare axios instance used exclusively for the /token/refresh HTTP call.
 // Must have NO response interceptors so that a 401 from the refresh endpoint
@@ -25,7 +30,8 @@ const _refreshHttp = axios.create({
     timeout: REFRESH_HTTP_TIMEOUT_MS,
 });
 
-export { resetAuthState };
+export { resetAuthState, classifyRefreshError, shouldPerformAutoLogout };
+export { shouldPerformIdleLogout, shouldIgnoreCrossTabSessionExpired } from '../lib/sessionLogoutPolicy';
 
 const API_BASE = '/api/auth/token';
 
@@ -146,6 +152,29 @@ async function waitForRefreshLock(): Promise<void> {
 function releaseRefreshLock(): void {
     localStorage.removeItem(REFRESH_LOCK_KEY);
 }
+
+function notifySessionDeferred(reason: string): void {
+    window.dispatchEvent(
+        new CustomEvent('app:session-deferred', { detail: { reason } }),
+    );
+}
+
+function forceLogoutRedirect(): void {
+    clearTokens();
+    broadcastAuthEvent({ type: 'LOGOUT' });
+    sessionStorage.setItem('session_expired', '1');
+    if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+    }
+}
+
+function mayAutoLogout(refreshError: unknown): boolean {
+    return shouldPerformAutoLogout({
+        activeOrGuarded: isUserActiveOrGuarded(),
+        errorKind: classifyRefreshError(refreshError),
+        hasRefreshToken: Boolean(getRefreshToken()),
+    });
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -214,14 +243,28 @@ function _refreshOnce(): Promise<void> {
                 broadcastAuthEvent({ type: 'TOKEN_REFRESH' });
             })
             .catch((err: unknown) => {
-                // Network error / timeout → keep AUTHENTICATED so requests can retry later
-                const isNetworkError = err instanceof Error &&
-                    (!('response' in err) || (err as AxiosError).response == null);
-                if (navigator.onLine && !isNetworkError) {
-                    setAuthState('EXPIRED');
-                    broadcastAuthEvent({ type: 'SESSION_EXPIRED' });
+                const errorKind = classifyRefreshError(err);
+                const isNetworkError = errorKind === 'network';
+                const activeOrGuarded = isUserActiveOrGuarded();
+
+                if (navigator.onLine && !isNetworkError && errorKind !== 'transient_server') {
+                    if (shouldPerformAutoLogout({
+                        activeOrGuarded,
+                        errorKind,
+                        hasRefreshToken: Boolean(getRefreshToken()),
+                    })) {
+                        setAuthState('EXPIRED');
+                        broadcastAuthEvent({ type: 'SESSION_EXPIRED' });
+                    } else {
+                        // Working user or transient issue — preserve session for keepalive retry
+                        setAuthState('AUTHENTICATED');
+                        notifySessionDeferred(errorKind);
+                    }
                 } else {
                     setAuthState('AUTHENTICATED');
+                    if (activeOrGuarded && (isNetworkError || errorKind === 'transient_server')) {
+                        notifySessionDeferred(errorKind);
+                    }
                 }
                 throw err;
             })
@@ -263,25 +306,16 @@ export function build401Handler(
                     }
                     return (instance as typeof axios)(originalRequest);
                 } catch (refreshError) {
-                    const isNetworkError = refreshError instanceof Error &&
-                        (!('response' in refreshError) || (refreshError as AxiosError).response == null);
-                    if (navigator.onLine && !isNetworkError) {
-                        clearTokens();
-                        broadcastAuthEvent({ type: 'LOGOUT' });
-                        sessionStorage.setItem('session_expired', '1');
-                        if (window.location.pathname !== '/login') {
-                            window.location.href = '/login';
-                        }
+                    if (mayAutoLogout(refreshError)) {
+                        forceLogoutRedirect();
+                    } else {
+                        notifySessionDeferred(classifyRefreshError(refreshError));
                     }
                     return Promise.reject(refreshError);
                 }
             }
-            // No refresh token — clear and redirect
-            clearTokens();
-            broadcastAuthEvent({ type: 'LOGOUT' });
-            sessionStorage.setItem('session_expired', '1');
-            if (window.location.pathname !== '/login') {
-                window.location.href = '/login';
+            if (mayAutoLogout(error)) {
+                forceLogoutRedirect();
             }
         }
 

@@ -8,6 +8,7 @@
  * Fix #3 — useIdleTimeout idleStartedAt: total idle time, not just hidden duration
  * Fix #4 — willExpireInNext(2): proactive refresh at boot for near-expiry tokens
  * Fix #5 — sessionActivity + keepalive: PO guard keeps session alive during long forms
+ * Fix #6 — sessionLogoutPolicy: SAP/Odoo pattern — never auto-logout while active
  *
  * Runs in Vitest node environment with an in-process localStorage mock.
  */
@@ -61,7 +62,16 @@ import {
     setTransactionGuardDepth,
     isTransactionGuardActive,
     shouldKeepSessionAlive,
+    isUserActiveOrGuarded,
+    __resetSessionActivityForTests,
+    ACTIVE_SESSION_WINDOW_MS,
 } from '../lib/sessionActivity';
+import {
+    classifyRefreshError,
+    shouldPerformAutoLogout,
+    shouldPerformIdleLogout,
+    shouldIgnoreCrossTabSessionExpired,
+} from '../lib/sessionLogoutPolicy';
 
 // Mirror the private key constants from useTokenRefresh.ts
 const TOKEN_EXPIRY_KEY = 'token_expiry';
@@ -297,6 +307,8 @@ describe('Fix #3 — Total idle time math (idleStartedAt)', () => {
 describe('Fix #5 — sessionActivity keepalive signals', () => {
     beforeEach(() => {
         vi.useFakeTimers();
+        localStorage.clear();
+        __resetSessionActivityForTests();
         setTransactionGuardDepth(0);
         touchSessionActivity();
     });
@@ -320,8 +332,8 @@ describe('Fix #5 — sessionActivity keepalive signals', () => {
     });
 
     it('shouldKeepSessionAlive is false after active window with no guard', () => {
-        const windowMs = 45 * 60 * 1000;
-        vi.advanceTimersByTime(46 * 60 * 1000);
+        const windowMs = ACTIVE_SESSION_WINDOW_MS;
+        __resetSessionActivityForTests(windowMs + 60_000);
         expect(shouldKeepSessionAlive(windowMs)).toBe(false);
     });
 
@@ -339,6 +351,95 @@ describe('Fix #5 — sessionActivity keepalive signals', () => {
         expect(isTransactionGuardActive()).toBe(true);
         setTransactionGuardDepth(0);
         expect(isTransactionGuardActive()).toBe(false);
+    });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// FIX #6 — sessionLogoutPolicy (SAP/Odoo enterprise active-session protection)
+// ──────────────────────────────────────────────────────────────────────────────
+describe('Fix #6 — sessionLogoutPolicy (never logout while active)', () => {
+    const base = { hasRefreshToken: true, manualLogout: false };
+
+    it('classifies network errors without HTTP response', () => {
+        expect(classifyRefreshError(new Error('Network Error'))).toBe('network');
+    });
+
+    it('classifies 500 as transient_server — must NOT trigger logout while active', () => {
+        const err = {
+            response: { status: 500, data: { error: 'Internal server error' } },
+            message: 'Request failed',
+        };
+        expect(classifyRefreshError(err)).toBe('transient_server');
+        expect(shouldPerformAutoLogout({
+            ...base,
+            activeOrGuarded: true,
+            errorKind: 'transient_server',
+        })).toBe(false);
+    });
+
+    it('classifies definitive refresh token expiry', () => {
+        const err = {
+            response: { status: 401, data: { error: 'Refresh token expired' } },
+        };
+        expect(classifyRefreshError(err)).toBe('definitive_auth');
+    });
+
+    it('NEVER auto-logout active user on definitive auth (defer until idle)', () => {
+        expect(shouldPerformAutoLogout({
+            ...base,
+            activeOrGuarded: true,
+            errorKind: 'definitive_auth',
+        })).toBe(false);
+    });
+
+    it('auto-logout inactive user on definitive auth only', () => {
+        expect(shouldPerformAutoLogout({
+            ...base,
+            activeOrGuarded: false,
+            errorKind: 'definitive_auth',
+        })).toBe(true);
+        expect(shouldPerformAutoLogout({
+            ...base,
+            activeOrGuarded: false,
+            errorKind: 'network',
+        })).toBe(false);
+        expect(shouldPerformAutoLogout({
+            ...base,
+            activeOrGuarded: false,
+            errorKind: 'transient_server',
+        })).toBe(false);
+    });
+
+    it('manual logout always allowed', () => {
+        expect(shouldPerformAutoLogout({
+            ...base,
+            activeOrGuarded: true,
+            errorKind: 'network',
+            manualLogout: true,
+        })).toBe(true);
+    });
+
+    it('idle logout blocked while active or guard open', () => {
+        expect(shouldPerformIdleLogout(true)).toBe(false);
+        expect(shouldPerformIdleLogout(false)).toBe(true);
+    });
+
+    it('cross-tab SESSION_EXPIRED ignored while this tab is working', () => {
+        expect(shouldIgnoreCrossTabSessionExpired(true)).toBe(true);
+        expect(shouldIgnoreCrossTabSessionExpired(false)).toBe(false);
+    });
+
+    it('PO guard + server 500 matrix: session preserved (SAP/Odoo heartbeat pattern)', () => {
+        setTransactionGuardDepth(1);
+        touchSessionActivity();
+        expect(isUserActiveOrGuarded()).toBe(true);
+        expect(shouldPerformAutoLogout({
+            ...base,
+            activeOrGuarded: true,
+            errorKind: 'transient_server',
+        })).toBe(false);
+        expect(shouldPerformIdleLogout(isUserActiveOrGuarded())).toBe(false);
+        setTransactionGuardDepth(0);
     });
 });
 

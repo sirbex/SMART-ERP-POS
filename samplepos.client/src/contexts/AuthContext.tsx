@@ -3,8 +3,11 @@ import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTo
 import { apiClient } from '../utils/api';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
 import { useSessionKeepalive } from '../hooks/useSessionKeepalive';
+import { useGlobalSessionActivity } from '../hooks/useGlobalSessionActivity';
 import { setupAuthBroadcastListener, onAuthBroadcast, broadcastAuthEvent } from '../lib/authBroadcast';
 import { setupOfflineQueueAutoFlush } from '../lib/offlineRequestQueue';
+import { isUserActiveOrGuarded } from '../lib/sessionActivity';
+import { shouldIgnoreCrossTabSessionExpired, shouldPerformIdleLogout } from '../lib/sessionLogoutPolicy';
 import type { AxiosError } from 'axios';
 import type { UserRole } from '../types';
 
@@ -71,7 +74,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [permissionKeys, setPermissionKeys] = useState<string[]>([]);
   const [idlePausedByGuard, setIdlePausedByGuard] = useState(false);
 
-  // Proactive token refresh during long data-entry sessions (PO lines, etc.)
+  // Global activity — all modules/tabs (enterprise SSOT; independent of idle/guard)
+  useGlobalSessionActivity(isAuthenticated);
+
+  // Proactive token refresh during long data-entry sessions (any module)
   useSessionKeepalive(isAuthenticated);
 
   useEffect(() => {
@@ -199,14 +205,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // ── Multi-tab broadcast: react to auth events from other tabs ──
     const cleanupBroadcastListener = setupAuthBroadcastListener();
     const unsubscribeBroadcast = onAuthBroadcast((event) => {
-      if (event.type === 'LOGOUT' || event.type === 'SESSION_EXPIRED') {
-        // Another tab logged out or session expired — mirror it here without re-broadcasting
+      if (event.type === 'LOGOUT') {
         clearTokens();
         setUser(null);
         setIsAuthenticated(false);
         setPermissionKeys([]);
         if (window.location.pathname !== '/login') {
-          if (event.type === 'SESSION_EXPIRED') sessionStorage.setItem('session_expired', '1');
+          window.location.href = '/login';
+        }
+        return;
+      }
+      if (event.type === 'SESSION_EXPIRED') {
+        if (shouldIgnoreCrossTabSessionExpired(isUserActiveOrGuarded())) {
+          return;
+        }
+        clearTokens();
+        setUser(null);
+        setIsAuthenticated(false);
+        setPermissionKeys([]);
+        if (window.location.pathname !== '/login') {
+          sessionStorage.setItem('session_expired', '1');
           window.location.href = '/login';
         }
       }
@@ -299,8 +317,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // ── Auto-logout on idle (30 minutes of inactivity) ────────
   const idleLogout = useCallback(() => {
+    if (!shouldPerformIdleLogout(isUserActiveOrGuarded())) return;
     logout();
-    // Signal the login page to show "session expired" banner
     sessionStorage.setItem('session_expired', '1');
   }, [logout]);
 

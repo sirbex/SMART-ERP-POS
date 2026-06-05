@@ -1,5 +1,5 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
-import { clearTokens } from '../hooks/useTokenRefresh';
+import { attachAuthInterceptors } from '../hooks/useTokenRefresh';
 import logger from '../utils/logger';
 import { HandledApiError } from '../utils/errorHandler';
 import { toast } from 'sonner';
@@ -32,35 +32,12 @@ class ResilientApiClient {
     }
 
     private setupInterceptors() {
-        // Request interceptor
-        this.client.interceptors.request.use(
-            (config) => {
-                // Add auth token
-                const token = localStorage.getItem('auth_token');
-                if (token) {
-                    config.headers.Authorization = `Bearer ${token}`;
-                }
-
-                // Add request ID for tracing
-                config.headers['X-Request-ID'] = this.generateRequestId();
-
-                return config;
-            },
-            (error) => {
-                logger.error('Request error:', error);
-                return Promise.reject(error);
-            }
-        );
-
-        // Response interceptor
+        // Retry + business rules (runs after auth layer in axios error chain)
         this.client.interceptors.response.use(
-            (response) => {
-                return response;
-            },
+            (response) => response,
             async (error: AxiosError) => {
                 const config = error.config as AxiosRequestConfig & { _retry?: boolean; _retryCount?: number };
 
-                // Retry logic
                 if (this.shouldRetry(error) && config && !config._retry) {
                     config._retryCount = config._retryCount || 0;
                     config._retryCount++;
@@ -68,7 +45,6 @@ class ResilientApiClient {
                     if (config._retryCount <= 3) {
                         config._retry = true;
 
-                        // Exponential backoff
                         const delay = Math.min(1000 * Math.pow(2, config._retryCount), 10000);
                         await this.sleep(delay);
 
@@ -81,7 +57,6 @@ class ResilientApiClient {
                     }
                 }
 
-                // ── Business rule violations (HTTP 422 or known error_code prefixes) ──
                 const brvData = error.response?.data as Record<string, unknown> | undefined;
                 const brvCode = brvData?.error_code as string | undefined;
                 const isBusinessRuleViolation =
@@ -105,14 +80,16 @@ class ResilientApiClient {
                     return Promise.reject(new HandledApiError(reason));
                 }
 
-                // Handle specific error cases
-                if (error.response?.status === 401) {                    // Token expired - redirect to login
-                    this.handleUnauthorized();
-                }
-
                 return Promise.reject(this.normalizeError(error));
             }
         );
+
+        // Registered last → runs first on 401 (refresh + enterprise logout policy)
+        attachAuthInterceptors(this.client, {
+            extraRequestHeaders: (config) => {
+                config.headers['X-Request-ID'] = this.generateRequestId();
+            },
+        });
     }
 
     private shouldRetry(error: AxiosError): boolean {
@@ -120,11 +97,6 @@ class ResilientApiClient {
         if (!error.response) return true; // Network error
         const status = error.response.status;
         return status >= 500 && status < 600; // Server error
-    }
-
-    private handleUnauthorized() {
-        clearTokens();
-        window.location.href = '/login';
     }
 
     private normalizeError(error: AxiosError): Error {
