@@ -34,6 +34,10 @@ export const securityHeaders = helmet({
 
 /**
  * Rate limiting configurations
+ *
+ * SAP/Odoo: business API is limited per tenant (tenantRateLimit.ts).
+ * Global IP limit is a DDoS safety net for unauthenticated traffic only —
+ * see server.ts placement after tenantMiddleware.
  */
 export const globalRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes

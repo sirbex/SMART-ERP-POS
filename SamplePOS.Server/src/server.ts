@@ -188,10 +188,6 @@ initializeRbacMiddleware(pool);
 // Security headers
 app.use(helmet());
 
-// Rate limiting (must be early to block floods before heavy middleware)
-app.use(globalRateLimit);
-app.use('/api/auth', authRateLimit);
-
 // Correlation ID for request tracing
 app.use(correlationId);
 
@@ -245,6 +241,16 @@ app.use(auditContextMiddleware);
 
 // Multi-tenant middleware (resolves tenant from JWT/header/subdomain → attaches pool)
 app.use(tenantMiddleware);
+
+// SAP/Odoo: authenticated tenant API uses per-tenant budgets (tenantRateLimit below).
+// Global IP limit applies only to unauthenticated traffic (login flood, health probes).
+app.use((req, res, next) => {
+  if (req.path === '/health' || req.path === '/metrics') return next();
+  if (req.tenantId) return next();
+  return globalRateLimit(req, res, next);
+});
+
+app.use('/api/auth', authRateLimit);
 
 // Per-tenant rate limiting (must be after tenant resolution, before routes)
 app.use(tenantRateLimit);

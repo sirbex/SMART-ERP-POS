@@ -20,6 +20,7 @@ describe('POS product search display contract', () => {
     expect(searchSrc).toContain('p.category');
     expect(searchSrc).toContain('Margin:');
     expect(searchSrc).toContain('Qty:');
+    expect(searchSrc).toContain('searchCachedProducts');
   });
 
   it('does not render SKU in the search dropdown rows', () => {

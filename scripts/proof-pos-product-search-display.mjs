@@ -34,6 +34,18 @@ if (vitest.status !== 0) fail('pos-product-search-display.spec.ts');
 else pass('pos-product-search-display.spec.ts');
 
 console.log('\n' + '═'.repeat(60));
+console.log(' proof — POS catalog SSOT (offline-first)');
+console.log('═'.repeat(60));
+
+const ssot = spawnSync(
+  'npm',
+  ['test', '--', '--run', 'pos-catalog-ssot'],
+  { cwd: clientDir, stdio: 'inherit', shell: true },
+);
+if (ssot.status !== 0) fail('pos-catalog-ssot.spec.ts');
+else pass('pos-catalog-ssot.spec.ts');
+
+console.log('\n' + '═'.repeat(60));
 console.log(' proof — Client production build');
 console.log('═'.repeat(60));
 

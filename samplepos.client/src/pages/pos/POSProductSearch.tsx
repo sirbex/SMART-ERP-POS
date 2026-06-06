@@ -1,13 +1,18 @@
 import { useState, useRef, useEffect, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
 import POSSearchBar from '../../components/pos/POSSearchBar';
 import POSButton from '../../components/pos/POSButton';
 import POSModal from '../../components/pos/POSModal';
 import { formatCurrency } from '../../utils/currency';
-import { api } from '../../utils/api';
-import { inventoryKeys } from '../../hooks/useInventory';
-import { searchCachedProducts } from '../../services/offlineCatalogService';
+import {
+  searchCachedProducts,
+  syncProductCatalog,
+  getLastSyncTime,
+  isCatalogStale,
+  isCatalogAvailable,
+  POS_CATALOG_SYNCED_EVENT,
+  CATALOG_STALE_MS,
+} from '../../services/offlineCatalogService';
 import type { CachedProduct } from '../../services/offlineCatalogService';
 
 // TIMEZONE STRATEGY: Display dates without conversion
@@ -73,87 +78,32 @@ export interface POSProductSearchHandle {
   clearSearch: () => void;
 }
 
-interface StockLevelItem {
-  product_id: string;
-  product_name: string;
-  sku?: string;
-  barcode?: string;
-  generic_name?: string;
-  category?: string;
-  total_stock: number | string;
-  selling_price: number | string;
-  average_cost: number | string;
-  nearest_expiry?: string;
-  is_taxable?: boolean;
-  tax_rate?: number | string;
-  uoms?: Array<{
-    uomId: string;
-    name: string;
-    symbol?: string;
-    conversionFactor: number;
-    price: number;
-    cost: number;
-    isDefault: boolean;
-  }>;
-}
-
-function mapStockLevelToSearchResult(item: StockLevelItem): ProductSearchResult {
-  const sellingPrice = parseFloat(String(item.selling_price || 0));
-  const averageCost = parseFloat(String(item.average_cost || 0));
+function transformCachedToSearchResult(cached: CachedProduct): ProductSearchResult {
+  const defaultUom = cached.uoms.find((u) => u.isDefault) || cached.uoms[0];
   const marginPct =
-    sellingPrice > 0
-      ? new Decimal(sellingPrice).minus(averageCost).dividedBy(sellingPrice).times(100).toNumber()
+    cached.sellingPrice > 0
+      ? new Decimal(cached.sellingPrice)
+        .minus(cached.costPrice)
+        .dividedBy(cached.sellingPrice)
+        .times(100)
+        .toNumber()
       : 0;
-
-  let uoms = item.uoms || [];
-  if (!uoms || uoms.length === 0) {
-    uoms = [
-      {
-        uomId: `default-${item.product_id}`,
-        name: 'PIECE',
-        symbol: 'PIECE',
-        conversionFactor: 1,
-        isDefault: true,
-        price: sellingPrice,
-        cost: averageCost,
-      },
-    ];
-  }
-
-  const defaultUom = uoms.find((u) => u.isDefault) || uoms[0];
-
   return {
-    id: item.product_id,
-    name: item.product_name,
-    sku: item.sku || '',
-    barcode: item.barcode || '',
-    category: item.category || undefined,
-    uoms,
+    id: cached.id,
+    name: cached.name,
+    sku: cached.sku,
+    barcode: cached.barcode,
+    category: cached.category,
+    uoms: cached.uoms,
     selectedUom: defaultUom,
-    stockOnHand: parseFloat(String(item.total_stock || 0)),
-    expiryDate: item.nearest_expiry,
-    costPrice: averageCost,
-    sellingPrice,
+    stockOnHand: cached.stockOnHand,
+    expiryDate: cached.nearestExpiry,
+    costPrice: cached.costPrice,
+    sellingPrice: cached.sellingPrice,
     marginPct,
-    isTaxable: item.is_taxable ?? false,
-    taxRate: parseFloat(String(item.tax_rate || 0)),
+    isTaxable: cached.isTaxable,
+    taxRate: cached.taxRate,
   };
-}
-
-function filterStockLevelsForSearch(stockLevels: StockLevelItem[], term: string): ProductSearchResult[] {
-  const q = term.toLowerCase();
-  return stockLevels
-    .filter((item) => {
-      if (!item.total_stock || Number(item.total_stock) <= 0) return false;
-      return (
-        item.product_name?.toLowerCase().includes(q) ||
-        item.sku?.toLowerCase().includes(q) ||
-        item.barcode?.toLowerCase().includes(q) ||
-        item.generic_name?.toLowerCase().includes(q) ||
-        item.category?.toLowerCase().includes(q)
-      );
-    })
-    .map(mapStockLevelToSearchResult);
 }
 
 const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProps>(
@@ -162,6 +112,9 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
     const [selected, setSelected] = useState<ProductSearchResult | null>(null);
     const [selectedIndex, setSelectedIndex] = useState<number>(0);
     const [highlightedUomIndex, setHighlightedUomIndex] = useState<number>(0);
+    const [catalogRev, setCatalogRev] = useState(getLastSyncTime);
+    const [catalogSyncing, setCatalogSyncing] = useState(false);
+    const catalogSyncingRef = useRef(false);
     const searchInputRef = useRef<HTMLInputElement>(null);
     const productListRef = useRef<HTMLDivElement>(null);
     const uomButtonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -179,62 +132,46 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
       },
     }));
 
-    // ── Transform cached products to ProductSearchResult format ──
-    const transformCachedToSearchResult = (cached: CachedProduct): ProductSearchResult => {
-      const defaultUom = cached.uoms.find((u) => u.isDefault) || cached.uoms[0];
-      const marginPct =
-        cached.sellingPrice > 0
-          ? new Decimal(cached.sellingPrice)
-            .minus(cached.costPrice)
-            .dividedBy(cached.sellingPrice)
-            .times(100)
-            .toNumber()
-          : 0;
-      return {
-        id: cached.id,
-        name: cached.name,
-        sku: cached.sku,
-        barcode: cached.barcode,
-        category: cached.category,
-        uoms: cached.uoms,
-        selectedUom: defaultUom,
-        stockOnHand: cached.stockOnHand,
-        expiryDate: cached.nearestExpiry,
-        costPrice: cached.costPrice,
-        sellingPrice: cached.sellingPrice,
-        marginPct,
-        isTaxable: cached.isTaxable,
-        taxRate: cached.taxRate,
-      };
-    };
+    // ── SAP/Odoo POS: local catalog is SSOT — search never hits the network per keystroke ──
+    const refreshCatalogIfNeeded = useCallback(async () => {
+      if (!isOnline || catalogSyncingRef.current) return;
+      if (isCatalogAvailable() && !isCatalogStale()) return;
+      catalogSyncingRef.current = true;
+      setCatalogSyncing(true);
+      try {
+        await syncProductCatalog();
+        setCatalogRev(getLastSyncTime());
+      } finally {
+        catalogSyncingRef.current = false;
+        setCatalogSyncing(false);
+      }
+    }, [isOnline]);
 
-    // Fetch stock levels once — shared cache with Dashboard/inventory hooks.
-    // Filter client-side per keystroke to avoid hammering /inventory/stock-levels (429).
-    const { data: stockLevelsRaw, isLoading: isOnlineLoading } = useQuery({
-      queryKey: inventoryKeys.stockLevels(),
-      queryFn: async () => {
-        const stockRes = await api.inventory.stockLevels();
-        if (!stockRes.data.success) return [] as StockLevelItem[];
-        return (stockRes.data.data || []) as StockLevelItem[];
-      },
-      staleTime: 30_000,
-      enabled: isOnline,
-    });
+    useEffect(() => {
+      void refreshCatalogIfNeeded();
+    }, [refreshCatalogIfNeeded]);
 
-    const onlineData = useMemo(
-      () => (search && stockLevelsRaw ? filterStockLevelsForSearch(stockLevelsRaw, search) : []),
-      [search, stockLevelsRaw],
+    // Background refresh on stale interval (not tied to search input)
+    useEffect(() => {
+      if (!isOnline) return;
+      const timer = window.setInterval(() => {
+        if (isCatalogStale()) void refreshCatalogIfNeeded();
+      }, CATALOG_STALE_MS);
+      return () => window.clearInterval(timer);
+    }, [isOnline, refreshCatalogIfNeeded]);
+
+    useEffect(() => {
+      const onSynced = () => setCatalogRev(getLastSyncTime());
+      window.addEventListener(POS_CATALOG_SYNCED_EVENT, onSynced);
+      return () => window.removeEventListener(POS_CATALOG_SYNCED_EVENT, onSynced);
+    }, []);
+
+    const data = useMemo<ProductSearchResult[]>(
+      () => (search ? searchCachedProducts(search).map(transformCachedToSearchResult) : []),
+      [search, catalogRev],
     );
 
-    // ── Offline search: use cached catalog (memoized to prevent new array ref each render) ──
-    const offlineResults = useMemo<ProductSearchResult[]>(
-      () => (!isOnline && search ? searchCachedProducts(search).map(transformCachedToSearchResult) : []),
-      [isOnline, search]
-    );
-
-    // Unified data source
-    const data = isOnline ? onlineData : offlineResults;
-    const isLoading = isOnline ? isOnlineLoading : false;
+    const isLoading = catalogSyncing && !isCatalogAvailable();
 
     // Auto-focus search bar on mount
     useEffect(() => {
@@ -419,7 +356,7 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
         {isLoading && <div className="mt-2 text-xs text-gray-500">Searching...</div>}
         {!isOnline && search && (
           <div className="mt-1 text-xs text-amber-600 flex items-center gap-1">
-            <span>⚡</span> Searching offline catalog
+            <span>⚡</span> Offline — searching local catalog
           </div>
         )}
         {search && Array.isArray(data) && (

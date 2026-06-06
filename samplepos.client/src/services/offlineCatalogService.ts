@@ -1,8 +1,8 @@
 /**
  * Offline Product Catalog Service
  *
- * Caches the full POS product catalog (with stock, prices, UoMs)
- * into localStorage so product search works without network.
+ * SAP/Odoo POS: one replication stream per session — deduplicated background sync.
+ * Search always reads localStorage catalog (zero network per keystroke).
  *
  * Storage key: 'pos_product_catalog'
  * Stock mirror:  'pos_local_stock'
@@ -16,6 +16,14 @@ const CATALOG_KEY = 'pos_product_catalog';
 const STOCK_KEY = 'pos_local_stock';
 const SYNC_KEY = 'pos_catalog_last_sync';
 const CART_KEY = 'pos_persisted_cart_v1';
+
+/** SAP/Odoo POS: background catalog refresh interval (not per keystroke). */
+export const CATALOG_STALE_MS = 5 * 60 * 1000;
+
+/** Fired on window after syncProductCatalog() succeeds — POS search listens. */
+export const POS_CATALOG_SYNCED_EVENT = 'pos:catalog-synced';
+
+let catalogSyncInFlight: Promise<CachedProduct[]> | null = null;
 
 // ── Types ─────────────────────────────────────────────────────
 export interface CachedProductUom {
@@ -67,6 +75,24 @@ export function setCachedCatalog(products: CachedProduct[]): void {
 export function getLastSyncTime(): number {
     const ts = localStorage.getItem(SYNC_KEY);
     return ts ? parseInt(ts, 10) : 0;
+}
+
+export function isCatalogAvailable(): boolean {
+    return getCachedCatalog().length > 0;
+}
+
+export function isCatalogStale(maxAgeMs: number = CATALOG_STALE_MS): boolean {
+    const last = getLastSyncTime();
+    if (!last) return true;
+    return Date.now() - last > maxAgeMs;
+}
+
+function notifyCatalogSynced(): void {
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(POS_CATALOG_SYNCED_EVENT, {
+            detail: { syncedAt: getLastSyncTime() },
+        }));
+    }
 }
 
 // ── Stock mirror: read / write / decrement / restore ──────────
@@ -132,6 +158,17 @@ export function clearPersistedCart(): void {
  * Call on POS page load (when online).
  */
 export async function syncProductCatalog(): Promise<CachedProduct[]> {
+    if (catalogSyncInFlight) return catalogSyncInFlight;
+
+    catalogSyncInFlight = syncProductCatalogOnce()
+        .finally(() => {
+            catalogSyncInFlight = null;
+        });
+
+    return catalogSyncInFlight;
+}
+
+async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
     try {
         const res = await apiClient.get('/inventory/stock-levels');
         interface StockLevelRow {
@@ -200,6 +237,7 @@ export async function syncProductCatalog(): Promise<CachedProduct[]> {
         }
         setLocalStock(stock);
 
+        notifyCatalogSynced();
         return products;
     } catch (err) {
         console.error('[OfflineCatalog] Failed to sync product catalog:', err);
@@ -230,7 +268,8 @@ export function searchCachedProducts(query: string): CachedProduct[] {
                 p.name.toLowerCase().includes(term) ||
                 p.sku.toLowerCase().includes(term) ||
                 p.barcode.toLowerCase().includes(term) ||
-                (p.genericName?.toLowerCase().includes(term) ?? false)
+                (p.genericName?.toLowerCase().includes(term) ?? false) ||
+                (p.category?.toLowerCase().includes(term) ?? false)
             );
         })
         .map((p) => ({
