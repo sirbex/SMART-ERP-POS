@@ -9,6 +9,20 @@ import {
   MovementFilters,
 } from './types.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
+import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+
+const MOVEMENT_SORT_COLUMNS: Record<string, string> = {
+  dateTime: 'sm.created_at',
+  product: 'p.name',
+  category: 'p.category',
+  type: 'sm.movement_type',
+  quantity: 'ABS(sm.quantity)',
+  unitCost: 'sm.unit_cost',
+  totalValue: '(ABS(sm.quantity) * COALESCE(sm.unit_cost, 0))',
+  balanceAfter: 'bc.balance_after',
+  reference: "COALESCE(s.sale_number, gr.receipt_number, sm.reference_id::text, '')",
+  notes: 'sm.notes',
+};
 
 /**
  * Record stock movement
@@ -261,6 +275,10 @@ export async function getAllMovements(
 
   const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
+  const orderCol = pickSortColumn(filters?.sortBy, MOVEMENT_SORT_COLUMNS, 'dateTime');
+  const orderDir = sqlSortOrder(filters?.sortOrder ?? (filters?.sortBy ? 'asc' : 'desc'));
+  const orderBy = `${orderCol} ${orderDir}, sm.id ${orderDir}`;
+
   // Count query (includes same JOINs so search filter works)
   const countResult = await pool.query(
     `SELECT COUNT(*)
@@ -321,7 +339,7 @@ export async function getAllMovements(
      LEFT JOIN uoms def_u ON def_uom.uom_id = def_u.id
      JOIN balance_cte bc ON bc.id = sm.id
      ${whereClause}
-     ORDER BY sm.created_at DESC, sm.id DESC
+     ORDER BY ${orderBy}
      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
     [...values, limit, offset]
   );

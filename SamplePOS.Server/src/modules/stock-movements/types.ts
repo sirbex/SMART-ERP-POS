@@ -93,6 +93,9 @@ export interface MovementFilters {
   startDate?: string;
   endDate?: string;
   search?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  balanceGt?: number;
 }
 
 /**

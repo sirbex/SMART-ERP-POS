@@ -4,6 +4,7 @@ import Decimal from 'decimal.js';
 import type { Pool } from 'pg';
 import type pg from 'pg';
 import * as customerRepository from './customerRepository.js';
+import type { CustomerListQuery } from './customerRepository.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { AccountingCore, AccountingError } from '../../services/accountingCore.js';
 import * as glEntryService from '../../services/glEntryService.js';
@@ -40,7 +41,8 @@ import { BUSINESS_TIMEZONE, getBusinessDate, formatDateBusiness } from '../../ut
 export async function getAllCustomers(
   page: number = 1,
   limit: number = 50,
-  dbPool?: pg.Pool
+  dbPool?: pg.Pool,
+  listQuery: CustomerListQuery = {},
 ): Promise<{
   data: Customer[];
   pagination: {
@@ -51,9 +53,13 @@ export async function getAllCustomers(
   };
 }> {
   const offset = (page - 1) * limit;
+  const query: CustomerListQuery = {
+    ...listQuery,
+    search: listQuery.search?.trim() || undefined,
+  };
   const [customers, total] = await Promise.all([
-    customerRepository.findAllCustomers(limit, offset, dbPool),
-    customerRepository.countCustomers(dbPool),
+    customerRepository.findAllCustomers(limit, offset, dbPool, query),
+    customerRepository.countCustomers(dbPool, query),
   ]);
 
   return {

@@ -12,6 +12,8 @@ import type {
   CreatePurchaseOrderInput,
   CreateGoodsReceiptInput,
 } from '../types/inputs';
+import type { ServerListParams } from '../lib/serverListParams';
+import { toServerListQuery } from '../lib/serverListParams';
 
 // Query Keys for React Query
 export const queryKeys = {
@@ -26,7 +28,8 @@ export const queryKeys = {
   },
   customers: {
     all: ['customers'] as const,
-    list: (page?: number, limit?: number) => ['customers', 'list', page, limit] as const,
+    list: (page?: number, limit?: number, params?: ServerListParams) =>
+      ['customers', 'list', page, limit, params] as const,
     detail: (id: string) => ['customers', 'detail', id] as const,
     statement: (id: string, start?: string, end?: string, page?: number, limit?: number) => ['customers', 'statement', id, start, end, page, limit] as const,
     smartStatement: (id: string, startDate: string, endDate: string) =>
@@ -39,7 +42,8 @@ export const queryKeys = {
   },
   sales: {
     all: ['sales'] as const,
-    list: (page?: number, limit?: number) => ['sales', 'list', page, limit] as const,
+    list: (page?: number, limit?: number, params?: ServerListParams) =>
+      ['sales', 'list', page, limit, params] as const,
     detail: (id: string) => ['sales', 'detail', id] as const,
     summary: (startDate?: string, endDate?: string, groupBy?: string) =>
       ['sales', 'summary', startDate, endDate, groupBy] as const,
@@ -193,11 +197,10 @@ export function useDeleteProduct() {
 }
 
 // Customer Hooks
-export function useCustomers(page = 1, limit = 50) {
-  // Custom select to include pagination alongside data
+export function useCustomers(page = 1, limit = 50, listParams?: ServerListParams) {
   return useQuery({
-    queryKey: queryKeys.customers.list(page, limit),
-    queryFn: () => api.customers.list({ page, limit }),
+    queryKey: queryKeys.customers.list(page, limit, listParams),
+    queryFn: () => api.customers.list({ page, limit, ...toServerListQuery(listParams ?? {}) }),
     select: (resp) => ({
       data: (resp.data.data ?? []) as unknown[],
       pagination: resp.data.pagination,
@@ -318,17 +321,38 @@ export function useCustomerSmartStatement(
 }
 
 // Sales Hooks
-export function useSales(page = 1, limit = 50, filters?: { startDate?: string; endDate?: string; cashierId?: string }) {
-  // Custom select to include pagination alongside data
-  // CRITICAL: Include filters in queryKey so React Query refetches when dates change
+export function useSales(
+  page = 1,
+  limit = 50,
+  filters?: {
+    startDate?: string;
+    endDate?: string;
+    cashierId?: string;
+    status?: string;
+    paymentMethod?: string;
+    search?: string;
+  } & ServerListParams,
+) {
+  const { startDate, endDate, cashierId, status, paymentMethod, search, ...listParams } = filters ?? {};
   return useQuery({
-    queryKey: [...queryKeys.sales.list(page, limit), filters?.startDate, filters?.endDate, filters?.cashierId],
-    queryFn: () => api.sales.list({ page, limit, ...filters }),
+    queryKey: [...queryKeys.sales.list(page, limit, listParams), startDate, endDate, cashierId, status, paymentMethod, search],
+    queryFn: () =>
+      api.sales.list({
+        page,
+        limit,
+        startDate,
+        endDate,
+        cashierId,
+        status,
+        paymentMethod,
+        search,
+        ...toServerListQuery(listParams),
+      }),
     select: (resp) => ({
       data: (resp.data.data ?? []) as unknown[],
       pagination: resp.data.pagination,
     }),
-    staleTime: 10000, // 10 seconds
+    staleTime: 10000,
   });
 }
 

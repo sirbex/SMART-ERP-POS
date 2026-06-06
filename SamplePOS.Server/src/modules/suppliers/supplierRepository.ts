@@ -7,6 +7,69 @@ import {
   syncSupplierBalanceFromOpenItems,
   SUPPLIER_OPEN_ITEM_BALANCE_SQL,
 } from '../supplier-payments/apReconciliationEngine.js';
+import {
+  pickSortColumn,
+  sqlSortOrder,
+  type EnterpriseListQuery,
+} from '../../utils/enterpriseListQuery.js';
+
+export type SupplierListQuery = EnterpriseListQuery;
+
+const SUPPLIER_SORT_COLUMNS: Record<string, string> = {
+  name: '"CompanyName"',
+  contactPerson: '"ContactName"',
+  paymentTerms: '"DefaultPaymentTerms"',
+  status: '"IsActive"',
+  createdAt: '"CreatedAt"',
+};
+
+function buildSupplierListClauses(query: SupplierListQuery = {}) {
+  const params: unknown[] = [];
+  const conditions: string[] = ['"IsActive" = true'];
+  let paramIndex = 1;
+
+  if (query.search?.trim()) {
+    params.push(`%${query.search.trim()}%`);
+    conditions.push(
+      `("CompanyName" ILIKE $${paramIndex} OR "ContactName" ILIKE $${paramIndex} OR "Phone" ILIKE $${paramIndex} OR "Email" ILIKE $${paramIndex} OR "SupplierCode" ILIKE $${paramIndex} OR "TaxId" ILIKE $${paramIndex})`,
+    );
+    paramIndex++;
+  }
+
+  if (query.paymentTerms) {
+    params.push(paymentTermsStringToDays(query.paymentTerms));
+    conditions.push(`"DefaultPaymentTerms" = $${paramIndex}`);
+    paramIndex++;
+  }
+
+  if (query.outstandingOnly || (query.balanceGt != null && query.balanceGt > 0)) {
+    conditions.push(`(${SUPPLIER_OPEN_ITEM_BALANCE_SQL}) > 0.009`);
+  }
+
+  let orderBy: string;
+  if (query.sortBy === 'outstandingBalance') {
+    orderBy = `(${SUPPLIER_OPEN_ITEM_BALANCE_SQL}) ${sqlSortOrder(query.sortOrder ?? 'desc')}`;
+  } else {
+    const col = pickSortColumn(query.sortBy, SUPPLIER_SORT_COLUMNS, 'name');
+    orderBy = `${col} ${sqlSortOrder(query.sortOrder ?? 'asc')}, "CompanyName" ASC`;
+  }
+
+  return {
+    whereClause: conditions.join(' AND '),
+    params,
+    orderBy,
+    nextParamIndex: paramIndex,
+  };
+}
+
+const SUPPLIER_SELECT = `
+      "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
+      "Email" as email, "Phone" as phone, "Address" as address,
+      "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
+      ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
+      "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
+      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
+      version`;
 
 export interface Supplier {
   id: string;
@@ -75,36 +138,25 @@ function normalizeSupplierRow(row: Record<string, unknown>): Supplier {
 }
 
 /**
- * Find all suppliers with pagination and optional search
+ * Find all suppliers — server-side sort/filter across full dataset (enterprise pagination).
  */
-export async function findAll(pool: Pool, limit: number, offset: number, search?: string): Promise<Supplier[]> {
-  const params: unknown[] = [];
-  let whereClause = '"IsActive" = true';
-
-  if (search && search.trim().length > 0) {
-    params.push(`%${search.trim()}%`);
-    whereClause += ` AND ("CompanyName" ILIKE $1 OR "ContactName" ILIKE $1 OR "Phone" ILIKE $1 OR "Email" ILIKE $1 OR "SupplierCode" ILIKE $1 OR "TaxId" ILIKE $1)`;
-  }
-
-  params.push(limit, offset);
-  const limitParam = `$${params.length - 1}`;
-  const offsetParam = `$${params.length}`;
+export async function findAll(
+  pool: Pool,
+  limit: number,
+  offset: number,
+  query: SupplierListQuery = {},
+): Promise<Supplier[]> {
+  const { whereClause, params, orderBy, nextParamIndex } = buildSupplierListClauses(query);
+  const limitParam = `$${nextParamIndex}`;
+  const offsetParam = `$${nextParamIndex + 1}`;
 
   const result = await pool.query(
-    `SELECT 
-      "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
-      "Email" as email, "Phone" as phone, "Address" as address,
-      "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
-      -- Open-item SSOT (invoices − unallocated payments); never use cached column in reads.
-      ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
-      "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
-      "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
-      version
+    `SELECT ${SUPPLIER_SELECT}
     FROM suppliers 
     WHERE ${whereClause}
-    ORDER BY "CompanyName" ASC
+    ORDER BY ${orderBy}
     LIMIT ${limitParam} OFFSET ${offsetParam}`,
-    params
+    [...params, limit, offset],
   );
   return result.rows.map(normalizeSupplierRow);
 }
@@ -350,23 +402,38 @@ export async function recalculateOutstandingBalance(
 /**
  * Count all active suppliers
  */
-export async function countAll(pool: Pool, search?: string, includeInactive: boolean = false): Promise<number> {
-  const conditions: string[] = [];
+export async function countAll(
+  pool: Pool,
+  query: SupplierListQuery = {},
+  includeInactive: boolean = false,
+): Promise<number> {
   const params: unknown[] = [];
+  const conditions: string[] = [];
 
   if (!includeInactive) {
     conditions.push('"IsActive" = true');
   }
 
-  if (search && search.trim().length > 0) {
-    params.push(`%${search.trim()}%`);
-    conditions.push(`("CompanyName" ILIKE $${params.length} OR "ContactName" ILIKE $${params.length} OR "Phone" ILIKE $${params.length} OR "Email" ILIKE $${params.length} OR "SupplierCode" ILIKE $${params.length} OR "TaxId" ILIKE $${params.length})`);
+  if (query.search?.trim()) {
+    params.push(`%${query.search.trim()}%`);
+    conditions.push(
+      `("CompanyName" ILIKE $${params.length} OR "ContactName" ILIKE $${params.length} OR "Phone" ILIKE $${params.length} OR "Email" ILIKE $${params.length} OR "SupplierCode" ILIKE $${params.length} OR "TaxId" ILIKE $${params.length})`,
+    );
+  }
+
+  if (query.paymentTerms) {
+    params.push(paymentTermsStringToDays(query.paymentTerms));
+    conditions.push(`"DefaultPaymentTerms" = $${params.length}`);
+  }
+
+  if (query.outstandingOnly || (query.balanceGt != null && query.balanceGt > 0)) {
+    conditions.push(`(${SUPPLIER_OPEN_ITEM_BALANCE_SQL}) > 0.009`);
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const result = await pool.query(
     `SELECT COUNT(*) as count FROM suppliers ${whereClause}`,
-    params
+    params,
   );
   return parseInt(result.rows[0].count, 10);
 }

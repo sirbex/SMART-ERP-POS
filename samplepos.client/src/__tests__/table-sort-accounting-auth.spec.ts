@@ -37,21 +37,35 @@ describe('tableSortUtils — client-side column sort', () => {
 });
 
 describe('SortableTableHeader — wired on list pages', () => {
-  const pagesWithSortableHeaders = [
+  const serverPaginatedPages = [
     'pages/SuppliersPage.tsx',
     'pages/CustomersPage.tsx',
+    'pages/inventory/PurchaseOrdersPage.tsx',
+    'pages/inventory/GoodsReceiptsPage.tsx',
+    'pages/inventory/StockMovementsPage.tsx',
+  ];
+
+  const clientSortedPages = [
     'pages/SalesPage.tsx',
     'pages/inventory/ProductsPage.tsx',
     'pages/inventory/StockLevelsPage.tsx',
-    'pages/inventory/PurchaseOrdersPage.tsx',
     'components/customers/CustomerGroupsPanel.tsx',
   ];
 
-  for (const page of pagesWithSortableHeaders) {
+  for (const page of serverPaginatedPages) {
+    it(`${page} uses server-side table sort`, () => {
+      const src = readSrc(page);
+      expect(src).toContain('SortableTableHeader');
+      expect(src).toContain('useServerTableSort');
+      expect(src).toContain('serverListParams');
+    });
+  }
+
+  for (const page of clientSortedPages) {
     it(`${page} imports SortableTableHeader`, () => {
       const src = readSrc(page);
       expect(src).toContain('SortableTableHeader');
-      expect(src).toContain('useColumnSort');
+      expect(src).toMatch(/useColumnSort|useServerTableSort/);
     });
   }
 });

@@ -8,6 +8,15 @@ import {
   grItemsConversionFactorExpr,
   grItemsIsBonusExpr,
 } from '../../db/schemaColumnCache.js';
+import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+
+const GR_SORT_COLUMNS: Record<string, string> = {
+  grNumber: 'gr.receipt_number',
+  poNumber: 'po.order_number',
+  supplier: 's."CompanyName"',
+  receivedDate: 'gr.received_date',
+  receiptStatus: 'gr.status',
+};
 
 export interface GoodsReceipt {
   id: string;
@@ -522,6 +531,8 @@ export const goodsReceiptRepository = {
       endDate?: string;
       /** TO_INVOICE = completed GR with no supplier bill; INVOICED = bill linked */
       billingStatus?: 'TO_INVOICE' | 'INVOICED';
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
     }
   ): Promise<{ grs: GoodsReceipt[]; total: number }> {
     const offset = (page - 1) * limit;
@@ -611,6 +622,14 @@ export const goodsReceiptRepository = {
       values
     );
 
+    let orderBy: string;
+    if (filters?.sortBy === 'invoiceStatus') {
+      orderBy = `(CASE WHEN ${supplierBillExistsSql} THEN 1 ELSE 0 END) ${sqlSortOrder(filters.sortOrder ?? 'asc')}`;
+    } else {
+      const col = pickSortColumn(filters?.sortBy, GR_SORT_COLUMNS, 'receivedDate');
+      orderBy = `${col} ${sqlSortOrder(filters?.sortOrder ?? 'desc')}`;
+    }
+
     const result = await pool.query(
       `SELECT 
          gr.id,
@@ -641,7 +660,7 @@ export const goodsReceiptRepository = {
        LEFT JOIN suppliers s ON po.supplier_id = s."Id"
        LEFT JOIN users u ON u.id = gr.received_by_id
        ${whereClause} 
-       ORDER BY gr.created_at DESC 
+       ORDER BY ${orderBy}, gr.created_at DESC 
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...values, limit, offset]
     );

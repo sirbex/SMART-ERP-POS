@@ -26,8 +26,7 @@ import { DatePicker } from '../../components/ui/date-picker';
 import { downloadFile } from '../../utils/download';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
-import { useColumnSort } from '../../hooks/useColumnSort';
-import { applyTableSort } from '../../lib/tableSortUtils';
+import { useServerTableSort } from '../../hooks/useServerTableSort';
 import type { Supplier } from '../../types';
 import {
   SupplierSelector,
@@ -66,12 +65,6 @@ type POSortField =
   | 'expectedDelivery'
   | 'status'
   | 'totalAmount';
-
-const PO_DESC_DEFAULT = new Set<POSortField>([
-  'orderDate',
-  'expectedDelivery',
-  'totalAmount',
-]);
 
 interface POLineItem {
   id: string;
@@ -1242,8 +1235,17 @@ export default function PurchaseOrdersPage() {
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [page, setPage] = useState(1);
   const limit = 20;
-  const { sortField, sortOrder, handleSort, setSortOrder } =
-    useColumnSort<POSortField>('orderDate', 'desc');
+  const {
+    sortField,
+    sortOrder,
+    handleColumnSort,
+    setSortOrder,
+    serverListParams,
+  } = useServerTableSort<POSortField>({
+    defaultField: 'orderDate',
+    defaultOrder: 'desc',
+    onQueryChange: () => setPage(1),
+  });
 
   // API queries
   const {
@@ -1256,6 +1258,7 @@ export default function PurchaseOrdersPage() {
     limit,
     status: selectedStatus !== 'ALL' ? selectedStatus : undefined,
     supplierId: selectedSupplier || undefined,
+    ...serverListParams,
   });
 
   const { data: suppliersData } = useSuppliers();
@@ -1352,25 +1355,6 @@ export default function PurchaseOrdersPage() {
     return { total, draft, pending, completed, cancelled, totalValue: totalValue.toNumber() };
   }, [purchaseOrders]);
 
-  const poSortAccessors = useMemo(
-    () => ({
-      poNumber: (po: PORow) => po.poNumber || po.order_number || '',
-      supplier: (po: PORow) => po.supplierName || po.supplier_name || '',
-      orderDate: (po: PORow) => po.orderDate || po.order_date || '',
-      expectedDelivery: (po: PORow) => po.expectedDelivery || po.expected_delivery_date || '',
-      status: (po: PORow) => po.status ?? '',
-      totalAmount: (po: PORow) => Number(po.totalAmount ?? po.total_amount ?? 0),
-    }),
-    [],
-  );
-
-  const handleColumnSort = (field: string) => {
-    const f = field as POSortField;
-    handleSort(f, {
-      defaultOrder: PO_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
-    });
-  };
-
   const mobileSortOptions = [
     { value: 'poNumber', label: 'Sort by PO Number' },
     { value: 'supplier', label: 'Sort by Supplier' },
@@ -1379,11 +1363,6 @@ export default function PurchaseOrdersPage() {
     { value: 'status', label: 'Sort by Status' },
     { value: 'totalAmount', label: 'Sort by Total Amount' },
   ];
-
-  const sortedPurchaseOrders = useMemo(
-    () => applyTableSort([...purchaseOrders], sortField, sortOrder, poSortAccessors),
-    [purchaseOrders, sortField, sortOrder, poSortAccessors],
-  );
 
   // Handle submit PO - automatically sends to supplier and creates goods receipt
   const handleSubmitPO = async (id: string) => {
@@ -1705,14 +1684,14 @@ export default function PurchaseOrdersPage() {
       <div className="bg-white rounded-lg shadow overflow-hidden">
         {/* Mobile Card View */}
         <div className="block sm:hidden space-y-3 p-3">
-          {sortedPurchaseOrders.length === 0 ? (
+          {purchaseOrders.length === 0 ? (
             <div className="text-center py-8 text-gray-500">
               {selectedStatus !== 'ALL' || selectedSupplier
                 ? 'No purchase orders match your filters'
                 : 'No purchase orders yet. Create your first PO to get started!'}
             </div>
           ) : (
-            sortedPurchaseOrders.map((po: PORow) => {
+            purchaseOrders.map((po: PORow) => {
               const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
               const totalAmount = new Decimal(po.totalAmount || 0);
               return (
@@ -1775,7 +1754,7 @@ export default function PurchaseOrdersPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {sortedPurchaseOrders.length === 0 ? (
+                {purchaseOrders.length === 0 ? (
                   <tr>
                     <td colSpan={hasDeliveryDates ? 7 : 6} className="px-6 py-8 text-center text-gray-500">
                       {selectedStatus !== 'ALL' || selectedSupplier
@@ -1784,7 +1763,7 @@ export default function PurchaseOrdersPage() {
                     </td>
                   </tr>
                 ) : (
-                  sortedPurchaseOrders.map((po: PORow) => {
+                  purchaseOrders.map((po: PORow) => {
                     const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
                     const totalAmount = new Decimal(po.totalAmount || 0);
 

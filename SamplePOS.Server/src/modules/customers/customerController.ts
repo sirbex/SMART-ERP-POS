@@ -2,6 +2,7 @@
 
 import type { Request, Response } from 'express';
 import { CreateCustomerSchema, UpdateCustomerSchema } from '../../../../shared/zod/customer.js';
+import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseListQuery.js';
 import * as customerService from './customerService.js';
 import * as cnDnReportService from '../reports/cnDnReportService.js';
 import { z } from 'zod';
@@ -30,6 +31,8 @@ const PaginationQuerySchema = z.object({
     .string()
     .optional()
     .transform((v) => (v ? parseInt(v) : 50)),
+  search: z.string().optional(),
+  ...EnterpriseListQueryFields,
 });
 const SearchQuerySchema = z.object({
   q: z.string().optional().default(''),
@@ -96,9 +99,16 @@ export const getCustomerOpeningBalanceHistory = asyncHandler(async (req: Request
 
 export const getCustomers = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { page, limit } = PaginationQuerySchema.parse(req.query);
+  const parsed = PaginationQuerySchema.parse(req.query);
+  const { page, limit, search, sortBy, sortOrder, outstandingOnly, balanceGt } = parsed;
 
-  const result = await customerService.getAllCustomers(page, limit, pool);
+  const result = await customerService.getAllCustomers(page, limit, pool, {
+    search,
+    sortBy,
+    sortOrder,
+    outstandingOnly,
+    balanceGt,
+  });
 
   res.json({
     success: true,

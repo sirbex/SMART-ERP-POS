@@ -16,7 +16,7 @@ import { downloadFile } from '../utils/download';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
 import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
-import { useColumnSort } from '../hooks/useColumnSort';
+import { useServerTableSort } from '../hooks/useServerTableSort';
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
 // Frontend displays as-is without parsing to Date object
@@ -237,13 +237,26 @@ export default function SuppliersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('table');
-  const { sortField, sortOrder, handleSort, resetSort, setSortField, setSortOrder } =
-    useColumnSort<SortField>('name', 'asc');
   const [filterPaymentTerms, setFilterPaymentTerms] = useState<string>('');
-  const [filterOutstandingOnly, setFilterOutstandingOnly] = useState(false);
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [page, setPage] = useState(1);
   const limit = 20;
+
+  const {
+    sortField,
+    sortOrder,
+    handleColumnSort,
+    columnFilterActive: filterOutstandingOnly,
+    clearColumnFilter,
+    serverListParams,
+    setSortOrder,
+  } = useServerTableSort<SortField>({
+    defaultField: 'name',
+    defaultOrder: 'asc',
+    filterField: 'outstandingBalance',
+    filterParam: 'outstandingOnly',
+    onQueryChange: () => setPage(1),
+  });
 
   // Permission gating
   const canCreateSupplier = useCanAccess([], ['suppliers.create']);
@@ -258,86 +271,25 @@ export default function SuppliersPage() {
     totalOutstanding: number;
   }>({ totalInvoices: 0, unpaidInvoices: 0, totalOutstanding: 0 });
 
-  // API queries
-  const { data: suppliersData, isLoading, isFetching, isPlaceholderData, error, refetch } = useSuppliers({ page, limit, search: debouncedSearch || undefined });
+  // API queries — server-side sort/filter across full dataset (enterprise pagination)
+  const { data: suppliersData, isLoading, isFetching, isPlaceholderData, error, refetch } = useSuppliers({
+    page,
+    limit,
+    search: debouncedSearch || undefined,
+    paymentTerms: filterPaymentTerms || undefined,
+    ...serverListParams,
+  });
   const createMutation = useCreateSupplier();
   const updateMutation = useUpdateSupplier();
   const deleteMutation = useDeleteSupplier();
 
-  // Extract suppliers
-  const allSuppliers = useMemo(() => {
+  const suppliers = useMemo(() => {
     if (!suppliersData) return [];
     if (suppliersData.data && Array.isArray(suppliersData.data)) return suppliersData.data;
     return Array.isArray(suppliersData) ? suppliersData : [];
   }, [suppliersData]);
 
-  // Filter and sort suppliers (client-side on current page — same pattern as Reorder Dashboard)
-  const suppliers = useMemo(() => {
-    let filtered = [...allSuppliers];
-
-    if (filterPaymentTerms) {
-      filtered = filtered.filter(
-        (supplier: Supplier) => supplier.paymentTerms === filterPaymentTerms
-      );
-    }
-
-    if (filterOutstandingOnly) {
-      filtered = filtered.filter(
-        (supplier: Supplier) => Number(supplier.outstandingBalance) > 0
-      );
-    }
-
-    filtered.sort((a: Supplier, b: Supplier) => {
-      let aVal: string | number | boolean;
-      let bVal: string | number | boolean;
-
-      switch (sortField) {
-        case 'name':
-          aVal = a.name?.toLowerCase() || '';
-          bVal = b.name?.toLowerCase() || '';
-          break;
-        case 'contactPerson':
-          aVal = a.contactPerson?.toLowerCase() || '';
-          bVal = b.contactPerson?.toLowerCase() || '';
-          break;
-        case 'paymentTerms':
-          aVal = a.paymentTerms || '';
-          bVal = b.paymentTerms || '';
-          break;
-        case 'status':
-          aVal = a.isActive ? 1 : 0;
-          bVal = b.isActive ? 1 : 0;
-          break;
-        case 'outstandingBalance':
-          aVal = Number(a.outstandingBalance) || 0;
-          bVal = Number(b.outstandingBalance) || 0;
-          break;
-        case 'createdAt':
-          aVal = new Date(a.createdAt || 0).getTime();
-          bVal = new Date(b.createdAt || 0).getTime();
-          break;
-        default:
-          return 0;
-      }
-
-      if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
-      if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
-      return 0;
-    });
-
-    return filtered;
-  }, [allSuppliers, filterPaymentTerms, filterOutstandingOnly, sortField, sortOrder]);
-
-  const handleColumnSort = (field: string) => {
-    const f = field as SortField;
-    if (f === 'outstandingBalance') {
-      setFilterOutstandingOnly(true);
-      handleSort(f, { defaultOrder: 'desc' });
-      return;
-    }
-    setFilterOutstandingOnly(false);
-    handleSort(f, { defaultOrder: 'asc' });
-  };
+  const listPagination = suppliersData?.pagination;
 
   // Debounce search — wait 350ms after last keystroke before firing API call
   useEffect(() => {
@@ -362,13 +314,10 @@ export default function SuppliersPage() {
 
   // Calculate statistics — use API-level aggregates to avoid pagination skewing totals
   const stats = useMemo(() => {
-    // pagination.total = true count across all pages (top-level in API response)
-    const total = suppliersData?.pagination?.total ?? allSuppliers.length;
-    // Active count: use pagination.total (API already filters WHERE IsActive=true)
-    const active = suppliersData?.pagination?.total ?? allSuppliers.filter((s: Supplier) => s.isActive).length;
-
+    const total = listPagination?.total ?? suppliers.length;
+    const active = listPagination?.total ?? suppliers.filter((s: Supplier) => s.isActive).length;
     return { total, active };
-  }, [allSuppliers, suppliersData]);
+  }, [suppliers, listPagination]);
 
   // Currency formatter for summary cards — uses shared formatCurrency
   const formatCurrencyTop = (amount: number): string => formatCurrency(amount, true, 0);
@@ -604,16 +553,7 @@ export default function SuppliersPage() {
               <select
                 id="sort-field"
                 value={sortField}
-                onChange={(e) => {
-                  const f = e.target.value as SortField;
-                  setSortField(f);
-                  if (f === 'outstandingBalance') {
-                    setFilterOutstandingOnly(true);
-                    setSortOrder('desc');
-                  } else {
-                    setFilterOutstandingOnly(false);
-                  }
-                }}
+                onChange={(e) => handleColumnSort(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="name">Sort by Name</option>
@@ -638,8 +578,8 @@ export default function SuppliersPage() {
                 onClick={() => {
                   setSearchQuery('');
                   setFilterPaymentTerms('');
-                  setFilterOutstandingOnly(false);
-                  resetSort();
+                  clearColumnFilter();
+                  setPage(1);
                 }}
                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
@@ -733,11 +673,11 @@ export default function SuppliersPage() {
               {filterOutstandingOnly && (
                 <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
                   <span>
-                    Showing suppliers with outstanding balance only ({suppliers.length} on this page)
+                    Showing suppliers with outstanding balance only ({listPagination?.total ?? suppliers.length} total)
                   </span>
                   <button
                     type="button"
-                    onClick={() => setFilterOutstandingOnly(false)}
+                    onClick={clearColumnFilter}
                     className="text-amber-800 underline hover:text-amber-950"
                   >
                     Clear balance filter

@@ -6,6 +6,8 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api, getErrorMessage } from '../utils/api';
 import type { RecordStockMovementInput } from '../types/inputs';
+import type { ServerListParams } from '../lib/serverListParams';
+import { toServerListQuery } from '../lib/serverListParams';
 
 /**
  * Query key factory for stock movements
@@ -33,11 +35,19 @@ export function useStockMovements(params?: {
   productId?: string;
   userId?: string;
   search?: string;
-}) {
+} & ServerListParams) {
   return useQuery({
-    queryKey: stockMovementKeys.list(params || {}),
+    queryKey: stockMovementKeys.list((params || {}) as Record<string, unknown>),
     queryFn: async () => {
-      const response = await api.stockMovements.list(params);
+      const response = await api.stockMovements.list({
+        page: params?.page,
+        limit: params?.limit,
+        movementType: params?.movementType,
+        startDate: params?.startDate,
+        endDate: params?.endDate,
+        search: params?.search,
+        ...toServerListQuery(params ?? {}),
+      });
       return response.data;
     },
     staleTime: 30000, // 30 seconds - audit data should be fresh

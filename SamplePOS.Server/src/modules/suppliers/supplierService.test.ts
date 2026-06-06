@@ -73,8 +73,8 @@ describe('supplierService', () => {
             const result = await supplierService.getAllSuppliers(mockPool, 1, 20);
 
             expect(result).toBeDefined();
-            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, undefined);
-            expect(mockCountAll).toHaveBeenCalledWith(mockPool, undefined);
+            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, { search: undefined });
+            expect(mockCountAll).toHaveBeenCalledWith(mockPool, { search: undefined });
         });
 
         it('should pass search term to repository when provided', async () => {
@@ -82,10 +82,10 @@ describe('supplierService', () => {
             mockCountAll.mockResolvedValue(1);
             mockGetTotalOutstanding.mockResolvedValue(0);
 
-            await supplierService.getAllSuppliers(mockPool, 1, 20, 'acme');
+            await supplierService.getAllSuppliers(mockPool, 1, 20, { search: 'acme' });
 
-            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, 'acme');
-            expect(mockCountAll).toHaveBeenCalledWith(mockPool, 'acme');
+            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, { search: 'acme' });
+            expect(mockCountAll).toHaveBeenCalledWith(mockPool, { search: 'acme' });
         });
 
         it('should treat blank search as no search', async () => {
@@ -93,10 +93,10 @@ describe('supplierService', () => {
             mockCountAll.mockResolvedValue(0);
             mockGetTotalOutstanding.mockResolvedValue(0);
 
-            await supplierService.getAllSuppliers(mockPool, 1, 20, '   ');
+            await supplierService.getAllSuppliers(mockPool, 1, 20, { search: '   ' });
 
-            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, undefined);
-            expect(mockCountAll).toHaveBeenCalledWith(mockPool, undefined);
+            expect(mockFindAll).toHaveBeenCalledWith(mockPool, 20, 0, { search: undefined });
+            expect(mockCountAll).toHaveBeenCalledWith(mockPool, { search: undefined });
         });
     });
 

@@ -5,6 +5,7 @@ import { goodsReceiptService } from './goodsReceiptService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseListQuery.js';
 
 // Validation schemas
 const GRItemSchema = z.object({
@@ -64,6 +65,7 @@ const ListGRsQuerySchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   billingStatus: z.enum(['TO_INVOICE', 'INVOICED']).optional(),
+  ...EnterpriseListQueryFields,
 });
 
 const UpdateGRItemSchema = z
@@ -254,6 +256,8 @@ export const goodsReceiptController = {
       startDate: query.startDate,
       endDate: query.endDate,
       billingStatus: query.billingStatus,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     });
 
     res.json({

@@ -5,6 +5,7 @@ import { purchaseOrderService } from './purchaseOrderService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseListQuery.js';
 import * as supplierProductPriceRepository from '../suppliers/supplierProductPriceRepository.js';
 
 /** Coerce empty/ISO date strings to YYYY-MM-DD or null for PO date fields. */
@@ -79,6 +80,7 @@ const ListPOsQuerySchema = z.object({
     .transform((val) => (val ? parseInt(val) : 50)),
   status: z.enum(['DRAFT', 'PENDING', 'COMPLETED', 'CANCELLED']).optional(),
   supplierId: z.string().uuid().optional(),
+  ...EnterpriseListQueryFields,
 });
 
 const UuidParamSchema = z.object({
@@ -200,6 +202,8 @@ export const purchaseOrderController = {
     const result = await purchaseOrderService.listPOs(pool, query.page, query.limit, {
       status: query.status,
       supplierId: query.supplierId,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
     });
 
     res.json({

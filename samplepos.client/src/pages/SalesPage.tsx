@@ -16,6 +16,7 @@ import { useBackendPermission } from '../hooks/useBackendPermission';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../components/ui/MobileSortSelect';
 import { useColumnSort } from '../hooks/useColumnSort';
+import { useServerTableSort } from '../hooks/useServerTableSort';
 import { applyTableSort } from '../lib/tableSortUtils';
 
 // ── Local type definitions ──────────────────────────────────────────────
@@ -128,6 +129,10 @@ interface SalesTableProps {
   pagination?: { page: number; totalPages: number; total: number; limit: number };
   currentPage: number;
   onPageChange: (page: number) => void;
+  sortField: SalesTableSortField;
+  sortOrder: 'asc' | 'desc';
+  onColumnSort: (field: string) => void;
+  onToggleSortOrder: () => void;
 }
 
 interface CustomerSalesViewProps {
@@ -358,10 +363,32 @@ export default function SalesPage() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedSale, setSelectedSale] = useState<SaleRow | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [paymentMethodFilter, statusFilter, debouncedSearch, startDate, endDate]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const limit = 50;
+
+  const {
+    sortField: salesSortField,
+    sortOrder: salesSortOrder,
+    handleColumnSort: handleSalesColumnSort,
+    setSortOrder: setSalesSortOrder,
+    serverListParams: salesServerParams,
+  } = useServerTableSort<SalesTableSortField>({
+    defaultField: 'date',
+    defaultOrder: 'desc',
+    onQueryChange: () => setCurrentPage(1),
+  });
 
   // Handle date filter change
   const handleDateFilterChange = (filter: DateFilterType) => {
@@ -378,6 +405,10 @@ export default function SalesPage() {
     startDate: startDate ? startDate : undefined,
     endDate: endDate ? endDate : undefined,
     cashierId: isCashier ? user?.id : undefined,
+    status: statusFilter !== 'ALL' ? statusFilter : undefined,
+    paymentMethod: paymentMethodFilter !== 'ALL' ? paymentMethodFilter : undefined,
+    search: debouncedSearch || undefined,
+    ...salesServerParams,
   });
 
   // Fetch summary data
@@ -525,7 +556,7 @@ export default function SalesPage() {
     };
   }, [summary]);
 
-  // Filter sales
+  // Client-side filter for grouped overview tabs (all-sales uses server-side filters)
   const filteredSales = useMemo(() => {
     return normalizedSales.filter((sale) => {
       const matchesPayment =
@@ -1024,13 +1055,19 @@ export default function SalesPage() {
                 {/* All Sales Tab */}
                 {activeTab === 'all-sales' && (
                   <>
-                    {filteredSales.length > 0 ? (
+                    {(pagination?.total ?? normalizedSales.length) > 0 ? (
                       <SalesTable
-                        sales={filteredSales}
+                        sales={normalizedSales}
                         onSelectSale={setSelectedSale}
                         pagination={pagination}
                         currentPage={currentPage}
                         onPageChange={setCurrentPage}
+                        sortField={salesSortField}
+                        sortOrder={salesSortOrder}
+                        onColumnSort={handleSalesColumnSort}
+                        onToggleSortOrder={() =>
+                          setSalesSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
+                        }
                       />
                     ) : (
                       <div className="text-center py-12">
@@ -1135,31 +1172,12 @@ function SalesTable({
   pagination,
   currentPage,
   onPageChange,
+  sortField,
+  sortOrder,
+  onColumnSort,
+  onToggleSortOrder,
 }: SalesTableProps) {
   const hasDiscounts = sales.some((s) => s.discountAmount > 0);
-  const { sortField, sortOrder, handleSort, setSortOrder } = useColumnSort<SalesTableSortField>('date', 'desc');
-
-  const saleSortAccessors = useMemo(
-    () => ({
-      saleNumber: (s: SaleRow) => s.saleNumber || s.id.slice(0, 8),
-      date: (s: SaleRow) => saleSortDate(s),
-      customer: (s: SaleRow) => s.customerName || 'Walk-in',
-      amount: (s: SaleRow) => s.totalAmount,
-      profit: (s: SaleRow) => s.profit || 0,
-      payment: (s: SaleRow) => s.paymentMethod,
-      status: (s: SaleRow) => s.status,
-    }),
-    [],
-  );
-
-  const handleColumnSort = (field: string) => {
-    handleSort(field as SalesTableSortField);
-  };
-
-  const sortedSales = useMemo(
-    () => applyTableSort(sales, sortField, sortOrder, saleSortAccessors),
-    [sales, sortField, sortOrder, saleSortAccessors],
-  );
 
   const mobileSortOptions = [
     { value: 'saleNumber', label: 'Sort by Sale #' },
@@ -1177,13 +1195,13 @@ function SalesTable({
         sortField={sortField}
         sortOrder={sortOrder}
         options={mobileSortOptions}
-        onFieldChange={handleColumnSort}
-        onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+        onFieldChange={onColumnSort}
+        onToggleOrder={onToggleSortOrder}
         className="px-2"
       />
       {/* Mobile Card View */}
       <div className="block sm:hidden space-y-3 px-2">
-        {sortedSales.map((sale: SaleRow) => (
+        {sales.map((sale: SaleRow) => (
           <div
             key={sale.id}
             className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm active:bg-gray-50"
@@ -1219,25 +1237,25 @@ function SalesTable({
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <SortableTableHeader label="Sale #" field="saleNumber" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-              <SortableTableHeader label="Date & Time" field="date" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-              <SortableTableHeader label="Customer" field="customer" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-              <SortableTableHeader label="Amount" field="amount" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
+              <SortableTableHeader label="Sale #" field="saleNumber" activeField={sortField} direction={sortOrder} onSort={onColumnSort} />
+              <SortableTableHeader label="Date & Time" field="date" activeField={sortField} direction={sortOrder} onSort={onColumnSort} />
+              <SortableTableHeader label="Customer" field="customer" activeField={sortField} direction={sortOrder} onSort={onColumnSort} />
+              <SortableTableHeader label="Amount" field="amount" activeField={sortField} direction={sortOrder} onSort={onColumnSort} align="right" />
               {hasDiscounts && (
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                   Discount
                 </th>
               )}
-              <SortableTableHeader label="Profit (Margin)" field="profit" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} align="right" />
-              <SortableTableHeader label="Payment" field="payment" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
-              <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} />
+              <SortableTableHeader label="Profit (Margin)" field="profit" activeField={sortField} direction={sortOrder} onSort={onColumnSort} align="right" />
+              <SortableTableHeader label="Payment" field="payment" activeField={sortField} direction={sortOrder} onSort={onColumnSort} />
+              <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={onColumnSort} />
               <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
                 Actions
               </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
-            {sortedSales.map((sale: SaleRow) => (
+            {sales.map((sale: SaleRow) => (
               <tr
                 key={sale.id}
                 className="hover:bg-gray-50 cursor-pointer"

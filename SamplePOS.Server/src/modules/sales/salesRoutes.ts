@@ -1,5 +1,6 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
+import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseListQuery.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { salesService, CreateSaleInput, RefundSaleInput } from './salesService.js';
 import { authenticate } from '../../middleware/auth.js';
@@ -58,8 +59,10 @@ const ListSalesQuerySchema = z.object({
   customerId: z.string().uuid().optional(),
   cashierId: z.string().uuid().optional(),
   paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT']).optional(),
-  startDate: z.string().optional(), // Keep as string (YYYY-MM-DD format)
-  endDate: z.string().optional(), // Keep as string (YYYY-MM-DD format)
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  search: z.string().optional(),
+  ...EnterpriseListQueryFields,
 });
 
 const UuidParamSchema = z.object({
@@ -359,6 +362,11 @@ export const salesController = {
       paymentMethod: query.paymentMethod,
       startDate: query.startDate,
       endDate: query.endDate,
+      search: query.search,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
+      outstandingOnly: query.outstandingOnly,
+      balanceGt: query.balanceGt,
     });
 
     res.json({

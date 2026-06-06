@@ -36,8 +36,7 @@ import { GrReceiptStatusBadge } from '../../components/inventory/GrReceiptStatus
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
-import { useColumnSort } from '../../hooks/useColumnSort';
-import { applyTableSort } from '../../lib/tableSortUtils';
+import { useServerTableSort } from '../../hooks/useServerTableSort';
 import { ListSkeleton } from '../../components/ui/ListSkeleton';
 import { MobileListCard, ResponsiveActionBar, mobileActionBtnClass } from '../../components/ui/ResponsiveActionBar';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
@@ -124,8 +123,6 @@ type GRSortField =
   | 'receivedDate'
   | 'receiptStatus'
   | 'invoiceStatus';
-
-const GR_DESC_DEFAULT = new Set<GRSortField>(['receivedDate']);
 
 interface GRItemRow {
   id: string;
@@ -284,8 +281,17 @@ export default function GoodsReceiptsPage() {
   const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>('custom');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const { sortField, sortOrder, handleSort, setSortOrder } =
-    useColumnSort<GRSortField>('receivedDate', 'desc');
+  const {
+    sortField,
+    sortOrder,
+    handleColumnSort: baseColumnSort,
+    setSortOrder,
+    serverListParams,
+  } = useServerTableSort<GRSortField>({
+    defaultField: 'receivedDate',
+    defaultOrder: 'desc',
+    onQueryChange: () => setPage(1),
+  });
   const [selectedGR, setSelectedGR] = useState<GRRow | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -426,6 +432,7 @@ export default function GoodsReceiptsPage() {
     search: debouncedSearch || undefined,
     startDate: startDate || undefined,
     endDate: endDate || undefined,
+    ...serverListParams,
   });
 
   const finalizeMutation = useFinalizeGoodsReceipt();
@@ -970,29 +977,13 @@ export default function GoodsReceiptsPage() {
   const goodsReceipts = (data?.data?.data || []) as GRRow[];
   const pagination = data?.data?.pagination;
 
-  const grSortAccessors = useMemo(
-    () => ({
-      grNumber: (gr: GRRow) => gr.grNumber || gr.receiptNumber || gr.receipt_number || '',
-      poNumber: (gr: GRRow) => gr.poNumber || gr.po_number || '',
-      supplier: (gr: GRRow) => gr.supplierName || gr.supplier_name || '',
-      receivedDate: (gr: GRRow) => gr.receivedDate || gr.received_date || '',
-      receiptStatus: (gr: GRRow) => gr.status ?? '',
-      invoiceStatus: (gr: GRRow) => gr.billingStatus || gr.billing_status || '',
-    }),
-    [],
-  );
-
   const handleColumnSort = (field: string) => {
     const f = field as GRSortField;
     if (f === 'invoiceStatus') {
       setBillingFilter('TO_INVOICE');
       setPage(1);
-      handleSort(f, { defaultOrder: 'asc' });
-      return;
     }
-    handleSort(f, {
-      defaultOrder: GR_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
-    });
+    baseColumnSort(field);
   };
 
   const mobileSortOptions = [
@@ -1004,10 +995,8 @@ export default function GoodsReceiptsPage() {
     { value: 'invoiceStatus', label: 'Sort by Invoice Status' },
   ];
 
-  const sortedGoodsReceipts = useMemo(
-    () => applyTableSort([...goodsReceipts], sortField, sortOrder, grSortAccessors),
-    [goodsReceipts, sortField, sortOrder, grSortAccessors],
-  );
+  // Server returns sorted/filtered slice — no client-side re-sort on current page
+  const displayGoodsReceipts = goodsReceipts;
 
   const billingCounts = useMemo(() => ({
     toInvoice: goodsReceipts.filter((g) => (g.billingStatus || g.billing_status) === 'TO_INVOICE').length,
@@ -1269,10 +1258,10 @@ export default function GoodsReceiptsPage() {
 
           {/* Mobile card list */}
           <div className="md:hidden divide-y divide-gray-100">
-            {sortedGoodsReceipts.length === 0 ? (
+            {displayGoodsReceipts.length === 0 ? (
               <p className="px-4 py-12 text-center text-gray-500 text-sm">No goods receipts found</p>
             ) : (
-              sortedGoodsReceipts.map((gr: GRRow) => (
+              displayGoodsReceipts.map((gr: GRRow) => (
                 <MobileListCard key={gr.id}>
                   <div className="flex items-start justify-between gap-3 min-w-0">
                     <div className="min-w-0 flex-1">
@@ -1304,14 +1293,14 @@ export default function GoodsReceiptsPage() {
           <div className="hidden md:block">
           {billingFilter === 'TO_INVOICE' && sortField === 'invoiceStatus' && (
             <div className="px-4 lg:px-6 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
-              <span>Showing receipts to invoice ({sortedGoodsReceipts.length} on this page)</span>
+              <span>Showing receipts to invoice ({pagination?.total ?? displayGoodsReceipts.length} total)</span>
               <button
                 type="button"
                 className="text-amber-800 underline"
                 onClick={() => {
                   setBillingFilter('');
                   setPage(1);
-                  handleSort('receivedDate', { defaultOrder: 'desc' });
+                  baseColumnSort('receivedDate');
                 }}
               >
                 Clear filter
@@ -1334,14 +1323,14 @@ export default function GoodsReceiptsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {sortedGoodsReceipts.length === 0 ? (
+                {displayGoodsReceipts.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
                       No goods receipts found
                     </td>
                   </tr>
                 ) : (
-                  sortedGoodsReceipts.map((gr: GRRow) => (
+                  displayGoodsReceipts.map((gr: GRRow) => (
                     <tr key={gr.id} className="hover:bg-gray-50/80 transition-colors">
                       <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
                         {gr.grNumber || gr.receiptNumber || gr.receipt_number}

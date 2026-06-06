@@ -6,6 +6,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/api';
 import { GOODS_RECEIPTS_KEYS } from './useGoodsReceipts';
 import type { CreatePurchaseOrderInput, CreatePOInvoiceInput, RecordPOPaymentInput } from '../types/inputs';
+import type { ServerListParams } from '../lib/serverListParams';
+import { toServerListQuery } from '../lib/serverListParams';
 
 /**
  * Query key factory for purchase orders
@@ -25,11 +27,17 @@ export function usePurchaseOrders(params?: {
   limit?: number;
   status?: string;
   supplierId?: string;
-}) {
+} & ServerListParams) {
   return useQuery({
-    queryKey: purchaseOrderKeys.list(params || {}),
+    queryKey: purchaseOrderKeys.list((params || {}) as Record<string, unknown>),
     queryFn: async () => {
-      const response = await api.purchaseOrders.list(params);
+      const response = await api.purchaseOrders.list({
+        page: params?.page,
+        limit: params?.limit,
+        status: params?.status,
+        supplierId: params?.supplierId,
+        ...toServerListQuery(params ?? {}),
+      });
       return response.data;
     },
     staleTime: 30000, // 30 seconds

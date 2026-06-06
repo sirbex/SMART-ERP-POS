@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
@@ -15,8 +15,7 @@ import { useCanAccess } from '../components/auth/ProtectedRoute';
 import { getBusinessDate, formatTimestamp } from '../utils/businessDate';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../components/ui/MobileSortSelect';
-import { useColumnSort } from '../hooks/useColumnSort';
-import { applyTableSort } from '../lib/tableSortUtils';
+import { useServerTableSort } from '../hooks/useServerTableSort';
 
 interface StatementResponse {
   openingBalance: number | string;
@@ -64,8 +63,34 @@ type CustomerSortField = 'name' | 'contact' | 'balance' | 'deposits' | 'creditLi
 export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+
+  const {
+    sortField,
+    sortOrder,
+    handleColumnSort,
+    columnFilterActive: filterBalanceOnly,
+    clearColumnFilter,
+    serverListParams,
+    setSortOrder,
+  } = useServerTableSort<CustomerSortField>({
+    defaultField: 'name',
+    defaultOrder: 'asc',
+    filterField: 'balance',
+    filterParam: 'balanceGt',
+    onQueryChange: () => setPage(1),
+  });
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchTerm), 350);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch]);
 
   // Permission gating
   const canCreateCustomer = useCanAccess([], ['customers.create']);
@@ -75,36 +100,11 @@ export default function CustomersPage() {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
   const [detailModalTab, setDetailModalTab] = useState<CustomerModalTab>('overview');
-  const [filterBalanceOnly, setFilterBalanceOnly] = useState(false);
-  const { sortField, sortOrder, handleSort, setSortOrder } = useColumnSort<CustomerSortField>('name', 'asc');
 
   const toNumber = (v: unknown): number => {
     if (typeof v === 'number') return v;
     const parsed = parseFloat(String(v ?? '0'));
     return isNaN(parsed) ? 0 : parsed;
-  };
-
-  const customerSortAccessors = useMemo(
-    () => ({
-      name: (c: Customer) => c.name ?? '',
-      contact: (c: Customer) => `${c.email ?? ''} ${c.phone ?? ''}`.trim(),
-      balance: (c: Customer) => toNumber(c.balance),
-      deposits: (c: Customer) => toNumber(c.depositBalance),
-      creditLimit: (c: Customer) => Number(c.creditLimit) || 0,
-      status: (c: Customer) => (c.isActive ? 1 : 0),
-    }),
-    [],
-  );
-
-  const handleColumnSort = (field: string) => {
-    const f = field as CustomerSortField;
-    if (f === 'balance') {
-      setFilterBalanceOnly(true);
-      handleSort(f, { defaultOrder: 'desc' });
-      return;
-    }
-    setFilterBalanceOnly(false);
-    handleSort(f, { defaultOrder: 'asc' });
   };
 
   const mobileSortOptions = [
@@ -134,27 +134,13 @@ export default function CustomersPage() {
 
   // downloadFile imported from shared utils/download — no duplicate needed
 
-  const { data: customersResponse, isLoading, error } = useCustomers(page, 50);
+  const { data: customersResponse, isLoading, error } = useCustomers(page, 50, {
+    search: debouncedSearch || undefined,
+    ...serverListParams,
+  });
   const customers = (customersResponse?.data || []) as Customer[];
   const pagination = customersResponse?.pagination;
-
-  // Filter customers by search term
-  const filteredCustomers = customers.filter((customer: Customer) => {
-    const term = searchTerm.toLowerCase();
-    return (
-      String(customer.name ?? '').toLowerCase().includes(term) ||
-      (customer.email && String(customer.email).toLowerCase().includes(term)) ||
-      (customer.phone && String(customer.phone).includes(term))
-    );
-  });
-
-  const sortedCustomers = useMemo(() => {
-    let rows = [...filteredCustomers];
-    if (filterBalanceOnly) {
-      rows = rows.filter((c) => toNumber(c.balance) > 0);
-    }
-    return applyTableSort(rows, sortField, sortOrder, customerSortAccessors);
-  }, [filteredCustomers, filterBalanceOnly, sortField, sortOrder, customerSortAccessors]);
+  const displayCustomers = customers;
 
   // Calculate summary statistics
   const totalCustomers = pagination?.total || 0;
@@ -295,13 +281,13 @@ export default function CustomersPage() {
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Customers</h2>
               {isLoading ? (
                 <div className="text-center py-8 text-gray-500">Loading...</div>
-              ) : sortedCustomers.length === 0 ? (
+              ) : displayCustomers.length === 0 ? (
                 <div className="text-center py-8 text-gray-500">No customers yet</div>
               ) : (
                 <>
                   {/* Mobile Card View */}
                   <div className="block sm:hidden space-y-3">
-                    {sortedCustomers.slice(0, 10).map((customer: Customer) => (
+                    {displayCustomers.slice(0, 10).map((customer: Customer) => (
                       <div
                         key={customer.id}
                         className="border border-gray-200 rounded-lg p-3 cursor-pointer hover:bg-gray-50"
@@ -357,7 +343,7 @@ export default function CustomersPage() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {sortedCustomers.slice(0, 10).map((customer: Customer) => (
+                        {displayCustomers.slice(0, 10).map((customer: Customer) => (
                           <tr
                             key={customer.id}
                             className="hover:bg-gray-50 cursor-pointer"
@@ -443,8 +429,8 @@ export default function CustomersPage() {
 
             {filterBalanceOnly && (
               <div className="mb-4 px-4 py-2 bg-amber-50 border border-amber-100 rounded-lg text-xs text-amber-900 flex items-center justify-between">
-                <span>Showing customers with outstanding balance only ({sortedCustomers.length})</span>
-                <button type="button" className="text-amber-800 underline" onClick={() => { setFilterBalanceOnly(false); handleSort('name', { defaultOrder: 'asc' }); }}>Clear filter</button>
+                <span>Showing customers with outstanding balance only ({pagination?.total ?? displayCustomers.length} total)</span>
+                <button type="button" className="text-amber-800 underline" onClick={clearColumnFilter}>Clear filter</button>
               </div>
             )}
 
@@ -454,7 +440,7 @@ export default function CustomersPage() {
                 <div className="text-center py-12 text-gray-500">Loading customers...</div>
               ) : error ? (
                 <div className="text-center py-12 text-red-600">Error loading customers</div>
-              ) : sortedCustomers.length === 0 ? (
+              ) : displayCustomers.length === 0 ? (
                 <div className="text-center py-12">
                   <p className="text-gray-500 mb-4">No customers found</p>
                   <button
@@ -468,7 +454,7 @@ export default function CustomersPage() {
                 <>
                   {/* Mobile Card View */}
                   <div className="block sm:hidden space-y-3 p-3">
-                    {sortedCustomers.map((customer: Customer) => (
+                    {displayCustomers.map((customer: Customer) => (
                       <div key={customer.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-3">
@@ -528,7 +514,7 @@ export default function CustomersPage() {
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {sortedCustomers.map((customer: Customer) => (
+                        {displayCustomers.map((customer: Customer) => (
                           <tr key={customer.id} className="hover:bg-gray-50">
                             <td className="px-6 py-4">
                               <div className="flex items-center">

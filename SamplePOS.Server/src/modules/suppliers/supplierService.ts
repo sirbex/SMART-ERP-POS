@@ -3,6 +3,7 @@
 
 import { Pool } from 'pg';
 import * as supplierRepository from './supplierRepository.js';
+import type { SupplierListQuery } from './supplierRepository.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { ForbiddenError } from '../../middleware/errorHandler.js';
@@ -36,12 +37,20 @@ function assertNotSystemSupplier(supplier: { id?: string; SupplierCode?: string 
  * - Includes active and inactive suppliers
  * - Returns total count for pagination UI
  */
-export async function getAllSuppliers(pool: Pool, page: number = 1, limit: number = 50, search?: string) {
+export async function getAllSuppliers(
+  pool: Pool,
+  page: number = 1,
+  limit: number = 50,
+  listQuery: SupplierListQuery = {},
+) {
   const offset = (page - 1) * limit;
-  const normalizedSearch = search && search.trim().length > 0 ? search.trim() : undefined;
+  const normalizedSearch =
+    listQuery.search && listQuery.search.trim().length > 0 ? listQuery.search.trim() : undefined;
+  const query: SupplierListQuery = { ...listQuery, search: normalizedSearch };
+
   const [data, total, totalOutstanding] = await Promise.all([
-    supplierRepository.findAll(pool, limit, offset, normalizedSearch),
-    supplierRepository.countAll(pool, normalizedSearch),
+    supplierRepository.findAll(pool, limit, offset, query),
+    supplierRepository.countAll(pool, query),
     supplierRepository.getTotalOutstanding(pool),
   ]);
 

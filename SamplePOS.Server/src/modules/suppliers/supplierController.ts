@@ -6,6 +6,7 @@ import { z } from 'zod';
 import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { CreateSupplierSchema, UpdateSupplierSchema } from '../../../../shared/zod/supplier.js';
+import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseListQuery.js';
 import * as supplierService from './supplierService.js';
 import * as cnDnReportService from '../reports/cnDnReportService.js';
 import logger from '../../utils/logger.js';
@@ -18,6 +19,7 @@ const PaginationQuerySchema = z.object({
   page: z.string().optional().transform(v => v ? parseInt(v) : 1),
   limit: z.string().optional().transform(v => v ? parseInt(v) : 50),
   search: z.string().optional(),
+  ...EnterpriseListQueryFields,
 });
 const SearchQuerySchema = z.object({
   q: z.string().optional().default(''),
@@ -38,9 +40,17 @@ const LedgerQuerySchema = z.object({
  */
 export const getSuppliers = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const { page, limit, search } = PaginationQuerySchema.parse(req.query);
+  const parsed = PaginationQuerySchema.parse(req.query);
+  const { page, limit, search, sortBy, sortOrder, outstandingOnly, balanceGt, paymentTerms } = parsed;
 
-  const result = await supplierService.getAllSuppliers(pool, page, limit, search);
+  const result = await supplierService.getAllSuppliers(pool, page, limit, {
+    search,
+    sortBy,
+    sortOrder,
+    outstandingOnly,
+    balanceGt,
+    paymentTerms,
+  });
 
   res.json({
     success: true,

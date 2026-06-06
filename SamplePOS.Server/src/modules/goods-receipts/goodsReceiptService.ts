@@ -971,6 +971,8 @@ export const goodsReceiptService = {
       startDate?: string;
       endDate?: string;
       billingStatus?: 'TO_INVOICE' | 'INVOICED';
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
     }
   ): Promise<ListGRsResult> {
     return goodsReceiptRepository.listGRs(pool, page, limit, filters);

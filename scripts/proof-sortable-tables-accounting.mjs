@@ -56,6 +56,7 @@ console.log('');
 console.log('Verified:');
 console.log('  • tableSortUtils ascending/descending sort');
 console.log('  • SortableTableHeader on Suppliers/Customers/Sales/Inventory');
+console.log('  • Server-paginated lists use useServerTableSort (full-dataset sort/filter)');
 console.log('  • useExpenses, JournalEntries, ExpenseCategories, AssetAccounting → api axios');
 console.log('  • Production client build');
 console.log('═'.repeat(60));

@@ -8,6 +8,7 @@ import { MovementType } from './types.js';
 import * as stockMovementService from './stockMovementService.js';
 import { PaginationHelper } from '../../utils/pagination.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseListQuery.js';
 
 // Validation schemas
 const UuidParamSchema = z.object({ productId: z.string().uuid() });
@@ -64,6 +65,7 @@ const ListMovementsQuerySchema = z.object({
     .string()
     .optional(),
   search: z.string().optional(),
+  ...EnterpriseListQueryFields,
 });
 
 /**
@@ -132,6 +134,9 @@ export const getAllMovements = asyncHandler(async (req, res) => {
     startDate: query.startDate,
     endDate: query.endDate,
     search: query.search,
+    sortBy: query.sortBy,
+    sortOrder: query.sortOrder,
+    balanceGt: query.balanceGt,
   });
 
   const pg = { page: query.page, limit: query.limit, offset: (query.page - 1) * query.limit };

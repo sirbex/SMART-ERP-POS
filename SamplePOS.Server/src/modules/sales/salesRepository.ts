@@ -5,6 +5,17 @@ import { BusinessError } from '../../middleware/errorHandler.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 import { safeParseInt } from '../../utils/safeParse.js';
+import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+
+const SALES_SORT_COLUMNS: Record<string, string> = {
+  saleNumber: 's.sale_number',
+  date: 's.sale_date',
+  customer: 'c.name',
+  amount: 's.total_amount',
+  profit: 's.profit',
+  payment: 's.payment_method',
+  status: 's.status',
+};
 
 export interface SaleRecord {
   id: string;
@@ -510,6 +521,11 @@ export const salesRepository = {
       paymentMethod?: string;
       startDate?: string;
       endDate?: string;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      outstandingOnly?: boolean;
+      balanceGt?: number;
     }
   ): Promise<{ sales: SaleRecord[]; total: number }> {
     const offset = (page - 1) * limit;
@@ -547,9 +563,39 @@ export const salesRepository = {
       values.push(filters.endDate);
     }
 
+    if (filters?.search?.trim()) {
+      whereClauses.push(
+        `(s.sale_number ILIKE $${paramIndex} OR c.name ILIKE $${paramIndex})`,
+      );
+      values.push(`%${filters.search.trim()}%`);
+      paramIndex++;
+    }
+
+    if (filters?.outstandingOnly || (filters?.balanceGt != null && filters.balanceGt > 0)) {
+      whereClauses.push(`(s.total_amount - COALESCE(s.amount_paid, 0)) > 0.009`);
+    }
+
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    const countResult = await pool.query(`SELECT COUNT(*) FROM sales s ${whereClause}`, values);
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM sales s
+       LEFT JOIN customers c ON s.customer_id = c.id
+       ${whereClause}`,
+      values,
+    );
+
+    let orderBy: string;
+    if (filters?.sortBy === 'date') {
+      orderBy = `s.sale_date ${sqlSortOrder(filters.sortOrder ?? 'desc')}, s.created_at ${sqlSortOrder(filters.sortOrder ?? 'desc')}`;
+    } else if (filters?.sortBy === 'outstanding' || filters?.sortBy === 'balance') {
+      orderBy = `(s.total_amount - COALESCE(s.amount_paid, 0)) ${sqlSortOrder(filters.sortOrder ?? 'desc')}`;
+    } else {
+      const col = pickSortColumn(filters?.sortBy, SALES_SORT_COLUMNS, 'date');
+      orderBy = `${col} ${sqlSortOrder(filters?.sortOrder ?? 'desc')}`;
+      if (filters?.sortBy !== 'date') {
+        orderBy += `, s.sale_date DESC`;
+      }
+    }
 
     const result = await pool.query(
       `SELECT 
@@ -577,7 +623,7 @@ export const salesRepository = {
        LEFT JOIN customers c ON s.customer_id = c.id
        LEFT JOIN users u ON s.cashier_id = u.id
        ${whereClause} 
-       ORDER BY s.sale_date DESC, s.created_at DESC 
+       ORDER BY ${orderBy}
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...values, limit, offset]
     );

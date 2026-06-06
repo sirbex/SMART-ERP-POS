@@ -4,6 +4,16 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
 import { tableHasColumn } from '../../db/schemaColumnCache.js';
+import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+
+const PO_SORT_COLUMNS: Record<string, string> = {
+  poNumber: 'po.order_number',
+  supplier: 's."CompanyName"',
+  orderDate: 'po.order_date',
+  expectedDelivery: 'po.expected_delivery_date',
+  status: 'po.status',
+  totalAmount: 'po.total_amount',
+};
 
 export interface PurchaseOrder {
   id: string;
@@ -267,7 +277,7 @@ export const purchaseOrderRepository = {
     pool: Pool | PoolClient,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; supplierId?: string }
+    filters?: { status?: string; supplierId?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' }
   ): Promise<{ pos: PurchaseOrder[]; total: number }> {
     const offset = (page - 1) * limit;
     const whereClauses: string[] = [];
@@ -304,12 +314,15 @@ export const purchaseOrderRepository = {
       values
     );
 
+    const orderCol = pickSortColumn(filters?.sortBy, PO_SORT_COLUMNS, 'orderDate');
+    const orderDir = sqlSortOrder(filters?.sortOrder ?? (filters?.sortBy ? 'asc' : 'desc'));
+
     const result = await pool.query(
       `SELECT po.*, s."CompanyName" as supplier_name 
        FROM purchase_orders po
        JOIN suppliers s ON po.supplier_id = s."Id"
        ${whereClause} 
-       ORDER BY po.created_at DESC 
+       ORDER BY ${orderCol} ${orderDir}, po.created_at DESC 
        LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`,
       [...values, limit, offset]
     );

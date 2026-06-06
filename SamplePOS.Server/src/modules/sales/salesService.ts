@@ -2176,6 +2176,11 @@ export const salesService = {
       paymentMethod?: string;
       startDate?: string;
       endDate?: string;
+      search?: string;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      outstandingOnly?: boolean;
+      balanceGt?: number;
     }
   ): Promise<{ sales: SaleRecord[]; total: number }> {
     return salesRepository.listSales(pool, page, limit, filters);

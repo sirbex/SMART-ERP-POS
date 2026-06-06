@@ -7,8 +7,7 @@ import { DatePicker } from '../../components/ui/date-picker';
 import Decimal from 'decimal.js';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
-import { useColumnSort } from '../../hooks/useColumnSort';
-import { applyTableSort } from '../../lib/tableSortUtils';
+import { useServerTableSort } from '../../hooks/useServerTableSort';
 
 type MovementSortField =
   | 'dateTime'
@@ -21,14 +20,6 @@ type MovementSortField =
   | 'balanceAfter'
   | 'reference'
   | 'notes';
-
-const MOVEMENT_DESC_DEFAULT = new Set<MovementSortField>([
-  'dateTime',
-  'quantity',
-  'unitCost',
-  'totalValue',
-  'balanceAfter',
-]);
 
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
@@ -179,8 +170,17 @@ export default function StockMovementsPage() {
   const limit = 50;
   const [filterQtyOnly, setFilterQtyOnly] = useState(false);
   const [filterBalanceOnly, setFilterBalanceOnly] = useState(false);
-  const { sortField, sortOrder, handleSort, setSortOrder } =
-    useColumnSort<MovementSortField>('dateTime', 'desc');
+  const {
+    sortField,
+    sortOrder,
+    handleColumnSort: baseColumnSort,
+    setSortOrder,
+    serverListParams,
+  } = useServerTableSort<MovementSortField>({
+    defaultField: 'dateTime',
+    defaultOrder: 'desc',
+    onQueryChange: () => setPage(1),
+  });
 
   // Debounce search term (300ms) so we don't fire a request on every keystroke
   useEffect(() => {
@@ -188,10 +188,9 @@ export default function StockMovementsPage() {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  // Reset to page 1 when search changes
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, selectedType, startDate, endDate]);
 
   // API queries
   const { data: movementsData, isLoading, isFetching, error, refetch } = useStockMovements({
@@ -201,6 +200,7 @@ export default function StockMovementsPage() {
     startDate: startDate || undefined,
     endDate: endDate || undefined,
     search: debouncedSearch || undefined,
+    ...serverListParams,
   });
 
   const { data: productsData } = useProducts();
@@ -241,49 +241,19 @@ export default function StockMovementsPage() {
   // Server already filtered by search — use movements directly
   const filteredMovements = movements;
 
-  const movementSortAccessors = useMemo(
-    () => ({
-      dateTime: (m: StockMovementRow) => m.createdAt ?? '',
-      product: (m: StockMovementRow) =>
-        m.productName || productMap.get(m.productId)?.name || '',
-      category: (m: StockMovementRow) =>
-        m.productCategory || productMap.get(m.productId)?.category || '',
-      type: (m: StockMovementRow) => m.movementType ?? '',
-      quantity: (m: StockMovementRow) => Math.abs(Number(m.quantity) || 0),
-      unitCost: (m: StockMovementRow) => Number(m.unitCost) || 0,
-      totalValue: (m: StockMovementRow) => {
-        const qty = Math.abs(Number(m.quantity) || 0);
-        const cost = Number(m.unitCost) || 0;
-        return qty * cost;
-      },
-      balanceAfter: (m: StockMovementRow) =>
-        m.balanceAfter != null ? Number(m.balanceAfter) : null,
-      reference: (m: StockMovementRow) =>
-        m.saleNumber || m.grNumber || m.referenceType || m.referenceId || '',
-      notes: (m: StockMovementRow) => m.notes ?? '',
-    }),
-    [productMap],
-  );
-
   const handleColumnSort = (field: string) => {
     const f = field as MovementSortField;
     if (f === 'quantity') {
       setFilterQtyOnly(true);
       setFilterBalanceOnly(false);
-      handleSort(f, { defaultOrder: 'desc' });
-      return;
-    }
-    if (f === 'balanceAfter') {
+    } else if (f === 'balanceAfter') {
       setFilterBalanceOnly(true);
       setFilterQtyOnly(false);
-      handleSort(f, { defaultOrder: 'desc' });
-      return;
+    } else {
+      setFilterQtyOnly(false);
+      setFilterBalanceOnly(false);
     }
-    setFilterQtyOnly(false);
-    setFilterBalanceOnly(false);
-    handleSort(f, {
-      defaultOrder: MOVEMENT_DESC_DEFAULT.has(f) ? 'desc' : 'asc',
-    });
+    baseColumnSort(field);
   };
 
   const mobileSortOptions = [
@@ -299,7 +269,7 @@ export default function StockMovementsPage() {
     { value: 'notes', label: 'Sort by Notes' },
   ];
 
-  const sortedMovements = useMemo(() => {
+  const displayMovements = useMemo(() => {
     let rows = [...filteredMovements];
     if (filterQtyOnly) {
       rows = rows.filter((m) => Math.abs(Number(m.quantity) || 0) > 0);
@@ -307,15 +277,8 @@ export default function StockMovementsPage() {
     if (filterBalanceOnly) {
       rows = rows.filter((m) => m.balanceAfter != null && Number(m.balanceAfter) > 0);
     }
-    return applyTableSort(rows, sortField, sortOrder, movementSortAccessors);
-  }, [
-    filteredMovements,
-    filterQtyOnly,
-    filterBalanceOnly,
-    sortField,
-    sortOrder,
-    movementSortAccessors,
-  ]);
+    return rows;
+  }, [filteredMovements, filterQtyOnly, filterBalanceOnly]);
 
   // Calculate summary statistics (for filtered movements)
   const stats = useMemo(() => {
@@ -626,7 +589,7 @@ export default function StockMovementsPage() {
           />
           <div className="flex justify-between items-center">
           <div className="text-sm text-gray-600">
-            Showing {sortedMovements.length} of {totalCount} movements
+            Showing {displayMovements.length} of {totalCount} movements
           </div>
           <button
             onClick={handleResetFilters}
@@ -693,8 +656,8 @@ export default function StockMovementsPage() {
             <div className="px-4 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-900 flex items-center justify-between">
               <span>
                 {filterQtyOnly
-                  ? `Showing movements with quantity only (${sortedMovements.length})`
-                  : `Showing movements with balance after > 0 (${sortedMovements.length})`}
+                  ? `Showing movements with quantity only (${displayMovements.length})`
+                  : `Showing movements with balance after > 0 (${displayMovements.length})`}
               </span>
               <button
                 type="button"
@@ -702,7 +665,7 @@ export default function StockMovementsPage() {
                 onClick={() => {
                   setFilterQtyOnly(false);
                   setFilterBalanceOnly(false);
-                  handleSort('dateTime', { defaultOrder: 'desc' });
+                  baseColumnSort('dateTime');
                 }}
               >
                 Clear filter
@@ -725,7 +688,7 @@ export default function StockMovementsPage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {sortedMovements.length === 0 ? (
+              {displayMovements.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || selectedType !== 'ALL' || startDate || endDate
@@ -734,7 +697,7 @@ export default function StockMovementsPage() {
                   </td>
                 </tr>
               ) : (
-                sortedMovements.map((movement: StockMovementRow) => {
+                displayMovements.map((movement: StockMovementRow) => {
                   const product = productMap.get(movement.productId);
                   const movementConfig = MOVEMENT_TYPES[movement.movementType as MovementType] || {
                     label: movement.movementType,

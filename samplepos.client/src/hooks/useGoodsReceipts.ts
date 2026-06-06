@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../utils/api';
 import type { CreateGoodsReceiptInput, UpdateGoodsReceiptItemInput } from '../types/inputs';
+import type { ServerListParams } from '../lib/serverListParams';
+import { toServerListQuery } from '../lib/serverListParams';
 
 // Query keys
 export const GOODS_RECEIPTS_KEYS = {
@@ -21,10 +23,21 @@ export function useGoodsReceipts(params?: {
   startDate?: string;
   endDate?: string;
   billingStatus?: 'TO_INVOICE' | 'INVOICED';
-}) {
+} & ServerListParams) {
   return useQuery({
-    queryKey: GOODS_RECEIPTS_KEYS.list(params || {}),
-    queryFn: () => api.goodsReceipts.list(params),
+    queryKey: GOODS_RECEIPTS_KEYS.list((params || {}) as Record<string, unknown>),
+    queryFn: () =>
+      api.goodsReceipts.list({
+        page: params?.page,
+        limit: params?.limit,
+        status: params?.status,
+        purchaseOrderId: params?.purchaseOrderId,
+        search: params?.search,
+        startDate: params?.startDate,
+        endDate: params?.endDate,
+        billingStatus: params?.billingStatus,
+        ...toServerListQuery(params ?? {}),
+      }),
   });
 }
 

@@ -7,15 +7,24 @@ import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../share
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { NotFoundError } from '../../middleware/errorHandler.js';
 import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness } from '../../utils/dateRange.js';
+import {
+  pickSortColumn,
+  sqlSortOrder,
+  type EnterpriseListQuery,
+} from '../../utils/enterpriseListQuery.js';
 
-export async function findAllCustomers(
-  limit: number = 50,
-  offset: number = 0,
-  dbPool?: pg.Pool
-): Promise<Customer[]> {
-  const pool = dbPool || globalPool;
-  const result = await pool.query(
-    `SELECT 
+export type CustomerListQuery = EnterpriseListQuery;
+
+const CUSTOMER_FROM_JOIN = `
+    FROM customers c
+    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
+    LEFT JOIN LATERAL (
+      SELECT SUM(amount_available) as available_balance
+      FROM pos_customer_deposits
+      WHERE customer_id = c.id AND status = 'ACTIVE'
+    ) dep ON true`;
+
+const CUSTOMER_SELECT = `
       c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
       c.customer_group_id as "customerGroupId",
       c.price_group_id as "priceGroupId",
@@ -25,18 +34,64 @@ export async function findAllCustomers(
       c.created_at as "createdAt",
       c.updated_at as "updatedAt",
       c.version,
-      COALESCE(dep.available_balance, 0) as "depositBalance"
-    FROM customers c
-    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
-    LEFT JOIN LATERAL (
-      SELECT SUM(amount_available) as available_balance
-      FROM pos_customer_deposits
-      WHERE customer_id = c.id AND status = 'ACTIVE'
-    ) dep ON true
-    WHERE c.is_active = true
-    ORDER BY c.name ASC
-    LIMIT $1 OFFSET $2`,
-    [limit, offset]
+      COALESCE(dep.available_balance, 0) as "depositBalance"`;
+
+const CUSTOMER_SORT_COLUMNS: Record<string, string> = {
+  name: 'c.name',
+  contact: "LOWER(COALESCE(c.email, '') || ' ' || COALESCE(c.phone, ''))",
+  balance: 'c.balance',
+  deposits: 'COALESCE(dep.available_balance, 0)',
+  creditLimit: 'c.credit_limit',
+  status: 'c.is_active',
+  createdAt: 'c.created_at',
+};
+
+function buildCustomerListClauses(query: CustomerListQuery = {}) {
+  const params: unknown[] = [];
+  const conditions: string[] = ['c.is_active = true'];
+  let paramIndex = 1;
+
+  if (query.search?.trim()) {
+    params.push(`%${query.search.trim()}%`);
+    conditions.push(
+      `(c.name ILIKE $${paramIndex} OR c.email ILIKE $${paramIndex} OR c.phone ILIKE $${paramIndex} OR c.customer_number ILIKE $${paramIndex})`,
+    );
+    paramIndex++;
+  }
+
+  if (query.outstandingOnly || (query.balanceGt != null && query.balanceGt > 0)) {
+    conditions.push('c.balance > 0.009');
+  }
+
+  let orderBy: string;
+  if (query.sortBy === 'balance') {
+    orderBy = `c.balance ${sqlSortOrder(query.sortOrder ?? 'desc')}, c.name ASC`;
+  } else {
+    const col = pickSortColumn(query.sortBy, CUSTOMER_SORT_COLUMNS, 'name');
+    orderBy = `${col} ${sqlSortOrder(query.sortOrder ?? 'asc')}, c.name ASC`;
+  }
+
+  return { whereClause: conditions.join(' AND '), params, orderBy, nextParamIndex: paramIndex };
+}
+
+export async function findAllCustomers(
+  limit: number = 50,
+  offset: number = 0,
+  dbPool?: pg.Pool,
+  query: CustomerListQuery = {},
+): Promise<Customer[]> {
+  const pool = dbPool || globalPool;
+  const { whereClause, params, orderBy, nextParamIndex } = buildCustomerListClauses(query);
+  const limitParam = `$${nextParamIndex}`;
+  const offsetParam = `$${nextParamIndex + 1}`;
+
+  const result = await pool.query(
+    `SELECT ${CUSTOMER_SELECT}
+    ${CUSTOMER_FROM_JOIN}
+    WHERE ${whereClause}
+    ORDER BY ${orderBy}
+    LIMIT ${limitParam} OFFSET ${offsetParam}`,
+    [...params, limit, offset],
   );
 
   return result.rows;
@@ -300,9 +355,16 @@ export async function searchCustomers(searchTerm: string, limit: number = 20, db
   return result.rows;
 }
 
-export async function countCustomers(dbPool?: pg.Pool | pg.PoolClient): Promise<number> {
+export async function countCustomers(
+  dbPool?: pg.Pool | pg.PoolClient,
+  query: CustomerListQuery = {},
+): Promise<number> {
   const pool = dbPool || globalPool;
-  const result = await pool.query('SELECT COUNT(*) as count FROM customers WHERE is_active = true');
+  const { whereClause, params } = buildCustomerListClauses(query);
+  const result = await pool.query(
+    `SELECT COUNT(*) as count ${CUSTOMER_FROM_JOIN} WHERE ${whereClause}`,
+    params,
+  );
 
   return parseInt(result.rows[0].count, 10);
 }

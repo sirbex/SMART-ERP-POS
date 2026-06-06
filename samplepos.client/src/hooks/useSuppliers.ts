@@ -5,6 +5,8 @@
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api } from '../utils/api';
 import type { CreateSupplierInput, UpdateSupplierInput } from '../types/inputs';
+import type { ServerListParams } from '../lib/serverListParams';
+import { toServerListQuery } from '../lib/serverListParams';
 
 /**
  * Query key factory for suppliers
@@ -22,15 +24,11 @@ export const supplierKeys = {
 /**
  * Fetch all suppliers with optional filters
  */
-export function useSuppliers(params?: {
-  page?: number;
-  limit?: number;
-  search?: string;
-}) {
+export function useSuppliers(params?: ServerListParams) {
   return useQuery({
-    queryKey: supplierKeys.list(params || {}),
+    queryKey: supplierKeys.list((params || {}) as Record<string, unknown>),
     queryFn: async () => {
-      const response = await api.suppliers.list(params);
+      const response = await api.suppliers.list(toServerListQuery(params ?? {}));
       return response.data;
     },
     staleTime: 60000, // 1 minute

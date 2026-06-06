@@ -19,6 +19,8 @@ import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
 import { HandledApiError } from './errorHandler';
 import { toast } from 'sonner';
+import type { ServerListParams } from '../lib/serverListParams';
+import { toServerListQuery } from '../lib/serverListParams';
 import type {
   CreateProductInput,
   UpdateProductInput,
@@ -298,8 +300,8 @@ export const api = {
 
   // Customers
   customers: {
-    list: (params?: { page?: number; limit?: number }) =>
-      apiClient.get<ApiResponse>('customers', { params }),
+    list: (params?: ServerListParams & { page?: number; limit?: number }) =>
+      apiClient.get<ApiResponse>('customers', { params: params ? { page: params.page, limit: params.limit, ...toServerListQuery(params) } : undefined }),
     getById: (id: string) => apiClient.get<ApiResponse>(`customers/${id}`),
     create: (data: CreateCustomerInput) => apiClient.post<ApiResponse>('customers', data),
     update: (id: string, data: UpdateCustomerInput) =>
@@ -344,8 +346,8 @@ export const api = {
 
   // Suppliers
   suppliers: {
-    list: (params?: { page?: number; limit?: number; search?: string }) =>
-      apiClient.get<ApiResponse>('suppliers', { params }),
+    list: (params?: ServerListParams & { page?: number; limit?: number }) =>
+      apiClient.get<ApiResponse>('suppliers', { params: params ? toServerListQuery(params) : undefined }),
     getById: (id: string) => apiClient.get<ApiResponse>(`suppliers/${id}`),
     create: (data: CreateSupplierInput) => apiClient.post<ApiResponse>('suppliers', data),
     update: (id: string, data: UpdateSupplierInput) =>
@@ -366,7 +368,24 @@ export const api = {
       endDate?: string;
       cashierId?: string;
       paymentMethod?: string;
-    }) => apiClient.get<ApiResponse>('sales', { params }),
+      status?: string;
+      search?: string;
+    } & ServerListParams) =>
+      apiClient.get<ApiResponse>('sales', {
+        params: params
+          ? {
+              page: params.page,
+              limit: params.limit,
+              startDate: params.startDate,
+              endDate: params.endDate,
+              cashierId: params.cashierId,
+              paymentMethod: params.paymentMethod,
+              status: params.status,
+              search: params.search,
+              ...toServerListQuery(params),
+            }
+          : undefined,
+      }),
     getById: (id: string) => apiClient.get<ApiResponse>(`sales/${id}`),
     create: (data: CreateSaleInput) => apiClient.post<ApiResponse>('sales', data),
     summary: (params?: { startDate?: string; endDate?: string; groupBy?: string }) =>
@@ -480,8 +499,18 @@ export const api = {
 
   // Purchase Orders
   purchaseOrders: {
-    list: (params?: { page?: number; limit?: number; status?: string; supplierId?: string }) =>
-      apiClient.get<ApiResponse>('purchase-orders', { params }),
+    list: (params?: { page?: number; limit?: number; status?: string; supplierId?: string } & ServerListParams) =>
+      apiClient.get<ApiResponse>('purchase-orders', {
+        params: params
+          ? {
+              page: params.page,
+              limit: params.limit,
+              status: params.status,
+              supplierId: params.supplierId,
+              ...toServerListQuery(params),
+            }
+          : undefined,
+      }),
     getById: (id: string) => apiClient.get<ApiResponse>(`purchase-orders/${id}`),
     getItems: (id: string) => apiClient.get<ApiResponse>(`purchase-orders/${id}/items`),
     create: (data: CreatePurchaseOrderInput) =>
@@ -505,8 +534,31 @@ export const api = {
 
   // Goods Receipts
   goodsReceipts: {
-    list: (params?: { page?: number; limit?: number; status?: string; purchaseOrderId?: string; search?: string; startDate?: string; endDate?: string }) =>
-      apiClient.get<ApiResponse>('goods-receipts', { params }),
+    list: (params?: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      purchaseOrderId?: string;
+      search?: string;
+      startDate?: string;
+      endDate?: string;
+      billingStatus?: 'TO_INVOICE' | 'INVOICED';
+    } & ServerListParams) =>
+      apiClient.get<ApiResponse>('goods-receipts', {
+        params: params
+          ? {
+              page: params.page,
+              limit: params.limit,
+              status: params.status,
+              purchaseOrderId: params.purchaseOrderId,
+              search: params.search,
+              startDate: params.startDate,
+              endDate: params.endDate,
+              billingStatus: params.billingStatus,
+              ...toServerListQuery(params),
+            }
+          : undefined,
+      }),
     getById: (id: string) => apiClient.get<ApiResponse>(`goods-receipts/${id}`),
     create: (data: CreateGoodsReceiptInput) => apiClient.post<ApiResponse>('goods-receipts', data),
     finalize: (id: string) => apiClient.post<ApiResponse>(`goods-receipts/${id}/finalize`),
@@ -547,7 +599,20 @@ export const api = {
       startDate?: string;
       endDate?: string;
       search?: string;
-    }) => apiClient.get<ApiResponse>('stock-movements', { params }),
+    } & ServerListParams) =>
+      apiClient.get<ApiResponse>('stock-movements', {
+        params: params
+          ? {
+              page: params.page,
+              limit: params.limit,
+              movementType: params.movementType,
+              startDate: params.startDate,
+              endDate: params.endDate,
+              search: params.search,
+              ...toServerListQuery(params),
+            }
+          : undefined,
+      }),
     byProduct: (productId: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`stock-movements/product/${productId}`, { params }),
     byBatch: (batchId: string, params?: { page?: number; limit?: number }) =>

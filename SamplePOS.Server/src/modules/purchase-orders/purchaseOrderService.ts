@@ -384,7 +384,7 @@ export const purchaseOrderService = {
     pool: Pool,
     page: number = 1,
     limit: number = 50,
-    filters?: { status?: string; supplierId?: string }
+    filters?: { status?: string; supplierId?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' }
   ): Promise<{ pos: PurchaseOrder[]; total: number }> {
     return purchaseOrderRepository.listPOs(pool, page, limit, filters);
   },
