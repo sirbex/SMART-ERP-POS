@@ -8,7 +8,11 @@ import Decimal from 'decimal.js';
 import { api } from '../utils/api';
 import { DatePicker } from '../components/ui/date-picker';
 import { printReceipt } from '../lib/print';
-import type { ReceiptData } from '../lib/print';
+import {
+  buildReceiptDataFromSale,
+  fetchInvoiceSettingsForReceipt,
+  type InvoiceSettingsForReceipt,
+} from '../lib/receiptFromSale';
 import { DocumentFlowButton } from '../components/shared/DocumentFlowButton';
 import { VoidSaleModal } from '../components/sales/VoidSaleModal';
 import { RefundSaleModal } from '../components/sales/RefundSaleModal';
@@ -2179,6 +2183,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
   const [error, setError] = useState<string | null>(null);
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
+  const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettingsForReceipt | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
   // Handle escape key and focus trap
@@ -2240,6 +2245,11 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
 
     fetchSaleDetails();
   }, [sale.id]);
+
+  // Load invoice/receipt branding so reprints match original POS receipts
+  useEffect(() => {
+    fetchInvoiceSettingsForReceipt().then(setInvoiceSettings);
+  }, []);
 
   const items = saleDetails?.items || [];
 
@@ -2778,51 +2788,9 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                       console.error('Failed to log receipt reprint:', err);
                     }
 
-                    // Compute effective discount from sale-level or item-level
-                    const saleDisc = Number(s.discountAmount || 0);
-                    const itemDiscTotal =
-                      saleDisc > 0
-                        ? 0
-                        : (s.items || []).reduce((sum: number, item: SaleItemRow) => {
-                          return (
-                            sum + parseFloat(String(item.discountAmount || item.discount_amount || 0))
-                          );
-                        }, 0);
-                    const effectiveDisc = saleDisc > 0 ? saleDisc : itemDiscTotal;
-
-                    const receiptData: ReceiptData = {
+                    const receiptData = buildReceiptDataFromSale(s, invoiceSettings, {
                       isReprint: true,
-                      saleNumber: s.saleNumber,
-                      saleDate: s.saleDate || s.createdAt,
-                      totalAmount: s.totalAmount,
-                      subtotal:
-                        effectiveDisc > 0
-                          ? new Decimal(s.totalAmount || 0).plus(effectiveDisc).toNumber()
-                          : s.subtotal,
-                      discountAmount: effectiveDisc > 0 ? effectiveDisc : undefined,
-                      taxAmount: s.taxAmount,
-                      cashierName: s.cashierName || s.soldByName,
-                      customerName: s.customerName || 'Walk-in Customer',
-                      paymentMethod: s.paymentMethod,
-                      amountPaid: s.amountPaid || s.paymentReceived,
-                      changeAmount: s.changeAmount,
-                      items: s.items?.map((item) => ({
-                        name: item.productName || item.product_name || 'Unknown',
-                        quantity: Number(item.quantity || item.qty || 0),
-                        unitPrice: Number(item.unitPrice || item.unit_price || item.price || 0),
-                        subtotal: Number(
-                          item.totalPrice || item.total_price || item.subtotal || item.totalAmount || 0
-                        ),
-                        discountAmount:
-                          parseFloat(String(item.discountAmount || item.discount_amount || 0)) ||
-                          undefined,
-                      })),
-                      payments: s.paymentLines?.map((pl) => ({
-                        method: pl.paymentMethod || pl.payment_method || 'CASH',
-                        amount: Number(pl.amount),
-                        reference: pl.reference,
-                      })),
-                    };
+                    });
                     printReceipt(receiptData).catch((err) => console.error('Print failed:', err));
                   }}
                   className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
