@@ -6,6 +6,7 @@ import POSButton from '../../components/pos/POSButton';
 import POSModal from '../../components/pos/POSModal';
 import { formatCurrency } from '../../utils/currency';
 import { api } from '../../utils/api';
+import { inventoryKeys } from '../../hooks/useInventory';
 import { searchCachedProducts } from '../../services/offlineCatalogService';
 import type { CachedProduct } from '../../services/offlineCatalogService';
 
@@ -96,6 +97,65 @@ interface StockLevelItem {
   }>;
 }
 
+function mapStockLevelToSearchResult(item: StockLevelItem): ProductSearchResult {
+  const sellingPrice = parseFloat(String(item.selling_price || 0));
+  const averageCost = parseFloat(String(item.average_cost || 0));
+  const marginPct =
+    sellingPrice > 0
+      ? new Decimal(sellingPrice).minus(averageCost).dividedBy(sellingPrice).times(100).toNumber()
+      : 0;
+
+  let uoms = item.uoms || [];
+  if (!uoms || uoms.length === 0) {
+    uoms = [
+      {
+        uomId: `default-${item.product_id}`,
+        name: 'PIECE',
+        symbol: 'PIECE',
+        conversionFactor: 1,
+        isDefault: true,
+        price: sellingPrice,
+        cost: averageCost,
+      },
+    ];
+  }
+
+  const defaultUom = uoms.find((u) => u.isDefault) || uoms[0];
+
+  return {
+    id: item.product_id,
+    name: item.product_name,
+    sku: item.sku || '',
+    barcode: item.barcode || '',
+    category: item.category || undefined,
+    uoms,
+    selectedUom: defaultUom,
+    stockOnHand: parseFloat(String(item.total_stock || 0)),
+    expiryDate: item.nearest_expiry,
+    costPrice: averageCost,
+    sellingPrice,
+    marginPct,
+    isTaxable: item.is_taxable ?? false,
+    taxRate: parseFloat(String(item.tax_rate || 0)),
+  };
+}
+
+function filterStockLevelsForSearch(stockLevels: StockLevelItem[], term: string): ProductSearchResult[] {
+  const q = term.toLowerCase();
+  return stockLevels
+    .filter((item) => {
+      if (!item.total_stock || Number(item.total_stock) <= 0) return false;
+      return (
+        item.product_name?.toLowerCase().includes(q) ||
+        item.sku?.toLowerCase().includes(q) ||
+        item.barcode?.toLowerCase().includes(q) ||
+        item.generic_name?.toLowerCase().includes(q) ||
+        item.category?.toLowerCase().includes(q)
+      );
+    })
+    .map(mapStockLevelToSearchResult);
+}
+
 const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProps>(
   ({ onSelect, isOnline = true }, ref) => {
     const [search, setSearch] = useState('');
@@ -148,88 +208,23 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
       };
     };
 
-    // Query inventory stock levels to get only products with available stock
-    // Disabled when offline – falls back to local cache
-    const { data: onlineData, isLoading: isOnlineLoading } = useQuery({
-      queryKey: ['pos-search', search],
+    // Fetch stock levels once — shared cache with Dashboard/inventory hooks.
+    // Filter client-side per keystroke to avoid hammering /inventory/stock-levels (429).
+    const { data: stockLevelsRaw, isLoading: isOnlineLoading } = useQuery({
+      queryKey: inventoryKeys.stockLevels(),
       queryFn: async () => {
-        if (!search) return [];
-
-        // Get products with stock from inventory API
         const stockRes = await api.inventory.stockLevels();
-        if (!stockRes.data.success) return [];
-
-        const stockLevels = (stockRes.data.data || []) as StockLevelItem[];
-
-        // Filter products with available stock that match search term
-        const term = search.toLowerCase();
-        return stockLevels
-          .filter((item: StockLevelItem) => {
-            // Only show products with stock > 0
-            if (!item.total_stock || Number(item.total_stock) <= 0) return false;
-
-            // Match search term against product name, SKU, barcode, or generic name
-            return (
-              item.product_name?.toLowerCase().includes(term) ||
-              item.sku?.toLowerCase().includes(term) ||
-              item.barcode?.toLowerCase().includes(term) ||
-              item.generic_name?.toLowerCase().includes(term)
-            );
-          })
-          .map((item: StockLevelItem) => {
-            const sellingPrice = parseFloat(String(item.selling_price || 0));
-            const averageCost = parseFloat(String(item.average_cost || 0));
-            const marginPct =
-              sellingPrice > 0
-                ? new Decimal(sellingPrice)
-                  .minus(averageCost)
-                  .dividedBy(sellingPrice)
-                  .times(100)
-                  .toNumber()
-                : 0;
-
-            // Parse UoMs from backend (already in correct format)
-            let uoms = item.uoms || [];
-
-            // If no UoMs defined, create a default fallback
-            if (!uoms || uoms.length === 0) {
-              uoms = [
-                {
-                  uomId: `default-${item.product_id}`,
-                  name: 'PIECE',
-                  symbol: 'PIECE',
-                  conversionFactor: 1,
-                  isDefault: true,
-                  price: sellingPrice,
-                  cost: averageCost,
-                },
-              ];
-            }
-
-            // Get default UOM for display
-            const defaultUom = uoms.find((u: { isDefault?: boolean }) => u.isDefault) || uoms[0];
-
-            return {
-              id: item.product_id,
-              name: item.product_name,
-              sku: item.sku || '',
-              barcode: item.barcode || '',
-              category: item.category || undefined,
-              unitOfMeasure: defaultUom?.symbol || defaultUom?.name || 'PIECE',
-              uoms: uoms,
-              stockOnHand: parseFloat(String(item.total_stock || 0)),
-              expiryDate: item.nearest_expiry,
-              costPrice: averageCost,
-              sellingPrice: sellingPrice,
-              marginPct: marginPct,
-              isTaxable: item.is_taxable ?? false,
-              taxRate: parseFloat(String(item.tax_rate || 0)),
-            };
-          });
+        if (!stockRes.data.success) return [] as StockLevelItem[];
+        return (stockRes.data.data || []) as StockLevelItem[];
       },
-      staleTime: 10_000, // Refresh every 10 seconds for accurate stock
-      enabled: isOnline && !!search, // Disable when offline
+      staleTime: 30_000,
+      enabled: isOnline,
     });
+
+    const onlineData = useMemo(
+      () => (search && stockLevelsRaw ? filterStockLevelsForSearch(stockLevelsRaw, search) : []),
+      [search, stockLevelsRaw],
+    );
 
     // ── Offline search: use cached catalog (memoized to prevent new array ref each render) ──
     const offlineResults = useMemo<ProductSearchResult[]>(
