@@ -19,6 +19,7 @@
     "test:customer-invoice-adjustment:live": "node scripts/test-customer-invoice-adjustment-live.mjs",
     "proof:deploy": "node scripts/proof-deploy-readiness.mjs",
     "proof:session-active": "node scripts/proof-session-active-no-logout.mjs",
+    "proof:pos-search-display": "node scripts/proof-pos-product-search-display.mjs",
     "proof:sortable-tables": "node scripts/proof-sortable-tables-accounting.mjs",
     "proof:corrections": "node scripts/proof-pre-commit-corrections.mjs",
     "proof:at-cost": "cd SamplePOS.Server && npm run proof:at-cost",

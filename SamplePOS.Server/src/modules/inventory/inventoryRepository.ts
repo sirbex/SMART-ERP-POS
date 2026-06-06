@@ -133,6 +133,7 @@ export const inventoryRepository = {
          p.sku,
          p.barcode,
          p.generic_name,
+         p.category,
          pv.selling_price,
          p.is_taxable,
          p.tax_rate,
@@ -177,7 +178,7 @@ export const inventoryRepository = {
          GROUP BY poi.product_id
        ) po_agg ON po_agg.product_id = p.id
        WHERE p.is_active = true
-       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, pv.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, pv.average_cost, pv.cost_price, pi.reorder_level, pi.quantity_on_hand, po_agg.qty_on_order
+       GROUP BY p.id, p.name, p.sku, p.barcode, p.generic_name, p.category, pv.selling_price, p.is_taxable, p.tax_rate, p.min_days_before_expiry_sale, p.product_type, pv.average_cost, pv.cost_price, pi.reorder_level, pi.quantity_on_hand, po_agg.qty_on_order
        ORDER BY needs_reorder DESC, p.name ASC`
     );
     return result.rows;

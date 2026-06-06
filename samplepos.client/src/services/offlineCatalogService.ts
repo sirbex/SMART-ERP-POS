@@ -33,6 +33,7 @@ export interface CachedProduct {
     name: string;
     sku: string;
     barcode: string;
+    category?: string;
     sellingPrice: number;
     costPrice: number;
     isTaxable: boolean;
@@ -146,6 +147,7 @@ export async function syncProductCatalog(): Promise<CachedProduct[]> {
             tax_rate?: string;
             product_type?: string;
             generic_name?: string;
+            category?: string;
             uoms?: CachedProductUom[];
         }
 
@@ -175,6 +177,7 @@ export async function syncProductCatalog(): Promise<CachedProduct[]> {
                     name: item.product_name,
                     sku: item.sku || '',
                     barcode: item.barcode || '',
+                    category: item.category || undefined,
                     sellingPrice,
                     costPrice: averageCost,
                     isTaxable: item.is_taxable ?? false,
