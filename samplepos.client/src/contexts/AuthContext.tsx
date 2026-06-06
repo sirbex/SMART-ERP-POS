@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo, useRef } from 'react';
 import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessTokenDeduped, resetAuthState } from '../hooks/useTokenRefresh';
 import { apiClient } from '../utils/api';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
@@ -6,8 +6,8 @@ import { useSessionKeepalive } from '../hooks/useSessionKeepalive';
 import { useGlobalSessionActivity } from '../hooks/useGlobalSessionActivity';
 import { setupAuthBroadcastListener, onAuthBroadcast, broadcastAuthEvent } from '../lib/authBroadcast';
 import { setupOfflineQueueAutoFlush } from '../lib/offlineRequestQueue';
-import { isUserActiveOrGuarded } from '../lib/sessionActivity';
-import { shouldIgnoreCrossTabSessionExpired, shouldPerformIdleLogout } from '../lib/sessionLogoutPolicy';
+import { isUserActiveOrGuarded, isTransactionGuardActive } from '../lib/sessionActivity';
+import { shouldIgnoreCrossTabSessionExpired } from '../lib/sessionLogoutPolicy';
 import type { AxiosError } from 'axios';
 import type { UserRole } from '../types';
 
@@ -72,7 +72,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [permissionKeys, setPermissionKeys] = useState<string[]>([]);
-  const [idlePausedByGuard, setIdlePausedByGuard] = useState(false);
+  const pendingIdleLogoutRef = useRef(false);
+  const IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
   // Global activity — all modules/tabs (enterprise SSOT; independent of idle/guard)
   useGlobalSessionActivity(isAuthenticated);
@@ -80,14 +81,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // Proactive token refresh during long data-entry sessions (any module)
   useSessionKeepalive(isAuthenticated);
 
-  useEffect(() => {
-    const onGuard = (e: Event) => {
-      const detail = (e as CustomEvent<{ active?: boolean }>).detail;
-      setIdlePausedByGuard(Boolean(detail?.active));
-    };
-    window.addEventListener('app:transaction-guard', onGuard);
-    return () => window.removeEventListener('app:transaction-guard', onGuard);
-  }, []);
   const permissions = useMemo(() => {
     if (permissionKeys.length === 0) return EMPTY_PERMISSIONS;
     return new Set(permissionKeys);
@@ -315,22 +308,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, []);
 
-  // ── Auto-logout on idle (30 minutes of inactivity) ────────
+  // ── Auto-logout on idle (60 minutes without deliberate interaction) ────────
   const idleLogout = useCallback(() => {
-    if (!shouldPerformIdleLogout(isUserActiveOrGuarded())) return;
+    if (isTransactionGuardActive()) {
+      pendingIdleLogoutRef.current = true;
+      return;
+    }
+    pendingIdleLogoutRef.current = false;
     logout();
     sessionStorage.setItem('session_expired', '1');
   }, [logout]);
 
+  useEffect(() => {
+    const onGuard = (e: Event) => {
+      const detail = (e as CustomEvent<{ active?: boolean }>).detail;
+      if (detail?.active) return;
+      if (!pendingIdleLogoutRef.current) return;
+      pendingIdleLogoutRef.current = false;
+      logout();
+      sessionStorage.setItem('session_expired', '1');
+    };
+    window.addEventListener('app:transaction-guard', onGuard);
+    return () => window.removeEventListener('app:transaction-guard', onGuard);
+  }, [logout]);
+
   useIdleTimeout({
-    timeoutMs: 60 * 60 * 1000, // 60 minutes — data entry (100+ PO lines) must not expire mid-form
+    timeoutMs: IDLE_TIMEOUT_MS,
     onIdle: idleLogout,
     onWarning: () => {
-      // Visible notification — fire event so SessionWarningBanner can react
       window.dispatchEvent(new CustomEvent('app:session-warning'));
       console.warn('[Auth] Session expiring in 60 seconds due to inactivity');
     },
-    enabled: isAuthenticated && !idlePausedByGuard,
+    enabled: isAuthenticated,
   });
 
   return (

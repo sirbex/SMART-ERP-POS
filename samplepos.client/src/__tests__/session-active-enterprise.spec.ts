@@ -109,13 +109,15 @@ const ERP_MODULES = [
 ] as const;
 
 describe('Enterprise — global activity events (all modules)', () => {
-  it('registers all standard input events used across ERP UI', () => {
+  it('registers deliberate interaction events only (not passive mousemove/scroll)', () => {
     expect(GLOBAL_SESSION_ACTIVITY_EVENTS).toContain('keydown');
     expect(GLOBAL_SESSION_ACTIVITY_EVENTS).toContain('input');
     expect(GLOBAL_SESSION_ACTIVITY_EVENTS).toContain('mousedown');
     expect(GLOBAL_SESSION_ACTIVITY_EVENTS).toContain('paste');
     expect(GLOBAL_SESSION_ACTIVITY_EVENTS).toContain('compositionstart');
-    expect(GLOBAL_SESSION_ACTIVITY_EVENTS.length).toBeGreaterThanOrEqual(12);
+    expect(GLOBAL_SESSION_ACTIVITY_EVENTS).not.toContain('mousemove');
+    expect(GLOBAL_SESSION_ACTIVITY_EVENTS).not.toContain('scroll');
+    expect(GLOBAL_SESSION_ACTIVITY_EVENTS.length).toBeGreaterThanOrEqual(8);
   });
 });
 

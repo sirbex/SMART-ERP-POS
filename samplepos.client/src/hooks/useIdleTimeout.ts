@@ -12,10 +12,10 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { touchSessionActivity } from '../lib/sessionActivity';
-import { GLOBAL_SESSION_ACTIVITY_EVENTS } from '../lib/sessionActivityEvents';
+import { IDLE_SESSION_ACTIVITY_EVENTS } from '../lib/sessionActivityEvents';
 
-/** Events that count as "user activity" — same set as global tracker (all modules). */
-const ACTIVITY_EVENTS = GLOBAL_SESSION_ACTIVITY_EVENTS;
+/** Events that reset the idle logout timer — deliberate interaction only. */
+const ACTIVITY_EVENTS = IDLE_SESSION_ACTIVITY_EVENTS;
 
 /** Default idle threshold in milliseconds (15 minutes) */
 const DEFAULT_IDLE_MS = 15 * 60 * 1000;

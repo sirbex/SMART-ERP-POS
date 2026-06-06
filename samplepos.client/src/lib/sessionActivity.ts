@@ -5,8 +5,6 @@
  * localStorage so typing in any tab keeps every tab's session alive.
  */
 
-import { GLOBAL_SESSION_ACTIVITY_EVENTS } from './sessionActivityEvents';
-
 /** Align with AuthContext idle timeout — user is "working" within this window. */
 export const ACTIVE_SESSION_WINDOW_MS = 60 * 60 * 1000;
 
@@ -14,8 +12,6 @@ const ACTIVITY_STORAGE_KEY = 'smarterp_last_activity_at';
 
 let lastActivityAt = Date.now();
 let transactionGuardDepth = 0;
-
-/** Throttle localStorage writes (mousemove fires often). */
 let lastPersistAt = 0;
 const PERSIST_THROTTLE_MS = 2000;
 
@@ -107,4 +103,4 @@ export function __resetSessionActivityForTests(inactiveSinceMs = ACTIVE_SESSION_
   }
 }
 
-export { GLOBAL_SESSION_ACTIVITY_EVENTS };
+export { IDLE_SESSION_ACTIVITY_EVENTS, GLOBAL_SESSION_ACTIVITY_EVENTS } from './sessionActivityEvents';
