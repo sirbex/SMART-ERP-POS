@@ -149,7 +149,7 @@ export const inventoryRepository = {
          (
            SELECT json_agg(
              json_build_object(
-               'uomId', pu.id,
+               'uomId', pu.uom_id,
                'name', u.name,
                'symbol', u.symbol,
                'conversionFactor', pu.conversion_factor,

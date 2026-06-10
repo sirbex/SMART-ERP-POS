@@ -15,6 +15,7 @@ import {
   resolveFactorToBase,
   type ItemUomConversion,
 } from './uomGraphService.js';
+import logger from '../../utils/logger.js';
 
 type Queryable = pg.Pool | pg.PoolClient;
 
@@ -547,6 +548,76 @@ async function clearRedundantOverrides(
   }
 
   return { costOverride, priceOverride };
+}
+
+/**
+ * Bootstrap product_uoms + base_uom_id on product create (Quick Add / API create).
+ * Mirrors ProductsPage post-create addProductUom flow inside the same transaction.
+ */
+export async function bootstrapProductUomsFromCreateInput(
+  productId: string,
+  data: {
+    unitOfMeasure?: string;
+    conversionFactor?: number;
+    purchaseUomId?: string | null;
+  },
+  db: Queryable,
+): Promise<void> {
+  const existing = await repo.listProductUoms(productId, db as pg.Pool);
+  if (existing.length > 0) {
+    return;
+  }
+
+  const allUoms = await repo.listUoms(db as pg.Pool);
+  if (allUoms.length === 0) {
+    return;
+  }
+
+  const canonicalTarget = canonicalizeUomName(data.unitOfMeasure || 'EACH');
+  const baseUom =
+    allUoms.find((u) => canonicalizeUomName(u.name) === canonicalTarget) ??
+    allUoms.find((u) => canonicalizeUomName(u.name) === 'EACH') ??
+    allUoms.find((u) => canonicalizeUomName(u.name) === 'PIECE') ??
+    allUoms[0];
+
+  await repo.createProductUom(
+    {
+      productId,
+      uomId: baseUom.id,
+      conversionFactor: 1,
+      isDefault: true,
+    },
+    db,
+  );
+  await repo.setProductBaseUomId(productId, baseUom.id, db);
+  await syncCanonicalConversion(productId, baseUom.id, 1, true, db);
+
+  const purchaseUomId = data.purchaseUomId?.trim() ? data.purchaseUomId : null;
+  if (!purchaseUomId || purchaseUomId === baseUom.id) {
+    return;
+  }
+
+  const purchaseUom = await repo.getUomById(purchaseUomId, db);
+  if (!purchaseUom) {
+    logger.warn('Purchase UoM not found during product create bootstrap', {
+      productId,
+      purchaseUomId,
+    });
+    return;
+  }
+
+  const purchaseFactor = parseConversionFactor(data.conversionFactor ?? 1);
+  await assertNoCanonicalDuplicateMeaning(productId, purchaseUomId, db);
+  await repo.createProductUom(
+    {
+      productId,
+      uomId: purchaseUomId,
+      conversionFactor: purchaseFactor,
+      isDefault: false,
+    },
+    db,
+  );
+  await syncCanonicalConversion(productId, purchaseUomId, purchaseFactor, false, db);
 }
 
 export async function getProductUoms(productId: string, dbPool?: pg.Pool) {

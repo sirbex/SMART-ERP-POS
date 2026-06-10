@@ -15,6 +15,7 @@ import logger from '../../utils/logger.js';
 import type { BulkImportProductRow, BulkUpsertResult } from './productRepository.js';
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 import * as pricingService from '../../services/pricingService.js';
+import { bootstrapProductUomsFromCreateInput } from './uomService.js';
 
 // Server-side limit cap — safe with lightweight flat query (no json_agg/GROUP BY).
 // 1800 products + batch UOM = ~25ms total. Cap at 5000 for safety.
@@ -197,10 +198,20 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
 
   // Transaction: Create product atomically
   return UnitOfWork.run(pool, async (client) => {
-    const product = await productRepository.createProduct(productData, pool);
+    const product = await productRepository.createProduct(productData, client as unknown as pg.Pool);
+    if (!product.id) {
+      throw new Error('Product create did not return an id');
+    }
 
-    // If product has UoM data, create it within the transaction
-    // (UoM creation would be added here if needed)
+    await bootstrapProductUomsFromCreateInput(
+      product.id,
+      {
+        unitOfMeasure: data.unitOfMeasure,
+        conversionFactor: data.conversionFactor,
+        purchaseUomId: data.purchaseUomId,
+      },
+      client,
+    );
 
     logger.info('Product created successfully (transaction committed)', {
       productId: product.id,

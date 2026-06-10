@@ -4,6 +4,7 @@ import POSSearchBar from '../../components/pos/POSSearchBar';
 import POSButton from '../../components/pos/POSButton';
 import POSModal from '../../components/pos/POSModal';
 import { formatCurrency } from '../../utils/currency';
+import { getStockInSellingUom } from '../../utils/posCartUom';
 import {
   searchCachedProducts,
   syncProductCatalog,
@@ -459,7 +460,8 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
               <span className="font-bold text-blue-700 tabular-nums">{formatCurrency(selected.sellingPrice)}</span>
             </div>
             <div className="mb-2 text-sm text-gray-600">
-              Qty: <span className="font-medium text-gray-900 tabular-nums">{selected.stockOnHand}</span>
+              Total stock (base units):{' '}
+              <span className="font-medium text-gray-900 tabular-nums">{selected.stockOnHand}</span>
             </div>
             {selected.expiryDate && (
               <div className="mb-2 text-xs text-yellow-800 bg-yellow-100 px-2 py-1 rounded">
@@ -517,7 +519,8 @@ const POSProductSearch = forwardRef<POSProductSearchHandle, POSProductSearchProp
                     {uom.symbol || uom.name} - {formatCurrency(uom.price)}
                     {uom.isDefault && <span className="ml-2 text-xs">(Default)</span>}
                     <span className="ml-2 text-xs text-gray-500">
-                      Stock: {selected.stockOnHand}
+                      Stock: {getStockInSellingUom(selected.stockOnHand, uom.conversionFactor)}{' '}
+                      {uom.symbol || uom.name}
                     </span>
                   </POSButton>
                 ))}

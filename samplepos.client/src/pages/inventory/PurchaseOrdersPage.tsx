@@ -43,6 +43,12 @@ import {
 } from '../../components/inventory/shared';
 import type { ProcurementProduct } from '../../components/inventory/shared';
 import { UomSelector } from '../../components/inventory/UomSelector';
+import {
+  convertPoLineQuantityForUomChange,
+  poLineBaseCostFromDisplay,
+  poLineDisplayUnitCost,
+  poLineTotal,
+} from '../../../../shared/utils/po-line-uom';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -472,6 +478,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
       lineTotal: new Decimal(suggestedQty).times(new Decimal(initialCost)).toFixed(2),
       baseCost: initialCost, // Base unit cost for UOM recalculation
       selectedUomId: product.purchaseUomId || null,
+      conversionFactor: '1',
       quantityOnHand: product.quantityOnHand,
       reorderLevel: product.reorderLevel,
       reorderQuantity: product.reorderQuantity,
@@ -499,11 +506,9 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
         const updated = { ...item, [field]: value };
         try {
           if (field === 'unitCost') {
-            // Unit cost changed → recalculate line total
-            updated.lineTotal = new Decimal(updated.quantity || 0)
-              .times(new Decimal(value || 0))
-              .toDecimalPlaces(2)
-              .toString();
+            // Unit cost changed → recalculate line total and keep baseCost in sync
+            updated.lineTotal = poLineTotal(updated.quantity, value);
+            updated.baseCost = poLineBaseCostFromDisplay(value, updated.conversionFactor || '1');
           } else if (field === 'lineTotal') {
             // Line total changed → recalculate unit cost
             const qty = new Decimal(updated.quantity || 0);
@@ -512,6 +517,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
                 .div(qty)
                 .toDecimalPlaces(2)
                 .toString();
+              updated.baseCost = poLineBaseCostFromDisplay(updated.unitCost, updated.conversionFactor || '1');
             }
           } else if (field === 'quantity') {
             // Quantity changed → recalculate line total (keep unit cost)
@@ -526,23 +532,24 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
     );
   }, []);
 
-  // UOM change: SAP ME21N — always compute baseCost × factor (ignore costOverride from UomSelector)
+  // UOM change: recalc display cost from baseCost × factor; convert qty to preserve base quantity
   const handleUomChange = useCallback((id: string, uomId: string | null, _newCost: string, factor: string, uomName: string) => {
     setLineItems((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
-        let unitCost = item.unitCost;
-        let lineTotal = item.lineTotal;
-        try {
-          const base = new Decimal(item.baseCost || item.unitCost || 0);
-          const f = new Decimal(factor || 1);
-          unitCost = base.times(f).toDecimalPlaces(2).toString();
-          lineTotal = new Decimal(item.quantity || 0)
-            .times(new Decimal(unitCost))
-            .toDecimalPlaces(2)
-            .toString();
-        } catch { /* skip */ }
-        return { ...item, selectedUomId: uomId, unitCost, lineTotal, conversionFactor: factor, selectedUomName: uomName };
+        const oldFactor = item.conversionFactor || '1';
+        const quantity = convertPoLineQuantityForUomChange(item.quantity, oldFactor, factor);
+        const unitCost = poLineDisplayUnitCost(item.baseCost || item.unitCost, factor);
+        const lineTotal = poLineTotal(quantity, unitCost);
+        return {
+          ...item,
+          selectedUomId: uomId,
+          quantity,
+          unitCost,
+          lineTotal,
+          conversionFactor: factor,
+          selectedUomName: uomName,
+        };
       })
     );
   }, []);
@@ -835,6 +842,7 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
       {showQuickProduct && (
         <QuickCreateProductModal
           onClose={() => setShowQuickProduct(false)}
+          preferredSupplierId={supplierId || undefined}
           onCreated={() => {
             setShowQuickProduct(false);
             // Focus the search bar so user can find the newly created product
@@ -973,6 +981,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
       lineTotal: new Decimal(suggestedQty).times(new Decimal(initialCost)).toFixed(2),
       baseCost: initialCost,
       selectedUomId: product.purchaseUomId || null,
+      conversionFactor: '1',
       quantityOnHand: product.quantityOnHand,
       reorderLevel: product.reorderLevel,
       reorderQuantity: product.reorderQuantity,
@@ -995,10 +1004,8 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
         const updated = { ...item, [field]: value };
         try {
           if (field === 'unitCost') {
-            updated.lineTotal = new Decimal(updated.quantity || 0)
-              .times(new Decimal(value || 0))
-              .toDecimalPlaces(2)
-              .toString();
+            updated.lineTotal = poLineTotal(updated.quantity, value);
+            updated.baseCost = poLineBaseCostFromDisplay(value, updated.conversionFactor || '1');
           } else if (field === 'lineTotal') {
             const qty = new Decimal(updated.quantity || 0);
             if (qty.gt(0)) {
@@ -1006,6 +1013,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
                 .div(qty)
                 .toDecimalPlaces(2)
                 .toString();
+              updated.baseCost = poLineBaseCostFromDisplay(updated.unitCost, updated.conversionFactor || '1');
             }
           } else if (field === 'quantity') {
             updated.lineTotal = new Decimal(value || 0)
@@ -1019,23 +1027,24 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
     );
   }, []);
 
-  // UOM change: SAP ME21N — always compute baseCost × factor (ignore costOverride from UomSelector)
+  // UOM change: recalc display cost from baseCost × factor; convert qty to preserve base quantity
   const handleUomChange = useCallback((id: string, uomId: string | null, _newCost: string, factor: string, uomName: string) => {
     setLineItems((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
-        let unitCost = item.unitCost;
-        let lineTotal = item.lineTotal;
-        try {
-          const base = new Decimal(item.baseCost || item.unitCost || 0);
-          const f = new Decimal(factor || 1);
-          unitCost = base.times(f).toDecimalPlaces(2).toString();
-          lineTotal = new Decimal(item.quantity || 0)
-            .times(new Decimal(unitCost))
-            .toDecimalPlaces(2)
-            .toString();
-        } catch { /* skip */ }
-        return { ...item, selectedUomId: uomId, unitCost, lineTotal, conversionFactor: factor, selectedUomName: uomName };
+        const oldFactor = item.conversionFactor || '1';
+        const quantity = convertPoLineQuantityForUomChange(item.quantity, oldFactor, factor);
+        const unitCost = poLineDisplayUnitCost(item.baseCost || item.unitCost, factor);
+        const lineTotal = poLineTotal(quantity, unitCost);
+        return {
+          ...item,
+          selectedUomId: uomId,
+          quantity,
+          unitCost,
+          lineTotal,
+          conversionFactor: factor,
+          selectedUomName: uomName,
+        };
       })
     );
   }, []);
@@ -1207,6 +1216,7 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
 
       {showQuickProduct && (
         <QuickCreateProductModal onClose={() => setShowQuickProduct(false)}
+          preferredSupplierId={supplierId || undefined}
           onCreated={() => { setShowQuickProduct(false); focusSearch(); }} />
       )}
     </ModalContainer>

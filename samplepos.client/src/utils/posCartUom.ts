@@ -1,5 +1,7 @@
 /** POS cart: qty and stock warnings use the selected selling UoM (e.g. PKT). */
 
+import { convertPoLineQuantityForUomChange } from '../../../shared/utils/po-line-uom';
+
 type UomOption = {
   uomId: string;
   name?: string;
@@ -7,6 +9,16 @@ type UomOption = {
   conversionFactor: number;
   isDefault?: boolean;
 };
+
+/** Inventory is always stored in base units; convert for display in any selling UoM. */
+export function getStockInSellingUom(
+  stockOnHandBase: number,
+  conversionFactor: number | string = 1,
+): number {
+  const factor = Number(conversionFactor) || 1;
+  if (factor <= 0) return stockOnHandBase;
+  return Math.floor(stockOnHandBase / factor);
+}
 
 export function getPosLineStockInSellingUom(
   stockOnHandBase: number | undefined,
@@ -31,12 +43,26 @@ export function getPosLineStockInSellingUom(
     return { uomLabel, stockInSellingUom: undefined, isOverStock: false };
   }
 
-  const stockInSellingUom = Math.floor(stockOnHandBase / safeFactor);
+  const stockInSellingUom = getStockInSellingUom(stockOnHandBase, safeFactor);
   return {
     uomLabel,
     stockInSellingUom,
     isOverStock: false, // caller sets with quantity
   };
+}
+
+/** When the cashier switches selling UoM, preserve base quantity (same rule as PO lines). */
+export function convertPosCartQuantityForUomChange(
+  quantity: number,
+  availableUoms: UomOption[] | undefined,
+  fromUomId: string | undefined,
+  toUomId: string,
+): number {
+  const oldFactor = getPosLineConversionFactor(availableUoms, fromUomId);
+  const newFactor = getPosLineConversionFactor(availableUoms, toUomId);
+  const converted = convertPoLineQuantityForUomChange(quantity, oldFactor, newFactor);
+  const parsed = parseFloat(converted);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : quantity;
 }
 
 export function getPosLineConversionFactor(
@@ -81,5 +107,5 @@ export function isPosQtyOverStockInSellingUom(
   const factor = Number(selected?.conversionFactor ?? 1);
   const safeFactor = factor > 0 ? factor : 1;
   if (stockOnHandBase === undefined) return false;
-  return quantity > Math.floor(stockOnHandBase / safeFactor);
+  return quantity > getStockInSellingUom(stockOnHandBase, safeFactor);
 }

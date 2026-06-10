@@ -14,9 +14,11 @@ import type { Customer } from '@shared/zod/customer';
 import { formatCurrency } from '../../utils/currency';
 import { resolvePosCustomerForSale } from '../../utils/resolvePosCustomerId';
 import {
+  convertPosCartQuantityForUomChange,
   getPosLineBaseQuantity,
   getPosLineConversionFactor,
   getPosLineStockInSellingUom,
+  getStockInSellingUom,
   isPosQtyOverStockInSellingUom,
   scaleEngineBasePriceToSellingUom,
 } from '../../utils/posCartUom';
@@ -420,6 +422,15 @@ export default function POSPage() {
     amount: number;
     reason: string;
   } | null>(null);
+  /** Store credit from Sales → Exchange (applied as cart discount on replacement sale) */
+  const [exchangeCredit, setExchangeCredit] = useState<{
+    refundId: string;
+    refundNumber: string;
+    saleNumber: string;
+    amount: number;
+    customerId?: string | null;
+    customerName?: string | null;
+  } | null>(null);
   const [showManagerApprovalDialog, setShowManagerApprovalDialog] = useState(false);
   const [pendingDiscount, setPendingDiscount] = useState<PendingDiscount | null>(null);
 
@@ -543,6 +554,53 @@ export default function POSPage() {
       });
     }
   }, [isOnline]);
+
+  // Product exchange credit from Sales → Exchange flow
+  useEffect(() => {
+    const raw = sessionStorage.getItem('pos_exchange_credit');
+    if (!raw) return;
+    sessionStorage.removeItem('pos_exchange_credit');
+    try {
+      const credit = JSON.parse(raw) as {
+        refundId?: string;
+        amount?: number;
+        saleNumber?: string;
+        refundNumber?: string;
+        customerId?: string | null;
+        customerName?: string | null;
+      };
+      if (credit.amount && credit.amount > 0 && credit.refundId) {
+        setExchangeCredit({
+          refundId: credit.refundId,
+          refundNumber: credit.refundNumber || '',
+          saleNumber: credit.saleNumber || 'prior sale',
+          amount: credit.amount,
+          customerId: credit.customerId,
+          customerName: credit.customerName,
+        });
+        toast.success(
+          `Exchange credit ${formatCurrency(credit.amount)} from ${credit.saleNumber || 'prior sale'}. It will apply when you add replacement items.`,
+          { duration: 8000 }
+        );
+      }
+    } catch {
+      /* ignore corrupt session payload */
+    }
+  }, []);
+
+  // Auto-apply exchange credit as cart discount (capped at subtotal)
+  useEffect(() => {
+    if (!exchangeCredit || items.length === 0) return;
+    const lineSubtotal = items.reduce((sum, i) => new Decimal(sum).plus(i.subtotal).toNumber(), 0);
+    if (lineSubtotal <= 0) return;
+    const creditToApply = Math.min(exchangeCredit.amount, lineSubtotal);
+    setCartDiscount({
+      type: 'FIXED_AMOUNT',
+      value: creditToApply,
+      amount: creditToApply,
+      reason: `Exchange credit ${exchangeCredit.refundNumber} (${exchangeCredit.saleNumber})`,
+    });
+  }, [exchangeCredit, items]);
 
   // Check for quote to load on mount (from quotations page) and restore customer
   useEffect(() => {
@@ -1354,12 +1412,19 @@ export default function POSPage() {
       const newUom = item.availableUoms.find((u) => u.uomId === newUomId);
       if (!newUom) return prev;
 
+      const convertedQty = convertPosCartQuantityForUomChange(
+        item.quantity,
+        item.availableUoms,
+        item.selectedUomId,
+        newUomId,
+      );
+
       // Update item with new UoM pricing
       const newUnitPrice = newUom.price;
       const newCostPrice = newUom.cost;
 
       const recalc = recalcPosCartLineFields({
-        quantity: item.quantity,
+        quantity: convertedQty,
         unitPrice: newUnitPrice,
         costPrice: newCostPrice,
         discount: item.discount,
@@ -2922,6 +2987,7 @@ export default function POSPage() {
       taxAmount: tax,
       totalAmount: grandTotal,
       saleDate: formattedSaleDate,
+      exchangeRefundId: exchangeCredit?.refundId,
       paymentLines: finalPaymentLines.map((line) => ({
         paymentMethod: line.paymentMethod,
         amount: line.amount,
@@ -3035,6 +3101,7 @@ export default function POSPage() {
       setItems([]);
       setSelectedCustomer(null);
       setCartDiscount(null);
+      setExchangeCredit(null);
       setShowPaymentModal(false);
       setPaymentLines([]);
       setPaymentAmount('');
@@ -3115,6 +3182,7 @@ export default function POSPage() {
         setItems([]);
         setSelectedCustomer(null);
         setCartDiscount(null);
+        setExchangeCredit(null);
         setLoadedQuoteId(null); // Clear quote reference after successful sale
 
         // Clear quote customer persistence data after successful sale
@@ -4836,6 +4904,13 @@ export default function POSPage() {
                     autoFocus={idx === 0}
                   >
                     <span className="font-semibold">{uom.symbol || uom.name}</span>
+                    <span className="text-xs text-gray-500">
+                      {getStockInSellingUom(
+                        items[uomModalItemIndex].stockOnHand ?? 0,
+                        uom.conversionFactor,
+                      )}{' '}
+                      avail.
+                    </span>
                     <span className="font-bold">{formatCurrency(uom.price)}</span>
                   </POSButton>
                 ))}
