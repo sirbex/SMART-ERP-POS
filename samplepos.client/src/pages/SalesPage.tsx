@@ -2177,12 +2177,14 @@ function PartialPaymentsView({ onSelectSale, startDate, endDate }: PartialPaymen
 function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps) {
   const canVoidSale = useBackendPermission('sales.void');
   const canRefundSale = useBackendPermission('sales.refund');
+  const canExchangeSale = useBackendPermission('sales.exchange') || canRefundSale;
   const canReprintReceipt = useBackendPermission('sales.reprint');
   const [saleDetails, setSaleDetails] = useState<SaleRow | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
+  const [showExchangeModal, setShowExchangeModal] = useState(false);
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettingsForReceipt | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
@@ -2746,10 +2748,24 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
               {['COMPLETED', 'PARTIALLY_RETURNED'].includes(
                 (saleDetails?.status || sale.status) as string
               ) &&
-                canRefundSale && (
+                (canExchangeSale || canRefundSale) && (
+                  <>
+                  {canExchangeSale && (
+                  <button
+                    onClick={() => setShowExchangeModal(true)}
+                    title="Return wrong item(s) and sell the replacement at POS with store credit (partial only)."
+                    className="w-full sm:w-auto px-4 py-2 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                    </svg>
+                    Exchange
+                  </button>
+                  )}
+                  {canRefundSale && (
                   <button
                     onClick={() => setShowRefundModal(true)}
-                    title="Reverse this sale by returning items. Stock will be restored, a Credit Note will be posted, and a refund will be issued."
+                    title="Return items, restore stock, and issue a refund to the original payment method."
                     className="w-full sm:w-auto px-4 py-2 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2757,6 +2773,8 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                     </svg>
                     {(saleDetails?.status || sale.status) === 'PARTIALLY_RETURNED' ? 'Return More Items' : 'Return'}
                   </button>
+                  )}
+                  </>
                 )}
               {/* Hint: explain why Void is not available for posted sales */}
               {['COMPLETED', 'PARTIALLY_RETURNED'].includes(
@@ -2837,6 +2855,24 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
             setShowRefundModal(false);
             onSaleUpdated?.();
             onClose();
+          }}
+        />
+      )}
+
+      {/* Product exchange (partial return → POS replacement) */}
+      {showExchangeModal && saleDetails && (
+        <RefundSaleModal
+          mode="exchange"
+          saleId={sale.id}
+          saleNumber={sale.saleNumber || `Sale #${sale.id.slice(0, 8)}`}
+          totalAmount={sale.totalAmount}
+          customerId={saleDetails.customerId || sale.customerId}
+          customerName={saleDetails.customerName || sale.customerName}
+          items={saleDetails.items || []}
+          onClose={() => setShowExchangeModal(false)}
+          onSuccess={() => {
+            setShowExchangeModal(false);
+            onSaleUpdated?.();
           }}
         />
       )}

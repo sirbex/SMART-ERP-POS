@@ -16,6 +16,7 @@ export const PERMISSIONS: Record<string, Permission> = {
   SALES_DELETE: p('sales.delete', 'sales', 'delete', 'Delete sales transactions'),
   SALES_VOID: p('sales.void', 'sales', 'void', 'Void completed sales'),
   SALES_REFUND: p('sales.refund', 'sales', 'refund', 'Refund completed sales'),
+  SALES_EXCHANGE: p('sales.exchange', 'sales', 'exchange', 'Exchange wrong products on completed sales'),
   SALES_EXPORT: p('sales.export', 'sales', 'export', 'Export sales data'),
   SALES_APPROVE: p('sales.approve', 'sales', 'approve', 'Approve sales requiring authorization'),
   SALES_REPRINT: p('sales.reprint', 'sales', 'reprint', 'Reprint sale receipts'),

@@ -20,6 +20,7 @@ import {
     type OverchargeLine,
     type ReturnableSaleLine,
 } from '../../services/customerInvoiceAdjustmentApi';
+import { formatSellingQuantityWithBaseHint, sellingQtyToBase } from '@shared/utils/sale-item-uom';
 
 interface Props {
     open: boolean;
@@ -427,12 +428,12 @@ export function AdjustCustomerInvoiceModal({
             >
                 <div className="p-6 border-b border-gray-200">
                     <h2 id="adjust-invoice-title" className="text-lg font-semibold text-gray-900">
-                        Adjust Invoice {invoiceNumber ?? invoiceId.slice(0, 8)}
+                        Create Credit Note — {invoiceNumber ?? invoiceId.slice(0, 8)}
                     </h2>
                     <p className="text-sm text-gray-500 mt-1">
                         {context
-                            ? `${context.invoice.customerName} · Balance: ${formatCurrency(context.invoice.outstandingBalance)}`
-                            : 'Loading…'}
+                            ? `${context.invoice.customerName} · Invoice balance: ${formatCurrency(context.invoice.outstandingBalance)}`
+                            : 'Loading invoice lines…'}
                     </p>
                 </div>
                 <div className="p-6 flex-1 overflow-y-auto">
@@ -535,6 +536,7 @@ export function AdjustCustomerInvoiceModal({
                                             <tr>
                                                 <th />
                                                 <th className="px-2 py-1 text-left">Product</th>
+                                                <th className="px-2 py-1 text-right">Sold / available</th>
                                                 <th className="px-2 py-1 text-right">Return qty</th>
                                                 <th className="px-2 py-1 text-right">Unit price</th>
                                             </tr>
@@ -550,6 +552,32 @@ export function AdjustCustomerInvoiceModal({
                                                         />
                                                     </td>
                                                     <td className="px-2 py-1">{rl.line.productName}</td>
+                                                    <td className="px-2 py-1 text-right text-xs text-gray-600">
+                                                        {formatSellingQuantityWithBaseHint(rl.line.quantity, {
+                                                            uomSymbol: rl.line.uomSymbol,
+                                                            uomName: rl.line.uomName,
+                                                            baseUomSymbol: rl.line.baseUomSymbol,
+                                                            conversionFactor: rl.line.conversionFactor,
+                                                        })}
+                                                        {rl.line.refundedQuantity > 0 && (
+                                                            <div className="text-amber-700">
+                                                                Returned: {formatSellingQuantityWithBaseHint(rl.line.refundedQuantity, {
+                                                                    uomSymbol: rl.line.uomSymbol,
+                                                                    uomName: rl.line.uomName,
+                                                                    baseUomSymbol: rl.line.baseUomSymbol,
+                                                                    conversionFactor: rl.line.conversionFactor,
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                        <div className="text-blue-700">
+                                                            Max: {formatSellingQuantityWithBaseHint(rl.line.returnableQuantity, {
+                                                                uomSymbol: rl.line.uomSymbol,
+                                                                uomName: rl.line.uomName,
+                                                                baseUomSymbol: rl.line.baseUomSymbol,
+                                                                conversionFactor: rl.line.conversionFactor,
+                                                            })}
+                                                        </div>
+                                                    </td>
                                                     <td className="px-2 py-1 text-right">
                                                         <input
                                                             className="w-20 border rounded px-1 text-right"
@@ -557,6 +585,12 @@ export function AdjustCustomerInvoiceModal({
                                                             disabled={!rl.selected}
                                                             onChange={e => updateReturnQty(idx, e.target.value)}
                                                         />
+                                                        {rl.selected && rl.line.conversionFactor > 1 && (
+                                                            <div className="text-[10px] text-gray-500 mt-0.5">
+                                                                → {sellingQtyToBase(parseFloat(rl.quantity) || 0, rl.line.conversionFactor)}{' '}
+                                                                {rl.line.baseUomSymbol || 'base'} to stock
+                                                            </div>
+                                                        )}
                                                     </td>
                                                     <td className="px-2 py-1 text-right">{formatCurrency(rl.line.unitPrice)}</td>
                                                 </tr>

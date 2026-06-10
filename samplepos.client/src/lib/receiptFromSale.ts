@@ -54,7 +54,11 @@ export interface SaleForReceipt {
   taxAmount?: number;
   cashierName?: string;
   soldByName?: string;
+  /** Snake_case aliases from raw sale API rows */
+  cashier_name?: string;
+  sold_by_name?: string;
   customerName?: string;
+  customer_name?: string;
   paymentMethod?: string;
   amountPaid?: number;
   paymentReceived?: number;
@@ -160,8 +164,13 @@ export function buildReceiptDataFromSale(
         : sale.subtotal,
     discountAmount: effectiveDisc > 0 ? effectiveDisc : undefined,
     taxAmount: sale.taxAmount,
-    cashierName: sale.cashierName || sale.soldByName,
-    customerName: sale.customerName || undefined,
+    cashierName:
+      sale.cashierName ||
+      sale.soldByName ||
+      sale.cashier_name ||
+      sale.sold_by_name ||
+      undefined,
+    customerName: sale.customerName || sale.customer_name || undefined,
     paymentMethod: sale.paymentMethod,
     amountPaid: sale.amountPaid || sale.paymentReceived,
     changeAmount: changeAmount > 0 ? changeAmount : undefined,

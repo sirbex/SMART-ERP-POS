@@ -1707,6 +1707,8 @@ export interface SaleRefundData {
   totalCost: number;    // COGS to reverse
   paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
   customerId?: string;
+  /** REFUND = cash/AR repayment; EXCHANGE = store credit (2200) for POS replacement */
+  refundType?: 'REFUND' | 'EXCHANGE';
 }
 
 /**
@@ -1714,8 +1716,8 @@ export interface SaleRefundData {
  *
  * For a FULL refund this uses AccountingCore.reverseTransaction() (same as void).
  * For a PARTIAL refund we create a new journal entry with proportional amounts:
- *   DR Revenue (4000)            refundAmount  (reverse revenue)
- *   CR Cash / AR (1010/1200)     refundAmount  (pay back customer)
+ *   DR Sales Returns (4010)       refundAmount  (reverse revenue — aligned with credit notes)
+ *   CR Cash / AR / Store Credit   refundAmount  (pay back customer or hold for exchange)
  *   DR Inventory (1300)          costAmount    (restore inventory asset)
  *   CR COGS (5000)               costAmount    (reverse cost of goods)
  *
@@ -1747,20 +1749,26 @@ export async function recordSaleRefundToGL(
       // Fall through to create a standalone refund entry below
     }
 
-    // Determine credit account (where money goes back to customer)
+    // Determine credit account (where economic value goes back to customer)
+    const isExchange = data.refundType === 'EXCHANGE';
     let creditAccountCode: string;
-    switch (data.paymentMethod) {
-      case 'CREDIT':
-        creditAccountCode = AccountCodes.ACCOUNTS_RECEIVABLE; // 1200
-        break;
-      case 'CARD':
-        creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
-        break;
-      case 'MOBILE_MONEY':
-        creditAccountCode = AccountCodes.MOBILE_MONEY;
-        break;
-      default:
-        creditAccountCode = AccountCodes.CASH; // 1010
+    if (isExchange && data.paymentMethod !== 'CREDIT') {
+      // Walk-in exchange: store credit liability until applied at POS replacement sale
+      creditAccountCode = AccountCodes.CUSTOMER_DEPOSITS;
+    } else {
+      switch (data.paymentMethod) {
+        case 'CREDIT':
+          creditAccountCode = AccountCodes.ACCOUNTS_RECEIVABLE;
+          break;
+        case 'CARD':
+          creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
+          break;
+        case 'MOBILE_MONEY':
+          creditAccountCode = AccountCodes.MOBILE_MONEY;
+          break;
+        default:
+          creditAccountCode = AccountCodes.CASH;
+      }
     }
 
     // Build journal entries for the refund.
@@ -1782,21 +1790,23 @@ export async function recordSaleRefundToGL(
       description: string;
     }> = [];
 
-    // 1. DR Revenue — reverse the revenue
+    // 1. DR Sales Returns — reverse revenue (4010, same account as customer credit notes)
     if (data.totalAmount > 0) {
       revenueEntries.push({
-        accountCode: AccountCodes.SALES_REVENUE, // 4000
+        accountCode: AccountCodes.SALES_RETURNS,
         debitAmount: data.totalAmount,
         creditAmount: 0,
-        description: `Refund ${data.refundNumber}: Revenue reversal for ${data.saleNumber}`,
+        description: `${isExchange ? 'Exchange' : 'Refund'} ${data.refundNumber}: Sales return for ${data.saleNumber}`,
       });
 
-      // 2. CR Cash/AR — pay back customer
+      // 2. CR Cash/AR/Store credit
       revenueEntries.push({
         accountCode: creditAccountCode,
         debitAmount: 0,
         creditAmount: data.totalAmount,
-        description: `Refund ${data.refundNumber}: ${data.paymentMethod} refund for ${data.saleNumber}`,
+        description: isExchange
+          ? `Exchange ${data.refundNumber}: store credit for ${data.saleNumber}`
+          : `Refund ${data.refundNumber}: ${data.paymentMethod} refund for ${data.saleNumber}`,
       });
     }
 
@@ -1895,6 +1905,55 @@ export async function recordSaleRefundToGL(
       `GL posting failed for refund ${data.refundNumber}: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+}
+
+export interface ExchangeCreditApplicationData {
+  refundId: string;
+  refundNumber: string;
+  saleId: string;
+  saleNumber: string;
+  applicationDate: string;
+  amount: number;
+}
+
+/**
+ * Clear store-credit liability (2200) when exchange credit is applied on a replacement POS sale.
+ * Pairs with the EXCHANGE refund journal that credited 2200.
+ *
+ * DR  Customer Deposits (2200)
+ * CR  Sales Revenue (4000)
+ */
+export async function recordExchangeCreditApplicationToGL(
+  data: ExchangeCreditApplicationData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<void> {
+  if (data.amount <= 0) return;
+
+  await AccountingCore.createJournalEntry({
+    entryDate: data.applicationDate,
+    description: `Exchange credit applied: ${data.refundNumber} → sale ${data.saleNumber}`,
+    referenceType: 'EXCHANGE_CREDIT',
+    referenceId: data.saleId,
+    referenceNumber: data.saleNumber,
+    lines: [
+      {
+        accountCode: AccountCodes.CUSTOMER_DEPOSITS,
+        debitAmount: data.amount,
+        creditAmount: 0,
+        description: `Clear store credit from exchange ${data.refundNumber}`,
+      },
+      {
+        accountCode: AccountCodes.SALES_REVENUE,
+        debitAmount: 0,
+        creditAmount: data.amount,
+        description: `Exchange credit applied on ${data.saleNumber}`,
+      },
+    ],
+    userId: SYSTEM_USER_ID,
+    idempotencyKey: `EXCHANGE_CREDIT-${data.refundId}-${data.saleId}`,
+    source: 'SALES_REFUND' as const,
+  }, pool, txClient);
 }
 
 // =============================================================================

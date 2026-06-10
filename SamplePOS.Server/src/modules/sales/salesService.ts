@@ -92,6 +92,8 @@ export interface CreateSaleInput {
   idempotencyKey?: string; // Offline sync idempotency key
   offlineId?: string; // Offline sale identifier
   fromOrderId?: string; // POS order ID — if set, mark the order COMPLETED atomically with this sale
+  /** Exchange refund document whose store credit is applied as cart discount */
+  exchangeRefundId?: string;
   /** Optional audit context for price-edit / below-cost audit rows */
   auditContext?: AuditContext;
 }
@@ -106,6 +108,7 @@ export interface RefundSaleInput {
   reason: string;
   approvedById?: string;
   refundDate?: string; // YYYY-MM-DD, defaults to today
+  refundType?: 'REFUND' | 'EXCHANGE';
 }
 
 export const salesService = {
@@ -726,6 +729,36 @@ export const salesService = {
       assertSaleHeaderMatchesCalculatedTotal(input.totalAmount, calculatedTotal);
       const finalTotalAmount = calculatedTotal;
 
+      if (input.exchangeRefundId) {
+        if (discountAmount.lessThanOrEqualTo(0)) {
+          throw new BusinessError(
+            'Exchange credit requires a matching cart discount on the replacement sale',
+            'ERR_EXCHANGE_CREDIT_002',
+            { exchangeRefundId: input.exchangeRefundId },
+          );
+        }
+        const exchangeRefund = await salesRepository.getExchangeRefundForApplication(
+          client,
+          input.exchangeRefundId,
+        );
+        if (!exchangeRefund || exchangeRefund.refundType !== 'EXCHANGE') {
+          throw new BusinessError(
+            'Invalid or expired exchange credit reference',
+            'ERR_EXCHANGE_CREDIT_003',
+            { exchangeRefundId: input.exchangeRefundId },
+          );
+        }
+        const creditApplied = Money.toNumber(discountAmount);
+        const remainingCredit = exchangeRefund.totalAmount - exchangeRefund.exchangeAppliedAmount;
+        if (creditApplied > remainingCredit + 0.01) {
+          throw new BusinessError(
+            `Exchange credit (${creditApplied.toFixed(2)}) exceeds available balance (${remainingCredit.toFixed(2)})`,
+            'ERR_EXCHANGE_CREDIT_004',
+            { exchangeRefundId: input.exchangeRefundId, creditApplied, remainingCredit },
+          );
+        }
+      }
+
       logger.info('💰 FINAL TOTAL AMOUNT', {
         finalTotalAmount: finalTotalAmount.toFixed(2),
         used: 'calculated (items + tax - discount)',
@@ -1324,6 +1357,34 @@ export const salesService = {
           error: glError instanceof Error ? glError.message : String(glError),
         });
         throw glError;
+      }
+
+      if (input.exchangeRefundId && saleDiscountDec.greaterThan(0)) {
+        const creditApplied = Money.toNumber(saleDiscountDec);
+        const exchangeRefund = await salesRepository.getExchangeRefundForApplication(
+          client,
+          input.exchangeRefundId,
+        );
+        if (exchangeRefund) {
+          await salesRepository.applyExchangeCreditToSale(
+            client,
+            input.exchangeRefundId,
+            sale.id,
+            creditApplied,
+          );
+          await glEntryService.recordExchangeCreditApplicationToGL(
+            {
+              refundId: exchangeRefund.id,
+              refundNumber: exchangeRefund.refundNumber,
+              saleId: sale.id,
+              saleNumber: sale.saleNumber,
+              applicationDate: String(sale.saleDate || getBusinessDate()).slice(0, 10),
+              amount: creditApplied,
+            },
+            pool,
+            client,
+          );
+        }
       }
 
       // BR-SAL-002: Update customer balance for CREDIT sales (split payment support)
@@ -2886,6 +2947,39 @@ export const salesService = {
         );
       }
 
+      const refundType = input.refundType === 'EXCHANGE' ? 'EXCHANGE' : 'REFUND';
+
+      // Exchange is partial-only: full return must use REFUND path
+      if (refundType === 'EXCHANGE') {
+        const saleItemsPreview = await salesRepository.getSaleItemsForRefund(client, saleId);
+        const previewMap = new Map(saleItemsPreview.map((si) => [si.id, si]));
+        let allFullySelected = true;
+        for (const refundItem of input.items) {
+          const si = previewMap.get(refundItem.saleItemId);
+          if (!si) continue;
+          const remaining = new Decimal(si.remainingQty);
+          if (new Decimal(refundItem.quantity).lessThan(remaining)) {
+            allFullySelected = false;
+            break;
+          }
+        }
+        for (const si of saleItemsPreview) {
+          const selected = input.items.find((i) => i.saleItemId === si.id);
+          const remaining = new Decimal(si.remainingQty);
+          if (remaining.greaterThan(0) && (!selected || new Decimal(selected.quantity).lessThan(remaining))) {
+            allFullySelected = false;
+            break;
+          }
+        }
+        if (allFullySelected) {
+          throw new BusinessError(
+            'Exchange is for swapping wrong items only. Use Return for a full sale reversal.',
+            'ERR_EXCHANGE_FULL',
+            { saleId },
+          );
+        }
+      }
+
       // If approval provided, verify approver is manager
       if (input.approvedById) {
         const isManager = await salesRepository.isManager(client, input.approvedById);
@@ -2970,6 +3064,7 @@ export const salesService = {
         reason: input.reason.trim(),
         totalAmount: refundTotalAmount.toFixed(2),
         totalCost: refundTotalCost.toFixed(2),
+        refundType,
         createdById: refundedById,
         approvedById: input.approvedById,
       };
@@ -3186,6 +3281,7 @@ export const salesService = {
         totalCost: refundTotalCost.toNumber(),
         paymentMethod: sale.payment_method,
         customerId: sale.customer_id || undefined,
+        refundType,
       };
 
       const glTransactionId = await glEntryService.recordSaleRefundToGL(glRefundData, pool, client);
@@ -3413,11 +3509,14 @@ export const salesService = {
         isFullRefund,
       });
 
-      // CASH REGISTER INTEGRATION: Record refund movement for drawer tracking
-      // Non-blocking — refund is already committed; failure only affects drawer count
+      // CASH REGISTER: Record refund movement for drawer tracking (REFUND only — not exchange store credit)
       const isCashPayment = sale.payment_method === 'CASH';
       const isMobilePayment = sale.payment_method === 'MOBILE_MONEY';
-      if ((isCashPayment || isMobilePayment) && refundTotalAmount.greaterThan(0)) {
+      if (
+        refundType === 'REFUND'
+        && (isCashPayment || isMobilePayment)
+        && refundTotalAmount.greaterThan(0)
+      ) {
         try {
           // Use original sale's session if still open; otherwise find user's open session
           let sessionId: string | null = sale.cash_register_session_id || null;

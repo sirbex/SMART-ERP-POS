@@ -163,8 +163,8 @@ export function SupplierReassignmentModal({
                 </div>
 
                 <p className="text-xs text-gray-500 mb-4">
-                    SAP/Odoo-style correction: reverses unpaid vendor bills on this receipt, reopens GR/IR, then moves
-                    liability to the correct supplier. Stock and batches are not changed.
+                    Reverses unpaid vendor bills on this receipt, reopens GR/IR, then moves liability to the correct
+                    supplier. Stock and batches are not changed.
                 </p>
 
                 {(error || (preview?.blockers?.length ?? 0) > 0) && (

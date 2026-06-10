@@ -41,7 +41,6 @@ import {
     creditDebitNoteService,
     type CreditDebitNote,
     type SupplierCreditDebitNote,
-    type CreateCreditNoteRequest,
     type CreateDebitNoteRequest,
     type CreateSupplierCreditNoteRequest,
     type CreateSupplierDebitNoteRequest,
@@ -51,6 +50,7 @@ import { api } from '../../services/api';
 import { formatTimestampDate } from '../../utils/businessDate';
 import { ListSkeleton } from '../../components/ui/ListSkeleton';
 import { ResponsiveActionBar, ResponsiveToolbar, ResponsiveToolbarActions } from '../../components/ui/ResponsiveActionBar';
+import { AdjustCustomerInvoiceModal } from '../../components/shared/AdjustCustomerInvoiceModal';
 
 /** Supplier notes use DRAFT/POSTED/APPLIED; customer notes use Draft/Posted. */
 function isNoteDraft(status: string): boolean {
@@ -113,6 +113,12 @@ function CustomerNotesTab() {
     const [search, setSearch] = useState('');
     const [typeFilter, setTypeFilter] = useState<'ALL' | 'CREDIT_NOTE' | 'DEBIT_NOTE'>('ALL');
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [isSmartCreditOpen, setIsSmartCreditOpen] = useState(false);
+    const [adjustInvoice, setAdjustInvoice] = useState<{
+        id: string;
+        invoiceNumber: string;
+        customerId?: string;
+    } | null>(null);
     const [createType, setCreateType] = useState<'CREDIT_NOTE' | 'DEBIT_NOTE'>('CREDIT_NOTE');
     const [selectedNote, setSelectedNote] = useState<CreditDebitNote | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -175,6 +181,21 @@ function CustomerNotesTab() {
 
     return (
         <div className="space-y-4">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 sm:p-4 text-sm text-blue-900 space-y-2">
+                <p className="font-semibold flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 shrink-0" />
+                    Credit notes from invoice
+                </p>
+                <p>
+                    Credit notes must be created <strong>from the original customer invoice</strong>, not as free-form lines.
+                    Pick an invoice, then choose <strong>Price correction</strong> (overcharge, no stock change) or{' '}
+                    <strong>Return goods</strong> (physical return → stock + COGS reversal).
+                </p>
+                <p className="text-xs text-blue-800">
+                    Walk-in POS exchanges without an invoice: use <strong>Sales → Exchange</strong>. Full cash refunds: use <strong>Return</strong>.
+                </p>
+            </div>
+
             <ResponsiveToolbar>
                 <div className="relative flex-1 min-w-0 sm:max-w-md">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -201,10 +222,10 @@ function CustomerNotesTab() {
                     <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => { setCreateType('CREDIT_NOTE'); setIsCreateModalOpen(true); }}
+                        onClick={() => setIsSmartCreditOpen(true)}
                         className="flex items-center gap-1"
                     >
-                        <FileMinus className="h-4 w-4" />
+                        <Sparkles className="h-4 w-4" />
                         Credit Note
                     </Button>
 
@@ -302,13 +323,38 @@ function CustomerNotesTab() {
                 </div>
             )}
 
-            {/* Create Note Modal */}
+            {/* Smart credit note: invoice → adjustment wizard (posted CN) */}
+            <SmartCustomerCreditNotePicker
+                open={isSmartCreditOpen}
+                onClose={() => setIsSmartCreditOpen(false)}
+                onInvoiceSelected={(inv) => {
+                    setIsSmartCreditOpen(false);
+                    setAdjustInvoice(inv);
+                }}
+            />
+
+            {adjustInvoice && (
+                <AdjustCustomerInvoiceModal
+                    open={Boolean(adjustInvoice)}
+                    invoiceId={adjustInvoice.id}
+                    invoiceNumber={adjustInvoice.invoiceNumber}
+                    customerId={adjustInvoice.customerId}
+                    onClose={() => {
+                        setAdjustInvoice(null);
+                        fetchNotes();
+                    }}
+                />
+            )}
+
+            {/* Debit notes still use manual draft form */}
+            {isCreateModalOpen && createType === 'DEBIT_NOTE' && (
             <CreateCustomerNoteModal
                 open={isCreateModalOpen}
                 onClose={() => setIsCreateModalOpen(false)}
-                noteType={createType}
+                noteType="DEBIT_NOTE"
                 onSuccess={fetchNotes}
             />
+            )}
 
             {/* Detail View */}
             <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen} zIndex={detailGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
@@ -757,21 +803,168 @@ function SupplierNotesTab() {
 }
 
 // ============================================================
-// Create Customer Credit/Debit Note Modal
+// Smart Customer Credit Note — invoice picker (step 1 of wizard)
+// ============================================================
+
+interface SmartCustomerCreditNotePickerProps {
+    open: boolean;
+    onClose: () => void;
+    onInvoiceSelected: (invoice: { id: string; invoiceNumber: string; customerId?: string }) => void;
+}
+
+function SmartCustomerCreditNotePicker({
+    open,
+    onClose,
+    onInvoiceSelected,
+}: SmartCustomerCreditNotePickerProps) {
+    const [invoiceSearch, setInvoiceSearch] = useState('');
+    const [invoiceResults, setInvoiceResults] = useState<Array<{
+        id: string;
+        invoiceNumber: string;
+        customerName: string;
+        customerId?: string;
+        totalAmount: string;
+        amountDue?: string;
+        status?: string;
+    }>>([]);
+    const [searching, setSearching] = useState(false);
+
+    useEffect(() => {
+        if (!open) {
+            setInvoiceSearch('');
+            setInvoiceResults([]);
+        }
+    }, [open]);
+
+    const searchInvoices = async (q: string) => {
+        if (q.length < 2) {
+            setInvoiceResults([]);
+            return;
+        }
+        setSearching(true);
+        try {
+            const res = await api.get('/accounting/comprehensive/invoices', {
+                params: { search: q, limit: 15, documentType: 'INVOICE' },
+            });
+            const rows = (res.data?.data?.data || res.data?.data || []) as Array<Record<string, unknown>>;
+            setInvoiceResults(
+                rows
+                    .filter((inv) => {
+                        const docType = String(inv.documentType ?? inv.document_type ?? 'INVOICE');
+                        const status = String(inv.status ?? '');
+                        return docType === 'INVOICE' && !['CANCELLED', 'Cancelled', 'VOIDED', 'VOID'].includes(status);
+                    })
+                    .map((inv) => ({
+                        id: String(inv.id),
+                        invoiceNumber: String(inv.invoiceNumber ?? inv.invoice_number ?? ''),
+                        customerName: String(inv.customerName ?? inv.customer_name ?? 'Customer'),
+                        customerId: inv.customerId ? String(inv.customerId) : inv.customer_id ? String(inv.customer_id) : undefined,
+                        totalAmount: String(inv.totalAmount ?? inv.total_amount ?? 0),
+                        amountDue: String(inv.amountDue ?? inv.amount_due ?? inv.balance ?? ''),
+                        status: String(inv.status ?? ''),
+                    })),
+            );
+        } catch {
+            setInvoiceResults([]);
+            toast.error('Failed to search invoices');
+        } finally {
+            setSearching(false);
+        }
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-blue-600" />
+                        Create Credit Note
+                    </DialogTitle>
+                    <DialogDescription>
+                        Select the original customer invoice. Lines, amounts, and GL posting are driven from that invoice — no manual entry.
+                    </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4">
+                    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 space-y-1">
+                        <p className="font-medium">What happens next</p>
+                        <ol className="list-decimal pl-5 space-y-0.5 text-xs">
+                            <li>Choose <strong>Price correction</strong> or <strong>Return goods</strong></li>
+                            <li>Pick lines from the invoice (system suggests correct amounts)</li>
+                            <li>Credit note is created and <strong>posted immediately</strong> — AR and GL update automatically</li>
+                        </ol>
+                    </div>
+
+                    <div>
+                        <Label>Original customer invoice *</Label>
+                        <div className="relative mt-1">
+                            <Input
+                                placeholder="Search invoice # or customer name (e.g. mire)..."
+                                value={invoiceSearch}
+                                onChange={(e) => {
+                                    setInvoiceSearch(e.target.value);
+                                    void searchInvoices(e.target.value);
+                                }}
+                            />
+                            {searching && (
+                                <p className="text-xs text-gray-500 mt-1">Searching…</p>
+                            )}
+                            {invoiceResults.length > 0 && (
+                                <div className="absolute z-10 w-full bg-white border rounded-md shadow-lg mt-1 max-h-56 overflow-y-auto">
+                                    {invoiceResults.map((inv) => (
+                                        <button
+                                            key={inv.id}
+                                            type="button"
+                                            className="w-full text-left px-3 py-2.5 hover:bg-blue-50 text-sm border-b last:border-b-0"
+                                            onClick={() => {
+                                                onInvoiceSelected({
+                                                    id: inv.id,
+                                                    invoiceNumber: inv.invoiceNumber,
+                                                    customerId: inv.customerId,
+                                                });
+                                            }}
+                                        >
+                                            <div className="font-medium">{inv.invoiceNumber}</div>
+                                            <div className="text-gray-600">{inv.customerName}</div>
+                                            <div className="text-xs text-gray-500 mt-0.5">
+                                                Total {formatCurrency(parseFloat(inv.totalAmount || '0'))}
+                                                {inv.amountDue && parseFloat(inv.amountDue) > 0 && (
+                                                    <> · Outstanding {formatCurrency(parseFloat(inv.amountDue))}</>
+                                                )}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            {invoiceSearch.length >= 2 && !searching && invoiceResults.length === 0 && (
+                                <p className="text-xs text-gray-500 mt-2">No open customer invoices match.</p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Cancel</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// ============================================================
+// Create Customer Debit Note Modal (manual draft — credit uses smart wizard)
 // ============================================================
 
 interface CreateCustomerNoteModalProps {
     open: boolean;
     onClose: () => void;
-    noteType: 'CREDIT_NOTE' | 'DEBIT_NOTE';
+    noteType: 'DEBIT_NOTE';
     onSuccess: () => void;
 }
 
-function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateCustomerNoteModalProps) {
+function CreateCustomerNoteModal({ open, onClose, onSuccess }: CreateCustomerNoteModalProps) {
     const [invoiceId, setInvoiceId] = useState('');
     const [reason, setReason] = useState('');
-    const [cnType, setCnType] = useState<'FULL' | 'PARTIAL' | 'PRICE_CORRECTION'>('PARTIAL');
-    const [returnsGoods, setReturnsGoods] = useState(false);
     const [additionalNotes, setAdditionalNotes] = useState('');
     const [lines, setLines] = useState<CreateNoteLineInput[]>([
         { productName: '', quantity: 1, unitPrice: 0, taxRate: 0 },
@@ -832,27 +1025,14 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
 
         setSubmitting(true);
         try {
-            if (noteType === 'CREDIT_NOTE') {
-                const data: CreateCreditNoteRequest = {
-                    invoiceId,
-                    reason,
-                    noteType: cnType,
-                    returnsGoods,
-                    lines: lines.map(l => ({ ...l, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate) })),
-                    notes: additionalNotes || undefined,
-                };
-                await creditDebitNoteService.createCustomerCreditNote(data);
-                toast.success('Credit note created (Draft)');
-            } else {
-                const data: CreateDebitNoteRequest = {
-                    invoiceId,
-                    reason,
-                    lines: lines.map(l => ({ ...l, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate) })),
-                    notes: additionalNotes || undefined,
-                };
-                await creditDebitNoteService.createCustomerDebitNote(data);
-                toast.success('Debit note created (Draft)');
-            }
+            const data: CreateDebitNoteRequest = {
+                invoiceId,
+                reason,
+                lines: lines.map(l => ({ ...l, quantity: Number(l.quantity), unitPrice: Number(l.unitPrice), taxRate: Number(l.taxRate) })),
+                notes: additionalNotes || undefined,
+            };
+            await creditDebitNoteService.createCustomerDebitNote(data);
+            toast.success('Debit note created (Draft)');
             onSuccess();
             resetForm();
             onClose();
@@ -867,7 +1047,6 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
     const resetForm = () => {
         setInvoiceId('');
         setReason('');
-        setReturnsGoods(false);
         setAdditionalNotes('');
         setLines([{ productName: '', quantity: 1, unitPrice: 0, taxRate: 0 }]);
         setInvoiceSearch('');
@@ -879,13 +1058,9 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
         <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }} zIndex={cnGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
-                    <DialogTitle>
-                        Create {noteType === 'CREDIT_NOTE' ? 'Credit' : 'Debit'} Note
-                    </DialogTitle>
+                    <DialogTitle>Create Debit Note</DialogTitle>
                     <DialogDescription>
-                        {noteType === 'CREDIT_NOTE'
-                            ? 'Reduce customer balance (returns, allowances, corrections)'
-                            : 'Increase customer balance (additional charges, corrections)'}
+                        Increase customer balance (additional charges, corrections)
                     </DialogDescription>
                 </DialogHeader>
 
@@ -949,38 +1124,7 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
                         />
                     </div>
 
-                    {/* Note Type (credit only) */}
-                    {noteType === 'CREDIT_NOTE' && (
-                        <div>
-                            <Label>Credit Note Type</Label>
-                            <Select value={cnType} onValueChange={(v: string) => setCnType(v as 'FULL' | 'PARTIAL' | 'PRICE_CORRECTION')}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="FULL">Full Reversal</SelectItem>
-                                    <SelectItem value="PARTIAL">Partial</SelectItem>
-                                    <SelectItem value="PRICE_CORRECTION">Price Correction</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    )}
-
-                    {/* Returns Goods checkbox (credit note only, not for price corrections) */}
-                    {noteType === 'CREDIT_NOTE' && cnType !== 'PRICE_CORRECTION' && (
-                        <label className="flex items-center gap-2 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={returnsGoods}
-                                onChange={e => setReturnsGoods(e.target.checked)}
-                                className="h-4 w-4 rounded border-gray-300"
-                            />
-                            <span className="text-sm font-medium">Customer returns goods</span>
-                            <span className="text-xs text-gray-500">(increases inventory, reverses COGS)</span>
-                        </label>
-                    )}
-
-                    {/* Line Items */}
+                    {/* Line Items — debit notes only; credit notes use invoice-linked wizard */}
                     <div>
                         <div className="flex items-center justify-between mb-2">
                             <Label>Line Items</Label>
@@ -1063,7 +1207,7 @@ function CreateCustomerNoteModal({ open, onClose, noteType, onSuccess }: CreateC
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Cancel</Button>
                     <Button onClick={handleSubmit} disabled={submitting}>
-                        {submitting ? 'Creating...' : `Create ${noteType === 'CREDIT_NOTE' ? 'Credit' : 'Debit'} Note`}
+                        {submitting ? 'Creating...' : 'Create Debit Note'}
                     </Button>
                 </DialogFooter>
             </DialogContent>

@@ -14,6 +14,8 @@ import type { QuotationItem, UpdateQuotationInput } from '@shared/types/quotatio
 import { AxiosError } from 'axios';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
+import { useAuth } from '../../hooks/useAuth';
+import { isAuthQueryEnabled } from '../../lib/authQuery';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { DatePicker } from '../../components/ui/date-picker';
 import { getBusinessDate, addDaysToDateString } from '../../utils/businessDate';
@@ -78,11 +80,13 @@ export default function EditQuotationPage() {
   const [internalNotes, setInternalNotes] = useState('');
   const [requiresApproval, setRequiresApproval] = useState(false);
 
+  const { isAuthenticated } = useAuth();
+
   // Load existing quotation
   const { data: quoteData, isLoading: isLoadingQuote } = useQuery({
     queryKey: ['quotation', quoteNumber],
     queryFn: () => quotationApi.getQuotationByNumber(quoteNumber!),
-    enabled: !!quoteNumber,
+    enabled: !!quoteNumber && isAuthQueryEnabled(isAuthenticated),
   });
 
   const quote = quoteData;
@@ -158,6 +162,7 @@ export default function EditQuotationPage() {
   const editItemRefs = useRef<(HTMLInputElement | null)[][]>([]);
   const { data: allStockData } = useQuery({
     queryKey: ['stock-levels-cache'],
+    enabled: isAuthQueryEnabled(isAuthenticated),
     queryFn: async () => {
       const res = await api.inventory.stockLevels();
       if (!res.data.success) return [];

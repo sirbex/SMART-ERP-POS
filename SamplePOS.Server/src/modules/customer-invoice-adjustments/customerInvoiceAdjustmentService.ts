@@ -44,7 +44,12 @@ export interface ReturnableSaleLine {
     productName: string;
     quantity: number;
     returnableQuantity: number;
+    refundedQuantity: number;
     unitPrice: number;
+    uomSymbol: string | null;
+    uomName: string | null;
+    baseUomSymbol: string | null;
+    conversionFactor: number;
 }
 
 export interface AdjustmentContext {
@@ -92,7 +97,22 @@ function saleItemFromRow(row: Record<string, unknown>) {
     const quantity = Money.toNumber(Money.parseDb(row.quantity ?? 0));
     const unitPrice = Money.toNumber(Money.parseDb(row.unit_price ?? row.unitPrice ?? 0));
     const unitCost = Money.toNumber(Money.parseDb(row.unit_cost ?? row.unitCost ?? row.cost_price ?? 0));
-    return { id, productId, productName, quantity, unitPrice, unitCost };
+    const conversionFactor = Money.toNumber(Money.parseDb(row.conversion_factor ?? row.conversionFactor ?? 1));
+    const uomSymbol = row.uom_symbol ?? row.uomSymbol;
+    const uomName = row.uom_name ?? row.uomName;
+    const baseUomSymbol = row.base_uom_symbol ?? row.baseUomSymbol;
+    return {
+        id,
+        productId,
+        productName,
+        quantity,
+        unitPrice,
+        unitCost,
+        conversionFactor,
+        uomSymbol: uomSymbol != null ? String(uomSymbol) : null,
+        uomName: uomName != null ? String(uomName) : null,
+        baseUomSymbol: baseUomSymbol != null ? String(baseUomSymbol) : null,
+    };
 }
 
 const VOID_SALE_STATUSES = new Set(['VOID', 'VOIDED', 'VOIDED_BY_RETURN', 'CANCELLED']);
@@ -183,14 +203,25 @@ export const customerInvoiceAdjustmentService = {
                 const item = saleItemFromRow(raw);
                 if (!item.productId) continue;
 
-                returnableLines.push({
-                    saleItemId: item.id,
-                    productId: item.productId,
-                    productName: item.productName,
-                    quantity: item.quantity,
-                    returnableQuantity: item.quantity,
-                    unitPrice: item.unitPrice,
-                });
+                const refundedQty = Money.toNumber(
+                    Money.parseDb(raw.refunded_qty ?? raw.refundedQty ?? 0),
+                );
+                const returnableQty = Math.max(0, item.quantity - refundedQty);
+                if (returnableQty > 0.0001) {
+                    returnableLines.push({
+                        saleItemId: item.id,
+                        productId: item.productId,
+                        productName: item.productName,
+                        quantity: item.quantity,
+                        returnableQuantity: returnableQty,
+                        refundedQuantity: refundedQty,
+                        unitPrice: item.unitPrice,
+                        uomSymbol: item.uomSymbol,
+                        uomName: item.uomName,
+                        baseUomSymbol: item.baseUomSymbol,
+                        conversionFactor: item.conversionFactor,
+                    });
+                }
 
                 const resolved = await getFinalPrice(
                     item.productId,
@@ -277,7 +308,7 @@ export const customerInvoiceAdjustmentService = {
             totalSuggestedCreditAfterCap,
         );
 
-        if (outstandingBalance <= 0.009 && overchargeLines.length === 0) {
+        if (outstandingBalance <= 0.009 && overchargeLines.length === 0 && returnableLines.length === 0) {
             throw new BusinessRuleException(
                 'This invoice is fully settled and has no lines eligible for price correction or return.',
                 'ADJUST_INVOICE_SETTLED',
@@ -299,7 +330,7 @@ export const customerInvoiceAdjustmentService = {
                 { maxAdditionalCredit, outstandingBalance, invoiceTotal: invoice.totalAmount },
             );
         }
-        if (outstandingBalance <= 0.009 && maxAdditionalCredit <= 0.009) {
+        if (outstandingBalance <= 0.009 && maxAdditionalCredit <= 0.009 && returnableLines.length === 0) {
             throw new BusinessRuleException(
                 'Cannot adjust a fully paid invoice with no remaining correctable amount.',
                 'ADJUST_INVOICE_SETTLED',
@@ -528,6 +559,29 @@ export const customerInvoiceAdjustmentService = {
         });
 
         const posted = await creditDebitNoteService.postNote(pool, note.id);
+
+        const saleId = context.invoice.saleId;
+        if (saleId) {
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                for (const sel of input.lines) {
+                    await salesRepository.incrementRefundedQty(client, sel.saleItemId, sel.quantity);
+                }
+                await salesRepository.syncSaleStatusAfterCustomerReturn(client, saleId);
+                await client.query('COMMIT');
+            } catch (syncErr) {
+                await client.query('ROLLBACK');
+                logger.error('Failed to sync sale_items after customer return CN', {
+                    invoiceId: input.invoiceId,
+                    saleId,
+                    error: syncErr instanceof Error ? syncErr.message : String(syncErr),
+                });
+                throw syncErr;
+            } finally {
+                client.release();
+            }
+        }
 
         return {
             intent: 'RETURN_GOODS',

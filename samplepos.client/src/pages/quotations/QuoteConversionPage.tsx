@@ -12,18 +12,21 @@ import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
+import { useAuth } from '../../hooks/useAuth';
+import { isAuthQueryEnabled } from '../../lib/authQuery';
 import { getQuoteStatusBadge, isQuoteConvertible } from '@shared/types/quotation';
 import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
 
 export default function QuoteConversionPage() {
   const { quoteNumber } = useParams<{ quoteNumber: string }>();
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const [redirected, setRedirected] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['quotation', quoteNumber],
     queryFn: () => quotationApi.getQuotationByNumber(quoteNumber!),
-    enabled: !!quoteNumber,
+    enabled: !!quoteNumber && isAuthQueryEnabled(isAuthenticated),
   });
 
   // Redirect to POS once data is loaded and quote is convertible

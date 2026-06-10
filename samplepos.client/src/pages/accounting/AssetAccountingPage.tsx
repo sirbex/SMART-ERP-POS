@@ -894,7 +894,7 @@ export default function AssetAccountingPage() {
               <Settings className="h-12 w-12 mx-auto mb-3 text-gray-300" />
               <h3 className="text-lg font-medium text-gray-900">No asset classes defined</h3>
               <p className="text-sm text-gray-500 mt-1">
-                Asset classes define depreciation rules and GL account determination — like SAP asset classes.
+                Asset classes define depreciation rules and GL account mapping for fixed assets.
               </p>
               <button onClick={() => setShowCategoryForm(true)}
                 className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 inline-flex items-center">

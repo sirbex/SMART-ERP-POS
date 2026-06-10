@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import axios from 'axios';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './contexts/AuthContext';
 import { OfflineProvider } from './contexts/OfflineContext';
@@ -84,8 +85,9 @@ const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       retry: (failureCount, error) => {
-        // Never retry rate-limited or client errors (4xx)
-        const status = (error as { status?: number })?.status;
+        const status = axios.isAxiosError(error)
+          ? error.response?.status
+          : (error as { status?: number })?.status;
         if (status && status >= 400 && status < 500) return false;
         return failureCount < 1;
       },

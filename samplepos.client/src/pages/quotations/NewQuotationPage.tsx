@@ -14,6 +14,8 @@ import type { CreateQuotationInput, FulfillmentMode } from '@shared/types/quotat
 import { AxiosError } from 'axios';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
+import { useAuth } from '../../hooks/useAuth';
+import { isAuthQueryEnabled } from '../../lib/authQuery';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { DatePicker } from '../../components/ui/date-picker';
 import Decimal from 'decimal.js';
@@ -56,6 +58,7 @@ interface StockLevelItem {
 export default function NewQuotationPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isAuthenticated } = useAuth();
 
   // Customer data
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -91,6 +94,7 @@ export default function NewQuotationPage() {
   const itemRefs = useRef<(HTMLInputElement | null)[][]>([]);
   const { data: allStockData } = useQuery({
     queryKey: ['stock-levels-cache'],
+    enabled: isAuthQueryEnabled(isAuthenticated),
     queryFn: async () => {
       const res = await api.inventory.stockLevels();
       if (!res.data.success) return [];

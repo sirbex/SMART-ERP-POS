@@ -31,6 +31,7 @@ export type PermissionAction =
   | 'pay'
   | 'cancel'
   | 'refund'
+  | 'exchange'
   | 'export'
   | 'import'
   | 'reconcile'

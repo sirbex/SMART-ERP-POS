@@ -100,17 +100,20 @@ describe('receipt reprint parity', () => {
     expect(receipt.saleDate).toMatch(/^\d{2}\/\d{2}\/\d{4}/);
   });
 
-  it('omits customer line label when no customer on sale', () => {
+  it('maps snake_case seller and customer from sale detail API', () => {
     const receipt = buildReceiptDataFromSale(
       {
-        saleNumber: 'SALE-2026-0101',
+        saleNumber: 'SALE-2026-0200',
         createdAt: '2026-06-02T12:00:00.000Z',
-        totalAmount: 1000,
+        totalAmount: 10000,
+        cashier_name: 'Mary Seller',
+        customer_name: 'Acme Ltd',
       },
       null,
       { isReprint: true }
     );
 
-    expect(receipt.customerName).toBeUndefined();
+    expect(receipt.cashierName).toBe('Mary Seller');
+    expect(receipt.customerName).toBe('Acme Ltd');
   });
 });

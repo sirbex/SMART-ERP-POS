@@ -279,7 +279,7 @@ export default function DownPaymentClearingPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Down Payment Clearing</h1>
-            <p className="text-sm text-gray-500">SAP-style deposit clearing against invoices</p>
+            <p className="text-sm text-gray-500">Apply customer deposits against open invoices</p>
           </div>
         </div>
       </div>

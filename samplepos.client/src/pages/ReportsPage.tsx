@@ -3523,7 +3523,7 @@ export default function ReportsPage() {
                                   {card.badge}
                                 </span>
                                 <span className="inline-flex items-center text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-medium">
-                                  SAP/Odoo-style
+                                  Ledger-based
                                 </span>
                               </div>
                             </div>
@@ -3550,14 +3550,14 @@ export default function ReportsPage() {
                               Category Intelligence
                             </h3>
                             <p className="text-xs sm:text-sm text-gray-600 mb-2 sm:mb-3 line-clamp-2">
-                              SAP/Odoo-style multi-dimensional analysis. Inventory, Sales, Purchases, Stock Valuation & Expiry Exposure — all from ledger/stock tables, reconciled with GL.
+                              Multi-dimensional analysis across inventory, sales, purchases, stock valuation, and expiry exposure — from ledger and stock tables, reconciled with GL.
                             </p>
                             <div className="flex flex-wrap gap-1.5">
                               <span className="inline-flex items-center text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
                                 Cross-Module
                               </span>
                               <span className="inline-flex items-center text-xs bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full font-medium">
-                                SAP/Odoo-style
+                                Ledger-based
                               </span>
                               <span className="inline-flex items-center text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
                                 PDF Export

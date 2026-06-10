@@ -14,12 +14,14 @@ import { getQuoteStatusBadge, getDaysUntilExpiry, calculateQuoteAge, normalizeSt
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { formatTimestampDate } from '../../utils/businessDate';
-import { useAuthStore } from '../../stores/authStore';
+import { useAuth } from '../../hooks/useAuth';
+import { isAuthQueryEnabled } from '../../lib/authQuery';
 
 export default function QuotationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { isAdmin } = useAuthStore();
+  const { isAuthenticated, user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   // Default to showing active quotations (exclude CONVERTED and CANCELLED)
@@ -32,6 +34,7 @@ export default function QuotationsPage() {
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['quotations', page, statusFilter, typeFilter, searchTerm, sortBy, sortOrder],
+    enabled: isAuthQueryEnabled(isAuthenticated),
     queryFn: () =>
       quotationApi.listQuotations({
         page,
@@ -405,7 +408,7 @@ export default function QuotationsPage() {
                             Open in POS
                           </button>
                         )}
-                        {normalizeStatus(quote.status) === 'CANCELLED' && isAdmin() && (
+                        {normalizeStatus(quote.status) === 'CANCELLED' && isAdmin && (
                           deleteConfirmId === quote.id ? (
                             <span className="inline-flex items-center gap-1">
                               <button

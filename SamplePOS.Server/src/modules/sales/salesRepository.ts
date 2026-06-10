@@ -91,6 +91,9 @@ export interface RefundableSaleItemRecord {
   itemType: string;
   productName: string;
   sku: string | null;
+  uomSymbol?: string | null;
+  uomName?: string | null;
+  baseUomSymbol?: string | null;
 }
 
 export interface RefundRecord {
@@ -102,6 +105,9 @@ export interface RefundRecord {
   totalAmount: string;
   totalCost: string;
   status: string;
+  refundType?: string;
+  exchangeAppliedAmount?: string;
+  exchangeAppliedSaleId?: string | null;
   glTransactionId: string | null;
   createdById: string;
   approvedById: string | null;
@@ -129,6 +135,7 @@ export interface CreateRefundData {
   reason: string;
   totalAmount: string;
   totalCost: string;
+  refundType?: 'REFUND' | 'EXCHANGE';
   createdById: string;
   approvedById?: string;
 }
@@ -465,7 +472,17 @@ export const salesRepository = {
     items: SaleItemRecord[];
     paymentLines?: Record<string, unknown>[];
   } | null> {
-    const saleResult = await pool.query('SELECT * FROM sales WHERE id = $1', [id]);
+    const saleResult = await pool.query(
+      `SELECT
+        s.*,
+        c.name AS customer_name,
+        u.full_name AS cashier_name
+       FROM sales s
+       LEFT JOIN customers c ON s.customer_id = c.id
+       LEFT JOIN users u ON s.cashier_id = u.id
+       WHERE s.id = $1`,
+      [id]
+    );
 
     if (saleResult.rows.length === 0) {
       return null;
@@ -478,9 +495,14 @@ export const salesRepository = {
         si.*,
         COALESCE(p.name, si.product_name) AS product_name,
         p.sku AS sku,
-        p.barcode AS barcode
+        p.barcode AS barcode,
+        COALESCE(sell_uom.symbol, sell_uom.name) AS uom_symbol,
+        sell_uom.name AS uom_name,
+        COALESCE(base_uom.symbol, base_uom.name) AS base_uom_symbol
        FROM sale_items si
        LEFT JOIN products p ON p.id = si.product_id
+       LEFT JOIN uoms sell_uom ON sell_uom.id = si.uom_id
+       LEFT JOIN uoms base_uom ON base_uom.id = si.base_uom_id
        WHERE si.sale_id = $1
        ORDER BY si.created_at`,
       [id]
@@ -1350,9 +1372,14 @@ export const salesRepository = {
         si.product_type AS "productType",
         si.item_type AS "itemType",
         COALESCE(p.name, si.product_name) AS "productName",
-        p.sku
+        p.sku,
+        COALESCE(sell_uom.symbol, sell_uom.name) AS "uomSymbol",
+        sell_uom.name AS "uomName",
+        COALESCE(base_uom.symbol, base_uom.name) AS "baseUomSymbol"
        FROM sale_items si
        LEFT JOIN products p ON si.product_id = p.id
+       LEFT JOIN uoms sell_uom ON sell_uom.id = si.uom_id
+       LEFT JOIN uoms base_uom ON base_uom.id = si.base_uom_id
        WHERE si.sale_id = $1
        ORDER BY si.created_at`,
       [saleId]
@@ -1396,9 +1423,9 @@ export const salesRepository = {
     const result = await pool.query(
       `INSERT INTO sale_refunds (
         refund_number, sale_id, refund_date, reason,
-        total_amount, total_cost, status,
+        total_amount, total_cost, status, refund_type,
         created_by_id, approved_by_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'COMPLETED', $7, $8)
+      ) VALUES ($1, $2, $3, $4, $5, $6, 'COMPLETED', $7, $8, $9)
       RETURNING
         id,
         refund_number AS "refundNumber",
@@ -1408,6 +1435,9 @@ export const salesRepository = {
         total_amount AS "totalAmount",
         total_cost AS "totalCost",
         status,
+        refund_type AS "refundType",
+        exchange_applied_amount AS "exchangeAppliedAmount",
+        exchange_applied_sale_id AS "exchangeAppliedSaleId",
         gl_transaction_id AS "glTransactionId",
         created_by_id AS "createdById",
         approved_by_id AS "approvedById",
@@ -1419,6 +1449,7 @@ export const salesRepository = {
         data.reason,
         data.totalAmount,
         data.totalCost,
+        data.refundType || 'REFUND',
         data.createdById,
         data.approvedById || null,
       ]
@@ -1554,6 +1585,86 @@ export const salesRepository = {
        WHERE id = $1 AND status = 'COMPLETED'`,
       [saleId]
     );
+  },
+
+  /**
+   * After customer credit-note return goods or invoice adjustment, align sale status
+   * with refunded_qty on sale_items (same rules as salesService.refundSale).
+   */
+  async syncSaleStatusAfterCustomerReturn(pool: Pool | PoolClient, saleId: string): Promise<void> {
+    const isFull = await this.isSaleFullyRefunded(pool, saleId);
+    if (isFull) {
+      await this.markSaleVoidedByReturn(pool, saleId);
+      return;
+    }
+    const statusRes = await pool.query<{ status: string }>(
+      `SELECT status FROM sales WHERE id = $1`,
+      [saleId],
+    );
+    if (statusRes.rows[0]?.status === 'COMPLETED') {
+      await this.markSalePartiallyReturned(pool, saleId);
+    }
+  },
+
+  /**
+   * Load an EXCHANGE refund eligible for POS credit application.
+   */
+  async getExchangeRefundForApplication(
+    pool: Pool | PoolClient,
+    refundId: string,
+  ): Promise<{
+    id: string;
+    refundNumber: string;
+    totalAmount: number;
+    exchangeAppliedAmount: number;
+    refundType: string;
+    status: string;
+  } | null> {
+    const result = await pool.query(
+      `SELECT id, refund_number, total_amount, exchange_applied_amount, refund_type, status
+       FROM sale_refunds WHERE id = $1`,
+      [refundId],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      refundNumber: row.refund_number,
+      totalAmount: Money.toNumber(Money.parseDb(row.total_amount)),
+      exchangeAppliedAmount: Money.toNumber(Money.parseDb(row.exchange_applied_amount ?? 0)),
+      refundType: row.refund_type ?? 'REFUND',
+      status: row.status,
+    };
+  },
+
+  /**
+   * Record exchange credit applied on a replacement POS sale.
+   */
+  async applyExchangeCreditToSale(
+    pool: Pool | PoolClient,
+    refundId: string,
+    saleId: string,
+    appliedAmount: number,
+  ): Promise<void> {
+    const result = await pool.query(
+      `UPDATE sale_refunds
+       SET exchange_applied_amount = exchange_applied_amount + $1,
+           exchange_applied_sale_id = COALESCE(exchange_applied_sale_id, $2),
+           updated_at = NOW()
+       WHERE id = $3
+         AND refund_type = 'EXCHANGE'
+         AND status = 'COMPLETED'
+         AND exchange_applied_amount + $1 <= total_amount + 0.01
+       RETURNING id`,
+      [appliedAmount, saleId, refundId],
+    );
+    if (result.rows.length === 0) {
+      throw new BusinessError(
+        'Exchange credit could not be applied — invalid or exhausted exchange refund',
+        'ERR_EXCHANGE_CREDIT_001',
+        { refundId, saleId, appliedAmount },
+      );
+    }
   },
 
   /**

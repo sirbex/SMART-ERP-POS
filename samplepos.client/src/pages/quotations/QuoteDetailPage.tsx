@@ -31,6 +31,8 @@ import DeliveryNoteDrawer from '../../components/quotations/DeliveryNoteDrawer';
 import CreateDeliveryNoteDrawer from '../../components/quotations/CreateDeliveryNoteDrawer';
 import FulfillmentDrawer from '../../components/quotations/FulfillmentDrawer';
 import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
+import { useAuth } from '../../hooks/useAuth';
+import { isAuthQueryEnabled } from '../../lib/authQuery';
 
 interface InvoiceSettings {
   companyName?: string;
@@ -54,14 +56,17 @@ export default function QuoteDetailPage() {
   const [showCreateDN, setShowCreateDN] = useState(false);
   const [showFulfillment, setShowFulfillment] = useState(false);
 
+  const { isAuthenticated } = useAuth();
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['quotation', quoteNumber],
     queryFn: () => quotationApi.getQuotationByNumber(quoteNumber!),
-    enabled: !!quoteNumber,
+    enabled: !!quoteNumber && isAuthQueryEnabled(isAuthenticated),
   });
 
   const { data: settingsData } = useQuery({
     queryKey: ['invoice-settings'],
+    enabled: isAuthQueryEnabled(isAuthenticated),
     queryFn: async (): Promise<InvoiceSettings | undefined> => {
       const response = await api.settings.getInvoiceSettings();
       return response.data?.data as InvoiceSettings | undefined;
@@ -90,13 +95,13 @@ export default function QuoteDetailPage() {
   const { data: fulfillmentData } = useQuery({
     queryKey: ['dn-fulfillment', quotationId],
     queryFn: () => deliveryNotesApi.getFulfillment(quotationId!),
-    enabled: isWholesaleQuote && !!quotationId,
+    enabled: isAuthQueryEnabled(isAuthenticated) && isWholesaleQuote && !!quotationId,
   });
 
   const { data: dnListData } = useQuery({
     queryKey: ['quotation-dns', quotationId],
     queryFn: () => deliveryNotesApi.list({ quotationId: quotationId!, limit: 50 }),
-    enabled: isWholesaleQuote && !!quotationId,
+    enabled: isAuthQueryEnabled(isAuthenticated) && isWholesaleQuote && !!quotationId,
   });
 
   // ── Convert wholesale quote to Sales Order ──

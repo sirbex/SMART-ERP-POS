@@ -881,7 +881,7 @@ function POSTransactionModeInline({
         },
         {
             value: 'OrderToPayment' as const,
-            label: 'Order → Payment (SAP-style)',
+            label: 'Order → Payment',
             description: 'Two-step flow. Dispenser/staff creates an order, then cashier processes payment separately. Ideal for pharmacies and split-role workflows.',
         },
     ];

@@ -354,7 +354,7 @@ export default function GrirClearingPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">GR/IR Clearing</h1>
           <p className="text-sm text-gray-500 mt-1">
-            SAP MR11 — Match goods receipts with supplier invoices
+            Match goods receipts with supplier invoices
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -601,7 +601,7 @@ export default function GrirClearingPage() {
                 </div>
                 {clearingModal.grAmount !== clearingModal.invoiceAmount && (
                   <p className="text-xs text-yellow-600 mt-1">
-                    Variance will be posted to Price Variance account (5020) per SAP standard.
+                    Variance will be posted to Price Variance account (5020).
                   </p>
                 )}
               </div>
@@ -752,7 +752,7 @@ export default function GrirClearingPage() {
         ) : (
           <div className="space-y-3">
             <p className="text-sm text-gray-500">
-              Comparing GR received quantities/prices against PO ordered values (SAP ME23N style).
+              Comparing GR received quantities/prices against PO ordered values.
             </p>
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">

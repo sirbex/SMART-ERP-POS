@@ -1952,7 +1952,7 @@ export default function GoodsReceiptsPage() {
               ) : (
                 <>
                   <p className="text-xs text-gray-600 mb-3 px-1">
-                    Only on-hand quantity from this receipt can be returned (SAP/Odoo). Sold or consumed units cannot be sent back to the supplier.
+                    Only on-hand quantity from this receipt can be returned. Sold or consumed units cannot be sent back to the supplier.
                   </p>
 
                   {/* Mobile card list */}

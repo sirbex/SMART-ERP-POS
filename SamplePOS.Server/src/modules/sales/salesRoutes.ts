@@ -4,7 +4,7 @@ import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseList
 import { pool as globalPool } from '../../db/pool.js';
 import { salesService, CreateSaleInput, RefundSaleInput } from './salesService.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requirePermission } from '../../rbac/middleware.js';
+import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 import { normalizeResponse, normalizePaginatedResponse } from '../../utils/caseConverter.js';
 import { POSSaleSchema, POSSaleLineItemSchema } from '../../../../shared/zod/pos-sale.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -109,6 +109,7 @@ const RefundSaleBodySchema = z.object({
   reason: z.string().min(1).trim(),
   approvedById: z.string().uuid().optional(),
   refundDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD format').optional(),
+  refundType: z.enum(['REFUND', 'EXCHANGE']).optional().default('REFUND'),
 });
 
 export const salesController = {
@@ -181,6 +182,7 @@ export const salesController = {
         soldBy: req.user?.id || '00000000-0000-0000-0000-000000000000', // From auth middleware - null UUID for system
         saleDate: posData.saleDate || undefined, // Backdated sale date if provided
         paymentLines: posData.paymentLines || undefined, // Include payment lines for split payment
+        exchangeRefundId: posData.exchangeRefundId || undefined,
       };
     } else {
       // Log POS validation errors
@@ -570,11 +572,32 @@ export const salesController = {
     const body = RefundSaleBodySchema.parse(req.body);
     const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
 
+    const refundType = body.refundType ?? 'REFUND';
+    const requiredPermission = refundType === 'EXCHANGE' ? 'sales.exchange' : 'sales.refund';
+    const { getRbacService } = await import('../../rbac/middleware.js');
+    let permitted = false;
+    try {
+      const rbac = getRbacService(req);
+      permitted = await rbac.checkPermission(userId, requiredPermission, null, null);
+      if (!permitted && refundType === 'EXCHANGE') {
+        permitted = await rbac.checkPermission(userId, 'sales.refund', null, null);
+      }
+    } catch {
+      if (req.user?.role && ['ADMIN', 'MANAGER', 'CASHIER'].includes(req.user.role.toUpperCase())) {
+        permitted = true;
+      }
+    }
+    if (!permitted) {
+      res.status(403).json({ success: false, error: 'Insufficient permissions', code: 'PERMISSION_DENIED' });
+      return;
+    }
+
     const input: RefundSaleInput = {
       items: body.items,
       reason: body.reason,
       approvedById: body.approvedById,
       refundDate: body.refundDate,
+      refundType,
     };
 
     const result = await salesService.refundSale(pool, id, userId, input);
@@ -722,11 +745,11 @@ salesRoutes.post(
   asyncHandler(salesController.voidSale)
 );
 
-// Refund sale - requires sales.refund permission (with audit trail)
+// Refund / exchange sale — permission checked in controller (refund vs exchange)
 salesRoutes.post(
   '/:id/refund',
   authenticate,
-  requirePermission('sales.refund'),
+  requireAnyPermission(['sales.refund', 'sales.exchange']),
   asyncHandler(salesController.refundSale)
 );
 

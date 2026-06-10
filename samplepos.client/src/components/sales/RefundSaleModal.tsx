@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../../utils/api';
 import { extractApiError } from '../../utils/extractApiError';
 import { formatCurrency } from '../../utils/currency';
 import Decimal from 'decimal.js';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
+
+import { formatSellingQuantityWithBaseHint, sellingQtyToBase } from '@shared/utils/sale-item-uom';
 
 interface RefundItem {
     saleItemId: string;
@@ -16,6 +19,10 @@ interface RefundItem {
     maxRefundable: number;
     selected: boolean;
     refundQuantity: number;
+    uomSymbol: string | null;
+    uomName: string | null;
+    baseUomSymbol: string | null;
+    conversionFactor: number;
 }
 
 interface RefundSaleModalProps {
@@ -33,18 +40,43 @@ interface RefundSaleModalProps {
         price?: number | string;
         refundedQty?: number | string;
         refunded_qty?: number | string;
+        conversionFactor?: number | string;
+        conversion_factor?: number | string;
+        uomSymbol?: string | null;
+        uom_symbol?: string | null;
+        uomName?: string | null;
+        uom_name?: string | null;
+        baseUomSymbol?: string | null;
+        base_uom_symbol?: string | null;
         totalPrice?: number | string;
         total_price?: number | string;
     }[];
+    /** refund = full/partial return; exchange = wrong-product swap (partial only, then POS) */
+    mode?: 'refund' | 'exchange';
+    customerId?: string;
+    customerName?: string;
     onClose: () => void;
     onSuccess: () => void;
 }
 
-export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClose, onSuccess }: RefundSaleModalProps) {
-    const [reason, setReason] = useState('');
+export function RefundSaleModal({
+    saleId,
+    saleNumber,
+    totalAmount,
+    items,
+    mode = 'refund',
+    customerId,
+    customerName,
+    onClose,
+    onSuccess,
+}: RefundSaleModalProps) {
+    const navigate = useNavigate();
+    const isExchange = mode === 'exchange';
+    const [reason, setReason] = useState(isExchange ? 'Customer exchange - wrong product selected' : '');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [successResult, setSuccessResult] = useState<{
+        refundId: string;
         refundNumber: string;
         totalAmount: number;
         isFullRefund: boolean;
@@ -56,7 +88,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
     const { openGuard, closeGuard } = useTransactionGuard();
     const guardRef = useRef<GuardHandle | null>(null);
     useEffect(() => {
-        guardRef.current = openGuard({ cancellable: false, label: 'Process sale refund/return' });
+        guardRef.current = openGuard({ cancellable: false, label: isExchange ? 'Process product exchange' : 'Process sale refund/return' });
         return () => { if (guardRef.current) { closeGuard(guardRef.current.id); guardRef.current = null; } };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -69,6 +101,9 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                 const qty = Number(item.quantity || item.qty || 0);
                 const refundedQty = Number(item.refundedQty || item.refunded_qty || 0);
                 const maxRefundable = qty - refundedQty;
+                const conversionFactor = Number(
+                    item.conversionFactor ?? item.conversion_factor ?? 1,
+                );
                 return {
                     saleItemId: item.id!,
                     productName: item.productName || item.product_name || 'Unknown Product',
@@ -77,7 +112,13 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                     unitPrice: Number(item.unitPrice || item.unit_price || item.price || 0),
                     maxRefundable,
                     selected: false,
-                    refundQuantity: maxRefundable, // Default to max when selected
+                    refundQuantity: maxRefundable,
+                    uomSymbol: item.uomSymbol ?? item.uom_symbol ?? null,
+                    uomName: item.uomName ?? item.uom_name ?? null,
+                    baseUomSymbol: item.baseUomSymbol ?? item.base_uom_symbol ?? null,
+                    conversionFactor: Number.isFinite(conversionFactor) && conversionFactor > 0
+                        ? conversionFactor
+                        : 1,
                 };
             })
             .filter((item) => item.maxRefundable > 0) // Only show items with remaining refundable qty
@@ -136,6 +177,10 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
     }, [refundItems]);
 
     const handleRefund = async () => {
+        if (isExchange && isFullRefund) {
+            setError('Exchange is for swapping wrong items only. Use Return when the customer is giving back the entire sale.');
+            return;
+        }
         if (selectedItems.length === 0) {
             setError('Select at least one item to refund');
             return;
@@ -164,14 +209,16 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                     quantity: item.refundQuantity,
                 })),
                 reason: reason.trim(),
+                refundType: isExchange ? 'EXCHANGE' : 'REFUND',
             });
             const data = response.data.data as {
-                refund: { refundNumber: string; totalAmount: number | string };
+                refund: { id: string; refundNumber: string; totalAmount: number | string };
                 isFullRefund: boolean;
                 itemsRestored: number;
             };
             setSuccessResult({
                 refundNumber: data.refund.refundNumber,
+                refundId: data.refund.id,
                 totalAmount: Number(data.refund.totalAmount),
                 isFullRefund: data.isFullRefund,
                 itemsRestored: data.itemsRestored,
@@ -200,20 +247,27 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
                         </div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-2">Return Processed</h3>
+                        <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                            {isExchange ? 'Exchange Credit Posted' : 'Return Processed'}
+                        </h3>
                         <p className="text-sm text-gray-600 mb-2">
-                            {successResult.isFullRefund ? 'Full return' : 'Partial return'} completed successfully.
+                            {isExchange
+                                ? 'Wrong item(s) returned to stock. Sell the replacement at POS and apply this credit.'
+                                : successResult.isFullRefund
+                                    ? 'Full return completed successfully.'
+                                    : 'Partial return completed successfully.'}
                         </p>
                         <p className="text-xs text-gray-500 mb-4">
-                            Stock restored &middot; Credit note posted &middot; Refund issued
+                            Stock restored
+                            {isExchange ? ' · Store credit ready for replacement sale' : ' · Return document posted · Refund issued'}
                         </p>
                         <div className="bg-gray-50 rounded-lg p-4 border border-gray-200 mb-4 space-y-2">
                             <div className="flex justify-between text-sm">
-                                <span className="text-gray-500">Credit Note / Return #</span>
+                                <span className="text-gray-500">{isExchange ? 'Exchange return #' : 'Return #'}</span>
                                 <span className="font-mono font-semibold text-gray-900">{successResult.refundNumber}</span>
                             </div>
                             <div className="flex justify-between text-sm">
-                                <span className="text-gray-500">Refund Amount</span>
+                                <span className="text-gray-500">{isExchange ? 'Exchange Credit' : 'Refund Amount'}</span>
                                 <span className="font-semibold text-gray-900">{formatCurrency(successResult.totalAmount)}</span>
                             </div>
                             <div className="flex justify-between text-sm">
@@ -221,12 +275,43 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                 <span className="font-semibold text-gray-900">{successResult.itemsRestored}</span>
                             </div>
                         </div>
-                        <button
-                            onClick={onSuccess}
-                            className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm"
-                        >
-                            Done
-                        </button>
+                        {isExchange ? (
+                            <div className="flex flex-col gap-2">
+                                <button
+                                    onClick={() => {
+                                        sessionStorage.setItem(
+                                            'pos_exchange_credit',
+                                            JSON.stringify({
+                                                refundId: successResult.refundId,
+                                                amount: successResult.totalAmount,
+                                                saleNumber,
+                                                refundNumber: successResult.refundNumber,
+                                                customerId: customerId || null,
+                                                customerName: customerName || null,
+                                            })
+                                        );
+                                        onSuccess();
+                                        navigate('/pos');
+                                    }}
+                                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm"
+                                >
+                                    Sell Replacement at POS
+                                </button>
+                                <button
+                                    onClick={onSuccess}
+                                    className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm"
+                                >
+                                    Done
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                onClick={onSuccess}
+                                className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm"
+                            >
+                                Done
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>,
@@ -252,7 +337,9 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                         </svg>
                     </div>
                     <div className="flex-1">
-                        <h3 id="refund-modal-title" className="text-lg font-semibold text-amber-900">Return Sale</h3>
+                        <h3 id="refund-modal-title" className="text-lg font-semibold text-amber-900">
+                            {isExchange ? 'Exchange Product' : 'Return Sale'}
+                        </h3>
                         <p className="text-sm text-amber-700">{saleNumber} &middot; {formatCurrency(totalAmount)}</p>
                     </div>
                 </div>
@@ -265,12 +352,25 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                         <div>
-                            <p className="font-medium">What happens when you return a sale</p>
+                            <p className="font-medium">
+                                {isExchange ? 'Product exchange' : 'What happens when you return a sale'}
+                            </p>
                             <ul className="mt-1 list-disc list-inside text-xs space-y-0.5 text-blue-800">
-                                <li>Items are restored to stock at original cost</li>
-                                <li>A Credit Note is posted against this sale</li>
-                                <li>Refund is issued to the original payment method (cash drawer, card, or customer credit)</li>
-                                <li>The original sale remains in the audit trail — it is not deleted</li>
+                                {isExchange ? (
+                                    <>
+                                        <li>Return the wrong item(s) only — not the full sale</li>
+                                        <li>Stock is restored; store credit is held for the replacement sale</li>
+                                        <li>Continue at POS to sell the correct replacement product</li>
+                                        <li>Exchange credit applies automatically against the new sale total</li>
+                                    </>
+                                ) : (
+                                    <>
+                                        <li>Items are restored to stock at original cost</li>
+                                        <li>A return document (REF-*) is posted with revenue reversal</li>
+                                        <li>Refund is issued to the original payment method (cash drawer, card, or customer account)</li>
+                                        <li>The original sale remains in the audit trail — it is not deleted</li>
+                                    </>
+                                )}
                             </ul>
                         </div>
                     </div>
@@ -291,7 +391,7 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                     onClick={selectAll}
                                     className="text-sm text-blue-600 hover:text-blue-800 font-medium"
                                 >
-                                    {refundItems.every((i) => i.selected) ? 'Deselect All' : 'Select All (Full Return)'}
+                                    {refundItems.every((i) => i.selected) ? 'Deselect All' : isExchange ? 'Select All Items' : 'Select All (Full Return)'}
                                 </button>
                             </div>
 
@@ -317,18 +417,44 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                                         {formatCurrency(new Decimal(item.unitPrice).times(item.selected ? item.refundQuantity : 0).toNumber())}
                                                     </span>
                                                 </div>
-                                                <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
+                                                <div className="flex items-center gap-4 mt-1 text-xs text-gray-500 flex-wrap">
                                                     <span>Unit price: {formatCurrency(item.unitPrice)}</span>
-                                                    <span>Sold: {item.quantity}</span>
+                                                    <span>
+                                                        Sold:{' '}
+                                                        {formatSellingQuantityWithBaseHint(item.quantity, {
+                                                            uomSymbol: item.uomSymbol,
+                                                            uomName: item.uomName,
+                                                            baseUomSymbol: item.baseUomSymbol,
+                                                            conversionFactor: item.conversionFactor,
+                                                        })}
+                                                    </span>
                                                     {item.refundedQty > 0 && (
-                                                        <span className="text-amber-600">Already returned: {item.refundedQty}</span>
+                                                        <span className="text-amber-600">
+                                                            Already returned:{' '}
+                                                            {formatSellingQuantityWithBaseHint(item.refundedQty, {
+                                                                uomSymbol: item.uomSymbol,
+                                                                uomName: item.uomName,
+                                                                baseUomSymbol: item.baseUomSymbol,
+                                                                conversionFactor: item.conversionFactor,
+                                                            })}
+                                                        </span>
                                                     )}
-                                                    <span className="text-blue-600">Available to return: {item.maxRefundable}</span>
+                                                    <span className="text-blue-600">
+                                                        Available:{' '}
+                                                        {formatSellingQuantityWithBaseHint(item.maxRefundable, {
+                                                            uomSymbol: item.uomSymbol,
+                                                            uomName: item.uomName,
+                                                            baseUomSymbol: item.baseUomSymbol,
+                                                            conversionFactor: item.conversionFactor,
+                                                        })}
+                                                    </span>
                                                 </div>
                                                 {/* Quantity selector — visible when item is selected */}
                                                 {item.selected && (
-                                                    <div className="mt-3 flex items-center gap-2">
-                                                        <label className="text-xs text-gray-600">Return qty:</label>
+                                                    <div className="mt-3 flex items-center gap-2 flex-wrap">
+                                                        <label className="text-xs text-gray-600">
+                                                            Return qty ({item.uomSymbol || item.uomName || 'unit'}):
+                                                        </label>
                                                         <div className="flex items-center border border-gray-300 rounded-lg overflow-hidden">
                                                             <button
                                                                 type="button"
@@ -356,7 +482,12 @@ export function RefundSaleModal({ saleId, saleNumber, totalAmount, items, onClos
                                                                 +
                                                             </button>
                                                         </div>
-                                                        <span className="text-xs text-gray-400">of {item.maxRefundable}</span>
+                                                        <span className="text-xs text-gray-400">
+                                                            of {item.maxRefundable} {item.uomSymbol || item.uomName || 'units'}
+                                                            {item.conversionFactor > 1 && (
+                                                                <> → {sellingQtyToBase(item.refundQuantity, item.conversionFactor)} {item.baseUomSymbol || 'base'} to stock</>
+                                                            )}
+                                                        </span>
                                                     </div>
                                                 )}
                                             </div>

@@ -23,7 +23,12 @@ export interface ReturnableSaleLine {
     productName: string;
     quantity: number;
     returnableQuantity: number;
+    refundedQuantity: number;
     unitPrice: number;
+    uomSymbol: string | null;
+    uomName: string | null;
+    baseUomSymbol: string | null;
+    conversionFactor: number;
 }
 
 export interface AdjustmentContext {
