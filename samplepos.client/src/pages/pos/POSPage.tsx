@@ -310,6 +310,25 @@ interface LineItem {
   atCostLayers?: AtCostLayerSegment[];
 }
 
+/** POS order/hold payloads: selling qty + UoM → base snapshot (matches server resolveCanonicalProductUom). */
+function buildPosOrderLinePayload(item: LineItem) {
+  const uomId =
+    item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined;
+  const factor = getPosLineConversionFactor(item.availableUoms, item.selectedUomId);
+  const baseUom = item.availableUoms?.find((u) => u.isDefault);
+  return {
+    productId: item.id,
+    productName: item.name,
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    discountAmount: item.discount?.amount || 0,
+    uomId,
+    baseQty: getPosLineBaseQuantity(item.quantity, item.availableUoms, item.selectedUomId),
+    baseUomId: baseUom?.uomId,
+    conversionFactor: factor,
+  };
+}
+
 function AtCostFifoHint({ item }: { item: LineItem }) {
   const factor = getPosLineConversionFactor(item.availableUoms, item.selectedUomId);
 
@@ -1651,6 +1670,7 @@ export default function POSPage() {
             productSku: item.sku,
             uomId: item.selectedUomId,
             uomName: item.uom,
+            uomConversionFactor: getPosLineConversionFactor(item.availableUoms, item.selectedUomId),
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             costPrice: item.costPrice,
@@ -2469,17 +2489,7 @@ export default function POSPage() {
 
     setIsCreatingOrder(true);
     try {
-      const orderItems = items.map((item) => ({
-        productId: item.id,
-        productName: item.name,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        discountAmount: item.discount?.amount || 0,
-        uomId: item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined,
-        baseQty: item.quantity, // will be recalculated by backend if UOM differs
-        baseUomId: undefined,
-        conversionFactor: 1,
-      }));
+      const orderItems = items.map((item) => buildPosOrderLinePayload(item));
 
       // ── Offline: save order locally, sync when internet is restored ──
       if (!isOnline) {
@@ -2621,17 +2631,7 @@ export default function POSPage() {
         (err instanceof Error && ('code' in err && (err as Record<string, unknown>).code === 'ERR_NETWORK')) ||
         !navigator.onLine;
       if (isNetworkError) {
-        const orderItems = items.map((item) => ({
-          productId: item.id,
-          productName: item.name,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          discountAmount: item.discount?.amount || 0,
-          uomId: item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined,
-          baseQty: item.quantity,
-          baseUomId: undefined,
-          conversionFactor: 1,
-        }));
+        const orderItems = items.map((item) => buildPosOrderLinePayload(item));
         const offlineId = saveOrderOffline({
           customerId: selectedCustomer?.id,
           items: orderItems,

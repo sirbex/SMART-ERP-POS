@@ -63,6 +63,9 @@ export interface GoodsReceiptItem {
   uomName?: string | null;
   uomSymbol?: string | null;
   conversionFactor?: number;
+  uomId?: string | null;
+  baseQty?: number | null;
+  baseUomId?: string | null;
 }
 
 export interface CreateGRData {
@@ -290,6 +293,9 @@ export const goodsReceiptRepository = {
 
     const conversionFactorExpr = await grItemsConversionFactorExpr(pool);
     const isBonusExpr = await grItemsIsBonusExpr(pool);
+    const hasUomSnapshot = await tableHasColumn(pool, 'goods_receipt_items', 'base_qty');
+    const baseQtySelect = hasUomSnapshot ? 'gri.base_qty as "baseQty"' : 'NULL::numeric as "baseQty"';
+    const baseUomSelect = hasUomSnapshot ? 'gri.base_uom_id as "baseUomId"' : 'NULL::uuid as "baseUomId"';
 
     const itemsResult = await pool.query(
       `SELECT 
@@ -312,7 +318,9 @@ export const goodsReceiptRepository = {
          COALESCE(u.name, def_u.name) as "uomName",
          COALESCE(u.symbol, def_u.symbol) as "uomSymbol",
          ${conversionFactorExpr} as "conversionFactor",
-         COALESCE(gri.uom_id, poi.uom_id) as "uomId"
+         COALESCE(gri.uom_id, poi.uom_id) as "uomId",
+         ${baseQtySelect},
+         ${baseUomSelect}
        FROM goods_receipt_items gri
        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
        LEFT JOIN products p ON gri.product_id = p.id

@@ -563,14 +563,17 @@ export const goodsReceiptService = {
           }
         }
 
-        // SAP UoM snapshot: resolve base UoM and conversion factor for stock movement
-        let finBaseUomId: string | null = null;
+        // SAP UoM snapshot: prefer GR line snapshot; fall back to live default only for legacy rows
         const finConversionFactor = Number(item.conversionFactor) || 1;
-        const finPuRes = await client.query(
-          `SELECT pu.uom_id FROM product_uoms pu WHERE pu.product_id = $1 AND pu.is_default = true LIMIT 1`,
-          [productId]
-        );
-        finBaseUomId = finPuRes.rows[0]?.uom_id || null;
+        const snapshotBaseUomId = item.baseUomId ?? null;
+        let finBaseUomId: string | null = snapshotBaseUomId;
+        if (!finBaseUomId) {
+          const finPuRes = await client.query(
+            `SELECT pu.uom_id FROM product_uoms pu WHERE pu.product_id = $1 AND pu.is_default = true LIMIT 1`,
+            [productId]
+          );
+          finBaseUomId = finPuRes.rows[0]?.uom_id || null;
+        }
 
         const expiryDate: string | null = item.expiryDate || null;
         InventoryBusinessRules.validatePositiveQuantity(receivedQty, 'goods receipt item');

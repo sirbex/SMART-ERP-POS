@@ -3,6 +3,8 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import { ordersRepository, CreateOrderData, CreateOrderItemData, OrderRecord } from './ordersRepository.js';
 import { ValidationError, NotFoundError, BusinessError } from '../../middleware/errorHandler.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
+import { resolveCanonicalProductUom } from '../products/uomService.js';
+import { PricingEngine } from '../../utils/pricingEngine.js';
 import logger from '../../utils/logger.js';
 import Decimal from 'decimal.js';
 
@@ -93,10 +95,26 @@ export const ordersService = {
 
         const createdOrder = await ordersRepository.createOrder(client, orderData);
 
-        // Create order items
-        const itemsData: CreateOrderItemData[] = input.items.map(item => {
+        // Create order items — resolve MUoM snapshots server-side (SSOT: same as sales posting)
+        const itemsData: CreateOrderItemData[] = [];
+        for (const item of input.items) {
           const lineTotal = new Decimal(item.quantity).times(new Decimal(item.unitPrice));
-          return {
+          let baseQty = item.baseQty ?? null;
+          let baseUomId = item.baseUomId ?? null;
+          let conversionFactor = item.conversionFactor ?? null;
+
+          if (item.productId) {
+            const resolved = await resolveCanonicalProductUom(
+              item.productId,
+              item.uomId ?? null,
+              client,
+            );
+            baseUomId = resolved.baseUomId;
+            conversionFactor = resolved.conversionFactor;
+            baseQty = PricingEngine.calculateBaseQuantity(item.quantity, resolved.conversionFactor).toNumber();
+          }
+
+          itemsData.push({
             orderId: createdOrder.id,
             productId: item.productId,
             productName: item.productName,
@@ -105,11 +123,11 @@ export const ordersService = {
             lineTotal: parseFloat(lineTotal.toFixed(2)),
             discountAmount: item.discountAmount || 0,
             uomId: item.uomId || null,
-            baseQty: item.baseQty ?? null,
-            baseUomId: item.baseUomId || null,
-            conversionFactor: item.conversionFactor ?? null,
-          };
-        });
+            baseQty,
+            baseUomId,
+            conversionFactor,
+          });
+        }
 
         const items = await ordersRepository.addOrderItems(client, itemsData);
         createdOrder.items = items;

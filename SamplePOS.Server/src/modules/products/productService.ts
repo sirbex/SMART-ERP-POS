@@ -189,9 +189,13 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
     });
   }
 
+  // Purchase-pack factor belongs in product_uoms only; legacy products.conversion_factor stays 1.
+  const purchaseConversionFactor = data.conversionFactor ?? 1;
+
   // Use Decimal for bank-grade precision
   const productData = {
     ...data,
+    conversionFactor: 1,
     costPrice: data.costPrice ? new Decimal(data.costPrice).toNumber() : data.costPrice,
     sellingPrice: data.sellingPrice ? new Decimal(data.sellingPrice).toNumber() : data.sellingPrice,
   };
@@ -207,7 +211,7 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
       product.id,
       {
         unitOfMeasure: data.unitOfMeasure,
-        conversionFactor: data.conversionFactor,
+        conversionFactor: purchaseConversionFactor,
         purchaseUomId: data.purchaseUomId,
       },
       client,
