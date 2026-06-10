@@ -3,8 +3,7 @@ import { UnitOfWork } from '../../db/unitOfWork.js';
 import { ordersRepository, CreateOrderData, CreateOrderItemData, OrderRecord } from './ordersRepository.js';
 import { ValidationError, NotFoundError, BusinessError } from '../../middleware/errorHandler.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
-import { resolveCanonicalProductUom } from '../products/uomService.js';
-import { PricingEngine } from '../../utils/pricingEngine.js';
+import { resolveSaleItemUom } from '../products/uomService.js';
 import logger from '../../utils/logger.js';
 import Decimal from 'decimal.js';
 
@@ -102,16 +101,18 @@ export const ordersService = {
           let baseQty = item.baseQty ?? null;
           let baseUomId = item.baseUomId ?? null;
           let conversionFactor = item.conversionFactor ?? null;
+          let uomId = item.uomId ?? null;
 
           if (item.productId) {
-            const resolved = await resolveCanonicalProductUom(
+            const snapshot = await resolveSaleItemUom(
               item.productId,
-              item.uomId ?? null,
+              { quantity: item.quantity, uomId: item.uomId ?? null },
               client,
             );
-            baseUomId = resolved.baseUomId;
-            conversionFactor = resolved.conversionFactor;
-            baseQty = PricingEngine.calculateBaseQuantity(item.quantity, resolved.conversionFactor).toNumber();
+            baseUomId = snapshot.baseUomId;
+            conversionFactor = snapshot.conversionFactor;
+            baseQty = snapshot.baseQuantity;
+            uomId = snapshot.sellingUomId;
           }
 
           itemsData.push({
@@ -122,7 +123,7 @@ export const ordersService = {
             unitPrice: item.unitPrice,
             lineTotal: parseFloat(lineTotal.toFixed(2)),
             discountAmount: item.discountAmount || 0,
-            uomId: item.uomId || null,
+            uomId,
             baseQty,
             baseUomId,
             conversionFactor,

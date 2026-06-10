@@ -61,10 +61,10 @@ CREATE TABLE IF NOT EXISTS pos_order_items (
   line_total        NUMERIC(15,2) NOT NULL,
   discount_amount   NUMERIC(15,2) NOT NULL DEFAULT 0,
 
-  -- UoM snapshot (SAP multi-UoM)
-  uom_id            UUID REFERENCES product_uoms(id),
+  -- UoM snapshot (master uoms.id — aligned with sale_items via migration 521)
+  uom_id            UUID REFERENCES uoms(id),
   base_qty          NUMERIC(15,4),
-  base_uom_id       UUID REFERENCES product_uoms(id),
+  base_uom_id       UUID REFERENCES uoms(id),
   conversion_factor NUMERIC(15,6)
 );
 
