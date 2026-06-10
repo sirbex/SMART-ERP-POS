@@ -19,6 +19,32 @@ import logger from '../../utils/logger.js';
 
 type Queryable = pg.Pool | pg.PoolClient;
 
+async function bootstrapLegacyProductUomFromProductRow(
+  productId: string,
+  db: Queryable,
+): Promise<void> {
+  const existing = await repo.listProductUoms(productId, db as pg.Pool);
+  if (existing.length > 0) {
+    return;
+  }
+
+  const unitOfMeasure = (await repo.getProductLegacyUnitOfMeasure(productId, db))?.trim() || 'EACH';
+
+  await bootstrapProductUomsFromCreateInput(
+    productId,
+    { unitOfMeasure, conversionFactor: 1 },
+    db,
+  );
+
+  const bootstrapped = await repo.listProductUoms(productId, db as pg.Pool);
+  if (bootstrapped.length > 0) {
+    logger.info('Bootstrapped legacy product_uoms from products.unit_of_measure', {
+      productId,
+      unitOfMeasure,
+    });
+  }
+}
+
 /**
  * SAP MUoM: every item needs a base stock UoM (products.base_uom_id + one is_default row).
  * Legacy rows may have product_uoms without base_uom_id; the UI often omits isDefault on first add.
@@ -29,7 +55,13 @@ async function ensureProductBaseUomContext(
   incoming?: { isDefault: boolean; conversionFactor: number },
 ): Promise<{ isDefault: boolean; conversionFactor: number }> {
   let baseUomId = await repo.getProductBaseUomId(productId, db);
-  const existingUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  let existingUoms = await repo.listProductUoms(productId, db as pg.Pool);
+
+  if (!baseUomId && existingUoms.length === 0) {
+    await bootstrapLegacyProductUomFromProductRow(productId, db);
+    baseUomId = await repo.getProductBaseUomId(productId, db);
+    existingUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  }
 
   if (!baseUomId && existingUoms.length > 0) {
     const candidate = existingUoms.find((uom) => uom.isDefault) ?? existingUoms[0];
@@ -382,8 +414,9 @@ export async function resolveSaleItemUom(
   );
 
   if (!baseUomId) {
+    const productName = (await repo.getProductName(productId, db)) ?? 'This product';
     throw new ValidationError(
-      'Item must have a base stock unit of measure before inventory or sales transactions. ' +
+      `"${productName}" must have a base stock unit of measure before inventory or sales transactions. ` +
         'Open the product → Units of Measure and set a base unit.',
     );
   }

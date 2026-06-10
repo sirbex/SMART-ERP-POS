@@ -18,6 +18,9 @@ const mockRepo = {
   upsertItemUomConversion: jest.fn<MockFn>(),
   listItemUomConversions: jest.fn<MockFn>(),
   setProductBaseUomId: jest.fn<MockFn>(),
+  listUoms: jest.fn<MockFn>(),
+  getProductLegacyUnitOfMeasure: jest.fn<MockFn>(),
+  getProductName: jest.fn<MockFn>(),
 };
 
 jest.unstable_mockModule('./uomRepository.js', () => mockRepo);
@@ -41,6 +44,9 @@ describe('uomService.addProductUom base UoM', () => {
     jest.clearAllMocks();
     mockRepo.getProductBaseUomId.mockResolvedValue(null);
     mockRepo.listProductUoms.mockResolvedValue([]);
+    mockRepo.getProductLegacyUnitOfMeasure.mockResolvedValue(null);
+    mockRepo.getProductName.mockResolvedValue('Test Product');
+    mockRepo.listUoms.mockResolvedValue([]);
     mockRepo.createProductUom.mockResolvedValue({
       id: 'a0000000-0000-4000-8000-000000000001',
       productId: '099172ce-f327-4e1f-8ce4-b10e61d5bc50',
@@ -252,12 +258,63 @@ describe('resolveSaleItemUom — Wave 4 MUoM hardening', () => {
     expect(result.sellingUomId).toBe(packUomId);
   });
 
-  it('throws when base UoM is missing', async () => {
+  it('bootstraps legacy product from unit_of_measure on first sale resolve', async () => {
+    let legacyBootstrapped = false;
+    mockRepo.getProductBaseUomId.mockImplementation(async () =>
+      legacyBootstrapped ? baseUomId : null,
+    );
+    mockRepo.listProductUoms.mockImplementation(async () =>
+      legacyBootstrapped
+        ? [
+            {
+              id: 'pu-base',
+              productId,
+              uomId: baseUomId,
+              uomName: 'Tablet',
+              conversionFactor: '1',
+              isDefault: true,
+            },
+          ]
+        : [],
+    );
+    mockRepo.listUoms.mockResolvedValue([
+      { id: baseUomId, name: 'TABLET', symbol: 'TAB', type: 'QUANTITY' },
+    ]);
+    mockRepo.getProductLegacyUnitOfMeasure.mockResolvedValue('TABLET');
+    mockRepo.getProductName.mockResolvedValue('Cefixime 100mg tabs cefiwel');
+    mockRepo.createProductUom.mockImplementation(async (input: { productId: string }) => {
+      legacyBootstrapped = true;
+      return { id: 'pu-base', ...input };
+    });
+
+    const result = await resolveSaleItemUom(
+      productId,
+      { quantity: 28 },
+      mockDb as unknown as Pool,
+    );
+
+    expect(mockRepo.createProductUom).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productId,
+        uomId: baseUomId,
+        conversionFactor: 1,
+        isDefault: true,
+      }),
+      expect.anything(),
+    );
+    expect(result.baseUomId).toBe(baseUomId);
+    expect(result.baseQuantity).toBe(28);
+  });
+
+  it('throws when base UoM is missing and legacy bootstrap cannot run', async () => {
     mockRepo.getProductBaseUomId.mockResolvedValue(null);
     mockRepo.listProductUoms.mockResolvedValue([]);
+    mockRepo.listUoms.mockResolvedValue([]);
+    mockRepo.getProductLegacyUnitOfMeasure.mockResolvedValue('TABLET');
+    mockRepo.getProductName.mockResolvedValue('Legacy Product X');
     await expect(
       resolveSaleItemUom(productId, { quantity: 1 }, mockDb as unknown as Pool),
-    ).rejects.toThrow(/base stock unit/i);
+    ).rejects.toThrow(/Legacy Product X.*base stock unit/i);
   });
 
   it('throws when selling UoM label is not configured', async () => {

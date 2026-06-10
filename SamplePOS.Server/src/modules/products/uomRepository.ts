@@ -182,6 +182,21 @@ export async function getProductBaseUomId(productId: string, db?: Queryable): Pr
   return res.rows[0]?.baseUomId ?? null;
 }
 
+export async function getProductLegacyUnitOfMeasure(
+  productId: string,
+  db?: Queryable,
+): Promise<string | null> {
+  const pool = db || globalPool;
+  const res = await pool.query(`SELECT unit_of_measure FROM products WHERE id = $1`, [productId]);
+  return res.rows[0]?.unit_of_measure ?? null;
+}
+
+export async function getProductName(productId: string, db?: Queryable): Promise<string | null> {
+  const pool = db || globalPool;
+  const res = await pool.query(`SELECT name FROM products WHERE id = $1`, [productId]);
+  return res.rows[0]?.name ?? null;
+}
+
 export async function setProductBaseUomId(productId: string, uomId: string, db?: Queryable): Promise<void> {
   const pool = db || globalPool;
   await pool.query(
