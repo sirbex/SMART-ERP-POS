@@ -38,7 +38,7 @@ async function bootstrapLegacyProductUomFromProductRow(
 
   const bootstrapped = await repo.listProductUoms(productId, db as pg.Pool);
   if (bootstrapped.length > 0) {
-    logger.info('Bootstrapped legacy product_uoms from products.unit_of_measure', {
+    logger.info('Bootstrapped legacy product_uoms from product base UoM (or EACH default)', {
       productId,
       unitOfMeasure,
     });

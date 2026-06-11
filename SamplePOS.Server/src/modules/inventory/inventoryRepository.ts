@@ -155,7 +155,18 @@ export const inventoryRepository = {
                'conversionFactor', pu.conversion_factor,
                'isDefault', pu.is_default,
                'price', COALESCE(pu.price_override, pv.selling_price * pu.conversion_factor),
-               'cost', COALESCE(pu.cost_override, COALESCE(NULLIF(pv.average_cost, 0), pv.cost_price) * pu.conversion_factor),
+               'cost', COALESCE(
+                 pu.cost_override,
+                 CASE
+                   WHEN pu.price_override IS NOT NULL AND pv.selling_price > 0
+                   THEN ROUND(
+                     (COALESCE(NULLIF(pv.average_cost, 0), pv.cost_price)::numeric / pv.selling_price::numeric)
+                     * pu.price_override::numeric,
+                     2
+                   )
+                   ELSE COALESCE(NULLIF(pv.average_cost, 0), pv.cost_price) * pu.conversion_factor
+                 END
+               ),
                'priceIsOverridden', (pu.price_override IS NOT NULL),
                'computedPrice', (pv.selling_price * pu.conversion_factor)
              )

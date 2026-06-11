@@ -126,6 +126,12 @@ export class ProductWithUom {
       return new Decimal(targetUom.costOverride);
     }
 
+    // When price is overridden, keep catalog margin (avoid factor-scaled cost vs flat price)
+    if (targetUom.priceOverride && this.basePrice.gt(0)) {
+      const displayPrice = new Decimal(targetUom.priceOverride);
+      return this.baseCost.div(this.basePrice).mul(displayPrice);
+    }
+
     // Otherwise derive from base cost
     const factor = new Decimal(targetUom.conversionFactor);
     return this.baseCost.mul(factor);

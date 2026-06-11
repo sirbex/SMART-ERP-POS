@@ -6,6 +6,7 @@ import {
   getStockInSellingUom,
   convertPosCartQuantityForUomChange,
   scaleEngineBasePriceToSellingUom,
+  normalizePosSellingQuantity,
 } from '../utils/posCartUom';
 
 const uoms = [
@@ -49,5 +50,12 @@ describe('POS stock in selling UoM (Pregnacare / PKT scenario)', () => {
     const misconfiguredStock = 3;
     expect(getStockInSellingUom(misconfiguredStock, 1)).toBe(3);
     expect(getStockInSellingUom(misconfiguredStock, 10)).toBe(0);
+  });
+});
+
+describe('normalizePosSellingQuantity', () => {
+  it('snaps float drift to nearest integer qty', () => {
+    expect(normalizePosSellingQuantity(0.99999)).toBe(1);
+    expect(normalizePosSellingQuantity(2.000001)).toBe(2);
   });
 });

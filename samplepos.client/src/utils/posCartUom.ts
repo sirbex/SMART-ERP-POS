@@ -65,6 +65,14 @@ export function convertPosCartQuantityForUomChange(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : quantity;
 }
 
+/** Snap near-integer selling qty after UoM switch (avoids 0.99999 from float drift). */
+export function normalizePosSellingQuantity(quantity: number): number {
+  if (!Number.isFinite(quantity) || quantity <= 0) return 1;
+  const rounded = Math.round(quantity);
+  if (Math.abs(quantity - rounded) < 0.01) return Math.max(1, rounded);
+  return quantity;
+}
+
 export function getPosLineConversionFactor(
   availableUoms: UomOption[] | undefined,
   selectedUomId: string | undefined,

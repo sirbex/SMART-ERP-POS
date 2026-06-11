@@ -187,8 +187,15 @@ export async function getProductLegacyUnitOfMeasure(
   db?: Queryable,
 ): Promise<string | null> {
   const pool = db || globalPool;
-  const res = await pool.query(`SELECT unit_of_measure FROM products WHERE id = $1`, [productId]);
-  return res.rows[0]?.unit_of_measure ?? null;
+  // Migration 013 dropped products.unit_of_measure; resolve via base_uom_id → uoms.name.
+  const res = await pool.query(
+    `SELECT u.name
+     FROM products p
+     LEFT JOIN uoms u ON u.id = p.base_uom_id
+     WHERE p.id = $1`,
+    [productId],
+  );
+  return res.rows[0]?.name ?? null;
 }
 
 export async function getProductName(productId: string, db?: Queryable): Promise<string | null> {

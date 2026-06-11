@@ -20,6 +20,7 @@ import {
   getPosLineStockInSellingUom,
   getStockInSellingUom,
   isPosQtyOverStockInSellingUom,
+  normalizePosSellingQuantity,
   scaleEngineBasePriceToSellingUom,
 } from '../../utils/posCartUom';
 import {
@@ -1431,11 +1432,13 @@ export default function POSPage() {
       const newUom = item.availableUoms.find((u) => u.uomId === newUomId);
       if (!newUom) return prev;
 
-      const convertedQty = convertPosCartQuantityForUomChange(
-        item.quantity,
-        item.availableUoms,
-        item.selectedUomId,
-        newUomId,
+      const convertedQty = normalizePosSellingQuantity(
+        convertPosCartQuantityForUomChange(
+          item.quantity,
+          item.availableUoms,
+          item.selectedUomId,
+          newUomId,
+        ),
       );
 
       // Update item with new UoM pricing
