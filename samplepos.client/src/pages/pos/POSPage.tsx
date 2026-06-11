@@ -14,13 +14,13 @@ import type { Customer } from '@shared/zod/customer';
 import { formatCurrency } from '../../utils/currency';
 import { resolvePosCustomerForSale } from '../../utils/resolvePosCustomerId';
 import {
-  convertPosCartQuantityForUomChange,
   getPosLineBaseQuantity,
   getPosLineConversionFactor,
-  getPosLineStockInSellingUom,
+  getPosLineStockAvailability,
+  getPosQuantityAfterUomChange,
   getStockInSellingUom,
   isPosQtyOverStockInSellingUom,
-  normalizePosSellingQuantity,
+  sanitizePosSellingQuantity,
   scaleEngineBasePriceToSellingUom,
 } from '../../utils/posCartUom';
 import {
@@ -973,12 +973,29 @@ export default function POSPage() {
     }
   }, [activeUser?.token]);
 
-  // ── Cart persistence: restore on mount ──
+  // ── Cart persistence: restore on mount (sanitize legacy MUoM float qty) ──
   useEffect(() => {
     const saved = getPersistedCart<LineItem[]>();
     if (saved && saved.length > 0 && items.length === 0) {
-      setItems(saved);
-      console.log('[CartPersist] Restored', saved.length, 'items from localStorage');
+      const sanitized = saved.map((item) => {
+        const quantity = sanitizePosSellingQuantity(
+          item.quantity,
+          item.availableUoms,
+          item.selectedUomId,
+        );
+        if (quantity === item.quantity) return item;
+        return {
+          ...item,
+          ...recalcPosCartLineFields({
+            quantity,
+            unitPrice: item.unitPrice,
+            costPrice: item.costPrice,
+            discount: item.discount,
+          }),
+        };
+      });
+      setItems(sanitized);
+      console.log('[CartPersist] Restored', sanitized.length, 'items from localStorage');
     }
   }, []);
 
@@ -1432,14 +1449,7 @@ export default function POSPage() {
       const newUom = item.availableUoms.find((u) => u.uomId === newUomId);
       if (!newUom) return prev;
 
-      const convertedQty = normalizePosSellingQuantity(
-        convertPosCartQuantityForUomChange(
-          item.quantity,
-          item.availableUoms,
-          item.selectedUomId,
-          newUomId,
-        ),
-      );
+      const convertedQty = getPosQuantityAfterUomChange();
 
       // Update item with new UoM pricing
       const newUnitPrice = newUom.price;
@@ -2117,10 +2127,15 @@ export default function POSPage() {
     setItems((prev) => {
       const updated = [...prev];
       const item = updated[itemIndex];
+      const quantity = sanitizePosSellingQuantity(
+        newQuantity,
+        item.availableUoms,
+        item.selectedUomId,
+      );
       updated[itemIndex] = {
         ...item,
         ...recalcPosCartLineFields({
-          quantity: newQuantity,
+          quantity,
           unitPrice: item.unitPrice,
           costPrice: item.costPrice,
           discount: item.discount,
@@ -3621,7 +3636,7 @@ export default function POSPage() {
             ) : (
               <div className="space-y-2">
                 {items.map((item, idx) => {
-                  const stockUom = getPosLineStockInSellingUom(
+                  const stockUom = getPosLineStockAvailability(
                     item.stockOnHand,
                     item.availableUoms,
                     item.selectedUomId,
@@ -3723,9 +3738,10 @@ export default function POSPage() {
                         {formatCurrency(item.subtotal)}
                       </span>
                     </div>
-                    {lineQtyOverStock && stockUom.stockInSellingUom !== undefined && (
+                    {(lineQtyOverStock || stockUom.stockHint) && (
                       <div className="text-red-600 text-[10px] mt-0.5">
-                        Only {stockUom.stockInSellingUom} {stockUom.uomLabel} in stock
+                        {stockUom.stockHint ??
+                          `Only ${stockUom.stockInSellingUom} ${stockUom.uomLabel} in stock`}
                       </div>
                     )}
                     {item.pricingRule && (
@@ -3812,7 +3828,7 @@ export default function POSPage() {
                     </tr>
                   ) : (
                     items.map((item, idx) => {
-                      const stockUom = getPosLineStockInSellingUom(
+                      const stockUom = getPosLineStockAvailability(
                         item.stockOnHand,
                         item.availableUoms,
                         item.selectedUomId,
@@ -3869,7 +3885,7 @@ export default function POSPage() {
                         <td className="px-2 py-2 text-right">
                           <input
                             type="number"
-                            min="0"
+                            min="1"
                             step="1"
                             value={item.quantity}
                             onChange={(e) =>
@@ -3879,9 +3895,10 @@ export default function POSPage() {
                             className={`w-14 sm:w-20 border rounded px-1 sm:px-2 py-1 text-right text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 ${lineQtyOverStock ? 'border-red-500 bg-red-50' : ''}`}
                             aria-label={`Quantity in ${stockUom.uomLabel} for ${item.name}`}
                           />
-                          {lineQtyOverStock && stockUom.stockInSellingUom !== undefined && (
+                          {(lineQtyOverStock || stockUom.stockHint) && (
                             <div className="text-red-600 text-[10px] mt-0.5 whitespace-nowrap">
-                              Only {stockUom.stockInSellingUom} {stockUom.uomLabel} in stock
+                              {stockUom.stockHint ??
+                                `Only ${stockUom.stockInSellingUom} ${stockUom.uomLabel} in stock`}
                             </div>
                           )}
                         </td>

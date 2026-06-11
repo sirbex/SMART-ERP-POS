@@ -2,16 +2,23 @@ import { describe, expect, it } from 'vitest';
 import {
   getPosLineBaseQuantity,
   getPosLineConversionFactor,
+  getPosLineStockAvailability,
   getPosLineStockInSellingUom,
+  getPosQuantityAfterUomChange,
   getStockInSellingUom,
   convertPosCartQuantityForUomChange,
   scaleEngineBasePriceToSellingUom,
-  normalizePosSellingQuantity,
+  sanitizePosSellingQuantity,
 } from '../utils/posCartUom';
 
 const uoms = [
   { uomId: 'base', symbol: 'TAB', conversionFactor: 1, isDefault: true },
   { uomId: 'pkt', symbol: 'PKT', conversionFactor: 10, isDefault: false },
+];
+
+const boxUoms = [
+  { uomId: 'base', symbol: 'TAB', conversionFactor: 1, isDefault: true },
+  { uomId: 'box', symbol: 'BOX', conversionFactor: 30, isDefault: false },
 ];
 
 describe('POS AT_COST UoM scaling', () => {
@@ -26,7 +33,7 @@ describe('POS AT_COST UoM scaling', () => {
 });
 
 describe('POS stock in selling UoM (Pregnacare / PKT scenario)', () => {
-  const stockBase = 30; // 3 PKT × 10 tabs after correct GR posting
+  const stockBase = 30;
 
   it('shows 3 PKT when selling by packet', () => {
     expect(getStockInSellingUom(stockBase, 10)).toBe(3);
@@ -42,7 +49,7 @@ describe('POS stock in selling UoM (Pregnacare / PKT scenario)', () => {
     expect(stock.uomLabel).toBe('TAB');
   });
 
-  it('converts cart qty when switching PKT → base (1 PKT → 10 TAB)', () => {
+  it('PO path still converts base qty when switching PKT → TAB (1 PKT → 10 TAB)', () => {
     expect(convertPosCartQuantityForUomChange(1, uoms, 'pkt', 'base')).toBe(10);
   });
 
@@ -53,9 +60,34 @@ describe('POS stock in selling UoM (Pregnacare / PKT scenario)', () => {
   });
 });
 
-describe('normalizePosSellingQuantity', () => {
+describe('POS retail UoM switch (not PO base preservation)', () => {
+  it('resets qty to 1 when cashier changes selling UoM', () => {
+    expect(getPosQuantityAfterUomChange()).toBe(1);
+  });
+
+  it('does not produce fractional BOX qty from 1 TAB via PO conversion', () => {
+    const poStyle = convertPosCartQuantityForUomChange(1, boxUoms, 'base', 'box');
+    expect(poStyle).toBeCloseTo(0.033333, 4);
+    expect(getPosQuantityAfterUomChange()).toBe(1);
+  });
+});
+
+describe('sanitizePosSellingQuantity', () => {
   it('snaps float drift to nearest integer qty', () => {
-    expect(normalizePosSellingQuantity(0.99999)).toBe(1);
-    expect(normalizePosSellingQuantity(2.000001)).toBe(2);
+    expect(sanitizePosSellingQuantity(0.99999, uoms, 'pkt')).toBe(1);
+    expect(sanitizePosSellingQuantity(2.000001, uoms, 'pkt')).toBe(2);
+  });
+
+  it('repairs persisted fractional pack qty (Acetazolamide 0.033333 BOX)', () => {
+    expect(sanitizePosSellingQuantity(0.033333, boxUoms, 'box')).toBe(1);
+  });
+});
+
+describe('getPosLineStockAvailability', () => {
+  it('hints base stock when less than one full pack is on hand', () => {
+    const stock = getPosLineStockAvailability(10, boxUoms, 'box', 'BOX');
+    expect(stock.stockInSellingUom).toBe(0);
+    expect(stock.stockHint).toMatch(/10 TAB in stock/);
+    expect(stock.stockHint).toMatch(/less than 1 BOX/);
   });
 });

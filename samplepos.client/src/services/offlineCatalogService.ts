@@ -15,7 +15,7 @@ import apiClient from '../utils/api';
 const CATALOG_KEY = 'pos_product_catalog';
 const STOCK_KEY = 'pos_local_stock';
 const SYNC_KEY = 'pos_catalog_last_sync';
-const CART_KEY = 'pos_persisted_cart_v1';
+const CART_KEY = 'pos_persisted_cart_v2';
 
 /** SAP/Odoo POS: background catalog refresh interval (not per keystroke). */
 export const CATALOG_STALE_MS = 5 * 60 * 1000;

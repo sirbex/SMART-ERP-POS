@@ -51,7 +51,10 @@ export function getPosLineStockInSellingUom(
   };
 }
 
-/** When the cashier switches selling UoM, preserve base quantity (same rule as PO lines). */
+/**
+ * PO procurement: preserve base qty when order UoM changes (60 PC → 5 BOX).
+ * Exported for PO screens — not for POS cart UoM switches.
+ */
 export function convertPosCartQuantityForUomChange(
   quantity: number,
   availableUoms: UomOption[] | undefined,
@@ -65,12 +68,63 @@ export function convertPosCartQuantityForUomChange(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : quantity;
 }
 
-/** Snap near-integer selling qty after UoM switch (avoids 0.99999 from float drift). */
-export function normalizePosSellingQuantity(quantity: number): number {
+/**
+ * POS retail: switching selling UoM starts a fresh line qty of 1 in the new unit.
+ * (SAP/Odoo POS — do not inherit PO base-qty preservation; that yields 0.033 BOX etc.)
+ */
+export function getPosQuantityAfterUomChange(): number {
+  return 1;
+}
+
+/** Whole-number selling qty for POS; repairs persisted-cart float drift (0.99999 → 1). */
+export function sanitizePosSellingQuantity(
+  quantity: number,
+  availableUoms?: UomOption[],
+  selectedUomId?: string,
+): number {
   if (!Number.isFinite(quantity) || quantity <= 0) return 1;
-  const rounded = Math.round(quantity);
-  if (Math.abs(quantity - rounded) < 0.01) return Math.max(1, rounded);
-  return quantity;
+  const hasAlternateUom = (availableUoms?.length ?? 0) > 1;
+  const factor = getPosLineConversionFactor(availableUoms, selectedUomId);
+  if (hasAlternateUom || factor > 1) {
+    const rounded = Math.round(quantity);
+    return rounded >= 1 ? rounded : 1;
+  }
+  const snapped = Math.round(quantity);
+  if (Math.abs(quantity - snapped) < 0.01) return Math.max(1, snapped);
+  return Math.max(1, quantity);
+}
+
+/** @deprecated Use sanitizePosSellingQuantity */
+export function normalizePosSellingQuantity(quantity: number): number {
+  return sanitizePosSellingQuantity(quantity);
+}
+
+export function getPosLineStockAvailability(
+  stockOnHandBase: number | undefined,
+  availableUoms: UomOption[] | undefined,
+  selectedUomId: string | undefined,
+  fallbackUomLabel: string,
+): ReturnType<typeof getPosLineStockInSellingUom> & { stockHint?: string } {
+  const stock = getPosLineStockInSellingUom(
+    stockOnHandBase,
+    availableUoms,
+    selectedUomId,
+    fallbackUomLabel,
+  );
+  if (
+    stockOnHandBase !== undefined &&
+    stockOnHandBase > 0 &&
+    stock.stockInSellingUom === 0 &&
+    getPosLineConversionFactor(availableUoms, selectedUomId) > 1
+  ) {
+    const baseUom = availableUoms?.find((u) => u.isDefault) ?? availableUoms?.[0];
+    const baseLabel = (baseUom?.symbol || baseUom?.name || 'units').trim();
+    return {
+      ...stock,
+      stockHint: `${stockOnHandBase} ${baseLabel} in stock — less than 1 ${stock.uomLabel}`,
+    };
+  }
+  return stock;
 }
 
 export function getPosLineConversionFactor(
