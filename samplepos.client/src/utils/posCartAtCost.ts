@@ -219,18 +219,22 @@ export function buildAtCostBlendedCartLine(
   blendedUnitPerSelling: number,
   layers: AtCostLayerSegment[],
   pricingRule?: PosAtCostLineTemplate['pricingRule'],
+  /** When true (AT_COST / FEFO issue price), cost = issue price. Otherwise preserve catalog inventory cost. */
+  isAtCostIssuePrice = false,
 ): PosAtCostCartLine {
+  const inventoryCost = template.costPrice;
+  const lineCost = isAtCostIssuePrice ? blendedUnitPerSelling : inventoryCost;
   const recalc = recalcPosCartLineFields({
     quantity: totalSellingQty,
     unitPrice: blendedUnitPerSelling,
-    costPrice: blendedUnitPerSelling,
+    costPrice: lineCost,
     discount: template.discount,
   });
 
   return {
     ...template,
     ...recalc,
-    costPrice: blendedUnitPerSelling,
+    costPrice: lineCost,
     pricingRule,
     atCostLayerIndex: undefined,
     atCostLayerLabel: layers.length > 1 ? `${layers.length} FIFO layers` : undefined,

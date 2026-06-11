@@ -851,6 +851,8 @@ export default function POSPage() {
               group.selectedUomId,
             );
             const isAtCostRule = price.appliedRule.scope === 'at_cost';
+            const isAtCostIssuePrice =
+              isAtCostRule || selectedCustomer?.pricingMode === 'AT_COST';
             const layers = (price.atCostLayers ?? []) as AtCostLayerSegment[];
             const pricingRule =
               price.appliedRule.scope !== 'base'
@@ -890,6 +892,7 @@ export default function POSPage() {
               scaledFinalPrice,
               layers,
               pricingRule,
+              isAtCostIssuePrice,
             ) as LineItem;
             const withLayers: LineItem = {
               ...blended,
@@ -927,20 +930,14 @@ export default function POSPage() {
           if (!item.pricingRule) return item;
           changed = true;
           const basePrice = item.pricingRule.basePrice;
-          const newSubtotal = new Decimal(item.quantity).times(basePrice).toNumber();
-          const newMargin =
-            basePrice > 0
-              ? new Decimal(basePrice)
-                .minus(item.costPrice)
-                .dividedBy(basePrice)
-                .times(100)
-                .toNumber()
-              : 0;
           return {
             ...item,
-            unitPrice: basePrice,
-            subtotal: newSubtotal,
-            marginPct: newMargin,
+            ...recalcPosCartLineFields({
+              quantity: item.quantity,
+              unitPrice: basePrice,
+              costPrice: item.costPrice,
+              discount: item.discount,
+            }),
             pricingRule: undefined,
           };
         });

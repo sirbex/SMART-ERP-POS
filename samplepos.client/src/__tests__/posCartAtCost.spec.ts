@@ -7,6 +7,7 @@ import {
   mustSplitAtCostFifoLayers,
   shouldSplitAtCostFifoLayers,
 } from '../utils/posCartAtCost';
+import { recalcPosCartLineFields } from '../utils/posCartLine';
 
 describe('posCartAtCost FIFO split', () => {
   const template = {
@@ -31,8 +32,10 @@ describe('posCartAtCost FIFO split', () => {
     ];
     expect(shouldSplitAtCostFifoLayers(layers)).toBe(true);
     expect(mustSplitAtCostFifoLayers(layers, 2, 19000)).toBe(false);
-    const line = buildAtCostBlendedCartLine(template, 2, 19000, layers);
+    const line = buildAtCostBlendedCartLine(template, 2, 19000, layers, undefined, true);
     expect(line.unitPrice).toBe(19000);
+    expect(line.costPrice).toBe(19000);
+    expect(line.marginPct).toBe(0);
     expect(line.subtotal).toBe(38000);
   });
 
@@ -96,6 +99,66 @@ describe('posCartAtCost FIFO split', () => {
     expect(shouldSplitAtCostFifoLayers(layers)).toBe(true);
     expect(mustSplitAtCostFifoLayers(layers, 3, 1300000)).toBe(false);
     expect(canSplitAtCostLayersToSellingUom(layers, 10)).toBe(true);
+  });
+});
+
+describe('posCartAtCost — customer reprice preserves inventory cost (SSoT)', () => {
+  const catalogTemplate = {
+    id: 'p1',
+    name: 'Acetazolamide',
+    sku: 'PRD-MQ5FHGOG-V1PH',
+    uom: 'tb',
+    costPrice: 633,
+    marginPct: 89.45,
+    isTaxable: false,
+    taxRate: 0,
+    availableUoms: [
+      { uomId: 'base', name: 'Tablet', symbol: 'tb', conversionFactor: 1, price: 6000, cost: 633, isDefault: true },
+    ],
+    selectedUomId: 'base',
+  };
+
+  it('credit customer reprice: selling price updates, inventory cost unchanged, margin correct', () => {
+    const line = buildAtCostBlendedCartLine(catalogTemplate, 1, 6000, [], undefined, false);
+    expect(line.unitPrice).toBe(6000);
+    expect(line.costPrice).toBe(633);
+    expect(line.marginPct).toBeCloseTo(89.45, 1);
+  });
+
+  it('credit customer with engine price override: cost still catalog', () => {
+    const line = buildAtCostBlendedCartLine(catalogTemplate, 1, 900, [], undefined, false);
+    expect(line.unitPrice).toBe(900);
+    expect(line.costPrice).toBe(633);
+    expect(line.marginPct).toBeCloseTo(29.67, 1);
+  });
+
+  it('AT_COST issue price: cost syncs to FEFO issue price, margin 0%', () => {
+    const line = buildAtCostBlendedCartLine(catalogTemplate, 1, 633, [], { scope: 'at_cost', ruleName: null, basePrice: 6000, discount: 0 }, true);
+    expect(line.unitPrice).toBe(633);
+    expect(line.costPrice).toBe(633);
+    expect(line.marginPct).toBe(0);
+  });
+
+  it('walk-in add path unchanged: recalc with catalog cost only', () => {
+    const walkIn = recalcPosCartLineFields({ quantity: 1, unitPrice: 6000, costPrice: 633 });
+    expect(walkIn.marginPct).toBeCloseTo(89.45, 1);
+  });
+
+  it('manual price edit after customer select uses preserved inventory cost', () => {
+    const afterReprice = buildAtCostBlendedCartLine(catalogTemplate, 1, 6000, [], undefined, false);
+    const edited = recalcPosCartLineFields({
+      quantity: 1,
+      unitPrice: 800,
+      costPrice: afterReprice.costPrice,
+    });
+    expect(edited.unitPrice).toBe(800);
+    expect(afterReprice.costPrice).toBe(633);
+    expect(edited.marginPct).toBeCloseTo(20.88, 1);
+  });
+
+  it('below-cost edit shows negative margin (not forced to 0%)', () => {
+    const edited = recalcPosCartLineFields({ quantity: 1, unitPrice: 500, costPrice: 633 });
+    expect(edited.marginPct).toBeLessThan(0);
   });
 });
 
