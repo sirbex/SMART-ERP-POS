@@ -181,7 +181,17 @@ describe('returnGrnService return flow', () => {
                 };
             }
             if (s.includes('FROM goods_receipt_items gri')) {
-                return { rows: [{ uom_id: null, uom_name: null, product_name: 'Widget' }] };
+                return {
+                    rows: [{
+                        uom_id: 'uom-1',
+                        uom_symbol: 'EA',
+                        product_name: 'Widget',
+                        base_uom_symbol: 'EA',
+                    }],
+                };
+            }
+            if (s.includes('FROM uoms WHERE id')) {
+                return { rows: [{ symbol: 'EA' }] };
             }
             if (s.includes('costing_method')) {
                 return { rows: [{ costing_method: 'FIFO' }] };
@@ -228,7 +238,7 @@ describe('returnGrnService return flow', () => {
                     { productId: 'prod-1', batchId: 'batch-early', quantity: 6, unitCost: 100 },
                 ],
             }),
-        ).rejects.toThrow(/Maximum returnable now/);
+        ).rejects.toThrow(/Maximum returnable is/);
     });
 
     it('post validates same lines saved on draft', async () => {

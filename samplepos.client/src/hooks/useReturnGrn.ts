@@ -18,6 +18,14 @@ export interface CreateReturnGrnInput {
     lines: ReturnGrnLine[];
 }
 
+export interface ReturnGrnUomOption {
+    uomId: string;
+    uomName: string;
+    uomSymbol: string;
+    conversionFactor: number;
+    isDefault?: boolean;
+}
+
 export interface ReturnableItem {
     grItemId?: string;
     productId: string;
@@ -26,7 +34,11 @@ export interface ReturnableItem {
     batchNumber: string | null;
     uomId: string;
     uomName: string;
+    uomSymbol?: string;
     conversionFactor: number;
+    baseUomId?: string | null;
+    baseUomSymbol?: string | null;
+    availableUoms?: ReturnGrnUomOption[];
     receivedQuantity: number;
     returnedQuantity: number;
     documentReturnableQuantity?: number;

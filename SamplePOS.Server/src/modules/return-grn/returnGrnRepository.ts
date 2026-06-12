@@ -306,6 +306,9 @@ export const returnGrnRepository = {
         uomName: string | null;
         uomSymbol: string | null;
         conversionFactor: number;
+        baseUomId: string | null;
+        baseUomSymbol: string | null;
+        availableUoms: unknown;
         receivedQuantity: number;
         unitCost: number;
         returnedQuantity: number;
@@ -334,16 +337,38 @@ export const returnGrnRepository = {
          COALESCE(u.name, def_u.name)   AS "uomName",
          COALESCE(u.symbol, def_u.symbol) AS "uomSymbol",
          COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric AS "conversionFactor",
+         COALESCE(p.base_uom_id, def_pu.uom_id) AS "baseUomId",
+         COALESCE(base_u.symbol, base_u.name, def_u.symbol, def_u.name) AS "baseUomSymbol",
+         COALESCE(
+           (
+             SELECT json_agg(
+               json_build_object(
+                 'uomId', pu2.uom_id,
+                 'uomName', u2.name,
+                 'uomSymbol', COALESCE(u2.symbol, u2.name),
+                 'conversionFactor', pu2.conversion_factor,
+                 'isDefault', pu2.is_default
+               ) ORDER BY pu2.is_default DESC, u2.name ASC
+             )
+             FROM product_uoms pu2
+             JOIN uoms u2 ON u2.id = pu2.uom_id
+             WHERE pu2.product_id = gri.product_id
+           ),
+           '[]'::json
+         ) AS "availableUoms",
          CASE
            WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric
            ELSE gri.received_quantity::numeric
+                * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
          END AS "receivedQuantity",
          ROUND(gri.cost_price::numeric, 2) AS "unitCost",
          COALESCE(returned.qty, 0) AS "returnedQuantity",
          GREATEST(0,
            CASE
              WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-             ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+             ELSE gri.received_quantity::numeric
+                  * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
+                  - COALESCE(returned.qty, 0)
            END
          ) AS "documentReturnableQuantity",
          COALESCE(ib.remaining_quantity, 0)::numeric AS "onHandQuantity",
@@ -351,7 +376,9 @@ export const returnGrnRepository = {
            GREATEST(0,
              CASE
                WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-               ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+               ELSE gri.received_quantity::numeric
+                    * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
+                    - COALESCE(returned.qty, 0)
              END
            ),
            COALESCE(ib.remaining_quantity, 0)::numeric
@@ -360,13 +387,17 @@ export const returnGrnRepository = {
            GREATEST(0,
              CASE
                WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-               ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+               ELSE gri.received_quantity::numeric
+                    * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
+                    - COALESCE(returned.qty, 0)
              END
            ) - LEAST(
              GREATEST(0,
                CASE
                  WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-                 ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+                 ELSE gri.received_quantity::numeric
+                      * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
+                      - COALESCE(returned.qty, 0)
                END
              ),
              COALESCE(ib.remaining_quantity, 0)::numeric
@@ -377,6 +408,7 @@ export const returnGrnRepository = {
              CASE
                WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric
                ELSE gri.received_quantity::numeric
+                    * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
              END
            ) <= COALESCE(returned.qty, 0)
              THEN 'Already fully returned to supplier'
@@ -386,7 +418,9 @@ export const returnGrnRepository = {
              AND GREATEST(0,
                CASE
                  WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-                 ELSE gri.received_quantity::numeric - COALESCE(returned.qty, 0)
+                 ELSE gri.received_quantity::numeric
+                      * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
+                      - COALESCE(returned.qty, 0)
                END
              ) > 0
              THEN 'Sold or consumed — only on-hand quantity can be returned to the supplier'
@@ -406,6 +440,7 @@ export const returnGrnRepository = {
        LEFT JOIN product_uoms pu ON pu.product_id = gri.product_id AND pu.uom_id = gri.uom_id
        LEFT JOIN product_uoms def_pu ON def_pu.product_id = gri.product_id AND def_pu.is_default = true
        LEFT JOIN uoms def_u ON def_u.id = def_pu.uom_id
+       LEFT JOIN uoms base_u ON base_u.id = p.base_uom_id
        LEFT JOIN LATERAL (
          SELECT SUM(rl.base_quantity) AS qty
          FROM return_grn_lines rl

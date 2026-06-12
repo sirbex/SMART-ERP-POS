@@ -87,7 +87,7 @@ describe('returnGrnValidation', () => {
                 consumedQuantity: 8,
             });
             expect(() => assertWithinReturnableLimits(r, 5, 'Product A')).toThrow(
-                /Maximum returnable now: 2/,
+                /Maximum returnable is 2/,
             );
             try {
                 assertWithinReturnableLimits(r, 5, 'Product A');
@@ -123,7 +123,7 @@ describe('returnGrnValidation', () => {
                     { productId: 'p1', batchId: 'b1', baseQuantity: 4, productName: 'A' },
                     { productId: 'p1', batchId: 'b1', baseQuantity: 4, productName: 'A' },
                 ]),
-            ).toThrow(/Maximum returnable now/);
+            ).toThrow(/Maximum returnable is/);
         });
 
         it('allows two lines that fit within batch on-hand', () => {
@@ -142,7 +142,7 @@ describe('returnGrnValidation', () => {
             consumeReturnableQuantity(working, 'p1', 'b1', 4, 'A');
             expect(() =>
                 consumeReturnableQuantity(working, 'p1', 'b1', 4, 'A'),
-            ).toThrow(/Maximum returnable now/);
+            ).toThrow(/Maximum returnable is/);
         });
     });
 

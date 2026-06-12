@@ -24,7 +24,7 @@
     "proof:at-cost": "node scripts/proof-at-cost-issue-price.mjs",
     "proof:at-cost:all": "npm run test:pricing-phases && npm run proof:at-cost",
     "proof:gr-uom:server": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/modules/goods-receipts/goodsReceiptService.test.ts",
-    "test:return-grn": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/modules/return-grn/returnGrnValidation.test.ts src/modules/return-grn/returnGrnService.returnFlow.test.ts src/modules/return-grn/returnGrnService.costLayers.test.ts src/modules/return-grn/returnGrnScnBilling.test.ts src/modules/return-grn/rgrnClearingAccount.test.ts",
+    "test:return-grn": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/modules/return-grn/returnGrnQuantity.test.ts src/modules/return-grn/returnGrnValidation.test.ts src/modules/return-grn/returnGrnService.returnFlow.test.ts src/modules/return-grn/returnGrnService.costLayers.test.ts src/modules/return-grn/returnGrnScnBilling.test.ts src/modules/return-grn/rgrnClearingAccount.test.ts",
     "proof:gr-billing-rgrn-scn": "node scripts/proof-gr-billing-rgrn-scn.mjs",
     "proof:ap-reconciliation": "node ../scripts/proof-ap-reconciliation.mjs",
     "proof:at-cost:resolve": "tsx scripts/proof-at-cost-resolve.ts",

@@ -1,9 +1,12 @@
 /**
  * Return GRN validation — single source of truth for returnable quantity rules.
  * SAP/Odoo: min(document entitlement, on-hand). FIFO batch when batch not specified.
+ * All limits compared in base_quantity only.
  */
 
+import Decimal from 'decimal.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
+import { returnGrnBaseToDisplayQuantity } from './returnGrnQuantity.js';
 
 export interface ReturnableItemRow {
     grItemId?: string;
@@ -21,12 +24,45 @@ export interface ReturnableItemRow {
     returnBlockReason?: string | null;
 }
 
+/** Optional entered-UoM context for unit-aware error messages. */
+export interface ReturnGrnLimitDisplay {
+    enteredQuantity: number;
+    enteredUomSymbol: string;
+    factorToBase: number;
+    baseUomSymbol?: string;
+}
+
 export type MutableReturnableRow = ReturnableItemRow & {
     returnableQuantity: number;
     documentReturnableQuantity: number;
     onHandQuantity: number;
     consumedQuantity: number;
 };
+
+function formatQty(n: number): string {
+    const fixed = new Decimal(n).toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toFixed();
+    if (!fixed.includes('.')) return fixed;
+    return fixed.replace(/\.?0+$/, '');
+}
+
+function buildOverReturnMessage(
+    baseQuantity: number,
+    returnableBase: number,
+    productName: string,
+    display?: ReturnGrnLimitDisplay,
+): string {
+    if (display && display.factorToBase > 0) {
+        const entered = formatQty(display.enteredQuantity);
+        const maxDisplay = formatQty(
+            returnGrnBaseToDisplayQuantity(returnableBase, display.factorToBase),
+        );
+        const symbol = display.enteredUomSymbol || 'units';
+        return `Cannot return ${entered} ${symbol}. Maximum returnable is ${maxDisplay} ${symbol}.`;
+    }
+
+    const baseSymbol = display?.baseUomSymbol || 'units';
+    return `Cannot return ${formatQty(baseQuantity)} ${baseSymbol}. Maximum returnable is ${formatQty(returnableBase)} ${baseSymbol}.`;
+}
 
 /** Clone snapshot so multi-line create/post can deduct pending qty in-memory. */
 export function cloneReturnableSnapshot(
@@ -78,6 +114,7 @@ export function assertWithinReturnableLimits(
     row: ReturnableItemRow | undefined,
     baseQuantity: number,
     productName: string,
+    display?: ReturnGrnLimitDisplay,
 ): void {
     if (!row) {
         throw new ValidationError(
@@ -94,9 +131,7 @@ export function assertWithinReturnableLimits(
     const returned = Number(row.returnedQuantity) || 0;
     const received = Number(row.receivedQuantity) || 0;
 
-    const parts = [
-        `Cannot return ${baseQuantity} of ${productName}. Maximum returnable now: ${returnable}.`,
-    ];
+    const parts = [buildOverReturnMessage(baseQuantity, returnable, productName, display)];
 
     if (consumed > 0) {
         parts.push(
@@ -129,11 +164,12 @@ export function consumeReturnableQuantity(
     batchId: string | null | undefined,
     baseQuantity: number,
     productName: string,
+    display?: ReturnGrnLimitDisplay,
 ): string | null {
     const effectiveBatchId = resolveReturnBatchId(working, productId, batchId);
     const row = pickReturnableRow(working, productId, effectiveBatchId);
 
-    assertWithinReturnableLimits(row, baseQuantity, productName);
+    assertWithinReturnableLimits(row, baseQuantity, productName, display);
 
     if (!row) {
         throw new ValidationError(`No returnable stock found for ${productName} on this goods receipt.`);
@@ -161,6 +197,7 @@ export function validateReturnLinesAgainstSnapshot(
         batchId?: string | null;
         baseQuantity: number;
         productName?: string;
+        limitDisplay?: ReturnGrnLimitDisplay;
     }>,
 ): Array<{ productId: string; batchId: string | null }> {
     const working = cloneReturnableSnapshot(snapshot);
@@ -174,6 +211,7 @@ export function validateReturnLinesAgainstSnapshot(
             line.batchId ?? null,
             line.baseQuantity,
             name,
+            line.limitDisplay,
         );
         resolved.push({ productId: line.productId, batchId });
     }

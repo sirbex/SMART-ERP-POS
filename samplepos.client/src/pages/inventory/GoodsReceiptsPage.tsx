@@ -24,6 +24,13 @@ import {
   useCreateCreditNoteFromReturn,
 } from '../../hooks/useReturnGrn';
 import type { ReturnableItem } from '../../hooks/useReturnGrn';
+import {
+  formatReturnGrnDualQty,
+  findReturnUomOption,
+  maxReturnableInUom,
+  resolveReturnUomOptions,
+  returnGrnLineTotal,
+} from '../../utils/returnGrnUom';
 import { useAuth } from '../../hooks/useAuth';
 import { useTenant } from '../../contexts/TenantContext';
 import { formatCurrency } from '../../utils/currency';
@@ -373,6 +380,7 @@ export default function GoodsReceiptsPage() {
 
   const [returnReason, setReturnReason] = useState('');
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [returnUomIds, setReturnUomIds] = useState<Record<string, string>>({});
   const [showAddItemForm, setShowAddItemForm] = useState(false);
   const [returnSubmitting, setReturnSubmitting] = useState(false);
   const [receiveAllFlash, setReceiveAllFlash] = useState('');
@@ -788,9 +796,40 @@ export default function GoodsReceiptsPage() {
     setShowDetailsModal(true);
   };
 
+  const returnLineKey = (item: ReturnableItem) =>
+    `${item.productId}_${item.batchId || 'no-batch'}`;
+
+  const getReturnLineUomContext = (item: ReturnableItem, selectedUomId?: string) => {
+    const receiptUom = {
+      uomId: item.uomId,
+      uomName: item.uomName,
+      uomSymbol: item.uomSymbol || item.uomName,
+      conversionFactor: item.conversionFactor,
+    };
+    const options = resolveReturnUomOptions(item.availableUoms, receiptUom);
+    const selected = findReturnUomOption(options, selectedUomId || item.uomId);
+    const baseSymbol = item.baseUomSymbol || selected.uomSymbol;
+    return { options, selected, receiptUom, baseSymbol };
+  };
+
+  useEffect(() => {
+    if (!showReturnModal || returnableItems.length === 0) return;
+    setReturnUomIds((prev) => {
+      const next = { ...prev };
+      for (const item of returnableItems) {
+        const key = returnLineKey(item);
+        if (!next[key] && item.uomId) {
+          next[key] = item.uomId;
+        }
+      }
+      return next;
+    });
+  }, [showReturnModal, returnableItems]);
+
   const handleOpenReturnModal = () => {
     setReturnReason('');
     setReturnQuantities({});
+    setReturnUomIds({});
     setShowReturnModal(true);
   };
 
@@ -798,15 +837,16 @@ export default function GoodsReceiptsPage() {
     if (!selectedGR) return;
     const lines = returnableItems
       .filter((item) => {
-        const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+        const key = returnLineKey(item);
         return (returnQuantities[key] || 0) > 0;
       })
       .map((item) => {
-        const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+        const key = returnLineKey(item);
+        const { selected } = getReturnLineUomContext(item, returnUomIds[key]);
         return {
           productId: item.productId,
           batchId: item.batchId || undefined,
-          uomId: item.uomId || undefined,
+          uomId: selected.uomId || item.uomId || undefined,
           quantity: returnQuantities[key],
           unitCost: Number(item.unitCost) || 0,
         };
@@ -1958,11 +1998,18 @@ export default function GoodsReceiptsPage() {
                   {/* Mobile card list */}
                   <div className="sm:hidden space-y-3 mb-4">
                     {returnableItems.map((item) => {
-                      const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+                      const key = returnLineKey(item);
                       const qty = returnQuantities[key] || 0;
-                      const maxReturn = item.returnableQuantity;
+                      const { options, selected, receiptUom, baseSymbol } = getReturnLineUomContext(
+                        item,
+                        returnUomIds[key],
+                      );
+                      const maxReturn = maxReturnableInUom(
+                        item.returnableQuantity,
+                        selected.conversionFactor,
+                      );
                       const consumed = item.consumedQuantity ?? 0;
-                      const canReturn = maxReturn > 0;
+                      const canReturn = item.returnableQuantity > 0;
                       return (
                         <article
                           key={key}
@@ -1980,30 +2027,82 @@ export default function GoodsReceiptsPage() {
                             )}
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-xs text-gray-600">
-                            <span>On hand: <strong>{item.onHandQuantity ?? '—'}</strong></span>
-                            <span>Max return: <strong>{maxReturn}</strong></span>
+                            <span>
+                              On hand:{' '}
+                              <strong>
+                                {formatReturnGrnDualQty(
+                                  item.onHandQuantity ?? 0,
+                                  receiptUom,
+                                  baseSymbol,
+                                )}
+                              </strong>
+                            </span>
+                            <span>
+                              Max return:{' '}
+                              <strong>
+                                {formatReturnGrnDualQty(
+                                  item.returnableQuantity,
+                                  receiptUom,
+                                  baseSymbol,
+                                )}
+                              </strong>
+                            </span>
                             <span>Unit cost: {formatCurrency(item.unitCost)}</span>
-                            <span>Received: {item.receivedQuantity}</span>
+                            <span>
+                              Received:{' '}
+                              {formatReturnGrnDualQty(
+                                item.receivedQuantity,
+                                receiptUom,
+                                baseSymbol,
+                              )}
+                            </span>
                           </div>
                           <div className="flex items-center justify-between gap-2 pt-1">
-                            <label className="text-sm font-medium text-gray-700">Return qty</label>
-                            <input
-                              type="number"
-                              min={0}
-                              max={maxReturn}
-                              step={1}
-                              value={qty || ''}
-                              onChange={(e) => {
-                                const val = e.target.value === '' ? 0 : Number(e.target.value);
-                                setReturnQuantities((prev) => ({
-                                  ...prev,
-                                  [key]: Math.min(Math.max(0, val), maxReturn),
-                                }));
-                              }}
-                              className="w-24 border rounded-lg px-3 py-2 text-right disabled:bg-gray-100"
-                              disabled={returnSubmitting || !canReturn}
-                              aria-label={`Return quantity for ${item.productName}`}
-                            />
+                            <label className="text-sm font-medium text-gray-700">Return</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                min={0}
+                                max={maxReturn}
+                                step={0.001}
+                                value={qty || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value === '' ? 0 : Number(e.target.value);
+                                  setReturnQuantities((prev) => ({
+                                    ...prev,
+                                    [key]: Math.min(Math.max(0, val), maxReturn),
+                                  }));
+                                }}
+                                className="w-20 border rounded-lg px-2 py-2 text-right disabled:bg-gray-100"
+                                disabled={returnSubmitting || !canReturn}
+                                aria-label={`Return quantity for ${item.productName}`}
+                              />
+                              <select
+                                value={selected.uomId}
+                                onChange={(e) => {
+                                  const nextUomId = e.target.value;
+                                  const next = findReturnUomOption(options, nextUomId);
+                                  const nextMax = maxReturnableInUom(
+                                    item.returnableQuantity,
+                                    next.conversionFactor,
+                                  );
+                                  setReturnUomIds((prev) => ({ ...prev, [key]: nextUomId }));
+                                  setReturnQuantities((prev) => ({
+                                    ...prev,
+                                    [key]: Math.min(prev[key] || 0, nextMax),
+                                  }));
+                                }}
+                                className="border rounded-lg px-2 py-2 text-sm disabled:bg-gray-100"
+                                disabled={returnSubmitting || !canReturn}
+                                aria-label={`Return unit for ${item.productName}`}
+                              >
+                                {options.map((opt) => (
+                                  <option key={opt.uomId} value={opt.uomId}>
+                                    {opt.uomSymbol || opt.uomName}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                           </div>
                         </article>
                       );
@@ -2012,8 +2111,22 @@ export default function GoodsReceiptsPage() {
                       Total return value:{' '}
                       {formatCurrency(
                         returnableItems.reduce((sum, item) => {
-                          const key = `${item.productId}_${item.batchId || 'no-batch'}`;
-                          return sum + (returnQuantities[key] || 0) * item.unitCost;
+                          const key = returnLineKey(item);
+                          const entered = returnQuantities[key] || 0;
+                          if (entered <= 0) return sum;
+                          const { selected, receiptUom } = getReturnLineUomContext(
+                            item,
+                            returnUomIds[key],
+                          );
+                          return (
+                            sum +
+                            returnGrnLineTotal(
+                              entered,
+                              selected.conversionFactor,
+                              receiptUom.conversionFactor,
+                              Number(item.unitCost) || 0,
+                            )
+                          );
                         }, 0),
                       )}
                     </div>
@@ -2031,15 +2144,23 @@ export default function GoodsReceiptsPage() {
                         <th className="text-right px-3 py-2">Max Returnable</th>
                         <th className="text-right px-3 py-2">Unit Cost</th>
                         <th className="text-center px-3 py-2">Return Qty</th>
+                        <th className="text-center px-3 py-2">UoM</th>
                       </tr>
                     </thead>
                     <tbody>
                       {returnableItems.map((item) => {
-                        const key = `${item.productId}_${item.batchId || 'no-batch'}`;
+                        const key = returnLineKey(item);
                         const qty = returnQuantities[key] || 0;
-                        const maxReturn = item.returnableQuantity;
+                        const { options, selected, receiptUom, baseSymbol } = getReturnLineUomContext(
+                          item,
+                          returnUomIds[key],
+                        );
+                        const maxReturn = maxReturnableInUom(
+                          item.returnableQuantity,
+                          selected.conversionFactor,
+                        );
                         const consumed = item.consumedQuantity ?? 0;
-                        const canReturn = maxReturn > 0;
+                        const canReturn = item.returnableQuantity > 0;
                         return (
                           <tr key={key} className={`border-b hover:bg-gray-50 ${!canReturn ? 'bg-amber-50/40' : ''}`}>
                             <td className="px-3 py-2">
@@ -2059,19 +2180,33 @@ export default function GoodsReceiptsPage() {
                                 </span>
                               )}
                             </td>
-                            <td className="px-3 py-2 text-right">{item.receivedQuantity}</td>
-                            <td className="px-3 py-2 text-right text-amber-700">
-                              {consumed > 0 ? consumed : '—'}
+                            <td className="px-3 py-2 text-right text-xs">
+                              {formatReturnGrnDualQty(item.receivedQuantity, receiptUom, baseSymbol)}
                             </td>
-                            <td className="px-3 py-2 text-right">{item.onHandQuantity ?? '—'}</td>
-                            <td className="px-3 py-2 text-right font-medium">{maxReturn}</td>
+                            <td className="px-3 py-2 text-right text-amber-700 text-xs">
+                              {consumed > 0
+                                ? formatReturnGrnDualQty(consumed, receiptUom, baseSymbol)
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2 text-right text-xs">
+                              {item.onHandQuantity != null
+                                ? formatReturnGrnDualQty(item.onHandQuantity, receiptUom, baseSymbol)
+                                : '—'}
+                            </td>
+                            <td className="px-3 py-2 text-right font-medium text-xs">
+                              {formatReturnGrnDualQty(
+                                item.returnableQuantity,
+                                receiptUom,
+                                baseSymbol,
+                              )}
+                            </td>
                             <td className="px-3 py-2 text-right">{formatCurrency(item.unitCost)}</td>
                             <td className="px-3 py-2 text-center">
                               <input
                                 type="number"
                                 min={0}
                                 max={maxReturn}
-                                step={1}
+                                step={0.001}
                                 value={qty || ''}
                                 onChange={(e) => {
                                   const val = e.target.value === '' ? 0 : Number(e.target.value);
@@ -2085,21 +2220,62 @@ export default function GoodsReceiptsPage() {
                                 aria-label={`Return quantity for ${item.productName}`}
                               />
                             </td>
+                            <td className="px-3 py-2 text-center">
+                              <select
+                                value={selected.uomId}
+                                onChange={(e) => {
+                                  const nextUomId = e.target.value;
+                                  const next = findReturnUomOption(options, nextUomId);
+                                  const nextMax = maxReturnableInUom(
+                                    item.returnableQuantity,
+                                    next.conversionFactor,
+                                  );
+                                  setReturnUomIds((prev) => ({ ...prev, [key]: nextUomId }));
+                                  setReturnQuantities((prev) => ({
+                                    ...prev,
+                                    [key]: Math.min(prev[key] || 0, nextMax),
+                                  }));
+                                }}
+                                className="border rounded px-2 py-1 text-sm disabled:bg-gray-100 max-w-[5rem]"
+                                disabled={returnSubmitting || !canReturn}
+                                aria-label={`Return unit for ${item.productName}`}
+                              >
+                                {options.map((opt) => (
+                                  <option key={opt.uomId} value={opt.uomId}>
+                                    {opt.uomSymbol || opt.uomName}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                     <tfoot>
                       <tr className="bg-gray-50 font-medium">
-                        <td colSpan={6} className="px-3 py-2 text-right">
+                        <td colSpan={7} className="px-3 py-2 text-right">
                           Total Return Value:
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td colSpan={2} className="px-3 py-2 text-center">
                           {formatCurrency(
                             returnableItems.reduce((sum, item) => {
-                              const key = `${item.productId}_${item.batchId || 'no-batch'}`;
-                              return sum + (returnQuantities[key] || 0) * item.unitCost;
-                            }, 0)
+                              const key = returnLineKey(item);
+                              const entered = returnQuantities[key] || 0;
+                              if (entered <= 0) return sum;
+                              const { selected, receiptUom } = getReturnLineUomContext(
+                                item,
+                                returnUomIds[key],
+                              );
+                              return (
+                                sum +
+                                returnGrnLineTotal(
+                                  entered,
+                                  selected.conversionFactor,
+                                  receiptUom.conversionFactor,
+                                  Number(item.unitCost) || 0,
+                                )
+                              );
+                            }, 0),
                           )}
                         </td>
                       </tr>

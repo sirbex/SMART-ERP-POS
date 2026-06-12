@@ -49,12 +49,16 @@ import {
     SUPPLIER_BILL_REQUIRED_FOR_SCN_MESSAGE,
 } from './returnGrnMessages.js';
 import { resolveCanonicalProductUom } from '../products/uomService.js';
-import { PricingEngine } from '../../utils/pricingEngine.js';
 import {
     assertWithinReturnableLimits,
     pickReturnableRow,
     validateReturnLinesAgainstSnapshot,
+    type ReturnGrnLimitDisplay,
 } from './returnGrnValidation.js';
+import {
+    returnGrnEnteredToBaseQuantity,
+    returnGrnPurchaseQuantityFromBase,
+} from './returnGrnQuantity.js';
 
 export interface CreateReturnGrnInput {
     grnId: string;
@@ -124,47 +128,41 @@ export const returnGrnService = {
                 batchId?: string | null;
                 baseQuantity: number;
                 productName: string;
+                limitDisplay?: ReturnGrnLimitDisplay;
+                enteredUomId: string | null;
             }> = [];
 
             for (const line of input.lines) {
                 if (line.quantity <= 0) throw new Error('Return quantity must be positive');
 
-                // ── Purchase-UOM lock (SAP-grade rule) ───────────────────────────
-                // Returns MUST use the same UoM the item was received in.
-                // Allowing a different UoM produces wrong base_quantity, wrong GL,
-                // wrong inventory value, and MR11 drift.
                 const grItemRow = await client.query<{
                     uom_id: string | null;
-                    uom_name: string | null;
+                    uom_symbol: string | null;
                     product_name: string | null;
+                    base_uom_symbol: string | null;
                 }>(
-                    `SELECT gri.uom_id, u.name AS uom_name, p.name AS product_name
+                    `SELECT gri.uom_id,
+                            COALESCE(u.symbol, u.name) AS uom_symbol,
+                            p.name AS product_name,
+                            COALESCE(base_u.symbol, base_u.name) AS base_uom_symbol
                      FROM goods_receipt_items gri
                      LEFT JOIN uoms u ON u.id = gri.uom_id
                      JOIN products p ON p.id = gri.product_id
+                     LEFT JOIN uoms base_u ON base_u.id = p.base_uom_id
                      WHERE gri.goods_receipt_id = $1 AND gri.product_id = $2
                      LIMIT 1`,
                     [input.grnId, line.productId],
                 );
                 const purchaseUomId: string | null = grItemRow.rows[0]?.uom_id ?? null;
-                const purchaseUomName: string | null = grItemRow.rows[0]?.uom_name ?? null;
                 const productName = grItemRow.rows[0]?.product_name ?? 'product';
+                const baseUomSymbol = grItemRow.rows[0]?.base_uom_symbol ?? 'units';
 
-                let effectiveUomId: string | null = line.uomId || null;
-
-                if (purchaseUomId) {
-                    if (effectiveUomId && effectiveUomId !== purchaseUomId) {
-                        throw new ValidationError(
-                            `UoM mismatch: this product was received in "${purchaseUomName ?? purchaseUomId}". ` +
-                            `Returns must use the same unit of measure — no conversion allowed on returns.`,
-                        );
-                    }
-                    // Default to purchase UOM when caller omits it
-                    if (!effectiveUomId) {
-                        effectiveUomId = purchaseUomId;
-                    }
+                const effectiveUomId: string | null = line.uomId ?? purchaseUomId;
+                if (!effectiveUomId) {
+                    throw new ValidationError(
+                        `Unit of measure is required to return ${productName}.`,
+                    );
                 }
-                // ────────────────────────────────────────────────────────────────
 
                 const { conversionFactor } = await resolveCanonicalProductUom(
                     line.productId,
@@ -172,22 +170,59 @@ export const returnGrnService = {
                     client,
                 );
 
-                const baseQuantity = PricingEngine.calculateBaseQuantity(
-                    line.quantity,
+                const uomSymbolRow = await client.query<{ symbol: string | null }>(
+                    `SELECT COALESCE(symbol, name) AS symbol FROM uoms WHERE id = $1 LIMIT 1`,
+                    [effectiveUomId],
+                );
+                const enteredUomSymbol = uomSymbolRow.rows[0]?.symbol ?? 'units';
+
+                const baseQuantity = returnGrnEnteredToBaseQuantity(line.quantity, conversionFactor);
+
+                const snapshotRow = pickReturnableRow(
+                    returnableSnapshot,
+                    line.productId,
+                    line.batchId ?? null,
+                );
+                const maxBaseQuantity = Number(snapshotRow?.returnableQuantity) || 0;
+
+                logger.info('[RETURN GRN] quantity validation input', {
+                    grnId: input.grnId,
+                    productId: line.productId,
+                    productName,
+                    enteredQuantity: line.quantity,
+                    enteredUomId: effectiveUomId,
+                    enteredUomSymbol,
                     conversionFactor,
-                ).toNumber();
+                    baseQuantity,
+                    maxBaseQuantity,
+                });
+
+                const limitDisplay: ReturnGrnLimitDisplay = {
+                    enteredQuantity: line.quantity,
+                    enteredUomSymbol,
+                    factorToBase: conversionFactor,
+                    baseUomSymbol,
+                };
 
                 pendingLines.push({
                     productId: line.productId,
                     batchId: line.batchId ?? null,
                     baseQuantity,
                     productName,
+                    limitDisplay,
+                    enteredUomId: effectiveUomId,
                 });
             }
 
             const resolvedBatches = validateReturnLinesAgainstSnapshot(
                 returnableSnapshot,
-                pendingLines,
+                pendingLines.map((p) => ({
+                    productId: p.productId,
+                    batchId: p.batchId,
+                    baseQuantity: p.baseQuantity,
+                    productName: p.productName,
+                    limitDisplay: p.limitDisplay,
+                })),
             );
 
             const lines: ReturnGrnLine[] = [];
@@ -204,19 +239,23 @@ export const returnGrnService = {
                     [input.grnId, line.productId],
                 );
                 const purchaseUomId: string | null = grItemRow.rows[0]?.uom_id ?? null;
-                let effectiveUomId: string | null = line.uomId || purchaseUomId;
+                const effectiveUomId = pending.enteredUomId;
 
-                const { conversionFactor } = await resolveCanonicalProductUom(
+                const { conversionFactor: purchaseFactor } = await resolveCanonicalProductUom(
                     line.productId,
-                    effectiveUomId,
+                    purchaseUomId,
                     client,
                 );
 
                 const baseQuantity = pending.baseQuantity;
+                const purchaseQuantity = returnGrnPurchaseQuantityFromBase(
+                    baseQuantity,
+                    purchaseFactor,
+                );
 
-                // lineTotal = quantity × unitCost (both in purchase-UOM units).
+                // lineTotal = purchase-UOM qty × purchase-UOM unit cost (gri.cost_price).
                 const lineTotal = Money.toNumber(
-                    Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitCost))
+                    Money.multiply(Money.parseDb(purchaseQuantity), Money.parseDb(line.unitCost))
                 );
 
                 const created = await returnGrnRepository.createLine(client, {
@@ -224,7 +263,7 @@ export const returnGrnService = {
                     productId: line.productId,
                     batchId: resolvedBatchId,
                     uomId: effectiveUomId,
-                    quantity: line.quantity,
+                    quantity: purchaseQuantity,
                     baseQuantity,
                     unitCost: line.unitCost,
                     lineTotal,
@@ -525,14 +564,31 @@ export const returnGrnService = {
      */
     async getReturnableItems(pool: Pool, grnId: string) {
         const items = await returnGrnRepository.getReturnableItems(pool, grnId);
-        return items.map(item => ({
-            ...item,
-            conversionFactor: Number(item.conversionFactor) || 1,
-            receivedQuantity: Number(item.receivedQuantity) || 0,
-            unitCost: Number(item.unitCost) || 0,
-            returnedQuantity: Number(item.returnedQuantity) || 0,
-            returnableQuantity: Number(item.returnableQuantity) || 0,
-        }));
+        return items.map((item) => {
+            const rawUoms = item.availableUoms;
+            const availableUoms = Array.isArray(rawUoms)
+                ? rawUoms.map((u: Record<string, unknown>) => ({
+                    uomId: String(u.uomId ?? ''),
+                    uomName: String(u.uomName ?? ''),
+                    uomSymbol: String(u.uomSymbol ?? u.uomName ?? ''),
+                    conversionFactor: Number(u.conversionFactor) || 1,
+                    isDefault: Boolean(u.isDefault),
+                }))
+                : [];
+
+            return {
+                ...item,
+                conversionFactor: Number(item.conversionFactor) || 1,
+                receivedQuantity: Number(item.receivedQuantity) || 0,
+                unitCost: Number(item.unitCost) || 0,
+                returnedQuantity: Number(item.returnedQuantity) || 0,
+                returnableQuantity: Number(item.returnableQuantity) || 0,
+                documentReturnableQuantity: Number(item.documentReturnableQuantity) || 0,
+                onHandQuantity: Number(item.onHandQuantity) || 0,
+                consumedQuantity: Number(item.consumedQuantity) || 0,
+                availableUoms,
+            };
+        });
     },
 
     /**
