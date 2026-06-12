@@ -33,16 +33,13 @@ export function formatQtyLabel(n: number): string {
 /** e.g. "2 BOX (20 PCS)" when receipt UoM differs from base. */
 export function formatReturnGrnDualQty(
   baseQty: number,
-  receiptUom: { symbol: string; conversionFactor: number },
+  receiptUom: { symbol?: string; uomSymbol?: string; conversionFactor: number },
   baseSymbol: string,
 ): string {
+  const symbol = receiptUom.symbol || receiptUom.uomSymbol || 'units';
   const displayQty = baseToUomQuantity(baseQty, receiptUom.conversionFactor);
-  const primary = `${formatQtyLabel(displayQty)} ${receiptUom.symbol}`;
-  if (
-    receiptUom.conversionFactor === 1 ||
-    receiptUom.symbol === baseSymbol ||
-    !baseSymbol
-  ) {
+  const primary = `${formatQtyLabel(displayQty)} ${symbol}`;
+  if (receiptUom.conversionFactor === 1 || symbol === baseSymbol || !baseSymbol) {
     return primary;
   }
   return `${primary} (${formatQtyLabel(baseQty)} ${baseSymbol})`;
