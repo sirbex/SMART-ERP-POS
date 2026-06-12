@@ -320,6 +320,8 @@ export class InventoryBusinessRules {
     unitCost: number;
     batchNumber?: string | null;
     expiryDate?: string | null;
+    /** When true (products.track_expiry), expiryDate is mandatory. Never required globally. */
+    trackExpiry?: boolean;
   }): void {
     if (!item.productId || item.productId.trim().length === 0) {
       throw new BusinessRuleViolation(
@@ -343,6 +345,17 @@ export class InventoryBusinessRules {
         'Unit cost must be non-negative',
         'INVALID_UNIT_COST'
       );
+    }
+
+    if (item.trackExpiry) {
+      const expiry = item.expiryDate;
+      if (!expiry || String(expiry).trim() === '') {
+        throw new BusinessRuleViolation(
+          'BR-INV-011',
+          'Expiry date is required for products that track expiry',
+          'MISSING_EXPIRY_DATE'
+        );
+      }
     }
   }
 }

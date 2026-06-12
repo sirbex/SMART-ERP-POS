@@ -49,6 +49,7 @@ export interface GoodsReceiptItem {
   poItemId: string | null;
   productId: string;
   productName: string;
+  trackExpiry?: boolean;
   orderedQuantity: number;
   receivedQuantity: number;
   unitCost: number;
@@ -304,6 +305,7 @@ export const goodsReceiptRepository = {
          gri.product_id as "productId",
          gri.po_item_id as "poItemId",
          COALESCE(p.name, 'Unknown Product') as "productName",
+         COALESCE(p.track_expiry, false) as "trackExpiry",
          ROUND(COALESCE(poi.ordered_quantity, gri.received_quantity)::numeric, 2) as "orderedQuantity",
          ROUND(COALESCE(poi.received_quantity, 0)::numeric, 2) as "poAlreadyReceived",
          ROUND(gri.received_quantity::numeric, 2) as "receivedQuantity",
@@ -407,6 +409,7 @@ export const goodsReceiptRepository = {
          gri.po_item_id as "poItemId",
          gri.product_id as "productId",
          COALESCE(p.name, 'Unknown Product') as "productName",
+         COALESCE(p.track_expiry, false) as "trackExpiry",
          gri.received_quantity as "receivedQuantity",
          gri.batch_number as "batchNumber",
          gri.expiry_date as "expiryDate",

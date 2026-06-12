@@ -6,6 +6,7 @@ import Decimal from 'decimal.js';
 import { downloadFile } from '../../utils/download';
 import { getBusinessDate } from '../../utils/businessDate';
 import { grBillableLineTotal, splitGRReceiptQuantities } from '../../utils/grReceiptQuantity';
+import { grItemTrackExpiry, grLineExpirySatisfied } from '../../utils/grExpiryGate';
 import {
   useGoodsReceipts,
   useFinalizeGoodsReceipt,
@@ -158,6 +159,8 @@ interface GRItemRow {
   uom_id?: string;
   conversionFactor?: number | string;
   conversion_factor?: number | string;
+  trackExpiry?: boolean;
+  track_expiry?: boolean;
 }
 
 interface PORow {
@@ -614,35 +617,32 @@ export default function GoodsReceiptsPage() {
   }, [showDetailsModal, items, isFromPO, selectedGR?.status]);
 
   const handleFinalize = async (id: string) => {
-    // ── Part 4: Required field enforcement ──
-    if (isFromPO) {
-      const validationErrors: string[] = [];
-      let anyReceived = false;
+    const validationErrors: string[] = [];
+    let anyReceived = false;
 
-      items.forEach((it: GRItemRow) => {
-        const es = editItems[it.id] || {};
-        const productName = it.productName || it.product_name || 'Unknown';
-        const qty = Number(es.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
-        const expiry = es.expiryDate ?? it.expiryDate ?? it.expiry_date ?? '';
+    items.forEach((it: GRItemRow) => {
+      const es = editItems[it.id] || {};
+      const productName = it.productName || it.product_name || 'Unknown';
+      const qty = Number(es.receivedQuantity ?? it.receivedQuantity ?? it.received_quantity ?? 0);
+      const expiry = es.expiryDate ?? it.expiryDate ?? it.expiry_date ?? '';
+      const trackExpiry = grItemTrackExpiry(it);
 
-        if (qty > 0) {
-          anyReceived = true;
-          // Batch is optional — backend auto-generates BATCH-YYYYMMDD-### if blank
-          if (!expiry || String(expiry).trim() === '') {
-            validationErrors.push(`${productName}: Expiry date is required`);
-          }
+      if (qty > 0) {
+        anyReceived = true;
+        if (!grLineExpirySatisfied(trackExpiry, qty, expiry)) {
+          validationErrors.push(`${productName}: Expiry date is required`);
         }
-      });
-
-      if (!anyReceived) {
-        alert('Cannot finalize: At least one line must have a received quantity greater than zero.');
-        return;
       }
+    });
 
-      if (validationErrors.length > 0) {
-        alert(`Cannot finalize. Please fix the following:\n\n${validationErrors.join('\n')}`);
-        return;
-      }
+    if (!anyReceived) {
+      alert('Cannot finalize: At least one line must have a received quantity greater than zero.');
+      return;
+    }
+
+    if (validationErrors.length > 0) {
+      alert(`Cannot finalize. Please fix the following:\n\n${validationErrors.join('\n')}`);
+      return;
     }
 
     if (
@@ -2717,6 +2717,10 @@ function AddGRItemForm({
     const cost = parseFloat(unitCost);
     if (!qty || qty <= 0) { alert('Quantity must be positive'); return; }
     if (cost < 0) { alert('Unit cost cannot be negative'); return; }
+    if (selectedProduct.trackExpiry && (!expiryDate || !expiryDate.trim())) {
+      alert('Expiry date is required for this product');
+      return;
+    }
 
     addMutation.mutate({
       grId,
@@ -2776,9 +2780,18 @@ function AddGRItemForm({
             className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500" />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Expiry Date (optional)</label>
-          <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)}
-            className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500" />
+          {selectedProduct?.trackExpiry ? (
+            <>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Expiry Date</label>
+              <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} min={getBusinessDate()}
+                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500" />
+            </>
+          ) : (
+            <>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Expiry Date</label>
+              <span className="text-xs text-gray-400 italic">Not tracked for this product</span>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -2820,6 +2833,7 @@ function GRItemRow({
   onRemove?: (itemId: string) => void;
 }) {
   const es = editState || {};
+  const trackExpiry = grItemTrackExpiry(item);
   const ordered = Number(item.orderedQuantity ?? item.ordered_quantity ?? 0);
   // PO and GR persist qty/cost in the PO's order UoM (display units), same as PurchaseOrdersPage.
   const receivedQty = Number(
@@ -2884,8 +2898,10 @@ function GRItemRow({
     if (es.unitCost == null) return null;
     return Number(es.unitCost) < 0 ? 'Must be ≥ 0' : null;
   })();
+  const hasQty = receivedQty > 0;
   const expiryError = ((): string | null => {
-    const v = es.expiryDate;
+    const v = es.expiryDate ?? item.expiryDate ?? item.expiry_date;
+    if (trackExpiry && hasQty && (!v || !String(v).trim())) return 'Required';
     if (!v) return null;
     const d = new Date(v);
     if (isNaN(d.getTime())) return 'Invalid date';
@@ -2893,12 +2909,11 @@ function GRItemRow({
     return v <= todayStr ? 'Must be a future date' : null;
   })();
 
-  // Line completeness indicator — batch optional (auto-generated if blank)
+  // Line completeness — expiry only when product tracks expiry
   const hasBatch = !!(es.batchNumber ?? '').trim();
-  const hasExpiry = !!(es.expiryDate ?? '').trim();
-  const hasQty = receivedQty > 0;
-  const isComplete = hasExpiry && hasQty; // batch optional — auto-generated
-  const isPartial = hasQty && !hasExpiry;
+  const hasExpiry = !!(es.expiryDate ?? item.expiryDate ?? item.expiry_date ?? '').trim();
+  const isComplete = hasQty && grLineExpirySatisfied(trackExpiry, receivedQty, es.expiryDate ?? item.expiryDate ?? item.expiry_date);
+  const isPartial = hasQty && trackExpiry && !hasExpiry;
   const rowBorderColor = disabled
     ? ''
     : isComplete
@@ -3033,12 +3048,12 @@ function GRItemRow({
               <div className="text-xs text-red-600 mt-0.5 truncate max-w-[120px]" title={batchWarnings[item.id]}>{batchWarnings[item.id]}</div>
             )}
           </div>
-          <div className="flex-1">
+          <div className={trackExpiry ? 'flex-1' : 'hidden'}>
             <input
               type="date"
               data-gr-expiry-idx={itemIndex}
               className={`w-full border rounded px-2 py-1 text-sm ${expiryError ? 'border-red-500' : 'focus:ring-2 focus:ring-blue-400 focus:border-blue-400'}`}
-              value={es.expiryDate ?? ''}
+              value={es.expiryDate ?? (item.expiryDate ? String(item.expiryDate).slice(0, 10) : '') ?? ''}
               disabled={disabled}
               min={getBusinessDate()}
               onChange={(e) => onFieldChange(item.id, 'expiryDate', e.target.value || undefined)}
@@ -3054,6 +3069,9 @@ function GRItemRow({
             />
             {expiryError && <div className="text-xs text-red-600 mt-0.5">{expiryError}</div>}
           </div>
+          {!trackExpiry && (
+            <div className="flex-1 text-xs text-gray-400 italic py-1">N/A</div>
+          )}
         </div>
       </td>
       {/* Bonus */}

@@ -198,6 +198,10 @@ async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
 
                 let uoms: CachedProductUom[] = item.uoms || [];
                 if (!uoms || uoms.length === 0) {
+                    console.warn(
+                        `[offlineCatalog] Product ${item.product_id} (${item.product_name}) has no UoM rows — ` +
+                        'POS MUoM stock/pricing may be wrong until catalog sync includes product_uoms.',
+                    );
                     uoms = [{
                         uomId: `default-${item.product_id}`,
                         name: 'PIECE',

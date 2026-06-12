@@ -280,20 +280,21 @@ export const goodsReceiptService = {
         let unitCost = it.unitCost;
         const expiry = it.expiryDate ?? null;
 
-        // BR-INV-011: Validate item completeness
+        const productData = grProductsMap.get(it.productId);
+
+        // BR-INV-011: Validate item completeness (expiry only when track_expiry)
+        const trackExpiry = !!(productData?.track_expiry);
         InventoryBusinessRules.validateGRItemCompleteness({
           productId: it.productId,
           receivedQuantity: receivedQty,
           unitCost: unitCost,
           batchNumber: it.batchNumber || null,
           expiryDate: expiry,
+          trackExpiry,
         });
         logger.info('BR-INV-011: GR item completeness validation passed', {
           productId: it.productId,
         });
-
-        // Fetch product data for cost variance checks
-        const productData = grProductsMap.get(it.productId);
 
         // BR-INV-002: Validate positive quantity
         InventoryBusinessRules.validatePositiveQuantity(
@@ -483,12 +484,16 @@ export const goodsReceiptService = {
       }
 
       // Collect per-item validation errors (do not mutate state yet)
+      const finProductIds = [...new Set(items.map((i) => i.productId))];
+      const finProductsMap = await batchFetchProducts(client, finProductIds);
+
       const preValidationErrors: string[] = [];
       for (const item of items) {
         const productName: string = item.productName ?? 'Unknown product';
         const receivedQty: number = Money.parseDb(item.receivedQuantity).toNumber();
         const unitCost: number = Money.parseDb(item.unitCost).toNumber();
         const expiryDate: string | null = item.expiryDate || null;
+        const trackExpiry = !!(finProductsMap.get(item.productId)?.track_expiry);
 
         if (receivedQty <= 0)
           preValidationErrors.push(`${productName}: received quantity must be greater than 0`);
@@ -496,6 +501,9 @@ export const goodsReceiptService = {
           preValidationErrors.push(`${productName}: unit cost cannot be negative`);
         if (expiryDate && expiryDate < getBusinessDate())
           preValidationErrors.push(`${productName}: expiry date cannot be in the past`);
+        if (trackExpiry && receivedQty > 0 && (!expiryDate || String(expiryDate).trim() === '')) {
+          preValidationErrors.push(`${productName}: Expiry date is required`);
+        }
       }
 
       if (preValidationErrors.length > 0) {
@@ -563,21 +571,24 @@ export const goodsReceiptService = {
           }
         }
 
-        // SAP UoM snapshot: prefer GR line snapshot; fall back to live default only for legacy rows
-        const finConversionFactor = Number(item.conversionFactor) || 1;
-        const snapshotBaseUomId = item.baseUomId ?? null;
-        let finBaseUomId: string | null = snapshotBaseUomId;
-        if (!finBaseUomId) {
-          const finPuRes = await client.query(
-            `SELECT pu.uom_id FROM product_uoms pu WHERE pu.product_id = $1 AND pu.is_default = true LIMIT 1`,
-            [productId]
-          );
-          finBaseUomId = finPuRes.rows[0]?.uom_id || null;
-        }
+        // MUoM SSOT: re-resolve conversion via uomService (no silent factor=1 fallback)
+        const lineUomId = item.uomId ?? null;
+        const resolvedUom = await resolveCanonicalProductUom(productId, lineUomId, client);
+        const finConversionFactor = resolvedUom.conversionFactor;
+        const finBaseUomId: string | null = item.baseUomId ?? resolvedUom.baseUomId;
 
         const expiryDate: string | null = item.expiryDate || null;
+        const trackExpiry = !!(finProductsMap.get(productId)?.track_expiry);
         InventoryBusinessRules.validatePositiveQuantity(receivedQty, 'goods receipt item');
         PurchaseOrderBusinessRules.validateUnitCost(unitCost);
+        InventoryBusinessRules.validateGRItemCompleteness({
+          productId,
+          receivedQuantity: receivedQty,
+          unitCost,
+          batchNumber: item.batchNumber ?? null,
+          expiryDate,
+          trackExpiry,
+        });
         if (expiryDate) InventoryBusinessRules.validateExpiryDate(expiryDate, false);
 
         for (const segment of segments) {
@@ -1026,6 +1037,25 @@ export const goodsReceiptService = {
         InventoryBusinessRules.validateExpiryDate(data.expiryDate, false);
       }
 
+      const effectiveQty =
+        data.receivedQuantity !== undefined
+          ? data.receivedQuantity
+          : Money.parseDb(item.receivedQuantity).toNumber();
+      const effectiveCost =
+        data.unitCost !== undefined ? data.unitCost : Money.parseDb(item.unitCost).toNumber();
+      const effectiveExpiry =
+        data.expiryDate !== undefined ? data.expiryDate : item.expiryDate ?? null;
+      const productMap = await batchFetchProducts(client, [item.productId]);
+      const trackExpiry = !!(productMap.get(item.productId)?.track_expiry);
+      InventoryBusinessRules.validateGRItemCompleteness({
+        productId: item.productId,
+        receivedQuantity: effectiveQty,
+        unitCost: effectiveCost,
+        batchNumber: data.batchNumber ?? item.batchNumber ?? null,
+        expiryDate: effectiveExpiry,
+        trackExpiry,
+      });
+
       const updateData = { ...data };
 
       const updated = await goodsReceiptRepository.updateGRItem(client, itemId, updateData);
@@ -1060,6 +1090,8 @@ export const goodsReceiptService = {
 
       // Build lookup for existing items
       const itemMap = new Map(existingItems.map((it: GoodsReceiptItem) => [it.id, it]));
+      const batchProductIds = [...new Set(existingItems.map((it: GoodsReceiptItem) => it.productId))];
+      const batchProductsMap = await batchFetchProducts(client, batchProductIds);
 
       const results: GoodsReceiptItem[] = [];
 
@@ -1093,6 +1125,26 @@ export const goodsReceiptService = {
         if (update.expiryDate) {
           InventoryBusinessRules.validateExpiryDate(update.expiryDate, false);
         }
+
+        const effectiveQty =
+          update.receivedQuantity !== undefined
+            ? update.receivedQuantity
+            : Money.parseDb(existing.receivedQuantity).toNumber();
+        const effectiveCost =
+          update.unitCost !== undefined
+            ? update.unitCost
+            : Money.parseDb(existing.unitCost).toNumber();
+        const effectiveExpiry =
+          update.expiryDate !== undefined ? update.expiryDate : existing.expiryDate ?? null;
+        const trackExpiry = !!(batchProductsMap.get(existing.productId)?.track_expiry);
+        InventoryBusinessRules.validateGRItemCompleteness({
+          productId: existing.productId,
+          receivedQuantity: effectiveQty,
+          unitCost: effectiveCost,
+          batchNumber: update.batchNumber ?? existing.batchNumber ?? null,
+          expiryDate: effectiveExpiry,
+          trackExpiry,
+        });
 
         const data: UpdateGRItemData = {};
         if (update.receivedQuantity !== undefined) data.receivedQuantity = update.receivedQuantity;
@@ -1141,6 +1193,17 @@ export const goodsReceiptService = {
       if (data.expiryDate) {
         InventoryBusinessRules.validateExpiryDate(data.expiryDate, false);
       }
+
+      const productMap = await batchFetchProducts(client, [data.productId]);
+      const trackExpiry = !!(productMap.get(data.productId)?.track_expiry);
+      InventoryBusinessRules.validateGRItemCompleteness({
+        productId: data.productId,
+        receivedQuantity: data.receivedQuantity,
+        unitCost: data.unitCost,
+        batchNumber: data.batchNumber ?? null,
+        expiryDate: data.expiryDate ?? null,
+        trackExpiry,
+      });
 
       const items = await goodsReceiptRepository.addGRItems(client, [{
         goodsReceiptId: grId,
@@ -1296,6 +1359,9 @@ export const goodsReceiptService = {
       batchNumber: string;
     }> = [];
 
+    const openingProductIds = items.map((it) => it.productId);
+    const openingProductsMap = await batchFetchProducts(pool, openingProductIds);
+
     const { grId, grNumber } = await UnitOfWork.run(pool, async (client) => {
       // Tell app.skip_stock_movement_trigger — we create movements explicitly
       await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
@@ -1344,6 +1410,16 @@ export const goodsReceiptService = {
 
       // Process each item: batch → movement → qty update → cost layer data
       for (const item of items) {
+        const trackExpiry = !!(openingProductsMap.get(item.productId)?.track_expiry);
+        InventoryBusinessRules.validateGRItemCompleteness({
+          productId: item.productId,
+          receivedQuantity: item.quantity,
+          unitCost: item.costPrice,
+          batchNumber: item.batchNumber ?? null,
+          expiryDate: item.expiryDate ?? null,
+          trackExpiry,
+        });
+
         const batchNumber =
           item.batchNumber ||
           `IMP-INIT-${item.sku.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 40)}`;
