@@ -582,6 +582,10 @@ export const api = {
     hydrateFromPO: (id: string) =>
       apiClient.post<ApiResponse>(`goods-receipts/${id}/hydrate-from-po`),
     cancel: (id: string) => apiClient.post<ApiResponse>(`goods-receipts/${id}/cancel`),
+    getReverseUninvoicedEligibility: (id: string) =>
+      apiClient.get<ApiResponse>(`goods-receipts/${id}/reverse-uninvoiced/eligibility`),
+    reverseUninvoiced: (id: string, data: { reason: string }) =>
+      apiClient.post<ApiResponse>(`goods-receipts/${id}/reverse-uninvoiced`, data),
   },
 
   // Return GRN (Goods Return to Supplier)

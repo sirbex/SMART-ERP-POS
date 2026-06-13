@@ -1,4 +1,5 @@
 import { Pool, PoolClient } from 'pg';
+import { poItemNetReceivedQuantitySql, poItemOpenQuantitySql } from '../purchase-orders/purchaseOrderNetReceived.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 
 export interface InventoryBatch {
@@ -181,11 +182,11 @@ export const inventoryRepository = {
        LEFT JOIN inventory_batches b ON p.id = b.product_id AND b.status = 'ACTIVE'
        LEFT JOIN (
          SELECT poi.product_id,
-                SUM(poi.ordered_quantity - poi.received_quantity) as qty_on_order
+                SUM(${poItemOpenQuantitySql('poi')}) as qty_on_order
          FROM purchase_order_items poi
          JOIN purchase_orders po ON po.id = poi.purchase_order_id
          WHERE po.status = 'PENDING'
-           AND poi.ordered_quantity > poi.received_quantity
+           AND ${poItemOpenQuantitySql('poi')} > 0
          GROUP BY poi.product_id
        ) po_agg ON po_agg.product_id = p.id
        WHERE p.is_active = true

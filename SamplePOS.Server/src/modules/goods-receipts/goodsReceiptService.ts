@@ -36,6 +36,12 @@ import {
   documentTotalDiffersFromSubledger,
   resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
+import { correctionEligibilityService } from '../corrections/correctionEligibilityService.js';
+import { returnGrnService } from '../return-grn/returnGrnService.js';
+import { returnGrnRepository } from '../return-grn/returnGrnRepository.js';
+import { returnGrnPurchaseQuantityFromBase } from '../return-grn/returnGrnQuantity.js';
+import type { CorrectionEligibilityResult } from '../corrections/correctionEligibilityTypes.js';
+import { BusinessError } from '../../middleware/errorHandler.js';
 
 // Alert shape consumed by controller for finalize response
 export interface CostPriceChangeAlert {
@@ -91,7 +97,13 @@ async function assertPOAllowsReceiving(
     );
   }
   if (status === 'COMPLETED') {
-    throw new Error('Purchase order is already fully received');
+    const hasOpen = await purchaseOrderRepository.hasOpenReceiptQuantity(pool, purchaseOrderId);
+    if (!hasOpen) {
+      throw new Error('Purchase order is already fully received');
+    }
+    // Net-received model: returns reopen receipt against this PO (Phase 1B).
+    await purchaseOrderRepository.updatePOStatus(pool, purchaseOrderId, 'PENDING');
+    return;
   }
   if (status !== 'PENDING') {
     throw new Error(
@@ -1282,6 +1294,105 @@ export const goodsReceiptService = {
       }
 
       return goodsReceiptRepository.cancelGR(client, id);
+    });
+  },
+
+  /** Preview whether a posted uninvoiced receipt can be fully reversed via Return GRN orchestration. */
+  async getReverseUninvoicedEligibility(
+    pool: Pool,
+    grId: string,
+  ): Promise<CorrectionEligibilityResult> {
+    return correctionEligibilityService.eligibilityReverseUninvoicedReceipt(pool, grId);
+  },
+
+  /**
+   * Reverse a posted uninvoiced goods receipt (SAP counter-document pattern).
+   * Creates + posts a full Return GRN in one transaction; GR stays COMPLETED with reversal metadata.
+   * Does NOT decrement purchase_order_items.received_quantity (Phase 1B).
+   */
+  async reverseUninvoicedReceipt(
+    pool: Pool,
+    grId: string,
+    input: { reason: string; userId: string },
+  ): Promise<{
+    gr: GoodsReceipt;
+    returnGrn: { id: string; returnGrnNumber: string; status: string };
+  }> {
+    const reason = input.reason?.trim();
+    if (!reason) throw new BusinessError('Reversal reason is required', 'ERR_GR_REVERSAL_001');
+
+    return UnitOfWork.run(pool, async (client) => {
+      await client.query(`SELECT id FROM goods_receipts WHERE id = $1 FOR UPDATE`, [grId]);
+
+      const eligibility = await correctionEligibilityService.eligibilityReverseUninvoicedReceipt(
+        client,
+        grId,
+      );
+      if (!eligibility.allowed || eligibility.route !== 'REVERSE_UNINVOICED_RECEIPT') {
+        throw new BusinessError(
+          eligibility.blockers[0] ?? 'This goods receipt is not eligible for uninvoiced reversal',
+          'ERR_GR_REVERSAL_002',
+          { blockers: eligibility.blockers },
+        );
+      }
+
+      const returnableSnapshot = await returnGrnRepository.getReturnableItems(client, grId);
+      const lines = returnableSnapshot
+        .filter((item) => Number(item.returnableQuantity) > 0)
+        .map((item) => {
+          const factor = Number(item.conversionFactor) || 1;
+          const baseQty = Number(item.returnableQuantity);
+          const enteredQty = returnGrnPurchaseQuantityFromBase(baseQty, factor);
+          return {
+            productId: item.productId as string,
+            batchId: (item.batchId as string | null) ?? null,
+            uomId: (item.uomId as string | null) ?? null,
+            quantity: enteredQty,
+            unitCost: Number(item.unitCost) || 0,
+          };
+        });
+
+      if (lines.length === 0) {
+        throw new BusinessError('No returnable lines — cannot reverse receipt', 'ERR_GR_REVERSAL_003');
+      }
+
+      const { returnGrn } = await returnGrnService.create(
+        pool,
+        {
+          grnId: grId,
+          reason: `[Uninvoiced reversal] ${reason}`,
+          createdBy: input.userId,
+          lines,
+        },
+        client,
+      );
+
+      const posted = await returnGrnService.post(pool, returnGrn.id, client);
+
+      await goodsReceiptRepository.setReversalMetadata(client, grId, {
+        reversedByReturnGrnId: posted.id,
+        reversalReason: reason,
+        reversedByUserId: input.userId,
+      });
+
+      logger.info('[GR] Uninvoiced receipt reversed via Return GRN', {
+        grId,
+        returnGrnId: posted.id,
+        returnGrnNumber: posted.returnGrnNumber,
+        lineCount: lines.length,
+      });
+
+      const refreshed = await goodsReceiptRepository.getGRById(client, grId);
+      if (!refreshed) throw new Error(`Goods receipt ${grId} not found after reversal`);
+
+      return {
+        gr: refreshed.gr,
+        returnGrn: {
+          id: posted.id,
+          returnGrnNumber: posted.returnGrnNumber,
+          status: posted.status,
+        },
+      };
     });
   },
 

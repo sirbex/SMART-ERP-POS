@@ -7,6 +7,7 @@ import logger from '../../utils/logger.js';
 import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness, getBusinessDate } from '../../utils/dateRange.js';
 import { demandForecastRepository, type ProductDemandStats } from './demandForecastRepository.js';
 import { classifyReorderPriority } from './reorderDashboardLogic.js';
+import { poItemOpenQuantitySql } from '../purchase-orders/purchaseOrderNetReceived.js';
 import type {
   SalesReportRow,
   SupplierCostAnalysisRow,
@@ -3352,11 +3353,11 @@ export const reportsRepository = {
       ),
       qty_on_order AS (
         SELECT poi.product_id,
-               COALESCE(SUM(poi.ordered_quantity - poi.received_quantity), 0)::numeric AS qty
+               COALESCE(SUM((${poItemOpenQuantitySql('poi')})::numeric), 0)::numeric AS qty
         FROM purchase_order_items poi
         JOIN purchase_orders po ON po.id = poi.purchase_order_id
         WHERE po.status = 'PENDING'
-          AND poi.ordered_quantity > poi.received_quantity
+          AND (${poItemOpenQuantitySql('poi')})::numeric > 0
         GROUP BY poi.product_id
       ),
       sales_30d AS (

@@ -4,7 +4,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import { goodsReceiptService } from './goodsReceiptService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
-import { asyncHandler } from '../../middleware/errorHandler.js';
+import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseListQuery.js';
 
 // Validation schemas
@@ -105,6 +105,10 @@ const AddGRItemSchema = z.object({
   unitCost: z.number().nonnegative('Unit cost must be non-negative'),
   batchNumber: z.string().optional().nullable(),
   expiryDate: z.string().optional().nullable(),
+});
+
+const ReverseUninvoicedSchema = z.object({
+  reason: z.string().min(1, 'Reason is required').max(500),
 });
 
 export const goodsReceiptController = {
@@ -433,6 +437,32 @@ export const goodsReceiptController = {
       message: 'Item removed from goods receipt',
     });
   },
+
+  async getReverseUninvoicedEligibility(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const eligibility = await goodsReceiptService.getReverseUninvoicedEligibility(pool, id);
+    res.json({ success: true, data: eligibility });
+  },
+
+  async reverseUninvoicedReceipt(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const { reason } = ReverseUninvoicedSchema.parse(req.body);
+    const userId = req.user?.id;
+    if (!userId) throw new ValidationError('Authentication required');
+
+    const result = await goodsReceiptService.reverseUninvoicedReceipt(pool, id, {
+      reason,
+      userId,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+      message: `Receipt reversed via ${result.returnGrn.returnGrnNumber}`,
+    });
+  },
 };
 
 // Routes
@@ -478,6 +508,17 @@ goodsReceiptRoutes.post(
   authenticate,
   requirePermission('purchasing.update'),
   asyncHandler(goodsReceiptController.cancelGR)
+);
+goodsReceiptRoutes.get(
+  '/:id/reverse-uninvoiced/eligibility',
+  authenticate,
+  asyncHandler(goodsReceiptController.getReverseUninvoicedEligibility)
+);
+goodsReceiptRoutes.post(
+  '/:id/reverse-uninvoiced',
+  authenticate,
+  requirePermission('inventory.create'),
+  asyncHandler(goodsReceiptController.reverseUninvoicedReceipt)
 );
 goodsReceiptRoutes.post(
   '/:id/items',

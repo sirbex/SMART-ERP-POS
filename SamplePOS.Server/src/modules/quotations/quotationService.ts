@@ -27,6 +27,9 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { getBusinessDate, formatDateBusiness, addDaysToDateString } from '../../utils/dateRange.js';
+import { buildQuoteConversionLineSnapshots } from './quotationSaleUom.js';
+import { tableHasColumn } from '../../db/schemaColumnCache.js';
+import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -631,6 +634,39 @@ export const quotationService = {
         })
       );
 
+      // MUoM SSOT: resolve base quantities for inventory deduction (Wave 4 / Rule 2).
+      const productLineMeta: Array<{
+        itemIndex: number;
+        productId: string;
+        quantity: number;
+        uomId: string | null;
+        unitCost: number | null;
+      }> = [];
+      for (let idx = 0; idx < items.length; idx++) {
+        const item = items[idx];
+        if (!item.product_id || String(item.product_id).startsWith('custom_')) continue;
+        productLineMeta.push({
+          itemIndex: idx,
+          productId: item.product_id,
+          quantity: parseFloat(item.quantity),
+          uomId: validatedUomIds[idx] ?? null,
+          unitCost: item.unit_cost ? parseFloat(item.unit_cost) : null,
+        });
+      }
+      const quoteUomSnapshots = await buildQuoteConversionLineSnapshots(
+        client,
+        productLineMeta.map((m) => ({
+          productId: m.productId,
+          quantity: m.quantity,
+          uomId: m.uomId,
+          unitCost: m.unitCost,
+        })),
+      );
+      const uomSnapshotByItemIndex = new Map(
+        productLineMeta.map((m, i) => [m.itemIndex, quoteUomSnapshots[i]]),
+      );
+      const hasSaleItemUomSnapshot = await tableHasColumn(client, 'sale_items', 'base_qty');
+
       // Prepare sale data
       // CRITICAL: Use unit_price * quantity (pre-tax) as lineTotal, NOT item.line_total.
       // Quotation items store line_total as TAX-INCLUSIVE (subtotal + tax).
@@ -641,8 +677,15 @@ export const quotationService = {
         const qty = new Decimal(item.quantity);
         const price = new Decimal(item.unit_price);
         const preTaxLineTotal = qty.times(price);
-        const costPerItem = item.unit_cost ? new Decimal(item.unit_cost) : new Decimal(0);
-        const itemCost = costPerItem.times(qty);
+        const uomSnap = uomSnapshotByItemIndex.get(index);
+        const costPerItem = uomSnap
+          ? new Decimal(uomSnap.baseUnitCost)
+          : item.unit_cost
+            ? new Decimal(item.unit_cost)
+            : new Decimal(0);
+        const itemCost = uomSnap
+          ? costPerItem.times(uomSnap.baseQuantity)
+          : costPerItem.times(qty);
 
         return {
           productId: item.product_id,
@@ -652,17 +695,21 @@ export const quotationService = {
           lineTotal: parseFloat(preTaxLineTotal.toFixed(2)),
           uomId: validatedUomIds[index],
           uomName: item.uom_name,
-          costPrice: item.unit_cost ? parseFloat(item.unit_cost) : 0,
+          costPrice: uomSnap ? uomSnap.baseUnitCost : item.unit_cost ? parseFloat(item.unit_cost) : 0,
           profit: parseFloat(preTaxLineTotal.minus(itemCost).toFixed(2)),
+          uomSnapshot: uomSnap,
         };
       });
 
       const totalAmount = parseFloat(quotation.total_amount);
-      const totalCost = items.reduce((sum, item) => {
-        const cost = item.unit_cost ? new Decimal(item.unit_cost) : new Decimal(0);
+      const totalCost = saleItems.reduce((sum, item) => {
+        if (item.uomSnapshot) {
+          return sum + item.uomSnapshot.baseUnitCost * item.uomSnapshot.baseQuantity;
+        }
+        const cost = item.costPrice ? new Decimal(item.costPrice) : new Decimal(0);
         const qty = new Decimal(item.quantity);
-        return sum.plus(cost.times(qty));
-      }, new Decimal(0)).toNumber();
+        return sum + cost.times(qty).toNumber();
+      }, 0);
 
       // Handle missing customer_id by looking up customer by name
       let customerId = quotation.customer_id;
@@ -798,38 +845,66 @@ export const quotationService = {
         const isCustomItem = item.productId?.startsWith('custom_');
         const productId = isCustomItem ? null : item.productId;
         const itemType = isCustomItem ? 'custom' : 'product';
+        const snap = item.uomSnapshot;
 
-        await client.query(
-          `INSERT INTO sale_items (
-            sale_id, product_id, product_name, item_type, quantity, unit_price,
-            total_price, unit_cost, profit, uom_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [
-            saleRecord.id,
-            productId, // NULL for custom items
-            item.productName, // Store name for custom items
-            itemType,
-            item.quantity,
-            item.unitPrice,
-            item.lineTotal, // Maps to total_price column
-            item.costPrice, // Maps to unit_cost column
-            item.profit,
-            item.uomId,
-          ]
-        );
+        if (hasSaleItemUomSnapshot && snap) {
+          await client.query(
+            `INSERT INTO sale_items (
+              sale_id, product_id, product_name, item_type, quantity, unit_price,
+              total_price, unit_cost, profit, uom_id, base_qty, base_uom_id, conversion_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [
+              saleRecord.id,
+              productId,
+              item.productName,
+              itemType,
+              item.quantity,
+              item.unitPrice,
+              item.lineTotal,
+              item.costPrice,
+              item.profit,
+              item.uomId,
+              snap.baseQuantity,
+              snap.baseUomId,
+              snap.conversionFactor,
+            ],
+          );
+        } else {
+          await client.query(
+            `INSERT INTO sale_items (
+              sale_id, product_id, product_name, item_type, quantity, unit_price,
+              total_price, unit_cost, profit, uom_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [
+              saleRecord.id,
+              productId,
+              item.productName,
+              itemType,
+              item.quantity,
+              item.unitPrice,
+              item.lineTotal,
+              item.costPrice,
+              item.profit,
+              item.uomId,
+            ],
+          );
+        }
       }
 
-      // FEFO STOCK DEDUCTION: Deduct physical inventory for each non-service item.
-      // CRITICAL: Was missing — GL was posting COGS but inventory_batches were not
-      // consumed, causing permanent GL/physical stock drift (Issue #1 forensic audit).
-      // Must run BEFORE GL posting (same order as salesService.createSale) so that
-      // if deduction fails the entire transaction rolls back before GL journals are written.
+      // FEFO STOCK DEDUCTION — base_quantity SSOT (Rule 2).
       for (const item of saleItems) {
         const isServiceItem = !item.productId || item.productId.startsWith('custom_');
         if (isServiceItem) continue;
+        const snap = item.uomSnapshot;
+        const deductQty = snap ? snap.deductQuantity : new Decimal(item.quantity);
+        await InventoryBusinessRules.validateStockAvailability(
+          client,
+          item.productId!,
+          deductQty.toNumber(),
+        );
         await deductStockFEFO(client, {
           productId: item.productId!,
-          quantity: new Decimal(item.quantity),
+          quantity: deductQty,
           movementType: 'SALE',
           referenceType: 'SALE',
           referenceId: saleRecord.id,

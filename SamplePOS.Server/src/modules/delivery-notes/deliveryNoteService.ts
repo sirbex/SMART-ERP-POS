@@ -19,6 +19,7 @@ import {
   resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import { resolveDeliveryLineBaseQuantity } from './deliveryNoteUom.js';
 import {
   DeliveryNoteWithLines,
   CreateDeliveryNoteData,
@@ -251,10 +252,17 @@ export const deliveryNoteService = {
         }
       }
 
-      // ── Stock availability check (no deduction) ──────────────
+      // ── Stock availability check (no deduction) — validate in base units (Rule 2) ──
       for (const line of linesResult.rows) {
         const productId = line.product_id as string;
-        const required = new Decimal(line.quantity_delivered);
+        const enteredQty = Money.toNumber(Money.parseDb(line.quantity_delivered));
+        const uomSnap = await resolveDeliveryLineBaseQuantity(
+          client,
+          productId,
+          enteredQty,
+          (line.uom_id as string | null) ?? null,
+        );
+        const required = new Decimal(uomSnap.baseQuantity);
 
         if (line.batch_id) {
           // Specific batch — check its remaining qty
@@ -395,13 +403,20 @@ export const deliveryNoteService = {
       for (const line of linesResult.rows) {
         const productId = line.product_id as string;
 
-        // Look up product name for errors
         const pResult = await client.query('SELECT name FROM products WHERE id = $1', [productId]);
         const productName = pResult.rows[0]?.name || productId;
 
+        const enteredQty = Money.toNumber(Money.parseDb(line.quantity_delivered));
+        const uomSnap = await resolveDeliveryLineBaseQuantity(
+          client,
+          productId,
+          enteredQty,
+          (line.uom_id as string | null) ?? null,
+        );
+
         const fefoResult = await sharedDeductStockFEFO(client, {
           productId,
-          quantity: new Decimal(line.quantity_delivered),
+          quantity: new Decimal(uomSnap.baseQuantity),
           specificBatchId: line.batch_id || undefined,
           movementType: 'DELIVERY',
           referenceType: 'DELIVERY_NOTE',

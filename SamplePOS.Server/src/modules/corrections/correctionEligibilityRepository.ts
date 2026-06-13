@@ -156,6 +156,42 @@ export const correctionEligibilityRepository = {
         return result.rows as GrnReturnGrnSummary[];
     },
 
+    async getGrnReversalMetadata(
+        pool: Pool | PoolClient,
+        grnId: string,
+    ): Promise<{
+        reversedByReturnGrnId: string | null;
+        reversedByReturnGrnNumber: string | null;
+        reversalTimestamp: string | null;
+        reversalReason: string | null;
+    } | null> {
+        const colCheck = await pool.query(
+            `SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'goods_receipts' AND column_name = 'reversed_by_return_grn_id'
+             LIMIT 1`,
+        );
+        if (colCheck.rows.length === 0) {
+            return {
+                reversedByReturnGrnId: null,
+                reversedByReturnGrnNumber: null,
+                reversalTimestamp: null,
+                reversalReason: null,
+            };
+        }
+
+        const result = await pool.query(
+            `SELECT gr.reversed_by_return_grn_id AS "reversedByReturnGrnId",
+                    r.return_grn_number AS "reversedByReturnGrnNumber",
+                    gr.reversal_timestamp AS "reversalTimestamp",
+                    gr.reversal_reason AS "reversalReason"
+             FROM goods_receipts gr
+             LEFT JOIN return_grn r ON r.id = gr.reversed_by_return_grn_id
+             WHERE gr.id = $1`,
+            [grnId],
+        );
+        return result.rows[0] ?? null;
+    },
+
     async countSupplierPaymentAllocations(
         pool: Pool | PoolClient,
         invoiceId: string,

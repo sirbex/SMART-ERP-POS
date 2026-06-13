@@ -9,6 +9,11 @@ import {
   grItemsIsBonusExpr,
 } from '../../db/schemaColumnCache.js';
 import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+import {
+  poItemNetReceivedQuantitySql,
+  poItemOpenQuantitySql,
+  poItemReturnedQuantitySql,
+} from '../purchase-orders/purchaseOrderNetReceived.js';
 
 const GR_SORT_COLUMNS: Record<string, string> = {
   grNumber: 'gr.receipt_number',
@@ -17,6 +22,24 @@ const GR_SORT_COLUMNS: Record<string, string> = {
   receivedDate: 'gr.received_date',
   receiptStatus: 'gr.status',
 };
+
+async function grReversalSelectSql(pool: Pool | PoolClient): Promise<string> {
+  const has = await tableHasColumn(pool, 'goods_receipts', 'reversed_by_return_grn_id');
+  if (!has) {
+    return `
+         NULL::uuid AS "reversedByReturnGrnId",
+         NULL::text AS "reversedByReturnGrnNumber",
+         NULL::timestamptz AS "reversalTimestamp",
+         NULL::text AS "reversalReason",
+         false AS "isReversed"`;
+  }
+  return `
+         gr.reversed_by_return_grn_id AS "reversedByReturnGrnId",
+         (SELECT r.return_grn_number FROM return_grn r WHERE r.id = gr.reversed_by_return_grn_id) AS "reversedByReturnGrnNumber",
+         gr.reversal_timestamp AS "reversalTimestamp",
+         gr.reversal_reason AS "reversalReason",
+         (gr.reversed_by_return_grn_id IS NOT NULL) AS "isReversed"`;
+}
 
 export interface GoodsReceipt {
   id: string;
@@ -41,6 +64,12 @@ export interface GoodsReceipt {
    * DRAFT_GR = receipt not finalized | TO_INVOICE = received-not-billed (GR/IR) | INVOICED = AP bill exists
    */
   billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
+  /** Posted Return GRN that fully reversed this receipt (counter-document). */
+  reversedByReturnGrnId?: string | null;
+  reversedByReturnGrnNumber?: string | null;
+  reversalTimestamp?: string | null;
+  reversalReason?: string | null;
+  isReversed?: boolean;
 }
 
 export interface GoodsReceiptItem {
@@ -248,6 +277,7 @@ export const goodsReceiptRepository = {
     pool: Pool | PoolClient,
     id: string
   ): Promise<{ gr: GoodsReceipt; items: GoodsReceiptItem[]; productUomsMap?: Record<string, Array<{ id: string; uomId: string; uomName: string; uomSymbol: string | null; conversionFactor: string; barcode: string | null; isDefault: boolean; priceOverride: string | null; costOverride: string | null }>> } | null> {
+    const reversalSql = await grReversalSelectSql(pool);
     const grResult = await pool.query(
       `SELECT 
          gr.id,
@@ -265,6 +295,7 @@ export const goodsReceiptRepository = {
          po.status AS "poStatus",
          po.supplier_id as "supplierId",
          s."CompanyName" as "supplierName",
+         ${reversalSql},
          (SELECT si."SupplierInvoiceNumber"
             FROM supplier_invoices si
            WHERE si.document_type = 'SUPPLIER_INVOICE'
@@ -297,6 +328,8 @@ export const goodsReceiptRepository = {
     const hasUomSnapshot = await tableHasColumn(pool, 'goods_receipt_items', 'base_qty');
     const baseQtySelect = hasUomSnapshot ? 'gri.base_qty as "baseQty"' : 'NULL::numeric as "baseQty"';
     const baseUomSelect = hasUomSnapshot ? 'gri.base_uom_id as "baseUomId"' : 'NULL::uuid as "baseUomId"';
+    const returnedSql = poItemReturnedQuantitySql('poi');
+    const netSql = poItemNetReceivedQuantitySql('poi');
 
     const itemsResult = await pool.query(
       `SELECT 
@@ -307,7 +340,9 @@ export const goodsReceiptRepository = {
          COALESCE(p.name, 'Unknown Product') as "productName",
          COALESCE(p.track_expiry, false) as "trackExpiry",
          ROUND(COALESCE(poi.ordered_quantity, gri.received_quantity)::numeric, 2) as "orderedQuantity",
-         ROUND(COALESCE(poi.received_quantity, 0)::numeric, 2) as "poAlreadyReceived",
+         ROUND(COALESCE(poi.received_quantity, 0)::numeric, 2) as "poGrossReceived",
+         ROUND((${returnedSql})::numeric, 2) as "poReturnedQuantity",
+         ROUND((${netSql})::numeric, 2) as "poAlreadyReceived",
          ROUND(gri.received_quantity::numeric, 2) as "receivedQuantity",
          COALESCE(gri.batch_number, ib.batch_number) as "batchNumber",
          gri.expiry_date as "expiryDate",
@@ -641,6 +676,7 @@ export const goodsReceiptRepository = {
       orderBy = `${col} ${sqlSortOrder(filters?.sortOrder ?? 'desc')}`;
     }
 
+    const reversalSql = await grReversalSelectSql(pool);
     const result = await pool.query(
       `SELECT 
          gr.id,
@@ -658,6 +694,7 @@ export const goodsReceiptRepository = {
          po.status AS "poStatus",
          po.supplier_id as "supplierId",
          s."CompanyName" as "supplierName",
+         ${reversalSql},
          ${supplierBillNumberSql} AS "supplierBillNumber",
          CASE
            WHEN gr.status = 'DRAFT' THEN 'DRAFT_GR'
@@ -842,14 +879,54 @@ export const goodsReceiptRepository = {
    * Check if PO is fully received
    */
   async isPOFullyReceived(pool: Pool | PoolClient, poId: string): Promise<boolean> {
+    const netSql = poItemNetReceivedQuantitySql('poi');
     const result = await pool.query(
       `SELECT 
-         COUNT(*) FILTER (WHERE ordered_quantity > received_quantity) as pending_items
-       FROM purchase_order_items
-       WHERE purchase_order_id = $1`,
+         COUNT(*) FILTER (
+           WHERE COALESCE(poi.ordered_quantity, 0)::numeric > (${netSql})::numeric
+         ) as pending_items
+       FROM purchase_order_items poi
+       WHERE poi.purchase_order_id = $1`,
       [poId]
     );
 
     return parseInt(result.rows[0].pending_items) === 0;
+  },
+
+  /**
+   * Link a posted Return GRN as the counter-document that reversed this receipt.
+   * Requires migration 522 + session flag to bypass COMPLETED immutability trigger.
+   */
+  async setReversalMetadata(
+    pool: Pool | PoolClient,
+    grId: string,
+    data: {
+      reversedByReturnGrnId: string;
+      reversalReason: string;
+      reversedByUserId: string;
+    },
+  ): Promise<void> {
+    const has = await tableHasColumn(pool, 'goods_receipts', 'reversed_by_return_grn_id');
+    if (!has) {
+      throw new Error('Reversal metadata columns are not installed — run migration 522_gr_reversal_metadata.sql');
+    }
+
+    await pool.query(`SET LOCAL app.allow_gr_reversal_metadata = 'true'`);
+    const result = await pool.query(
+      `UPDATE goods_receipts
+       SET reversed_by_return_grn_id = $1,
+           reversal_timestamp = CURRENT_TIMESTAMP,
+           reversal_reason = $2,
+           reversed_by_user_id = $3,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4
+         AND status = 'COMPLETED'
+         AND reversed_by_return_grn_id IS NULL`,
+      [data.reversedByReturnGrnId, data.reversalReason, data.reversedByUserId, grId],
+    );
+
+    if ((result.rowCount ?? 0) === 0) {
+      throw new Error('Could not set reversal metadata — receipt may already be reversed or is not COMPLETED');
+    }
   },
 };

@@ -7,6 +7,7 @@ import { api } from '../utils/api';
 export type CorrectionRoute =
     | 'NONE'
     | 'RETURN_GRN'
+    | 'REVERSE_UNINVOICED_RECEIPT'
     | 'SUPPLIER_CN'
     | 'CUSTOMER_CN'
     | 'AP_RECLASS'

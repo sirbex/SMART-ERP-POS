@@ -149,6 +149,13 @@ interface POItemRow {
   unit_price?: number | string;
   receivedQuantity?: number | string;
   received_quantity?: number | string;
+  gross_received_quantity?: number | string;
+  returnedQuantity?: number | string;
+  returned_quantity?: number | string;
+  netReceivedQuantity?: number | string;
+  net_received_quantity?: number | string;
+  openQuantity?: number | string;
+  open_quantity?: number | string;
   totalPrice?: number | string;
   total_price?: number | string;
   totalCost?: number | string;
@@ -1443,7 +1450,11 @@ export default function PurchaseOrdersPage() {
         productId: item.product_id || item.productId,
         quantity: item.ordered_quantity || item.quantity,
         unitCost: item.unit_price || item.unitCost,
-        receivedQuantity: item.received_quantity || item.receivedQuantity,
+        receivedQuantity:
+          item.gross_received_quantity ?? item.received_quantity ?? item.receivedQuantity,
+        returnedQuantity: item.returned_quantity ?? item.returnedQuantity ?? 0,
+        netReceivedQuantity: item.net_received_quantity ?? item.netReceivedQuantity ?? 0,
+        openQuantity: item.open_quantity ?? item.openQuantity ?? 0,
         totalPrice: item.total_price || item.totalPrice,
       }));
 
@@ -1485,7 +1496,11 @@ export default function PurchaseOrdersPage() {
         productId: item.product_id || item.productId,
         quantity: item.ordered_quantity || item.quantity,
         unitCost: item.unit_price || item.unitCost,
-        receivedQuantity: item.received_quantity || item.receivedQuantity,
+        receivedQuantity:
+          item.gross_received_quantity ?? item.received_quantity ?? item.receivedQuantity,
+        returnedQuantity: item.returned_quantity ?? item.returnedQuantity ?? 0,
+        netReceivedQuantity: item.net_received_quantity ?? item.netReceivedQuantity ?? 0,
+        openQuantity: item.open_quantity ?? item.openQuantity ?? 0,
         totalPrice: item.total_price || item.totalPrice,
       }));
 

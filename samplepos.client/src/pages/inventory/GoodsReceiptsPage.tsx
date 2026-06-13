@@ -122,6 +122,16 @@ interface GRRow {
   supplier_bill_number?: string | null;
   billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
   billing_status?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
+  isReversed?: boolean;
+  is_reversed?: boolean;
+  reversedByReturnGrnId?: string | null;
+  reversed_by_return_grn_id?: string | null;
+  reversedByReturnGrnNumber?: string | null;
+  reversed_by_return_grn_number?: string | null;
+  reversalTimestamp?: string | null;
+  reversal_timestamp?: string | null;
+  reversalReason?: string | null;
+  reversal_reason?: string | null;
 }
 
 type GRSortField =
@@ -383,6 +393,9 @@ export default function GoodsReceiptsPage() {
   const [returnUomIds, setReturnUomIds] = useState<Record<string, string>>({});
   const [showAddItemForm, setShowAddItemForm] = useState(false);
   const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [showReverseModal, setShowReverseModal] = useState(false);
+  const [reverseReason, setReverseReason] = useState('');
+  const [reverseSubmitting, setReverseSubmitting] = useState(false);
   const [receiveAllFlash, setReceiveAllFlash] = useState('');
 
   const limit = 20;
@@ -456,6 +469,25 @@ export default function GoodsReceiptsPage() {
   // Return GRN data for selected GRN
   const selectedGRId = selectedGR?.id || '';
   const isFinalized = selectedGR?.status === 'COMPLETED' || selectedGR?.status === 'FINALIZED';
+
+  const { data: reverseEligibilityData } = useQuery({
+    queryKey: ['gr-reverse-eligibility', selectedGRId],
+    queryFn: async () => {
+      const res = await api.goodsReceipts.getReverseUninvoicedEligibility(selectedGRId);
+      return (res.data as { data?: Record<string, unknown> })?.data ?? res.data;
+    },
+    enabled: showDetailsModal && isFinalized && Boolean(selectedGRId),
+  });
+  const reverseEligibility = reverseEligibilityData as {
+    allowed?: boolean;
+    route?: string;
+    blockers?: string[];
+    suggestedActions?: string[];
+  } | undefined;
+  const canReverseUninvoiced =
+    reverseEligibility?.allowed === true
+    && reverseEligibility?.route === 'REVERSE_UNINVOICED_RECEIPT';
+
   const { data: returnableData, isLoading: returnableLoading } = useReturnableItems(
     (showReturnModal || (showDetailsModal && isFinalized)) && selectedGRId ? selectedGRId : '',
   );
@@ -509,6 +541,17 @@ export default function GoodsReceiptsPage() {
   const grDetailLoading = detailsQuery.isLoading;
   const grDetailFetching = detailsQuery.isFetching;
   const grDetail = detailsQuery.data?.data?.data as GRDetailData | undefined;
+  const grReversalMeta = grDetail?.gr as GRRow | undefined;
+  const isGrReversed = Boolean(
+    grReversalMeta?.isReversed
+    ?? grReversalMeta?.is_reversed
+    ?? grReversalMeta?.reversedByReturnGrnId
+    ?? grReversalMeta?.reversed_by_return_grn_id,
+  );
+  const reversedByRgrnNumber =
+    grReversalMeta?.reversedByReturnGrnNumber
+    ?? grReversalMeta?.reversed_by_return_grn_number
+    ?? '';
   const items = useMemo(() => grDetail?.items || [], [grDetail]);
   const productUomsMap = grDetail?.productUomsMap || {};
 
@@ -831,6 +874,36 @@ export default function GoodsReceiptsPage() {
     setReturnQuantities({});
     setReturnUomIds({});
     setShowReturnModal(true);
+  };
+
+  const handleOpenReverseModal = () => {
+    setReverseReason('');
+    setShowReverseModal(true);
+  };
+
+  const handleSubmitReverseUninvoiced = async () => {
+    if (!selectedGRId || !reverseReason.trim()) {
+      toast.error('Reversal reason is required');
+      return;
+    }
+    setReverseSubmitting(true);
+    try {
+      const res = await api.goodsReceipts.reverseUninvoiced(selectedGRId, {
+        reason: reverseReason.trim(),
+      });
+      const payload = (res.data as { data?: { returnGrn?: { returnGrnNumber?: string } } })?.data;
+      const rgrnNum = payload?.returnGrn?.returnGrnNumber ?? 'Return GRN';
+      toast.success(`Receipt reversed via ${rgrnNum}. Original GR remains posted for audit.`);
+      setShowReverseModal(false);
+      queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
+      queryClient.invalidateQueries({ queryKey: ['gr-reverse-eligibility', selectedGRId] });
+      queryClient.invalidateQueries({ queryKey: ['return-grn'] });
+      queryClient.invalidateQueries({ queryKey: ['goods-receipt', selectedGRId] });
+    } catch (err) {
+      handleApiError(err, { fallback: 'Failed to reverse uninvoiced receipt' });
+    } finally {
+      setReverseSubmitting(false);
+    }
   };
 
   const handleSubmitReturn = async () => {
@@ -1727,6 +1800,20 @@ export default function GoodsReceiptsPage() {
                 )}
                 {(selectedGR.status === 'COMPLETED' || selectedGR.status === 'FINALIZED') && (
                   <div className="flex flex-col gap-2 w-full">
+                    {isGrReversed && (
+                      <div className="text-sm rounded-lg border border-rose-300 bg-rose-50 text-rose-900 px-3 py-2">
+                        <span className="font-semibold">Reversed (counter-document).</span>
+                        {' '}Status remains <strong>COMPLETED</strong>
+                        {reversedByRgrnNumber ? (
+                          <> — reversed by <strong>{reversedByRgrnNumber}</strong></>
+                        ) : null}
+                        {(grReversalMeta?.reversalReason ?? grReversalMeta?.reversal_reason) && (
+                          <span className="block mt-1 text-rose-800">
+                            Reason: {grReversalMeta?.reversalReason ?? grReversalMeta?.reversal_reason}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {(() => {
                       const supplierBillNum =
                         (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
@@ -1810,6 +1897,19 @@ export default function GoodsReceiptsPage() {
                       </div>
                     )}
                     <ResponsiveActionBar divider={false}>
+                    {canReverseUninvoiced && !isGrReversed && (
+                      <button
+                        type="button"
+                        onClick={handleOpenReverseModal}
+                        className="text-sm font-medium px-4 bg-rose-700 text-white rounded-lg hover:bg-rose-800 flex gap-2"
+                        title="Full reversal via Return GRN — original receipt stays posted (uninvoiced only)"
+                      >
+                        <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                        Reverse Uninvoiced Receipt
+                      </button>
+                    )}
                     <button
                       onClick={handleOpenReturnModal}
                       className="text-sm font-medium px-4 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex gap-2"
@@ -1928,6 +2028,81 @@ export default function GoodsReceiptsPage() {
             );
           }}
         />
+      )}
+
+      {/* Reverse Uninvoiced Receipt Modal */}
+      {showReverseModal && selectedGR && (
+        <div
+          className="fixed inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4"
+          style={{ zIndex: ZINDEX.NESTED_PANEL }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reverse-gr-title"
+          onClick={() => !reverseSubmitting && setShowReverseModal(false)}
+        >
+          <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
+          <div
+            className="relative bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-xl p-5 sm:p-6 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div>
+                <h3 id="reverse-gr-title" className="text-lg font-bold text-gray-900">
+                  Reverse Uninvoiced Receipt
+                </h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  Creates and posts a full Return GRN (DR 2150 / CR 1300). Original{' '}
+                  <strong>{selectedGR.grNumber || selectedGR.receipt_number}</strong> stays{' '}
+                  <strong>COMPLETED</strong> for audit.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => !reverseSubmitting && setShowReverseModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            {reverseEligibility?.blockers && reverseEligibility.blockers.length > 0 && (
+              <ul className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 list-disc pl-5">
+                {reverseEligibility.blockers.map((b) => (
+                  <li key={b}>{b}</li>
+                ))}
+              </ul>
+            )}
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Reversal reason <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+              placeholder="e.g. Wrong delivery — full return before supplier invoice"
+              disabled={reverseSubmitting}
+            />
+            <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
+              <button
+                type="button"
+                onClick={handleSubmitReverseUninvoiced}
+                disabled={reverseSubmitting || !reverseReason.trim()}
+                className="text-sm font-medium px-4 py-2 bg-rose-700 text-white rounded-lg hover:bg-rose-800 disabled:opacity-50"
+              >
+                {reverseSubmitting ? 'Reversing…' : 'Confirm reversal'}
+              </button>
+              <button
+                type="button"
+                onClick={() => !reverseSubmitting && setShowReverseModal(false)}
+                className="text-sm font-medium px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                disabled={reverseSubmitting}
+              >
+                Cancel
+              </button>
+            </ResponsiveActionBar>
+          </div>
+        </div>
       )}
 
       {/* Return to Supplier Modal */}

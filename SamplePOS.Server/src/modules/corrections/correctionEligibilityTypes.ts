@@ -12,6 +12,7 @@ export type CorrectionDocumentType =
 export type CorrectionRoute =
     | 'NONE'
     | 'RETURN_GRN'
+    | 'REVERSE_UNINVOICED_RECEIPT'
     | 'SUPPLIER_CN'
     | 'CUSTOMER_CN'
     | 'AP_RECLASS'
@@ -21,6 +22,7 @@ export type CorrectionRoute =
 export type CorrectionKind =
     | 'REVERSE'
     | 'RETURN_GRN'
+    | 'REVERSE_UNINVOICED_RECEIPT'
     | 'PRODUCT_SWAP'
     | 'AP_RECLASS'
     | 'SUPPLIER_CN'

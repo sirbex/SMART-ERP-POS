@@ -5,6 +5,11 @@ import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
 import { tableHasColumn } from '../../db/schemaColumnCache.js';
 import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+import {
+  poItemNetReceivedQuantitySql,
+  poItemOpenQuantitySql,
+  poItemReturnedQuantitySql,
+} from './purchaseOrderNetReceived.js';
 
 const PO_SORT_COLUMNS: Record<string, string> = {
   poNumber: 'po.order_number',
@@ -38,6 +43,11 @@ export interface PurchaseOrderItem {
   unitCost: number;
   lineTotal: number;
   receivedQuantity: number;
+  /** Posted supplier returns against receipts on this PO line (purchase UoM). */
+  returnedQuantity?: number;
+  /** receivedQuantity − returnedQuantity (open receipt uses this, not gross). */
+  netReceivedQuantity?: number;
+  openQuantity?: number;
   uomId?: string | null;
   uomName?: string | null;
 }
@@ -245,13 +255,21 @@ export const purchaseOrderRepository = {
       return null;
     }
 
+    const returnedSql = poItemReturnedQuantitySql('poi');
+    const netSql = poItemNetReceivedQuantitySql('poi');
+    const openSql = poItemOpenQuantitySql('poi');
+
     const itemsResult = await pool.query(
       `SELECT 
          poi.*,
          p.name as product_name,
          COALESCE(u.name, def_u.name) as uom_name,
          COALESCE(pu.conversion_factor, 1)::numeric as conversion_factor,
-         COALESCE(pv.cost_price, 0)::numeric as product_cost_price
+         COALESCE(pv.cost_price, 0)::numeric as product_cost_price,
+         ROUND(COALESCE(poi.received_quantity, 0)::numeric, 4) AS gross_received_quantity,
+         ROUND((${returnedSql})::numeric, 4) AS returned_quantity,
+         ROUND((${netSql})::numeric, 4) AS net_received_quantity,
+         ROUND((${openSql})::numeric, 4) AS open_quantity
        FROM purchase_order_items poi
        JOIN products p ON poi.product_id = p.id
        LEFT JOIN uoms u ON poi.uom_id = u.id
@@ -331,6 +349,19 @@ export const purchaseOrderRepository = {
       pos: result.rows,
       total: parseInt(countResult.rows[0].count),
     };
+  },
+
+  /** True when any PO line has open receipt qty (ordered − net received > 0). */
+  async hasOpenReceiptQuantity(pool: Pool | PoolClient, poId: string): Promise<boolean> {
+    const openSql = poItemOpenQuantitySql('poi');
+    const result = await pool.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM purchase_order_items poi
+         WHERE poi.purchase_order_id = $1 AND (${openSql})::numeric > 0.0001
+       ) AS has_open`,
+      [poId],
+    );
+    return result.rows[0]?.has_open === true;
   },
 
   /**

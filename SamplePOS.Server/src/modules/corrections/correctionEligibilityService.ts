@@ -5,7 +5,7 @@
  * Does not execute corrections — routes to existing modules.
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { returnGrnRepository } from '../return-grn/returnGrnRepository.js';
 import { supplierAdjustmentService } from '../supplier-adjustments/supplierAdjustmentService.js';
 import { getPaymentWithAllocations } from '../ar-payments/arPaymentService.js';
@@ -85,6 +85,7 @@ export const correctionEligibilityService = {
         const kindRoutes: Record<CorrectionKind, CorrectionRoute> = {
             REVERSE: 'BLOCKED',
             RETURN_GRN: 'RETURN_GRN',
+            REVERSE_UNINVOICED_RECEIPT: 'REVERSE_UNINVOICED_RECEIPT',
             PRODUCT_SWAP: 'PRODUCT_SWAP',
             AP_RECLASS: 'AP_RECLASS',
             SUPPLIER_CN: 'SUPPLIER_CN',
@@ -427,6 +428,123 @@ export const correctionEligibilityService = {
             warnings,
             suggestedActions,
             context: { grnId: rgrn.grnId, grNumber: rgrn.grNumber, status: rgrn.status },
+        });
+    },
+
+    /**
+     * Eligibility for one-click uninvoiced receipt reversal (orchestrated full Return GRN).
+     * GR status stays COMPLETED; counter-document + reversal metadata provide audit trail.
+     */
+    async eligibilityReverseUninvoicedReceipt(pool: Pool | PoolClient, grnId: string): Promise<CorrectionEligibilityResult> {
+        const header = await correctionEligibilityRepository.getGrnHeader(pool, grnId);
+        if (!header) throw new Error(`Goods receipt ${grnId} not found`);
+
+        const base = {
+            documentType: 'GOODS_RECEIPT' as const,
+            documentId: grnId,
+            documentNumber: header.grNumber,
+        };
+
+        if (header.status === 'CANCELLED') {
+            return result(base, {
+                allowed: false,
+                route: 'BLOCKED',
+                blockers: ['Goods receipt is cancelled.'],
+            });
+        }
+
+        if (header.status === 'DRAFT') {
+            return result(base, {
+                allowed: false,
+                route: 'BLOCKED',
+                blockers: ['Goods receipt is still in DRAFT — cancel the draft instead of reversing a posted receipt.'],
+            });
+        }
+
+        if (header.status !== 'COMPLETED' && header.status !== 'FINALIZED') {
+            return result(base, {
+                allowed: false,
+                route: 'BLOCKED',
+                blockers: [`Goods receipt status "${header.status}" is not eligible for reversal.`],
+            });
+        }
+
+        const blockers: string[] = [];
+        const warnings: string[] = [];
+        const suggestedActions: string[] = [];
+
+        const reversalMeta = await correctionEligibilityRepository.getGrnReversalMetadata(pool, grnId);
+        if (reversalMeta?.reversedByReturnGrnId) {
+            blockers.push(
+                `Receipt already reversed by ${reversalMeta.reversedByReturnGrnNumber ?? reversalMeta.reversedByReturnGrnId}.`,
+            );
+        }
+
+        const invoices = await correctionEligibilityRepository.getSupplierInvoicesForGrn(pool, grnId);
+        if (invoices.length > 0) {
+            blockers.push(
+                'Supplier invoice exists for this receipt — use Return to Supplier + Supplier Credit Note instead of uninvoiced reversal.',
+            );
+            suggestedActions.push('Use partial/full Return GRN and issue a supplier credit note against the bill.');
+        }
+
+        const returnGrns = await correctionEligibilityRepository.getReturnGrnsForGrn(pool, grnId);
+        const postedReturns = returnGrns.filter((r) => r.status === 'POSTED');
+        if (postedReturns.length > 0) {
+            blockers.push(
+                `${postedReturns.length} posted return GRN(s) already exist — complete remaining quantity via Return to Supplier.`,
+            );
+        }
+
+        const returnableItems = await returnGrnRepository.getReturnableItems(pool, grnId);
+        if (returnableItems.length === 0) {
+            blockers.push('No receipt lines found.');
+        }
+
+        for (const item of returnableItems) {
+            const returned = Number(item.returnedQuantity) || 0;
+            const returnable = Number(item.returnableQuantity) || 0;
+            const consumed = Number(item.consumedQuantity) || 0;
+            const productName = item.productName ?? 'product';
+
+            if (returned > 0) {
+                blockers.push(`${productName}: partial return already recorded — use Return to Supplier for the remainder.`);
+            }
+            if (consumed > 0) {
+                blockers.push(
+                    `${productName}: ${consumed} unit(s) sold or consumed — cannot fully reverse uninvoiced receipt.`,
+                );
+            }
+            if (returnable <= 0) {
+                blockers.push(`${productName}: no returnable quantity on hand.`);
+            }
+            if (item.returnBlockReason) {
+                blockers.push(`${productName}: ${item.returnBlockReason}`);
+            }
+        }
+
+        const route: CorrectionRoute =
+            blockers.length > 0 ? 'BLOCKED' : 'REVERSE_UNINVOICED_RECEIPT';
+
+        if (route === 'REVERSE_UNINVOICED_RECEIPT') {
+            suggestedActions.push(
+                'Reverse uninvoiced receipt will create and post a full Return GRN (DR 2150 / CR 1300). Original GR stays COMPLETED.',
+            );
+        }
+
+        return result(base, {
+            allowed: blockers.length === 0,
+            route,
+            blockers,
+            warnings,
+            suggestedActions,
+            correctionKind: 'REVERSE_UNINVOICED_RECEIPT',
+            context: {
+                returnableLineCount: returnableItems.filter((i) => Number(i.returnableQuantity) > 0).length,
+                invoiceCount: invoices.length,
+                postedReturnCount: postedReturns.length,
+                isReversed: Boolean(reversalMeta?.reversedByReturnGrnId),
+            },
         });
     },
 };

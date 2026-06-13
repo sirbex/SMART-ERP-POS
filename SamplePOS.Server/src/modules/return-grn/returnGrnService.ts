@@ -14,7 +14,7 @@
  *       Only a manually-created Supplier Credit Note reduces AP.
  */
 
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import {
@@ -49,6 +49,8 @@ import {
     SUPPLIER_BILL_REQUIRED_FOR_SCN_MESSAGE,
 } from './returnGrnMessages.js';
 import { resolveCanonicalProductUom } from '../products/uomService.js';
+import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
+import { purchaseOrderRepository } from '../purchase-orders/purchaseOrderRepository.js';
 import {
     assertWithinReturnableLimits,
     pickReturnableRow,
@@ -83,9 +85,10 @@ export const returnGrnService = {
     async create(
         pool: Pool,
         input: CreateReturnGrnInput,
+        txClient?: PoolClient,
     ): Promise<{ returnGrn: ReturnGrn; lines: ReturnGrnLine[] }> {
 
-        return UnitOfWork.run(pool, async (client) => {
+        const execute = async (client: PoolClient) => {
             // 1. Validate source GRN exists and is finalized
             // Resolve supplier through PO (standard) or through manual PO (for manual GRs)
             const grResult = await client.query(
@@ -157,7 +160,14 @@ export const returnGrnService = {
                 const productName = grItemRow.rows[0]?.product_name ?? 'product';
                 const baseUomSymbol = grItemRow.rows[0]?.base_uom_symbol ?? 'units';
 
-                const effectiveUomId: string | null = line.uomId ?? purchaseUomId;
+                let effectiveUomId: string | null = line.uomId ?? purchaseUomId;
+                if (!effectiveUomId) {
+                    const baseRow = await client.query<{ base_uom_id: string | null }>(
+                        `SELECT base_uom_id FROM products WHERE id = $1 LIMIT 1`,
+                        [line.productId],
+                    );
+                    effectiveUomId = baseRow.rows[0]?.base_uom_id ?? null;
+                }
                 if (!effectiveUomId) {
                     throw new ValidationError(
                         `Unit of measure is required to return ${productName}.`,
@@ -282,7 +292,10 @@ export const returnGrnService = {
             });
 
             return { returnGrn, lines };
-        });
+        };
+
+        if (txClient) return execute(txClient);
+        return UnitOfWork.run(pool, execute);
     },
 
     /**
@@ -301,9 +314,10 @@ export const returnGrnService = {
     async post(
         pool: Pool,
         rgrnId: string,
+        txClient?: PoolClient,
     ): Promise<ReturnGrn> {
 
-        return UnitOfWork.run(pool, async (client) => {
+        const execute = async (client: PoolClient) => {
             // 1. Get the RGRN and validate DRAFT status
             const rgrn = await returnGrnRepository.getById(client, rgrnId);
             if (!rgrn) throw new Error('Return GRN not found');
@@ -436,6 +450,25 @@ export const returnGrnService = {
             const posted = await returnGrnRepository.post(client, rgrnId);
             if (!posted) throw new Error('Failed to post Return GRN');
 
+            // 4b. Reopen PO when net received drops below ordered (Phase 1B re-receive).
+            const grPoRow = await client.query<{ purchase_order_id: string | null }>(
+              `SELECT purchase_order_id FROM goods_receipts WHERE id = $1`,
+              [rgrn.grnId],
+            );
+            const linkedPoId = grPoRow.rows[0]?.purchase_order_id;
+            if (linkedPoId) {
+              const fullyReceived = await goodsReceiptRepository.isPOFullyReceived(client, linkedPoId);
+              if (!fullyReceived) {
+                const poStatusRow = await client.query<{ status: string }>(
+                  `SELECT status FROM purchase_orders WHERE id = $1`,
+                  [linkedPoId],
+                );
+                if (poStatusRow.rows[0]?.status === 'COMPLETED') {
+                  await purchaseOrderRepository.updatePOStatus(client, linkedPoId, 'PENDING');
+                }
+              }
+            }
+
             // 5. GL posting — INSIDE transaction (SAP LUW: issue from subledger valuation)
             const couplingAfterReturn = await captureInventoryCoupling(client);
             const glInventoryAmount = resolveGl1300FromBatchSubledgerDelta(
@@ -533,7 +566,10 @@ export const returnGrnService = {
             });
 
             return posted;
-        });
+        };
+
+        if (txClient) return execute(txClient);
+        return UnitOfWork.run(pool, execute);
     },
 
     /**
