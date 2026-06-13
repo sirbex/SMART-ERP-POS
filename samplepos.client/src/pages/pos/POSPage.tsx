@@ -28,6 +28,7 @@ import {
   isPosLineBlockedByCatalogCost,
   recalcPosCartLineFields,
 } from '../../utils/posCartLine';
+import { buildPosOrderLinePayload } from '../../utils/posOrderLinePayload';
 import {
   atCostCartGroupNeedsUpdate,
   buildAtCostBlendedCartLine,
@@ -309,25 +310,6 @@ interface LineItem {
   atCostLayerLabel?: string;
   /** Layer breakdown when shown on one blended line (multi-batch, non-splittable UoM). */
   atCostLayers?: AtCostLayerSegment[];
-}
-
-/** POS order/hold payloads: selling qty + UoM → base snapshot (matches server resolveCanonicalProductUom). */
-function buildPosOrderLinePayload(item: LineItem) {
-  const uomId =
-    item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined;
-  const factor = getPosLineConversionFactor(item.availableUoms, item.selectedUomId);
-  const baseUom = item.availableUoms?.find((u) => u.isDefault);
-  return {
-    productId: item.id,
-    productName: item.name,
-    quantity: item.quantity,
-    unitPrice: item.unitPrice,
-    discountAmount: item.discount?.amount || 0,
-    uomId,
-    baseQty: getPosLineBaseQuantity(item.quantity, item.availableUoms, item.selectedUomId),
-    baseUomId: baseUom?.uomId,
-    conversionFactor: factor,
-  };
 }
 
 function AtCostFifoHint({ item }: { item: LineItem }) {

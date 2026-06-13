@@ -57,6 +57,7 @@
     "proof:return-supplier-flow": "node scripts/proof-return-supplier-flow.mjs",
     "proof:gr-billing-rgrn-scn": "node scripts/proof-gr-billing-rgrn-scn.mjs",
     "proof:gr-reversed-billing": "node scripts/proof-gr-reversed-billing.mjs",
+    "audit:muom-base-without-product-uoms": "node scripts/audit-muom-base-without-product-uoms.mjs",
     "proof:reorder-intelligence": "node scripts/proof-reorder-intelligence.mjs",
     "proof:enterprise": "npm run proof:enterprise-phase-b && npm run proof:enterprise-phase-c && npm run proof:enterprise-phase-d && npm run proof:enterprise-phase-f",
     "proof:enterprise:local": "npm run proof:smart-customer-statement:local && npm run proof:correction-eligibility:local && npm run proof:return-supplier-flow && npm run proof:supplier-reassignment:local",
