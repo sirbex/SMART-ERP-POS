@@ -17,11 +17,17 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(resolve(root, 'SamplePOS.Server/package.json'));
 const pg = require('pg');
 
+const TENANT_DB = {
+  henber: 'pos_tenant_henber_pharmacy',
+  dynamics: 'pos_tenant_dynamics',
+};
+
 function loadDatabaseUrl() {
   const tenantArg = process.argv.find((a) => a.startsWith('--tenant='));
-  const tenant = tenantArg ? tenantArg.slice('--tenant='.length) : null;
-  if (tenant === 'henber' && process.env.HENBER_DATABASE_URL) return process.env.HENBER_DATABASE_URL;
-  if (process.env.HENBER_DATABASE_URL && !tenant) return process.env.HENBER_DATABASE_URL;
+  const tenant = tenantArg ? tenantArg.slice('--tenant='.length) : (process.env.TENANT || process.env.TENANT_DB || null);
+  if (tenant === 'henber' && process.env.HENBER_DATABASE_URL) {
+    return process.env.HENBER_DATABASE_URL;
+  }
   const envPath = resolve(root, 'SamplePOS.Server/.env');
   if (existsSync(envPath)) {
     for (const line of readFileSync(envPath, 'utf8').split('\n')) {
@@ -32,8 +38,9 @@ function loadDatabaseUrl() {
     }
   }
   if (process.env.DATABASE_URL) {
-    if (!tenant || tenant === 'default' || tenant === 'system') return process.env.DATABASE_URL;
-    return process.env.DATABASE_URL.replace(/\/([^/?]+)(\?.*)?$/, `/pos_tenant_${tenant.replace(/-/g, '_')}$2`);
+    const tenantDb = tenant ? (TENANT_DB[tenant.toLowerCase()] || tenant) : null;
+    if (!tenantDb || tenantDb === 'default' || tenantDb === 'system') return process.env.DATABASE_URL;
+    return process.env.DATABASE_URL.replace(/\/([^/?]+)(\?.*)?$/, `/${tenantDb}$2`);
   }
   throw new Error('Set DATABASE_URL or HENBER_DATABASE_URL');
 }
