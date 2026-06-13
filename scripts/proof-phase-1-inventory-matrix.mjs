@@ -369,6 +369,21 @@ async function gate1and2(token, pool, userId) {
   assert(near(gl1300AfterRev, gl1300Before, 1), 'GL 1300 restored', `${gl1300AfterRev} vs ${gl1300Before}`);
   assert(near(grniAfterRev, grniBefore, 1), 'GRNI 2150 restored', `${grniAfterRev} vs ${grniBefore}`);
 
+  const grAfterRev = await req('GET', `/api/goods-receipts/${grId}`, { token });
+  const grNumber = grAfterRev.data?.data?.grNumber ?? grAfterRev.data?.data?.receipt_number;
+  const isReversedAfterRev = grAfterRev.data?.data?.isReversed ?? grAfterRev.data?.data?.is_reversed;
+  assert(isReversedAfterRev === true, 'Reversed GR isReversed=true', String(isReversedAfterRev));
+
+  const listAfterRev = await req('GET', `/api/goods-receipts?limit=10&search=${encodeURIComponent(grNumber || grId)}`, { token });
+  const listRow = (listAfterRev.data?.data ?? []).find((g) => g.id === grId);
+  assert(!!listRow, 'Reversed GR found on list', grNumber);
+  assert(listRow.billingStatus === 'REVERSED', 'Reversed GR billingStatus=REVERSED (not To invoice)', String(listRow?.billingStatus));
+
+  const toInvoiceList = await req('GET', '/api/goods-receipts?limit=50&billingStatus=TO_INVOICE', { token });
+  const toInvoiceRows = toInvoiceList.data?.data ?? [];
+  const leaked = toInvoiceRows.find((g) => g.id === grId);
+  assert(!leaked, 'Reversed GR excluded from TO_INVOICE filter', leaked ? `found ${grId} in filter` : '');
+
   // Gate 2 — re-receive 100
   const gr2 = await req('POST', '/api/goods-receipts', {
     token,

@@ -102,8 +102,23 @@ async function liveProof() {
         if (g.billingStatus !== 'TO_INVOICE') {
             throw new Error(`Filter TO_INVOICE returned billingStatus=${g.billingStatus}`);
         }
+        if (g.isReversed === true) {
+            throw new Error(`Filter TO_INVOICE returned reversed GR ${g.grNumber ?? g.id}`);
+        }
     }
-    console.log(`PASS filter TO_INVOICE (${toInvoice.length} rows)`);
+    console.log(`PASS filter TO_INVOICE (${toInvoice.length} rows, none reversed)`);
+
+    const reversed = grs.filter((g) => g.billingStatus === 'REVERSED' || g.isReversed === true);
+    for (const g of reversed) {
+        if (g.billingStatus !== 'REVERSED') {
+            throw new Error(`isReversed GR ${g.grNumber ?? g.id} has billingStatus=${g.billingStatus}`);
+        }
+    }
+    if (reversed.length > 0) {
+        console.log(`PASS REVERSED billing lane (${reversed.length} row(s) on list)`);
+    } else {
+        console.log('INFO no REVERSED GR rows in sample — Jest covers filter invariant');
+    }
 
     const uninvoicedGr = grs.find((g) => g.billingStatus === 'TO_INVOICE' && g.status === 'COMPLETED')
         ?? grs.find((g) => g.status === 'COMPLETED' && !g.supplierBillNumber);

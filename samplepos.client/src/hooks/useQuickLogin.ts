@@ -32,6 +32,33 @@ interface QuickLoginResult {
     method: 'PIN' | 'BIOMETRIC';
 }
 
+function mapQuickLoginError(err: unknown): string {
+    const axiosErr = err as { response?: { status?: number; data?: { error?: string; error_code?: string } } };
+    const code = axiosErr.response?.data?.error_code;
+    const serverMsg = axiosErr.response?.data?.error;
+    const status = axiosErr.response?.status;
+
+    if (status === 503) {
+        return 'Tenant database is updating. Try password login or wait a moment.';
+    }
+    if (code === 'UNTRUSTED_DEVICE') {
+        return 'This device is not registered as a trusted POS terminal. Use password login to register it.';
+    }
+    if (code === 'NO_USERS') {
+        return 'No staff have PIN quick login set up. Enable PIN in profile settings first.';
+    }
+    if (code === 'PIN_LOCKED') {
+        return serverMsg || 'PIN is locked due to too many failed attempts. Use password login or ask an admin.';
+    }
+    if (code === 'INVALID_PIN') {
+        return 'Invalid PIN. Please try again.';
+    }
+    if (code === 'QUICK_LOGIN_DISABLED') {
+        return 'Quick login is disabled for this user.';
+    }
+    return serverMsg || (err instanceof Error ? err.message : 'Quick login failed');
+}
+
 // ============================================================
 // Device Fingerprint
 // ============================================================
@@ -146,8 +173,7 @@ export function useQuickLogin() {
 
             return data;
         } catch (err: unknown) {
-            const axiosErr = err as { response?: { data?: { error?: string; error_code?: string; data?: Record<string, unknown> } } };
-            const msg = axiosErr.response?.data?.error || (err instanceof Error ? err.message : 'Quick login failed');
+            const msg = mapQuickLoginError(err);
             setError(msg);
             throw err;
         } finally {
@@ -181,8 +207,7 @@ export function useQuickLogin() {
 
             return data;
         } catch (err: unknown) {
-            const axiosErr = err as { response?: { data?: { error?: string; error_code?: string; data?: Record<string, unknown> } } };
-            const msg = axiosErr.response?.data?.error || (err instanceof Error ? err.message : 'Quick login failed');
+            const msg = mapQuickLoginError(err);
             setError(msg);
             throw err;
         } finally {

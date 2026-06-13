@@ -120,8 +120,8 @@ interface GRRow {
   totalValue?: number | string;
   supplierBillNumber?: string | null;
   supplier_bill_number?: string | null;
-  billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
-  billing_status?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
+  billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED' | 'CANCELLED' | 'NOT_APPLICABLE';
+  billing_status?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED' | 'CANCELLED' | 'NOT_APPLICABLE';
   isReversed?: boolean;
   is_reversed?: boolean;
   reversedByReturnGrnId?: string | null;
@@ -1395,6 +1395,7 @@ export default function GoodsReceiptsPage() {
                     receiptStatus={gr.status}
                     billingStatus={gr.billingStatus || gr.billing_status}
                     supplierBillNumber={gr.supplierBillNumber || gr.supplier_bill_number}
+                    isReversed={gr.isReversed ?? gr.is_reversed}
                   />
                   {renderGrActions(gr, 'stack')}
                 </MobileListCard>
@@ -1465,6 +1466,7 @@ export default function GoodsReceiptsPage() {
                           receiptStatus={gr.status}
                           billingStatus={gr.billingStatus || gr.billing_status}
                           supplierBillNumber={gr.supplierBillNumber || gr.supplier_bill_number}
+                          isReversed={gr.isReversed ?? gr.is_reversed}
                         />
                       </td>
                       <td className="px-4 lg:px-6 py-3 whitespace-nowrap text-sm">

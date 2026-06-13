@@ -37,13 +37,18 @@ describe('goodsReceiptRepository.listGRs — billing status', () => {
         expect(grs.length).toBeGreaterThan(0);
         for (const gr of grs) {
             expect(gr).toHaveProperty('billingStatus');
-            expect(['DRAFT_GR', 'TO_INVOICE', 'INVOICED', 'CANCELLED', 'NOT_APPLICABLE']).toContain(gr.billingStatus);
+            expect(['DRAFT_GR', 'TO_INVOICE', 'INVOICED', 'REVERSED', 'CANCELLED', 'NOT_APPLICABLE']).toContain(gr.billingStatus);
             if (gr.billingStatus === 'INVOICED') {
                 expect(gr.supplierBillNumber).toBeTruthy();
             }
             if (gr.billingStatus === 'TO_INVOICE') {
                 expect(gr.status).toBe('COMPLETED');
                 expect(gr.supplierBillNumber ?? null).toBeFalsy();
+                expect(gr.isReversed).not.toBe(true);
+            }
+            if (gr.billingStatus === 'REVERSED') {
+                expect(gr.status).toBe('COMPLETED');
+                expect(gr.isReversed).toBe(true);
             }
             if (gr.billingStatus === 'DRAFT_GR') {
                 expect(gr.status).toBe('DRAFT');
@@ -57,6 +62,7 @@ describe('goodsReceiptRepository.listGRs — billing status', () => {
         for (const gr of grs) {
             expect(gr.status).toBe('COMPLETED');
             expect(gr.billingStatus).toBe('TO_INVOICE');
+            expect(gr.isReversed).not.toBe(true);
         }
     });
 
@@ -67,6 +73,21 @@ describe('goodsReceiptRepository.listGRs — billing status', () => {
             expect(gr.status).toBe('COMPLETED');
             expect(gr.billingStatus).toBe('INVOICED');
             expect(gr.supplierBillNumber).toBeTruthy();
+        }
+    });
+
+    it('reversed GRs are REVERSED billing lane and never in TO_INVOICE filter', async () => {
+        if (!schemaReady) return;
+        const { grs: all } = await goodsReceiptRepository.listGRs(pool, 1, 100);
+        const reversed = all.filter((g) => g.isReversed === true || g.billingStatus === 'REVERSED');
+        for (const gr of reversed) {
+            expect(gr.billingStatus).toBe('REVERSED');
+            expect(gr.isReversed).toBe(true);
+        }
+        const { grs: toInvoice } = await goodsReceiptRepository.listGRs(pool, 1, 100, { billingStatus: 'TO_INVOICE' });
+        const reversedIds = new Set(reversed.map((g) => g.id));
+        for (const gr of toInvoice) {
+            expect(reversedIds.has(gr.id)).toBe(false);
         }
     });
 });

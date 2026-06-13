@@ -23,7 +23,35 @@ const GR_SORT_COLUMNS: Record<string, string> = {
   receiptStatus: 'gr.status',
 };
 
-async function grReversalSelectSql(pool: Pool | PoolClient): Promise<string> {
+/** True when every received line on the GR has been fully returned via posted Return GRNs. */
+function grLegacyFullyReversedSql(grAlias = 'gr'): string {
+  return `(
+    EXISTS (SELECT 1 FROM return_grn rg WHERE rg.grn_id = ${grAlias}.id AND rg.status = 'POSTED')
+    AND NOT EXISTS (
+      SELECT 1
+      FROM goods_receipt_items gri
+      WHERE gri.goods_receipt_id = ${grAlias}.id
+        AND COALESCE(gri.received_quantity, 0)::numeric > COALESCE((
+          SELECT SUM(rl.quantity)
+          FROM return_grn_lines rl
+          INNER JOIN return_grn rg2 ON rg2.id = rl.rgrn_id AND rg2.status = 'POSTED'
+          WHERE rg2.grn_id = gri.goods_receipt_id
+            AND rl.product_id = gri.product_id
+        ), 0)::numeric + 0.0001
+    )
+  )`;
+}
+
+/** Metadata link and/or legacy inference from posted Return GRNs (pre-migration 522 backfill). */
+async function grFullyReversedConditionSql(pool: Pool | PoolClient, grAlias = 'gr'): Promise<string> {
+  const hasMetadata = await tableHasColumn(pool, 'goods_receipts', 'reversed_by_return_grn_id');
+  const legacy = grLegacyFullyReversedSql(grAlias);
+  if (!hasMetadata) return legacy;
+  return `(${grAlias}.reversed_by_return_grn_id IS NOT NULL OR ${legacy})`;
+}
+
+async function grReversalSelectSql(pool: Pool | PoolClient, fullyReversedSql?: string): Promise<string> {
+  const isReversedExpr = fullyReversedSql ?? (await grFullyReversedConditionSql(pool, 'gr'));
   const has = await tableHasColumn(pool, 'goods_receipts', 'reversed_by_return_grn_id');
   if (!has) {
     return `
@@ -31,14 +59,14 @@ async function grReversalSelectSql(pool: Pool | PoolClient): Promise<string> {
          NULL::text AS "reversedByReturnGrnNumber",
          NULL::timestamptz AS "reversalTimestamp",
          NULL::text AS "reversalReason",
-         false AS "isReversed"`;
+         (${isReversedExpr}) AS "isReversed"`;
   }
   return `
          gr.reversed_by_return_grn_id AS "reversedByReturnGrnId",
          (SELECT r.return_grn_number FROM return_grn r WHERE r.id = gr.reversed_by_return_grn_id) AS "reversedByReturnGrnNumber",
          gr.reversal_timestamp AS "reversalTimestamp",
          gr.reversal_reason AS "reversalReason",
-         (gr.reversed_by_return_grn_id IS NOT NULL) AS "isReversed"`;
+         (${isReversedExpr}) AS "isReversed"`;
 }
 
 export interface GoodsReceipt {
@@ -62,8 +90,9 @@ export interface GoodsReceipt {
   /**
    * SAP/Odoo billing lane on the GR list:
    * DRAFT_GR = receipt not finalized | TO_INVOICE = received-not-billed (GR/IR) | INVOICED = AP bill exists
+   * REVERSED = fully returned via posted Return GRN — not billable
    */
-  billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'CANCELLED' | 'NOT_APPLICABLE';
+  billingStatus?: 'DRAFT_GR' | 'TO_INVOICE' | 'INVOICED' | 'REVERSED' | 'CANCELLED' | 'NOT_APPLICABLE';
   /** Posted Return GRN that fully reversed this receipt (counter-document). */
   reversedByReturnGrnId?: string | null;
   reversedByReturnGrnNumber?: string | null;
@@ -631,12 +660,15 @@ export const goodsReceiptRepository = {
         )
     )`;
 
+    const fullyReversedSql = await grFullyReversedConditionSql(pool, 'gr');
+
     if (filters?.billingStatus === 'INVOICED') {
       whereClauses.push(`gr.status = 'COMPLETED'`);
       whereClauses.push(supplierBillExistsSql);
     } else if (filters?.billingStatus === 'TO_INVOICE') {
       whereClauses.push(`gr.status = 'COMPLETED'`);
       whereClauses.push(`NOT (${supplierBillExistsSql})`);
+      whereClauses.push(`NOT (${fullyReversedSql})`);
     }
 
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -676,7 +708,7 @@ export const goodsReceiptRepository = {
       orderBy = `${col} ${sqlSortOrder(filters?.sortOrder ?? 'desc')}`;
     }
 
-    const reversalSql = await grReversalSelectSql(pool);
+    const reversalSql = await grReversalSelectSql(pool, fullyReversedSql);
     const result = await pool.query(
       `SELECT 
          gr.id,
@@ -699,6 +731,7 @@ export const goodsReceiptRepository = {
          CASE
            WHEN gr.status = 'DRAFT' THEN 'DRAFT_GR'
            WHEN gr.status = 'CANCELLED' THEN 'CANCELLED'
+           WHEN ${fullyReversedSql} THEN 'REVERSED'
            WHEN ${supplierBillNumberSql} IS NOT NULL THEN 'INVOICED'
            WHEN gr.status = 'COMPLETED' THEN 'TO_INVOICE'
            ELSE 'NOT_APPLICABLE'
