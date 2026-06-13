@@ -245,6 +245,137 @@ async function buildMergedCanonicalConversions(
   return Array.from(byFrom.values());
 }
 
+export interface ProductPurchaseUomIntegrityCheck {
+  productId: string;
+  productName: string;
+  sku: string | null;
+  baseUomId: string | null;
+  baseUomLabel: string | null;
+  purchaseUomId: string | null;
+  purchaseUomLabel: string | null;
+  valid: boolean;
+  missingBaseUom: boolean;
+  missingProductUomsRow: boolean;
+  missingConversionPath: boolean;
+  /** Master uoms.id safe for PO line selection; null = use base (factor 1). */
+  effectivePoUomId: string | null;
+}
+
+/**
+ * SAP/Odoo-grade MUoM integrity: purchase UoM must exist in product_uoms with a path to base.
+ * Read-only — use validateProductPurchaseUomIntegrity to enforce on writes.
+ */
+export async function checkProductPurchaseUomIntegrity(
+  productId: string,
+  db: Queryable,
+): Promise<ProductPurchaseUomIntegrityCheck> {
+  const summary = await repo.getProductSummary(productId, db);
+  const baseUomId = await repo.getProductBaseUomId(productId, db);
+  const ctx = await repo.getProductPurchaseUomContext(productId, db);
+  const purchaseUomId = ctx?.purchaseUomId ?? null;
+
+  const baseUom = baseUomId ? await repo.getUomById(baseUomId, db) : null;
+  const purchaseUom =
+    purchaseUomId && purchaseUomId !== baseUomId
+      ? await repo.getUomById(purchaseUomId, db)
+      : null;
+
+  const base: ProductPurchaseUomIntegrityCheck = {
+    productId,
+    productName: summary?.name ?? 'Product',
+    sku: summary?.sku ?? null,
+    baseUomId,
+    baseUomLabel: baseUom?.symbol ?? baseUom?.name ?? null,
+    purchaseUomId: purchaseUomId && purchaseUomId !== baseUomId ? purchaseUomId : null,
+    purchaseUomLabel: purchaseUom?.symbol ?? purchaseUom?.name ?? null,
+    valid: true,
+    missingBaseUom: false,
+    missingProductUomsRow: false,
+    missingConversionPath: false,
+    effectivePoUomId: null,
+  };
+
+  if (!baseUomId) {
+    return {
+      ...base,
+      valid: false,
+      missingBaseUom: true,
+    };
+  }
+
+  if (!base.purchaseUomId) {
+    return base;
+  }
+
+  const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  const hasProductUomsRow = productUoms.some((uom) => uom.uomId === base.purchaseUomId);
+
+  if (!hasProductUomsRow) {
+    return {
+      ...base,
+      valid: false,
+      missingProductUomsRow: true,
+      missingConversionPath: true,
+    };
+  }
+
+  const conversions = await buildMergedCanonicalConversions(productId, baseUomId, db);
+  try {
+    resolveFactorToBase(baseUomId, base.purchaseUomId, conversions);
+    return {
+      ...base,
+      valid: true,
+      effectivePoUomId: base.purchaseUomId,
+    };
+  } catch {
+    return {
+      ...base,
+      valid: false,
+      missingConversionPath: true,
+    };
+  }
+}
+
+/**
+ * Enforce MUoM integrity when products.purchase_uom_id is configured.
+ */
+export async function validateProductPurchaseUomIntegrity(
+  productId: string,
+  db: Queryable,
+): Promise<ProductPurchaseUomIntegrityCheck> {
+  const check = await checkProductPurchaseUomIntegrity(productId, db);
+
+  if (check.valid) {
+    return check;
+  }
+
+  if (check.missingBaseUom) {
+    throw new ValidationError(
+      `"${check.productName}" must have a base stock unit of measure. ` +
+        'Open the product → Units of Measure and set a base unit.',
+    );
+  }
+
+  const purchaseLabel = check.purchaseUomLabel ?? 'Purchase UoM';
+  const baseLabel = check.baseUomLabel ?? 'base stock UoM';
+
+  if (check.missingProductUomsRow) {
+    throw new ValidationError(
+      `Purchase UoM "${purchaseLabel}" is not configured for "${check.productName}". ` +
+        `Add it under Product UoMs and define a conversion to ${baseLabel}.`,
+    );
+  }
+
+  if (check.missingConversionPath) {
+    throw new ValidationError(
+      `Purchase UoM "${purchaseLabel}" has no conversion path to base stock UoM "${baseLabel}" ` +
+        `for "${check.productName}". Update Product UoMs with a valid conversion factor.`,
+    );
+  }
+
+  return check;
+}
+
 /**
  * Persist canonical edges from product_uoms (repairs legacy/partial item_uom_conversions).
  * Idempotent — safe before PO/GR/sales posting.

@@ -182,6 +182,32 @@ export async function getProductBaseUomId(productId: string, db?: Queryable): Pr
   return res.rows[0]?.baseUomId ?? null;
 }
 
+export async function getProductPurchaseUomContext(
+  productId: string,
+  db?: Queryable,
+): Promise<{
+  purchaseUomId: string | null;
+  conversionFactor: number;
+  baseUomId: string | null;
+} | null> {
+  const pool = db || globalPool;
+  const res = await pool.query(
+    `SELECT purchase_uom_id AS "purchaseUomId",
+            conversion_factor AS "conversionFactor",
+            base_uom_id AS "baseUomId"
+     FROM products
+     WHERE id = $1`,
+    [productId],
+  );
+  const row = res.rows[0];
+  if (!row) return null;
+  return {
+    purchaseUomId: row.purchaseUomId ?? null,
+    conversionFactor: Number(row.conversionFactor ?? 1),
+    baseUomId: row.baseUomId ?? null,
+  };
+}
+
 export async function getProductLegacyUnitOfMeasure(
   productId: string,
   db?: Queryable,
@@ -202,6 +228,17 @@ export async function getProductName(productId: string, db?: Queryable): Promise
   const pool = db || globalPool;
   const res = await pool.query(`SELECT name FROM products WHERE id = $1`, [productId]);
   return res.rows[0]?.name ?? null;
+}
+
+export async function getProductSummary(
+  productId: string,
+  db?: Queryable,
+): Promise<{ name: string; sku: string | null } | null> {
+  const pool = db || globalPool;
+  const res = await pool.query(`SELECT name, sku FROM products WHERE id = $1`, [productId]);
+  const row = res.rows[0];
+  if (!row) return null;
+  return { name: row.name, sku: row.sku ?? null };
 }
 
 export async function setProductBaseUomId(productId: string, uomId: string, db?: Queryable): Promise<void> {

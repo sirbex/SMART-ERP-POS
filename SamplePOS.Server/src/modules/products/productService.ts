@@ -15,7 +15,7 @@ import logger from '../../utils/logger.js';
 import type { BulkImportProductRow, BulkUpsertResult } from './productRepository.js';
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 import * as pricingService from '../../services/pricingService.js';
-import { bootstrapProductUomsFromCreateInput } from './uomService.js';
+import { bootstrapProductUomsFromCreateInput, validateProductPurchaseUomIntegrity, checkProductPurchaseUomIntegrity } from './uomService.js';
 
 // Server-side limit cap — safe with lightweight flat query (no json_agg/GROUP BY).
 // 1800 products + batch UOM = ~25ms total. Cap at 5000 for safety.
@@ -217,6 +217,10 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
       client,
     );
 
+    if (data.purchaseUomId) {
+      await validateProductPurchaseUomIntegrity(product.id, client);
+    }
+
     logger.info('Product created successfully (transaction committed)', {
       productId: product.id,
       sku: product.sku,
@@ -312,6 +316,10 @@ export async function updateProduct(
       throw new Error(`Failed to update product with ID ${id}`);
     }
 
+    if (data.purchaseUomId) {
+      await validateProductPurchaseUomIntegrity(id, client);
+    }
+
     logger.info('Product updated successfully (transaction committed)', { productId: id });
 
     return updated;
@@ -346,6 +354,35 @@ export async function deleteProduct(id: string, dbPool?: pg.Pool): Promise<void>
   if (!success) {
     throw new Error(`Failed to delete product with ID ${id}`);
   }
+}
+
+/**
+ * Procurement search with honest purchase UoM resolution for PO lines.
+ * Invalid purchase_uom_id is flagged; effectivePurchaseUomId falls back to base (null).
+ */
+export async function procurementSearchForPo(
+  query: string,
+  supplierId: string | null,
+  limit: number = 20,
+  dbPool?: pg.Pool,
+): Promise<productRepository.ProcurementSearchResult[]> {
+  const pool = dbPool || globalPool;
+  const rows = await productRepository.procurementSearch(query, supplierId, limit, pool);
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const integrity = await checkProductPurchaseUomIntegrity(row.id, pool);
+      const purchaseConfigured = Boolean(row.purchaseUomId && row.purchaseUomId !== integrity.baseUomId);
+      const purchaseUomIncomplete = purchaseConfigured && !integrity.valid;
+
+      return {
+        ...row,
+        baseUomId: integrity.baseUomId,
+        purchaseUomIncomplete,
+        effectivePurchaseUomId: integrity.valid ? integrity.effectivePoUomId : null,
+      };
+    }),
+  );
 }
 
 // ── Bulk Import (Opening Inventory) ─────────────────────────────────────

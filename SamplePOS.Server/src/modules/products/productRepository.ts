@@ -773,6 +773,12 @@ export interface ProcurementSearchResult {
   purchaseUomId: string | null;
   leadTimeDays: number;
   trackExpiry: boolean;
+  /** Base stock UoM (products.base_uom_id) */
+  baseUomId?: string | null;
+  /** True when purchase_uom_id is set but not in product_uoms / no conversion path */
+  purchaseUomIncomplete?: boolean;
+  /** Safe UoM for PO auto-select; null = base UoM */
+  effectivePurchaseUomId?: string | null;
   // Supplier-specific pricing (when supplierId provided)
   supplierLastPrice: number | null;
   supplierPurchaseCount: number | null;

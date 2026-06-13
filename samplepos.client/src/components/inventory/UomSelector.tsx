@@ -59,13 +59,26 @@ export function UomSelector({
   // When server UOM data loads with a pre-selected UOM,
   // ensure the parent's displayed cost reflects baseCost × factor, computed locally.
   useEffect(() => {
-    if (uoms.length === 0 || !selectedUomId) return;
+    if (uoms.length === 0) return;
+
+    if (!selectedUomId) return;
+
     // Only fire once per UOM selection to avoid infinite loops
     if (syncedUomRef.current === selectedUomId) return;
 
     // Match by master uomId (uoms table PK) or product_uoms.id for backward compat
     const selected = uoms.find(u => u.uomId === selectedUomId || u.id === selectedUomId);
-    if (!selected) return;
+    if (!selected) {
+      // Orphan selection (e.g. products.purchase_uom_id not in product_uoms) — fall back to base
+      syncedUomRef.current = '__orphan__';
+      onChangeRef.current({
+        uomId: null,
+        newCost: computeUnitCost(baseCost),
+        conversionFactor: '1',
+        uomName: 'Base UoM',
+      });
+      return;
+    }
 
     syncedUomRef.current = selectedUomId;
 

@@ -21,6 +21,7 @@ const mockRepo = {
   listUoms: jest.fn<MockFn>(),
   getProductLegacyUnitOfMeasure: jest.fn<MockFn>(),
   getProductName: jest.fn<MockFn>(),
+  getProductPurchaseUomContext: jest.fn<MockFn>(),
 };
 
 jest.unstable_mockModule('./uomRepository.js', () => mockRepo);
@@ -141,6 +142,11 @@ describe('resolveCanonicalProductUom', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockRepo.getProductBaseUomId.mockResolvedValue(baseUomId);
+    mockRepo.getProductPurchaseUomContext.mockResolvedValue({
+      purchaseUomId: null,
+      conversionFactor: 1,
+      baseUomId,
+    });
     mockRepo.listProductUoms.mockResolvedValue([
       {
         id: 'd0000000-0000-4000-8000-000000000004',

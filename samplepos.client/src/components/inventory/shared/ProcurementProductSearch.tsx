@@ -21,6 +21,10 @@ export interface ProcurementProduct {
   purchaseUomId: string | null;
   leadTimeDays: number;
   trackExpiry: boolean;
+  baseUomId?: string | null;
+  purchaseUomIncomplete?: boolean;
+  /** null = use base UoM on PO line */
+  effectivePurchaseUomId?: string | null;
   supplierLastPrice: number | null;
   supplierPurchaseCount: number | null;
   supplierName: string | null;
@@ -244,6 +248,14 @@ export function ProcurementProductSearch({
                       {reorder && (
                         <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-red-100 text-red-700">
                           Low Stock
+                        </span>
+                      )}
+                      {product.purchaseUomIncomplete && (
+                        <span
+                          className="shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-100 text-amber-800"
+                          title="Purchase UoM is not fully configured — PO will use base stock UoM"
+                        >
+                          Purchase UoM incomplete
                         </span>
                       )}
                     </div>

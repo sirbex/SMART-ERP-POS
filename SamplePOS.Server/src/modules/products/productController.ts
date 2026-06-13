@@ -199,7 +199,7 @@ export const procurementSearch = asyncHandler(async (req: Request, res: Response
   const pool = req.tenantPool || globalPool;
   const { q, supplierId, limit } = ProcurementSearchQuerySchema.parse(req.query);
 
-  const results = await productRepository.procurementSearch(q, supplierId || null, limit, pool);
+  const results = await productService.procurementSearchForPo(q, supplierId || null, limit, pool);
 
   res.json({ success: true, data: results });
 });

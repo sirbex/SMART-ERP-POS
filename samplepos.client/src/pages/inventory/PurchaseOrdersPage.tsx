@@ -89,6 +89,8 @@ interface POLineItem {
   reorderLevel?: number;
   reorderQuantity?: number;
   costSource?: string;
+  /** Set when server flagged purchase_uom_id as not in product_uoms */
+  purchaseUomIncomplete?: boolean;
 }
 
 /** PO row — supports both snake_case (raw API) and camelCase (mapped) fields */
@@ -249,6 +251,11 @@ function LineItemRow({
             )}
             {item.costSource && (
               <span className="text-blue-500">({item.costSource})</span>
+            )}
+            {item.purchaseUomIncomplete && (
+              <span className="text-amber-700 font-medium" title="Purchase UoM not configured — using base stock UoM">
+                Purchase UoM incomplete
+              </span>
             )}
           </div>
         </div>
@@ -484,12 +491,13 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
       unitCost: initialCost,
       lineTotal: new Decimal(suggestedQty).times(new Decimal(initialCost)).toFixed(2),
       baseCost: initialCost, // Base unit cost for UOM recalculation
-      selectedUomId: product.purchaseUomId || null,
+      selectedUomId: product.effectivePurchaseUomId ?? null,
       conversionFactor: '1',
       quantityOnHand: product.quantityOnHand,
       reorderLevel: product.reorderLevel,
       reorderQuantity: product.reorderQuantity,
       costSource,
+      purchaseUomIncomplete: product.purchaseUomIncomplete ?? false,
     };
 
     setLineItems((prev) => [...prev, newItem]);
@@ -987,12 +995,13 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
       unitCost: initialCost,
       lineTotal: new Decimal(suggestedQty).times(new Decimal(initialCost)).toFixed(2),
       baseCost: initialCost,
-      selectedUomId: product.purchaseUomId || null,
+      selectedUomId: product.effectivePurchaseUomId ?? null,
       conversionFactor: '1',
       quantityOnHand: product.quantityOnHand,
       reorderLevel: product.reorderLevel,
       reorderQuantity: product.reorderQuantity,
       costSource,
+      purchaseUomIncomplete: product.purchaseUomIncomplete ?? false,
     };
 
     setLineItems((prev) => [...prev, newItem]);
