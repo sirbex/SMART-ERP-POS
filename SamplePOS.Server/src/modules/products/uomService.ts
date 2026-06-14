@@ -732,9 +732,15 @@ export async function bootstrapProductUomsFromCreateInput(
     return;
   }
 
-  const allUoms = await repo.listUoms(db as pg.Pool);
+  let allUoms = await repo.listUoms(db as pg.Pool);
   if (allUoms.length === 0) {
-    return;
+    const seeded = await repo.createUom({ name: 'EACH', symbol: 'ea', type: 'QUANTITY' }, db as pg.Pool);
+    allUoms = seeded ? [seeded] : await repo.listUoms(db as pg.Pool);
+    if (allUoms.length === 0) {
+      throw new ValidationError(
+        'Cannot create product: no units of measure exist. Add at least one UoM in Settings first.',
+      );
+    }
   }
 
   const canonicalTarget = canonicalizeUomName(data.unitOfMeasure || 'EACH');

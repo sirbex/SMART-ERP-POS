@@ -1,0 +1,52 @@
+name: Henber Heal MUoM Orphans
+
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: 'Run heal (--execute). Leave unchecked for dry-run audit only.'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  heal:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Audit and heal Category C MUoM orphans on Henber
+        env:
+          EXECUTE: ${{ inputs.execute }}
+        run: |
+          EXEC_FLAG=""
+          if [ "$EXECUTE" = "true" ]; then
+            EXEC_FLAG="--execute"
+          fi
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<REMOTE
+          set -euo pipefail
+          cd /opt/smarterp
+          git fetch origin main
+          git checkout origin/main -- scripts/audit-muom-integrity-full.mjs scripts/heal-muom-orphan-products.mjs
+          docker cp scripts/audit-muom-integrity-full.mjs smarterp-backend:/tmp/audit-muom-integrity-full.mjs
+          docker cp scripts/heal-muom-orphan-products.mjs smarterp-backend:/tmp/heal-muom-orphan-products.mjs
+          docker exec -u root smarterp-backend cp /tmp/audit-muom-integrity-full.mjs /app/audit-muom-integrity-full.mjs
+          docker exec -u root smarterp-backend cp /tmp/heal-muom-orphan-products.mjs /app/heal-muom-orphan-products.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/audit-muom-integrity-full.mjs /app/heal-muom-orphan-products.mjs
+          echo "=== BEFORE ==="
+          docker exec -w /app smarterp-backend node audit-muom-integrity-full.mjs --tenant=henber || true
+          echo "=== HEAL ==="
+          docker exec -w /app smarterp-backend node heal-muom-orphan-products.mjs --tenant=henber ${EXEC_FLAG}
+          echo "=== AFTER ==="
+          docker exec -w /app smarterp-backend node audit-muom-integrity-full.mjs --tenant=henber
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key

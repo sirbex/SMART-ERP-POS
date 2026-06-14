@@ -217,6 +217,13 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
       client,
     );
 
+    const postBootstrapUoms = await uomRepository.listProductUoms(product.id, client as unknown as pg.Pool);
+    if (postBootstrapUoms.length === 0) {
+      throw new Error(
+        `Product "${product.sku}" was created without a base unit of measure. MUoM bootstrap failed.`,
+      );
+    }
+
     if (data.purchaseUomId) {
       await validateProductPurchaseUomIntegrity(product.id, client);
     }
@@ -417,6 +424,12 @@ export async function bulkImportProducts(
   const result = await productRepository.bulkUpsertForImport(client, rows, duplicateStrategy);
 
   for (const productId of result.skuToProductId.values()) {
+    const uomRows = await uomRepository.listProductUoms(productId, client as unknown as pg.Pool);
+    if (uomRows.length === 0) {
+      throw new Error(
+        `Product ${productId} has no product_uoms after import — MUoM bootstrap failed`,
+      );
+    }
     const ctx = await uomRepository.getProductPurchaseUomContext(productId, client);
     if (ctx?.purchaseUomId && ctx.baseUomId && ctx.purchaseUomId !== ctx.baseUomId) {
       await validateProductPurchaseUomIntegrity(productId, client);

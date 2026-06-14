@@ -693,9 +693,9 @@ export async function bulkUpsertForImport(
         uomNameMap.set(u.name, u.id);
         if (u.symbol) uomNameMap.set(u.symbol, u.id);
       }
-      const eachUomId = uomNameMap.get('EACH') || uomNameMap.get('EA');
+      let eachUomId = uomNameMap.get('EACH') || uomNameMap.get('EA');
 
-      // Auto-create missing UoMs
+      // Auto-create missing UoMs from import rows
       const missingUoms = new Set<string>();
       for (const r of syncRows) {
         if (r.unitOfMeasure) {
@@ -713,8 +713,35 @@ export async function bulkUpsertForImport(
         }
       }
 
+      // Ensure a default countable base UoM exists — never leave imports without product_uoms
+      if (!eachUomId) {
+        const eachRes = await client.query(
+          `INSERT INTO uoms (name, symbol, type) VALUES ('EACH', 'ea', 'QUANTITY')
+           ON CONFLICT DO NOTHING
+           RETURNING id, UPPER(name) AS name`
+        );
+        if (eachRes.rows[0]) {
+          eachUomId = eachRes.rows[0].id;
+          uomNameMap.set(eachRes.rows[0].name, eachRes.rows[0].id);
+        } else {
+          const lookup = await client.query(
+            `SELECT id, UPPER(name) AS name FROM uoms WHERE UPPER(name) IN ('EACH', 'EA') OR UPPER(symbol) IN ('EACH', 'EA') LIMIT 1`
+          );
+          if (lookup.rows[0]) {
+            eachUomId = lookup.rows[0].id;
+            uomNameMap.set(lookup.rows[0].name, lookup.rows[0].id);
+          }
+        }
+      }
+      if (!eachUomId) {
+        throw new Error(
+          'Cannot import products: no base UoM (EACH/EA) in master table and auto-create failed'
+        );
+      }
+
       const puValues: unknown[] = [];
       const puPlaceholders: string[] = [];
+      const baseUomByProduct = new Map<string, string>();
       let puIdx = 1;
       for (const r of syncRows) {
         const productId = skuToProductId.get(r.sku.toLowerCase())!;
@@ -723,9 +750,9 @@ export async function bulkUpsertForImport(
           uomId = uomNameMap.get(r.unitOfMeasure.toUpperCase());
         }
         if (!uomId) uomId = eachUomId;
-        if (!uomId) continue;
         puPlaceholders.push(`($${puIdx}::uuid, $${puIdx + 1}::uuid, 1.0, true)`);
         puValues.push(productId, uomId);
+        baseUomByProduct.set(productId, uomId);
         puIdx += 2;
       }
       if (puPlaceholders.length > 0) {
@@ -748,6 +775,15 @@ export async function bulkUpsertForImport(
              updated_at = NOW()`,
           puValues
         );
+
+        // Keep products.base_uom_id in sync with default product_uoms row
+        for (const [productId, uomId] of baseUomByProduct) {
+          await client.query(
+            `UPDATE products SET base_uom_id = $2, updated_at = NOW()
+             WHERE id = $1 AND (base_uom_id IS NULL OR base_uom_id IS DISTINCT FROM $2)`,
+            [productId, uomId]
+          );
+        }
       }
     }
   }
