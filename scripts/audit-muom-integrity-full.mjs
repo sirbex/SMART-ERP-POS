@@ -18,11 +18,9 @@
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
+import pg from 'pg';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const require = createRequire(resolve(root, 'SamplePOS.Server/package.json'));
-const pg = require('pg');
 
 const csvArg = process.argv.find((a) => a.startsWith('--csv='));
 const csvPath = csvArg ? csvArg.slice('--csv='.length) : null;
@@ -52,7 +50,9 @@ function loadDatabaseUrl() {
     if (!tenantDb || tenantDb === 'default' || tenantDb === 'system') return process.env.DATABASE_URL;
     return process.env.DATABASE_URL.replace(/\/([^/?]+)(\?.*)?$/, `/${tenantDb}$2`);
   }
-  throw new Error('Set DATABASE_URL or HENBER_DATABASE_URL');
+  // Docker production (smarterp-backend container)
+  const tenantDb = tenant ? (TENANT_DB[tenant.toLowerCase()] || tenant) : 'pos_tenant_henber_pharmacy';
+  return `postgresql://postgres:55b9bed51c599b26e7115ab126a974e8@postgres:5432/${tenantDb}`;
 }
 
 const AUDIT_SQL = `

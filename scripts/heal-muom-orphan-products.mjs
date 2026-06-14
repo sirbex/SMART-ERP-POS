@@ -19,11 +19,9 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
+import pg from 'pg';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const require = createRequire(resolve(root, 'SamplePOS.Server/package.json'));
-const pg = require('pg');
 
 const EXECUTE = process.argv.includes('--execute');
 const productFilter = (() => {
@@ -61,7 +59,8 @@ function loadDatabaseUrl() {
   if (tenantKey && TENANT_DB[tenantKey]) {
     return `postgresql://postgres:password@localhost:5432/${TENANT_DB[tenantKey]}`;
   }
-  throw new Error('Set DATABASE_URL or HENBER_DATABASE_URL (with --tenant=henber)');
+  // Docker production (smarterp-backend container)
+  return 'postgresql://postgres:55b9bed51c599b26e7115ab126a974e8@postgres:5432/pos_tenant_henber_pharmacy';
 }
 
 const FIND_SQL = `
