@@ -316,7 +316,12 @@ export async function updateProduct(
       throw new Error(`Failed to update product with ID ${id}`);
     }
 
-    if (data.purchaseUomId) {
+    const purchaseUomAfterSave =
+      data.purchaseUomId !== undefined
+        ? data.purchaseUomId || null
+        : (existing.purchaseUomId as string | null | undefined) ?? null;
+
+    if (purchaseUomAfterSave) {
       await validateProductPurchaseUomIntegrity(id, client);
     }
 
@@ -410,6 +415,13 @@ export async function bulkImportProducts(
   });
 
   const result = await productRepository.bulkUpsertForImport(client, rows, duplicateStrategy);
+
+  for (const productId of result.skuToProductId.values()) {
+    const ctx = await uomRepository.getProductPurchaseUomContext(productId, client);
+    if (ctx?.purchaseUomId && ctx.baseUomId && ctx.purchaseUomId !== ctx.baseUomId) {
+      await validateProductPurchaseUomIntegrity(productId, client);
+    }
+  }
 
   logger.info('Product master data import complete', {
     inserted: result.inserted,

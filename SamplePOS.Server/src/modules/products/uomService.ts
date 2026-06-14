@@ -872,6 +872,11 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
       }
     }
 
+    const purchaseCtx = await repo.getProductPurchaseUomContext(data.productId, client);
+    if (purchaseCtx?.purchaseUomId && purchaseCtx.purchaseUomId !== purchaseCtx.baseUomId) {
+      await validateProductPurchaseUomIntegrity(data.productId, client);
+    }
+
     return result;
   });
 }
@@ -962,6 +967,11 @@ export async function updateProductUom(
       parsed.isDefault ?? result.isDefault,
       pool,
     );
+
+    const purchaseCtx = await repo.getProductPurchaseUomContext(result.productId, pool);
+    if (purchaseCtx?.purchaseUomId && purchaseCtx.purchaseUomId !== purchaseCtx.baseUomId) {
+      await validateProductPurchaseUomIntegrity(result.productId, pool);
+    }
   }
 
   return result;
@@ -977,6 +987,14 @@ export async function removeProductUom(id: string, dbPool?: pg.Pool) {
   const baseUomId = await repo.getProductBaseUomId(existing.productId, pool);
   if (existing.isDefault || baseUomId === existing.uomId) {
     throw new ConflictError('Cannot remove the canonical base stock UoM from an item.');
+  }
+
+  const purchaseCtx = await repo.getProductPurchaseUomContext(existing.productId, pool);
+  if (purchaseCtx?.purchaseUomId === existing.uomId) {
+    throw new ValidationError(
+      'Cannot remove this unit — it is set as the product Purchase UoM. ' +
+        'Change Purchase UoM on the product master or add a replacement unit first.',
+    );
   }
 
   await repo.deleteItemUomConversionBySource(existing.productId, existing.uomId, pool);
