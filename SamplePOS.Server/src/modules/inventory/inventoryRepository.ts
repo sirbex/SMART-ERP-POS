@@ -147,6 +147,7 @@ export const inventoryRepository = {
          CASE WHEN COALESCE(SUM(b.remaining_quantity), pi.quantity_on_hand) <= pi.reorder_level THEN true ELSE false END as needs_reorder,
          COALESCE(po_agg.qty_on_order, 0) as qty_on_order,
          0 as qty_reserved,
+         COALESCE(
          (
            SELECT json_agg(
              json_build_object(
@@ -175,7 +176,25 @@ export const inventoryRepository = {
            FROM product_uoms pu
            JOIN uoms u ON pu.uom_id = u.id
            WHERE pu.product_id = p.id
-         ) as uoms
+         ),
+         (
+           SELECT json_build_array(
+             json_build_object(
+               'uomId', u.id,
+               'name', u.name,
+               'symbol', u.symbol,
+               'conversionFactor', 1,
+               'isDefault', true,
+               'price', pv.selling_price,
+               'cost', COALESCE(NULLIF(pv.average_cost, 0), pv.cost_price),
+               'priceIsOverridden', false,
+               'computedPrice', pv.selling_price
+             )
+           )
+           FROM uoms u
+           WHERE u.id = p.base_uom_id
+         )
+       ) as uoms
        FROM products p
        LEFT JOIN product_inventory pi ON pi.product_id = p.id
        LEFT JOIN product_valuation pv ON pv.product_id = p.id

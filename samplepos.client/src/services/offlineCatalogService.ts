@@ -190,6 +190,8 @@ async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
 
         const stockLevels: StockLevelRow[] = res.data?.data || [];
 
+        const missingUomProducts: string[] = [];
+
         const products: CachedProduct[] = stockLevels
             .filter((item: StockLevelRow) => Number(item.total_stock || 0) > 0 || item.product_type === 'service')
             .map((item: StockLevelRow) => {
@@ -198,10 +200,7 @@ async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
 
                 let uoms: CachedProductUom[] = item.uoms || [];
                 if (!uoms || uoms.length === 0) {
-                    console.warn(
-                        `[offlineCatalog] Product ${item.product_id} (${item.product_name}) has no UoM rows — ` +
-                        'POS MUoM stock/pricing may be wrong until catalog sync includes product_uoms.',
-                    );
+                    missingUomProducts.push(`${item.product_name} (${item.product_id})`);
                     uoms = [{
                         uomId: `default-${item.product_id}`,
                         name: 'PIECE',
@@ -230,6 +229,14 @@ async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
                     genericName: item.generic_name || undefined,
                 };
             });
+
+        if (missingUomProducts.length > 0) {
+            console.warn(
+                `[offlineCatalog] ${missingUomProducts.length} product(s) have no product_uoms and no base_uom_id — ` +
+                'POS uses a synthetic PIECE fallback; repair product master data. Examples:',
+                missingUomProducts.slice(0, 3).join('; '),
+            );
+        }
 
         // Persist catalog
         setCachedCatalog(products);

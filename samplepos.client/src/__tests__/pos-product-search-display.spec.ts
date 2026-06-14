@@ -33,4 +33,8 @@ describe('POS product search display contract', () => {
     expect(catalogSrc).toContain('category?: string');
     expect(catalogSrc).toContain('category: item.category');
   });
+
+  it('stock-levels API falls back to base_uom_id when product_uoms is empty', () => {
+    expect(repoSrc).toMatch(/COALESCE\([\s\S]*product_uoms pu[\s\S]*p\.base_uom_id/s);
+  });
 });
