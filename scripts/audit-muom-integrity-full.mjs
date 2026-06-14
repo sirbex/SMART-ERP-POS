@@ -24,6 +24,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const csvArg = process.argv.find((a) => a.startsWith('--csv='));
 const csvPath = csvArg ? csvArg.slice('--csv='.length) : null;
+const failOnArg = process.argv.find((a) => a.startsWith('--fail-on='));
+const failOnCategories = failOnArg
+  ? failOnArg.slice('--fail-on='.length).split(',').map((s) => s.trim().toUpperCase()).filter(Boolean)
+  : null;
 
 const TENANT_DB = {
   henber: 'pos_tenant_henber_pharmacy',
@@ -188,7 +192,12 @@ async function main() {
     }
 
     const bad = rows.filter((r) => r.category !== 'OK').length;
-    if (bad > 0) process.exitCode = 1;
+    if (failOnCategories) {
+      const gateBad = rows.filter((r) => failOnCategories.includes(r.category)).length;
+      if (gateBad > 0) process.exitCode = 1;
+    } else if (bad > 0) {
+      process.exitCode = 1;
+    }
   } finally {
     await pool.end();
   }

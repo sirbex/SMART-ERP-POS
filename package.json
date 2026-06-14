@@ -66,6 +66,7 @@
     "proof:muom-integrity-matrix": "node scripts/proof-muom-integrity-matrix.mjs",
     "heal:muom-base-without-product-uoms": "node scripts/heal-muom-base-without-product-uoms.mjs",
     "heal:muom-orphan-products": "node scripts/heal-muom-orphan-products.mjs",
+    "heal:muom-set-base-from-product-uoms": "node scripts/heal-muom-set-base-from-product-uoms.mjs",
     "proof:reorder-intelligence": "node scripts/proof-reorder-intelligence.mjs",
     "proof:enterprise": "npm run proof:enterprise-phase-b && npm run proof:enterprise-phase-c && npm run proof:enterprise-phase-d && npm run proof:enterprise-phase-f",
     "proof:enterprise:local": "npm run proof:smart-customer-statement:local && npm run proof:correction-eligibility:local && npm run proof:return-supplier-flow && npm run proof:supplier-reassignment:local",

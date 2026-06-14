@@ -33,18 +33,22 @@ jobs:
           set -euo pipefail
           cd /opt/smarterp
           git fetch origin main
-          git checkout origin/main -- scripts/audit-muom-integrity-full.mjs scripts/heal-muom-orphan-products.mjs
+          git checkout origin/main -- scripts/audit-muom-integrity-full.mjs scripts/heal-muom-orphan-products.mjs scripts/heal-muom-set-base-from-product-uoms.mjs
           docker cp scripts/audit-muom-integrity-full.mjs smarterp-backend:/tmp/audit-muom-integrity-full.mjs
           docker cp scripts/heal-muom-orphan-products.mjs smarterp-backend:/tmp/heal-muom-orphan-products.mjs
+          docker cp scripts/heal-muom-set-base-from-product-uoms.mjs smarterp-backend:/tmp/heal-muom-set-base-from-product-uoms.mjs
           docker exec -u root smarterp-backend cp /tmp/audit-muom-integrity-full.mjs /app/audit-muom-integrity-full.mjs
           docker exec -u root smarterp-backend cp /tmp/heal-muom-orphan-products.mjs /app/heal-muom-orphan-products.mjs
-          docker exec -u root smarterp-backend chown nodejs:nodejs /app/audit-muom-integrity-full.mjs /app/heal-muom-orphan-products.mjs
+          docker exec -u root smarterp-backend cp /tmp/heal-muom-set-base-from-product-uoms.mjs /app/heal-muom-set-base-from-product-uoms.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/audit-muom-integrity-full.mjs /app/heal-muom-orphan-products.mjs /app/heal-muom-set-base-from-product-uoms.mjs
           echo "=== BEFORE ==="
           docker exec -w /app smarterp-backend node audit-muom-integrity-full.mjs --tenant=henber || true
-          echo "=== HEAL ==="
+          echo "=== HEAL C (orphans) ==="
           docker exec -w /app smarterp-backend node heal-muom-orphan-products.mjs --tenant=henber ${EXEC_FLAG}
-          echo "=== AFTER ==="
-          docker exec -w /app smarterp-backend node audit-muom-integrity-full.mjs --tenant=henber
+          echo "=== HEAL A (base from product_uoms) ==="
+          docker exec -w /app smarterp-backend node heal-muom-set-base-from-product-uoms.mjs --tenant=henber ${EXEC_FLAG}
+          echo "=== AFTER (Category C must be 0) ==="
+          docker exec -w /app smarterp-backend node audit-muom-integrity-full.mjs --tenant=henber --fail-on=C
           REMOTE
 
       - name: Cleanup SSH key
