@@ -17,6 +17,7 @@ import {
 } from '../hooks/useTokenRefresh';
 import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
+import { isPublicApiRoute } from '../lib/apiPublicRoutes';
 import { HandledApiError } from './errorHandler';
 import { toast } from 'sonner';
 import type { ServerListParams } from '../lib/serverListParams';
@@ -83,13 +84,8 @@ export const apiClient: AxiosInstance = axios.create({
 // Request Interceptor - Add auth token + refresh if expired
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
-    // Skip auth for public routes
-    if (
-      config.url?.includes('/login') ||
-      config.url?.includes('/register') ||
-      config.url?.includes('/token/refresh') ||
-      config.url?.includes('/health')
-    ) {
+    // Skip auth for public routes (password login + unauthenticated quick-login)
+    if (isPublicApiRoute(config.url, config.method)) {
       return config;
     }
 
