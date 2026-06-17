@@ -4,6 +4,7 @@ import { platformApi } from '../../services/platformApi';
 import type { Tenant, TenantUsage, BillingInfo, AuditLogEntry, LimitCheck, BillingEvent } from '../../services/platformApi';
 import { CreateTenantSchema } from '@shared/zod/tenant';
 import { getStructuredErrorMessage } from '../../utils/errorHandler';
+import { formatZodIssues } from '../../utils/formatZodIssues';
 import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
 import {
   Building2,
@@ -100,14 +101,7 @@ function CreateTenantModal({ open, onClose, onCreated }: { open: boolean; onClos
     };
     const parsed = CreateTenantSchema.safeParse(payload);
     if (!parsed.success) {
-      setError(
-        parsed.error.errors
-          .map((err) => {
-            const field = err.path.join('.') || 'form';
-            return `${field}: ${err.message}`;
-          })
-          .join('\n'),
-      );
+      setError(formatZodIssues(parsed.error));
       return;
     }
     setSaving(true);
