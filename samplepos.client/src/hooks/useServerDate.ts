@@ -10,6 +10,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import apiClient from '../utils/api';
+import { getAccessToken } from '../hooks/useTokenRefresh';
 import { getBusinessDate as getLocalBusinessDate } from '../utils/businessDate';
 import { setServerBusinessDate } from '../utils/businessDateCache';
 
@@ -38,6 +39,7 @@ export function useServerDate() {
     const { data, isLoading, error } = useQuery({
         queryKey: ['server-time'],
         queryFn: fetchServerTime,
+        enabled: !!getAccessToken(),
         staleTime: 5 * 60 * 1000,        // 5 minutes
         gcTime: 10 * 60 * 1000,          // 10 minutes
         refetchInterval: 5 * 60 * 1000,  // Re-check every 5 min

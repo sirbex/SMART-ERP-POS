@@ -39,6 +39,14 @@ export function isPublicApiRoute(url: string | undefined, method?: string): bool
     return true;
   }
 
+  // Tenant branding/config — public before login (login page branding, platform shell)
+  if (
+    (path === 'tenant/config' || path.startsWith('tenant/config?')) &&
+    m === 'GET'
+  ) {
+    return true;
+  }
+
   // Password login (auth/login, platform/login) — not quick-login setup routes
   if (path.includes('/login') && !path.includes('/quick-login')) {
     return true;

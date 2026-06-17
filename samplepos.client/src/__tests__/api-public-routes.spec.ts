@@ -38,6 +38,12 @@ describe('isPublicApiRoute', () => {
       expect(isPublicApiRoute('auth/token/refresh', 'POST')).toBe(true);
       expect(isPublicApiRoute('/health', 'GET')).toBe(true);
     });
+
+    it('allows tenant config before login', () => {
+      expect(isPublicApiRoute('tenant/config', 'GET')).toBe(true);
+      expect(isPublicApiRoute('/api/tenant/config', 'GET')).toBe(true);
+      expect(isPublicApiRoute('tenant/config', 'PUT')).toBe(false);
+    });
   });
 
   describe('protected routes', () => {

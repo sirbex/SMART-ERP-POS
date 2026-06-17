@@ -16,14 +16,21 @@ export const TenantPlanSchema = z.enum(['FREE', 'STARTER', 'PROFESSIONAL', 'ENTE
 
 export const CreateTenantSchema = z.object({
   slug: z.string()
-    .min(3, 'Slug must be at least 3 characters')
-    .max(63, 'Slug must not exceed 63 characters')
-    .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Slug must be lowercase alphanumeric with hyphens, cannot start/end with hyphen'),
+    .trim()
+    .transform((s) => s.toLowerCase())
+    .pipe(z.string()
+      .min(3, 'Slug must be at least 3 characters')
+      .max(63, 'Slug must not exceed 63 characters')
+      .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/, 'Slug must be lowercase alphanumeric with hyphens, cannot start/end with hyphen')),
   name: z.string().min(2).max(255),
   plan: TenantPlanSchema.optional().default('FREE'),
   billingEmail: z.string().email().max(255),
-  country: z.string().length(2).regex(/^[A-Z]{2}$/, 'Country must be a 2-letter ISO code').optional().default('UG'),
-  currency: z.string().length(3).regex(/^[A-Z]{3}$/, 'Currency must be a 3-letter ISO code').optional().default('UGX'),
+  country: z.string().trim().transform((s) => s.toUpperCase())
+    .pipe(z.string().length(2).regex(/^[A-Z]{2}$/, 'Country must be a 2-letter ISO code'))
+    .optional().default('UG'),
+  currency: z.string().trim().transform((s) => s.toUpperCase())
+    .pipe(z.string().length(3).regex(/^[A-Z]{3}$/, 'Currency must be a 3-letter ISO code'))
+    .optional().default('UGX'),
   timezone: z.string().max(50).regex(/^[a-zA-Z_/]+$/, 'Invalid timezone format').optional().default('Africa/Kampala'),
   ownerEmail: z.string().email().max(255),
   ownerPassword: z.string()

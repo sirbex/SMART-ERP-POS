@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster, toast } from 'react-hot-toast';
 import { Toaster as SonnerToaster } from 'sonner';
 import { useAuth } from './hooks/useAuth';
@@ -156,6 +156,18 @@ function PlatformProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/** Tenant POS/ERP services — skip on platform admin (uses platform_token, not tenant auth). */
+function TenantAppServices() {
+  const { pathname } = useLocation();
+  if (pathname.startsWith('/platform')) return null;
+  return (
+    <>
+      <BusinessDateSync />
+      <OfflineAutoSync />
+    </>
+  );
+}
+
 function App() {
   const { isAuthenticated, isLoading } = useAuth();
 
@@ -220,8 +232,7 @@ function App() {
     <PlatformAuthProvider>
       <BrowserRouter>
         <NetworkStatusBanner />
-        <BusinessDateSync />
-        <OfflineAutoSync />
+        <TenantAppServices />
         <Toaster
           position="top-right"
           toastOptions={{
