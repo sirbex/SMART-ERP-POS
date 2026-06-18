@@ -19,7 +19,15 @@ import { isAuthQueryEnabled } from '../../lib/authQuery';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { DatePicker } from '../../components/ui/date-picker';
 import { getBusinessDate, addDaysToDateString } from '../../utils/businessDate';
-import Decimal from 'decimal.js';
+import {
+  adjustQuotationQuantity,
+  calculateLineTotal,
+  calculateQuotationTotals,
+  hasTaxableQuotationLines,
+} from '../../utils/quotationCalculations';
+import { QuotationLineUomSelect } from '../../components/quotations/QuotationLineUomSelect';
+import { useMasterUoms } from '../../hooks/useMasterUoms';
+import { displayMasterUomName, pickDefaultMasterUom } from '../../utils/quotationUom';
 
 interface QuoteItem {
   id: string;
@@ -81,6 +89,8 @@ export default function EditQuotationPage() {
   const [requiresApproval, setRequiresApproval] = useState(false);
 
   const { isAuthenticated } = useAuth();
+  const { data: masterUoms = [] } = useMasterUoms();
+  const defaultMasterUom = useMemo(() => pickDefaultMasterUom(masterUoms), [masterUoms]);
 
   // Load existing quotation
   const { data: quoteData, isLoading: isLoadingQuote } = useQuery({
@@ -209,6 +219,8 @@ export default function EditQuotationPage() {
       discountAmount: 0,
       isTaxable: false,
       taxRate: 0,
+      uomId: defaultMasterUom?.id,
+      uomName: defaultMasterUom ? displayMasterUomName(defaultMasterUom) : '',
     };
     setItems([...items, newItem]);
   };
@@ -247,36 +259,8 @@ export default function EditQuotationPage() {
     setItems(items.filter((item) => item.id !== id));
   };
 
-  // Calculate totals
-  const calculateTotals = () => {
-    let subtotal = new Decimal(0);
-    let totalDiscount = new Decimal(0);
-    let totalTax = new Decimal(0);
-
-    items.forEach((item) => {
-      const itemSubtotal = new Decimal(item.quantity).times(item.unitPrice);
-      const itemDiscount = new Decimal(item.discountAmount);
-      const taxableAmount = itemSubtotal.minus(itemDiscount);
-      const itemTax = item.isTaxable
-        ? taxableAmount.times(item.taxRate).dividedBy(100)
-        : new Decimal(0);
-
-      subtotal = subtotal.plus(itemSubtotal);
-      totalDiscount = totalDiscount.plus(itemDiscount);
-      totalTax = totalTax.plus(itemTax);
-    });
-
-    const total = subtotal.minus(totalDiscount).plus(totalTax);
-
-    return {
-      subtotal: subtotal.toNumber(),
-      totalDiscount: totalDiscount.toNumber(),
-      totalTax: totalTax.toNumber(),
-      total: total.toNumber(),
-    };
-  };
-
-  const totals = calculateTotals();
+  const totals = calculateQuotationTotals(items);
+  const showTax = hasTaxableQuotationLines(items);
 
   // ── Keyboard Navigation ──
 
@@ -357,7 +341,7 @@ export default function EditQuotationPage() {
 
   // Item row keyboard handler — Enter moves to next field/row, Ctrl+Delete removes row
   const handleItemKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number, fieldIndex: number) => {
-    const maxFieldIndex = 3; // description, quantity, unitPrice, discount
+    const maxFieldIndex = 4; // description, quantity, uom, unitPrice, discount
 
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -403,6 +387,26 @@ export default function EditQuotationPage() {
       return;
     }
   }, [items]);
+
+  const handleQuantityKeyDown = useCallback((
+    e: React.KeyboardEvent<HTMLInputElement>,
+    rowIndex: number,
+  ) => {
+    const item = items[rowIndex];
+    if (!item) return;
+    const step = e.shiftKey ? 10 : 1;
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      updateItem(item.id, 'quantity', adjustQuotationQuantity(item.quantity, step));
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      updateItem(item.id, 'quantity', adjustQuotationQuantity(item.quantity, -step));
+      return;
+    }
+    handleItemKeyDown(e, rowIndex, 1);
+  }, [handleItemKeyDown, items]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -461,6 +465,11 @@ export default function EditQuotationPage() {
 
     if (items.some((item) => item.unitPrice < 0)) {
       toast.error('Unit prices cannot be negative');
+      return;
+    }
+
+    if (items.some((item) => !item.productId && item.itemType === 'custom' && !item.uomId)) {
+      toast.error('Select a UoM from the system list for each custom line');
       return;
     }
 
@@ -709,22 +718,19 @@ export default function EditQuotationPage() {
                         <th className="text-left py-2.5 px-3 w-8">#</th>
                         <th className="text-left py-2.5 px-3">Description</th>
                         <th className="text-right py-2.5 px-3 w-24">Qty</th>
+                        <th className="text-left py-2.5 px-3 w-24">UoM</th>
                         <th className="text-right py-2.5 px-3 w-28">Unit Price</th>
                         <th className="text-right py-2.5 px-3 w-24">Discount</th>
-                        <th className="text-center py-2.5 px-3 w-16">Tax</th>
+                        {showTax && (
+                          <th className="text-center py-2.5 px-3 w-16">Tax</th>
+                        )}
                         <th className="text-right py-2.5 px-3 w-28">Total</th>
                         <th className="py-2.5 px-3 w-10"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {items.map((item, rowIndex) => {
-                        const itemSubtotal = new Decimal(item.quantity).times(item.unitPrice);
-                        const itemDiscount = new Decimal(item.discountAmount);
-                        const taxableAmount = itemSubtotal.minus(itemDiscount);
-                        const itemTax = item.isTaxable
-                          ? taxableAmount.times(item.taxRate).dividedBy(100)
-                          : new Decimal(0);
-                        const itemTotal = taxableAmount.plus(itemTax);
+                        const itemTotal = calculateLineTotal(item);
 
                         return (
                           <tr key={item.id} className="border-t border-gray-100 hover:bg-blue-50/30 focus-within:bg-blue-50/50">
@@ -732,7 +738,7 @@ export default function EditQuotationPage() {
                             <td className="py-2 px-3">
                               <input
                                 ref={(el) => {
-                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null, null];
                                   editItemRefs.current[rowIndex][0] = el;
                                 }}
                                 type="text"
@@ -747,31 +753,52 @@ export default function EditQuotationPage() {
                             <td className="py-2 px-3">
                               <input
                                 ref={(el) => {
-                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null, null];
                                   editItemRefs.current[rowIndex][1] = el;
                                 }}
                                 type="number"
                                 value={item.quantity}
                                 onChange={(e) => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)}
-                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 1)}
+                                onKeyDown={(e) => handleQuantityKeyDown(e, rowIndex)}
                                 className={`w-full px-2 py-1 text-sm text-right border rounded focus:ring-1 focus:ring-blue-500 ${item.stockOnHand !== undefined && item.quantity > item.stockOnHand ? 'border-red-400 bg-red-50' : 'border-transparent hover:border-gray-300 focus:border-blue-500 bg-transparent'}`}
                                 min="0"
-                                step="0.01"
+                                step="1"
                               />
                               {item.stockOnHand !== undefined && item.quantity > item.stockOnHand && (
                                 <p className="text-red-600 text-[10px] text-right">Only {item.stockOnHand} in stock</p>
                               )}
                             </td>
                             <td className="py-2 px-3">
+                              <QuotationLineUomSelect
+                                productId={item.productId}
+                                uomId={item.uomId}
+                                uomName={item.uomName}
+                                inputRef={(el) => {
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null, null];
+                                  editItemRefs.current[rowIndex][2] = el;
+                                }}
+                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 2)}
+                                onChange={(uomId, uomName) => {
+                                  setItems((prev) =>
+                                    prev.map((row) =>
+                                      row.id === item.id
+                                        ? { ...row, uomId: uomId ?? undefined, uomName }
+                                        : row
+                                    )
+                                  );
+                                }}
+                              />
+                            </td>
+                            <td className="py-2 px-3">
                               <input
                                 ref={(el) => {
-                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
-                                  editItemRefs.current[rowIndex][2] = el;
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null, null];
+                                  editItemRefs.current[rowIndex][3] = el;
                                 }}
                                 type="number"
                                 value={item.unitPrice}
                                 onChange={(e) => updateItem(item.id, 'unitPrice', parseFloat(e.target.value) || 0)}
-                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 2)}
+                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 3)}
                                 className="w-full px-2 py-1 text-sm text-right border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent"
                                 min="0"
                                 step="0.01"
@@ -780,29 +807,31 @@ export default function EditQuotationPage() {
                             <td className="py-2 px-3">
                               <input
                                 ref={(el) => {
-                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null];
-                                  editItemRefs.current[rowIndex][3] = el;
+                                  if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null, null];
+                                  editItemRefs.current[rowIndex][4] = el;
                                 }}
                                 type="number"
                                 value={item.discountAmount}
                                 onChange={(e) => updateItem(item.id, 'discountAmount', parseFloat(e.target.value) || 0)}
-                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 3)}
+                                onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 4)}
                                 className="w-full px-2 py-1 text-sm text-right border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent"
                                 min="0"
                                 step="0.01"
                               />
                             </td>
-                            <td className="py-2 px-3 text-center">
-                              <input
-                                type="checkbox"
-                                checked={item.isTaxable}
-                                onChange={(e) => updateItem(item.id, 'isTaxable', e.target.checked)}
-                                className="rounded border-gray-300"
-                                title={item.isTaxable ? `Tax: ${item.taxRate}%` : 'Not taxable'}
-                              />
-                            </td>
+                            {showTax && (
+                              <td className="py-2 px-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={item.isTaxable}
+                                  onChange={(e) => updateItem(item.id, 'isTaxable', e.target.checked)}
+                                  className="rounded border-gray-300"
+                                  title={item.isTaxable ? `Tax: ${item.taxRate}%` : 'Not taxable'}
+                                />
+                              </td>
+                            )}
                             <td className="py-2 px-3 text-right font-medium text-gray-900">
-                              {formatCurrency(itemTotal.toNumber())}
+                              {formatCurrency(itemTotal)}
                             </td>
                             <td className="py-2 px-3">
                               <button
@@ -932,7 +961,9 @@ export default function EditQuotationPage() {
               {totals.totalDiscount > 0 && (
                 <span>Discount: <strong className="text-red-600">-{formatCurrency(totals.totalDiscount)}</strong></span>
               )}
-              <span>Tax: <strong className="text-gray-900">{formatCurrency(totals.totalTax)}</strong></span>
+              {showTax && (
+                <span>Tax: <strong className="text-gray-900">{formatCurrency(totals.totalTax)}</strong></span>
+              )}
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">

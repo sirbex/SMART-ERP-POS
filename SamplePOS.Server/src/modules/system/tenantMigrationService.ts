@@ -5,6 +5,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { schemaVersionRepository } from './schemaVersionRepository.js';
 import { CURRENT_SCHEMA_VERSION } from '../../constants/schemaVersion.js';
+import { assertTenantSchemaIntegrity } from './tenantSchemaIntegrity.js';
 import logger from '../../utils/logger.js';
 
 const { Pool: PgPool } = pg;
@@ -121,11 +122,11 @@ export const tenantMigrationService = {
      * Run pending migrations against a tenant pool.
      * Replicates the logic from shared/sql/migrate.mjs but runs in-process.
      */
-    async _runPendingMigrations(tenantPool: Pool, tenantSlug: string): Promise<void> {
-        const sqlDir = resolveSqlDir();
-
-        // 1. Bootstrap schema_migrations table (idempotent)
-        await tenantPool.query(`
+    /**
+     * Normalize schema_migrations to the canonical shape expected by the runner.
+     */
+    async ensureSchemaMigrationsTable(pool: Pool): Promise<void> {
+        await pool.query(`
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 id SERIAL PRIMARY KEY,
                 filename TEXT UNIQUE NOT NULL,
@@ -133,6 +134,186 @@ export const tenantMigrationService = {
                 checksum TEXT
             );
         `);
+        await pool.query(`ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS checksum TEXT`);
+    },
+
+    /**
+     * Copy migration filenames recorded on a healthy tenant into a target DB.
+     * Used when the target schema already exists (template clone) but tracking is incomplete.
+     */
+    async copyMissingMigrationsFrom(sourcePool: Pool, targetPool: Pool): Promise<number> {
+        await this.ensureSchemaMigrationsTable(targetPool);
+
+        const { rows: sourceRows } = await sourcePool.query<{
+            filename: string;
+            executed_at: Date | string | null;
+            checksum: string | null;
+        }>('SELECT filename, executed_at, checksum FROM schema_migrations ORDER BY filename');
+
+        const { rows: targetRows } = await targetPool.query<{ filename: string }>(
+            'SELECT filename FROM schema_migrations'
+        );
+        const existing = new Set(targetRows.map((r) => r.filename));
+
+        let inserted = 0;
+        for (const row of sourceRows) {
+            if (existing.has(row.filename)) continue;
+            await targetPool.query(
+                'INSERT INTO schema_migrations (filename, executed_at, checksum) VALUES ($1, COALESCE($2, now()), $3)',
+                [row.filename, row.executed_at, row.checksum]
+            );
+            inserted++;
+        }
+        return inserted;
+    },
+
+    /**
+     * Mirror schema_version rows from a reference tenant so version checks match migration history.
+     */
+    async copySchemaVersionFromReference(sourcePool: Pool, targetPool: Pool): Promise<void> {
+        await targetPool.query(`
+            CREATE TABLE IF NOT EXISTS schema_version (
+                id SERIAL PRIMARY KEY,
+                version INTEGER NOT NULL,
+                applied_at TIMESTAMPTZ DEFAULT now()
+            )
+        `);
+
+        const sourceVersion = await schemaVersionRepository.getSchemaVersion(sourcePool);
+        const targetVersion = await schemaVersionRepository.getSchemaVersion(targetPool);
+
+        if (targetVersion >= sourceVersion) return;
+
+        await targetPool.query('DELETE FROM schema_version');
+        const { rows } = await sourcePool.query<{ version: number; applied_at: Date | string | null }>(
+            'SELECT version, applied_at FROM schema_version ORDER BY version'
+        );
+        for (const row of rows) {
+            await targetPool.query(
+                'INSERT INTO schema_version (version, applied_at) VALUES ($1, COALESCE($2, now()))',
+                [row.version, row.applied_at]
+            );
+        }
+    },
+
+    /**
+     * Find an ACTIVE tenant DB at the current schema version with complete migration history.
+     */
+    async findReferenceTenantPool(masterPool: Pool): Promise<{ pool: Pool; slug: string } | null> {
+        const dbUser = process.env.DB_USER || 'postgres';
+        const dbPassword = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD || 'password';
+
+        const { rows } = await masterPool.query<{
+            slug: string;
+            database_name: string;
+            database_host: string;
+            database_port: number;
+        }>(
+            `SELECT slug, database_name, database_host, database_port
+             FROM tenants
+             WHERE status = 'ACTIVE' AND database_name IS NOT NULL
+             ORDER BY created_at DESC`
+        );
+
+        for (const tenant of rows) {
+            const pool = new PgPool({
+                host: tenant.database_host,
+                port: tenant.database_port,
+                database: tenant.database_name,
+                user: dbUser,
+                password: dbPassword,
+                max: 2,
+                idleTimeoutMillis: 5000,
+                connectionTimeoutMillis: 10000,
+            });
+
+            try {
+                const version = await schemaVersionRepository.getSchemaVersion(pool);
+                if (version < CURRENT_SCHEMA_VERSION) {
+                    await pool.end().catch(() => { /* ignore */ });
+                    continue;
+                }
+
+                const { rows: migRows } = await pool.query<{ c: number }>(
+                    `SELECT count(*)::int AS c FROM schema_migrations WHERE filename ~ '^[0-9]{3}_'`
+                );
+                if ((migRows[0]?.c ?? 0) < 50) {
+                    await pool.end().catch(() => { /* ignore */ });
+                    continue;
+                }
+
+                await this.ensureSchemaMigrationsTable(pool);
+                const { rows: checksumCol } = await pool.query<{ exists: boolean }>(
+                    `SELECT EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'schema_migrations'
+                          AND column_name = 'checksum'
+                    ) AS exists`
+                );
+                if (!checksumCol[0]?.exists) {
+                    await pool.end().catch(() => { /* ignore */ });
+                    continue;
+                }
+
+                return { pool, slug: tenant.slug };
+            } catch {
+                await pool.end().catch(() => { /* ignore */ });
+            }
+        }
+
+        return null;
+    },
+
+    /**
+     * Align a target DB (template or new tenant) with a healthy reference tenant, then apply pending migrations.
+     */
+    async syncDatabaseFromReference(
+        referencePool: Pool,
+        targetPool: Pool,
+        referenceSlug: string,
+        targetLabel: string
+    ): Promise<void> {
+        const copied = await this.copyMissingMigrationsFrom(referencePool, targetPool);
+        if (copied > 0) {
+            logger.info(
+                `Copied ${copied} schema_migrations from "${referenceSlug}" to "${targetLabel}"`
+            );
+        }
+
+        await this.copySchemaVersionFromReference(referencePool, targetPool);
+        await this.ensureTenantUpToDate(targetPool, targetLabel);
+
+        const version = await schemaVersionRepository.getSchemaVersion(targetPool);
+        if (version < CURRENT_SCHEMA_VERSION) {
+            throw new Error(
+                `"${targetLabel}" schema v${version} still behind v${CURRENT_SCHEMA_VERSION} after sync`
+            );
+        }
+    },
+
+    /**
+     * Finalize a freshly cloned tenant DB before activation.
+     */
+    async prepareNewTenantDatabase(tenantPool: Pool, tenantSlug: string): Promise<void> {
+        await this.ensureSchemaMigrationsTable(tenantPool);
+        await this.ensureTenantUpToDate(tenantPool, tenantSlug);
+
+        const version = await schemaVersionRepository.getSchemaVersion(tenantPool);
+        if (version < CURRENT_SCHEMA_VERSION) {
+            throw new Error(
+                `Tenant "${tenantSlug}" provisioning incomplete: schema v${version}, expected v${CURRENT_SCHEMA_VERSION}`
+            );
+        }
+
+        await assertTenantSchemaIntegrity(tenantPool, tenantSlug);
+    },
+
+    async _runPendingMigrations(tenantPool: Pool, tenantSlug: string): Promise<void> {
+        const sqlDir = resolveSqlDir();
+
+        // 1. Bootstrap schema_migrations table (idempotent)
+        await this.ensureSchemaMigrationsTable(tenantPool);
 
         // 2. Get already-applied migrations
         const { rows: applied } = await tenantPool.query(

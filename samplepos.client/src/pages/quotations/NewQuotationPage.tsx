@@ -18,8 +18,16 @@ import { useAuth } from '../../hooks/useAuth';
 import { isAuthQueryEnabled } from '../../lib/authQuery';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { DatePicker } from '../../components/ui/date-picker';
-import Decimal from 'decimal.js';
 import { getBusinessDate } from '../../utils/businessDate';
+import {
+  adjustQuotationQuantity,
+  calculateLineTotal,
+  calculateQuotationTotals,
+  hasTaxableQuotationLines,
+} from '../../utils/quotationCalculations';
+import { QuotationLineUomSelect } from '../../components/quotations/QuotationLineUomSelect';
+import { useMasterUoms } from '../../hooks/useMasterUoms';
+import { displayMasterUomName, pickDefaultMasterUom } from '../../utils/quotationUom';
 
 interface QuoteItem {
   id: string;
@@ -59,6 +67,8 @@ export default function NewQuotationPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { isAuthenticated } = useAuth();
+  const { data: masterUoms = [] } = useMasterUoms();
+  const defaultMasterUom = useMemo(() => pickDefaultMasterUom(masterUoms), [masterUoms]);
 
   // Customer data
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -142,13 +152,15 @@ export default function NewQuotationPage() {
       ...items,
       {
         id: `temp_${Date.now()}`,
-        itemType: 'product',
+        itemType: 'custom',
         description: '',
         quantity: 1,
         unitPrice: 0,
         discountAmount: 0,
-        isTaxable: true,
+        isTaxable: false,
         taxRate: 18,
+        uomId: defaultMasterUom?.id,
+        uomName: defaultMasterUom ? displayMasterUomName(defaultMasterUom) : '',
       },
     ]);
   };
@@ -192,42 +204,11 @@ export default function NewQuotationPage() {
     setItems(items.filter((_, i) => i !== index));
   };
 
-  const calculateItemTotal = (item: QuoteItem): number => {
-    const subtotal = new Decimal(item.quantity).times(item.unitPrice);
-    const afterDiscount = subtotal.minus(item.discountAmount || 0);
-    if (item.isTaxable) {
-      const tax = afterDiscount.times(item.taxRate || 0).dividedBy(100);
-      return afterDiscount.plus(tax).toNumber();
-    }
-    return afterDiscount.toNumber();
-  };
+  const calculateItemTotal = (item: QuoteItem): number => calculateLineTotal(item);
 
-  const calculateTotals = () => {
-    let subtotal = new Decimal(0);
-    let totalDiscount = new Decimal(0);
-    let totalTax = new Decimal(0);
+  const calculateTotals = () => calculateQuotationTotals(items);
 
-    items.forEach((item) => {
-      const itemSubtotal = new Decimal(item.quantity).times(item.unitPrice);
-      subtotal = subtotal.plus(itemSubtotal);
-      totalDiscount = totalDiscount.plus(item.discountAmount || 0);
-
-      if (item.isTaxable) {
-        const afterDiscount = itemSubtotal.minus(item.discountAmount || 0);
-        const tax = afterDiscount.times(item.taxRate || 0).dividedBy(100);
-        totalTax = totalTax.plus(tax);
-      }
-    });
-
-    const total = subtotal.minus(totalDiscount).plus(totalTax);
-
-    return {
-      subtotal: subtotal.toNumber(),
-      totalDiscount: totalDiscount.toNumber(),
-      totalTax: totalTax.toNumber(),
-      total: total.toNumber(),
-    };
-  };
+  const showTax = hasTaxableQuotationLines(items);
 
   // ── Keyboard Navigation ──
 
@@ -236,7 +217,7 @@ export default function NewQuotationPage() {
   }, [productsData]);
 
   useEffect(() => {
-    itemRefs.current = items.map((_, i) => itemRefs.current[i] || [null, null, null]);
+    itemRefs.current = items.map((_, i) => itemRefs.current[i] || [null, null, null, null]);
   }, [items]);
 
   const scrollSearchItemIntoView = useCallback((index: number, direction: 'up' | 'down') => {
@@ -300,7 +281,7 @@ export default function NewQuotationPage() {
   const handleItemKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number, fieldIndex: number) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (fieldIndex < 2) {
+      if (fieldIndex < 3) {
         itemRefs.current[rowIndex]?.[fieldIndex + 1]?.focus();
       } else {
         if (rowIndex < items.length - 1) {
@@ -334,6 +315,24 @@ export default function NewQuotationPage() {
       return;
     }
   }, [items.length]);
+
+  const handleQuantityKeyDown = useCallback((
+    e: React.KeyboardEvent<HTMLInputElement>,
+    index: number,
+  ) => {
+    const step = e.shiftKey ? 10 : 1;
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      updateItem(index, 'quantity', adjustQuotationQuantity(items[index].quantity, step));
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      updateItem(index, 'quantity', adjustQuotationQuantity(items[index].quantity, -step));
+      return;
+    }
+    handleItemKeyDown(e, index, 1);
+  }, [handleItemKeyDown, items]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -376,6 +375,13 @@ export default function NewQuotationPage() {
       toast.error('Please add at least one item');
       return;
     }
+    const customMissingUom = items.find(
+      (item) => !item.productId && item.itemType === 'custom' && !item.uomId
+    );
+    if (customMissingUom) {
+      toast.error('Select a UoM from the system list for each custom line');
+      return;
+    }
 
     const quotationData = {
       quoteType: 'standard' as const,
@@ -388,9 +394,17 @@ export default function NewQuotationPage() {
       validUntil,
       notes: internalNotes || undefined,
       items: items.map((item) => ({
-        ...item,
+        productId: item.productId,
+        itemType: item.productId ? item.itemType : 'custom',
+        sku: item.sku,
+        description: item.description,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountAmount: item.discountAmount,
+        isTaxable: item.isTaxable,
+        taxRate: item.taxRate,
         uomId: item.uomId || undefined,
-        total: calculateItemTotal(item),
+        uomName: item.uomName || undefined,
       })),
     };
 
@@ -613,8 +627,11 @@ export default function NewQuotationPage() {
                         <th className="text-left py-2.5 px-3 w-8">#</th>
                         <th className="text-left py-2.5 px-3">Description</th>
                         <th className="text-right py-2.5 px-3 w-24">Qty</th>
+                        <th className="text-left py-2.5 px-3 w-24">UoM</th>
                         <th className="text-right py-2.5 px-3 w-28">Unit Price</th>
-                        <th className="text-center py-2.5 px-3 w-16">Tax</th>
+                        {showTax && (
+                          <th className="text-center py-2.5 px-3 w-16">Tax</th>
+                        )}
                         <th className="text-right py-2.5 px-3 w-28">Total</th>
                         <th className="py-2.5 px-3 w-10"></th>
                       </tr>
@@ -626,7 +643,7 @@ export default function NewQuotationPage() {
                           <td className="py-2 px-3">
                             <input
                               ref={(el) => {
-                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null];
+                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null, null];
                                 itemRefs.current[index][0] = el;
                               }}
                               type="text"
@@ -642,16 +659,16 @@ export default function NewQuotationPage() {
                           <td className="py-2 px-3">
                             <input
                               ref={(el) => {
-                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null];
+                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null, null];
                                 itemRefs.current[index][1] = el;
                               }}
                               type="number"
                               value={item.quantity}
                               onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
-                              onKeyDown={(e) => handleItemKeyDown(e, index, 1)}
+                              onKeyDown={(e) => handleQuantityKeyDown(e, index)}
                               className={`w-full px-2 py-1 text-sm text-right border rounded focus:ring-1 focus:ring-blue-500 ${item.stockOnHand !== undefined && item.quantity > item.stockOnHand ? 'border-red-400 bg-red-50' : 'border-transparent hover:border-gray-300 focus:border-blue-500 bg-transparent'}`}
                               min="0"
-                              step="0.01"
+                              step="1"
                               required
                             />
                             {item.stockOnHand !== undefined && item.quantity > item.stockOnHand && (
@@ -659,30 +676,49 @@ export default function NewQuotationPage() {
                             )}
                           </td>
                           <td className="py-2 px-3">
+                            <QuotationLineUomSelect
+                              productId={item.productId}
+                              uomId={item.uomId}
+                              uomName={item.uomName}
+                              inputRef={(el) => {
+                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null, null];
+                                itemRefs.current[index][2] = el;
+                              }}
+                              onKeyDown={(e) => handleItemKeyDown(e, index, 2)}
+                              onChange={(uomId, uomName) => {
+                                const updated = [...items];
+                                updated[index] = { ...updated[index], uomId: uomId ?? undefined, uomName };
+                                setItems(updated);
+                              }}
+                            />
+                          </td>
+                          <td className="py-2 px-3">
                             <input
                               ref={(el) => {
-                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null];
-                                itemRefs.current[index][2] = el;
+                                if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null, null];
+                                itemRefs.current[index][3] = el;
                               }}
                               type="number"
                               value={item.unitPrice}
                               onChange={(e) => updateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)}
-                              onKeyDown={(e) => handleItemKeyDown(e, index, 2)}
+                              onKeyDown={(e) => handleItemKeyDown(e, index, 3)}
                               className="w-full px-2 py-1 text-sm text-right border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent"
                               min="0"
                               step="0.01"
                               required
                             />
                           </td>
-                          <td className="py-2 px-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={item.isTaxable}
-                              onChange={(e) => updateItem(index, 'isTaxable', e.target.checked)}
-                              className="rounded border-gray-300"
-                              title={item.isTaxable ? `Tax: ${item.taxRate}%` : 'Not taxable'}
-                            />
-                          </td>
+                          {showTax && (
+                            <td className="py-2 px-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={item.isTaxable}
+                                onChange={(e) => updateItem(index, 'isTaxable', e.target.checked)}
+                                className="rounded border-gray-300"
+                                title={item.isTaxable ? `Tax: ${item.taxRate}%` : 'Not taxable'}
+                              />
+                            </td>
+                          )}
                           <td className="py-2 px-3 text-right font-medium text-gray-900">
                             {formatCurrency(calculateItemTotal(item))}
                           </td>
@@ -813,7 +849,9 @@ export default function NewQuotationPage() {
               {totals.totalDiscount > 0 && (
                 <span>Discount: <strong className="text-red-600">-{formatCurrency(totals.totalDiscount)}</strong></span>
               )}
-              <span>Tax: <strong className="text-gray-900">{formatCurrency(totals.totalTax)}</strong></span>
+              {showTax && (
+                <span>Tax: <strong className="text-gray-900">{formatCurrency(totals.totalTax)}</strong></span>
+              )}
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right">

@@ -28,6 +28,7 @@ import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { getBusinessDate, formatDateBusiness, addDaysToDateString } from '../../utils/dateRange.js';
 import { buildQuoteConversionLineSnapshots } from './quotationSaleUom.js';
+import { loadMasterUoms, normalizeQuotationLineUom } from './quotationUomResolver.js';
 import { tableHasColumn } from '../../db/schemaColumnCache.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 
@@ -251,6 +252,8 @@ export const quotationService = {
     }
   ): Promise<QuotationDetail> {
     return UnitOfWork.run(pool, async (client) => {
+      const masterUoms = await loadMasterUoms(client);
+
       // Calculate totals
       let subtotal = new Decimal(0);
       let taxAmount = new Decimal(0);
@@ -269,6 +272,13 @@ export const quotationService = {
         subtotal = subtotal.plus(itemSubtotal);
         taxAmount = taxAmount.plus(itemTax);
 
+        const normalizedUom = normalizeQuotationLineUom(masterUoms, {
+          itemType: item.itemType,
+          productId: item.productId,
+          uomId: item.uomId,
+          uomName: item.uomName,
+        });
+
         return {
           lineNumber: idx + 1,
           productId: item.productId || null,
@@ -284,8 +294,8 @@ export const quotationService = {
           taxRate: taxRate.toNumber(),
           taxAmount: itemTax.toNumber(),
           lineTotal: lineTotal.toNumber(),
-          uomId: item.uomId || null,
-          uomName: item.uomName || null,
+          uomId: normalizedUom.uomId,
+          uomName: normalizedUom.uomName,
           unitCost: item.unitCost || null,
           costTotal: item.unitCost ? new Decimal(item.unitCost).times(qty).toNumber() : null,
           productType: item.productType || 'inventory',
@@ -421,6 +431,8 @@ export const quotationService = {
 
       // If items provided, update them
       if (data.items && Array.isArray(data.items)) {
+        const masterUoms = await loadMasterUoms(client);
+
         // Delete existing items
         await client.query('DELETE FROM quotation_items WHERE quotation_id = $1', [id]);
 
@@ -443,6 +455,13 @@ export const quotationService = {
           subtotal = subtotal.plus(itemSubtotal);
           taxAmount = taxAmount.plus(itemTax);
 
+          const normalizedUom = normalizeQuotationLineUom(masterUoms, {
+            itemType: String(item.itemType || 'product'),
+            productId: (item.productId as string | null) || null,
+            uomId: (item.uomId as string | null) || null,
+            uomName: (item.uomName as string | null) || null,
+          });
+
           return {
             lineNumber: idx + 1, // Auto-assign line numbers
             productId: (item.productId as string | null) || null,
@@ -458,8 +477,8 @@ export const quotationService = {
             taxRate: taxRate.toNumber(),
             taxAmount: itemTax.toNumber(),
             lineTotal: lineTotal.toNumber(),
-            uomId: (item.uomId as string | null) || null,
-            uomName: (item.uomName as string | null) || null,
+            uomId: normalizedUom.uomId,
+            uomName: normalizedUom.uomName,
             unitCost: item.unitCost ? Number(item.unitCost) : null,
             costTotal: item.unitCost ? new Decimal(item.unitCost).times(qty).toNumber() : null,
             productType: String(item.productType || 'inventory'),

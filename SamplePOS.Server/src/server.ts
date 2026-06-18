@@ -488,6 +488,7 @@ async function startServer() {
     try {
       const { tenantService } = await import('./modules/platform/tenantService.js');
       await tenantService.ensureTemplateDatabase(pool);
+      await tenantService.syncTemplateDatabase(pool);
       logger.info('Tenant template database ready');
     } catch (err) {
       logger.warn('Template DB pre-build skipped (will create on first tenant provision)', {

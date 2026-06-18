@@ -138,6 +138,7 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => onSelectCustomer(null)}
                 className="text-xs text-red-600 hover:text-red-800 flex-shrink-0"
               >
@@ -169,6 +170,7 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
                       customers.map((customer: Customer) => (
                         <button
                           key={customer.id}
+                          type="button"
                           onClick={() => handleSelect(customer)}
                           className="w-full text-left px-3 py-2 hover:bg-blue-50 focus:bg-blue-100 border-b last:border-b-0"
                         >
@@ -187,6 +189,7 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => setShowQuickAdd(true)}
                 className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 focus:ring-2 focus:ring-green-500 whitespace-nowrap text-xs sm:text-sm font-medium flex-shrink-0"
                 title="Quick Add Customer"

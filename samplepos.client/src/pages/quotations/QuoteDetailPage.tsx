@@ -31,6 +31,7 @@ import DeliveryNoteDrawer from '../../components/quotations/DeliveryNoteDrawer';
 import CreateDeliveryNoteDrawer from '../../components/quotations/CreateDeliveryNoteDrawer';
 import FulfillmentDrawer from '../../components/quotations/FulfillmentDrawer';
 import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
+import { hasTaxableQuotationLines } from '../../utils/quotationCalculations';
 import { useAuth } from '../../hooks/useAuth';
 import { isAuthQueryEnabled } from '../../lib/authQuery';
 
@@ -148,6 +149,7 @@ export default function QuoteDetailPage() {
   }
 
   const { quotation, items } = data;
+  const showTax = hasTaxableQuotationLines(items) && (quotation.taxAmount || 0) > 0;
   const badge = getQuoteStatusBadge(quotation.status);
   const age = calculateQuoteAge(quotation.createdAt);
   const daysUntilExpiry = getDaysUntilExpiry(quotation.validUntil);
@@ -400,8 +402,9 @@ export default function QuoteDetailPage() {
                   <th className="text-left py-3 px-2">#</th>
                   <th className="text-left py-3 px-2">Description</th>
                   <th className="text-right py-3 px-2">Qty</th>
+                  <th className="text-left py-3 px-2">UoM</th>
                   <th className="text-right py-3 px-2">Unit Price</th>
-                  <th className="text-right py-3 px-2">Tax</th>
+                  {showTax && <th className="text-right py-3 px-2">Tax</th>}
                   <th className="text-right py-3 px-2">Total</th>
                 </tr>
               </thead>
@@ -415,8 +418,13 @@ export default function QuoteDetailPage() {
                       {item.notes && <div className="text-sm text-gray-500">{item.notes}</div>}
                     </td>
                     <td className="py-3 px-2 text-right">{item.quantity}</td>
+                    <td className="py-3 px-2">{item.uomName || '—'}</td>
                     <td className="py-3 px-2 text-right">{formatCurrency(item.unitPrice)}</td>
-                    <td className="py-3 px-2 text-right">{item.taxRate}%</td>
+                    {showTax && (
+                      <td className="py-3 px-2 text-right">
+                        {item.isTaxable ? `${item.taxRate}%` : '—'}
+                      </td>
+                    )}
                     <td className="py-3 px-2 text-right font-semibold">{formatCurrency(item.lineTotal)}</td>
                   </tr>
                 ))}
@@ -437,10 +445,12 @@ export default function QuoteDetailPage() {
                   <span className="font-semibold">-{formatCurrency(quotation.discountAmount)}</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span className="text-gray-700">Tax:</span>
-                <span className="font-semibold">{formatCurrency(quotation.taxAmount)}</span>
-              </div>
+              {showTax && (
+                <div className="flex justify-between">
+                  <span className="text-gray-700">Tax:</span>
+                  <span className="font-semibold">{formatCurrency(quotation.taxAmount)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-lg font-bold pt-2 border-t">
                 <span>Total:</span>
                 <span>{formatCurrency(quotation.totalAmount)}</span>

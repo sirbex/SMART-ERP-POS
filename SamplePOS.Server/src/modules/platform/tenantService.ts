@@ -3,7 +3,7 @@
 //
 // Handles tenant lifecycle: provisioning, suspension, plan changes.
 // Provisioning uses PostgreSQL TEMPLATE database for instant, consistent cloning.
-// The template DB is refreshed from pos_system on startup and before each provision.
+// The template DB is refreshed from a healthy reference tenant on startup and before each provision.
 
 import type pg from 'pg';
 import bcrypt from 'bcrypt';
@@ -19,6 +19,9 @@ import type {
   TenantUsage,
 } from '../../../../shared/types/tenant.js';
 import { invalidateTenantCache } from '../../middleware/tenantMiddleware.js';
+import { tenantMigrationService } from '../system/tenantMigrationService.js';
+import { assertTenantSchemaIntegrity } from '../system/tenantSchemaIntegrity.js';
+import { CURRENT_SCHEMA_VERSION } from '../../constants/schemaVersion.js';
 import logger from '../../utils/logger.js';
 
 const TEMPLATE_DB_NAME = 'pos_template';
@@ -154,20 +157,8 @@ export const tenantService = {
 
       await this.validateTenantSchema(tenantPool, databaseName);
 
-      // 4b. Ensure schema_version is set so migration service skips re-running
-      await tenantPool.query(`
-        CREATE TABLE IF NOT EXISTS schema_version (
-          id SERIAL PRIMARY KEY,
-          version INTEGER NOT NULL,
-          applied_at TIMESTAMPTZ DEFAULT now()
-        )
-      `);
-      const { rows: svRows } = await tenantPool.query(
-        'SELECT COALESCE(MAX(version), 0) AS v FROM schema_version'
-      );
-      if ((svRows[0]?.v ?? 0) < 1) {
-        await tenantPool.query('INSERT INTO schema_version (version) VALUES (1)');
-      }
+      // 4b. Ensure migration tracking + schema version match production before go-live
+      await tenantMigrationService.prepareNewTenantDatabase(tenantPool, input.slug);
 
       // 5. Seed the admin user
       await this.seedAdminUser(tenantPool, {
@@ -382,8 +373,8 @@ export const tenantService = {
    * Ensure the template database exists and is up-to-date.
    * Called on server startup and before each tenant provisioning.
    *
-   * Uses pg_dump --schema-only from pos_system → pos_template.
-   * This is a one-time cost; subsequent tenant creates are instant via TEMPLATE.
+   * Schema is cloned from a healthy reference tenant when available (accurate migration
+   * history). Falls back to pos_system schema dump on first install.
    */
   async ensureTemplateDatabase(masterPool: pg.Pool): Promise<void> {
     const dbHost = process.env.DB_HOST || 'localhost';
@@ -392,67 +383,76 @@ export const tenantService = {
     const dbPassword = process.env.DB_PASSWORD || 'password';
     const masterDbName = process.env.DB_NAME || 'pos_system';
 
+    const reference = await tenantMigrationService.findReferenceTenantPool(masterPool);
+    const schemaSourceDb = reference
+      ? (await masterPool.query<{ database_name: string }>(
+          `SELECT database_name FROM tenants WHERE slug = $1`,
+          [reference.slug]
+        )).rows[0]?.database_name ?? masterDbName
+      : masterDbName;
+
+    if (reference) {
+      logger.info(`Template schema source: reference tenant "${reference.slug}" (${schemaSourceDb})`);
+      await reference.pool.end().catch(() => { /* released after lookup */ });
+    } else {
+      logger.warn('No reference tenant at current schema version — template will use pos_system schema');
+    }
+
     const client = await masterPool.connect();
+    let rebuildRequired = false;
     try {
-      // Check if template already exists
       const { rows } = await client.query(`SELECT 1 FROM pg_database WHERE datname = $1`, [
         TEMPLATE_DB_NAME,
       ]);
 
       if (rows.length > 0) {
-        // Template exists — check if master has newer migration version
-        // Compare table counts as a proxy for schema freshness
-        const masterCount = await client.query(
-          `SELECT count(*)::int AS cnt FROM information_schema.tables WHERE table_schema = 'public'`
+        const templateVersion = this.getTemplateSchemaVersion(
+          dbHost,
+          dbPort,
+          dbUser,
+          dbPassword
         );
-        const masterTableCount = masterCount.rows[0]?.cnt ?? 0;
 
-        // Verify template table count matches (use a separate connection)
-        let templateTableCount = 0;
-        try {
-          const templateResult = execSync(
-            `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-            `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
-            { encoding: 'utf-8', timeout: 10_000 }
+        if (templateVersion >= CURRENT_SCHEMA_VERSION) {
+          logger.info(
+            `Template DB at schema v${templateVersion} (target v${CURRENT_SCHEMA_VERSION})`
           );
-          templateTableCount = parseInt(templateResult.trim(), 10) || 0;
-        } catch {
-          // If we can't query template, rebuild it
-          templateTableCount = 0;
-        }
-
-        // Allow small variance (platform tables are excluded from template)
-        const expectedDiff = PLATFORM_TABLES.length;
-        if (Math.abs(masterTableCount - templateTableCount) <= expectedDiff + 2) {
-          logger.info(`Template DB up-to-date (${templateTableCount} tables)`);
+          await this.syncTemplateDatabase(masterPool);
           return;
         }
 
         logger.info(
-          `Template DB stale (${templateTableCount} vs master ${masterTableCount}), rebuilding...`
+          `Template DB stale (v${templateVersion} vs v${CURRENT_SCHEMA_VERSION}), rebuilding...`
         );
+        rebuildRequired = true;
 
-        // Terminate any connections to template before dropping
         await client.query(
           `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
           [TEMPLATE_DB_NAME]
         );
         await client.query(`DROP DATABASE IF EXISTS ${TEMPLATE_DB_NAME}`);
+      } else {
+        rebuildRequired = true;
       }
 
-      // Create empty template database
-      await client.query(`CREATE DATABASE ${TEMPLATE_DB_NAME}`);
-      logger.info(`Created empty template database: ${TEMPLATE_DB_NAME}`);
+      if (rebuildRequired) {
+        await client.query(`CREATE DATABASE ${TEMPLATE_DB_NAME}`);
+        logger.info(`Created empty template database: ${TEMPLATE_DB_NAME}`);
+      }
     } finally {
       client.release();
     }
 
-    // Clone schema from master into template using pg_dump | psql
+    if (!rebuildRequired) {
+      return;
+    }
+
+    // Clone schema from reference tenant (preferred) or master registry DB
     const excludeArgs = PLATFORM_TABLES.map((t) => `--exclude-table=${t}`).join(' ');
 
     const pgDumpCmd =
       `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-      `--schema-only --no-owner --no-privileges ${excludeArgs} ${masterDbName}`;
+      `--schema-only --no-owner --no-privileges ${excludeArgs} ${schemaSourceDb}`;
     const psqlCmd =
       `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
       `-d ${TEMPLATE_DB_NAME} -v ON_ERROR_STOP=0`;
@@ -460,19 +460,25 @@ export const tenantService = {
     try {
       execSync(`${pgDumpCmd} | ${psqlCmd}`, {
         encoding: 'utf-8',
-        timeout: 60_000,
+        timeout: 120_000,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-      logger.info(`Template database schema loaded from ${masterDbName}`);
+      logger.info(`Template database schema loaded from ${schemaSourceDb}`);
 
-      // Seed essential reference data into template so every tenant starts ready.
-      // Like Odoo/SAP: template includes chart of accounts, UOMs, RBAC roles/permissions.
-      const seedTables = ['accounts', 'uoms', 'rbac_permissions_catalog', 'rbac_roles', 'rbac_role_permissions', 'schema_version', 'schema_migrations'];
+      // Seed essential reference data — migration history is synced separately
+      const seedTables = [
+        'accounts',
+        'uoms',
+        'rbac_permissions_catalog',
+        'rbac_roles',
+        'rbac_role_permissions',
+      ];
+      const seedSourceDb = reference ? schemaSourceDb : masterDbName;
       for (const table of seedTables) {
         try {
           const dumpDataCmd =
             `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-            `--data-only --table=${table} --no-owner --no-privileges ${masterDbName}`;
+            `--data-only --table=${table} --no-owner --no-privileges ${seedSourceDb}`;
           execSync(`${dumpDataCmd} | ${psqlCmd}`, {
             encoding: 'utf-8',
             timeout: 15_000,
@@ -543,6 +549,64 @@ export const tenantService = {
 
       const msg = error instanceof Error ? error.message : String(error);
       logger.warn(`Template DB loaded with warnings (${tableCount} tables): ${msg}`);
+    }
+
+    await this.syncTemplateDatabase(masterPool);
+  },
+
+  /**
+   * Reconcile pos_template migration tracking with a healthy reference tenant.
+   */
+  async syncTemplateDatabase(masterPool: pg.Pool): Promise<void> {
+    const reference = await tenantMigrationService.findReferenceTenantPool(masterPool);
+    if (!reference) {
+      logger.warn(
+        'Template migration sync skipped — no ACTIVE tenant at current schema version to use as reference'
+      );
+      return;
+    }
+
+    const templatePool = this.getTemplatePool();
+    try {
+      await tenantMigrationService.syncDatabaseFromReference(
+        reference.pool,
+        templatePool,
+        reference.slug,
+        '__template__'
+      );
+      await assertTenantSchemaIntegrity(templatePool, '__template__');
+      logger.info(`Template database migration state synced from "${reference.slug}"`);
+    } finally {
+      await reference.pool.end().catch(() => { /* ignore */ });
+    }
+  },
+
+  getTemplatePool(): pg.Pool {
+    return connectionManager.getPool({
+      tenantId: '00000000-0000-0000-0000-000000000001',
+      slug: '__template__',
+      databaseName: TEMPLATE_DB_NAME,
+      databaseHost: process.env.DB_HOST || 'localhost',
+      databasePort: parseInt(process.env.DB_PORT || '5432', 10),
+      plan: 'FREE',
+    });
+  },
+
+  getTemplateSchemaVersion(
+    dbHost: string,
+    dbPort: string,
+    dbUser: string,
+    dbPassword: string
+  ): number {
+    try {
+      const result = execSync(
+        `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT COALESCE(MAX(version), 0) FROM schema_version"`,
+        { encoding: 'utf-8', timeout: 10_000 }
+      );
+      return parseInt(result.trim(), 10) || 0;
+    } catch {
+      return 0;
     }
   },
 
