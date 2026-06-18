@@ -169,7 +169,7 @@ export default function EditQuotationPage() {
   const [searchSelectedIndex, setSearchSelectedIndex] = useState(0);
   // Refs for item row inputs: editItemRefs[rowIndex][fieldIndex]
   // fieldIndex: 0=description, 1=quantity, 2=unitPrice, 3=discount
-  const editItemRefs = useRef<(HTMLInputElement | null)[][]>([]);
+  const editItemRefs = useRef<(HTMLInputElement | HTMLSelectElement | null)[][]>([]);
   const { data: allStockData } = useQuery({
     queryKey: ['stock-levels-cache'],
     enabled: isAuthQueryEnabled(isAuthenticated),
@@ -340,7 +340,7 @@ export default function EditQuotationPage() {
   }, [products, productSearch, scrollSearchItemIntoView, selectHighlightedProduct]);
 
   // Item row keyboard handler — Enter moves to next field/row, Ctrl+Delete removes row
-  const handleItemKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number, fieldIndex: number) => {
+  const handleItemKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>, rowIndex: number, fieldIndex: number) => {
     const maxFieldIndex = 4; // description, quantity, uom, unitPrice, discount
 
     if (e.key === 'Enter') {

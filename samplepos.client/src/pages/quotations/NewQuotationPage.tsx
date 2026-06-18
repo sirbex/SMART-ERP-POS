@@ -101,7 +101,7 @@ export default function NewQuotationPage() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const productListRef = useRef<HTMLDivElement>(null);
   const [searchSelectedIndex, setSearchSelectedIndex] = useState(0);
-  const itemRefs = useRef<(HTMLInputElement | null)[][]>([]);
+  const itemRefs = useRef<(HTMLInputElement | HTMLSelectElement | null)[][]>([]);
   const { data: allStockData } = useQuery({
     queryKey: ['stock-levels-cache'],
     enabled: isAuthQueryEnabled(isAuthenticated),
@@ -278,7 +278,7 @@ export default function NewQuotationPage() {
     }
   }, [productsData, productSearch, scrollSearchItemIntoView, selectHighlightedProduct]);
 
-  const handleItemKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number, fieldIndex: number) => {
+  const handleItemKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement | HTMLSelectElement>, rowIndex: number, fieldIndex: number) => {
     if (e.key === 'Enter') {
       e.preventDefault();
       if (fieldIndex < 3) {
