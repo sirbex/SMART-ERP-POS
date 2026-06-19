@@ -417,14 +417,13 @@ export async function createClearingRecord(
         status: string;
     }
 ): Promise<GrirClearingRow> {
+    const matchedAt = ['MATCHED', 'VARIANCE'].includes(data.status) ? new Date() : null;
     const result = await client.query(
         `INSERT INTO grir_clearing
        (id, purchase_order_id, goods_receipt_id, invoice_id,
         po_amount, gr_amount, invoice_amount, variance, status,
         matched_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
-             CASE WHEN $9 IN ('MATCHED', 'VARIANCE') THEN NOW() ELSE NULL END,
-             NOW(), NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
      ON CONFLICT (id) DO UPDATE SET
        invoice_id = EXCLUDED.invoice_id,
        gr_amount = EXCLUDED.gr_amount,
@@ -437,6 +436,7 @@ export async function createClearingRecord(
         [
             data.id, data.purchaseOrderId, data.goodsReceiptId, data.invoiceId,
             data.poAmount, data.grAmount, data.invoiceAmount, data.variance, data.status,
+            matchedAt,
         ]
     );
     return result.rows[0];
@@ -451,15 +451,16 @@ export async function updateClearingStatus(
     status: string,
     variance?: number
 ): Promise<GrirClearingRow> {
+    const shouldSetMatchedAt = ['MATCHED', 'VARIANCE'].includes(status);
     const result = await client.query(
         `UPDATE grir_clearing
      SET status = $2,
          variance = COALESCE($3, variance),
-         matched_at = CASE WHEN $2 IN ('MATCHED', 'VARIANCE') THEN NOW() ELSE matched_at END,
+         matched_at = CASE WHEN $4 THEN NOW() ELSE matched_at END,
          updated_at = NOW()
      WHERE id = $1
      RETURNING *`,
-        [id, status, variance ?? null]
+        [id, status, variance ?? null, shouldSetMatchedAt]
     );
     return result.rows[0];
 }
