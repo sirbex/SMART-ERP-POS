@@ -87,12 +87,12 @@ async function ensureProductBaseUomContext(
   };
 }
 
-async function assertNoCanonicalDuplicateMeaning(
+async function findCanonicalDuplicateProductUom(
   productId: string,
   uomId: string,
   db: Queryable,
   currentProductUomId?: string,
-): Promise<void> {
+) {
   const targetUom = await repo.getUomById(uomId, db);
   if (!targetUom) {
     throw new ValidationError('Selected unit of measure does not exist.');
@@ -105,9 +105,19 @@ async function assertNoCanonicalDuplicateMeaning(
     return canonicalizeUomName(uom.uomName) === targetCanonical;
   });
 
-  if (duplicate) {
+  return duplicate ? { duplicate, targetUom } : null;
+}
+
+async function assertNoCanonicalDuplicateMeaning(
+  productId: string,
+  uomId: string,
+  db: Queryable,
+  currentProductUomId?: string,
+): Promise<void> {
+  const match = await findCanonicalDuplicateProductUom(productId, uomId, db, currentProductUomId);
+  if (match) {
     throw new ConflictError(
-      `Unit ${targetUom.name} duplicates existing canonical unit ${duplicate.uomName}. Use the canonical unit instead.`,
+      `Unit ${match.targetUom.name} duplicates existing canonical unit ${match.duplicate.uomName}. Use the canonical unit instead.`,
     );
   }
 }
@@ -810,7 +820,26 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
       conversionFactor: effective.conversionFactor,
     };
 
-    await assertNoCanonicalDuplicateMeaning(data.productId, data.uomId, client);
+    const canonicalDuplicate = await findCanonicalDuplicateProductUom(
+      data.productId,
+      data.uomId,
+      client,
+    );
+    if (canonicalDuplicate) {
+      return updateProductUom(
+        canonicalDuplicate.duplicate.id,
+        {
+          uomId: data.uomId,
+          conversionFactor: data.conversionFactor,
+          isDefault: data.isDefault,
+          barcode: data.barcode,
+          costOverride: data.costOverride,
+          priceOverride: data.priceOverride,
+        },
+        auditContext,
+        client as unknown as pg.Pool,
+      );
+    }
 
     if (data.isDefault) {
       await repo.unsetDefaultForProduct(data.productId, client);

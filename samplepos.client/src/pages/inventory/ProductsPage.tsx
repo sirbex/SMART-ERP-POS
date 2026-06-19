@@ -594,10 +594,13 @@ export default function ProductsPage() {
     try {
       setApiError('');
 
+      const baseFormUom = productUoms.find((u) => u.isDefault) ?? productUoms[0];
+
       // Convert form data to API format matching backend schema
       const productData = {
         name: formData.name,
         sku: formData.sku,
+        unitOfMeasure: baseFormUom?.uomName || undefined,
         barcode: formData.barcode || undefined,
         description: formData.description || undefined,
         category: formData.category || undefined,

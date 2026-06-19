@@ -13,12 +13,15 @@ const mockRepo = {
   setProductUomAsBase: jest.fn<MockFn>(),
   unsetDefaultForProduct: jest.fn<MockFn>(),
   createProductUom: jest.fn<MockFn>(),
+  updateProductUom: jest.fn<MockFn>(),
+  getProductUomById: jest.fn<MockFn>(),
   deleteItemUomConversionBySource: jest.fn<MockFn>(),
   deleteAllItemUomConversionsForProduct: jest.fn<MockFn>(),
   upsertItemUomConversion: jest.fn<MockFn>(),
   listItemUomConversions: jest.fn<MockFn>(),
   setProductBaseUomId: jest.fn<MockFn>(),
   listUoms: jest.fn<MockFn>(),
+  createUom: jest.fn<MockFn>(),
   getProductLegacyUnitOfMeasure: jest.fn<MockFn>(),
   getProductName: jest.fn<MockFn>(),
   getProductPurchaseUomContext: jest.fn<MockFn>(),
@@ -48,6 +51,7 @@ describe('uomService.addProductUom base UoM', () => {
     mockRepo.getProductLegacyUnitOfMeasure.mockResolvedValue(null);
     mockRepo.getProductName.mockResolvedValue('Test Product');
     mockRepo.listUoms.mockResolvedValue([]);
+    mockRepo.createUom.mockResolvedValue({ id: 'seed-each', name: 'EACH' });
     mockRepo.createProductUom.mockResolvedValue({
       id: 'a0000000-0000-4000-8000-000000000001',
       productId: '099172ce-f327-4e1f-8ce4-b10e61d5bc50',
@@ -124,6 +128,61 @@ describe('uomService.addProductUom base UoM', () => {
         uomId: 'b0000000-0000-4000-8000-000000000002',
         isDefault: false,
         conversionFactor: 12,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('updates existing row when canonical duplicate already exists (bootstrap + UI add)', async () => {
+    const productId = '099172ce-f327-4e1f-8ce4-b10e61d5bc50';
+    const eachUomId = 'c0000000-0000-4000-8000-000000000003';
+    const existingProductUomId = 'd0000000-0000-4000-8000-000000000004';
+
+    mockRepo.getProductBaseUomId.mockResolvedValue(eachUomId);
+    mockRepo.getUomById.mockResolvedValue({ id: eachUomId, name: 'Each' });
+    mockRepo.listProductUoms.mockResolvedValue([
+      {
+        id: existingProductUomId,
+        productId,
+        uomId: eachUomId,
+        uomName: 'Each',
+        conversionFactor: '1',
+        isDefault: true,
+      },
+    ]);
+    mockRepo.getProductUomById.mockResolvedValue({
+      id: existingProductUomId,
+      productId,
+      uomId: eachUomId,
+      conversionFactor: '1',
+      isDefault: true,
+    });
+    mockRepo.updateProductUom.mockResolvedValue({
+      id: existingProductUomId,
+      productId,
+      uomId: eachUomId,
+      conversionFactor: '1',
+      isDefault: true,
+    });
+
+    await addProductUom(
+      {
+        productId,
+        uomId: eachUomId,
+        conversionFactor: 1,
+        isDefault: true,
+      },
+      undefined,
+      mockPool,
+    );
+
+    expect(mockRepo.createProductUom).not.toHaveBeenCalled();
+    expect(mockRepo.updateProductUom).toHaveBeenCalledWith(
+      existingProductUomId,
+      expect.objectContaining({
+        uomId: eachUomId,
+        conversionFactor: 1,
+        isDefault: true,
       }),
       expect.anything(),
     );
