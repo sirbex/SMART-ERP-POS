@@ -12,7 +12,7 @@ import { ProductCreateSchema } from '@shared/zod/product';
 import { POSSaleSchema } from '@shared/zod/pos-sale';
 import type { Customer } from '@shared/zod/customer';
 import { formatCurrency } from '../../utils/currency';
-import { resolvePosCustomerForSale } from '../../utils/resolvePosCustomerId';
+import { resolvePosCustomerForSale, isPersistedCustomerId } from '../../utils/resolvePosCustomerId';
 import {
   getPosLineBaseQuantity,
   getPosLineConversionFactor,
@@ -636,8 +636,13 @@ export default function POSPage() {
           if (savedCart) {
             const cartData = JSON.parse(savedCart);
             if (cartData?.items?.length > 0) {
-              console.log('📋 Restoring previously loaded quote customer:', customerData);
-              setSelectedCustomer(customerData);
+              if (isPersistedCustomerId(customerData?.id)) {
+                console.log('📋 Restoring previously loaded quote customer:', customerData);
+                setSelectedCustomer(customerData);
+              } else {
+                console.warn('📋 Skipping temp/offline quote customer restore:', customerData?.id);
+                localStorage.removeItem('pos_loaded_quote_customer');
+              }
             } else {
               localStorage.removeItem('pos_loaded_quote_customer');
             }
@@ -693,22 +698,23 @@ export default function POSPage() {
     }
   }, [activeUser?.id, activeUser?.token]);
 
-  // Fetch customer deposit balance when customer is selected
+  // Fetch customer deposit balance when a persisted customer is selected
   useEffect(() => {
     const fetchCustomerDepositBalance = async () => {
-      if (!selectedCustomer?.id) {
+      if (!selectedCustomer?.id || !isPersistedCustomerId(selectedCustomer.id)) {
         setCustomerDepositBalance(0);
         return;
       }
 
+      const customerId = selectedCustomer.id;
       console.log(
         '🔍 Fetching deposit balance for customer:',
-        selectedCustomer.id,
+        customerId,
         selectedCustomer.name
       );
       setIsLoadingDeposits(true);
       try {
-        const response = await api.deposits.getCustomerBalance(selectedCustomer.id);
+        const response = await api.deposits.getCustomerBalance(customerId);
         console.log('📦 Deposit balance response:', response.data);
         if (response.data?.success && response.data?.data) {
           const depositData = response.data.data as DepositBalanceData;
@@ -794,7 +800,10 @@ export default function POSPage() {
           ),
         }));
 
-        const resolved = await pricingApi.calculateBulkPrices(bulkInput, selectedCustomer?.id);
+        const resolved = await pricingApi.calculateBulkPrices(
+          bulkInput,
+          isPersistedCustomerId(selectedCustomer?.id) ? selectedCustomer?.id : undefined,
+        );
 
         setItems((prev) => {
           let changed = false;
@@ -2029,38 +2038,20 @@ export default function POSPage() {
             setSelectedCustomer(matchedCustomer);
             localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(matchedCustomer));
           } else {
-            // No match found — create a temporary placeholder (credit sales won't work)
-            console.log('📋 No DB match, using temp customer:', quotation.customerName);
-            const basicCustomer: Customer = {
-              id: 'temp_' + Date.now(),
-              name: quotation.customerName || 'Walk-in Customer',
-              email: quotation.customerEmail || '',
-              phone: quotation.customerPhone || '',
-              balance: 0,
-              creditLimit: 0,
-              isActive: true,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            setSelectedCustomer(basicCustomer);
-            localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(basicCustomer));
+            // No match — do not use temp_ id (breaks deposit/pricing UUID APIs)
+            console.warn('📋 No DB match for quote customer:', quotation.customerName);
+            setSelectedCustomer(null);
+            localStorage.removeItem('pos_loaded_quote_customer');
+            toast(
+              `Quote customer "${quotation.customerName}" was not found. Search and select the customer in POS.`,
+              { icon: '⚠️' }
+            );
           }
         } catch (err) {
           console.error('❌ Failed to search customers by name:', err);
-          // Fallback to temp customer
-          const basicCustomer: Customer = {
-            id: 'temp_' + Date.now(),
-            name: quotation.customerName || 'Walk-in Customer',
-            email: quotation.customerEmail || '',
-            phone: quotation.customerPhone || '',
-            balance: 0,
-            creditLimit: 0,
-            isActive: true,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          };
-          setSelectedCustomer(basicCustomer);
-          localStorage.setItem('pos_loaded_quote_customer', JSON.stringify(basicCustomer));
+          setSelectedCustomer(null);
+          localStorage.removeItem('pos_loaded_quote_customer');
+          toast.error('Could not resolve quote customer — select customer manually in POS');
         }
       }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolvePosCustomerForSale } from './resolvePosCustomerId';
+import { resolvePosCustomerForSale, isPersistedCustomerId } from './resolvePosCustomerId';
 
 vi.mock('./api', () => ({
   api: {
@@ -14,6 +14,11 @@ import { api } from './api';
 describe('resolvePosCustomerForSale', () => {
   beforeEach(() => {
     vi.mocked(api.customers.list).mockReset();
+  });
+
+  it('isPersistedCustomerId rejects temp_ placeholders', () => {
+    expect(isPersistedCustomerId('temp_1781842571163')).toBe(false);
+    expect(isPersistedCustomerId('81c0d6d5-d939-4bad-a17b-86728b4b72e4')).toBe(true);
   });
 
   it('returns UUID customer unchanged', async () => {

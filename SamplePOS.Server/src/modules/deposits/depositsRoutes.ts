@@ -14,6 +14,10 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 
 const router = express.Router();
 
+const CustomerIdParamSchema = z.object({
+  customerId: z.string().uuid('Invalid customer ID'),
+});
+
 // Apply authentication to all routes
 router.use(authenticate);
 
@@ -83,10 +87,19 @@ router.get('/:id', asyncHandler(async (req, res) => {
  */
 router.get('/customer/:customerId', asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
+    const parsed = CustomerIdParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid customer ID',
+            details: parsed.error.flatten(),
+        });
+    }
+    const { customerId } = parsed.data;
     const status = req.query.status as 'ACTIVE' | 'DEPLETED' | 'REFUNDED' | 'CANCELLED' | undefined;
     const deposits = await depositsService.getCustomerDeposits(
         pool,
-        req.params.customerId,
+        customerId,
         status
     );
 
@@ -102,14 +115,23 @@ router.get('/customer/:customerId', asyncHandler(async (req, res) => {
  */
 router.get('/customer/:customerId/balance', asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
-    logger.info('Fetching deposit balance for customer', { customerId: req.params.customerId });
+    const parsed = CustomerIdParamSchema.safeParse(req.params);
+    if (!parsed.success) {
+        return res.status(400).json({
+            success: false,
+            error: 'Invalid customer ID',
+            details: parsed.error.flatten(),
+        });
+    }
+    const { customerId } = parsed.data;
+    logger.info('Fetching deposit balance for customer', { customerId });
 
     const balance = await depositsService.getCustomerDepositBalance(
         pool,
-        req.params.customerId
+        customerId
     );
 
-    logger.info('Deposit balance result', { customerId: req.params.customerId, balance });
+    logger.info('Deposit balance result', { customerId, balance });
 
     res.json({
         success: true,

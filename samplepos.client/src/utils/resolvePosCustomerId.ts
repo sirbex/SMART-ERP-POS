@@ -4,7 +4,8 @@ import type { Customer } from '@shared/zod/customer';
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function isPersistedCustomerId(id: string | undefined): boolean {
+/** True when id is a persisted tenant customer row (not temp_/offline placeholder). */
+export function isPersistedCustomerId(id: string | undefined): boolean {
   if (!id) return false;
   if (id.startsWith('temp_')) return false;
   if (id.startsWith('offline_cust_')) return false;
