@@ -57,4 +57,14 @@ describe('POST /orders item schema — MUoM payload boundary', () => {
       }),
     ).toThrow(/Invalid uuid/i);
   });
+
+  it('accepts custom_svc_ productId in API payload (server nulls before DB)', () => {
+    const parsed = OrderItemSchema.parse({
+      productId: 'custom_svc_test_01_1781843390491_71bx',
+      productName: 'Installation',
+      quantity: 1,
+      unitPrice: 50000,
+    });
+    expect(parsed.productId).toBe('custom_svc_test_01_1781843390491_71bx');
+  });
 });

@@ -11,7 +11,7 @@ import { asyncHandler, NotFoundError, ValidationError } from '../../middleware/e
 
 const CreateDeliveryNoteLineSchema = z.object({
   quotationItemId: z.string().uuid(),
-  productId: z.string().uuid(),
+  productId: z.string().uuid().optional(),
   batchId: z.string().uuid().nullable().optional(),
   uomId: z.string().uuid().nullable().optional(),
   uomName: z.string().nullable().optional(),

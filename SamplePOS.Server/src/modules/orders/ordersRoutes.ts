@@ -184,7 +184,7 @@ router.post(
 
     // 2. Build CreateSaleInput from order items
     const saleItems: SaleItemInput[] = order.items!.map(item => ({
-      productId: item.productId,
+      productId: item.productId ?? `custom_svc_order_${item.id}`,
       productName: item.productName,
       quantity: Money.toNumber(Money.parseDb(item.quantity)),
       unitPrice: Money.toNumber(Money.parseDb(item.unitPrice)),

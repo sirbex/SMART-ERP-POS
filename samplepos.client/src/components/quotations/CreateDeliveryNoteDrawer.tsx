@@ -12,6 +12,7 @@ import deliveryNotesApi from '../../api/deliveryNotes';
 import type { CreateDeliveryNoteLine } from '../../api/deliveryNotes';
 import { formatCurrency } from '../../utils/currency';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
+import { isPersistedProductId } from '../../utils/productIdBoundary';
 
 interface FulfillmentItem {
     quotationItemId: string;
@@ -92,18 +93,26 @@ export default function CreateDeliveryNoteDrawer({
     });
 
     const handleSubmit = () => {
-        const lines: CreateDeliveryNoteLine[] = items
-            .filter((item) => item.productType !== 'service' && (lineQuantities[item.id] || 0) > 0)
-            .map((item) => ({
-                quotationItemId: item.id,
-                productId: item.productId || '',
-                uomId: item.uomId,
-                uomName: item.uomName,
-                quantityDelivered: lineQuantities[item.id] || 0,
-                unitPrice: item.unitPrice,
-                unitCost: item.unitCost ?? undefined,
-                description: item.description,
-            }));
+        const candidates = items.filter(
+            (item) => item.productType !== 'service' && (lineQuantities[item.id] || 0) > 0
+        );
+        const missingProduct = candidates.filter((item) => !isPersistedProductId(item.productId));
+        if (missingProduct.length > 0) {
+            toast.error(
+                `Cannot deliver custom lines without a catalog product: ${missingProduct.map((i) => i.description).join(', ')}`
+            );
+            return;
+        }
+
+        const lines: CreateDeliveryNoteLine[] = candidates.map((item) => ({
+            quotationItemId: item.id,
+            uomId: item.uomId,
+            uomName: item.uomName,
+            quantityDelivered: lineQuantities[item.id] || 0,
+            unitPrice: item.unitPrice,
+            unitCost: item.unitCost ?? undefined,
+            description: item.description,
+        }));
 
         if (lines.length === 0) {
             toast.error('Add at least one item with quantity > 0');

@@ -59,7 +59,7 @@ export interface DeliveryNoteWithLines extends DeliveryNote {
 
 export interface CreateDeliveryNoteLine {
   quotationItemId: string;
-  productId: string;
+  productId?: string;
   batchId?: string | null;
   uomId?: string | null;
   uomName?: string | null;

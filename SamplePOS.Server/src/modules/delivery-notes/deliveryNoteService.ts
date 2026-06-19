@@ -128,6 +128,13 @@ export const deliveryNoteService = {
           );
         }
 
+        if (!qi.product_id) {
+          throw new ValidationError(
+            `Item "${qi.description}" has no catalog product linked and cannot be delivered. ` +
+              'Use a product line on the quotation or fulfill custom items via POS/invoice.'
+          );
+        }
+
         const ordered = new Decimal(qi.quantity);
         const alreadyDelivered = new Decimal(qi.delivered_quantity);
         const pending = new Decimal(qi.pending_quantity);

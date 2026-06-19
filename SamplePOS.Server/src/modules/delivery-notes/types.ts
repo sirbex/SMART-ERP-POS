@@ -64,7 +64,7 @@ export interface CreateDeliveryNoteData {
 
 export interface CreateDeliveryNoteLineData {
   quotationItemId: string;
-  productId: string;
+  productId?: string;
   batchId?: string | null;
   uomId?: string | null;
   uomName?: string | null;

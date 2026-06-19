@@ -12,6 +12,7 @@ import deliveryNotesApi from '../../api/deliveryNotes';
 import quotationApi from '../../api/quotations';
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
+import { isPersistedProductId } from '../../utils/productIdBoundary';
 import { downloadFile } from '../../utils/download';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import type {
@@ -391,18 +392,26 @@ function CreateDeliveryNote({
   const handleCreate = () => {
     if (!selectedQuotation) return;
 
-    const lines: CreateDeliveryNoteLine[] = selectedQuotation.items
-      .filter((item) => item.productType !== 'service' && (lineQuantities[item.id] || 0) > 0)
-      .map((item) => ({
-        quotationItemId: item.id,
-        productId: item.productId || '',
-        uomId: item.uomId,
-        uomName: item.uomName,
-        quantityDelivered: lineQuantities[item.id] || 0,
-        unitPrice: item.unitPrice,
-        unitCost: item.unitCost ?? undefined,
-        description: item.description,
-      }));
+    const candidates = selectedQuotation.items.filter(
+      (item) => item.productType !== 'service' && (lineQuantities[item.id] || 0) > 0
+    );
+    const missingProduct = candidates.filter((item) => !isPersistedProductId(item.productId));
+    if (missingProduct.length > 0) {
+      toast.error(
+        `Cannot deliver custom lines without a catalog product: ${missingProduct.map((i) => i.description).join(', ')}`
+      );
+      return;
+    }
+
+    const lines: CreateDeliveryNoteLine[] = candidates.map((item) => ({
+      quotationItemId: item.id,
+      uomId: item.uomId,
+      uomName: item.uomName,
+      quantityDelivered: lineQuantities[item.id] || 0,
+      unitPrice: item.unitPrice,
+      unitCost: item.unitCost ?? undefined,
+      description: item.description,
+    }));
 
     if (lines.length === 0) {
       toast.error('Add at least one item with quantity > 0');

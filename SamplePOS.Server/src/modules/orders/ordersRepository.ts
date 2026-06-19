@@ -34,7 +34,7 @@ export interface OrderRecord {
 export interface OrderItemRecord {
   id: string;
   orderId: string;
-  productId: string;
+  productId: string | null;
   productName: string;
   quantity: string;
   unitPrice: string;
@@ -61,7 +61,7 @@ export interface CreateOrderData {
 
 export interface CreateOrderItemData {
   orderId: string;
-  productId: string;
+  productId: string | null;
   productName: string;
   quantity: number;
   unitPrice: number;

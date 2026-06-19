@@ -5,6 +5,7 @@ import { ValidationError, NotFoundError, BusinessError } from '../../middleware/
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { resolveSaleItemUom } from '../products/uomService.js';
 import logger from '../../utils/logger.js';
+import { normalizeProductIdForDb } from '../../utils/productIdBoundary.js';
 import Decimal from 'decimal.js';
 
 // ── Input types ──────────────────────────────────────────────────────
@@ -98,14 +99,15 @@ export const ordersService = {
         const itemsData: CreateOrderItemData[] = [];
         for (const item of input.items) {
           const lineTotal = new Decimal(item.quantity).times(new Decimal(item.unitPrice));
+          const dbProductId = normalizeProductIdForDb(item.productId);
           let baseQty = item.baseQty ?? null;
           let baseUomId = item.baseUomId ?? null;
           let conversionFactor = item.conversionFactor ?? null;
           let uomId = item.uomId ?? null;
 
-          if (item.productId) {
+          if (dbProductId) {
             const snapshot = await resolveSaleItemUom(
-              item.productId,
+              dbProductId,
               { quantity: item.quantity, uomId: item.uomId ?? null },
               client,
             );
@@ -117,7 +119,7 @@ export const ordersService = {
 
           itemsData.push({
             orderId: createdOrder.id,
-            productId: item.productId,
+            productId: dbProductId,
             productName: item.productName,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
