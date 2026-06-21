@@ -61,6 +61,46 @@ CREATE TABLE IF NOT EXISTS customer_balances (
     PRIMARY KEY (customer_id)
 );
 
+-- Upgrade legacy customer_balances (partial pre-306 installs used different column names)
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'customer_balances'
+          AND column_name = 'invoiced_amount'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'customer_balances'
+          AND column_name = 'total_invoiced'
+    ) THEN
+        ALTER TABLE customer_balances RENAME COLUMN invoiced_amount TO total_invoiced;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'customer_balances'
+          AND column_name = 'paid_amount'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'customer_balances'
+          AND column_name = 'total_paid'
+    ) THEN
+        ALTER TABLE customer_balances RENAME COLUMN paid_amount TO total_paid;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'customer_balances'
+          AND column_name = 'outstanding_balance'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'customer_balances'
+          AND column_name = 'balance'
+    ) THEN
+        ALTER TABLE customer_balances RENAME COLUMN outstanding_balance TO balance;
+    END IF;
+END $$;
+
 -- ============================================================
 -- 3. supplier_balances — Real-time AP state per supplier
 -- Updated by: goodsReceiptService.finalizeGR(), supplier payments

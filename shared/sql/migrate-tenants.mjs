@@ -16,6 +16,13 @@ import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
+import {
+  buildMigrationTableAnchors,
+  findDriftedMigrationFiles,
+  relationSatisfiesAnchor,
+  NUMBERED_MIGRATION,
+  MIGRATION_FILE_EXCLUDE,
+} from '../../scripts/lib/migrationTableAnchors.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,8 +43,48 @@ const DATABASE_URL =
 const DB_USER = process.env.DB_USER || 'postgres';
 const DB_PASSWORD = process.env.DB_PASSWORD || process.env.DATABASE_PASSWORD || 'password';
 
-// Excluded file patterns (same as migrate.mjs and tenantMigrationService.ts)
-const EXCLUDE_PATTERN = /^999_rollback|^apply-|^fix_|^backfill_/i;
+// Numbered migrations only — manual scripts (rebuild_*, repair_*, fix_*, etc.) never auto-run
+const PLATFORM_MIGRATION_FILES = new Set(['400_multi_tenant.sql']);
+
+async function applyMigrationFile(tenantPool, tenantSlug, filename, sqlDir) {
+    const filePath = path.join(sqlDir, filename);
+    const sql = fs.readFileSync(filePath, 'utf-8');
+    const checksum = crypto.createHash('sha256').update(sql).digest('hex');
+    const client = await tenantPool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query(sql);
+        await client.query(
+            `INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)
+             ON CONFLICT (filename) DO UPDATE SET checksum = EXCLUDED.checksum, executed_at = now()`,
+            [filename, checksum]
+        );
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => { });
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+async function repairMigrationDrift(tenantPool, tenantSlug, sqlDir, anchors) {
+    const { rows } = await tenantPool.query(
+        `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`
+    );
+    const { rows: viewRows } = await tenantPool.query(
+        `SELECT viewname FROM pg_views WHERE schemaname = 'public'`
+    );
+    const existing = new Set(rows.map((r) => r.tablename));
+    const views = new Set(viewRows.map((r) => r.viewname));
+    const drifted = findDriftedMigrationFiles(existing, anchors, views);
+    for (const filename of drifted) {
+        console.log(`     🔧 ${tenantSlug}: drift repair ${filename}`);
+        await applyMigrationFile(tenantPool, tenantSlug, filename, sqlDir);
+        for (const t of anchors[filename]) existing.add(t);
+    }
+    return drifted.length;
+}
 
 async function main() {
     const masterPool = new pg.Pool({ connectionString: DATABASE_URL });
@@ -62,10 +109,13 @@ async function main() {
 
         // 2. Discover migration files
         const sqlDir = __dirname;
+        const anchors = buildMigrationTableAnchors(sqlDir);
         const allFiles = fs
             .readdirSync(sqlDir)
             .filter((f) => f.endsWith('.sql'))
-            .filter((f) => !EXCLUDE_PATTERN.test(f))
+            .filter((f) => NUMBERED_MIGRATION.test(f))
+            .filter((f) => !MIGRATION_FILE_EXCLUDE.test(f))
+            .filter((f) => !PLATFORM_MIGRATION_FILES.has(f))
             .sort();
 
         let totalUpgraded = 0;
@@ -99,10 +149,21 @@ async function main() {
                 `);
 
                 // Get applied migrations
-                const { rows: applied } = await tenantPool.query(
+                let { rows: applied } = await tenantPool.query(
                     'SELECT filename FROM schema_migrations ORDER BY filename'
                 );
-                const appliedSet = new Set(applied.map((r) => r.filename));
+                let appliedSet = new Set(applied.map((r) => r.filename));
+
+                if (!DRY_RUN) {
+                    const repaired = await repairMigrationDrift(tenantPool, tenant.slug, sqlDir, anchors);
+                    if (repaired > 0) {
+                        console.log(`  🔧 ${tenant.slug}: repaired ${repaired} drifted migration(s)`);
+                        ({ rows: applied } = await tenantPool.query(
+                            'SELECT filename FROM schema_migrations ORDER BY filename'
+                        ));
+                        appliedSet = new Set(applied.map((r) => r.filename));
+                    }
+                }
 
                 const pending = allFiles.filter((f) => !appliedSet.has(f));
 
@@ -136,29 +197,8 @@ async function main() {
                 // Execute pending migrations
                 let applied_count = 0;
                 for (const filename of pending) {
-                    const filePath = path.join(sqlDir, filename);
-                    const sql = fs.readFileSync(filePath, 'utf-8');
-                    const checksum = crypto.createHash('sha256').update(sql).digest('hex');
-
-                    const client = await tenantPool.connect();
-                    try {
-                        await client.query('BEGIN');
-                        await client.query(sql);
-                        await client.query(
-                            'INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)',
-                            [filename, checksum]
-                        );
-                        await client.query('COMMIT');
-                        applied_count++;
-                    } catch (err) {
-                        await client.query('ROLLBACK').catch(() => { });
-                        console.error(
-                            `     ❌ ${tenant.slug}: FAILED on ${filename}: ${err instanceof Error ? err.message : err}`
-                        );
-                        throw err; // stop this tenant
-                    } finally {
-                        client.release();
-                    }
+                    await applyMigrationFile(tenantPool, tenant.slug, filename, sqlDir);
+                    applied_count++;
                 }
 
                 // Get version after

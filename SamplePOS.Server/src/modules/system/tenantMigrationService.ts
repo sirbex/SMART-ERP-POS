@@ -5,10 +5,38 @@ import path from 'path';
 import crypto from 'crypto';
 import { schemaVersionRepository } from './schemaVersionRepository.js';
 import { CURRENT_SCHEMA_VERSION } from '../../constants/schemaVersion.js';
-import { assertTenantSchemaIntegrity } from './tenantSchemaIntegrity.js';
+import { assertTenantSchemaIntegrity, verifyTenantSchemaIntegrity } from './tenantSchemaIntegrity.js';
+import {
+    buildMigrationTableAnchors,
+    findDriftedMigrationFiles,
+    findColumnDriftedMigrationFiles,
+    migrationHasColumnDrift,
+    relationSatisfiesAnchor,
+    TENANT_REQUIRED_TABLES,
+    NUMBERED_MIGRATION,
+    MIGRATION_FILE_EXCLUDE,
+    PLATFORM_MIGRATION_FILES,
+} from './migrationAnchors.js';
 import logger from '../../utils/logger.js';
 
 const { Pool: PgPool } = pg;
+
+async function loadTableColumnMap(pool: Pool): Promise<Map<string, Set<string>>> {
+    const { rows } = await pool.query<{ table_name: string; column_name: string }>(
+        `SELECT table_name, column_name FROM information_schema.columns
+         WHERE table_schema = 'public'`
+    );
+    const map = new Map<string, Set<string>>();
+    for (const row of rows) {
+        let cols = map.get(row.table_name);
+        if (!cols) {
+            cols = new Set<string>();
+            map.set(row.table_name, cols);
+        }
+        cols.add(row.column_name);
+    }
+    return map;
+}
 
 // ============================================================================
 // SQL directory resolution
@@ -43,6 +71,9 @@ const migrationLocks = new Map<string, Promise<void>>();
 // Once a tenant has been verified/migrated during this process lifetime,
 // skip the DB check on subsequent requests. Cleared on process restart.
 const verifiedTenants = new Set<string>();
+
+// Re-export for tests and tooling
+export { findDriftedMigrationFiles, buildMigrationTableAnchors, TENANT_REQUIRED_TABLES } from './migrationAnchors.js';
 
 // ============================================================================
 // Service
@@ -81,6 +112,11 @@ export const tenantMigrationService = {
     },
 
     async _doEnsure(tenantPool: Pool, tenantSlug: string): Promise<void> {
+        // Repair migration-record drift before version checks (schema_version can
+        // be current while DDL from an "applied" migration never ran on clone).
+        await this._repairMigrationTableDrift(tenantPool, tenantSlug);
+        await this._runPendingMigrations(tenantPool, tenantSlug);
+
         const tenantVersion = await schemaVersionRepository.getSchemaVersion(tenantPool);
 
         if (tenantVersion >= CURRENT_SCHEMA_VERSION) {
@@ -144,6 +180,17 @@ export const tenantMigrationService = {
     async copyMissingMigrationsFrom(sourcePool: Pool, targetPool: Pool): Promise<number> {
         await this.ensureSchemaMigrationsTable(targetPool);
 
+        const anchors = buildMigrationTableAnchors();
+        const { rows: targetTableRows } = await targetPool.query<{ tablename: string }>(
+            `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`
+        );
+        const { rows: targetViewRows } = await targetPool.query<{ viewname: string }>(
+            `SELECT viewname FROM pg_views WHERE schemaname = 'public'`
+        );
+        const targetTables = new Set(targetTableRows.map((r) => r.tablename));
+        const targetViews = new Set(targetViewRows.map((r) => r.viewname));
+        const targetColumns = await loadTableColumnMap(targetPool);
+
         const { rows: sourceRows } = await sourcePool.query<{
             filename: string;
             executed_at: Date | string | null;
@@ -156,14 +203,34 @@ export const tenantMigrationService = {
         const existing = new Set(targetRows.map((r) => r.filename));
 
         let inserted = 0;
+        let skippedDrift = 0;
         for (const row of sourceRows) {
             if (existing.has(row.filename)) continue;
+
+            const anchorTables = anchors[row.filename];
+            if (anchorTables?.some((t) => !relationSatisfiesAnchor(t, targetTables, targetViews))) {
+                skippedDrift++;
+                continue;
+            }
+
+            if (migrationHasColumnDrift(row.filename, targetColumns)) {
+                skippedDrift++;
+                continue;
+            }
+
             await targetPool.query(
                 'INSERT INTO schema_migrations (filename, executed_at, checksum) VALUES ($1, COALESCE($2, now()), $3)',
                 [row.filename, row.executed_at, row.checksum]
             );
             inserted++;
         }
+
+        if (skippedDrift > 0) {
+            logger.info(
+                `Skipped copying ${skippedDrift} migration record(s) — target missing anchor tables/columns (will run DDL)`
+            );
+        }
+
         return inserted;
     },
 
@@ -256,6 +323,12 @@ export const tenantMigrationService = {
                     continue;
                 }
 
+                const integrity = await verifyTenantSchemaIntegrity(pool);
+                if (!integrity.ok) {
+                    await pool.end().catch(() => { /* ignore */ });
+                    continue;
+                }
+
                 return { pool, slug: tenant.slug };
             } catch {
                 await pool.end().catch(() => { /* ignore */ });
@@ -294,19 +367,133 @@ export const tenantMigrationService = {
 
     /**
      * Finalize a freshly cloned tenant DB before activation.
+     * When masterPool is provided, mirrors migration tracking from a healthy reference
+     * tenant first (same as template sync) so pending DDL does not re-run on cloned schema.
      */
-    async prepareNewTenantDatabase(tenantPool: Pool, tenantSlug: string): Promise<void> {
+    async prepareNewTenantDatabase(
+        tenantPool: Pool,
+        tenantSlug: string,
+        masterPool?: Pool,
+    ): Promise<void> {
         await this.ensureSchemaMigrationsTable(tenantPool);
-        await this.ensureTenantUpToDate(tenantPool, tenantSlug);
 
-        const version = await schemaVersionRepository.getSchemaVersion(tenantPool);
-        if (version < CURRENT_SCHEMA_VERSION) {
-            throw new Error(
-                `Tenant "${tenantSlug}" provisioning incomplete: schema v${version}, expected v${CURRENT_SCHEMA_VERSION}`
-            );
+        if (masterPool) {
+            const reference = await this.findReferenceTenantPool(masterPool);
+            if (reference) {
+                try {
+                    await this.syncDatabaseFromReference(
+                        reference.pool,
+                        tenantPool,
+                        reference.slug,
+                        tenantSlug,
+                    );
+                } finally {
+                    await reference.pool.end().catch(() => { /* ignore */ });
+                }
+            } else {
+                await this.ensureTenantUpToDate(tenantPool, tenantSlug);
+                const version = await schemaVersionRepository.getSchemaVersion(tenantPool);
+                if (version < CURRENT_SCHEMA_VERSION) {
+                    throw new Error(
+                        `Tenant "${tenantSlug}" provisioning incomplete: schema v${version}, expected v${CURRENT_SCHEMA_VERSION}`
+                    );
+                }
+            }
+        } else {
+            await this.ensureTenantUpToDate(tenantPool, tenantSlug);
+            const version = await schemaVersionRepository.getSchemaVersion(tenantPool);
+            if (version < CURRENT_SCHEMA_VERSION) {
+                throw new Error(
+                    `Tenant "${tenantSlug}" provisioning incomplete: schema v${version}, expected v${CURRENT_SCHEMA_VERSION}`
+                );
+            }
         }
 
         await assertTenantSchemaIntegrity(tenantPool, tenantSlug);
+    },
+
+    async _applyMigrationFile(
+        tenantPool: Pool,
+        tenantSlug: string,
+        filename: string,
+        sqlDir: string,
+    ): Promise<void> {
+        const filePath = path.join(sqlDir, filename);
+        const sql = fs.readFileSync(filePath, 'utf-8');
+        const checksum = crypto.createHash('sha256').update(sql).digest('hex');
+
+        const client = await tenantPool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query(sql);
+            await client.query(
+                `INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)
+                 ON CONFLICT (filename) DO UPDATE SET checksum = EXCLUDED.checksum, executed_at = now()`,
+                [filename, checksum]
+            );
+            await client.query('COMMIT');
+        } catch (err) {
+            await client.query('ROLLBACK').catch(() => { /* ignore rollback error */ });
+            const msg = err instanceof Error ? err.message : String(err);
+            throw new Error(`Tenant "${tenantSlug}" migration failed on ${filename}: ${msg}`);
+        } finally {
+            client.release();
+        }
+    },
+
+    /**
+     * Re-apply anchor migrations when tracking says "applied" but tables/columns are absent.
+     */
+    async _repairMigrationTableDrift(tenantPool: Pool, tenantSlug: string): Promise<void> {
+        const sqlDir = resolveSqlDir();
+        await this.ensureSchemaMigrationsTable(tenantPool);
+
+        const { rows } = await tenantPool.query<{ tablename: string }>(
+            `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`
+        );
+        const { rows: viewRows } = await tenantPool.query<{ viewname: string }>(
+            `SELECT viewname FROM pg_views WHERE schemaname = 'public'`
+        );
+        const existingTables = new Set(rows.map((r) => r.tablename));
+        const existingViews = new Set(viewRows.map((r) => r.viewname));
+        const columnMap = await loadTableColumnMap(tenantPool);
+        const anchors = buildMigrationTableAnchors();
+
+        const tableDrifted = findDriftedMigrationFiles(existingTables, anchors, existingViews);
+        const columnDrifted = findColumnDriftedMigrationFiles(columnMap);
+        const toRepair = [...new Set([...tableDrifted, ...columnDrifted])].sort();
+
+        for (const filename of toRepair) {
+            const filePath = path.join(sqlDir, filename);
+            if (!fs.existsSync(filePath)) {
+                logger.error(
+                    `Tenant "${tenantSlug}" drift on ${filename} but SQL file not found`
+                );
+                continue;
+            }
+
+            const missingTables = anchors[filename]?.filter(
+                (t) => !relationSatisfiesAnchor(t, existingTables, existingViews),
+            ) ?? [];
+            const detail =
+                missingTables.length > 0
+                    ? `${missingTables.join(', ')} missing`
+                    : `column drift on ${filename}`;
+            logger.warn(
+                `Tenant "${tenantSlug}" migration drift: ${detail} — re-applying ${filename}`
+            );
+
+            await this._applyMigrationFile(tenantPool, tenantSlug, filename, sqlDir);
+            logger.info(`Tenant "${tenantSlug}": drift repair ✅ ${filename}`);
+
+            for (const table of anchors[filename] ?? []) {
+                existingTables.add(table);
+            }
+            const refreshed = await loadTableColumnMap(tenantPool);
+            for (const [table, cols] of refreshed) {
+                columnMap.set(table, cols);
+            }
+        }
     },
 
     async _runPendingMigrations(tenantPool: Pool, tenantSlug: string): Promise<void> {
@@ -321,18 +508,19 @@ export const tenantMigrationService = {
         );
         const appliedSet = new Set(applied.map((r: { filename: string }) => r.filename));
 
-        // 3. Discover SQL files (same filter as migrate.mjs)
+        // 3. Discover numbered migration files only (same filter as migrationAnchors / migrate.mjs)
         const allFiles = fs
             .readdirSync(sqlDir)
             .filter((f: string) => f.endsWith('.sql'))
-            .filter((f: string) => !/^999_rollback|^apply-|^fix_|^backfill_/i.test(f))
+            .filter((f: string) => NUMBERED_MIGRATION.test(f))
+            .filter((f: string) => !MIGRATION_FILE_EXCLUDE.test(f))
+            .filter((f: string) => !PLATFORM_MIGRATION_FILES.has(f))
             .sort();
 
         // 4. Filter to pending
         const pending = allFiles.filter((f: string) => !appliedSet.has(f));
 
         if (pending.length === 0) {
-            logger.info(`Tenant "${tenantSlug}": no pending migrations.`);
             return;
         }
 
@@ -340,30 +528,8 @@ export const tenantMigrationService = {
 
         // 5. Execute each migration in its own transaction
         for (const filename of pending) {
-            const filePath = path.join(sqlDir, filename);
-            const sql = fs.readFileSync(filePath, 'utf-8');
-            const checksum = crypto.createHash('sha256').update(sql).digest('hex');
-
-            const client = await tenantPool.connect();
-            try {
-                await client.query('BEGIN');
-                await client.query(sql);
-                await client.query(
-                    'INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)',
-                    [filename, checksum]
-                );
-                await client.query('COMMIT');
-                logger.info(`Tenant "${tenantSlug}": ✅ ${filename}`);
-            } catch (err) {
-                await client.query('ROLLBACK').catch(() => { /* ignore rollback error */ });
-                const msg = err instanceof Error ? err.message : String(err);
-                logger.error(`Tenant "${tenantSlug}": ❌ ${filename}: ${msg}`);
-                throw new Error(
-                    `Tenant "${tenantSlug}" migration failed on ${filename}: ${msg}`
-                );
-            } finally {
-                client.release();
-            }
+            await this._applyMigrationFile(tenantPool, tenantSlug, filename, sqlDir);
+            logger.info(`Tenant "${tenantSlug}": ✅ ${filename}`);
         }
     },
 
@@ -383,16 +549,7 @@ export const tenantMigrationService = {
      * Required tables that every tenant DB must have for core features.
      * If any are missing after migration, a CRITICAL error is logged.
      */
-    REQUIRED_TABLES: [
-        'products', 'product_inventory', 'product_valuation',
-        'customers', 'suppliers', 'sales', 'sale_items',
-        'invoices', 'invoice_line_items',
-        'purchase_orders', 'purchase_order_items',
-        'inventory_batches', 'stock_movements',
-        'users', 'schema_migrations', 'schema_version',
-        'accounts', 'ledger_transactions', 'ledger_entries',
-        'product_categories', 'uoms', 'product_uoms',
-    ] as readonly string[],
+    REQUIRED_TABLES: TENANT_REQUIRED_TABLES,
 
     /**
      * Sync ALL active tenants to current schema version.
@@ -452,24 +609,24 @@ export const tenantMigrationService = {
 
                 const versionBefore = await schemaVersionRepository.getSchemaVersion(tenantPool);
 
-                if (versionBefore >= CURRENT_SCHEMA_VERSION) {
-                    verifiedTenants.add(tenant.slug);
-                    result.upToDate++;
-                    continue;
-                }
-
-                logger.warn(
-                    `Tenant "${tenant.slug}" schema v${versionBefore} is behind master v${CURRENT_SCHEMA_VERSION}. Upgrading...`
-                );
-
+                await this._repairMigrationTableDrift(tenantPool, tenant.slug);
                 await this._runPendingMigrations(tenantPool, tenant.slug);
 
                 const versionAfter = await schemaVersionRepository.getSchemaVersion(tenantPool);
                 verifiedTenants.add(tenant.slug);
-                result.upgraded++;
-                logger.info(
-                    `Tenant "${tenant.slug}" upgraded from v${versionBefore} to v${versionAfter}`
-                );
+
+                if (versionBefore >= CURRENT_SCHEMA_VERSION && versionAfter >= CURRENT_SCHEMA_VERSION) {
+                    result.upToDate++;
+                } else if (versionAfter >= CURRENT_SCHEMA_VERSION) {
+                    result.upgraded++;
+                    logger.info(
+                        `Tenant "${tenant.slug}" upgraded from v${versionBefore} to v${versionAfter}`
+                    );
+                } else {
+                    throw new Error(
+                        `Tenant "${tenant.slug}" still at v${versionAfter}, expected v${CURRENT_SCHEMA_VERSION}`
+                    );
+                }
             } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
                 result.failed.push(tenant.slug);

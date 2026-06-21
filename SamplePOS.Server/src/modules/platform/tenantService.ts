@@ -7,7 +7,7 @@
 
 import type pg from 'pg';
 import bcrypt from 'bcrypt';
-import { execSync } from 'child_process';
+import { execSync, type ExecSyncOptions } from 'child_process';
 import { connectionManager } from '../../db/connectionManager.js';
 import { tenantRepository } from './tenantRepository.js';
 import { getAllPermissions } from '../../rbac/permissions.js';
@@ -25,6 +25,16 @@ import { CURRENT_SCHEMA_VERSION } from '../../constants/schemaVersion.js';
 import logger from '../../utils/logger.js';
 
 const TEMPLATE_DB_NAME = 'pos_template';
+
+/** Run pg_dump/psql via shell with PGPASSWORD in env (works on Windows + Linux). */
+function pgShellExec(command: string, dbPassword: string, options?: ExecSyncOptions): string {
+  return execSync(command, {
+    encoding: 'utf-8',
+    shell: true,
+    env: { ...process.env, PGPASSWORD: dbPassword },
+    ...options,
+  }) as string;
+}
 
 // Tables that every tenant MUST have — provisioning fails if any are missing
 const CRITICAL_TABLES = [
@@ -57,6 +67,17 @@ const CRITICAL_TABLES = [
   'cash_registers',
   'cash_register_sessions',
   'expenses',
+  'ar_customer_payments',
+  'ar_payment_allocations',
+  'quotations',
+  'quotation_items',
+  'delivery_notes',
+  'delivery_note_lines',
+  'product_inventory',
+  'product_valuation',
+  'system_settings',
+  'goods_receipts',
+  'goods_receipt_items',
 ] as const;
 
 // Platform-only tables excluded from template
@@ -158,7 +179,7 @@ export const tenantService = {
       await this.validateTenantSchema(tenantPool, databaseName);
 
       // 4b. Ensure migration tracking + schema version match production before go-live
-      await tenantMigrationService.prepareNewTenantDatabase(tenantPool, input.slug);
+      await tenantMigrationService.prepareNewTenantDatabase(tenantPool, input.slug, masterPool);
 
       // 5. Seed the admin user
       await this.seedAdminUser(tenantPool, {
@@ -451,15 +472,14 @@ export const tenantService = {
     const excludeArgs = PLATFORM_TABLES.map((t) => `--exclude-table=${t}`).join(' ');
 
     const pgDumpCmd =
-      `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
       `--schema-only --no-owner --no-privileges ${excludeArgs} ${schemaSourceDb}`;
     const psqlCmd =
-      `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
       `-d ${TEMPLATE_DB_NAME} -v ON_ERROR_STOP=0`;
 
     try {
-      execSync(`${pgDumpCmd} | ${psqlCmd}`, {
-        encoding: 'utf-8',
+      pgShellExec(`${pgDumpCmd} | ${psqlCmd}`, dbPassword, {
         timeout: 120_000,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -477,10 +497,9 @@ export const tenantService = {
       for (const table of seedTables) {
         try {
           const dumpDataCmd =
-            `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+            `pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
             `--data-only --table=${table} --no-owner --no-privileges ${seedSourceDb}`;
-          execSync(`${dumpDataCmd} | ${psqlCmd}`, {
-            encoding: 'utf-8',
+          pgShellExec(`${dumpDataCmd} | ${psqlCmd}`, dbPassword, {
             timeout: 15_000,
             stdio: ['pipe', 'pipe', 'pipe'],
           });
@@ -497,10 +516,11 @@ export const tenantService = {
       // The accounts seed copies CurrentBalance from master (which has real data).
       // New tenants must not inherit those balances.
       try {
-        execSync(
-          `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        pgShellExec(
+          `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
           `-d ${TEMPLATE_DB_NAME} -c "UPDATE accounts SET \\\"CurrentBalance\\\" = 0 WHERE \\\"CurrentBalance\\\" != 0;"`,
-          { encoding: 'utf-8', timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] }
+          dbPassword,
+          { timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] },
         );
         logger.info('Template account balances zeroed out');
       } catch {
@@ -509,12 +529,13 @@ export const tenantService = {
 
       // Seed internal system user required for automated GL journal entry audit trail
       try {
-        execSync(
-          `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        pgShellExec(
+          `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
           `-d ${TEMPLATE_DB_NAME} -c "INSERT INTO users (id, email, password_hash, full_name, role, is_active, user_number) ` +
           `VALUES ('00000000-0000-0000-0000-000000000000', 'system@internal', 'NOLOGIN', 'System', 'ADMIN', false, 'SYS-0000') ` +
           `ON CONFLICT (id) DO NOTHING;"`,
-          { encoding: 'utf-8', timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] }
+          dbPassword,
+          { timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] },
         );
         logger.info('Template seeded with system user');
       } catch {
@@ -524,10 +545,11 @@ export const tenantService = {
       // Check if enough tables were created despite warnings
       let tableCount = 0;
       try {
-        const result = execSync(
-          `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        const result = pgShellExec(
+          `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
           `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'"`,
-          { encoding: 'utf-8', timeout: 10_000 }
+          dbPassword,
+          { timeout: 10_000 },
         );
         tableCount = parseInt(result.trim(), 10) || 0;
       } catch {
@@ -599,10 +621,11 @@ export const tenantService = {
     dbPassword: string
   ): number {
     try {
-      const result = execSync(
-        `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      const result = pgShellExec(
+        `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
         `-d ${TEMPLATE_DB_NAME} -t -A -c "SELECT COALESCE(MAX(version), 0) FROM schema_version"`,
-        { encoding: 'utf-8', timeout: 10_000 }
+        dbPassword,
+        { timeout: 10_000 },
       );
       return parseInt(result.trim(), 10) || 0;
     } catch {
@@ -681,14 +704,13 @@ export const tenantService = {
     const excludeArgs = PLATFORM_TABLES.map((t) => `--exclude-table=${t}`).join(' ');
 
     const pgDumpCmd =
-      `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
       `--schema-only --no-owner --no-privileges ${excludeArgs} ${masterDbName}`;
     const psqlCmd =
-      `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+      `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
       `-d ${databaseName} -v ON_ERROR_STOP=0`;
 
-    execSync(`${pgDumpCmd} | ${psqlCmd}`, {
-      encoding: 'utf-8',
+    pgShellExec(`${pgDumpCmd} | ${psqlCmd}`, dbPassword, {
       timeout: 60_000,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -833,14 +855,13 @@ export const tenantService = {
 
     try {
       const dumpCmd =
-        `PGPASSWORD=${dbPassword} pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        `pg_dump -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
         `--data-only --table=accounts --no-owner --no-privileges ${masterDbName}`;
       const loadCmd =
-        `PGPASSWORD=${dbPassword} psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
+        `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
         `-d ${tenantDbName} -v ON_ERROR_STOP=0`;
 
-      execSync(`${dumpCmd} | ${loadCmd}`, {
-        encoding: 'utf-8',
+      pgShellExec(`${dumpCmd} | ${loadCmd}`, dbPassword, {
         timeout: 15_000,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
