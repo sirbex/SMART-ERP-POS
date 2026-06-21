@@ -28,12 +28,13 @@ const TEMPLATE_DB_NAME = 'pos_template';
 
 /** Run pg_dump/psql via shell with PGPASSWORD in env (works on Windows + Linux). */
 function pgShellExec(command: string, dbPassword: string, options?: ExecSyncOptions): string {
-  return execSync(command, {
+  const execOptions: ExecSyncOptions = {
     encoding: 'utf-8',
-    shell: true,
+    shell: process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : '/bin/sh',
     env: { ...process.env, PGPASSWORD: dbPassword },
     ...options,
-  }) as string;
+  };
+  return execSync(command, execOptions) as string;
 }
 
 // Tables that every tenant MUST have — provisioning fails if any are missing
