@@ -126,6 +126,7 @@ async function main() {
       amount: OB_AMOUNT,
       asOfDate: asOf,
       notes: 'proof-customer-opening-balance-local',
+      postReason: 'Proof script — customer opening balance cutover test',
     },
   });
   const obNum = post.data?.data?.invoiceNumber;
@@ -171,7 +172,12 @@ async function main() {
 
   const dup = await req('POST', '/api/customers/opening-balance', {
     token,
-    body: { customerId, amount: OB_AMOUNT, asOfDate: asOf },
+    body: {
+      customerId,
+      amount: OB_AMOUNT,
+      asOfDate: asOf,
+      postReason: 'Proof script duplicate OB rejection test',
+    },
   });
   assert(
     dup.status >= 400,

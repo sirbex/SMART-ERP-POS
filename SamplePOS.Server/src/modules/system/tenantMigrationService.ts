@@ -17,6 +17,11 @@ import {
     MIGRATION_FILE_EXCLUDE,
     PLATFORM_MIGRATION_FILES,
 } from './migrationAnchors.js';
+import {
+    findPostconditionDriftedMigrationFiles,
+    verifyMigrationPostcondition,
+    MIGRATION_POSTCONDITION_FILES,
+} from './migrationPostconditions.js';
 import logger from '../../utils/logger.js';
 
 const { Pool: PgPool } = pg;
@@ -214,6 +219,14 @@ export const tenantMigrationService = {
             }
 
             if (migrationHasColumnDrift(row.filename, targetColumns)) {
+                skippedDrift++;
+                continue;
+            }
+
+            if (
+                (MIGRATION_POSTCONDITION_FILES as readonly string[]).includes(row.filename) &&
+                !(await verifyMigrationPostcondition(targetPool, row.filename))
+            ) {
                 skippedDrift++;
                 continue;
             }
@@ -461,7 +474,8 @@ export const tenantMigrationService = {
 
         const tableDrifted = findDriftedMigrationFiles(existingTables, anchors, existingViews);
         const columnDrifted = findColumnDriftedMigrationFiles(columnMap);
-        const toRepair = [...new Set([...tableDrifted, ...columnDrifted])].sort();
+        const postconditionDrifted = await findPostconditionDriftedMigrationFiles(tenantPool);
+        const toRepair = [...new Set([...tableDrifted, ...columnDrifted, ...postconditionDrifted])].sort();
 
         for (const filename of toRepair) {
             const filePath = path.join(sqlDir, filename);
@@ -478,7 +492,9 @@ export const tenantMigrationService = {
             const detail =
                 missingTables.length > 0
                     ? `${missingTables.join(', ')} missing`
-                    : `column drift on ${filename}`;
+                    : postconditionDrifted.includes(filename)
+                      ? `constraint/account postcondition failed on ${filename}`
+                      : `column drift on ${filename}`;
             logger.warn(
                 `Tenant "${tenantSlug}" migration drift: ${detail} — re-applying ${filename}`
             );

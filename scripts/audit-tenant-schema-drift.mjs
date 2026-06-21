@@ -26,6 +26,7 @@ import {
   TENANT_REQUIRED_TABLES,
   resolveSqlDir,
 } from './lib/migrationTableAnchors.mjs';
+import { findPostconditionDriftedMigrationFiles } from './lib/migrationPostconditions.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(path.join(__dirname, '..', 'SamplePOS.Server', 'package.json'));
@@ -75,20 +76,23 @@ async function auditTenant(pool, label, sqlDir, anchors) {
 
   const missingRequired = TENANT_REQUIRED_TABLES.filter((t) => !existing.has(t));
   const driftedMigrations = findDriftedMigrationFiles(existing, anchors, views);
+  const postconditionDrift = await findPostconditionDriftedMigrationFiles(pool);
+  const allDrifted = [...new Set([...driftedMigrations, ...postconditionDrift])];
 
-  const driftDetails = driftedMigrations.map((filename) => ({
+  const driftDetails = allDrifted.map((filename) => ({
     migration: filename,
-    missingTables: anchors[filename].filter(
+    missingTables: anchors[filename]?.filter(
       (t) => !relationSatisfiesAnchor(t, existing, views),
-    ),
+    ) ?? [],
+    postcondition: postconditionDrift.includes(filename),
   }));
 
   let healed = [];
-  if (HEAL && driftedMigrations.length > 0) {
-    for (const filename of driftedMigrations) {
+  if (HEAL && allDrifted.length > 0) {
+    for (const filename of allDrifted) {
       await applyMigration(pool, label, filename, sqlDir);
       healed.push(filename);
-      for (const t of anchors[filename]) existing.add(t);
+      for (const t of anchors[filename] ?? []) existing.add(t);
     }
   }
 
@@ -96,10 +100,10 @@ async function auditTenant(pool, label, sqlDir, anchors) {
     label,
     tableCount: existing.size,
     missingRequired,
-    driftedMigrations,
+    driftedMigrations: allDrifted,
     driftDetails,
     healed,
-    ok: missingRequired.length === 0 && driftedMigrations.length === 0,
+    ok: missingRequired.length === 0 && allDrifted.length === 0,
   };
 }
 
@@ -184,9 +188,13 @@ async function main() {
           console.log(`        missing required: ${r.missingRequired.join(', ')}`);
         }
         for (const d of r.driftDetails ?? []) {
-          console.log(
-            `        drift ${d.migration}: missing ${d.missingTables.join(', ')}`,
-          );
+          if (d.postcondition) {
+            console.log(`        drift ${d.migration}: constraint/account postcondition failed`);
+          } else {
+            console.log(
+              `        drift ${d.migration}: missing ${d.missingTables.join(', ')}`,
+            );
+          }
         }
         if (r.healed?.length) {
           console.log(`        healed: ${r.healed.join(', ')}`);
