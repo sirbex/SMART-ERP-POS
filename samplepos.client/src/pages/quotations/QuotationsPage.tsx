@@ -3,9 +3,9 @@
  * View and manage all quotations
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Decimal from 'decimal.js';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
@@ -28,29 +28,56 @@ export default function QuotationsPage() {
   const [statusFilter, setStatusFilter] = useState<QuotationStatus | 'ALL' | 'ACTIVE'>('ACTIVE');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'quick' | 'standard'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+  // Debounced mirror of searchTerm — every query that depends on the search
+  // string MUST key on this debounced value, not the raw input. Without this,
+  // each keystroke fans out to N concurrent useQuery refetches (× 2 under
+  // React 18 Strict Mode in dev) and the renderer can be overwhelmed.
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'amount' | 'customer'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [showFilters, setShowFilters] = useState(false);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['quotations', page, statusFilter, typeFilter, searchTerm, sortBy, sortOrder],
+    queryKey: ['quotations', page, statusFilter, typeFilter, debouncedSearchTerm, sortBy, sortOrder],
     enabled: isAuthQueryEnabled(isAuthenticated),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
     queryFn: () =>
       quotationApi.listQuotations({
         page,
         limit: 20,
+        // Server is SSOT for "open": when ACTIVE, push openOnly=true so
+        // pagination totals reflect the visible (non-terminal) set.
         status: statusFilter === 'ALL' || statusFilter === 'ACTIVE' ? undefined : statusFilter,
+        openOnly: statusFilter === 'ACTIVE' ? true : undefined,
         quoteType: typeFilter === 'ALL' ? undefined : typeFilter,
-        searchTerm: searchTerm || undefined,
+        searchTerm: debouncedSearchTerm || undefined,
       }),
   });
 
-  // Filter out CONVERTED/CANCELLED if ACTIVE filter selected
-  const filteredQuotations = statusFilter === 'ACTIVE'
-    ? (data?.quotations || []).filter(q => q.status !== 'CONVERTED' && q.status !== 'CANCELLED' && q.status !== 'EXPIRED')
-    : (data?.quotations || []);
+  // Stats query is intentionally unaffected by the status/openOnly filter so the
+  // summary cards do not collapse to zero when ACTIVE is selected. Keeps the
+  // previous behaviour (page-1 sample, all statuses) byte-for-byte.
+  const { data: statsData } = useQuery({
+    queryKey: ['quotations-stats', typeFilter, debouncedSearchTerm],
+    enabled: isAuthQueryEnabled(isAuthenticated),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+    queryFn: () =>
+      quotationApi.listQuotations({
+        page: 1,
+        limit: 20,
+        quoteType: typeFilter === 'ALL' ? undefined : typeFilter,
+        searchTerm: debouncedSearchTerm || undefined,
+      }),
+  });
 
-  const quotations = filteredQuotations.sort((a, b) => {
+  const quotations = (data?.quotations || []).slice().sort((a, b) => {
     let comparison = 0;
     if (sortBy === 'date') {
       comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
@@ -64,7 +91,7 @@ export default function QuotationsPage() {
   const totalPages = data?.totalPages || 1;
 
   // Calculate stats using normalized 3-status model
-  const allQuotations = data?.quotations || [];
+  const allQuotations = statsData?.quotations || [];
   const openQuotations = allQuotations.filter(q => normalizeStatus(q.status) === 'OPEN');
   const stats = {
     total: allQuotations.length,

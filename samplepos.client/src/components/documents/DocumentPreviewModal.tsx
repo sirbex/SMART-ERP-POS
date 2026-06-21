@@ -22,6 +22,7 @@ import { Button } from '../ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Download, Printer, RefreshCw, Sun, Moon, X } from 'lucide-react';
 import { getAccessToken } from '../../hooks/useTokenRefresh';
+import { resolveDocumentUrl } from '../../lib/apiBase';
 
 export type DocumentTypeKey =
     | 'INVOICE'
@@ -86,8 +87,6 @@ interface Props {
     endDate?: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || '/api';
-
 export function DocumentPreviewModal({
     open,
     onClose,
@@ -107,20 +106,18 @@ export function DocumentPreviewModal({
     const [reloadTick, setReloadTick] = useState<number>(0);
     const reqIdRef = useRef<number>(0);
 
-    const queryString = useMemo(() => {
-        const params = new URLSearchParams({ paperSize });
-        if (startDate) params.set('startDate', startDate);
-        if (endDate) params.set('endDate', endDate);
-        return params.toString();
-    }, [paperSize, startDate, endDate]);
-
     const previewUrl = useMemo(
-        () => `${API_BASE}/documents/${encodeURIComponent(type)}/${encodeURIComponent(id)}/preview?${queryString}`,
-        [type, id, queryString],
+        () => resolveDocumentUrl(type, id, {
+            preview: true,
+            paperSize,
+            startDate,
+            endDate,
+        }),
+        [type, id, paperSize, startDate, endDate],
     );
     const downloadUrl = useMemo(
-        () => `${API_BASE}/documents/${encodeURIComponent(type)}/${encodeURIComponent(id)}?${queryString}`,
-        [type, id, queryString],
+        () => resolveDocumentUrl(type, id, { paperSize, startDate, endDate }),
+        [type, id, paperSize, startDate, endDate],
     );
 
     // Fetch PDF as blob so we can attach the auth header (iframe src cannot).
@@ -146,7 +143,6 @@ export function DocumentPreviewModal({
         const token = getAccessToken();
         fetch(previewUrl, {
             headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-            credentials: 'include',
             signal: controller.signal,
         })
             .then(async (res) => {
@@ -195,7 +191,6 @@ export function DocumentPreviewModal({
         const token = getAccessToken();
         const res = await fetch(downloadUrl, {
             headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-            credentials: 'include',
         });
         if (!res.ok) return;
         const blob = await res.blob();

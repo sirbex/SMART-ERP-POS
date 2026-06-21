@@ -28,7 +28,7 @@ import {
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { Money } from '../../utils/money.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
-import { BusinessError, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
+import { BusinessError, ConflictError, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import { quotationRepository } from '../quotations/quotationRepository.js';
 
@@ -913,11 +913,15 @@ export async function convertFromQuotation(
     );
   }
 
-  // Conversion guard: must not already be converted
+  // Conversion guard: must not already be converted via either retail or wholesale path
   if (quotation.converted_to_sale_id) {
-    throw new BusinessError(
-      `Quotation ${quotation.quote_number} has already been converted.`,
-      'ERR_DIST_QUOTE_CONVERTED'
+    throw new ConflictError(
+      `Quotation ${quotation.quote_number} has already been converted to sale.`,
+    );
+  }
+  if ((quotation as { converted_to_so_id?: string | null }).converted_to_so_id) {
+    throw new ConflictError(
+      `Quotation ${quotation.quote_number} has already been converted to a distribution sales order.`,
     );
   }
 
@@ -955,34 +959,55 @@ export async function convertFromQuotation(
     unitPrice: Money.toNumber(Money.parseDb(item.unit_price)),
   }));
 
-  // Create the distribution sales order (ATP confirmation happens inside)
-  const result = await createSalesOrder(pool, {
-    customerId: quotation.customer_id!,
-    orderDate: getBusinessDate(),
-    notes: `Converted from quotation ${quotation.quote_number}`,
-    createdBy: userId,
-    lines: soLines,
-  });
+  // ATP can be read outside the tx (read-only snapshot is acceptable here).
+  const productIds = soLines.map(l => l.productId);
+  const atpRows = await repo.getAtpForProducts(pool, productIds);
+  const atpMap = new Map(atpRows.map(r => [r.product_id, Money.toNumber(Money.parseDb(r.atp))]));
+  const orderDate = getBusinessDate();
 
-  // Mark quotation as CONVERTED — update atomically
-  await pool.query(
-    `UPDATE quotations
-     SET status = 'CONVERTED',
-         converted_at = NOW(),
-         updated_at = NOW(),
-         version = version + 1
-     WHERE id = $1 AND status != 'CONVERTED'`,
-    [quotationId]
-  );
+  // Single transaction: create SO and claim the quotation atomically.
+  // If the claim fails (concurrent conversion attempt), the SO insert is rolled
+  // back — no orphaned wholesale order is left behind. This is the SAP VA01-
+  // from-reference contract: either the source document is consumed and the
+  // target document exists, or neither change happens.
+  const txResult = await UnitOfWork.run(pool, async (client) => {
+    const orderId = await repo.createSalesOrder(client, {
+      customerId: quotation.customer_id!,
+      orderDate,
+      notes: `Converted from quotation ${quotation.quote_number}`,
+      createdBy: userId,
+    });
+
+    for (const line of soLines) {
+      const atp = atpMap.get(line.productId) ?? 0;
+      const confirmedQty = Math.min(line.orderedQty, Math.max(0, atp));
+      await repo.addSalesOrderLine(client, {
+        salesOrderId: orderId,
+        productId: line.productId,
+        orderedQty: line.orderedQty,
+        confirmedQty,
+        unitPrice: line.unitPrice,
+      });
+    }
+
+    // Atomic convert-once claim — rejects if any other path already converted
+    // this quotation (retail sale OR wholesale SO).
+    await quotationRepository.markQuotationAsConvertedToSO(client, quotationId, orderId);
+
+    const order = await repo.getSalesOrder(client, orderId);
+    const lines = await repo.getSalesOrderLines(client, orderId);
+    return { order: order!, lines };
+  });
 
   logger.info('Quotation converted to Distribution SO', {
     quotationNumber: quotation.quote_number,
-    orderNumber: result.order.orderNumber,
-    lineCount: result.lines.length,
+    orderNumber: txResult.order.order_number,
+    lineCount: txResult.lines.length,
   });
 
   return {
-    ...result,
+    order: normalizeSO(txResult.order),
+    lines: txResult.lines.map(normalizeSOLine),
     quotationNumber: quotation.quote_number,
   };
 }

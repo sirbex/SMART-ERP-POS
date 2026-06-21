@@ -348,6 +348,9 @@ app.use('/api/enterprise-accounting', requireFeature('accounting'), enterpriseAc
 app.use('/api/expenses', requireFeature('expenses'), expenseRoutes);
 
 // ── Documents (always available) ─────────────────────────────
+// PDF renderer MUST register before file-upload documentRoutes so
+// GET /api/documents/:type/:id is not swallowed by GET /:id metadata.
+app.use('/api/documents', createDocumentRoutes(pool));
 app.use('/api/documents', documentRoutes);
 
 // ── Reports (plan: STARTER+ for general, PROFESSIONAL+ for financial) ──
@@ -386,7 +389,6 @@ app.use('/api/ar-payments', arPaymentRoutes);
 
 // ── Invoices & Credit Notes (plan: STARTER+) ────────────────
 app.use('/api/invoices', requireFeature('invoices'), invoiceRoutes);
-app.use('/api/documents', createDocumentRoutes(pool));
 app.use('/api/credit-debit-notes', requireFeature('invoices'), creditDebitNoteRoutes);
 app.use('/api/document-flow', requireFeature('invoices'), documentFlowRoutes);
 app.use('/api/deposits', requireFeature('customers'), depositsRoutes);

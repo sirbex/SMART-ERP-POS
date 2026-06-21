@@ -10,6 +10,7 @@ import { AxiosError } from 'axios';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import CustomerDeposits from '../../components/customers/CustomerDeposits';
 import StoreCredits from '../../components/customers/StoreCredits';
+import { CustomerQuotationsTab } from '../../components/customers/CustomerQuotationsTab';
 import { DatePicker } from '../../components/ui/date-picker';
 import { getBusinessDate, formatTimestamp, formatTimestampDate } from '../../utils/businessDate';
 import { pricingApi } from '../../api/pricing';
@@ -210,7 +211,7 @@ interface SaleRow {
   paymentMethod?: string;
 }
 
-type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'credits' | 'edit';
+type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'credits' | 'quotations' | 'edit';
 
 function isCustomerOpeningBalance(inv: { documentType?: string; invoiceNumber?: string }) {
   return (
@@ -679,14 +680,15 @@ export default function CustomerDetailPage() {
         {/* Tabs */}
         <div className="border-b border-gray-200 mb-6 overflow-x-auto">
           <nav className="-mb-px flex space-x-3 sm:space-x-8 min-w-max">
-            {(['overview', 'invoices', 'transactions', 'deposits', 'credits', 'edit'] as Tab[]).map(t => (
+            {(['overview', 'invoices', 'transactions', 'deposits', 'credits', 'quotations', 'edit'] as Tab[]).map(t => (
               <button key={t} onClick={() => setTab(t)} className={`py-3 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${tab === t ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
                 {t === 'overview' ? 'Overview' :
                   t === 'invoices' ? 'Invoices' :
                     t === 'transactions' ? 'Transactions' :
                       t === 'deposits' ? 'Deposits' :
                         t === 'credits' ? 'Store Credits' :
-                          'Edit'}
+                          t === 'quotations' ? 'Quotations' :
+                            'Edit'}
               </button>
             ))}
           </nav>
@@ -1347,6 +1349,11 @@ export default function CustomerDetailPage() {
               window.location.reload();
             }}
           />
+        ) : null}
+
+        {/* Quotations Tab */}
+        {customer && tab === 'quotations' ? (
+          <CustomerQuotationsTab customerId={id} />
         ) : null}
       </div>
 

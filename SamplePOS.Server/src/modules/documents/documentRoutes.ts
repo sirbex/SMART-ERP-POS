@@ -10,6 +10,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
+import { PassThrough } from 'stream';
 import { z } from 'zod';
 import type { Pool } from 'pg';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -66,7 +67,23 @@ export function createDocumentRoutes(globalPool: Pool): Router {
         const query = QuerySchema.parse(req.query);
         const pool = req.tenantPool || globalPool;
 
-        res.setHeader('Content-Type', 'application/pdf');
+        // Buffer the PDF in-memory so we can set BOTH Content-Type and
+        // Content-Disposition (which depends on the renderer-derived filename)
+        // BEFORE any bytes hit the response. Streaming straight to `res` would
+        // commit the headers as soon as the renderer wrote its first chunk and
+        // the later setHeader('Content-Disposition', ...) would be silently
+        // dropped, leaving the browser to invent a filename from the URL.
+        //
+        // pdfkit's doc.end() flushes chunks ASYNCHRONOUSLY through doc.pipe(),
+        // so we MUST wait for the PassThrough's 'end' event before concat —
+        // returning early would yield an empty/truncated PDF.
+        const buffer = new PassThrough();
+        const chunks: Buffer[] = [];
+        buffer.on('data', (chunk: Buffer) => chunks.push(chunk));
+        const streamClosed = new Promise<void>((resolve, reject) => {
+            buffer.once('end', resolve);
+            buffer.once('error', reject);
+        });
 
         const result = await render(
             pool,
@@ -78,13 +95,18 @@ export function createDocumentRoutes(globalPool: Pool): Router {
                 startDate: query.startDate,
                 endDate: query.endDate,
             },
-            res,
+            buffer,
         );
+        await streamClosed;
 
+        const pdf = Buffer.concat(chunks);
+        res.setHeader('Content-Type', 'application/pdf');
         res.setHeader(
             'Content-Disposition',
             `${disposition}; filename="${result.filename}"`,
         );
+        res.setHeader('Content-Length', String(pdf.length));
+        res.end(pdf);
     }
 
     router.get(

@@ -31,6 +31,7 @@ import {
 import { renderInvoiceBody, type InvoiceBodyData } from './bodies/invoiceBody.js';
 import { renderReceiptBody, type ReceiptBodyData } from './bodies/receiptBody.js';
 import { renderQuotationBody, type QuotationBodyData } from './bodies/quotationBody.js';
+import { hasTaxableQuotationLines } from '@shared/utils/quotationCalculations.js';
 import {
     renderPurchaseOrderBody,
     type PurchaseOrderBodyData,
@@ -398,6 +399,16 @@ async function renderQuotation(
     const ctx = createDocument(meta, theme, output, { paperSize: req.paperSize ?? 'A4' });
 
     const body: QuotationBodyData = {
+        showTax:
+            hasTaxableQuotationLines(
+                result.items.map((it) => ({
+                    quantity: Number(it.quantity),
+                    unitPrice: Number(it.unitPrice),
+                    discountAmount: Number(it.discountAmount ?? 0),
+                    isTaxable: it.isTaxable !== false,
+                    taxRate: Number(it.taxRate ?? 0),
+                })),
+            ) && Number(q.taxAmount ?? 0) > 0,
         quotation: {
             quoteNumber: q.quoteNumber,
             quoteType: q.quoteType,

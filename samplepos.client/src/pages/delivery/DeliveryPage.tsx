@@ -5,7 +5,7 @@
  */
 
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import Layout from '../../components/Layout';
 import deliveryApi from '../../api/delivery';
@@ -113,21 +113,30 @@ function DeliveryOrdersTab() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<DeliveryStatus | 'ALL'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+  // Debounced mirror of searchTerm prevents a network round-trip per keystroke.
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFromSaleModal, setShowFromSaleModal] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showDriverModal, setShowDriverModal] = useState(false);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['delivery-orders', page, statusFilter, searchTerm],
+    queryKey: ['delivery-orders', page, statusFilter, debouncedSearchTerm],
     queryFn: () =>
       deliveryApi.searchOrders({
         page,
         limit: 20,
         status: statusFilter === 'ALL' ? undefined : statusFilter,
-        search: searchTerm || undefined,
+        search: debouncedSearchTerm || undefined,
       }),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
   });
 
   const orders = data?.orders || [];

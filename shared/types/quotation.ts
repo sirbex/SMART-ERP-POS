@@ -178,6 +178,14 @@ export interface QuotationFilters {
   searchTerm?: string;
   fromDate?: string;
   toDate?: string;
+  /**
+   * When true, server excludes every terminal status
+   * (CONVERTED, CANCELLED, EXPIRED, REJECTED) so the returned page
+   * and pagination totals reflect only quotations that are still
+   * actionable. This is the SSOT for "Open Quotations" across
+   * QuotationsPage, POSPage and DeliveryNotesPage.
+   */
+  openOnly?: boolean;
 }
 
 // ============================================================================

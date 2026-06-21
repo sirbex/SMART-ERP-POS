@@ -7,6 +7,7 @@ import { downloadFile } from '../../utils/download';
 import { api } from '../../utils/api';
 import { DatePicker } from '../ui/date-picker';
 import CustomerDeposits from './CustomerDeposits';
+import { CustomerQuotationsTab } from './CustomerQuotationsTab';
 import { AxiosError } from 'axios';
 import { getBusinessDate, formatTimestampDate } from '../../utils/businessDate';
 import { pricingApi } from '../../api/pricing';
@@ -156,7 +157,7 @@ interface StatementEntry {
     balanceAfter?: number | string;
 }
 
-type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'edit';
+type Tab = 'overview' | 'invoices' | 'transactions' | 'deposits' | 'quotations' | 'edit';
 
 interface CustomerDetailModalProps {
     isOpen: boolean;
@@ -431,7 +432,7 @@ export default function CustomerDetailModal({
                     {/* Tabs */}
                     <div className="border-b border-gray-200 px-4 sm:px-6 bg-white overflow-x-auto">
                         <nav className="-mb-px flex space-x-3 sm:space-x-6 min-w-max">
-                            {(['overview', 'invoices', 'transactions', 'deposits', 'edit'] as Tab[]).map((t) => (
+                            {(['overview', 'invoices', 'transactions', 'deposits', 'quotations', 'edit'] as Tab[]).map((t) => (
                                 <button
                                     key={t}
                                     onClick={() => setTab(t)}
@@ -1230,6 +1231,11 @@ export default function CustomerDetailModal({
                                 {/* Deposits Tab */}
                                 {tab === 'deposits' && customerId && (
                                     <CustomerDeposits customerId={customerId} />
+                                )}
+
+                                {/* Quotations Tab */}
+                                {tab === 'quotations' && customerId && (
+                                    <CustomerQuotationsTab customerId={customerId} />
                                 )}
 
                                 {/* Edit Tab */}

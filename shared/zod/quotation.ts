@@ -180,6 +180,10 @@ export const ConvertQuotationInputSchema = z.object({
   saleDate: z.string().optional(),
   notes: z.string().optional(),
   invoiceDueDate: z.string().optional(),
+  // POS drawer reconciliation: when converting a cash/card quote at the till, the
+  // open cash-register session must be linked so the conversion shows up in drawer
+  // counts (same rule as direct POS sales).
+  cashRegisterSessionId: z.string().uuid().optional(),
 }).strict().refine(
   data => {
     if (data.paymentOption === 'partial') return !!data.depositAmount && data.depositAmount > 0;
@@ -209,6 +213,20 @@ export const QuotationListFiltersSchema = z.object({
   fromDate: z.string().optional(),
   toDate: z.string().optional(),
   searchTerm: z.string().optional(),
+  // SSOT "open" filter: when true, excludes terminal/closed statuses
+  // (CONVERTED, CANCELLED, EXPIRED, REJECTED). Enforced server-side so
+  // pagination totals are correct.
+  openOnly: z.coerce.boolean().optional(),
 }).strict();
+
+// The canonical set of statuses that an "open" quotation is NOT in.
+// Used by openOnly=true filter. Kept in shared module so frontend and
+// backend agree on the definition of "open".
+export const CLOSED_QUOTATION_STATUSES = [
+  'CONVERTED',
+  'CANCELLED',
+  'EXPIRED',
+  'REJECTED',
+] as const satisfies readonly z.infer<typeof QuotationDbStatusEnum>[];
 
 export type QuotationListFilters = z.infer<typeof QuotationListFiltersSchema>;

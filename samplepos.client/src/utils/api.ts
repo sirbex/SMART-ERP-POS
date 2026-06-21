@@ -43,9 +43,11 @@ import type {
   InvoiceSettingsInput,
 } from '../types/inputs';
 
+import { getApiBaseUrl } from '../lib/apiBase';
+
 // API Configuration
 // Use relative URL in dev so requests go through Vite proxy (handles HTTPS)
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const API_BASE_URL = getApiBaseUrl();
 const API_TIMEOUT = 30000; // 30 seconds
 
 // API Response Types

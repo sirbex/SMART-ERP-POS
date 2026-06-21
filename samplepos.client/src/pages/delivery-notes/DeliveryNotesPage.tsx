@@ -5,7 +5,7 @@
  */
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import Layout from '../../components/Layout';
 import deliveryNotesApi from '../../api/deliveryNotes';
@@ -263,6 +263,9 @@ function CreateDeliveryNote({
   const queryClient = useQueryClient();
   const [selectedQuotation, setSelectedQuotation] = useState<{ quotation: Quotation; items: QuotationItem[] } | null>(null);
   const [quotationSearch, setQuotationSearch] = useState('');
+  // Debounced mirror — the search useQuery keys on this so each keystroke
+  // does not fan out to a refetch (× 2 in React 18 Strict Mode).
+  const [debouncedQuotationSearch, setDebouncedQuotationSearch] = useState('');
   const [deliveryDate, setDeliveryDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [driverName, setDriverName] = useState('');
   const [vehicleNumber, setVehicleNumber] = useState('');
@@ -272,21 +275,30 @@ function CreateDeliveryNote({
   const [productStockMap, setProductStockMap] = useState<Record<string, number>>({});
   const fulfillmentAppliedForRef = useRef<string | null>(null);
 
-  // Search wholesale quotations
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuotationSearch(quotationSearch), 300);
+    return () => clearTimeout(t);
+  }, [quotationSearch]);
+
+  // Search wholesale quotations — server excludes terminal statuses via openOnly.
   const { data: quotationsData } = useQuery({
-    queryKey: ['quotations-wholesale-search', quotationSearch],
-    queryFn: () => quotationApi.listQuotations({ searchTerm: quotationSearch || undefined, limit: 50 }),
+    queryKey: ['quotations-wholesale-search', debouncedQuotationSearch],
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+    queryFn: () =>
+      quotationApi.listQuotations({
+        searchTerm: debouncedQuotationSearch || undefined,
+        limit: 50,
+        openOnly: true,
+      }),
     enabled: !selectedQuotation,
   });
 
-  // Filter to WHOLESALE only (excluding CONVERTED & CANCELLED)
+  // Narrow to WHOLESALE fulfillment mode (status already filtered by server).
   const wholesaleQuotations = useMemo(() => {
     const all = quotationsData?.quotations || [];
     return all.filter(
-      (q) =>
-        (q as Quotation & { fulfillmentMode?: string }).fulfillmentMode === 'WHOLESALE' &&
-        q.status !== 'CONVERTED' &&
-        q.status !== 'CANCELLED'
+      (q) => (q as Quotation & { fulfillmentMode?: string }).fulfillmentMode === 'WHOLESALE',
     );
   }, [quotationsData]);
 

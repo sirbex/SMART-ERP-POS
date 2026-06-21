@@ -12,6 +12,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
 import { api } from '../../utils/api';
+import { downloadFile } from '../../utils/download';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
@@ -51,6 +52,7 @@ export default function QuoteDetailPage() {
   const queryClient = useQueryClient();
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [statusNotes, setStatusNotes] = useState('');
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   // Drawer state
   const [selectedDnId, setSelectedDnId] = useState<string | null>(null);
@@ -329,6 +331,31 @@ export default function QuoteDetailPage() {
           >
             🖨️ Print
           </button>
+          {quotation.id && (
+            <button
+              type="button"
+              onClick={async () => {
+                setIsDownloadingPdf(true);
+                try {
+                  await downloadFile(
+                    `/documents/QUOTATION/${quotation.id}`,
+                    `quotation-${quotation.quoteNumber}.pdf`,
+                  );
+                } catch (err) {
+                  toast.error(
+                    `PDF export failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                  );
+                } finally {
+                  setIsDownloadingPdf(false);
+                }
+              }}
+              disabled={isDownloadingPdf}
+              aria-label={`Download quotation ${quotation.quoteNumber} as PDF`}
+              className="px-5 py-2.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 text-sm disabled:opacity-50"
+            >
+              {isDownloadingPdf ? 'Preparing…' : '⬇️ Download PDF'}
+            </button>
+          )}
           {quotation.id && (
             <DocumentFlowButton entityType="QUOTATION" entityId={quotation.id} size="sm" />
           )}
@@ -660,6 +687,7 @@ export default function QuoteDetailPage() {
         overallStatus={fulfillment?.overallStatus}
         fulfillmentItems={fulfillmentItems}
       />
+
     </Layout>
   );
 }

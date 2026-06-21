@@ -37,6 +37,7 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getFinalPricesBulk, type ResolvedPrice } from '../pricing/pricingEngineService.js';
 import { getCustomerPricingMode } from '../pricing/pricingRepository.js';
 import { validateAtCostSalePricing } from './atCostSalePricingGuard.js';
+import { assertQuoteConvertibleForPosSale } from './quoteConvertibilityGuard.js';
 import { assertSaleLineNotBelowAllocatedCost } from './saleBelowCostGuard.js';
 import { recordSaleLinePriceEvent } from './salePriceAuditService.js';
 import {
@@ -241,6 +242,23 @@ export const salesService = {
       // Sales code already creates proper MOV- movements for each batch deduction
       await client.query("SET LOCAL app.skip_stock_movement_trigger = 'true'");
 
+      // ========== QUOTE PRE-VALIDATION (FAIL FAST, NO INVENTORY MUTATION) ==========
+      // Reject the sale up front when the quote is no longer convertible. The
+      // status list is centralised in quoteConvertibilityGuard so the same
+      // contract can be unit-tested without booting the whole sales graph.
+      if (input.quoteId) {
+        const quoteCheck = await client.query<{ status: string; quote_number: string | null }>(
+          `SELECT status, quote_number FROM quotations WHERE id = $1 FOR UPDATE`,
+          [input.quoteId]
+        );
+        if (quoteCheck.rows.length === 0) {
+          throw new NotFoundError('Quotation');
+        }
+        assertQuoteConvertibleForPosSale(
+          quoteCheck.rows[0].status,
+          quoteCheck.rows[0].quote_number ?? input.quoteId,
+        );
+      }
       // ========== BUSINESS RULE VALIDATIONS ==========
 
       // BR-SAL-002: Sale must have at least one item
@@ -1677,11 +1695,14 @@ export const salesService = {
             error: quoteError instanceof Error ? quoteError.message : String(quoteError),
             stack: quoteError instanceof Error ? quoteError.stack : undefined,
           });
-          // Don't fail the sale if quote conversion fails
-          // The sale is already successful, just log the issue
-          warnings.push(
-            `Quote conversion failed for quote ${input.quoteId}: ${quoteError instanceof Error ? quoteError.message : String(quoteError)}. Sale created but quotation status not updated.`
-          );
+          // Hard fail: a quote link failure after inventory has been deducted
+          // means we cannot guarantee convert-once. Roll back the whole TX so
+          // stock and GL stay coupled and the customer can retry cleanly.
+          // The earlier pre-validation makes the routine case (stale quoteId)
+          // fail BEFORE any deduction; this re-throw protects against the
+          // narrow race where the quote is converted between pre-check and
+          // markQuotationAsConverted.
+          throw quoteError;
         }
       }
       // CREDIT SALE INVOICE: Create invoice if there's any outstanding balance

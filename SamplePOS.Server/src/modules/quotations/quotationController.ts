@@ -133,6 +133,7 @@ export const quotationController = {
       fromDate: req.query.fromDate,
       toDate: req.query.toDate,
       searchTerm: req.query.searchTerm,
+      openOnly: req.query.openOnly,
     });
 
     const result = await quotationService.listQuotations(pool, filters);
@@ -181,6 +182,7 @@ export const quotationController = {
       depositMethod: validatedData.depositMethod === 'BANK_TRANSFER' ? 'MOBILE_MONEY' : validatedData.depositMethod,
       cashierId: userId,
       notes: validatedData.notes,
+      cashRegisterSessionId: validatedData.cashRegisterSessionId,
     });
 
     res.json({ success: true, data: result, message: 'Quotation converted to sale successfully' });

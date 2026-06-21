@@ -2068,15 +2068,15 @@ export default function POSPage() {
   const fetchRecentQuotes = async () => {
     try {
       setIsLoadingQuotes(true);
+      // Server enforces "open" — never trust client filtering, otherwise
+      // a CONVERTED quote could appear on later pages once the page size
+      // grows past 20.
       const response = await quotationApi.listQuotations({
         page: 1,
         limit: 20,
+        openOnly: true,
       });
-      // Only show OPEN quotes — exclude CONVERTED and CANCELLED
-      const openQuotes = (response.quotations || []).filter(
-        (q) => normalizeStatus(q.status) === 'OPEN'
-      );
-      setAvailableQuotes(openQuotes);
+      setAvailableQuotes(response.quotations || []);
     } catch (error) {
       console.error('Failed to fetch quotes:', error);
       toast.error('Failed to load quotes');

@@ -90,4 +90,34 @@ export class UnitOfWork {
             throw error;
         }
     }
+
+    /**
+     * Type guard: distinguishes a Pool from a PoolClient.
+     * Pool exposes a `connect()` method; PoolClient does not.
+     */
+    static isPool(handle: DbConnection): handle is Pool {
+        return typeof (handle as Pool).connect === 'function';
+    }
+
+    /**
+     * Run a callback inside a transaction OR join an existing one.
+     *
+     * - If `handle` is a `Pool`, a fresh transaction is opened via `UnitOfWork.run`.
+     * - If `handle` is a `PoolClient`, the callback runs inline on the caller's
+     *   active transaction (no nested BEGIN — the outer caller controls commit/rollback).
+     *
+     * Use this in service-layer functions that need to be callable both standalone
+     * (controller passes a pool) AND as part of a larger transaction (another service
+     * passes its active client). Guarantees atomicity in the composed case without
+     * creating nested-transaction artefacts.
+     */
+    static async runOrJoin<T>(
+        handle: DbConnection,
+        work: (client: PoolClient) => Promise<T>
+    ): Promise<T> {
+        if (UnitOfWork.isPool(handle)) {
+            return UnitOfWork.run(handle, work);
+        }
+        return work(handle as PoolClient);
+    }
 }

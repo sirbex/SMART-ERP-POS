@@ -21,6 +21,7 @@ import crypto from 'crypto';
 import { deductStockFEFO } from '../../utils/fefoDeduction.js';
 import { quotationRepository, QuotationDbRow, QuotationItemDbRow } from './quotationRepository.js';
 import { salesService } from '../sales/salesService.js';
+import { salesRepository, CreateSaleData, CreateSaleItemData } from '../sales/salesRepository.js';
 import { invoiceService } from '../invoices/invoiceService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
@@ -29,8 +30,13 @@ import * as glEntryService from '../../services/glEntryService.js';
 import { getBusinessDate, formatDateBusiness, addDaysToDateString } from '../../utils/dateRange.js';
 import { buildQuoteConversionLineSnapshots } from './quotationSaleUom.js';
 import { loadMasterUoms, normalizeQuotationLineUom } from './quotationUomResolver.js';
-import { tableHasColumn } from '../../db/schemaColumnCache.js';
-import { InventoryBusinessRules } from '../../middleware/businessRules.js';
+import { InventoryBusinessRules, SalesBusinessRules } from '../../middleware/businessRules.js';
+import * as masterDataGuard from '../../services/masterDataGuard.js';
+import { NotFoundError, ValidationError, BusinessError, ConflictError } from '../../middleware/errorHandler.js';
+import { createLogger } from '../../utils/logger.js';
+import { assertEditableQuotation, assertStatusChangeable } from './quotationGuards.js';
+
+const logger = createLogger('quotationService');
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -388,6 +394,7 @@ export const quotationService = {
       fromDate?: string;
       toDate?: string;
       searchTerm?: string;
+      openOnly?: boolean;
     }
   ): Promise<{ quotations: Quotation[]; total: number; page: number; limit: number; totalPages: number }> {
     const result = await quotationRepository.listQuotations(pool, filters);
@@ -410,21 +417,21 @@ export const quotationService = {
     data: Record<string, unknown>
   ): Promise<Quotation> {
     await UnitOfWork.run(pool, async (client) => {
-      // Get existing quotation
+      // Get existing quotation — lock the row to avoid TOCTOU with concurrent
+      // convertQuotationToSale / convertFromQuotation.
       const existing = await client.query(
-        'SELECT status, customer_id, customer_name FROM quotations WHERE id = $1',
+        `SELECT status, quote_number, customer_id, customer_name,
+                converted_to_sale_id, converted_to_so_id, converted_to_dn_id
+           FROM quotations WHERE id = $1 FOR UPDATE`,
         [id]
       );
 
       if (existing.rows.length === 0) {
-        throw new Error('Quotation not found');
+        throw new NotFoundError('Quotation not found');
       }
 
-      // Allow updates to any non-terminal quote (OPEN status)
-      const status = existing.rows[0].status;
-      if (status === 'CONVERTED' || status === 'CANCELLED' || status === 'EXPIRED') {
-        throw new Error(`Cannot update ${status} quotations`);
-      }
+      // SSOT editability guard — covers terminal statuses AND either conversion FK.
+      assertEditableQuotation(existing.rows[0]);
 
       // Update quotation header
       const updated = await quotationRepository.updateQuotation(client, id, data);
@@ -540,31 +547,18 @@ export const quotationService = {
       // convertQuotationToSale from slipping between this read and the UPDATE below.
       // (Issue #3 forensic audit — TOCTOU race with pool-based read outside transaction)
       const lockRow = await client.query(
-        `SELECT status, converted_to_sale_id FROM quotations WHERE id = $1 FOR UPDATE`,
+        `SELECT status, quote_number, converted_to_sale_id, converted_to_so_id, converted_to_dn_id
+           FROM quotations WHERE id = $1 FOR UPDATE`,
         [id]
       );
 
       if (!lockRow.rows[0]) {
-        throw new Error('Quotation not found');
+        throw new NotFoundError('Quotation not found');
       }
 
-      const currentStatus = lockRow.rows[0].status as string;
-      const convertedToSaleId = lockRow.rows[0].converted_to_sale_id as string | null;
-
-      // BR-QUOTE-007: CONVERTED quotes are locked - deal is closed
-      if (currentStatus === 'CONVERTED') {
-        throw new Error('Cannot change status of a converted quotation. The deal is closed and payment has been received.');
-      }
-
-      // BR-QUOTE-008: Quotes linked to a sale are locked
-      if (convertedToSaleId) {
-        throw new Error(`Cannot change status. This quotation has been converted to sale ${convertedToSaleId}. The transaction is complete.`);
-      }
-
-      // Additional validation: Cannot manually set to CONVERTED (must use convert endpoint)
-      if (status === 'CONVERTED') {
-        throw new Error('Cannot manually set status to CONVERTED. Use the convert endpoint to convert a quotation to a sale.');
-      }
+      // SSOT status-change guard — rejects CONVERTED source, FK-claimed quotes,
+      // and manual target=CONVERTED writes.
+      assertStatusChangeable(lockRow.rows[0], status);
 
       const quotation = await quotationRepository.updateQuotationStatus(client, id, status, notes);
 
@@ -593,6 +587,7 @@ export const quotationService = {
       depositMethod?: 'CASH' | 'CARD' | 'MOBILE_MONEY';
       cashierId: string;
       notes?: string;
+      cashRegisterSessionId?: string;
     }
   ): Promise<{
     sale: Record<string, unknown>;
@@ -600,14 +595,22 @@ export const quotationService = {
     payment?: Record<string, unknown>;
   }> {
     // Phase 1: Transactional work - create sale, sale items, GL posting, mark converted
-    const { saleRecord, quotation, customerId, totalAmount } = await UnitOfWork.run(pool, async (client) => {
+    const result = await UnitOfWork.run(pool, async (client) => {
       // Maintenance mode guard (replaces trg_maintenance_check_sales)
       await checkMaintenanceMode(client);
 
-      // Get quotation with items
-      const quoteData = await quotationRepository.getQuotationById(pool, quotationId);
+      // Lock quotation row first (TOCTOU with concurrent convert / status change).
+      const lockRow = await client.query(
+        `SELECT id FROM quotations WHERE id = $1 FOR UPDATE`,
+        [quotationId],
+      );
+      if (lockRow.rows.length === 0) {
+        throw new NotFoundError('Quotation');
+      }
+
+      const quoteData = await quotationRepository.getQuotationById(client, quotationId);
       if (!quoteData) {
-        throw new Error('Quotation not found');
+        throw new NotFoundError('Quotation');
       }
 
       const { quotation, items } = quoteData;
@@ -615,22 +618,24 @@ export const quotationService = {
       // BR-QUOTE-010: WHOLESALE quotations cannot be converted to a sale.
       // They follow the Delivery Note → Invoice path instead.
       if (quotation.fulfillment_mode === 'WHOLESALE') {
-        throw new Error(
+        throw new BusinessError(
           `Quotation ${quotation.quote_number} is WHOLESALE. ` +
-          `Use Delivery Notes → Invoice instead of converting to a sale.`
+          `Use Delivery Notes → Invoice instead of converting to a sale.`,
+          'BR-QUOTE-010',
+          { quotationId: quotation.id, quoteNumber: quotation.quote_number },
         );
       }
 
       // BR-QUOTE-001: Check conversion eligibility
-      const canConvert = await quotationRepository.canConvertQuotation(pool, quotationId);
+      const canConvert = await quotationRepository.canConvertQuotation(client, quotationId);
       if (!canConvert.can) {
-        throw new Error(`Cannot convert quotation: ${canConvert.reason}`);
+        throw new ConflictError(`Cannot convert quotation: ${canConvert.reason}`);
       }
 
       // BR-QUOTE-002: Verify not expired
       const today = getBusinessDate();
       if (String(quotation.valid_until) < today) {
-        throw new Error('Quotation has expired');
+        throw new ConflictError('Quotation has expired');
       }
 
       // Get default UOM for cases where quotation UOM doesn't exist
@@ -664,6 +669,13 @@ export const quotationService = {
       for (let idx = 0; idx < items.length; idx++) {
         const item = items[idx];
         if (!item.product_id || String(item.product_id).startsWith('custom_')) continue;
+
+        // BR-SAL-005: product must be active. Catches the case where a quote
+        // was raised against a product that was later archived/discontinued.
+        await SalesBusinessRules.validateProductActive(client, item.product_id);
+        // MDG-002: product must have a configured selling price.
+        await masterDataGuard.assertItemHasSellingPrice(client, item.product_id);
+
         productLineMeta.push({
           itemIndex: idx,
           productId: item.product_id,
@@ -684,7 +696,6 @@ export const quotationService = {
       const uomSnapshotByItemIndex = new Map(
         productLineMeta.map((m, i) => [m.itemIndex, quoteUomSnapshots[i]]),
       );
-      const hasSaleItemUomSnapshot = await tableHasColumn(client, 'sale_items', 'base_qty');
 
       // Prepare sale data
       // CRITICAL: Use unit_price * quantity (pre-tax) as lineTotal, NOT item.line_total.
@@ -743,7 +754,7 @@ export const quotationService = {
       }
 
       if (!customerId) {
-        throw new Error('Customer not found for quotation');
+        throw new NotFoundError('Customer for quotation');
       }
 
       // ============================================================
@@ -770,7 +781,7 @@ export const quotationService = {
           expectedTotal: expectedTotal.toNumber(),
           difference: expectedTotal.minus(quoteTotal).abs().toNumber(),
         });
-        throw new Error(
+        throw new ValidationError(
           `Quote ${quotation.quote_number} has inconsistent totals. ` +
           `Expected ${expectedTotal.toFixed(2)} but found ${quoteTotal.toFixed(2)}. ` +
           `Please verify the quotation before converting.`
@@ -779,7 +790,7 @@ export const quotationService = {
 
       // Validate subtotal > 0 and total > subtotal (when tax exists)
       if (quoteSubtotal.lessThanOrEqualTo(0)) {
-        throw new Error('Quote subtotal must be greater than zero');
+        throw new ValidationError('Quote subtotal must be greater than zero');
       }
 
       if (quoteTax.greaterThan(0) && quoteTotal.lessThanOrEqualTo(quoteSubtotal)) {
@@ -789,126 +800,128 @@ export const quotationService = {
           total: quoteTotal.toNumber(),
           tax: quoteTax.toNumber(),
         });
-        throw new Error(
+        throw new ValidationError(
           `Quote ${quotation.quote_number} appears to have swapped subtotal/total values. ` +
           `Subtotal (${quoteSubtotal.toFixed(2)}) should be less than total (${quoteTotal.toFixed(2)}) when tax exists.`
         );
       }
 
-      // BR-QUOTE-013: Credit limit check for credit-sale conversions
-      if (data.paymentOption === 'none') {
-        const creditCheck = await client.query(
-          `SELECT credit_limit, COALESCE(balance, 0) as current_balance
-           FROM customers WHERE id = $1`,
-          [customerId]
-        );
-        if (creditCheck.rows.length > 0) {
-          const creditLimit = new Decimal(creditCheck.rows[0].credit_limit || 0);
-          const currentBalance = new Decimal(creditCheck.rows[0].current_balance || 0);
-          const newBalance = currentBalance.plus(totalAmount);
-          if (creditLimit.greaterThan(0) && newBalance.greaterThan(creditLimit)) {
-            throw new Error(
-              `Credit limit exceeded. Limit: ${creditLimit.toFixed(2)}, ` +
-              `Current balance: ${currentBalance.toFixed(2)}, ` +
-              `Quote total: ${totalAmount}. ` +
-              `New balance would be ${newBalance.toFixed(2)}.`
-            );
-          }
+      // BR-QUOTE-013 + BR-SAL-003: Credit limit enforcement via Sales SSOT.
+      // Covers BOTH 'none' (full credit) and 'partial' (deposit + outstanding balance)
+      // — the prior inline check only ran for 'none' and used a raw query.
+      // For partial deposits the outstanding amount is what hits the customer's AR.
+      if (data.paymentOption === 'none' || data.paymentOption === 'partial') {
+        const outstandingAmount = data.paymentOption === 'partial'
+          ? Math.max(0, totalAmount - (data.depositAmount || 0))
+          : totalAmount;
+        if (outstandingAmount > 0) {
+          await SalesBusinessRules.validateCreditSale(
+            client,
+            customerId,
+            outstandingAmount,
+            'CREDIT',
+          );
         }
       }
 
       // Log the values being used for audit trail
-      console.log('Quote to Sale conversion - verified values:', {
+      logger.info('Quote to Sale conversion - verified values', {
         quoteNumber: quotation.quote_number,
         subtotal: quoteSubtotal,
         tax: quoteTax,
         discount: quoteDiscount,
         total: quoteTotal,
-        totalAmount: totalAmount, // This should equal quoteTotal
+        totalAmount,
       });
 
-      // Create sale
-      const sale = await client.query(
-        `INSERT INTO sales (
-          sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount,
-          total_amount, total_cost, profit, profit_margin, payment_method, amount_paid,
-          change_amount, cashier_id, quote_id
-        ) VALUES (
-          (SELECT CONCAT('SALE-', EXTRACT(YEAR FROM CURRENT_DATE), '-',
-           LPAD((COALESCE(MAX(CAST(SPLIT_PART(sale_number, '-', 3) AS INTEGER)), 0) + 1)::TEXT, 4, '0'))
-           FROM sales WHERE sale_number LIKE CONCAT('SALE-', EXTRACT(YEAR FROM CURRENT_DATE), '-%')),
-          $1, CURRENT_DATE, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-        ) RETURNING *`,
-        [
-          customerId,
-          parseFloat(quotation.subtotal),
-          parseFloat(quotation.tax_amount),
-          parseFloat(quotation.discount_amount),
-          totalAmount,
-          totalCost,
-          new Decimal(totalAmount).minus(totalCost).toNumber(),
-          totalAmount > 0 ? new Decimal(totalAmount).minus(totalCost).dividedBy(totalAmount).toNumber() : 0,
-          data.paymentOption === 'none' ? 'CREDIT' : (data.depositMethod || 'CASH'),
-          data.paymentOption === 'full' ? totalAmount : (data.depositAmount || 0),
-          0,
-          data.cashierId,
-          quotation.id,
-        ]
-      );
+      // ============================================================
+      // SALES SSOT: route header insert through salesRepository.createSale
+      // Gains (vs prior raw INSERT):
+      //   - generateSaleNumber (pg_advisory_xact_lock) — no sale_number race
+      //   - checkAccountingPeriodOpen — period control enforced
+      //   - idempotency_key / offline_id / cash_register_session_id columns set
+      //   - profit = (subtotal - discount) - totalCost  (tax-excluded, correct)
+      //   - chk_sales_payment_valid → BusinessError mapping
+      // Idempotency key "QC:<quoteId>" makes retry of a transiently-failed
+      // conversion safe (advisory_lock+unique key prevents duplicate sales).
+      // ============================================================
+      const saleData: CreateSaleData = {
+        customerId,
+        subtotal: parseFloat(quotation.subtotal),
+        totalAmount,
+        totalCost,
+        discountAmount: parseFloat(quotation.discount_amount),
+        taxAmount: parseFloat(quotation.tax_amount) || 0,
+        paymentMethod: data.paymentOption === 'none' ? 'CREDIT' : (data.depositMethod || 'CASH'),
+        paymentReceived: data.paymentOption === 'full' ? totalAmount : (data.depositAmount || 0),
+        changeAmount: 0,
+        soldBy: data.cashierId,
+        saleDate: getBusinessDate(),
+        quoteId: quotation.id,
+        idempotencyKey: `QC:${quotation.id}`,
+        cashRegisterSessionId: data.cashRegisterSessionId,
+      };
 
-      const saleRecord = sale.rows[0];
+      const createdSale = await salesRepository.createSale(client, saleData);
 
-      // Create sale items
-      for (const item of saleItems) {
-        // Handle custom/service items (productId starts with 'custom_')
-        const isCustomItem = item.productId?.startsWith('custom_');
-        const productId = isCustomItem ? null : item.productId;
-        const itemType = isCustomItem ? 'custom' : 'product';
+      // Re-shape to the raw snake_case row the downstream GL/document-flow code expects.
+      // (salesRepository returns camelCase via RETURNING aliases.)
+      // SaleRecord type does not currently expose cash_register_session_id, so we
+      // narrow via Record access — runtime field is set by the RETURNING clause.
+      const createdSaleAny = createdSale as unknown as Record<string, unknown>;
+      const saleRecord = {
+        id: createdSale.id,
+        sale_number: createdSale.saleNumber,
+        customer_id: createdSale.customerId,
+        sale_date: (createdSale.saleDate ?? getBusinessDate()) as string,
+        subtotal: createdSale.subtotal,
+        tax_amount: createdSale.taxAmount,
+        discount_amount: createdSale.discountAmount,
+        total_amount: createdSale.totalAmount,
+        total_cost: createdSale.totalCost,
+        profit: createdSale.profit,
+        profit_margin: createdSale.profitMargin,
+        payment_method: createdSale.paymentMethod,
+        amount_paid: createdSale.amountPaid,
+        change_amount: createdSale.changeAmount,
+        cashier_id: createdSale.cashierId,
+        quote_id: createdSale.quoteId,
+        cash_register_session_id: createdSaleAny.cashRegisterSessionId as string | null,
+        created_at: createdSale.createdAt,
+      };
+
+      // ============================================================
+      // SALES SSOT: route line inserts through salesRepository.addSaleItems
+      // Gains (vs prior raw per-line INSERT loop):
+      //   - product_type + income_account_id auto-resolved (replaces trigger)
+      //   - MUoM snapshot persisted on every line (base_qty/base_uom_id/conversion_factor)
+      //   - Single batched INSERT (1 round trip vs N)
+      //   - discount_amount column populated (default 0 — quotes have no cart discount;
+      //     header-level discount is captured on sales.discount_amount)
+      // ============================================================
+      const saleItemData: CreateSaleItemData[] = saleItems.map((item) => {
         const snap = item.uomSnapshot;
+        // For custom items, saleItems[].productId is the 'custom_*' string; addSaleItems
+        // detects this prefix and stores product_id = NULL with item_type = 'custom'.
+        // For regular products it is the UUID. Both are non-null strings here.
+        return {
+          saleId: saleRecord.id,
+          productId: (item.productId ?? '') as string,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          lineTotal: item.lineTotal,
+          costPrice: item.costPrice,
+          profit: item.profit,
+          discountAmount: 0, // header-level discount lives on sales.discount_amount
+          uomId: item.uomId,
+          baseQty: snap ? snap.baseQuantity : null,
+          baseUomId: snap ? snap.baseUomId : null,
+          conversionFactor: snap ? snap.conversionFactor : 1,
+        };
+      });
 
-        if (hasSaleItemUomSnapshot && snap) {
-          await client.query(
-            `INSERT INTO sale_items (
-              sale_id, product_id, product_name, item_type, quantity, unit_price,
-              total_price, unit_cost, profit, uom_id, base_qty, base_uom_id, conversion_factor
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-            [
-              saleRecord.id,
-              productId,
-              item.productName,
-              itemType,
-              item.quantity,
-              item.unitPrice,
-              item.lineTotal,
-              item.costPrice,
-              item.profit,
-              item.uomId,
-              snap.baseQuantity,
-              snap.baseUomId,
-              snap.conversionFactor,
-            ],
-          );
-        } else {
-          await client.query(
-            `INSERT INTO sale_items (
-              sale_id, product_id, product_name, item_type, quantity, unit_price,
-              total_price, unit_cost, profit, uom_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-            [
-              saleRecord.id,
-              productId,
-              item.productName,
-              itemType,
-              item.quantity,
-              item.unitPrice,
-              item.lineTotal,
-              item.costPrice,
-              item.profit,
-              item.uomId,
-            ],
-          );
-        }
-      }
+      await salesRepository.addSaleItems(client, saleItemData);
 
       // FEFO STOCK DEDUCTION — base_quantity SSOT (Rule 2).
       for (const item of saleItems) {
@@ -975,76 +988,81 @@ export const quotationService = {
       // Document Flow: Quotation → Sale
       await documentFlowService.linkDocuments(client, 'QUOTATION', quotation.id, 'SALE', saleRecord.id, 'CREATED_FROM');
 
-      // BR-QUOTE-003: Mark quotation as CONVERTED (proper business logic)
-      // CONVERTED status indicates the quotation has been fulfilled
-      // This prevents duplicate conversions and provides clear audit trail
+      // ============================================================
+      // Phase 2 (now atomic with Phase 1): create invoice + apply payment.
+      //
+      // invoiceService.createInvoice and invoiceService.addPayment accept
+      // `Pool | PoolClient` and route through UnitOfWork.runOrJoin, so they
+      // JOIN this transaction instead of opening their own. Any failure here
+      // rolls back the sale, GL, stock, and document-flow links atomically —
+      // no orphan sales, no BR-QUOTE-PHASE2-FAIL recovery path needed.
+      // ============================================================
+      const dueDate = addDaysToDateString(getBusinessDate(), 30);
+      const invoiceResult = await invoiceService.createInvoice(client, {
+        saleId: saleRecord.id,
+        customerId: customerId,
+        quoteId: quotation.id,
+        dueDate: dueDate,
+      });
+      const invoice = invoiceResult.invoice;
+      const invoiceId = invoice?.id as string | undefined;
+
+      if (invoiceId) {
+        await documentFlowService.linkDocuments(client, 'SALE', saleRecord.id, 'INVOICE', invoiceId, 'CREATED_FROM');
+        await documentFlowService.linkDocuments(client, 'QUOTATION', quotation.id, 'INVOICE', invoiceId, 'CREATED_FROM');
+      }
+
+      let payment: Record<string, unknown> | undefined;
+      if (invoiceId) {
+        if (data.paymentOption === 'full') {
+          // Full payment: mark invoice as PAID immediately
+          const paymentDate = getBusinessDate();
+          const paymentResult = await invoiceService.addPayment(client, invoiceId, {
+            paymentDate: paymentDate,
+            amount: totalAmount,
+            paymentMethod: data.depositMethod || 'CASH',
+            notes: `Full payment for quote ${quotation.quote_number}`,
+          });
+          payment = paymentResult?.payment as unknown as Record<string, unknown> | undefined;
+        } else if (data.paymentOption === 'partial' && data.depositAmount) {
+          // Partial payment: record deposit, invoice remains PARTIALLY_PAID
+          const paymentDate = getBusinessDate();
+          const paymentResult = await invoiceService.addPayment(client, invoiceId, {
+            paymentDate: paymentDate,
+            amount: data.depositAmount,
+            paymentMethod: data.depositMethod!,
+            notes: `Deposit for quote ${quotation.quote_number}`,
+          });
+          payment = paymentResult?.payment as unknown as Record<string, unknown> | undefined;
+        }
+        // For 'none': invoice remains UNPAID with full balance due
+      }
+
+      // BR-QUOTE-003: Mark quotation as CONVERTED and link the invoice in one shot.
+      // This used to be split (set CONVERTED in Phase 1 with invoice_id=null, then a
+      // post-commit pool.query updated converted_to_invoice_id). Now we have the
+      // invoice id available inside the same transaction, so we link it directly.
       await quotationRepository.markQuotationAsConverted(
         client,
         quotation.id,
         saleRecord.id,
-        null // Will update with invoice ID later
+        invoiceId ?? null,
       );
 
-      return { saleRecord, quotation, customerId, totalAmount };
+      if (invoiceId) {
+        await client.query(
+          'UPDATE quotations SET converted_to_invoice_id = $1, updated_at = NOW() WHERE id = $2',
+          [invoiceId, quotation.id],
+        );
+      }
+
+      return { saleRecord, quotation, customerId, totalAmount, invoice, payment };
     });
-
-    // Phase 2: Post-commit work - create invoice and handle payment
-    // These use pool (separate connections) because the sale must be committed first
-    let invoice: unknown;
-    let payment: Record<string, unknown> | undefined;
-
-    // Create invoice AFTER committing the sale transaction
-    // This ensures the sale is visible to the invoice service
-    const dueDate = addDaysToDateString(getBusinessDate(), 30);
-    const invoiceResult = await invoiceService.createInvoice(pool, {
-      saleId: saleRecord.id,
-      customerId: customerId,
-      quoteId: quotation.id,
-      dueDate: dueDate,
-    });
-    invoice = invoiceResult.invoice;
-
-    // Document Flow: Sale → Invoice (and Quotation → Invoice)
-    if (invoice) {
-      const invoiceId = (invoice as Record<string, string>).id;
-      await documentFlowService.linkDocuments(pool, 'SALE', saleRecord.id, 'INVOICE', invoiceId, 'CREATED_FROM');
-      await documentFlowService.linkDocuments(pool, 'QUOTATION', quotation.id, 'INVOICE', invoiceId, 'CREATED_FROM');
-    }
-
-    // Handle payment recording based on payment option
-    if (data.paymentOption === 'full' && invoice) {
-      // Full payment: mark invoice as PAID immediately
-      const paymentDate = getBusinessDate();
-      await invoiceService.addPayment(pool, (invoice as Record<string, string>).id, {
-        paymentDate: paymentDate,
-        amount: totalAmount,
-        paymentMethod: data.depositMethod || 'CASH',
-        notes: `Full payment for quote ${quotation.quote_number}`,
-      });
-    } else if (data.paymentOption === 'partial' && data.depositAmount && invoice) {
-      // Partial payment: record deposit, invoice remains PARTIALLY_PAID
-      const paymentDate = getBusinessDate();
-      await invoiceService.addPayment(pool, (invoice as Record<string, string>).id, {
-        paymentDate: paymentDate,
-        amount: data.depositAmount,
-        paymentMethod: data.depositMethod!,
-        notes: `Deposit for quote ${quotation.quote_number}`,
-      });
-    }
-    // For 'none': invoice remains UNPAID with full balance due
-
-    // Update quotation with invoice ID if invoice was created
-    if (invoice) {
-      await pool.query(
-        'UPDATE quotations SET converted_to_invoice_id = $1, updated_at = NOW() WHERE id = $2',
-        [(invoice as Record<string, string>).id, quotation.id]
-      );
-    }
 
     return {
-      sale: saleRecord,
-      invoice,
-      payment,
+      sale: result.saleRecord,
+      invoice: result.invoice,
+      payment: result.payment,
     };
   },
 
@@ -1055,25 +1073,33 @@ export const quotationService = {
     await UnitOfWork.run(pool, async (client) => {
       const result = await quotationRepository.getQuotationById(pool, id);
       if (!result) {
-        throw new Error('Quotation not found');
+        throw new NotFoundError('Quotation not found');
       }
 
-      const status = result.quotation.status;
+      const { status, quote_number } = result.quotation;
+      const convertedToSaleId = result.quotation.converted_to_sale_id;
+      const convertedToSoId = (result.quotation as { converted_to_so_id?: string | null }).converted_to_so_id ?? null;
+
+      const convertedToDnId = (result.quotation as { converted_to_dn_id?: string | null }).converted_to_dn_id ?? null;
 
       if (permanent) {
         // Hard delete — only allowed for CANCELLED quotations
         if (status !== 'CANCELLED') {
-          throw new Error('Only cancelled quotations can be permanently deleted');
+          throw new ConflictError(
+            `Quotation ${quote_number} is ${status}; only CANCELLED quotations can be permanently deleted.`,
+          );
         }
         await quotationRepository.hardDeleteQuotation(client, id);
         return;
       }
 
-      if (status === 'CONVERTED') {
-        throw new Error('Cannot delete a converted quotation');
+      if (status === 'CONVERTED' || convertedToSaleId || convertedToSoId || convertedToDnId) {
+        throw new ConflictError(
+          `Quotation ${quote_number} is locked: it has been converted to a downstream document.`,
+        );
       }
       if (status === 'CANCELLED') {
-        throw new Error('Quotation is already cancelled');
+        throw new ConflictError(`Quotation ${quote_number} is already cancelled.`);
       }
 
       // Soft delete by setting status to CANCELLED
@@ -1188,18 +1214,17 @@ export const quotationService = {
     decisions: Array<{ itemId: string; status: 'ACCEPTED' | 'REJECTED'; rejectionReason?: string }>
   ): Promise<QuotationItem[]> {
     return UnitOfWork.run(pool, async (client) => {
-      // Verify quotation is in a valid state for edits
+      // Verify quotation is in a valid state for edits — SSOT guard.
       const quoteResult = await client.query(
-        'SELECT status FROM quotations WHERE id = $1',
+        `SELECT status, quote_number, converted_to_sale_id, converted_to_so_id, converted_to_dn_id
+           FROM quotations WHERE id = $1 FOR UPDATE`,
         [quotationId]
       );
       if (quoteResult.rows.length === 0) {
-        throw new Error('Quotation not found');
+        throw new NotFoundError('Quotation not found');
       }
+      assertEditableQuotation(quoteResult.rows[0]);
       const status = quoteResult.rows[0].status;
-      if (status === 'CONVERTED' || status === 'CANCELLED') {
-        throw new Error(`Cannot modify items on a ${status} quotation`);
-      }
 
       // Verify all items belong to this quotation
       for (const d of decisions) {
@@ -1208,7 +1233,7 @@ export const quotationService = {
           [d.itemId, quotationId]
         );
         if (itemCheck.rows.length === 0) {
-          throw new Error(`Item ${d.itemId} does not belong to quotation ${quotationId}`);
+          throw new ValidationError(`Item ${d.itemId} does not belong to quotation ${quotationId}`);
         }
       }
 

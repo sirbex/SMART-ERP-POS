@@ -6,13 +6,14 @@ import { accountingApiClient } from '../../services/accountingApiClient.js';
 import * as depositsService from '../deposits/depositsService.js';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
-import { UnitOfWork } from '../../db/unitOfWork.js';
+import { UnitOfWork, DbConnection } from '../../db/unitOfWork.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 import * as arPaymentService from '../ar-payments/arPaymentService.js';
 import { AR_SSOT_INVOICE_PAYMENT_METHODS } from '../ar-payments/arPaymentService.js';
 import * as openItemEngine from '../ar-payments/openItemAllocationEngine.js';
+import { ValidationError } from '../../middleware/errorHandler.js';
 
 /** Raw DB row from payment_lines table as returned by salesRepository */
 interface PaymentLineRow {
@@ -89,7 +90,7 @@ type InvoicePaymentInput = {
 };
 
 async function syncLinkedSaleAfterInvoicePayment(
-  pool: Pool,
+  handle: DbConnection,
   inv: { sale_id: string | null; invoice_number: string },
   fresh: { amount_paid: number | null; total_amount: number | null },
   paymentMethod: string,
@@ -100,12 +101,12 @@ async function syncLinkedSaleAfterInvoicePayment(
   const isFullyPaid = new Decimal(fresh.amount_paid || 0).greaterThanOrEqualTo(
     new Decimal(fresh.total_amount),
   );
-  const saleResult = await pool.query('SELECT payment_method FROM sales WHERE id = $1', [inv.sale_id]);
+  const saleResult = await handle.query('SELECT payment_method FROM sales WHERE id = $1', [inv.sale_id]);
   const currentPaymentMethod = saleResult.rows[0]?.payment_method;
   const newPaymentMethod =
     isFullyPaid && currentPaymentMethod === 'CREDIT' ? paymentMethod : currentPaymentMethod;
 
-  await pool.query(
+  await handle.query(
     `UPDATE sales
      SET amount_paid = $1,
          payment_method = $2::payment_method
@@ -368,7 +369,7 @@ export const invoiceService = {
    * - CANCELLED: Invoice voided
    */
   async createInvoice(
-    pool: Pool,
+    handle: DbConnection,
     input: {
       customerId: string;
       saleId?: string | null;
@@ -386,7 +387,7 @@ export const invoiceService = {
 
     // Enforce uniqueness: one invoice per sale
     if (input.saleId) {
-      const existing = await invoiceRepository.findBySaleId(pool, input.saleId);
+      const existing = await invoiceRepository.findBySaleId(handle, input.saleId);
       if (existing) {
         throw new Error('An invoice already exists for this sale');
       }
@@ -399,7 +400,7 @@ export const invoiceService = {
     let saleAmountPaid = 0;
 
     if (input.saleId) {
-      const saleData = await salesRepository.getSaleById(pool, input.saleId);
+      const saleData = await salesRepository.getSaleById(handle, input.saleId);
       if (!saleData) throw new Error(`Sale ${input.saleId} not found`);
 
       // Cast sale to raw DB field shape (repository types use camelCase but actual DB rows are snake_case)
@@ -519,9 +520,11 @@ export const invoiceService = {
 
     // ============================================================
     // MUTATION PHASE (all writes inside a single transaction)
-    // Advisory xact locks in invoiceRepository are now effective
+    // Advisory xact locks in invoiceRepository are now effective.
+    // When called from an outer transaction (handle === PoolClient), runOrJoin
+    // joins it so the invoice + payments are atomic with the caller's work.
     // ============================================================
-    const fresh = await UnitOfWork.run(pool, async (client: PoolClient) => {
+    const fresh = await UnitOfWork.runOrJoin(handle, async (client: PoolClient) => {
       // Re-check uniqueness inside transaction (prevent race condition)
       if (input.saleId) {
         const existing = await invoiceRepository.findBySaleId(client, input.saleId);
@@ -615,9 +618,15 @@ export const invoiceService = {
     // Invoice *payments* post GL via recordInvoicePaymentToGL below.
     // ============================================================
 
-    // DELIVERY INTEGRATION: Auto-create delivery order for invoice if customer needs delivery
-    // CRITICAL: Non-blocking - invoice creation continues even if delivery creation fails
-    setImmediate(async () => {
+    // DELIVERY INTEGRATION: Auto-create delivery order for invoice if customer needs delivery.
+    // CRITICAL: Non-blocking — invoice creation continues even if delivery creation fails.
+    // When createInvoice is composed inside another transaction (handle === PoolClient), the
+    // outer caller controls commit timing; we can still queue the side-effect against the
+    // underlying Pool which we recover from the handle.
+    const postCommitPool: Pool | undefined = UnitOfWork.isPool(handle) ? handle : undefined;
+    if (postCommitPool) {
+      const pool = postCommitPool;
+      setImmediate(async () => {
       try {
         // Only create delivery order if invoice is linked to a sale (has actual products)
         if (fresh.sale_id) {
@@ -705,7 +714,13 @@ export const invoiceService = {
           error: error instanceof Error ? error.message : String(error),
         });
       }
-    });
+      });
+    } else {
+      logger.debug('Skipping post-commit auto-delivery dispatch — invoice created inside a composed transaction (no Pool available)', {
+        invoiceId: fresh.id,
+        invoiceNumber: fresh.invoice_number,
+      });
+    }
 
     return { invoice: fresh, initialPayment: null };
   },
@@ -766,16 +781,16 @@ export const invoiceService = {
   },
 
   async addPayment(
-    pool: Pool,
+    handle: DbConnection,
     invoiceId: string,
     input: InvoicePaymentInput,
   ) {
     // SSOT: standard clearing methods post through AR open-item engine (one CUSTOMER_PAYMENT GL doc).
     if (AR_SSOT_INVOICE_PAYMENT_METHODS.has(input.paymentMethod)) {
-      const result = await arPaymentService.recordInvoicePaymentViaArSsot(pool, invoiceId, input);
+      const result = await arPaymentService.recordInvoicePaymentViaArSsot(handle, invoiceId, input);
       if (result.invoice?.sale_id) {
         await syncLinkedSaleAfterInvoicePayment(
-          pool,
+          handle,
           { sale_id: result.invoice.sale_id, invoice_number: result.invoice.invoice_number },
           result.invoice,
           input.paymentMethod,
@@ -785,8 +800,16 @@ export const invoiceService = {
       return { invoice: result.invoice, payment: result.payment };
     }
 
-    // DEPOSIT / CREDIT retain legacy path until deposit/credit GL is folded into AR engine.
-    return addLegacyInvoicePayment(pool, invoiceId, input);
+    // DEPOSIT / CREDIT retain legacy path (own transaction, requires a Pool) until those
+    // paths are folded into the AR engine. Composed callers using a PoolClient must use
+    // one of the AR_SSOT_INVOICE_PAYMENT_METHODS instead.
+    if (!UnitOfWork.isPool(handle)) {
+      throw new ValidationError(
+        `Payment method ${input.paymentMethod} is not supported inside a composed transaction. ` +
+        `Use CASH / CARD / MOBILE_MONEY / BANK_TRANSFER, or call addPayment with a Pool.`,
+      );
+    }
+    return addLegacyInvoicePayment(handle, invoiceId, input);
   },
 
   async listPayments(pool: Pool, invoiceId: string) {

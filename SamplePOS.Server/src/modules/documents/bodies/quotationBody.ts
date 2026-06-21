@@ -7,6 +7,8 @@ import { Layout } from '../baseDocumentLayout.js';
 import { Money } from '../../../utils/money.js';
 
 export interface QuotationBodyData {
+    /** When false, tax row is omitted (matches UI when no line is taxable). */
+    showTax?: boolean;
     quotation: {
         quoteNumber: string;
         quoteType: string;
@@ -127,7 +129,9 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
         ...(data.quotation.discountAmount > 0
             ? [{ label: 'Discount', value: `-${fmt(data.quotation.discountAmount)}` }]
             : []),
-        ...(theme.flags.showTaxBreakdown && data.quotation.taxAmount > 0
+        ...(data.showTax !== false
+            && theme.flags.showTaxBreakdown
+            && data.quotation.taxAmount > 0
             ? [{ label: 'Tax', value: fmt(data.quotation.taxAmount) }]
             : []),
         { label: 'Total', value: fmt(data.quotation.totalAmount), emphasize: true },

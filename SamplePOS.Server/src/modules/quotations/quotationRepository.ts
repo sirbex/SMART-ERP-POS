@@ -12,9 +12,11 @@
  */
 
 import { Pool, PoolClient } from 'pg';
+import type { DbConnection } from '../../db/unitOfWork.js';
 import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { toUtcRange, BUSINESS_TIMEZONE } from '../../utils/dateRange.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
+import { CLOSED_QUOTATION_STATUSES } from '../../../../shared/zod/quotation.js';
 
 // ============================================================================
 // DATABASE ROW INTERFACES (snake_case from database)
@@ -39,6 +41,8 @@ export interface QuotationDbRow {
   valid_until: Date;
   converted_to_sale_id: string | null;
   converted_to_invoice_id: string | null;
+  converted_to_so_id: string | null;
+  converted_to_dn_id: string | null;
   converted_at: Date | null;
   created_by_id: string | null;
   assigned_to_id: string | null;
@@ -255,11 +259,11 @@ export const quotationRepository = {
    * Includes human-readable sale_number and invoice_number for converted quotations
    */
   async getQuotationById(
-    pool: Pool,
+    db: DbConnection,
     id: string
   ): Promise<{ quotation: QuotationDbRow & { converted_to_sale_number?: string; converted_to_invoice_number?: string }; items: QuotationItemDbRow[] } | null> {
     // LEFT JOIN to get human-readable sale_number and invoice_number
-    const quotationResult = await pool.query<QuotationDbRow & { converted_to_sale_number?: string; converted_to_invoice_number?: string }>(
+    const quotationResult = await db.query<QuotationDbRow & { converted_to_sale_number?: string; converted_to_invoice_number?: string }>(
       `SELECT q.*, 
               s.sale_number as converted_to_sale_number,
               i.invoice_number as converted_to_invoice_number
@@ -276,7 +280,7 @@ export const quotationRepository = {
 
     // Fetch items with product names from products table (LEFT JOIN for custom items)
     // Priority: 1) quotation_items.description, 2) products.name, 3) 'Unknown Product'
-    const itemsResult = await pool.query<QuotationItemDbRow>(
+    const itemsResult = await db.query<QuotationItemDbRow>(
       `SELECT 
         qi.id, qi.quotation_id, qi.line_number, qi.product_id, qi.item_type,
         COALESCE(NULLIF(qi.sku, ''), p.sku) as sku,
@@ -362,6 +366,7 @@ export const quotationRepository = {
       fromDate?: string;
       toDate?: string;
       searchTerm?: string;
+      openOnly?: boolean;
     }
   ): Promise<{ quotations: QuotationDbRow[]; total: number }> {
     const offset = (filters.page - 1) * filters.limit;
@@ -377,6 +382,15 @@ export const quotationRepository = {
     if (filters.status) {
       where.push(`status = $${idx++}::quotation_status`);
       values.push(filters.status);
+    } else if (filters.openOnly) {
+      // SSOT for "open": every closed/terminal status excluded server-side
+      // so pagination totals reflect the actual visible set.
+      where.push(
+        `status NOT IN (${CLOSED_QUOTATION_STATUSES
+          .map(() => `$${idx++}::quotation_status`)
+          .join(', ')})`,
+      );
+      values.push(...CLOSED_QUOTATION_STATUSES);
     }
 
     if (filters.quoteType) {
@@ -486,7 +500,10 @@ export const quotationRepository = {
     saleId: string,
     invoiceId: string | null
   ): Promise<QuotationDbRow> {
-    // Atomic convert-once guard (replaces tr_protect_converted_quotation)
+    // Atomic convert-once guard (replaces tr_protect_converted_quotation).
+    // Rejects the claim if the quote was already consumed by EITHER conversion
+    // path (retail sale OR wholesale SO) so the two services cannot both
+    // win a race against the same quotation.
     const result = await client.query<QuotationDbRow>(
       `UPDATE quotations 
        SET status = 'CONVERTED',
@@ -498,6 +515,8 @@ export const quotationRepository = {
        WHERE id = $3
          AND status != 'CONVERTED'
          AND converted_to_sale_id IS NULL
+         AND converted_to_so_id IS NULL
+         AND converted_to_dn_id IS NULL
        RETURNING *`,
       [saleId, invoiceId, quotationId]
     );
@@ -507,6 +526,99 @@ export const quotationRepository = {
     }
 
     return result.rows[0];
+  },
+
+  /**
+   * Mark quotation as converted to a Distribution Sales Order (wholesale path).
+   *
+   * Sister of markQuotationAsConverted but claims the wholesale FK. Shares the
+   * same convert-once contract so retail and wholesale paths cannot both
+   * succeed against the same quotation.
+   */
+  async markQuotationAsConvertedToSO(
+    client: PoolClient,
+    quotationId: string,
+    salesOrderId: string,
+  ): Promise<QuotationDbRow> {
+    const result = await client.query<QuotationDbRow>(
+      `UPDATE quotations
+       SET status = 'CONVERTED',
+           converted_to_so_id = $1,
+           version = version + 1,
+           converted_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $2
+         AND status != 'CONVERTED'
+         AND converted_to_sale_id IS NULL
+         AND converted_to_so_id IS NULL
+         AND converted_to_dn_id IS NULL
+       RETURNING *`,
+      [salesOrderId, quotationId],
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error('Quotation has already been converted or does not exist');
+    }
+
+    return result.rows[0];
+  },
+
+  /**
+   * Mark a wholesale quotation as CONVERTED via the legacy Delivery Note path,
+   * pointing converted_to_dn_id at the FIRST delivery note created against it.
+   *
+   * Subsequent DNs against the same quote are expected — they do NOT call this
+   * method, and they do NOT change the pointer. The first DN's id is a
+   * representative trace for the lifecycle transition (same pattern as
+   * SAP's first-reference-document principle).
+   *
+   * Contract:
+   *   - returns { alreadyClaimed: false, row } when this call wins the claim
+   *   - returns { alreadyClaimed: true,  row: null } when the quote was already
+   *     locked by ANY prior conversion (retail sale, distribution SO, or a
+   *     previous DN). The caller should treat this as a no-op success and
+   *     continue creating the DN — the lock is already held by the same
+   *     wholesale lifecycle.
+   *   - throws if the row is missing entirely (caller should have validated).
+   *
+   * The WHERE clause is the SSOT for "this quote is unclaimed" — keep it in
+   * lockstep with markQuotationAsConverted and markQuotationAsConvertedToSO.
+   */
+  async markQuotationAsConvertedToFirstDN(
+    client: PoolClient,
+    quotationId: string,
+    deliveryNoteId: string,
+  ): Promise<{ alreadyClaimed: boolean; row: QuotationDbRow | null }> {
+    const result = await client.query<QuotationDbRow>(
+      `UPDATE quotations
+       SET status = 'CONVERTED',
+           converted_to_dn_id = $1,
+           version = version + 1,
+           converted_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $2
+         AND status != 'CONVERTED'
+         AND converted_to_sale_id IS NULL
+         AND converted_to_so_id IS NULL
+         AND converted_to_dn_id IS NULL
+       RETURNING *`,
+      [deliveryNoteId, quotationId],
+    );
+
+    if (result.rows.length === 0) {
+      // Either the quote is gone (caller should have validated) or it was
+      // already claimed by another path. Distinguish via a follow-up read.
+      const exists = await client.query<{ id: string }>(
+        'SELECT id FROM quotations WHERE id = $1',
+        [quotationId],
+      );
+      if (exists.rows.length === 0) {
+        throw new Error('Quotation not found');
+      }
+      return { alreadyClaimed: true, row: null };
+    }
+
+    return { alreadyClaimed: false, row: result.rows[0] };
   },
 
   /**

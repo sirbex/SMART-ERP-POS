@@ -23,7 +23,9 @@ import type {
   BatchAdjustmentInput,
 } from '../types/inputs';
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+import { getApiBaseUrl } from '../lib/apiBase';
+
+export const API_BASE_URL = getApiBaseUrl();
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

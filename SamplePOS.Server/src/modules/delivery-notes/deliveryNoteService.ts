@@ -7,6 +7,7 @@ import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { deliveryNoteRepository } from './deliveryNoteRepository.js';
+import { quotationRepository } from '../quotations/quotationRepository.js';
 import { deductStockFEFO as sharedDeductStockFEFO } from '../../utils/fefoDeduction.js';
 import logger from '../../utils/logger.js';
 import { NotFoundError, ValidationError, ConflictError } from '../../middleware/errorHandler.js';
@@ -42,10 +43,11 @@ export const deliveryNoteService = {
     data: CreateDeliveryNoteData
   ): Promise<DeliveryNoteWithLines> {
     return UnitOfWork.run(pool, async (client: PoolClient) => {
-      // ── Validate quotation ───────────────────────────────────
+      // ── Validate quotation (lock row to prevent concurrent claim races) ──
       const qResult = await client.query(
-        `SELECT id, quote_number, customer_id, customer_name, fulfillment_mode, status
-         FROM quotations WHERE id = $1`,
+        `SELECT id, quote_number, customer_id, customer_name, fulfillment_mode, status,
+                converted_to_sale_id, converted_to_so_id, converted_to_dn_id
+         FROM quotations WHERE id = $1 FOR UPDATE`,
         [data.quotationId]
       );
       if (qResult.rows.length === 0) {
@@ -59,10 +61,28 @@ export const deliveryNoteService = {
         );
       }
 
-      const terminalStatuses = ['CONVERTED', 'CANCELLED', 'REJECTED', 'EXPIRED'];
-      if (terminalStatuses.includes(quotation.status)) {
+      // Hard-terminal statuses always block.
+      if (['CANCELLED', 'REJECTED', 'EXPIRED'].includes(quotation.status)) {
         throw new ConflictError(
           `Cannot create delivery note: quotation ${quotation.quote_number} is ${quotation.status}`
+        );
+      }
+      // CONVERTED is allowed ONLY if the conversion path was DN — additional
+      // partial-delivery DNs may still be created against the same quote.
+      // If the quote was claimed by a retail Sale or a Distribution SO, block.
+      if (quotation.status === 'CONVERTED' && quotation.converted_to_dn_id == null) {
+        if (quotation.converted_to_sale_id) {
+          throw new ConflictError(
+            `Quotation ${quotation.quote_number} is locked: converted to sale ${quotation.converted_to_sale_id}. Cannot create delivery note.`
+          );
+        }
+        if (quotation.converted_to_so_id) {
+          throw new ConflictError(
+            `Quotation ${quotation.quote_number} is locked: converted to distribution sales order ${quotation.converted_to_so_id}. Cannot create delivery note.`
+          );
+        }
+        throw new ConflictError(
+          `Quotation ${quotation.quote_number} is CONVERTED via an unknown path. Cannot create delivery note.`
         );
       }
 
@@ -184,6 +204,20 @@ export const deliveryNoteService = {
 
       // Recalculate header total
       await deliveryNoteRepository.recalcTotal(client, dn.id);
+
+      // ── Atomic first-DN claim (P6) ──────────────────────────
+      // Mark the source quotation CONVERTED and point converted_to_dn_id at
+      // THIS DN. If a previous DN already claimed the quote, the call is a
+      // silent no-op (idempotent by design — the lifecycle transition only
+      // happens once, on the first DN, but every DN must succeed).
+      //
+      // This closes the "ghost open quotation" loophole: a wholesale quote
+      // with any non-cancelled DN no longer appears in Open Quotations.
+      await quotationRepository.markQuotationAsConvertedToFirstDN(
+        client,
+        data.quotationId,
+        dn.id,
+      );
 
       // Return full DN with lines
       const result = await deliveryNoteRepository.getById(client, dn.id);
@@ -477,9 +511,12 @@ export const deliveryNoteService = {
         );
       }
 
+      // Recapture AFTER GL posting. `couplingAfterIssue` was taken between the
+      // batch deduction and the GL post specifically so we could compute the
+      // exact subledger delta to drive GL; it is stale for the final assert.
       assertInventoryCouplingUnchanged(
         inventoryCouplingBefore,
-        couplingAfterIssue,
+        await captureInventoryCoupling(client),
         `delivery note ${result.deliveryNoteNumber}`,
       );
 

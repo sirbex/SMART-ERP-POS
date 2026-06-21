@@ -41,6 +41,7 @@ jest.unstable_mockModule('../inventory/inventoryRepository.js', () => ({
 
 jest.unstable_mockModule('../supplier-payments/supplierPaymentRepository.js', () => ({
     createSupplierLiability: jest.fn<MockFn>().mockResolvedValue(undefined),
+    applyInvoiceLedgerOutstanding: jest.fn<MockFn>().mockResolvedValue({ changed: false, before: 0, after: 0 }),
 }));
 
 jest.unstable_mockModule('../../services/costLayerService.js', () => ({
