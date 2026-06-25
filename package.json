@@ -71,6 +71,8 @@
     "proof:quotation-uom:live": "node scripts/proof-quotation-uom-live.mjs",
     "proof:quotation-enterprise": "node scripts/proof-quotation-enterprise-matrix.mjs",
     "proof:quotation-pdf:live": "node scripts/proof-quotation-pdf-live.mjs",
+    "proof:quotation-invoice-pdf": "node scripts/proof-quotation-invoice-pdf-matrix.mjs",
+    "proof:quotation-invoice-pdf:live": "node scripts/proof-quotation-invoice-pdf-live.mjs",
     "proof:product-uom-idempotent:live": "node scripts/proof-product-uom-idempotent-live.mjs",
     "proof:synthetic-product-id": "node scripts/proof-synthetic-product-id-matrix.mjs",
     "audit:tenant-schema-drift": "node scripts/audit-tenant-schema-drift.mjs",

@@ -10,7 +10,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
 import type { QuotationStatus } from '@shared/types/quotation';
-import { getQuoteStatusBadge, getDaysUntilExpiry, calculateQuoteAge, normalizeStatus } from '@shared/types/quotation';
+import { getQuoteStatusBadge, getDaysUntilExpiry, calculateQuoteAge, normalizeStatus, isQuoteConvertibleFrom } from '@shared/types/quotation';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { formatTimestampDate } from '../../utils/businessDate';
@@ -421,7 +421,7 @@ export default function QuotationsPage() {
                         >
                           View
                         </button>
-                        {normalizeStatus(quote.status) === 'OPEN' && daysUntilExpiry > 0 && (
+                        {isQuoteConvertibleFrom(quote) && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

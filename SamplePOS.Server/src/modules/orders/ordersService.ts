@@ -25,6 +25,7 @@ export interface OrderItemInput {
 
 export interface CreateOrderInput {
   customerId?: string | null;
+  quoteId?: string | null;
   items: OrderItemInput[];
   subtotal?: number;
   discountAmount?: number;
@@ -123,6 +124,7 @@ export const ordersService = {
         // Create order header
         const orderData: CreateOrderData = {
           customerId: input.customerId || null,
+          quoteId: input.quoteId || null,
           subtotal: parseFloat(subtotal.toFixed(2)),
           discountAmount: parseFloat(discountAmount.toFixed(2)),
           taxAmount: parseFloat(taxAmount.toFixed(2)),

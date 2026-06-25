@@ -49,6 +49,13 @@ export function hasTaxableQuotationLines(items: QuotationLineCalc[]): boolean {
   return items.some((item) => item.isTaxable && (item.taxRate || 0) > 0);
 }
 
+/** SSOT: show discount column only when at least one line has a discount. */
+export function hasQuotationLineDiscounts(
+  items: Array<{ discountAmount?: number | null }>,
+): boolean {
+  return items.some((item) => (item.discountAmount ?? 0) > 0);
+}
+
 export function adjustQuotationQuantity(current: number, delta: number): number {
   const next = new Decimal(current || 0).plus(delta);
   return Math.max(0, next.toNumber());

@@ -62,6 +62,8 @@ export interface Quotation {
   convertedToSaleNumber?: string | null;
   convertedToInvoiceId: string | null;
   convertedToInvoiceNumber?: string | null;
+  convertedToSoId?: string | null;
+  convertedToDnId?: string | null;
   convertedAt: Date | null;
   createdById: string | null;
   internalNotes: string | null;
@@ -228,28 +230,71 @@ export const getQuoteStatusBadge = (status: QuotationStatus | QuotationDbStatus 
 export const isQuoteEditable = (status: QuotationStatus | QuotationDbStatus | string): boolean =>
   normalizeStatus(status) === 'OPEN';
 
+/** True when any downstream document has claimed this quotation. */
+export type QuotationConversionLinks = {
+  status?: string;
+  convertedToSaleId?: string | null;
+  convertedToInvoiceId?: string | null;
+  convertedToSoId?: string | null;
+  convertedToDnId?: string | null;
+};
+
+export const isQuotationConversionLocked = (links: QuotationConversionLinks): boolean => {
+  if (links.status && normalizeStatus(links.status) === 'CONVERTED') return true;
+  return !!(
+    links.convertedToSaleId
+    || links.convertedToInvoiceId
+    || links.convertedToSoId
+    || links.convertedToDnId
+  );
+};
+
+export const quotationConversionLinks = (q: QuotationConversionLinks): QuotationConversionLinks => ({
+  status: q.status,
+  convertedToSaleId: q.convertedToSaleId ?? null,
+  convertedToInvoiceId: q.convertedToInvoiceId ?? null,
+  convertedToSoId: q.convertedToSoId ?? null,
+  convertedToDnId: q.convertedToDnId ?? null,
+});
+
 /**
- * Conversion rules (SIMPLIFIED):
- * - OPEN (any non-converted, non-cancelled, non-expired status)
- * - Not already linked to a sale
+ * Conversion rules:
+ * - Not locked by status or any conversion FK
+ * - OPEN (non-terminal legacy statuses map to OPEN)
  * - Not expired
  */
 export const isQuoteConvertible = (
   status: QuotationStatus | QuotationDbStatus | string,
   validUntil: string,
-  convertedToSaleId?: string | null
+  convertedToSaleId?: string | null,
+  links?: Omit<QuotationConversionLinks, 'status' | 'validUntil'> | null,
 ): boolean => {
-  const normalized = normalizeStatus(status);
-  if (normalized !== 'OPEN') return false;
-  if (convertedToSaleId) return false;
+  if (isQuotationConversionLocked({ status, convertedToSaleId, ...links })) return false;
+  if (normalizeStatus(status) !== 'OPEN') return false;
   const today = new Date().toISOString().split('T')[0];
   return validUntil >= today;
 };
 
+export const isQuoteConvertibleFrom = (q: {
+  status: string;
+  validUntil: string;
+  convertedToSaleId?: string | null;
+  convertedToInvoiceId?: string | null;
+  convertedToSoId?: string | null;
+  convertedToDnId?: string | null;
+}): boolean =>
+  isQuoteConvertible(q.status, q.validUntil, q.convertedToSaleId, {
+    convertedToInvoiceId: q.convertedToInvoiceId,
+    convertedToSoId: q.convertedToSoId,
+    convertedToDnId: q.convertedToDnId,
+  });
+
 export const isQuoteFulfilled = (
   status: QuotationStatus | QuotationDbStatus | string,
-  convertedToSaleId?: string | null
-): boolean => normalizeStatus(status) === 'CONVERTED' || !!convertedToSaleId;
+  convertedToSaleId?: string | null,
+  links?: Omit<QuotationConversionLinks, 'status' | 'convertedToSaleId'> | null,
+): boolean =>
+  isQuotationConversionLocked({ status, convertedToSaleId, ...links });
 
 export const calculateQuoteAge = (createdAt: Date): number => {
   const now = new Date();

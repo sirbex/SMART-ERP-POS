@@ -19,6 +19,7 @@ import {
     customerIsActive,
 } from '../../utils/customerPriceGroupEdit';
 import { AdjustCustomerInvoiceModal } from '../shared/AdjustCustomerInvoiceModal';
+import { InvoiceSourceQuotationPanel } from '../invoices/InvoiceSourceQuotationPanel';
 import { useHasAnyPermission } from '../../hooks/useRbac';
 import { CustomerSmartStatementPanel } from './CustomerSmartStatementPanel';
 
@@ -134,6 +135,14 @@ interface InvoiceDetailResponse {
     };
     items: InvoiceDetailItem[];
     payments: InvoiceDetailPayment[];
+    sourceQuotation?: {
+        quoteId: string;
+        quoteNumber: string;
+        reference?: string | null;
+        referenceDetails?: string | null;
+        quotationAuthorisedByName?: string | null;
+    } | null;
+    invoiceAuthorisedByName?: string | null;
 }
 
 interface StatementResponse {
@@ -650,7 +659,19 @@ export default function CustomerDetailModal({
                                                                     </button>
                                                                 </div>
                                                                 {isExpanded && (
-                                                                    <div className="mt-2 border border-blue-200 rounded-lg p-2 bg-blue-50/30">
+                                                                    <div className="mt-2 border border-blue-200 rounded-lg p-2 bg-blue-50/30 space-y-2">
+                                                                        {expandedInvoiceDetails?.sourceQuotation && (
+                                                                            <InvoiceSourceQuotationPanel
+                                                                                source={expandedInvoiceDetails.sourceQuotation}
+                                                                                customer={{
+                                                                                    name: customer?.name ?? '',
+                                                                                    email: customer?.email ?? null,
+                                                                                    phone: customer?.phone ?? null,
+                                                                                }}
+                                                                                invoiceAuthorisedByName={expandedInvoiceDetails.invoiceAuthorisedByName}
+                                                                                className="!p-3"
+                                                                            />
+                                                                        )}
                                                                         {loadingExpandedInvoiceId === inv.id ? (
                                                                             <div className="text-xs text-gray-600">Loading invoice items...</div>
                                                                         ) : expandedInvoiceDetails?.items?.length ? (
@@ -811,6 +832,17 @@ export default function CustomerDetailModal({
                                                                                                 </div>
                                                                                             </div>
                                                                                             <div className="p-4 space-y-4">
+                                                                                                {expandedInvoiceDetails.sourceQuotation && (
+                                                                                                    <InvoiceSourceQuotationPanel
+                                                                                                        source={expandedInvoiceDetails.sourceQuotation}
+                                                                                                        customer={{
+                                                                                                            name: customer?.name ?? '',
+                                                                                                            email: customer?.email ?? null,
+                                                                                                            phone: customer?.phone ?? null,
+                                                                                                        }}
+                                                                                                        invoiceAuthorisedByName={expandedInvoiceDetails.invoiceAuthorisedByName}
+                                                                                                    />
+                                                                                                )}
                                                                                                 {expandedInvoiceDetails.items && expandedInvoiceDetails.items.length > 0 ? (
                                                                                                     <div>
                                                                                                         <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Line Items</h4>

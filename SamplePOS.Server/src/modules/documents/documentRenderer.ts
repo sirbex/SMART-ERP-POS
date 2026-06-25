@@ -31,7 +31,8 @@ import {
 import { renderInvoiceBody, type InvoiceBodyData } from './bodies/invoiceBody.js';
 import { renderReceiptBody, type ReceiptBodyData } from './bodies/receiptBody.js';
 import { renderQuotationBody, type QuotationBodyData } from './bodies/quotationBody.js';
-import { hasTaxableQuotationLines } from '@shared/utils/quotationCalculations.js';
+import { hasTaxableQuotationLines, hasQuotationLineDiscounts } from '@shared/utils/quotationCalculations.js';
+import { resolveInvoiceSourceQuotation, resolveInvoiceAuthorisedByName } from '../invoices/invoiceSourceQuotation.js';
 import {
     renderPurchaseOrderBody,
     type PurchaseOrderBodyData,
@@ -257,22 +258,15 @@ async function renderInvoice(
 
     const ctx = createDocument(meta, theme, output, { paperSize: req.paperSize ?? 'A4' });
 
-    let sourceQuotation: InvoiceBodyData['sourceQuotation'] = null;
-    const quoteId = (inv as { quote_id?: string | null }).quote_id ?? null;
-    const referenceSnapshot = (inv as { reference?: string | null }).reference ?? null;
-    if (quoteId) {
-        const qr = await pool.query(
-            'SELECT quote_number FROM quotations WHERE id = $1',
-            [quoteId],
-        );
-        const quoteNumber = (qr.rows[0]?.quote_number as string) ?? null;
-        if (quoteNumber) {
-            sourceQuotation = {
-                quoteNumber,
-                referenceDetails: referenceSnapshot,
-            };
+    const resolvedSource = await resolveInvoiceSourceQuotation(pool, inv);
+    const invoiceAuthorisedByName = await resolveInvoiceAuthorisedByName(pool, inv);
+    const sourceQuotation: InvoiceBodyData['sourceQuotation'] = resolvedSource
+      ? {
+          quoteNumber: resolvedSource.quoteNumber,
+          reference: resolvedSource.reference,
+          quotationAuthorisedByName: resolvedSource.quotationAuthorisedByName,
         }
-    }
+      : null;
 
     const body: InvoiceBodyData = {
         invoice: {
@@ -289,10 +283,12 @@ async function renderInvoice(
             notes: inv.notes ?? null,
         },
         sourceQuotation,
+        invoiceAuthorisedByName,
         customer,
-        items: (result.items ?? []).map(it => ({
+        items: (result.items ?? []).map((it, index) => ({
+            lineNumber: index + 1,
             productName: it.productName ?? null,
-            productCode: it.productCode ?? null,
+            productCode: it.productCode ?? it.sku ?? null,
             quantity: it.quantity,
             uomName: it.uomName ?? null,
             unitPrice: it.unitPrice,
@@ -417,17 +413,17 @@ async function renderQuotation(
 
     const ctx = createDocument(meta, theme, output, { paperSize: req.paperSize ?? 'A4' });
 
+    const lineCalcs = result.items.map((it) => ({
+        quantity: Number(it.quantity),
+        unitPrice: Number(it.unitPrice),
+        discountAmount: Number(it.discountAmount ?? 0),
+        isTaxable: it.isTaxable !== false,
+        taxRate: Number(it.taxRate ?? 0),
+    }));
+
     const body: QuotationBodyData = {
-        showTax:
-            hasTaxableQuotationLines(
-                result.items.map((it) => ({
-                    quantity: Number(it.quantity),
-                    unitPrice: Number(it.unitPrice),
-                    discountAmount: Number(it.discountAmount ?? 0),
-                    isTaxable: it.isTaxable !== false,
-                    taxRate: Number(it.taxRate ?? 0),
-                })),
-            ) && Number(q.taxAmount ?? 0) > 0,
+        showTax: hasTaxableQuotationLines(lineCalcs) && Number(q.taxAmount ?? 0) > 0,
+        showDiscount: hasQuotationLineDiscounts(result.items),
         quotation: {
             quoteNumber: q.quoteNumber,
             quoteType: q.quoteType,
@@ -457,6 +453,8 @@ async function renderQuotation(
             discountAmount: it.discountAmount,
             taxAmount: it.taxAmount,
             lineTotal: it.lineTotal,
+            isTaxable: it.isTaxable,
+            taxRate: it.taxRate,
         })),
     };
 

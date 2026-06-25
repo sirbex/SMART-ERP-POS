@@ -899,14 +899,17 @@ export const quotationService = {
       //   - discount_amount column populated (default 0 — quotes have no cart discount;
       //     header-level discount is captured on sales.discount_amount)
       // ============================================================
-      const saleItemData: CreateSaleItemData[] = saleItems.map((item) => {
+      const saleItemData: CreateSaleItemData[] = saleItems.map((item, index) => {
         const snap = item.uomSnapshot;
-        // For custom items, saleItems[].productId is the 'custom_*' string; addSaleItems
-        // detects this prefix and stores product_id = NULL with item_type = 'custom'.
-        // For regular products it is the UUID. Both are non-null strings here.
+        const quoteItem = items[index];
+        // Custom/service lines have NULL product_id in quotations; sale SSOT expects custom_* id.
+        let productId = item.productId;
+        if (!productId || quoteItem.item_type === 'custom' || quoteItem.item_type === 'service') {
+          productId = productId?.startsWith('custom_') ? productId : `custom_${quoteItem.id}`;
+        }
         return {
           saleId: saleRecord.id,
-          productId: (item.productId ?? '') as string,
+          productId: productId as string,
           productName: item.productName,
           quantity: item.quantity,
           unitPrice: item.unitPrice,

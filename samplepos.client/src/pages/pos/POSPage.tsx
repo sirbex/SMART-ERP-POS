@@ -77,7 +77,7 @@ import type {
   QuotationDetail,
   QuotationItem,
 } from '@shared/types/quotation';
-import { normalizeStatus, getQuoteStatusBadge } from '@shared/types/quotation';
+import { normalizeStatus, getQuoteStatusBadge, isQuoteConvertibleFrom } from '@shared/types/quotation';
 import type { OfflineSaleData } from '../../hooks/useOfflineMode';
 import type { CreateSaleInput } from '../../types/inputs';
 import { syncOfflineCustomers } from '../../services/offlineSyncEngine';
@@ -613,9 +613,9 @@ export default function POSPage() {
       setTimeout(async () => {
         try {
           const response = await quotationApi.getQuotationByNumber(loadQuoteNumber);
-          const quoteStatus = response.quotation?.status || '';
-          if (normalizeStatus(quoteStatus) !== 'OPEN') {
-            toast.error(`Quote ${loadQuoteNumber} is ${quoteStatus.toLowerCase()} and cannot be loaded`);
+          const quote = response.quotation;
+          if (!quote || !isQuoteConvertibleFrom(quote)) {
+            toast.error(`Quote ${loadQuoteNumber} is no longer available for conversion`);
             return;
           }
           await handleLoadQuoteToCart(response);
@@ -1936,9 +1936,9 @@ export default function POSPage() {
     try {
       const quote = quoteData.quotation || quoteData;
 
-      // Guard: prevent loading CONVERTED or CANCELLED quotes
-      if (normalizeStatus(quote.status) !== 'OPEN') {
-        toast.error(`Cannot load quote ${quote.quoteNumber} — it is already ${quote.status.toLowerCase()}`);
+      // Guard: prevent loading locked quotes
+      if (!isQuoteConvertibleFrom(quote)) {
+        toast.error(`Cannot load quote ${quote.quoteNumber} — it is no longer available for conversion`);
         return;
       }
 
@@ -2539,6 +2539,7 @@ export default function POSPage() {
         customerId: selectedCustomer?.id,
         notes: '',
         items: orderItems,
+        quoteId: loadedQuoteId || undefined,
         // Cart-level discount applied by dispenser (passed so backend stores correct total)
         discountAmount: cartDiscountAmount > 0 ? cartDiscountAmount : undefined,
       };
@@ -2604,6 +2605,7 @@ export default function POSPage() {
         // Clear cart
         setItems([]);
         setSelectedCustomer(null);
+        setLoadedQuoteId(null);
         setPaymentLines([]);
         setPaymentAmount('');
         clearPersistedCart();

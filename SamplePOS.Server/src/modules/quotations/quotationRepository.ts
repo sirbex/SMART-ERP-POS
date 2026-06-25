@@ -736,6 +736,15 @@ export const quotationRepository = {
       return { can: false, reason: 'Quote already converted' };
     }
 
+    if (
+      quote.converted_to_sale_id
+      || quote.converted_to_invoice_id
+      || quote.converted_to_so_id
+      || quote.converted_to_dn_id
+    ) {
+      return { can: false, reason: 'Quote already converted' };
+    }
+
     if (quote.status === 'CANCELLED') {
       return { can: false, reason: 'Quote is cancelled' };
     }

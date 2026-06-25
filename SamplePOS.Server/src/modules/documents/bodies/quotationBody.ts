@@ -5,11 +5,16 @@
 import type { LayoutContext } from '../baseDocumentLayout.js';
 import { Layout } from '../baseDocumentLayout.js';
 import { Money } from '../../../utils/money.js';
-import { quotationReferenceDetailLines } from '@shared/utils/quotationReferenceDetails.js';
+import {
+    hasQuotationLineDiscounts,
+    hasTaxableQuotationLines,
+} from '@shared/utils/quotationCalculations.js';
 
 export interface QuotationBodyData {
-    /** When false, tax row is omitted (matches UI when no line is taxable). */
+    /** When false, tax column/row omitted (no taxable lines with tax). */
     showTax?: boolean;
+    /** When false, discount column omitted (no line discounts). */
+    showDiscount?: boolean;
     quotation: {
         quoteNumber: string;
         quoteType: string;
@@ -39,8 +44,12 @@ export interface QuotationBodyData {
         discountAmount: number;
         taxAmount: number;
         lineTotal: number;
+        isTaxable?: boolean;
+        taxRate?: number;
     }>;
 }
+
+type TableCol = Parameters<typeof Layout.table>[2][number];
 
 export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData): void {
     const { theme, doc, contentWidth, contentLeft } = ctx;
@@ -48,104 +57,112 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
     const fmtDate = (d: string | null) =>
         d ? new Date(d).toLocaleDateString('en-US', { timeZone: 'Africa/Kampala' }) : '—';
 
-    // ── Customer + meta panels ──
+    const showTax =
+        data.showTax
+        ?? (hasTaxableQuotationLines(
+            data.items.map((it) => ({
+                quantity: it.quantity,
+                unitPrice: it.unitPrice,
+                discountAmount: it.discountAmount,
+                isTaxable: it.isTaxable !== false,
+                taxRate: it.taxRate ?? 0,
+            })),
+        ) && data.quotation.taxAmount > 0);
+    const showDiscount = data.showDiscount ?? hasQuotationLineDiscounts(data.items);
+
+    // ── Customer + document meta (reference on Quoted To card) ──
     const colW = (contentWidth - theme.spacing.lg) / 2;
     const startY = doc.y;
 
-    doc
-        .roundedRect(contentLeft, startY, colW, 80, 4)
-        .fillAndStroke(theme.colors.bgSubtle, theme.colors.border);
-    doc
-        .fillColor(theme.colors.primary)
-        .font(theme.fonts.familyBold)
-        .fontSize(theme.fonts.size.sm)
-        .text('QUOTED TO', contentLeft + 8, startY + 8, { width: colW - 16 });
-    const lines = [
-        data.quotation.customerName,
-        data.quotation.customerEmail,
-        data.quotation.customerPhone,
-    ].filter((l): l is string => Boolean(l));
-    doc.fillColor(theme.colors.text).font(theme.fonts.family).fontSize(theme.fonts.size.base);
-    let by = startY + 24;
-    lines.slice(0, 4).forEach(l => {
-        doc.text(l, contentLeft + 8, by, { width: colW - 16, ellipsis: true });
-        by += 13;
-    });
-
-    const rightX = contentLeft + colW + theme.spacing.lg;
-    doc
-        .roundedRect(rightX, startY, colW, 80, 4)
-        .fillAndStroke(theme.colors.bgSubtle, theme.colors.border);
     const meta: Array<[string, string]> = [
         ['Quote Type', data.quotation.quoteType.toUpperCase()],
         ['Quotation Date', fmtDate(data.quotation.validFrom)],
         ['Expiry Date', fmtDate(data.quotation.validUntil)],
         ['Status', data.quotation.status],
     ];
+
+    const customerLines = [
+        data.quotation.customerName,
+        data.quotation.customerEmail,
+        data.quotation.customerPhone,
+    ].filter((l): l is string => Boolean(l));
+    const referenceText = data.quotation.reference?.trim() || null;
+    const leftContentRows = customerLines.length + (referenceText ? 2 : 0);
+    const panelHeight = Math.max(
+        20 + leftContentRows * 13 + 16,
+        20 + meta.length * 16 + 8,
+    );
+
+    doc
+        .roundedRect(contentLeft, startY, colW, panelHeight, 4)
+        .fillAndStroke(theme.colors.bgSubtle, theme.colors.border);
+    doc
+        .fillColor(theme.colors.primary)
+        .font(theme.fonts.familyBold)
+        .fontSize(theme.fonts.size.sm)
+        .text('QUOTED TO', contentLeft + 8, startY + 8, { width: colW - 16 });
+    doc.fillColor(theme.colors.text).font(theme.fonts.family).fontSize(theme.fonts.size.base);
+    let by = startY + 24;
+    customerLines.slice(0, 4).forEach(l => {
+        doc.text(l, contentLeft + 8, by, { width: colW - 16, ellipsis: true });
+        by += 13;
+    });
+    if (referenceText) {
+        by += 4;
+        doc
+            .fillColor(theme.colors.muted)
+            .font(theme.fonts.family)
+            .fontSize(theme.fonts.size.xs)
+            .text('Reference', contentLeft + 8, by, { width: colW - 16 });
+        by += 12;
+        doc
+            .fillColor(theme.colors.text)
+            .font(theme.fonts.familyBold)
+            .fontSize(theme.fonts.size.base)
+            .text(referenceText, contentLeft + 8, by, { width: colW - 16 });
+    }
+
+    const rightX = contentLeft + colW + theme.spacing.lg;
+    doc
+        .roundedRect(rightX, startY, colW, panelHeight, 4)
+        .fillAndStroke(theme.colors.bgSubtle, theme.colors.border);
     let my = startY + 8;
     meta.forEach(([label, value]) => {
         doc
             .fillColor(theme.colors.muted)
             .font(theme.fonts.family)
             .fontSize(theme.fonts.size.xs)
-            .text(label, rightX + 8, my, { width: colW * 0.45 });
+            .text(label, rightX + 8, my, { width: colW * 0.42 });
         doc
             .fillColor(theme.colors.text)
             .font(theme.fonts.familyBold)
             .fontSize(theme.fonts.size.base)
-            .text(value, rightX + colW * 0.45 + 8, my, { width: colW * 0.55 - 16, align: 'right' });
+            .text(value, rightX + colW * 0.42 + 8, my, {
+                width: colW * 0.58 - 16,
+                align: 'right',
+            });
         my += 16;
     });
-    doc.y = startY + 80 + theme.spacing.lg;
+    doc.x = contentLeft;
+    doc.y = startY + panelHeight + theme.spacing.lg;
 
-    Layout.referenceDetailsBlock(
-        ctx,
-        'Reference',
-        quotationReferenceDetailLines(data.quotation.reference, data.quotation.description),
-    );
+    if (data.quotation.description?.trim()) {
+        Layout.sectionTitle(ctx, 'Notes');
+        Layout.text(ctx, data.quotation.description.trim(), { width: contentWidth });
+        doc.moveDown(0.3);
+    }
 
-    // ── Items ──
+    // ── Items (discount/tax columns only when relevant) ──
     Layout.sectionTitle(ctx, 'Items');
-    Layout.table(
-        ctx,
-        data.items,
-        [
-            { header: '#', key: 'lineNumber' as const, width: 0.04, align: 'right' as const, format: v => String(v) },
-            { header: 'Description', key: 'description' as const, width: 0.34 },
-            {
-                header: 'Qty', key: 'quantity' as const, width: 0.1, align: 'right' as const, format: (v, row) => {
-                    const r = row as QuotationBodyData['items'][number];
-                    return r.uomName ? `${r.quantity} ${r.uomName}` : String(r.quantity);
-                }
-            },
-            { header: 'Unit Price', key: 'unitPrice' as const, width: 0.12, align: 'right' as const, format: v => fmt(v as number) },
-            {
-                header: 'Discount', key: 'discountAmount' as const, width: 0.1, align: 'right' as const,
-                format: (v) => {
-                    const n = v as number;
-                    return n > 0 ? `-${fmt(n)}` : '—';
-                },
-            },
-            {
-                header: 'Tax', key: 'taxAmount' as const, width: 0.1, align: 'right' as const,
-                format: (v) => {
-                    const n = v as number;
-                    return n > 0 ? fmt(n) : '—';
-                },
-            },
-            { header: 'Line Total', key: 'lineTotal' as const, width: 0.2, align: 'right' as const, format: v => fmt(v as number) },
-        ],
-    );
+    Layout.table(ctx, data.items, buildQuotationItemColumns(showDiscount, showTax, fmt));
 
     // ── Totals ──
     Layout.totalsBlock(ctx, [
         { label: 'Subtotal', value: fmt(data.quotation.subtotal) },
-        ...(data.quotation.discountAmount > 0
+        ...(showDiscount && data.quotation.discountAmount > 0
             ? [{ label: 'Discount', value: `-${fmt(data.quotation.discountAmount)}` }]
             : []),
-        ...(data.showTax !== false
-            && theme.flags.showTaxBreakdown
-            && data.quotation.taxAmount > 0
+        ...(showTax && theme.flags.showTaxBreakdown && data.quotation.taxAmount > 0
             ? [{ label: 'Tax', value: fmt(data.quotation.taxAmount) }]
             : []),
         { label: 'Total', value: fmt(data.quotation.totalAmount), emphasize: true },
@@ -167,4 +184,52 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
         Layout.sectionTitle(ctx, 'Terms & Conditions');
         Layout.text(ctx, terms, { width: contentWidth });
     }
+}
+
+function buildQuotationItemColumns(
+    showDiscount: boolean,
+    showTax: boolean,
+    fmt: (n: number) => string,
+): TableCol[] {
+    const extraCols = (showDiscount ? 1 : 0) + (showTax ? 1 : 0);
+    const descWidth = extraCols === 0 ? 0.46 : extraCols === 1 ? 0.36 : 0.28;
+    const lineTotalWidth = extraCols === 0 ? 0.22 : 0.18;
+
+    const cols: TableCol[] = [
+        { header: '#', key: 'lineNumber' as const, width: 0.04, align: 'right' as const, format: v => String(v) },
+        { header: 'Description', key: 'description' as const, width: descWidth },
+        {
+            header: 'Qty', key: 'quantity' as const, width: 0.12, align: 'right' as const, format: (v, row) => {
+                const r = row as QuotationBodyData['items'][number];
+                return r.uomName ? `${r.quantity} ${r.uomName}` : String(r.quantity);
+            },
+        },
+        { header: 'Unit Price', key: 'unitPrice' as const, width: 0.14, align: 'right' as const, format: v => fmt(v as number) },
+    ];
+
+    if (showDiscount) {
+        cols.push({
+            header: 'Discount', key: 'discountAmount' as const, width: 0.12, align: 'right' as const,
+            format: (v) => {
+                const n = v as number;
+                return n > 0 ? `-${fmt(n)}` : '—';
+            },
+        });
+    }
+    if (showTax) {
+        cols.push({
+            header: 'Tax', key: 'taxAmount' as const, width: 0.12, align: 'right' as const,
+            format: (v) => {
+                const n = v as number;
+                return n > 0 ? fmt(n) : '—';
+            },
+        });
+    }
+
+    cols.push({
+        header: 'Line Total', key: 'lineTotal' as const, width: lineTotalWidth, align: 'right' as const,
+        format: v => fmt(v as number),
+    });
+
+    return cols;
 }

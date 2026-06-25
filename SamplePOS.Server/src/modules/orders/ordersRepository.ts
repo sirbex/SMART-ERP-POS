@@ -11,6 +11,7 @@ export interface OrderRecord {
   orderNumber: string;
   customerId: string | null;
   customerName: string | null;
+  quoteId: string | null;
   subtotal: string;
   discountAmount: string;
   taxAmount: string;
@@ -48,6 +49,7 @@ export interface OrderItemRecord {
 
 export interface CreateOrderData {
   customerId?: string | null;
+  quoteId?: string | null;
   subtotal: number;
   discountAmount: number;
   taxAmount: number;
@@ -82,7 +84,7 @@ export const ordersRepository = {
   async findByIdempotencyKey(pool: Pool | PoolClient, key: string): Promise<OrderRecord | null> {
     const result = await pool.query(
       `SELECT
-        o.id, o.order_number, o.customer_id,
+        o.id, o.order_number, o.customer_id, o.quote_id,
         c.name AS customer_name, o.subtotal, o.discount_amount,
         o.tax_amount, o.total_amount, o.status,
         o.created_by, uc.full_name AS created_by_name,
@@ -135,13 +137,14 @@ export const ordersRepository = {
 
     const result = await client.query(
       `INSERT INTO pos_orders (
-        order_number, customer_id, subtotal, discount_amount, tax_amount,
+        order_number, customer_id, quote_id, subtotal, discount_amount, tax_amount,
         total_amount, status, created_by, assigned_cashier_id, order_date, notes, idempotency_key
-      ) VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, $8, $9, $10, $11)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, $9, $10, $11, $12)
       RETURNING
         id,
         order_number,
         customer_id,
+        quote_id,
         subtotal,
         discount_amount,
         tax_amount,
@@ -159,6 +162,7 @@ export const ordersRepository = {
       [
         orderNumber,
         data.customerId || null,
+        data.quoteId || null,
         data.subtotal,
         data.discountAmount,
         data.taxAmount,
@@ -245,6 +249,7 @@ export const ordersRepository = {
         o.order_number,
         o.customer_id,
         c.name             AS customer_name,
+        o.quote_id,
         o.subtotal,
         o.discount_amount,
         o.tax_amount,
@@ -319,6 +324,7 @@ export const ordersRepository = {
         o.order_number,
         o.customer_id,
         c.name             AS customer_name,
+        o.quote_id,
         o.subtotal,
         o.discount_amount,
         o.tax_amount,
@@ -387,6 +393,7 @@ export const ordersRepository = {
         o.order_number,
         o.customer_id,
         c.name             AS customer_name,
+        o.quote_id,
         o.subtotal,
         o.discount_amount,
         o.tax_amount,

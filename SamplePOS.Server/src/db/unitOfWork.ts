@@ -93,10 +93,11 @@ export class UnitOfWork {
 
     /**
      * Type guard: distinguishes a Pool from a PoolClient.
-     * Pool exposes a `connect()` method; PoolClient does not.
+     * Pool exposes pool metrics (`totalCount`); a checked-out PoolClient does not.
+     * Do NOT use `connect` — both Pool and PoolClient define it in node-pg.
      */
     static isPool(handle: DbConnection): handle is Pool {
-        return typeof (handle as Pool).connect === 'function';
+        return typeof (handle as Pool).totalCount === 'number';
     }
 
     /**

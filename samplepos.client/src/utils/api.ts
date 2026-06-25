@@ -433,6 +433,7 @@ export const api = {
       apiClient.get<ApiResponse>(`orders/${id}`),
     create: (data: {
       customerId?: string | null;
+      quoteId?: string | null;
       items: { productId: string; productName: string; quantity: number; unitPrice: number; discountAmount?: number; uomId?: string | null; baseQty?: number | null; baseUomId?: string | null; conversionFactor?: number | null }[];
       subtotal?: number;
       discountAmount?: number;

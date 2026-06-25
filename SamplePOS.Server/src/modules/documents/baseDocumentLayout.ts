@@ -74,12 +74,13 @@ export const Layout = {
 
     /** Section heading */
     sectionTitle(ctx: LayoutContext, text: string): void {
-        const { doc, theme } = ctx;
+        const { doc, theme, contentLeft, contentWidth } = ctx;
         doc
             .fillColor(theme.colors.primary)
             .font(theme.fonts.familyBold)
             .fontSize(theme.fonts.size.md)
-            .text(text.toUpperCase());
+            .text(text.toUpperCase(), contentLeft, doc.y, { width: contentWidth, align: 'left' });
+        doc.x = contentLeft;
         doc.moveDown(0.3);
         doc.fillColor(theme.colors.text).font(theme.fonts.family);
     },

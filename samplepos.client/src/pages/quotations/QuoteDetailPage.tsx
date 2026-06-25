@@ -21,7 +21,8 @@ import {
   calculateQuoteAge,
   getDaysUntilExpiry,
   isQuoteEditable,
-  isQuoteConvertible,
+  isQuoteConvertibleFrom,
+  isQuotationConversionLocked,
 } from '@shared/types/quotation';
 import type { QuotationStatus } from '@shared/types/quotation';
 import { AxiosError } from 'axios';
@@ -32,7 +33,7 @@ import DeliveryNoteDrawer from '../../components/quotations/DeliveryNoteDrawer';
 import CreateDeliveryNoteDrawer from '../../components/quotations/CreateDeliveryNoteDrawer';
 import FulfillmentDrawer from '../../components/quotations/FulfillmentDrawer';
 import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
-import { hasTaxableQuotationLines } from '../../utils/quotationCalculations';
+import { hasTaxableQuotationLines, hasQuotationLineDiscounts } from '../../utils/quotationCalculations';
 import { useAuth } from '../../hooks/useAuth';
 import { isAuthQueryEnabled } from '../../lib/authQuery';
 
@@ -152,11 +153,19 @@ export default function QuoteDetailPage() {
 
   const { quotation, items } = data;
   const showTax = hasTaxableQuotationLines(items) && (quotation.taxAmount || 0) > 0;
+  const showDiscount = hasQuotationLineDiscounts(items);
   const badge = getQuoteStatusBadge(quotation.status);
   const age = calculateQuoteAge(quotation.createdAt);
   const daysUntilExpiry = getDaysUntilExpiry(quotation.validUntil);
   const canEdit = isQuoteEditable(quotation.status);
-  const canConvert = isQuoteConvertible(quotation.status, quotation.validUntil, quotation.convertedToSaleId);
+  const canConvert = isQuoteConvertibleFrom(quotation);
+  const conversionLocked = isQuotationConversionLocked({
+    status: quotation.status,
+    convertedToSaleId: quotation.convertedToSaleId,
+    convertedToInvoiceId: quotation.convertedToInvoiceId,
+    convertedToSoId: quotation.convertedToSoId,
+    convertedToDnId: quotation.convertedToDnId,
+  });
 
   // ── Wholesale derived data ──
   const existingDns: DeliveryNoteListItem[] = dnListData?.data || [];
@@ -308,7 +317,7 @@ export default function QuoteDetailPage() {
               + Delivery Note
             </button>
           )}
-          {isWholesaleQuote && canConvert && !quotation.convertedToSaleId && (
+          {isWholesaleQuote && canConvert && (
             <button
               onClick={() => convertToSOmutation.mutate()}
               disabled={convertToSOmutation.isPending}
@@ -325,12 +334,6 @@ export default function QuoteDetailPage() {
               Edit
             </button>
           )}
-          <button
-            onClick={() => window.print()}
-            className="px-5 py-2.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
-          >
-            🖨️ Print
-          </button>
           {quotation.id && (
             <button
               type="button"
@@ -381,78 +384,94 @@ export default function QuoteDetailPage() {
           </div>
         )}
 
-        {/* ── 4. Customer ── */}
-        <div className="mb-6 bg-white rounded-lg shadow p-6 print-section">
-          <h2 className="text-xl font-semibold mb-4 no-print">Customer Information</h2>
-          <div className="hidden print:block">
-            <h3 className="print-bill-title">Bill To:</h3>
-            <p className="print-bill-name">{quotation.customerName || 'N/A'}</p>
-            {quotation.customerPhone && <p className="print-bill-detail">{quotation.customerPhone}</p>}
-            {quotation.customerEmail && <p className="print-bill-detail">{quotation.customerEmail}</p>}
-          </div>
-          <div className="grid grid-cols-2 gap-4 print:hidden">
-            <div>
-              <p className="text-sm text-gray-600">Customer Name</p>
-              <p className="font-semibold">{quotation.customerName || 'N/A'}</p>
+        {/* ── 4. Document header (customer + meta + reference) ── */}
+        <div className="mb-6 bg-white rounded-lg shadow overflow-hidden print-section">
+          <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-gray-200">
+            <div className="p-5 sm:p-6">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 mb-2">Quoted To</p>
+              <p className="font-semibold text-gray-900 text-lg">{quotation.customerName || 'N/A'}</p>
+              {quotation.customerPhone && (
+                <p className="text-sm text-gray-600 mt-1">{quotation.customerPhone}</p>
+              )}
+              {quotation.customerEmail && (
+                <p className="text-sm text-gray-600 break-all">{quotation.customerEmail}</p>
+              )}
+              {quotation.reference && (
+                <div className="mt-4 pt-3 border-t border-gray-200">
+                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Reference</p>
+                  <p className="font-semibold text-gray-900 mt-1 break-words">{quotation.reference}</p>
+                </div>
+              )}
             </div>
-            {quotation.customerPhone && (
-              <div><p className="text-sm text-gray-600">Phone</p><p className="font-semibold">{quotation.customerPhone}</p></div>
-            )}
-            {quotation.customerEmail && (
-              <div><p className="text-sm text-gray-600">Email</p><p className="font-semibold">{quotation.customerEmail}</p></div>
-            )}
+            <div className="p-5 sm:p-6 bg-gray-50">
+              <dl className="space-y-2.5 text-sm">
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0">Quotation Date</dt>
+                  <dd className="font-medium text-gray-900 text-right">{formatTimestampDate(quotation.validFrom)}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0">Valid Until</dt>
+                  <dd className="font-medium text-gray-900 text-right">{formatTimestampDate(quotation.validUntil)}</dd>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 shrink-0">Status</dt>
+                  <dd className="font-semibold text-gray-900 text-right">{badge.label}</dd>
+                </div>
+              </dl>
+            </div>
           </div>
+          {quotation.description && (
+            <div className="px-5 sm:px-6 py-4 border-t border-gray-200 bg-gray-50">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Notes</p>
+              <p className="text-gray-900 whitespace-pre-wrap text-sm">{quotation.description}</p>
+            </div>
+          )}
         </div>
 
-        {/* ── 5. Quote Details (screen only) ── */}
-        <div className="mb-6 bg-white rounded-lg shadow p-6 no-print">
-          <h2 className="text-xl font-semibold mb-4">Quotation Details</h2>
-          <div className="grid grid-cols-2 gap-4">
-            {quotation.reference && (
-              <div><p className="text-sm text-gray-600">Reference</p><p className="font-semibold">{quotation.reference}</p></div>
-            )}
-            {quotation.description && (
-              <div><p className="text-sm text-gray-600">Description</p><p className="font-semibold">{quotation.description}</p></div>
-            )}
-            <div><p className="text-sm text-gray-600">Valid From</p><p className="font-semibold">{formatTimestampDate(quotation.validFrom)}</p></div>
-            <div><p className="text-sm text-gray-600">Valid Until</p><p className="font-semibold">{formatTimestampDate(quotation.validUntil)}</p></div>
-          </div>
-        </div>
-
-        {/* ── 6. Line Items ── */}
-        <div className="mb-6 bg-white rounded-lg shadow p-6 print-section">
-          <h2 className="text-xl font-semibold mb-4">Line Items</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b">
+        {/* ── 5. Line Items ── */}
+        <div className="mb-6 bg-white rounded-lg shadow p-5 sm:p-6 print-section">
+          <h2 className="text-left text-base font-semibold uppercase tracking-wide text-blue-700 mb-4">Items</h2>
+          <div className="overflow-x-auto -mx-2 sm:mx-0">
+            <table className="w-full min-w-[640px]">
+              <thead className="border-b bg-gray-50">
                 <tr>
-                  <th className="text-left py-3 px-2">#</th>
-                  <th className="text-left py-3 px-2">Description</th>
-                  <th className="text-right py-3 px-2">Qty</th>
-                  <th className="text-left py-3 px-2">UoM</th>
-                  <th className="text-right py-3 px-2">Unit Price</th>
-                  {showTax && <th className="text-right py-3 px-2">Tax</th>}
-                  <th className="text-right py-3 px-2">Total</th>
+                  <th className="text-left py-3 px-2 text-xs font-semibold uppercase text-gray-600">#</th>
+                  <th className="text-left py-3 px-2 text-xs font-semibold uppercase text-gray-600">Description</th>
+                  <th className="text-right py-3 px-2 text-xs font-semibold uppercase text-gray-600">Qty</th>
+                  <th className="text-left py-3 px-2 text-xs font-semibold uppercase text-gray-600">UoM</th>
+                  <th className="text-right py-3 px-2 text-xs font-semibold uppercase text-gray-600">Unit Price</th>
+                  {showDiscount && (
+                    <th className="text-right py-3 px-2 text-xs font-semibold uppercase text-gray-600">Discount</th>
+                  )}
+                  {showTax && (
+                    <th className="text-right py-3 px-2 text-xs font-semibold uppercase text-gray-600">Tax</th>
+                  )}
+                  <th className="text-right py-3 px-2 text-xs font-semibold uppercase text-gray-600">Total</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((item) => (
-                  <tr key={item.id} className="border-b">
-                    <td className="py-3 px-2">{item.lineNumber}</td>
-                    <td className="py-3 px-2">
-                      <div className="font-medium">{item.description}</div>
-                      {item.sku && <div className="text-sm text-gray-500">SKU: {item.sku}</div>}
-                      {item.notes && <div className="text-sm text-gray-500">{item.notes}</div>}
+                  <tr key={item.id} className="border-b last:border-b-0">
+                    <td className="py-3 px-2 text-sm">{item.lineNumber}</td>
+                    <td className="py-3 px-2 text-sm">
+                      <div className="font-medium text-gray-900">{item.description}</div>
+                      {item.sku && <div className="text-xs text-gray-500 mt-0.5">SKU: {item.sku}</div>}
+                      {item.notes && <div className="text-xs text-gray-500 mt-0.5">{item.notes}</div>}
                     </td>
-                    <td className="py-3 px-2 text-right">{item.quantity}</td>
-                    <td className="py-3 px-2">{item.uomName || '—'}</td>
-                    <td className="py-3 px-2 text-right">{formatCurrency(item.unitPrice)}</td>
+                    <td className="py-3 px-2 text-right text-sm">{item.quantity}</td>
+                    <td className="py-3 px-2 text-sm">{item.uomName || '—'}</td>
+                    <td className="py-3 px-2 text-right text-sm">{formatCurrency(item.unitPrice)}</td>
+                    {showDiscount && (
+                      <td className="py-3 px-2 text-right text-sm text-red-600">
+                        {(item.discountAmount || 0) > 0 ? `-${formatCurrency(item.discountAmount)}` : '—'}
+                      </td>
+                    )}
                     {showTax && (
-                      <td className="py-3 px-2 text-right">
+                      <td className="py-3 px-2 text-right text-sm">
                         {item.isTaxable ? `${item.taxRate}%` : '—'}
                       </td>
                     )}
-                    <td className="py-3 px-2 text-right font-semibold">{formatCurrency(item.lineTotal)}</td>
+                    <td className="py-3 px-2 text-right text-sm font-semibold">{formatCurrency(item.lineTotal)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -461,32 +480,32 @@ export default function QuoteDetailPage() {
 
           {/* Totals */}
           <div className="mt-6 pt-6 border-t flex justify-end">
-            <div className="w-80 space-y-2">
-              <div className="flex justify-between">
-                <span className="text-gray-700">Subtotal:</span>
+            <div className="w-full max-w-xs space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-700">Subtotal</span>
                 <span className="font-semibold">{formatCurrency(quotation.subtotal)}</span>
               </div>
-              {quotation.discountAmount > 0 && (
-                <div className="flex justify-between text-red-600">
-                  <span>Discount:</span>
+              {showDiscount && quotation.discountAmount > 0 && (
+                <div className="flex justify-between text-sm text-red-600">
+                  <span>Discount</span>
                   <span className="font-semibold">-{formatCurrency(quotation.discountAmount)}</span>
                 </div>
               )}
               {showTax && (
-                <div className="flex justify-between">
-                  <span className="text-gray-700">Tax:</span>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-700">Tax</span>
                   <span className="font-semibold">{formatCurrency(quotation.taxAmount)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-lg font-bold pt-2 border-t">
-                <span>Total:</span>
+              <div className="flex justify-between text-base font-bold pt-2 border-t">
+                <span>Total</span>
                 <span>{formatCurrency(quotation.totalAmount)}</span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* ── 7. Wholesale Timeline (static cards) ── */}
+        {/* ── 6. Wholesale Timeline (static cards) ── */}
         {isWholesaleQuote && (
           <div className="mb-6 no-print">
             {/* Fulfillment summary card */}
@@ -597,12 +616,14 @@ export default function QuoteDetailPage() {
         )}
 
         {/* ── 10. Conversion Info ── */}
-        {quotation.convertedToSaleId && (
+        {conversionLocked && (
           <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-6 no-print">
-            <h3 className="font-semibold text-green-900 mb-2">✓ Converted to Sale</h3>
-            <p className="text-green-800">
-              Sale: <span className="font-mono font-semibold">{quotation.convertedToSaleNumber || quotation.convertedToSaleId}</span>
-            </p>
+            <h3 className="font-semibold text-green-900 mb-2">✓ Converted</h3>
+            {quotation.convertedToSaleId && (
+              <p className="text-green-800">
+                Sale: <span className="font-mono font-semibold">{quotation.convertedToSaleNumber || quotation.convertedToSaleId}</span>
+              </p>
+            )}
             {quotation.convertedToInvoiceId && (
               <p className="text-green-800">
                 Invoice: <span className="font-mono font-semibold">{quotation.convertedToInvoiceNumber || quotation.convertedToInvoiceId}</span>

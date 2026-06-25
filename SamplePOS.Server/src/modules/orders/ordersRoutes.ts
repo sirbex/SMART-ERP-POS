@@ -33,6 +33,7 @@ const CreateOrderSchema = z.object({
   orderDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   notes: z.string().nullable().optional(),
   idempotencyKey: z.string().max(100).optional(),
+  quoteId: z.string().uuid().nullable().optional(),
 });
 
 const CompleteOrderSchema = z.object({
@@ -212,6 +213,7 @@ router.post(
       cashRegisterSessionId: paymentData.cashRegisterSessionId,
       // Atomically mark the order COMPLETED within the same sale transaction
       fromOrderId: orderId,
+      quoteId: order.quoteId ?? undefined,
     };
 
     // 3. Create the sale AND atomically mark order completed (single transaction)

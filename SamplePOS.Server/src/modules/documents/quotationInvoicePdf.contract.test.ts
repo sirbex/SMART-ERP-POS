@@ -7,6 +7,14 @@ import {
   quotationReferenceDetailLines,
   referenceSnapshotLines,
 } from '@shared/utils/quotationReferenceDetails.js';
+import {
+  hasQuotationLineDiscounts,
+  hasTaxableQuotationLines,
+} from '@shared/utils/quotationCalculations.js';
+import {
+  isQuotationConversionLocked,
+  isQuoteConvertibleFrom,
+} from '@shared/types/quotation.js';
 
 describe('quotation PDF reference details contract', () => {
   it('omits reference section when both fields are empty', () => {
@@ -47,5 +55,32 @@ describe('document footer contract', () => {
     const normalize = (text: string | null | undefined) => text?.trim() || null;
     expect(normalize('   ')).toBeNull();
     expect(normalize('Thank you')).toBe('Thank you');
+  });
+});
+
+describe('quotation column visibility contract', () => {
+  it('shows tax column only when lines are taxable with tax', () => {
+    expect(hasTaxableQuotationLines([{ quantity: 1, unitPrice: 10, isTaxable: false, taxRate: 18 }])).toBe(false);
+    expect(hasTaxableQuotationLines([{ quantity: 1, unitPrice: 10, isTaxable: true, taxRate: 18 }])).toBe(true);
+  });
+
+  it('shows discount column only when a line has discount', () => {
+    expect(hasQuotationLineDiscounts([{ discountAmount: 0 }])).toBe(false);
+    expect(hasQuotationLineDiscounts([{ discountAmount: 0 }, { discountAmount: 100 }])).toBe(true);
+  });
+});
+
+describe('quotation conversion lock contract', () => {
+  it('locks when converted_to_invoice_id is set even if status is still DRAFT', () => {
+    expect(
+      isQuotationConversionLocked({ status: 'DRAFT', convertedToInvoiceId: 'inv-1' }),
+    ).toBe(true);
+    expect(
+      isQuoteConvertibleFrom({
+        status: 'DRAFT',
+        validUntil: '2099-12-31',
+        convertedToInvoiceId: 'inv-1',
+      }),
+    ).toBe(false);
   });
 });

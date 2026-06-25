@@ -1,5 +1,6 @@
 import { Pool, PoolClient } from 'pg';
 import { invoiceRepository, InvoicePaymentRecord } from './invoiceRepository.js';
+import { resolveInvoiceSourceQuotation, resolveInvoiceAuthorisedByName } from './invoiceSourceQuotation.js';
 import { salesRepository } from '../sales/salesRepository.js';
 import logger from '../../utils/logger.js';
 import { accountingApiClient } from '../../services/accountingApiClient.js';
@@ -780,7 +781,9 @@ export const invoiceService = {
         }));
       }
     }
-    return { invoice: inv, payments, items };
+    const sourceQuotation = await resolveInvoiceSourceQuotation(pool, inv);
+    const invoiceAuthorisedByName = await resolveInvoiceAuthorisedByName(pool, inv);
+    return { invoice: inv, payments, items, sourceQuotation, invoiceAuthorisedByName };
   },
 
   async listInvoices(

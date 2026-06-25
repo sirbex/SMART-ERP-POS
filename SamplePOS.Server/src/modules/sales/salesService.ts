@@ -1761,6 +1761,7 @@ export const salesService = {
             saleId: sale.id,
             customerId: input.customerId,
             customerName: customerName,
+            quoteId: input.quoteId ?? null,
             dueDate: dueDateStr,
             subtotal: Money.toNumber(Money.parse(input.subtotal || subtotal.toNumber())),
             taxAmount: Money.toNumber(Money.parse(input.taxAmount || taxAmount.toNumber())),

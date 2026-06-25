@@ -11,6 +11,7 @@ import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import CustomerDeposits from '../../components/customers/CustomerDeposits';
 import StoreCredits from '../../components/customers/StoreCredits';
 import { CustomerQuotationsTab } from '../../components/customers/CustomerQuotationsTab';
+import { InvoiceSourceQuotationPanel } from '../../components/invoices/InvoiceSourceQuotationPanel';
 import { DatePicker } from '../../components/ui/date-picker';
 import { getBusinessDate, formatTimestamp, formatTimestampDate } from '../../utils/businessDate';
 import { pricingApi } from '../../api/pricing';
@@ -164,14 +165,18 @@ interface TransactionRow {
 }
 
 interface InvoiceDetailData {
-  id?: string;
-  invoiceNumber?: string;
-  status?: string;
-  totalAmount?: number | string;
-  amountPaid?: number | string;
-  balance?: number | string;
-  issueDate?: string;
-  dueDate?: string;
+  invoice?: {
+    quote_id?: string | null;
+    reference?: string | null;
+  };
+  sourceQuotation?: {
+    quoteId: string;
+    quoteNumber: string;
+    reference?: string | null;
+    referenceDetails?: string | null;
+    quotationAuthorisedByName?: string | null;
+  } | null;
+  invoiceAuthorisedByName?: string | null;
   items?: InvoiceItemRow[];
   payments?: PaymentHistoryRow[];
 }
@@ -1486,13 +1491,30 @@ export default function CustomerDetailPage() {
                   </div>
                 </div>
 
+                {(() => {
+                  const source = (invoiceDetail as InvoiceDetailData | undefined)?.sourceQuotation;
+                  if (!source) return null;
+                  return (
+                    <InvoiceSourceQuotationPanel
+                      source={source}
+                      customer={{
+                        name: customer?.name ?? '',
+                        email: customer?.email ?? null,
+                        phone: customer?.phone ?? null,
+                      }}
+                      invoiceAuthorisedByName={(invoiceDetail as InvoiceDetailData | undefined)?.invoiceAuthorisedByName}
+                      className="mb-4"
+                    />
+                  );
+                })()}
+
                 {/* Invoice Items */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="text-md font-semibold">Items</h4>
                   </div>
                   {(() => {
-                    const items = (invoiceDetail as InvoiceDetailData)?.items as InvoiceItemRow[] | undefined;
+                    const items = (invoiceDetail as InvoiceDetailData | undefined)?.items;
                     if (!items || items.length === 0) {
                       return <div className="text-gray-500">No items</div>;
                     }
@@ -1540,7 +1562,7 @@ export default function CustomerDetailPage() {
                   {isLoadingPayments ? (
                     <div className="text-gray-500">Loading payments…</div>
                   ) : (() => {
-                    const payments = ((invoiceDetail as InvoiceDetailData)?.payments as PaymentHistoryRow[]) || (paymentHistory as PaymentHistoryRow[]);
+                    const payments = ((invoiceDetail as InvoiceDetailData | undefined)?.payments as PaymentHistoryRow[]) || (paymentHistory as PaymentHistoryRow[]);
                     if (!payments || payments.length === 0) {
                       return <div className="text-gray-500">No payments recorded</div>;
                     }

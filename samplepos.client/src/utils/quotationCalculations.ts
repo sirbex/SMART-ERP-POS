@@ -3,6 +3,7 @@ export {
   calculateLineTotal,
   calculateQuotationTotals,
   hasTaxableQuotationLines,
+  hasQuotationLineDiscounts,
   adjustQuotationQuantity,
   type QuotationLineCalc,
 } from '@shared/utils/quotationCalculations';

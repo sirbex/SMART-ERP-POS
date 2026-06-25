@@ -155,9 +155,9 @@ export const invoiceRepository = {
       `INSERT INTO invoices (
         id, invoice_number, customer_id, customer_name, sale_id, quote_id, reference,
         issue_date, due_date,
-        subtotal, tax_amount, total_amount, amount_paid, amount_due, 
-        notes, status, payment_terms, created_at, updated_at
-      ) VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,$11,$12,'DRAFT',30,$13,$13)
+        subtotal, tax_amount, total_amount, amount_paid, amount_due,
+        notes, status, payment_terms, created_by_id, created_at, updated_at
+      ) VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,$11,$12,'DRAFT',30,$13,$14,$14)
       RETURNING *`,
       [
         invoiceNumber,
@@ -172,6 +172,7 @@ export const invoiceRepository = {
         data.taxAmount,
         data.totalAmount,
         data.notes || null,
+        data.createdById || null,
         now,
       ]
     );

@@ -14,7 +14,7 @@ import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { useAuth } from '../../hooks/useAuth';
 import { isAuthQueryEnabled } from '../../lib/authQuery';
-import { getQuoteStatusBadge, isQuoteConvertible } from '@shared/types/quotation';
+import { getQuoteStatusBadge, isQuoteConvertibleFrom, isQuotationConversionLocked } from '@shared/types/quotation';
 import { formatTimestampDate, formatTimestamp } from '../../utils/businessDate';
 
 export default function QuoteConversionPage() {
@@ -33,7 +33,7 @@ export default function QuoteConversionPage() {
   useEffect(() => {
     if (!data || redirected) return;
     const { quotation } = data;
-    const canConvert = isQuoteConvertible(quotation.status, quotation.validUntil, quotation.convertedToSaleId);
+    const canConvert = isQuoteConvertibleFrom(quotation);
 
     if (canConvert && quoteNumber) {
       setRedirected(true);
@@ -75,8 +75,14 @@ export default function QuoteConversionPage() {
 
   const { quotation } = data;
   const badge = getQuoteStatusBadge(quotation.status);
-  const isAlreadyConverted = quotation.status === 'CONVERTED' || !!quotation.convertedToSaleId;
-  const canConvert = isQuoteConvertible(quotation.status, quotation.validUntil, quotation.convertedToSaleId);
+  const isAlreadyConverted = isQuotationConversionLocked({
+    status: quotation.status,
+    convertedToSaleId: quotation.convertedToSaleId,
+    convertedToInvoiceId: quotation.convertedToInvoiceId,
+    convertedToSoId: quotation.convertedToSoId,
+    convertedToDnId: quotation.convertedToDnId,
+  });
+  const canConvert = isQuoteConvertibleFrom(quotation);
 
   // If convertible, the useEffect above will redirect — show loading in the meantime
   if (canConvert) {
