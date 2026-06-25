@@ -74,6 +74,7 @@
     "proof:synthetic-product-id": "node scripts/proof-synthetic-product-id-matrix.mjs",
     "audit:tenant-schema-drift": "node scripts/audit-tenant-schema-drift.mjs",
     "audit:tenant-schema-drift:heal": "node scripts/audit-tenant-schema-drift.mjs --heal",
+    "compare:tenant-schemas": "node scripts/compare-tenant-schemas.mjs",
     "heal:muom-base-without-product-uoms": "node scripts/heal-muom-base-without-product-uoms.mjs",
     "heal:muom-orphan-products": "node scripts/heal-muom-orphan-products.mjs",
     "heal:muom-set-base-from-product-uoms": "node scripts/heal-muom-set-base-from-product-uoms.mjs",

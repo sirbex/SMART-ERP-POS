@@ -593,10 +593,10 @@ export class AccountingCore {
                 await client.query(
                     `
           INSERT INTO ledger_entries (
-            "Id", "TransactionId", "AccountId", "EntryType", "Amount",
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType", "Amount",
             "DebitAmount", "CreditAmount", "Description", "LineNumber",
             "EntityType", "EntityId", "EntryDate", "CreatedAt"
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+          ) VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
         `,
                     [
                         entryId,
@@ -1014,10 +1014,10 @@ export class AccountingCore {
                 await client.query(
                     `
           INSERT INTO ledger_entries (
-            "Id", "TransactionId", "AccountId", "EntryType", "Amount",
+            "Id", "TransactionId", "LedgerTransactionId", "AccountId", "EntryType", "Amount",
             "DebitAmount", "CreditAmount", "Description", "LineNumber",
             "EntityType", "EntityId", "EntryDate", "CreatedAt"
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+          ) VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
         `,
                     [
                         entryId,
