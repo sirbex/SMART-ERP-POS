@@ -1,8 +1,7 @@
 import { Request, Response, Router } from 'express';
 import { z } from 'zod';
-import Decimal from 'decimal.js';
 import { pool as globalPool } from '../../db/pool.js';
-import { ordersService, CreateOrderInput, OrderItemInput } from './ordersService.js';
+import { ordersService, CreateOrderInput, OrderItemInput, buildOrderCompletionSaleTotals } from './ordersService.js';
 import { salesService, CreateSaleInput, SaleItemInput } from '../sales/salesService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
@@ -195,21 +194,17 @@ router.post(
     // Allow customer override at payment time (cashier can assign/change customer)
     const effectiveCustomerId = paymentData.customerId ?? order.customerId;
 
-    // Combine order's stored discount with any extra discount the cashier adds
-    const orderDiscountAmount = Money.toNumber(Money.parseDb(order.discountAmount));
-    const extraDiscount = paymentData.extraDiscountAmount ?? 0;
-    const effectiveDiscountAmount = new Decimal(orderDiscountAmount).plus(extraDiscount).toNumber();
-    const orderSubtotal = Money.toNumber(Money.parseDb(order.subtotal));
-    const orderTaxAmount = Money.toNumber(Money.parseDb(order.taxAmount));
-    const effectiveTotalAmount = Math.max(0, new Decimal(orderSubtotal).minus(effectiveDiscountAmount).plus(orderTaxAmount).toNumber());
+    // Combine order header discount with cashier extra discount — avoid double-counting
+    // line discounts already passed on sale items (createSale nets lines then subtracts cart).
+    const saleTotals = buildOrderCompletionSaleTotals(order, paymentData.extraDiscountAmount ?? 0);
 
     const saleInput: CreateSaleInput = {
       customerId: effectiveCustomerId,
       items: saleItems,
-      subtotal: orderSubtotal,
-      discountAmount: effectiveDiscountAmount,
-      taxAmount: orderTaxAmount,
-      totalAmount: effectiveTotalAmount,
+      subtotal: saleTotals.subtotal,
+      discountAmount: saleTotals.discountAmount,
+      taxAmount: saleTotals.taxAmount,
+      totalAmount: saleTotals.totalAmount,
       paymentMethod: paymentData.paymentMethod,
       paymentReceived: paymentData.paymentReceived,
       soldBy: userId,

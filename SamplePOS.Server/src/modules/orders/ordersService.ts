@@ -7,6 +7,7 @@ import { resolveSaleItemUom } from '../products/uomService.js';
 import logger from '../../utils/logger.js';
 import { normalizeProductIdForDb } from '../../utils/productIdBoundary.js';
 import Decimal from 'decimal.js';
+import { Money } from '../../utils/money.js';
 
 // ── Input types ──────────────────────────────────────────────────────
 
@@ -34,6 +35,46 @@ export interface CreateOrderInput {
   orderDate?: string;
   notes?: string | null;
   idempotencyKey?: string;
+}
+
+/**
+ * Map order totals → createSale header fields without double-counting discounts.
+ * Line item discounts are netted in createSale's item loop; cart discount must only
+ * include header surplus (not already on lines) plus cashier extra discount.
+ */
+export function buildOrderCompletionSaleTotals(
+  order: Pick<OrderRecord, 'subtotal' | 'discountAmount' | 'taxAmount' | 'items'>,
+  extraDiscountAmount = 0,
+): { subtotal: number; discountAmount: number; taxAmount: number; totalAmount: number } {
+  const items = order.items ?? [];
+  const itemDiscountSum = items.reduce(
+    (sum, item) => sum.plus(Money.parseDb(item.discountAmount || '0')),
+    new Decimal(0),
+  );
+  const orderDiscountAmount = Money.parseDb(order.discountAmount);
+  const orderTaxAmount = Money.parseDb(order.taxAmount);
+  const extraDiscount = new Decimal(extraDiscountAmount);
+
+  const headerSurplus = orderDiscountAmount.minus(itemDiscountSum);
+  const headerOnlyDiscount = headerSurplus.lessThan(0) ? new Decimal(0) : headerSurplus;
+
+  const itemsNet = items.reduce((sum, item) => {
+    const qty = Money.parseDb(item.quantity);
+    const price = Money.parseDb(item.unitPrice);
+    const lineDisc = Money.parseDb(item.discountAmount || '0');
+    return sum.plus(qty.times(price).minus(lineDisc));
+  }, new Decimal(0));
+
+  const cartDiscountForSale = headerOnlyDiscount.plus(extraDiscount);
+
+  const totalBeforeFloor = itemsNet.minus(cartDiscountForSale).plus(orderTaxAmount);
+
+  return {
+    subtotal: Money.toNumber(Money.parseDb(order.subtotal)),
+    taxAmount: Money.toNumber(orderTaxAmount),
+    discountAmount: Money.toNumber(cartDiscountForSale),
+    totalAmount: Money.toNumber(totalBeforeFloor.lessThan(0) ? new Decimal(0) : totalBeforeFloor),
+  };
 }
 
 // ── Service ──────────────────────────────────────────────────────────
