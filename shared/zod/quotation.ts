@@ -135,6 +135,9 @@ export const CreateQuotationInputSchema = z.object({
   validityDays: z.number().int().positive().default(30),
   validFrom: z.string().optional(),
   validUntil: z.string().optional(),
+  reference: z.string().max(255).optional(),
+  paymentTerms: z.string().optional(),
+  deliveryTerms: z.string().optional(),
   notes: z.string().optional(),
   fulfillmentMode: FulfillmentModeEnum.optional().default('RETAIL'),
   items: z.array(QuotationItemInputSchema).min(1, 'At least one item is required'),
@@ -158,6 +161,9 @@ export const UpdateQuotationInputSchema = z.object({
     .transform(val => (val === '' || val === null) ? undefined : val),
   validFrom: z.string().optional(),
   validUntil: z.string().optional(),
+  reference: z.string().max(255).optional(),
+  paymentTerms: z.string().optional(),
+  deliveryTerms: z.string().optional(),
   notes: z.string().optional(),
   items: z.array(
     QuotationItemInputSchema.extend({

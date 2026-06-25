@@ -5,6 +5,7 @@
 import type { LayoutContext } from '../baseDocumentLayout.js';
 import { Layout } from '../baseDocumentLayout.js';
 import { Money } from '../../../utils/money.js';
+import { quotationReferenceDetailLines } from '@shared/utils/quotationReferenceDetails.js';
 
 export interface QuotationBodyData {
     /** When false, tax row is omitted (matches UI when no line is taxable). */
@@ -77,8 +78,8 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
         .fillAndStroke(theme.colors.bgSubtle, theme.colors.border);
     const meta: Array<[string, string]> = [
         ['Quote Type', data.quotation.quoteType.toUpperCase()],
-        ['Valid From', fmtDate(data.quotation.validFrom)],
-        ['Valid Until', fmtDate(data.quotation.validUntil)],
+        ['Quotation Date', fmtDate(data.quotation.validFrom)],
+        ['Expiry Date', fmtDate(data.quotation.validUntil)],
         ['Status', data.quotation.status],
     ];
     let my = startY + 8;
@@ -97,12 +98,11 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
     });
     doc.y = startY + 80 + theme.spacing.lg;
 
-    if (data.quotation.reference || data.quotation.description) {
-        Layout.sectionTitle(ctx, 'Reference');
-        if (data.quotation.reference) Layout.text(ctx, data.quotation.reference);
-        if (data.quotation.description) Layout.text(ctx, data.quotation.description);
-        doc.moveDown(0.3);
-    }
+    Layout.referenceDetailsBlock(
+        ctx,
+        'Reference',
+        quotationReferenceDetailLines(data.quotation.reference, data.quotation.description),
+    );
 
     // ── Items ──
     Layout.sectionTitle(ctx, 'Items');
@@ -110,16 +110,30 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
         ctx,
         data.items,
         [
-            { header: '#', key: 'lineNumber' as const, width: 0.05, align: 'right' as const, format: v => String(v) },
-            { header: 'Description', key: 'description' as const, width: 0.45 },
+            { header: '#', key: 'lineNumber' as const, width: 0.04, align: 'right' as const, format: v => String(v) },
+            { header: 'Description', key: 'description' as const, width: 0.34 },
             {
                 header: 'Qty', key: 'quantity' as const, width: 0.1, align: 'right' as const, format: (v, row) => {
                     const r = row as QuotationBodyData['items'][number];
-                    return `${r.quantity}${r.uomName ? ' ' + r.uomName : ''}`;
+                    return r.uomName ? `${r.quantity} ${r.uomName}` : String(r.quantity);
                 }
             },
-            { header: 'Unit Price', key: 'unitPrice' as const, width: 0.15, align: 'right' as const, format: v => fmt(v as number) },
-            { header: 'Total', key: 'lineTotal' as const, width: 0.25, align: 'right' as const, format: v => fmt(v as number) },
+            { header: 'Unit Price', key: 'unitPrice' as const, width: 0.12, align: 'right' as const, format: v => fmt(v as number) },
+            {
+                header: 'Discount', key: 'discountAmount' as const, width: 0.1, align: 'right' as const,
+                format: (v) => {
+                    const n = v as number;
+                    return n > 0 ? `-${fmt(n)}` : '—';
+                },
+            },
+            {
+                header: 'Tax', key: 'taxAmount' as const, width: 0.1, align: 'right' as const,
+                format: (v) => {
+                    const n = v as number;
+                    return n > 0 ? fmt(n) : '—';
+                },
+            },
+            { header: 'Line Total', key: 'lineTotal' as const, width: 0.2, align: 'right' as const, format: v => fmt(v as number) },
         ],
     );
 

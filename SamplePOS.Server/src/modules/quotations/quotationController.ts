@@ -38,7 +38,10 @@ export const quotationController = {
       customerName: validatedData.customerName || null,
       customerPhone: validatedData.customerPhone || null,
       customerEmail: validatedData.customerEmail || null,
+      reference: validatedData.reference || null,
       description: validatedData.notes || null,
+      paymentTerms: validatedData.paymentTerms || null,
+      deliveryTerms: validatedData.deliveryTerms || null,
       validFrom: validatedData.validFrom || getBusinessDate(),
       validUntil: validatedData.validUntil || addDaysToDateString(getBusinessDate(), validatedData.validityDays || 30),
       createdById: userId,
@@ -163,7 +166,10 @@ export const quotationController = {
     const pool: Pool = req.pool!;
     const { id } = UuidParamSchema.parse(req.params);
     const validatedData = UpdateQuotationInputSchema.parse(req.body);
-    const quotation = await quotationService.updateQuotation(pool, id, validatedData);
+    const quotation = await quotationService.updateQuotation(pool, id, {
+      ...validatedData,
+      description: validatedData.notes,
+    });
     res.json({ success: true, data: quotation, message: 'Quotation updated successfully' });
   }),
 

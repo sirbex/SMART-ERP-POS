@@ -3,6 +3,7 @@ import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessYear, getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
+import { snapshotQuotationReferenceDetails } from '@shared/utils/quotationReferenceDetails.js';
 
 // Normalize snake_case database columns to InvoiceRecord
 function normalizeInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
@@ -12,6 +13,8 @@ function normalizeInvoiceRow(row: Record<string, unknown>): InvoiceRecord {
     invoice_number: row.invoice_number as string,
     customer_id: row.customer_id as string,
     sale_id: (row.sale_id as string) || null,
+    quote_id: (row.quote_id as string) || null,
+    reference: (row.reference as string) || null,
     issue_date: row.issue_date as Date,
     due_date: row.due_date as Date,
     status: status === 'PAID' ? 'PAID' : status === 'PARTIALLY_PAID' ? 'PARTIALLY_PAID' : 'UNPAID',
@@ -33,6 +36,8 @@ export interface InvoiceRecord {
   invoice_number: string;
   customer_id: string;
   sale_id: string | null;
+  quote_id: string | null;
+  reference: string | null;
   issue_date: Date;
   due_date: Date | null;
   status: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED';
@@ -118,6 +123,7 @@ export const invoiceRepository = {
       customerName: string;
       saleId?: string | null;
       quoteId?: string | null;
+      reference?: string | null;
       issueDate?: string | Date | null;
       dueDate?: string | Date | null;
       subtotal: number;
@@ -131,18 +137,35 @@ export const invoiceRepository = {
 
     const now = new Date();
 
+    let reference = data.reference ?? null;
+    if (data.quoteId && reference == null) {
+      const quoteRow = await pool.query(
+        'SELECT reference, description FROM quotations WHERE id = $1',
+        [data.quoteId],
+      );
+      if (quoteRow.rows[0]) {
+        reference = snapshotQuotationReferenceDetails(
+          quoteRow.rows[0].reference as string | null,
+          quoteRow.rows[0].description as string | null,
+        );
+      }
+    }
+
     const result = await pool.query(
       `INSERT INTO invoices (
-        id, invoice_number, customer_id, customer_name, sale_id, issue_date, due_date,
+        id, invoice_number, customer_id, customer_name, sale_id, quote_id, reference,
+        issue_date, due_date,
         subtotal, tax_amount, total_amount, amount_paid, amount_due, 
         notes, status, payment_terms, created_at, updated_at
-      ) VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,0,$9,$10,'DRAFT',30,$11,$11)
+      ) VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,0,$11,$12,'DRAFT',30,$13,$13)
       RETURNING *`,
       [
         invoiceNumber,
         data.customerId,
         data.customerName,
         data.saleId || null,
+        data.quoteId || null,
+        reference,
         data.issueDate || getBusinessDate(),
         data.dueDate || (() => { const d = new Date(getBusinessDate() + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 30); return formatDateBusiness(d); })(),
         data.subtotal,

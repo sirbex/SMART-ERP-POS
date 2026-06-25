@@ -55,6 +55,8 @@ interface RawSaleItemRow {
   productCode?: string | null;
   sku?: string | null;
   barcode?: string | null;
+  uom_name?: string | null;
+  uomName?: string | null;
 }
 
 /** Mapped invoice line item for UI display */
@@ -67,6 +69,7 @@ interface InvoiceLineItem {
   unitCost: number;
   productName: string | null;
   productCode: string | null;
+  uomName: string | null;
   sku: string | null;
   barcode: string | null;
 }
@@ -539,11 +542,19 @@ export const invoiceService = {
       ]);
       const customerName = (customerResult.rows[0]?.name as string) || 'Unknown Customer';
 
+      const quoteIdForInvoice =
+        input.quoteId
+        || (input.saleId
+          ? ((await client.query('SELECT quote_id FROM sales WHERE id = $1', [input.saleId])).rows[0]
+              ?.quote_id as string | null)
+          : null)
+        || null;
+
       const invoice = await invoiceRepository.createInvoice(client, {
         customerId: input.customerId,
         customerName,
         saleId: input.saleId || null,
-        quoteId: input.quoteId || null,
+        quoteId: quoteIdForInvoice,
         issueDate: input.issueDate || undefined,
         dueDate: input.dueDate || undefined,
         subtotal,
@@ -763,6 +774,7 @@ export const invoiceService = {
           unitCost: Money.parseDb(it.unit_cost ?? it.unitCost).toNumber(),
           productName: it.product_name ?? it.productName ?? it.name ?? null,
           productCode: it.product_code ?? it.productCode ?? null,
+          uomName: (it.uom_name ?? it.uomName ?? null) as string | null,
           sku: it.sku ?? null,
           barcode: it.barcode ?? null,
         }));

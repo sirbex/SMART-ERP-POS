@@ -94,6 +94,22 @@ export const Layout = {
             .text(text, opts);
     },
 
+    /**
+     * Reference details block — shared by quotation and invoice PDFs.
+     * Renders nothing when lines are empty (no title, no placeholders).
+     */
+    referenceDetailsBlock(
+        ctx: LayoutContext,
+        title: string,
+        lines: string[],
+    ): void {
+        const content = lines.filter((line) => line.trim() !== '');
+        if (content.length === 0) return;
+        Layout.sectionTitle(ctx, title);
+        content.forEach((line) => Layout.text(ctx, line));
+        ctx.doc.moveDown(0.3);
+    },
+
     /** Label/value pair grid (2 cols by default) */
     kvGrid(
         ctx: LayoutContext,
@@ -463,7 +479,7 @@ function drawFooter(
 ): void {
     const footerY = doc.page.height - paper.margin.bottom - (paper.isReceipt ? 24 : 40);
 
-    if (!paper.isReceipt) {
+        if (!paper.isReceipt) {
         doc
             .strokeColor(theme.colors.border)
             .lineWidth(0.5)
@@ -471,12 +487,13 @@ function drawFooter(
             .lineTo(contentLeft + contentWidth, footerY)
             .stroke();
 
-        if (theme.copy.footerText) {
+        const footerText = theme.copy.footerText?.trim();
+        if (footerText) {
             doc
                 .fillColor(theme.colors.muted)
                 .font(theme.fonts.family)
                 .fontSize(theme.fonts.size.xs)
-                .text(theme.copy.footerText, contentLeft, footerY + 6, {
+                .text(footerText, contentLeft, footerY + 6, {
                     width: contentWidth * 0.7,
                     align: 'left',
                 });

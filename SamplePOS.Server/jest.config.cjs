@@ -10,6 +10,7 @@ module.exports = {
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^@shared/(.*)\\.js$': '<rootDir>/../shared/$1',
     '^@shared/(.*)$': '<rootDir>/../shared/$1',
   },
   transform: {

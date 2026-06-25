@@ -257,6 +257,23 @@ async function renderInvoice(
 
     const ctx = createDocument(meta, theme, output, { paperSize: req.paperSize ?? 'A4' });
 
+    let sourceQuotation: InvoiceBodyData['sourceQuotation'] = null;
+    const quoteId = (inv as { quote_id?: string | null }).quote_id ?? null;
+    const referenceSnapshot = (inv as { reference?: string | null }).reference ?? null;
+    if (quoteId) {
+        const qr = await pool.query(
+            'SELECT quote_number FROM quotations WHERE id = $1',
+            [quoteId],
+        );
+        const quoteNumber = (qr.rows[0]?.quote_number as string) ?? null;
+        if (quoteNumber) {
+            sourceQuotation = {
+                quoteNumber,
+                referenceDetails: referenceSnapshot,
+            };
+        }
+    }
+
     const body: InvoiceBodyData = {
         invoice: {
             invoiceNumber: number,
@@ -271,11 +288,13 @@ async function renderInvoice(
             amountDue: num(inv.balance),
             notes: inv.notes ?? null,
         },
+        sourceQuotation,
         customer,
         items: (result.items ?? []).map(it => ({
             productName: it.productName ?? null,
             productCode: it.productCode ?? null,
             quantity: it.quantity,
+            uomName: it.uomName ?? null,
             unitPrice: it.unitPrice,
             lineTotal: it.lineTotal,
         })),

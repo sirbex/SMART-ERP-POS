@@ -223,7 +223,7 @@ export async function loadDocumentTheme(pool: Pool): Promise<DocumentTheme> {
         copy: {
             paymentInstructions: s.paymentInstructions,
             termsAndConditions: s.termsAndConditions,
-            footerText: s.footerText,
+            footerText: s.footerText?.trim() || null,
             customReceiptNote: s.customReceiptNote,
         },
         paymentAccounts: (s.paymentAccounts || [])

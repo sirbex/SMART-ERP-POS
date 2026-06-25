@@ -8,6 +8,7 @@
 import type { LayoutContext } from '../baseDocumentLayout.js';
 import { Layout } from '../baseDocumentLayout.js';
 import { Money } from '../../../utils/money.js';
+import { referenceSnapshotLines } from '@shared/utils/quotationReferenceDetails.js';
 
 export interface InvoiceBodyData {
     invoice: {
@@ -23,6 +24,11 @@ export interface InvoiceBodyData {
         amountDue: number;
         notes: string | null;
     };
+    /** Populated when invoice originates from a quotation conversion. */
+    sourceQuotation?: {
+        quoteNumber: string;
+        referenceDetails: string | null;
+    } | null;
     customer: {
         name: string;
         email: string | null;
@@ -33,6 +39,7 @@ export interface InvoiceBodyData {
         productName: string | null;
         productCode: string | null;
         quantity: number;
+        uomName?: string | null;
         unitPrice: number;
         lineTotal: number;
     }>;
@@ -104,6 +111,18 @@ export function renderInvoiceBody(ctx: LayoutContext, data: InvoiceBodyData): vo
 
     doc.y = startY + 80 + theme.spacing.lg;
 
+    if (data.sourceQuotation) {
+        Layout.sectionTitle(ctx, 'Source Quotation');
+        Layout.kvGrid(ctx, [
+            { label: 'Quotation Number', value: data.sourceQuotation.quoteNumber },
+        ], { columns: 1 });
+        Layout.referenceDetailsBlock(
+            ctx,
+            'Reference Details',
+            referenceSnapshotLines(data.sourceQuotation.referenceDetails),
+        );
+    }
+
     // ── Line Items ──
     Layout.sectionTitle(ctx, 'Items');
     Layout.table(
@@ -117,7 +136,10 @@ export function renderInvoiceBody(ctx: LayoutContext, data: InvoiceBodyData): vo
                 }
             },
             { header: 'Description', key: 'productName' as const, width: 0.45, format: (v) => (v as string) || '—' },
-            { header: 'Qty', key: 'quantity' as const, width: 0.1, align: 'right' as const, format: (v) => String(v) },
+            { header: 'Qty', key: 'quantity' as const, width: 0.1, align: 'right' as const, format: (v, row) => {
+                const r = row as InvoiceBodyData['items'][number];
+                return r.uomName ? `${v} ${r.uomName}` : String(v);
+            } },
             { header: 'Unit Price', key: 'unitPrice' as const, width: 0.15, align: 'right' as const, format: (v) => fmt(v as number) },
             { header: 'Total', key: 'lineTotal' as const, width: 0.2, align: 'right' as const, format: (v) => fmt(v as number) },
         ],
