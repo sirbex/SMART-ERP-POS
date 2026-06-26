@@ -32,6 +32,7 @@ import { renderInvoiceBody, type InvoiceBodyData } from './bodies/invoiceBody.js
 import { renderReceiptBody, type ReceiptBodyData } from './bodies/receiptBody.js';
 import { renderQuotationBody, type QuotationBodyData } from './bodies/quotationBody.js';
 import { hasTaxableQuotationLines, hasQuotationLineDiscounts } from '@shared/utils/quotationCalculations.js';
+import { quotationPdfReferenceDisplay } from '@shared/utils/quotationReferenceDetails.js';
 import { resolveInvoiceSourceQuotation, resolveInvoiceAuthorisedByName } from '../invoices/invoiceSourceQuotation.js';
 import {
     renderPurchaseOrderBody,
@@ -405,7 +406,7 @@ async function renderQuotation(
 
     const meta: DocumentMeta = {
         title: 'QUOTATION',
-        number: q.quoteNumber,
+        number: quotationPdfReferenceDisplay(q.reference, q.quoteNumber),
         subtitle: q.customerName ?? undefined,
         watermark:
             status === 'CANCELLED' ? 'CANCELLED' : status === 'EXPIRED' ? 'EXPIRED' : undefined,

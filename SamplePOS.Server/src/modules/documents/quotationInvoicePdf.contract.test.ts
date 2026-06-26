@@ -36,6 +36,10 @@ describe('quotation PDF reference details contract', () => {
     expect(quotationPdfReferenceDisplay(null, 'Q-2026-0043')).toBe('Q-2026-0043');
     expect(quotationPdfReferenceDisplay('   ', 'Q-2026-0043')).toBe('Q-2026-0043');
   });
+
+  it('uses user reference as PDF header number when set', () => {
+    expect(quotationPdfReferenceDisplay('PO-442', 'Q-2026-0043')).toBe('PO-442');
+  });
 });
 
 describe('invoice PDF source quotation contract', () => {

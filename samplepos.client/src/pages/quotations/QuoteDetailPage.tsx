@@ -401,6 +401,9 @@ export default function QuoteDetailPage() {
                 <p className="font-semibold text-gray-900 mt-1 break-words">
                   {quotation.reference?.trim() || quotation.quoteNumber}
                 </p>
+                {quotation.reference?.trim() && (
+                  <p className="text-xs text-gray-500 mt-1">Quotation No: {quotation.quoteNumber}</p>
+                )}
               </div>
             </div>
             <div className="p-5 sm:p-6 bg-gray-50">

@@ -94,6 +94,10 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
         data.quotation.customerEmail,
         data.quotation.customerPhone,
     ].filter((l): l is string => Boolean(l));
+    const userReference = data.quotation.reference?.trim() || null;
+    if (userReference) {
+        meta.unshift(['Quotation No', data.quotation.quoteNumber]);
+    }
     const referenceText = quotationPdfReferenceDisplay(
         data.quotation.reference,
         data.quotation.quoteNumber,
