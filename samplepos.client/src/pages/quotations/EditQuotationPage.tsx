@@ -28,6 +28,14 @@ import {
 import { QuotationLineUomSelect } from '../../components/quotations/QuotationLineUomSelect';
 import { useMasterUoms } from '../../hooks/useMasterUoms';
 import { displayMasterUomName, pickDefaultMasterUom } from '../../utils/quotationUom';
+import {
+  buildQuoteLineFromStockProduct,
+  displayProductUomName,
+  normalizeStockLevelUoms,
+  pickDefaultProductUom,
+  type StockLevelProductRow,
+  type StockProductUom,
+} from '../../utils/quotationStockProduct';
 
 interface QuoteItem {
   id: string;
@@ -43,28 +51,13 @@ interface QuoteItem {
   taxRate: number;
   uomId?: string;
   uomName?: string;
+  availableUoms?: StockProductUom[];
   unitCost?: number;
   productType?: string;
   stockOnHand?: number;
 }
 
-interface StockLevelItem {
-  product_id: string;
-  product_name: string;
-  sku?: string;
-  barcode?: string;
-  generic_name?: string;
-  total_stock: number | string;
-  selling_price: number | string;
-  average_cost: number | string;
-  nearest_expiry?: string;
-  is_taxable?: boolean;
-  tax_rate?: number | string;
-  uom_id?: string;
-  uom_name?: string;
-  unit_cost?: string;
-  product_type?: string;
-}
+interface StockLevelItem extends StockLevelProductRow {}
 
 export default function EditQuotationPage() {
   const navigate = useNavigate();
@@ -182,6 +175,51 @@ export default function EditQuotationPage() {
     gcTime: 5 * 60_000,
   });
 
+  // Attach POS catalog UoMs to loaded product lines (enables selling-UoM selector on edit).
+  useEffect(() => {
+    if (!allStockData?.length || items.length === 0) return;
+    setItems((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (!item.productId) return item;
+        const stock = allStockData.find((s) => s.product_id === item.productId);
+        if (!stock) return item;
+
+        const availableUoms = item.availableUoms?.length
+          ? item.availableUoms
+          : normalizeStockLevelUoms(stock);
+        const stockOnHand = Number(stock.total_stock ?? item.stockOnHand ?? 0);
+
+        let uomId = item.uomId;
+        let uomName = item.uomName;
+        if (!uomName?.trim() && availableUoms.length > 0) {
+          const selected = pickDefaultProductUom(availableUoms);
+          uomId = selected.uomId.startsWith('default-') ? undefined : selected.uomId;
+          uomName = displayProductUomName(selected);
+        }
+
+        if (
+          item.availableUoms === availableUoms
+          && item.stockOnHand === stockOnHand
+          && item.uomId === uomId
+          && item.uomName === uomName
+        ) {
+          return item;
+        }
+
+        changed = true;
+        return {
+          ...item,
+          availableUoms,
+          stockOnHand,
+          uomId,
+          uomName,
+        };
+      });
+      return changed ? next : prev;
+    });
+  }, [allStockData, items.length]);
+
   // Instant client-side filtering — no API call per keystroke
   const products = useMemo(() => {
     if (!productSearch || !allStockData) return [];
@@ -226,22 +264,23 @@ export default function EditQuotationPage() {
   };
 
   const addProductAsItem = (product: StockLevelItem) => {
+    const line = buildQuoteLineFromStockProduct(product);
     const newItem: QuoteItem = {
       id: crypto.randomUUID(),
-      productId: product.product_id,
+      productId: line.productId,
       itemType: 'product',
-      sku: product.sku,
-      description: product.product_name,
-      quantity: 1,
-      unitPrice: parseFloat(String(product.selling_price || '0')),
+      sku: line.sku,
+      description: line.description,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
       discountAmount: 0,
-      isTaxable: product.is_taxable || false,
-      taxRate: parseFloat(String(product.tax_rate || '0')),
-      uomId: product.uom_id,
-      uomName: product.uom_name,
-      unitCost: product.unit_cost ? parseFloat(product.unit_cost) : undefined,
+      isTaxable: line.isTaxable,
+      taxRate: line.taxRate,
+      uomId: line.uomId || undefined,
+      uomName: line.uomName,
+      availableUoms: line.availableUoms,
       productType: product.product_type,
-      stockOnHand: Number(product.total_stock || 0),
+      stockOnHand: line.stockOnHand,
     };
     setItems([...items, newItem]);
     setProductSearch('');
@@ -776,16 +815,22 @@ export default function EditQuotationPage() {
                                 productId={item.productId}
                                 uomId={item.uomId}
                                 uomName={item.uomName}
+                                availableUoms={item.availableUoms}
                                 inputRef={(el) => {
                                   if (!editItemRefs.current[rowIndex]) editItemRefs.current[rowIndex] = [null, null, null, null, null];
                                   editItemRefs.current[rowIndex][2] = el;
                                 }}
                                 onKeyDown={(e) => handleItemKeyDown(e, rowIndex, 2)}
-                                onChange={(uomId, uomName) => {
+                                onChange={(uomId, uomName, unitPrice) => {
                                   setItems((prev) =>
                                     prev.map((row) =>
                                       row.id === item.id
-                                        ? { ...row, uomId: uomId ?? undefined, uomName }
+                                        ? {
+                                            ...row,
+                                            uomId: uomId ?? undefined,
+                                            uomName,
+                                            ...(unitPrice != null ? { unitPrice } : {}),
+                                          }
                                         : row
                                     )
                                   );

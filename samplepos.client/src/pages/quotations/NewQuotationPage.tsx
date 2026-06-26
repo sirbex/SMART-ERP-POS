@@ -28,6 +28,11 @@ import {
 import { QuotationLineUomSelect } from '../../components/quotations/QuotationLineUomSelect';
 import { useMasterUoms } from '../../hooks/useMasterUoms';
 import { displayMasterUomName, pickDefaultMasterUom } from '../../utils/quotationUom';
+import {
+  buildQuoteLineFromStockProduct,
+  type StockLevelProductRow,
+  type StockProductUom,
+} from '../../utils/quotationStockProduct';
 
 interface QuoteItem {
   id: string;
@@ -43,25 +48,11 @@ interface QuoteItem {
   taxRate: number;
   uomId?: string;
   uomName?: string;
+  availableUoms?: StockProductUom[];
   stockOnHand?: number;
 }
 
-interface StockLevelItem {
-  product_id: string;
-  product_name: string;
-  sku?: string;
-  barcode?: string;
-  generic_name?: string;
-  total_stock: number | string;
-  selling_price: number | string;
-  average_cost: number | string;
-  nearest_expiry?: string;
-  is_taxable?: boolean;
-  tax_rate?: number | string;
-  uom_id?: string;
-  uom_name?: string;
-  product_type?: string;
-}
+interface StockLevelItem extends StockLevelProductRow {}
 
 export default function NewQuotationPage() {
   const navigate = useNavigate();
@@ -171,22 +162,24 @@ export default function NewQuotationPage() {
       updateItem(items.indexOf(existing), 'quantity', existing.quantity + 1);
       toast.success(`Increased ${product.product_name} quantity`);
     } else {
+      const line = buildQuoteLineFromStockProduct(product);
       setItems([
         ...items,
         {
           id: `temp_${Date.now()}`,
-          productId: product.product_id,
+          productId: line.productId,
           itemType: 'product',
-          sku: product.sku,
-          description: product.product_name,
-          quantity: 1,
-          unitPrice: parseFloat(String(product.selling_price || '0')),
+          sku: line.sku,
+          description: line.description,
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
           discountAmount: 0,
-          isTaxable: product.is_taxable || false,
-          taxRate: parseFloat(String(product.tax_rate || '18')),
-          uomId: product.uom_id,
-          uomName: product.uom_name,
-          stockOnHand: Number(product.total_stock || 0),
+          isTaxable: line.isTaxable,
+          taxRate: line.taxRate,
+          uomId: line.uomId || undefined,
+          uomName: line.uomName,
+          availableUoms: line.availableUoms,
+          stockOnHand: line.stockOnHand,
         },
       ]);
       toast.success(`Added ${product.product_name}`);
@@ -683,14 +676,20 @@ export default function NewQuotationPage() {
                               productId={item.productId}
                               uomId={item.uomId}
                               uomName={item.uomName}
+                              availableUoms={item.availableUoms}
                               inputRef={(el) => {
                                 if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null, null];
                                 itemRefs.current[index][2] = el;
                               }}
                               onKeyDown={(e) => handleItemKeyDown(e, index, 2)}
-                              onChange={(uomId, uomName) => {
+                              onChange={(nextUomId, nextUomName, nextUnitPrice) => {
                                 const updated = [...items];
-                                updated[index] = { ...updated[index], uomId: uomId ?? undefined, uomName };
+                                updated[index] = {
+                                  ...updated[index],
+                                  uomId: nextUomId ?? undefined,
+                                  uomName: nextUomName,
+                                  ...(nextUnitPrice != null ? { unitPrice: nextUnitPrice } : {}),
+                                };
                                 setItems(updated);
                               }}
                             />

@@ -1498,9 +1498,9 @@ export default function CustomerDetailPage() {
                     <InvoiceSourceQuotationPanel
                       source={source}
                       customer={{
-                        name: customer?.name ?? '',
-                        email: customer?.email ?? null,
-                        phone: customer?.phone ?? null,
+                        name: (customer as CustomerDetailData | undefined)?.name ?? '',
+                        email: (customer as CustomerDetailData | undefined)?.email ?? null,
+                        phone: (customer as CustomerDetailData | undefined)?.phone ?? null,
                       }}
                       invoiceAuthorisedByName={(invoiceDetail as InvoiceDetailData | undefined)?.invoiceAuthorisedByName}
                       className="mb-4"

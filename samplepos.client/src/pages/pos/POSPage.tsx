@@ -77,7 +77,7 @@ import type {
   QuotationDetail,
   QuotationItem,
 } from '@shared/types/quotation';
-import { normalizeStatus, getQuoteStatusBadge, isQuoteConvertibleFrom } from '@shared/types/quotation';
+import { getQuoteStatusBadge, isQuoteConvertibleFrom } from '@shared/types/quotation';
 import type { OfflineSaleData } from '../../hooks/useOfflineMode';
 import type { CreateSaleInput } from '../../types/inputs';
 import { syncOfflineCustomers } from '../../services/offlineSyncEngine';

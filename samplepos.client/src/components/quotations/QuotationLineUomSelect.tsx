@@ -1,3 +1,5 @@
+import type { StockProductUom } from '../../utils/quotationStockProduct';
+import { displayProductUomName } from '../../utils/quotationStockProduct';
 import { useMasterUoms } from '../../hooks/useMasterUoms';
 import { displayMasterUomName } from '../../utils/quotationUom';
 import { UomSelector } from '../inventory/UomSelector';
@@ -6,22 +8,26 @@ interface QuotationLineUomSelectProps {
   productId?: string;
   uomId?: string | null;
   uomName?: string | null;
+  /** POS catalog UoMs from stock-levels — selling price + conversion (preferred for product lines). */
+  availableUoms?: StockProductUom[];
   disabled?: boolean;
   className?: string;
   inputRef?: (el: HTMLSelectElement | null) => void;
   onKeyDown?: (e: React.KeyboardEvent<HTMLSelectElement>) => void;
-  onChange: (uomId: string | null, uomName: string) => void;
+  onChange: (uomId: string | null, uomName: string, unitPrice?: number) => void;
 }
 
 /**
  * Quotation line UoM:
- * - Product lines: product MUoM dropdown (UomSelector)
- * - Custom lines: master UoM list only (no free-text duplicates)
+ * - Product lines with catalog UoMs: POS-style selling unit + price (stock-levels)
+ * - Product lines without catalog: product MUoM dropdown (UomSelector) — legacy
+ * - Custom lines: master UoM list only
  */
 export function QuotationLineUomSelect({
   productId,
   uomId,
   uomName,
+  availableUoms,
   disabled = false,
   className = '',
   inputRef,
@@ -29,6 +35,41 @@ export function QuotationLineUomSelect({
   onChange,
 }: QuotationLineUomSelectProps) {
   const { data: masterUoms = [], isLoading } = useMasterUoms();
+  const selectClass =
+    className ||
+    'w-full px-2 py-1 text-sm border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent';
+
+  if (productId && availableUoms && availableUoms.length > 0) {
+    const baseUom = availableUoms.find((u) => u.isDefault) || availableUoms[0];
+    const baseLabel = displayProductUomName(baseUom);
+    const value = uomId || '';
+
+    return (
+      <select
+        ref={inputRef}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => {
+          const id = e.target.value;
+          const selected = availableUoms.find((u) => u.uomId === id);
+          if (!selected) return;
+          const resolvedId = selected.uomId.startsWith('default-') ? null : selected.uomId;
+          onChange(resolvedId, displayProductUomName(selected), Number(selected.price) || 0);
+        }}
+        onKeyDown={onKeyDown}
+        aria-label="Unit of measure"
+        className={selectClass}
+      >
+        {availableUoms.map((u) => (
+          <option key={u.uomId} value={u.uomId}>
+            {u.isDefault
+              ? `${displayProductUomName(u)} (Base)`
+              : `1 ${displayProductUomName(u)} = ${Number(u.conversionFactor)} ${baseLabel}`}
+          </option>
+        ))}
+      </select>
+    );
+  }
 
   if (productId) {
     return (
@@ -37,10 +78,7 @@ export function QuotationLineUomSelect({
         baseCost={0}
         selectedUomId={uomId}
         disabled={disabled}
-        className={
-          className ||
-          'w-full px-2 py-1 text-sm border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent'
-        }
+        className={selectClass}
         onChange={({ uomId: id, uomName: name }) => onChange(id, name)}
       />
     );
@@ -66,10 +104,7 @@ export function QuotationLineUomSelect({
       }}
       onKeyDown={onKeyDown}
       aria-label="Unit of measure"
-      className={
-        className ||
-        'w-full px-2 py-1 text-sm border border-transparent hover:border-gray-300 focus:border-blue-500 rounded focus:ring-1 focus:ring-blue-500 bg-transparent'
-      }
+      className={selectClass}
     >
       <option value="">{isLoading ? 'Loading…' : 'Select UoM…'}</option>
       {masterUoms.map((u) => (
@@ -78,7 +113,6 @@ export function QuotationLineUomSelect({
           {u.symbol && u.symbol !== u.name ? ` (${u.name})` : ''}
         </option>
       ))}
-      {/* Legacy row saved with name only — show until user picks canonical UoM */}
       {!selectValue && uomName?.trim() && (
         <option value="" disabled>
           {uomName} (select from list)

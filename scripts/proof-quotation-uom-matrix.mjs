@@ -43,28 +43,42 @@ console.log('1. SOURCE INVARIANTS\n');
 
 section('QuotationLineUomSelect component exists', existsSync(join(clientDir, 'src/components/quotations/QuotationLineUomSelect.tsx')));
 section('useMasterUoms hook exists', existsSync(join(clientDir, 'src/hooks/useMasterUoms.ts')));
-section('quotationUom utility exists', existsSync(join(clientDir, 'src/utils/quotationUom.ts')));
+section('quotationStockProduct utility exists', existsSync(join(clientDir, 'src/utils/quotationStockProduct.ts')));
 section('quotationUomResolver server module exists', existsSync(join(serverDir, 'src/modules/quotations/quotationUomResolver.ts')));
+
+const stockProduct = read('samplepos.client/src/utils/quotationStockProduct.ts');
+section('normalizeStockLevelUoms reads uoms[]', stockProduct.includes('item.uoms') && stockProduct.includes('buildQuoteLineFromStockProduct'));
+section('applySellingUomToQuoteLine updates price', stockProduct.includes('applySellingUomToQuoteLine'));
 
 const uomSelect = read('samplepos.client/src/components/quotations/QuotationLineUomSelect.tsx');
 section('Custom lines use master UoM select (not free text)', uomSelect.includes('useMasterUoms') && uomSelect.includes('<select'));
-section('Product lines use UomSelector', uomSelect.includes('UomSelector') && uomSelect.includes('productId'));
+section('Product lines use catalog availableUoms (POS parity)', uomSelect.includes('availableUoms') && uomSelect.includes('conversionFactor'));
+section('Product lines fallback to UomSelector', uomSelect.includes('UomSelector') && uomSelect.includes('productId'));
 
 const newQuote = read('samplepos.client/src/pages/quotations/NewQuotationPage.tsx');
+section('NewQuotationPage uses buildQuoteLineFromStockProduct', newQuote.includes('buildQuoteLineFromStockProduct'));
 section('NewQuotationPage uses QuotationLineUomSelect', newQuote.includes('QuotationLineUomSelect'));
 section('NewQuotationPage custom line itemType', newQuote.includes("itemType: 'custom'"));
 section('NewQuotationPage validates custom uomId', newQuote.includes('customMissingUom'));
 section('NewQuotationPage no free-text uom input', !newQuote.includes("updateItem(index, 'uomName', e.target.value)"));
 
 const editQuote = read('samplepos.client/src/pages/quotations/EditQuotationPage.tsx');
+section('EditQuotationPage uses buildQuoteLineFromStockProduct', editQuote.includes('buildQuoteLineFromStockProduct'));
+section('EditQuotationPage attaches availableUoms on load', editQuote.includes('normalizeStockLevelUoms'));
 section('EditQuotationPage uses QuotationLineUomSelect', editQuote.includes('QuotationLineUomSelect'));
 section('EditQuotationPage validates custom uomId', editQuote.includes("itemType === 'custom' && !item.uomId"));
+
+const quoteBody = read('SamplePOS.Server/src/modules/documents/bodies/quotationBody.ts');
+section('Quotation PDF has separate UoM column', quoteBody.includes("header: 'UoM'") && quoteBody.includes("key: 'uomName'"));
 
 const svc = read('SamplePOS.Server/src/modules/quotations/quotationService.ts');
 section('createQuotation normalizes UoM via resolver', svc.includes('normalizeQuotationLineUom') && svc.includes('loadMasterUoms'));
 section('updateQuotation normalizes UoM via resolver', (svc.match(/normalizeQuotationLineUom/g) || []).length >= 2);
 
 console.log('\n2. CLIENT UNIT TESTS\n');
+const stockProductTests = run('npx', ['vitest', 'run', 'src/utils/quotationStockProduct.test.ts'], clientDir);
+section('quotationStockProduct.test.ts', stockProductTests.ok, stockProductTests.ok ? 'vitest PASS' : stockProductTests.out.split('\n').slice(-5).join(' | '));
+
 const clientTests = run('npx', ['vitest', 'run', 'src/__tests__/quotation-uom.spec.ts'], clientDir);
 section('quotation-uom.spec.ts', clientTests.ok, clientTests.ok ? 'vitest PASS' : clientTests.out.split('\n').slice(-5).join(' | '));
 
@@ -83,7 +97,8 @@ section('Server tsc build', build.ok, build.ok ? 'PASS' : 'FAIL');
 console.log('\n' + '═'.repeat(64));
 if (fail === 0) {
   console.log('✅ QUOTATION UoM PROOF MATRIX — ALL PASS');
-  console.log('   Run proof:quotation-uom:live for Bliss API create + canonical UoM checks.');
+  console.log('   Run proof:quotation-uom:live for Bliss API custom-line UoM checks.');
+  console.log('   Run proof-quotation-product-uom-live.mjs for product MUoM + PDF UoM column.');
 } else {
   console.log(`❌ ${fail} section(s) FAILED — do not commit until fixed.`);
 }

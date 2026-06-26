@@ -199,19 +199,18 @@ function buildQuotationItemColumns(
     fmt: (n: number) => string,
 ): QuotationItemTableColumn[] {
     const extraCols = (showDiscount ? 1 : 0) + (showTax ? 1 : 0);
-    const descWidth = extraCols === 0 ? 0.46 : extraCols === 1 ? 0.36 : 0.28;
-    const lineTotalWidth = extraCols === 0 ? 0.22 : 0.18;
+    const descWidth = extraCols === 0 ? 0.38 : extraCols === 1 ? 0.28 : 0.22;
+    const lineTotalWidth = extraCols === 0 ? 0.18 : 0.15;
 
     const cols: QuotationItemTableColumn[] = [
         { header: '#', key: 'lineNumber' as const, width: 0.04, align: 'right' as const, format: v => String(v) },
         { header: 'Description', key: 'description' as const, width: descWidth },
+        { header: 'Qty', key: 'quantity' as const, width: 0.08, align: 'right' as const, format: (v) => String(v) },
         {
-            header: 'Qty', key: 'quantity' as const, width: 0.12, align: 'right' as const, format: (v, row) => {
-                const r = row as QuotationBodyData['items'][number];
-                return r.uomName ? `${r.quantity} ${r.uomName}` : String(r.quantity);
-            },
+            header: 'UoM', key: 'uomName' as const, width: 0.1, align: 'left' as const,
+            format: (v) => (v as string)?.trim() || '—',
         },
-        { header: 'Unit Price', key: 'unitPrice' as const, width: 0.14, align: 'right' as const, format: v => fmt(v as number) },
+        { header: 'Unit Price', key: 'unitPrice' as const, width: 0.12, align: 'right' as const, format: v => fmt(v as number) },
     ];
 
     if (showDiscount) {

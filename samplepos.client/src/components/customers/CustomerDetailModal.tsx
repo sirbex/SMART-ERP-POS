@@ -664,9 +664,9 @@ export default function CustomerDetailModal({
                                                                             <InvoiceSourceQuotationPanel
                                                                                 source={expandedInvoiceDetails.sourceQuotation}
                                                                                 customer={{
-                                                                                    name: customer?.name ?? '',
-                                                                                    email: customer?.email ?? null,
-                                                                                    phone: customer?.phone ?? null,
+                                                                                    name: (customer as CustomerData | undefined)?.name ?? '',
+                                                                                    email: (customer as CustomerData | undefined)?.email ?? null,
+                                                                                    phone: (customer as CustomerData | undefined)?.phone ?? null,
                                                                                 }}
                                                                                 invoiceAuthorisedByName={expandedInvoiceDetails.invoiceAuthorisedByName}
                                                                                 className="!p-3"
@@ -836,9 +836,9 @@ export default function CustomerDetailModal({
                                                                                                     <InvoiceSourceQuotationPanel
                                                                                                         source={expandedInvoiceDetails.sourceQuotation}
                                                                                                         customer={{
-                                                                                                            name: customer?.name ?? '',
-                                                                                                            email: customer?.email ?? null,
-                                                                                                            phone: customer?.phone ?? null,
+                                                                                                            name: (customer as CustomerData | undefined)?.name ?? '',
+                                                                                                            email: (customer as CustomerData | undefined)?.email ?? null,
+                                                                                                            phone: (customer as CustomerData | undefined)?.phone ?? null,
                                                                                                         }}
                                                                                                         invoiceAuthorisedByName={expandedInvoiceDetails.invoiceAuthorisedByName}
                                                                                                     />

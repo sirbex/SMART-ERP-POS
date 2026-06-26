@@ -40,13 +40,13 @@ describe('invoice PDF source quotation contract', () => {
 });
 
 describe('quotation UoM display contract', () => {
-  it('formats quantity with exact UoM name and space', () => {
-    const formatQty = (quantity: number, uomName: string | null) =>
-      uomName ? `${quantity} ${uomName}` : String(quantity);
+  it('keeps Qty and UoM as separate PDF columns', () => {
+    const formatQty = (quantity: number) => String(quantity);
+    const formatUom = (uomName: string | null) => uomName?.trim() || '—';
 
-    expect(formatQty(2, 'Box')).toBe('2 Box');
-    expect(formatQty(5, 'Carton')).toBe('5 Carton');
-    expect(formatQty(12, 'Piece')).toBe('12 Piece');
+    expect(formatQty(2)).toBe('2');
+    expect(formatUom('Box')).toBe('Box');
+    expect(formatUom(null)).toBe('—');
   });
 });
 
