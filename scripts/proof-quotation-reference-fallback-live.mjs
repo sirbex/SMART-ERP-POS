@@ -97,5 +97,11 @@ else bad('PDF shows user reference in header/body', userRef);
 if (withRef.text.includes(withRef.quote.quoteNumber)) ok('system quote number still present in meta', withRef.quote.quoteNumber);
 else bad('system quote number still present in meta', withRef.quote.quoteNumber);
 
+const cd = (await fetch(`${PROD}/api/documents/QUOTATION/${withRef.quote.id}`, {
+  headers: { Authorization: `Bearer ${token}` },
+})).headers.get('content-disposition') || '';
+if (cd.includes(`quotation-${userRef}.pdf`)) ok('Content-Disposition uses reference filename');
+else bad('Content-Disposition uses reference filename', cd.slice(0, 80));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

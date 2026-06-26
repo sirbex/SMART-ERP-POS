@@ -6,6 +6,7 @@ import {
   hasQuotationReferenceDetails,
   quotationReferenceDetailLines,
   quotationPdfReferenceDisplay,
+  quotationDownloadFilename,
   referenceSnapshotLines,
 } from '@shared/utils/quotationReferenceDetails.js';
 import {
@@ -39,6 +40,17 @@ describe('quotation PDF reference details contract', () => {
 
   it('uses user reference as PDF header number when set', () => {
     expect(quotationPdfReferenceDisplay('PO-442', 'Q-2026-0043')).toBe('PO-442');
+  });
+
+  it('uses user reference in download filename when set', () => {
+    expect(quotationDownloadFilename('PO-442', 'Q-2026-0043')).toBe('quotation-PO-442.pdf');
+    expect(quotationDownloadFilename('Tender / Ref 2026', 'Q-2026-0043')).toBe(
+      'quotation-Tender _ Ref 2026.pdf',
+    );
+  });
+
+  it('falls back to quote number in download filename when reference empty', () => {
+    expect(quotationDownloadFilename(null, 'Q-2026-0043')).toBe('quotation-Q-2026-0043.pdf');
   });
 });
 

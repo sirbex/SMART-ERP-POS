@@ -13,6 +13,7 @@ import { toast } from 'react-hot-toast';
 import quotationApi from '../../api/quotations';
 import { api } from '../../utils/api';
 import { downloadFile } from '../../utils/download';
+import { quotationDownloadFilename } from '@shared/utils/quotationReferenceDetails';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
@@ -342,7 +343,7 @@ export default function QuoteDetailPage() {
                 try {
                   await downloadFile(
                     `/documents/QUOTATION/${quotation.id}`,
-                    `quotation-${quotation.quoteNumber}.pdf`,
+                    quotationDownloadFilename(quotation.reference, quotation.quoteNumber),
                   );
                 } catch (err) {
                   toast.error(

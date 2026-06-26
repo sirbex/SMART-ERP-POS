@@ -53,3 +53,24 @@ export function quotationPdfReferenceDisplay(
   const trimmed = reference?.trim();
   return trimmed || quoteNumber;
 }
+
+/** Safe segment for Content-Disposition / browser download attribute. */
+export function sanitizeDownloadFilenameSegment(value: string): string {
+  const cleaned = value
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+    .replace(/\s+/g, ' ')
+    .slice(0, 120);
+  return cleaned || 'quotation';
+}
+
+/** Downloaded quotation PDF filename — user reference when set, else quote number. */
+export function quotationDownloadFilename(
+  reference: string | null | undefined,
+  quoteNumber: string,
+): string {
+  const base = sanitizeDownloadFilenameSegment(
+    quotationPdfReferenceDisplay(reference, quoteNumber),
+  );
+  return `quotation-${base}.pdf`;
+}

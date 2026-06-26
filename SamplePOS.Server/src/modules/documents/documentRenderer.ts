@@ -32,7 +32,10 @@ import { renderInvoiceBody, type InvoiceBodyData } from './bodies/invoiceBody.js
 import { renderReceiptBody, type ReceiptBodyData } from './bodies/receiptBody.js';
 import { renderQuotationBody, type QuotationBodyData } from './bodies/quotationBody.js';
 import { hasTaxableQuotationLines, hasQuotationLineDiscounts } from '@shared/utils/quotationCalculations.js';
-import { quotationPdfReferenceDisplay } from '@shared/utils/quotationReferenceDetails.js';
+import {
+  quotationDownloadFilename,
+  quotationPdfReferenceDisplay,
+} from '@shared/utils/quotationReferenceDetails.js';
 import { resolveInvoiceSourceQuotation, resolveInvoiceAuthorisedByName } from '../invoices/invoiceSourceQuotation.js';
 import {
     renderPurchaseOrderBody,
@@ -463,7 +466,7 @@ async function renderQuotation(
     finalizeDocument(ctx, meta);
 
     return {
-        filename: `quotation-${q.quoteNumber || req.id}.pdf`,
+        filename: quotationDownloadFilename(q.reference, q.quoteNumber || req.id),
         contentType: 'application/pdf',
     };
 }
