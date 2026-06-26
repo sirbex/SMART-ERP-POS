@@ -49,7 +49,14 @@ export interface QuotationBodyData {
     }>;
 }
 
-type TableCol = Parameters<typeof Layout.table>[2][number];
+type QuotationItem = QuotationBodyData['items'][number];
+type QuotationItemTableColumn = {
+    header: string;
+    key: keyof QuotationItem;
+    width?: number;
+    align?: 'left' | 'right' | 'center';
+    format?: (v: QuotationItem[keyof QuotationItem], row: QuotationItem) => string;
+};
 
 export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData): void {
     const { theme, doc, contentWidth, contentLeft } = ctx;
@@ -190,12 +197,12 @@ function buildQuotationItemColumns(
     showDiscount: boolean,
     showTax: boolean,
     fmt: (n: number) => string,
-): TableCol[] {
+): QuotationItemTableColumn[] {
     const extraCols = (showDiscount ? 1 : 0) + (showTax ? 1 : 0);
     const descWidth = extraCols === 0 ? 0.46 : extraCols === 1 ? 0.36 : 0.28;
     const lineTotalWidth = extraCols === 0 ? 0.22 : 0.18;
 
-    const cols: TableCol[] = [
+    const cols: QuotationItemTableColumn[] = [
         { header: '#', key: 'lineNumber' as const, width: 0.04, align: 'right' as const, format: v => String(v) },
         { header: 'Description', key: 'description' as const, width: descWidth },
         {
