@@ -183,7 +183,7 @@ describe('Quotation PDF integration proof', () => {
     expect(withFooter.length).toBeGreaterThan(withoutFooter.length);
   });
 
-  it('omits reference section when reference details are empty', async () => {
+  it('shows quote number as reference when user reference is empty', async () => {
     expect(
       quotationReferenceDetailLines(null, null),
     ).toHaveLength(0);

@@ -396,12 +396,12 @@ export default function QuoteDetailPage() {
               {quotation.customerEmail && (
                 <p className="text-sm text-gray-600 break-all">{quotation.customerEmail}</p>
               )}
-              {quotation.reference && (
-                <div className="mt-4 pt-3 border-t border-gray-200">
-                  <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Reference</p>
-                  <p className="font-semibold text-gray-900 mt-1 break-words">{quotation.reference}</p>
-                </div>
-              )}
+              <div className="mt-4 pt-3 border-t border-gray-200">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Reference</p>
+                <p className="font-semibold text-gray-900 mt-1 break-words">
+                  {quotation.reference?.trim() || quotation.quoteNumber}
+                </p>
+              </div>
             </div>
             <div className="p-5 sm:p-6 bg-gray-50">
               <dl className="space-y-2.5 text-sm">

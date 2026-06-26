@@ -9,6 +9,7 @@ import {
     hasQuotationLineDiscounts,
     hasTaxableQuotationLines,
 } from '@shared/utils/quotationCalculations.js';
+import { quotationPdfReferenceDisplay } from '@shared/utils/quotationReferenceDetails.js';
 
 export interface QuotationBodyData {
     /** When false, tax column/row omitted (no taxable lines with tax). */
@@ -93,8 +94,11 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
         data.quotation.customerEmail,
         data.quotation.customerPhone,
     ].filter((l): l is string => Boolean(l));
-    const referenceText = data.quotation.reference?.trim() || null;
-    const leftContentRows = customerLines.length + (referenceText ? 2 : 0);
+    const referenceText = quotationPdfReferenceDisplay(
+        data.quotation.reference,
+        data.quotation.quoteNumber,
+    );
+    const leftContentRows = customerLines.length + 2;
     const panelHeight = Math.max(
         20 + leftContentRows * 13 + 16,
         20 + meta.length * 16 + 8,
@@ -114,20 +118,18 @@ export function renderQuotationBody(ctx: LayoutContext, data: QuotationBodyData)
         doc.text(l, contentLeft + 8, by, { width: colW - 16, ellipsis: true });
         by += 13;
     });
-    if (referenceText) {
-        by += 4;
-        doc
-            .fillColor(theme.colors.muted)
-            .font(theme.fonts.family)
-            .fontSize(theme.fonts.size.xs)
-            .text('Reference', contentLeft + 8, by, { width: colW - 16 });
-        by += 12;
-        doc
-            .fillColor(theme.colors.text)
-            .font(theme.fonts.familyBold)
-            .fontSize(theme.fonts.size.base)
-            .text(referenceText, contentLeft + 8, by, { width: colW - 16 });
-    }
+    by += 4;
+    doc
+        .fillColor(theme.colors.muted)
+        .font(theme.fonts.family)
+        .fontSize(theme.fonts.size.xs)
+        .text('Reference', contentLeft + 8, by, { width: colW - 16 });
+    by += 12;
+    doc
+        .fillColor(theme.colors.text)
+        .font(theme.fonts.familyBold)
+        .fontSize(theme.fonts.size.base)
+        .text(referenceText, contentLeft + 8, by, { width: colW - 16 });
 
     const rightX = contentLeft + colW + theme.spacing.lg;
     doc

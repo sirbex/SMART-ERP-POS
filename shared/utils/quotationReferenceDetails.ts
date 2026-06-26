@@ -41,3 +41,15 @@ export function referenceSnapshotLines(snapshot: string | null | undefined): str
   if (snapshot == null || snapshot.trim() === '') return [];
   return snapshot.split('\n').filter((line) => line.trim() !== '');
 }
+
+/**
+ * Quotation PDF "Reference" on the Quoted To card:
+ * user-entered reference when set, otherwise the system quote number.
+ */
+export function quotationPdfReferenceDisplay(
+  reference: string | null | undefined,
+  quoteNumber: string,
+): string {
+  const trimmed = reference?.trim();
+  return trimmed || quoteNumber;
+}

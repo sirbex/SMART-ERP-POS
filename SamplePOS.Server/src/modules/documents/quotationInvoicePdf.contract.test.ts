@@ -5,6 +5,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   hasQuotationReferenceDetails,
   quotationReferenceDetailLines,
+  quotationPdfReferenceDisplay,
   referenceSnapshotLines,
 } from '@shared/utils/quotationReferenceDetails.js';
 import {
@@ -25,6 +26,15 @@ describe('quotation PDF reference details contract', () => {
   it('includes user-entered reference details exactly', () => {
     const lines = quotationReferenceDetailLines('Tender Ref 2026', 'Deliver to Kampala depot');
     expect(lines).toEqual(['Tender Ref 2026', 'Deliver to Kampala depot']);
+  });
+
+  it('uses user reference on quotation PDF when set', () => {
+    expect(quotationPdfReferenceDisplay('PO-442', 'Q-2026-0043')).toBe('PO-442');
+  });
+
+  it('falls back to quote number on quotation PDF when reference is empty', () => {
+    expect(quotationPdfReferenceDisplay(null, 'Q-2026-0043')).toBe('Q-2026-0043');
+    expect(quotationPdfReferenceDisplay('   ', 'Q-2026-0043')).toBe('Q-2026-0043');
   });
 });
 
