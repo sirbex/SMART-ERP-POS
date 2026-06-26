@@ -27,7 +27,6 @@ import { Money } from '../../utils/money.js';
 import { AccountingCore } from '../../services/accountingCore.js';
 import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 import { ACTIVE_GL_REFERENCE_PREDICATE } from '../../utils/activeGlReference.js';
-import { v5 as uuidv5 } from 'uuid';
 import {
   computeApReconciliationSnapshot,
   apMaterialityThreshold,
@@ -1365,6 +1364,9 @@ export interface HealAPDriftResult {
     transactionNumber?: string;
     transactionId?: string;
     durationMs: number;
+    /** True when global CORRECTION heal is blocked — use document-level fixes */
+    blocked?: boolean;
+    assessment?: import('../supplier-payments/apDriftHealPolicy.js').ApDriftHealAssessment;
 }
 
 export async function healAPDrift(
@@ -1418,81 +1420,22 @@ export async function healAPDrift(
         };
     }
 
-    // Resolve account codes (we use codes, not IDs, with AccountingCore)
-    const accCodes = ['2100', '5900'];
-    const accRes = await pool.query(
-        `SELECT "AccountCode" FROM accounts WHERE "AccountCode" = ANY($1::text[])`,
-        [accCodes],
+    const { assessApDriftHealEligibility } = await import(
+        '../supplier-payments/apDriftHealPolicy.js'
     );
-    const found = new Set<string>(accRes.rows.map(r => r.AccountCode));
-    if (!found.has('2100')) {
-        throw new Error('Account 2100 (Accounts Payable) not found');
-    }
-    let offsetCode = '5900';
-    if (!found.has('5900')) {
-        // Fall back to any expense account
-        const fallback = await pool.query(
-            `SELECT "AccountCode" FROM accounts WHERE "AccountType" = 'EXPENSE' ORDER BY "AccountCode" LIMIT 1`,
-        );
-        if (fallback.rowCount === 0) {
-            throw new Error('No expense account available for AP-drift correction');
-        }
-        offsetCode = fallback.rows[0].AccountCode;
-    }
-
-    // Build the correction JE. drift > 0 → GL > subledger → DEBIT AP / CREDIT Expense.
-    const action: 'debit-ap' | 'credit-ap' = drift > 0 ? 'debit-ap' : 'credit-ap';
-    const absDrift = Math.abs(drift);
-    const today = getBusinessDate();
-    const idempotencyKey = `AP-DRIFT-HEAL-${today}`;
-    // Deterministic UUID — must NOT use all-zero referenceId (collides with other CORRECTION entries).
-    const referenceId = uuidv5(idempotencyKey, '6ba7b810-9dad-11d1-80b4-00c04fd430c8');
-
-    const description =
-        `AP drift correction: align GL 2100 (${glBalance.toFixed(2)}) `
-        + `to open-item subledger (${subBalance.toFixed(2)}); drift=${drift.toFixed(2)}`;
-
-    const lines = action === 'debit-ap'
-        ? [
-            {
-                accountCode: '2100', debitAmount: absDrift, creditAmount: 0,
-                description: 'AP drift correction (reduce overstated liability)'
-            },
-            {
-                accountCode: offsetCode, debitAmount: 0, creditAmount: absDrift,
-                description: 'AP drift correction (offset to GL adjustments)'
-            },
-        ]
-        : [
-            {
-                accountCode: offsetCode, debitAmount: absDrift, creditAmount: 0,
-                description: 'AP drift correction (offset to GL adjustments)'
-            },
-            {
-                accountCode: '2100', debitAmount: 0, creditAmount: absDrift,
-                description: 'AP drift correction (recognise understated liability)'
-            },
-        ];
-
-    const tx = await AccountingCore.createJournalEntry({
-        entryDate: today,
-        description,
-        referenceType: 'CORRECTION',
-        referenceId,
-        referenceNumber: idempotencyKey,
-        idempotencyKey,
-        userId: userId ?? '00000000-0000-0000-0000-000000000000',
-        lines,
-        source: 'SYSTEM_CORRECTION',
-    }, pool);
-
+    const assessment = await assessApDriftHealEligibility(pool);
+    logger.warn('heal-ap-drift blocked: global AP CORRECTION disabled; use document-level fixes', {
+        drift: assessment.drift,
+        reasons: assessment.reasons,
+        recommendations: assessment.recommendations,
+    });
     return {
-        drift: snapshot.drift,
+        drift: assessment.drift,
         subledgerBalance: subBalance,
         glBalance,
-        action,
-        transactionNumber: tx.transactionNumber,
-        transactionId: tx.transactionId,
+        action: 'no-op',
+        blocked: true,
+        assessment,
         durationMs: Date.now() - startedAt,
     };
 }

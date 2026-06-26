@@ -320,6 +320,8 @@ export class AccountingCore {
       SELECT "Id" as "transactionId"
       FROM ledger_transactions
       WHERE "IdempotencyKey" = $1
+        AND "IsReversed" = FALSE
+        AND "Status" = 'POSTED'
       LIMIT 1
     `,
             [key]
@@ -440,6 +442,16 @@ export class AccountingCore {
                 lines: request.lines as GovernanceJournalLine[],
                 accounts: governanceAccounts,
                 idempotencyKey: request.idempotencyKey,
+            });
+
+            const { validateApJournalPosting } = await import(
+                '../modules/supplier-payments/apJournalGovernance.js'
+            );
+            validateApJournalPosting({
+                referenceType: request.referenceType,
+                source: governanceSource,
+                idempotencyKey: request.idempotencyKey,
+                lines: request.lines,
             });
 
             // 3b. Check idempotency by key - return existing if already processed
@@ -1137,6 +1149,7 @@ export class AccountingCore {
             }
 
             // 9. Mark original as reversed (but don't delete!)
+            // Release IdempotencyKey so the business document may be reposted (SAP reversal pattern).
             await client.query(
                 `
         UPDATE ledger_transactions
@@ -1144,6 +1157,11 @@ export class AccountingCore {
             "ReversedByTransactionId" = $2,
             "ReversedAt" = NOW(),
             "IsReversed" = TRUE,
+            "IdempotencyKey" = CASE
+              WHEN "IdempotencyKey" IS NOT NULL AND "IdempotencyKey" != ''
+              THEN "IdempotencyKey" || '::REVERSED::' || $2::uuid::text
+              ELSE "IdempotencyKey"
+            END,
             "UpdatedAt" = NOW()
         WHERE "Id" = $1
       `,

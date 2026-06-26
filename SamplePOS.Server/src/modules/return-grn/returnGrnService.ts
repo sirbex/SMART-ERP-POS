@@ -9,9 +9,8 @@
  * - Reduces batch remaining_quantity
  * - Deducts FIFO cost_layers (keeps layer subledger aligned with inventory GL)
  * - Recalculates product_inventory.quantity_on_hand
- * - Posts GL: DR GRN/IR Clearing (2150) / CR Inventory (1300) — inside same transaction
- *   ⚠️  AP (2100) is NOT touched on Return GRN post.
- *       Only a manually-created Supplier Credit Note reduces AP.
+ * - Posts GL: DR GRN/IR Clearing (2150) or Return Clearing (2160) / CR Inventory (1300)
+ * - When GRN was already invoiced: auto-creates Supplier Credit Note (DR AP / CR clearing)
  */
 
 import type { Pool, PoolClient } from 'pg';
@@ -504,6 +503,7 @@ export const returnGrnService = {
             const supplierName = grResult.rows[0]?.supplier_name || 'Unknown Supplier';
             const supplierId = grResult.rows[0]?.supplier_id || rgrn.supplierId || '';
             const originalGrNumber = grResult.rows[0]?.gr_number;
+            let hasInvoice = false;
 
             if (returnTotalNum > 0) {
                 // MR11 PURITY — detect whether the originating GRN already has a
@@ -528,7 +528,7 @@ export const returnGrnService = {
                      ) AS has_invoice`,
                     [rgrn.grnId],
                 );
-                const hasInvoice = invoiceCheck.rows[0]?.has_invoice ?? false;
+                hasInvoice = invoiceCheck.rows[0]?.has_invoice ?? false;
 
                 await glEntryService.recordReturnGrnToGL(
                     {
@@ -552,10 +552,22 @@ export const returnGrnService = {
                 `return GRN ${posted.returnGrnNumber || rgrnId}`,
             );
 
-            // NOTE: supplier balance is NOT updated here.
-            // AP (2100) is untouched by a Return GRN.
-            // Only a Supplier Credit Note (created manually via POST /:id/credit-note)
-            // should reduce AP and update the supplier's outstanding balance.
+            if (hasInvoice) {
+                try {
+                    await returnGrnService.createCreditNoteFromReturn(
+                        pool,
+                        rgrnId,
+                        undefined,
+                        client,
+                    );
+                } catch (scnErr: unknown) {
+                    const msg = scnErr instanceof Error ? scnErr.message : String(scnErr);
+                    if (!msg.includes('already exists')) {
+                        throw scnErr;
+                    }
+                    logger.info('Return GRN SCN already exists — skip auto-create', { rgrnId });
+                }
+            }
 
             logger.info('Return GRN posted — stock decreased, GL posted', {
                 rgrnId: posted.id,
@@ -659,8 +671,9 @@ export const returnGrnService = {
         pool: Pool,
         rgrnId: string,
         knownReferenceInvoiceId?: string,
+        txClient?: PoolClient,
     ): Promise<{ creditNoteId: string; creditNoteNumber: string }> {
-        return UnitOfWork.run(pool, async (client) => {
+        const run = async (client: PoolClient) => {
             // 1. Validate RGRN exists and is POSTED
             const rgrn = await returnGrnRepository.getById(client, rgrnId);
             if (!rgrn) throw new Error('Return GRN not found');
@@ -838,6 +851,8 @@ export const returnGrnService = {
             });
 
             return { creditNoteId: postedScn.id, creditNoteNumber: postedScn.invoiceNumber };
-        });
+        };
+        if (txClient) return run(txClient);
+        return UnitOfWork.run(pool, run);
     },
 };

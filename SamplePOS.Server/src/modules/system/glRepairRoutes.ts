@@ -306,11 +306,23 @@ router.post('/heal-ap-drift', asyncHandler(async (req, res) => {
     res.json({
         success: true,
         data: result,
-        message: result.action === 'no-op'
+        message: result.blocked
+            ? `AP drift heal blocked (${result.drift.toFixed(2)}): use document-level fixes — see assessment.recommendations`
+            : result.action === 'no-op'
             ? `No AP drift detected (drift=${result.drift.toFixed(2)})`
             : `AP drift of ${result.drift.toFixed(2)} corrected via ${result.transactionNumber} `
             + `(${result.action}) in ${result.durationMs}ms`,
     });
+}));
+
+// GET /api/system/gl/ap-drift-assessment — read-only decomposition before any heal
+router.get('/ap-drift-assessment', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const { assessApDriftHealEligibility } = await import(
+        '../supplier-payments/apDriftHealPolicy.js'
+    );
+    const assessment = await assessApDriftHealEligibility(pool);
+    res.json({ success: true, data: assessment });
 }));
 
 export default router;

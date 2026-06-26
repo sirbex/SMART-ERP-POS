@@ -435,9 +435,9 @@ export class ReconciliationService {
                 }
                 if (!supplierGlIntegrityOk) {
                     recommendations.push(
-                        'SUPPLIER_AP_GL: POST /api/system/gl/heal-ap-drift if drift not explained by expense-on-AP',
+                        'SUPPLIER_AP_GL: GET /api/system/gl/ap-drift-assessment then fix per-supplier document gaps (do not use heal-ap-drift)',
                     );
-                    recommendations.push('Run entity-tag backfill via heal-ap-reconciliation-caches');
+                    recommendations.push('Run proof-ap-drift-decompose.mjs before any GL adjustment');
                 }
                 recommendations.push('Review supplier payment applications and unallocated payments');
             }
