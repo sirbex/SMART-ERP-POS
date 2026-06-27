@@ -1,18 +1,18 @@
 # AP Drift Decomposition — Verified Proof (Henber)
 
-**Generated:** 2026-06-26T21:37:22.041Z
+**Generated:** 2026-06-27T07:52:03.305Z
 
 ## Headline (matches UI reconciliation report)
 
 | Metric | UGX |
 |--------|-----|
-| GL 2100 total | 29,382,251.00 |
-| GL supplier scope (SUPPLIER_AP_GL) | 28,982,251.00 |
-| Open-item subledger | 29,063,446.00 |
-| **integrityGlDrift** | **-81,195.00** |
+| GL 2100 total | 27,391,731.00 |
+| GL supplier scope (SUPPLIER_AP_GL) | 26,991,731.00 |
+| Open-item subledger | 26,991,731.00 |
+| **integrityGlDrift** | **0.00** |
 | Expense on 2100 | 400,000.00 |
-| Unposted pipeline | -63,695.00 |
-| STORED_BALANCE (stale) | 22,107,222.00 |
+| Unposted pipeline | 0.00 |
+| STORED_BALANCE (stale) | 20,116,702.00 |
 
 ## Decomposition (must sum to integrityGlDrift)
 
@@ -20,24 +20,24 @@
 |-----------|-----|----------|
 | Untagged CORRECTION (heal-ap-drift) | 0.00 | must be 0 pre-deploy |
 | Orphan RETURN_GRN on 2100 | 0.00 | must be 0 pre-deploy |
-| Per-supplier residual | -81,195.00 | ACCULIFE, KAMCARE, SALUD, Zedeck |
-| **integrityGlDrift** | **-81,195.00** | ✓ decomposed |
+| Per-supplier residual | 0.00 | ACCULIFE, KAMCARE, SALUD, Zedeck |
+| **integrityGlDrift** | **0.00** | ✗ FAILED |
 
 ## Algebraic identity (verified)
 
 ```
 integrityGlDrift = Σ(per-supplier entity drift) + untagged_CORRECTION_net_2100
--81,195.00 = -81,195.00 + (0.00)
+0.00 = 0.00 + (0.00)
 ```
 
 ## Simulated drift after fixes (no DB writes)
 
 | Step | Drift UGX |
 |------|-----------|
-| Current | -81,195.00 |
-| After reverse TXN-013389 + TXN-011802 | -81,195.00 |
-| After reverse SALUD 6 orphan RGRN GL | -81,195.00 |
-| RGRN repost pending (post-deploy) | 9 docs |
+| Current | 0.00 |
+| After reverse TXN-013389 + TXN-011802 | 0.00 |
+| After reverse SALUD 6 orphan RGRN GL | 0.00 |
+| RGRN repost pending (post-deploy) | 0 docs |
 | STORED_BALANCE drift | 7,275,029.00 | heal-ap-reconciliation-caches |
 
 ## Untagged CORRECTION transactions (reverse these first)
