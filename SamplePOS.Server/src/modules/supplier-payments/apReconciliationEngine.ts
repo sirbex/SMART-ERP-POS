@@ -227,6 +227,29 @@ function unallocatedPaymentsSql(supplierIdParam?: string, ctx?: ApQueryContext):
   `;
 }
 
+/** Gross posted GL 2100 for supplier procure-to-pay (includes reversal legs). */
+export async function computeApGlSupplierScopeGrossPosted(
+  conn: ApDbConn,
+  ctx?: ApQueryContext,
+): Promise<number> {
+  const params = asOfDateParam(ctx);
+  const res = await conn.query(
+    `
+    SELECT COALESCE(SUM(le."CreditAmount") - SUM(le."DebitAmount"), 0) AS gl_balance
+    FROM ledger_entries le
+    JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+    JOIN accounts a ON le."AccountId" = a."Id"
+    WHERE a."AccountCode" = '2100'
+      AND UPPER(le."EntityType") = 'SUPPLIER'
+      AND lt."ReferenceType" NOT IN ('EXPENSE', 'EXPENSE_PAYMENT')
+      AND lt."Status" = 'POSTED'
+      ${glAsOfFilter(ctx)}
+    `,
+    params,
+  );
+  return Money.toNumber(Money.parseDb(res.rows[0]?.gl_balance ?? 0));
+}
+
 /** Net-active GL 2100 for supplier procure-to-pay (excludes standalone expenses). */
 export async function computeApGlSupplierScope(
   conn: ApDbConn,

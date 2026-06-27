@@ -15,6 +15,7 @@ import {
 } from '../components/ui/dialog';
 import { AxiosError } from 'axios';
 import { apiClient, type ApiResponse } from '../utils/api';
+import { ApReconciliationLanesPanel } from '../components/reconciliation/ApReconciliationLanesPanel';
 
 function reconciliationErrorMessage(err: unknown, fallback: string): string {
     const ax = err as AxiosError<ApiResponse>;
@@ -105,6 +106,13 @@ interface ReconciliationDetail {
     recommendations?: string[];
 }
 
+interface ApIntegritySummary {
+    glNetActive: number;
+    openItemSubledger: number;
+    integrityDifference: number;
+    status: 'RECONCILED' | 'DISCREPANCY';
+}
+
 interface DiscrepancyListResponse {
     discrepancies: Array<{
         entityName: string;
@@ -154,17 +162,22 @@ export default function ReconciliationPage() {
         staleTime: 30_000,
     });
 
+    const { data: apIntegrityLane, refetch: refetchApIntegrity } = useQuery({
+        queryKey: ['ap-lane-integrity', asOfDate],
+        queryFn: async () => {
+            const res = await apiClient.get<ApiResponse<ApIntegritySummary>>(
+                '/erp-accounting/reconciliation/ap/integrity',
+                { params: { asOfDate } },
+            );
+            return res.data.data;
+        },
+        staleTime: 30_000,
+    });
+
     const { data: arDiscrepancies, refetch: refetchArDiscrepancies } = useQuery({
         queryKey: ['discrepancies-1200', asOfDate],
         queryFn: () => fetchDiscrepancyDetails('1200', asOfDate),
         enabled: expandedAccounts.has('1200'),
-        staleTime: 30_000,
-    });
-
-    const { data: apDiscrepancies, refetch: refetchApDiscrepancies } = useQuery({
-        queryKey: ['discrepancies-2100', asOfDate],
-        queryFn: () => fetchDiscrepancyDetails('2100', asOfDate),
-        enabled: expandedAccounts.has('2100'),
         staleTime: 30_000,
     });
 
@@ -270,16 +283,23 @@ export default function ReconciliationPage() {
 
     const handleRefresh = async () => {
         await refetchSummary();
+        await refetchApIntegrity();
         if (selectedAccount) {
             await refetchAccount();
         }
         if (expandedAccounts.has('1200')) {
             await refetchArDiscrepancies();
         }
-        if (expandedAccounts.has('2100')) {
-            await refetchApDiscrepancies();
-        }
     };
+
+    const nonApDiscrepancyCount = summary?.accounts.filter(
+        (a) => a.status === 'DISCREPANCY' && !a.accountName.includes('Payable'),
+    ).length ?? 0;
+    const apIntegrityDiscrepancy = apIntegrityLane?.status === 'DISCREPANCY' ? 1 : 0;
+    const totalDiscrepancyCount = nonApDiscrepancyCount + apIntegrityDiscrepancy;
+    const overallReconciled = summary?.overallStatus === 'ALL_RECONCILED'
+        ? (apIntegrityLane ? apIntegrityLane.status === 'RECONCILED' : true)
+        : totalDiscrepancyCount === 0;
 
     return (
         <div className="p-4 lg:p-6">
@@ -308,16 +328,16 @@ export default function ReconciliationPage() {
 
             {/* Overall Status */}
             {summary && (
-                <div className={`mb-6 p-4 rounded-lg border ${summary.overallStatus === 'ALL_RECONCILED' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                <div className={`mb-6 p-4 rounded-lg border ${overallReconciled ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
                     <div className="flex items-center space-x-3">
-                        {summary.overallStatus === 'ALL_RECONCILED' ? (
+                        {overallReconciled ? (
                             <CheckCircle className="h-6 w-6 text-green-600" />
                         ) : (
                             <AlertTriangle className="h-6 w-6 text-red-600" />
                         )}
                         <div>
-                            <p className={`font-semibold text-lg ${summary.overallStatus === 'ALL_RECONCILED' ? 'text-green-800' : 'text-red-800'}`}>
-                                {summary.overallStatus === 'ALL_RECONCILED' ? 'All Accounts Reconciled' : `${summary.discrepancyCount} Account(s) with Discrepancies`}
+                            <p className={`font-semibold text-lg ${overallReconciled ? 'text-green-800' : 'text-red-800'}`}>
+                                {overallReconciled ? 'All Accounts Reconciled' : `${totalDiscrepancyCount} Account(s) with Discrepancies`}
                             </p>
                             <p className="text-sm text-gray-600">
                                 As of {summary.asOfDate} | Generated {formatTimestamp(summary.generatedAt)}
@@ -355,6 +375,9 @@ export default function ReconciliationPage() {
                     <RefreshCw className="h-8 w-8 text-gray-400 animate-spin" />
                 </div>
             ) : summary?.accounts && summary.accounts.length > 0 ? (
+                <>
+                <ApReconciliationLanesPanel asOfDate={asOfDate} />
+
                 <div className="bg-white rounded-lg shadow-sm border mb-6">
                     <div className="px-6 py-4 border-b">
                         <h2 className="text-lg font-semibold">Reconciliation Summary</h2>
@@ -362,20 +385,36 @@ export default function ReconciliationPage() {
                     <div className="divide-y">
                         {summary.accounts.map((account: ReconciliationAccount, idx: number) => {
                             const code = accountCodes[account.accountName] || '';
-                            const hasDetails = code === '1200' || code === '2100';
+                            const isAp = code === '2100';
+                            const hasDetails = code === '1200';
                             const isExpanded = expandedAccounts.has(code);
-                            const discrepancies = code === '1200' ? arDiscrepancies?.data?.discrepancies :
-                                code === '2100' ? apDiscrepancies?.data?.discrepancies : [];
+                            const discrepancies = code === '1200' ? arDiscrepancies?.data?.discrepancies : [];
+
+                            const displayGl = isAp && apIntegrityLane
+                                ? apIntegrityLane.glNetActive
+                                : account.glBalance;
+                            const displaySubledger = isAp && apIntegrityLane
+                                ? apIntegrityLane.openItemSubledger
+                                : account.subledgerBalance;
+                            const displayDiff = isAp && apIntegrityLane
+                                ? apIntegrityLane.integrityDifference
+                                : account.difference;
+                            const displayStatus = isAp && apIntegrityLane
+                                ? (apIntegrityLane.status === 'RECONCILED' ? 'MATCHED' : 'DISCREPANCY')
+                                : account.status;
+                            const glLabel = isAp ? 'GL (Net Active)' : 'GL Balance';
+                            const subLabel = isAp ? 'Open-item Subledger' : 'Subledger';
+                            const diffLabel = isAp ? 'Integrity Difference' : 'Difference';
 
                             return (
                                 <div key={idx}>
                                     <div
-                                        className={`px-4 sm:px-6 py-4 hover:bg-gray-50 ${hasDetails && account.status === 'DISCREPANCY' ? 'cursor-pointer' : ''}`}
-                                        onClick={() => hasDetails && account.status === 'DISCREPANCY' && toggleExpanded(code)}
+                                        className={`px-4 sm:px-6 py-4 hover:bg-gray-50 ${hasDetails && displayStatus === 'DISCREPANCY' ? 'cursor-pointer' : ''}`}
+                                        onClick={() => hasDetails && displayStatus === 'DISCREPANCY' && toggleExpanded(code)}
                                     >
                                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                             <div className="flex items-center space-x-4">
-                                                {hasDetails && account.status === 'DISCREPANCY' ? (
+                                                {hasDetails && displayStatus === 'DISCREPANCY' ? (
                                                     isExpanded ? (
                                                         <ChevronDown className="h-5 w-5 text-gray-400" />
                                                     ) : (
@@ -391,23 +430,23 @@ export default function ReconciliationPage() {
                                             </div>
                                             <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:space-x-8 ml-9 sm:ml-0">
                                                 <div className="text-left sm:text-right">
-                                                    <p className="text-xs sm:text-sm text-gray-500">GL Balance</p>
-                                                    <p className="text-sm sm:text-base font-semibold">{formatCurrency(account.glBalance)}</p>
+                                                    <p className="text-xs sm:text-sm text-gray-500">{glLabel}</p>
+                                                    <p className="text-sm sm:text-base font-semibold">{formatCurrency(displayGl)}</p>
                                                 </div>
                                                 <div className="text-left sm:text-right">
-                                                    <p className="text-xs sm:text-sm text-gray-500">Subledger</p>
-                                                    <p className="text-sm sm:text-base font-semibold">{formatCurrency(account.subledgerBalance)}</p>
+                                                    <p className="text-xs sm:text-sm text-gray-500">{subLabel}</p>
+                                                    <p className="text-sm sm:text-base font-semibold">{formatCurrency(displaySubledger)}</p>
                                                 </div>
                                                 <div className="text-left sm:text-right">
-                                                    <p className="text-xs sm:text-sm text-gray-500">Difference</p>
-                                                    <p className={`text-sm sm:text-base font-semibold ${Math.abs(account.difference) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
-                                                        {formatCurrency(account.difference)}
+                                                    <p className="text-xs sm:text-sm text-gray-500">{diffLabel}</p>
+                                                    <p className={`text-sm sm:text-base font-semibold ${Math.abs(displayDiff) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
+                                                        {formatCurrency(displayDiff)}
                                                     </p>
                                                 </div>
                                             </div>
                                             <div className="flex items-center gap-2 ml-9 sm:ml-0">
                                                 <div>
-                                                    {account.status === 'MATCHED' ? (
+                                                    {displayStatus === 'MATCHED' ? (
                                                         <span className="inline-flex items-center px-2 sm:px-3 py-1 rounded-full text-xs sm:text-sm font-medium bg-green-100 text-green-800">
                                                             <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                                                             Matched
@@ -428,7 +467,7 @@ export default function ReconciliationPage() {
                                                 >
                                                     Details
                                                 </button>
-                                                {account.status === 'DISCREPANCY' && (
+                                                {displayStatus === 'DISCREPANCY' && !isAp && (
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
@@ -442,7 +481,7 @@ export default function ReconciliationPage() {
                                                 )}
                                             </div>
                                         </div>
-                                        {account.recommendation && account.status === 'DISCREPANCY' && (
+                                        {account.recommendation && displayStatus === 'DISCREPANCY' && !isAp && (
                                             <p className="mt-2 text-sm text-gray-500 ml-9">{account.recommendation}</p>
                                         )}
                                     </div>
@@ -459,8 +498,8 @@ export default function ReconciliationPage() {
                                                         <tr className="text-gray-500">
                                                             <th className="text-left py-2">Name</th>
                                                             <th className="text-right py-2">GL Balance</th>
-                                                            <th className="text-right py-2">Subledger</th>
-                                                            <th className="text-right py-2">Difference</th>
+                                                            <th className="text-right py-2">Open-item Subledger</th>
+                                                            <th className="text-right py-2">Integrity Difference</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y">
@@ -482,6 +521,7 @@ export default function ReconciliationPage() {
                         })}
                     </div>
                 </div>
+                </>
             ) : !summaryLoading && !summaryError ? (
                 <div className="mb-6 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
                     No reconciliation data returned for {asOfDate}. If this persists after Refresh,
@@ -509,15 +549,21 @@ export default function ReconciliationPage() {
                             {/* Summary Cards */}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                 <div className="bg-gray-50 rounded-lg p-4 min-w-0">
-                                    <p className="text-sm text-gray-500">GL Balance</p>
+                                    <p className="text-sm text-gray-500">
+                                        {selectedAccount === 'accounts-payable' ? 'GL (Net Active)' : 'GL Balance'}
+                                    </p>
                                     <p className="text-base sm:text-xl font-bold">{formatCurrency(accountDetail.glBalance)}</p>
                                 </div>
                                 <div className="bg-gray-50 rounded-lg p-4 min-w-0">
-                                    <p className="text-sm text-gray-500">Subledger Balance</p>
+                                    <p className="text-sm text-gray-500">
+                                        {selectedAccount === 'accounts-payable' ? 'Open-item Subledger' : 'Subledger Balance'}
+                                    </p>
                                     <p className="text-base sm:text-xl font-bold">{formatCurrency(accountDetail.subledgerBalance)}</p>
                                 </div>
                                 <div className="bg-gray-50 rounded-lg p-4 min-w-0">
-                                    <p className="text-sm text-gray-500">Difference</p>
+                                    <p className="text-sm text-gray-500">
+                                        {selectedAccount === 'accounts-payable' ? 'Integrity Difference' : 'Difference'}
+                                    </p>
                                     <p className={`text-base sm:text-xl font-bold ${Math.abs(accountDetail.difference) < 0.01 ? 'text-green-600' : 'text-red-600'}`}>
                                         {formatCurrency(accountDetail.difference)}
                                     </p>

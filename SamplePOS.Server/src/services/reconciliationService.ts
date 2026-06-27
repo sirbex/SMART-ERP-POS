@@ -18,6 +18,14 @@ import {
   captureApReconciliationMetrics,
   isApSupplierGlIntegrityMatched,
 } from '../modules/supplier-payments/apReconciliationMetrics.js';
+import {
+  getApCacheLane as fetchApCacheLane,
+  getApIntegrityLane as fetchApIntegrityLane,
+  getApJournalAuditLane as fetchApJournalAuditLane,
+  type ApCacheLane,
+  type ApIntegrityLane,
+  type ApJournalAuditLane,
+} from '../modules/supplier-payments/apReconciliationLanes.js';
 
 // Configure Decimal.js for financial precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -504,6 +512,24 @@ export class ReconciliationService {
             logger.error('Full reconciliation failed', { asOfDate: date, error });
             throw error;
         }
+    }
+
+    /** Lane 1 — net-active GL vs open-item (period close). */
+    async getApIntegrityLane(asOfDate?: string): Promise<ApIntegrityLane> {
+        const date = asOfDate || getBusinessDate();
+        return fetchApIntegrityLane(this.pool, date);
+    }
+
+    /** Lane 2 — open-item vs supplier cache (maintenance). */
+    async getApCacheLane(asOfDate?: string): Promise<ApCacheLane> {
+        const date = asOfDate || getBusinessDate();
+        return fetchApCacheLane(this.pool, date);
+    }
+
+    /** Lane 3 — gross posted vs net-active (journal audit, informational). */
+    async getApJournalAuditLane(asOfDate?: string): Promise<ApJournalAuditLane> {
+        const date = asOfDate || getBusinessDate();
+        return fetchApJournalAuditLane(this.pool, date);
     }
 
     /**

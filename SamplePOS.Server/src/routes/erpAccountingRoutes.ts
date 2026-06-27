@@ -841,6 +841,51 @@ router.get(
 );
 
 /**
+ * GET /api/erp-accounting/reconciliation/ap/integrity
+ * Lane 1 — net-active GL vs open-item (period close gate).
+ */
+router.get(
+  '/reconciliation/ap/integrity',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getApIntegrityLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/ap/cache
+ * Lane 2 — open-item vs supplier cache (maintenance).
+ */
+router.get(
+  '/reconciliation/ap/cache',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getApCacheLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/ap/history
+ * Lane 3 — gross posted vs net-active (journal audit, informational).
+ */
+router.get(
+  '/reconciliation/ap/history',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getApJournalAuditLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
  * GET /api/erp-accounting/reconciliation/:accountCode/discrepancies
  * Get detailed discrepancies for an account
  */
