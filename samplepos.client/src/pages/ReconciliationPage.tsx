@@ -16,6 +16,9 @@ import {
 import { AxiosError } from 'axios';
 import { apiClient, type ApiResponse } from '../utils/api';
 import { ApReconciliationLanesPanel } from '../components/reconciliation/ApReconciliationLanesPanel';
+import { ArReconciliationLanesPanel } from '../components/reconciliation/ArReconciliationLanesPanel';
+import { InventoryReconciliationLanesPanel } from '../components/reconciliation/InventoryReconciliationLanesPanel';
+import { FinancialHealthDashboard } from '../components/reconciliation/FinancialHealthDashboard';
 
 function reconciliationErrorMessage(err: unknown, fallback: string): string {
     const ax = err as AxiosError<ApiResponse>;
@@ -113,6 +116,20 @@ interface ApIntegritySummary {
     status: 'RECONCILED' | 'DISCREPANCY';
 }
 
+interface ArIntegritySummary {
+    glNetActive: number;
+    openItemSubledger: number;
+    integrityDifference: number;
+    status: 'RECONCILED' | 'DISCREPANCY';
+}
+
+interface InventoryIntegritySummary {
+    glNetActive: number;
+    batchSubledger: number;
+    integrityDifference: number;
+    status: 'RECONCILED' | 'DISCREPANCY';
+}
+
 interface DiscrepancyListResponse {
     discrepancies: Array<{
         entityName: string;
@@ -167,6 +184,30 @@ export default function ReconciliationPage() {
         queryFn: async () => {
             const res = await apiClient.get<ApiResponse<ApIntegritySummary>>(
                 '/erp-accounting/reconciliation/ap/integrity',
+                { params: { asOfDate } },
+            );
+            return res.data.data;
+        },
+        staleTime: 30_000,
+    });
+
+    const { data: arIntegrityLane, refetch: refetchArIntegrity } = useQuery({
+        queryKey: ['ar-lane-integrity', asOfDate],
+        queryFn: async () => {
+            const res = await apiClient.get<ApiResponse<ArIntegritySummary>>(
+                '/erp-accounting/reconciliation/ar/integrity',
+                { params: { asOfDate } },
+            );
+            return res.data.data;
+        },
+        staleTime: 30_000,
+    });
+
+    const { data: inventoryIntegrityLane, refetch: refetchInventoryIntegrity } = useQuery({
+        queryKey: ['inventory-lane-integrity', asOfDate],
+        queryFn: async () => {
+            const res = await apiClient.get<ApiResponse<InventoryIntegritySummary>>(
+                '/erp-accounting/reconciliation/inventory/integrity',
                 { params: { asOfDate } },
             );
             return res.data.data;
@@ -284,6 +325,8 @@ export default function ReconciliationPage() {
     const handleRefresh = async () => {
         await refetchSummary();
         await refetchApIntegrity();
+        await refetchArIntegrity();
+        await refetchInventoryIntegrity();
         if (selectedAccount) {
             await refetchAccount();
         }
@@ -292,13 +335,23 @@ export default function ReconciliationPage() {
         }
     };
 
-    const nonApDiscrepancyCount = summary?.accounts.filter(
-        (a) => a.status === 'DISCREPANCY' && !a.accountName.includes('Payable'),
+    const nonLaneDiscrepancyCount = summary?.accounts.filter(
+        (a) => a.status === 'DISCREPANCY'
+            && !a.accountName.includes('Payable')
+            && !a.accountName.includes('Receivable')
+            && !a.accountName.includes('Inventory'),
     ).length ?? 0;
     const apIntegrityDiscrepancy = apIntegrityLane?.status === 'DISCREPANCY' ? 1 : 0;
-    const totalDiscrepancyCount = nonApDiscrepancyCount + apIntegrityDiscrepancy;
+    const arIntegrityDiscrepancy = arIntegrityLane?.status === 'DISCREPANCY' ? 1 : 0;
+    const inventoryIntegrityDiscrepancy = inventoryIntegrityLane?.status === 'DISCREPANCY' ? 1 : 0;
+    const totalDiscrepancyCount = nonLaneDiscrepancyCount
+        + apIntegrityDiscrepancy
+        + arIntegrityDiscrepancy
+        + inventoryIntegrityDiscrepancy;
     const overallReconciled = summary?.overallStatus === 'ALL_RECONCILED'
         ? (apIntegrityLane ? apIntegrityLane.status === 'RECONCILED' : true)
+            && (arIntegrityLane ? arIntegrityLane.status === 'RECONCILED' : true)
+            && (inventoryIntegrityLane ? inventoryIntegrityLane.status === 'RECONCILED' : true)
         : totalDiscrepancyCount === 0;
 
     return (
@@ -376,7 +429,10 @@ export default function ReconciliationPage() {
                 </div>
             ) : summary?.accounts && summary.accounts.length > 0 ? (
                 <>
+                <FinancialHealthDashboard asOfDate={asOfDate} />
                 <ApReconciliationLanesPanel asOfDate={asOfDate} />
+                <ArReconciliationLanesPanel asOfDate={asOfDate} />
+                <InventoryReconciliationLanesPanel asOfDate={asOfDate} />
 
                 <div className="bg-white rounded-lg shadow-sm border mb-6">
                     <div className="px-6 py-4 border-b">
@@ -386,25 +442,47 @@ export default function ReconciliationPage() {
                         {summary.accounts.map((account: ReconciliationAccount, idx: number) => {
                             const code = accountCodes[account.accountName] || '';
                             const isAp = code === '2100';
+                            const isAr = code === '1200';
+                            const isInv = code === '1300';
                             const hasDetails = code === '1200';
                             const isExpanded = expandedAccounts.has(code);
                             const discrepancies = code === '1200' ? arDiscrepancies?.data?.discrepancies : [];
 
                             const displayGl = isAp && apIntegrityLane
                                 ? apIntegrityLane.glNetActive
-                                : account.glBalance;
+                                : isAr && arIntegrityLane
+                                  ? arIntegrityLane.glNetActive
+                                  : isInv && inventoryIntegrityLane
+                                    ? inventoryIntegrityLane.glNetActive
+                                    : account.glBalance;
                             const displaySubledger = isAp && apIntegrityLane
                                 ? apIntegrityLane.openItemSubledger
-                                : account.subledgerBalance;
+                                : isAr && arIntegrityLane
+                                  ? arIntegrityLane.openItemSubledger
+                                  : isInv && inventoryIntegrityLane
+                                    ? inventoryIntegrityLane.batchSubledger
+                                    : account.subledgerBalance;
                             const displayDiff = isAp && apIntegrityLane
                                 ? apIntegrityLane.integrityDifference
-                                : account.difference;
+                                : isAr && arIntegrityLane
+                                  ? arIntegrityLane.integrityDifference
+                                  : isInv && inventoryIntegrityLane
+                                    ? inventoryIntegrityLane.integrityDifference
+                                    : account.difference;
                             const displayStatus = isAp && apIntegrityLane
                                 ? (apIntegrityLane.status === 'RECONCILED' ? 'MATCHED' : 'DISCREPANCY')
-                                : account.status;
-                            const glLabel = isAp ? 'GL (Net Active)' : 'GL Balance';
-                            const subLabel = isAp ? 'Open-item Subledger' : 'Subledger';
-                            const diffLabel = isAp ? 'Integrity Difference' : 'Difference';
+                                : isAr && arIntegrityLane
+                                  ? (arIntegrityLane.status === 'RECONCILED' ? 'MATCHED' : 'DISCREPANCY')
+                                  : isInv && inventoryIntegrityLane
+                                    ? (inventoryIntegrityLane.status === 'RECONCILED' ? 'MATCHED' : 'DISCREPANCY')
+                                    : account.status;
+                            const glLabel = isAp || isAr || isInv ? 'GL (Net Active)' : 'GL Balance';
+                            const subLabel = isAp || isAr
+                                ? 'Open-item Subledger'
+                                : isInv
+                                  ? 'Batch Subledger'
+                                  : 'Subledger';
+                            const diffLabel = isAp || isAr || isInv ? 'Integrity Difference' : 'Difference';
 
                             return (
                                 <div key={idx}>
@@ -524,10 +602,8 @@ export default function ReconciliationPage() {
                 </>
             ) : !summaryLoading && !summaryError ? (
                 <div className="mb-6 p-4 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
-                    No reconciliation data returned for {asOfDate}. If this persists after Refresh,
-                    ask an admin to verify the database function{' '}
-                    <code className="text-xs bg-amber-100 px-1 rounded">fn_full_reconciliation_report</code>{' '}
-                    is deployed for this tenant.
+                    No reconciliation data returned for {asOfDate}. Try Refresh, or check tenant DB connectivity
+                    and the financial lane framework endpoints.
                 </div>
             ) : null}
 

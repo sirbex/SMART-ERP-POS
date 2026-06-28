@@ -34,6 +34,18 @@ import { authenticate } from '../middleware/auth.js';
 import { requirePermission } from '../rbac/middleware.js';
 import { pool as globalPool } from '../db/pool.js';
 import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
+import {
+  deprecateLegacyReconciliation,
+  legacyReconciliationMeta,
+} from '../modules/financial-reconciliation/legacyReconciliationAudit.js';
+import {
+  getLegacySurface,
+  LEGACY_RECONCILIATION_SURFACES,
+} from '../modules/financial-reconciliation/legacyReconciliationRegistry.js';
+import {
+  compareSqlSummaryToFramework,
+  captureFrameworkBaseline,
+} from '../modules/financial-reconciliation/reconciliationParityService.js';
 
 const router = Router();
 
@@ -737,105 +749,120 @@ router.get(
 
 /**
  * GET /api/erp-accounting/reconciliation/summary
- * Get full reconciliation summary for all key accounts
+ * @deprecated Phase F0 — use /financial-health. Framework-authoritative; SQL parity logged.
  */
 router.get(
   '/reconciliation/summary',
   requirePermission('accounting.reconcile'),
+  deprecateLegacyReconciliation('erp.reconciliation.summary'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
     const { reconciliationService } = withServices(req);
 
     const result = await reconciliationService.getFullReconciliation(asOfDate as string);
+    const surface = getLegacySurface('erp.reconciliation.summary');
 
     return res.json({
       success: true,
       data: result,
+      _meta: surface ? legacyReconciliationMeta(surface) : undefined,
     });
   })
 );
 
 /**
  * GET /api/erp-accounting/reconciliation/cash
- * Reconcile Cash account
+ * @deprecated Phase F0 — Cash lane provider planned.
  */
 router.get(
   '/reconciliation/cash',
   requirePermission('accounting.reconcile'),
+  deprecateLegacyReconciliation('erp.reconciliation.cash'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
     const { reconciliationService } = withServices(req);
 
     const result = await reconciliationService.reconcileCash(asOfDate as string);
+    const surface = getLegacySurface('erp.reconciliation.cash');
 
     return res.json({
       success: true,
       data: result,
+      _meta: surface ? legacyReconciliationMeta(surface) : undefined,
     });
   })
 );
 
 /**
  * GET /api/erp-accounting/reconciliation/accounts-receivable
- * Reconcile Accounts Receivable
+ * @deprecated Phase F0 — use /ar/{integrity,cache,history}.
  */
 router.get(
   '/reconciliation/accounts-receivable',
   requirePermission('accounting.reconcile'),
+  deprecateLegacyReconciliation('erp.reconciliation.accounts-receivable'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
     const { reconciliationService } = withServices(req);
 
     const result = await reconciliationService.reconcileAccountsReceivable(asOfDate as string);
+    const surface = getLegacySurface('erp.reconciliation.accounts-receivable');
 
     return res.json({
       success: true,
       data: result,
+      _meta: surface ? legacyReconciliationMeta(surface) : undefined,
     });
   })
 );
 
 /**
  * GET /api/erp-accounting/reconciliation/inventory
- * Reconcile Inventory
+ * @deprecated Phase F0 — use /inventory/{integrity,cache,history}.
  */
 router.get(
   '/reconciliation/inventory',
   requirePermission('accounting.reconcile'),
+  deprecateLegacyReconciliation('erp.reconciliation.inventory'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
     const { reconciliationService } = withServices(req);
 
     const result = await reconciliationService.reconcileInventory(asOfDate as string);
+    const surface = getLegacySurface('erp.reconciliation.inventory');
 
     return res.json({
       success: true,
       data: result,
+      _meta: surface ? legacyReconciliationMeta(surface) : undefined,
     });
   })
 );
 
 /**
  * GET /api/erp-accounting/reconciliation/accounts-payable
- * Reconcile Accounts Payable
+ * @deprecated Phase F0 — use /ap/{integrity,cache,history}.
  */
 router.get(
   '/reconciliation/accounts-payable',
   requirePermission('accounting.reconcile'),
+  deprecateLegacyReconciliation('erp.reconciliation.accounts-payable'),
   asyncHandler(async (req, res) => {
     const { asOfDate } = req.query;
 
     const { reconciliationService } = withServices(req);
 
     const result = await reconciliationService.reconcileAccountsPayable(asOfDate as string);
+    const surface = getLegacySurface('erp.reconciliation.accounts-payable');
 
     return res.json({
       success: true,
       data: result,
+      _meta: surface ? legacyReconciliationMeta(surface) : undefined,
     });
   })
 );
@@ -886,12 +913,139 @@ router.get(
 );
 
 /**
+ * GET /api/erp-accounting/reconciliation/ar/integrity
+ * Lane 1 — net-active GL vs open-item (period close gate).
+ */
+router.get(
+  '/reconciliation/ar/integrity',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getArIntegrityLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/ar/cache
+ * Lane 2 — open-item vs customer cache (maintenance).
+ */
+router.get(
+  '/reconciliation/ar/cache',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getArCacheLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/ar/history
+ * Lane 3 — gross posted vs net-active (journal audit, informational).
+ */
+router.get(
+  '/reconciliation/ar/history',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getArJournalAuditLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/inventory/integrity
+ * Lane 1 — net-active GL vs batch subledger (period close gate).
+ */
+router.get(
+  '/reconciliation/inventory/integrity',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getInventoryIntegrityLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/inventory/cache
+ * Lane 2 — batch subledger vs product cache (maintenance).
+ */
+router.get(
+  '/reconciliation/inventory/cache',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getInventoryCacheLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/inventory/history
+ * Lane 3 — gross posted vs net-active (journal audit, informational).
+ */
+router.get(
+  '/reconciliation/inventory/history',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getInventoryJournalAuditLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/lanes/:domain/:lane
+ * Generic financial lane resolver (ap | ar | inventory | cash).
+ */
+router.get(
+  '/reconciliation/lanes/:domain/:lane',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { domain, lane } = req.params;
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getFinancialLane(
+      domain as 'ap' | 'ar' | 'inventory' | 'cash',
+      lane as 'integrity' | 'cache' | 'history',
+      asOfDate as string,
+    );
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/financial-health
+ * Aggregated lane status for all registered domains (read-only).
+ */
+router.get(
+  '/reconciliation/financial-health',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getFinancialHealthSummary(asOfDate as string);
+    res.setHeader('X-Reconciliation-Framework', 'authoritative');
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
  * GET /api/erp-accounting/reconciliation/:accountCode/discrepancies
- * Get detailed discrepancies for an account
+ * @deprecated Phase F0 — use lane exception tables on domain integrity/cache routes.
  */
 router.get(
   '/reconciliation/:accountCode/discrepancies',
   requirePermission('accounting.reconcile'),
+  deprecateLegacyReconciliation('erp.reconciliation.discrepancies'),
   asyncHandler(async (req, res) => {
     const { accountCode } = req.params;
     const { asOfDate } = req.query;
@@ -914,8 +1068,50 @@ router.get(
     return res.json({
       success: true,
       data: result,
+      _meta: legacyReconciliationMeta(getLegacySurface('erp.reconciliation.discrepancies')!),
     });
   })
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/stabilization/consumer-audit
+ * Phase F0 — read-only catalog of legacy surfaces and their successors.
+ */
+router.get(
+  '/reconciliation/stabilization/consumer-audit',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (_req, res) => {
+    return res.json({
+      success: true,
+      data: {
+        phase: 'F0',
+        authoritative: 'financial-lane-framework',
+        surfaces: LEGACY_RECONCILIATION_SURFACES,
+      },
+    });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/stabilization/parity
+ * Phase F0 — compare fn_full_reconciliation_report vs framework lanes.
+ */
+router.get(
+  '/reconciliation/stabilization/parity',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const pool = req.tenantPool || globalPool;
+    const date = (asOfDate as string) || getBusinessDate();
+    const [parity, baseline] = await Promise.all([
+      compareSqlSummaryToFramework(pool, date),
+      captureFrameworkBaseline(pool, date),
+    ]);
+    return res.json({
+      success: true,
+      data: { parity, baseline },
+    });
+  }),
 );
 
 export default router;

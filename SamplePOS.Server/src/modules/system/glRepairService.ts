@@ -33,6 +33,7 @@ import {
   isApDriftExplainedByExpenses,
   syncSupplierBalanceFromOpenItems,
 } from '../supplier-payments/apReconciliationEngine.js';
+import { syncCustomerBalanceFromOpenItems } from '../ar-payments/openItemAllocationEngine.js';
 import {
   captureApReconciliationMetrics,
   verifyApReconciliationMetrics,
@@ -822,6 +823,7 @@ export const glRepairService = {
     runGLIntegrityCheck,
     rebuildPeriodBalances,
     recalcAllSupplierBalances,
+    recalcAllCustomerBalances,
     rebaseAccountBalances,
     healApReconciliationCaches,
     rebuildInventoryBalances,
@@ -1047,6 +1049,53 @@ export async function recalcAllSupplierBalances(
     return {
         suppliersScanned,
         suppliersUpdated,
+        durationMs: Date.now() - startedAt,
+    };
+}
+
+export interface RecalcCustomerBalancesResult {
+    customersScanned: number;
+    customersUpdated: number;
+    durationMs: number;
+}
+
+export async function recalcAllCustomerBalances(
+    dbPool?: pg.Pool,
+): Promise<RecalcCustomerBalancesResult> {
+    const pool = dbPool || globalPool;
+    const startedAt = Date.now();
+
+    const scanRes = await pool.query(`SELECT COUNT(*)::INT AS n FROM customers WHERE is_active = true`);
+    const customersScanned: number = scanRes.rows[0]?.n ?? 0;
+
+    const client = await pool.connect();
+    let customersUpdated = 0;
+    try {
+        await client.query('BEGIN');
+        const customers = await client.query<{ id: string }>(
+            `SELECT id FROM customers WHERE is_active = true`,
+        );
+        for (const row of customers.rows) {
+            const { oldBalance, newBalance } = await syncCustomerBalanceFromOpenItems(
+                client,
+                row.id,
+                'RECALC_ALL_CUSTOMER_BALANCES',
+            );
+            if (Math.abs(oldBalance - newBalance) > 0.01) {
+                customersUpdated++;
+            }
+        }
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+
+    return {
+        customersScanned,
+        customersUpdated,
         durationMs: Date.now() - startedAt,
     };
 }

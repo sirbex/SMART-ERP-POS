@@ -1,6 +1,13 @@
 # AP Reconciliation Lanes
 
+> **See also:** [FINANCIAL_RECONCILIATION_FRAMEWORK.md](./FINANCIAL_RECONCILIATION_FRAMEWORK.md) for cross-domain philosophy, period-close rules, Phase F0 stabilization, and legacy retirement plan.
+
 Accounts Payable reconciliation exposes **three independent concerns**. Only Lane 1 gates period close.
+
+> **Framework:** AP is implemented via `FinancialLaneProvider` in
+> `SamplePOS.Server/src/modules/financial-reconciliation/`. Generic API:
+> `GET /api/erp-accounting/reconciliation/lanes/ap/{integrity|cache|history}`.
+> Response shape: `FinancialLaneResult` (`periodCloseBlocking`, `severity`, `recommendedAction`).
 
 ## Lane 1 — Accounting Integrity (period close)
 

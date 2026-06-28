@@ -21,6 +21,11 @@ import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { pool as globalPool } from '../../db/pool.js';
 import type { Pool } from 'pg';
+import {
+  deprecateLegacyReconciliation,
+  legacyReconciliationMeta,
+} from '../financial-reconciliation/legacyReconciliationAudit.js';
+import { getLegacySurface } from '../financial-reconciliation/legacyReconciliationRegistry.js';
 
 const router = Router();
 
@@ -80,8 +85,9 @@ function sendError(res: Response, statusCode: number, message: string): void {
  * Run full accounting integrity check
  *
  * Returns comprehensive integrity status for all accounting subsystems.
+ * @deprecated Phase F0 — use GET /api/erp-accounting/reconciliation/financial-health
  */
-router.get('/', async (_req: Request, res: Response) => {
+router.get('/', deprecateLegacyReconciliation('accounting.integrity.full'), async (_req: Request, res: Response) => {
   try {
     const dbPool = (_req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
     const result = await glValidationService.runFullIntegrityCheck(dbPool);
@@ -148,11 +154,9 @@ router.get('/', async (_req: Request, res: Response) => {
 
 /**
  * GET /api/accounting/integrity/ar
- * Check AR reconciliation only
- *
- * Returns Accounts Receivable GL balance vs Customer subledger balance.
+ * @deprecated Phase F0 — use GET /api/erp-accounting/reconciliation/ar/integrity
  */
-router.get('/ar', async (_req: Request, res: Response) => {
+router.get('/ar', deprecateLegacyReconciliation('accounting.integrity.ar'), async (_req: Request, res: Response) => {
   try {
     const dbPool = (_req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
     const result = await glValidationService.checkARReconciliation(dbPool);
@@ -183,11 +187,9 @@ router.get('/ar', async (_req: Request, res: Response) => {
 
 /**
  * GET /api/accounting/integrity/ap
- * Check AP reconciliation only
- *
- * Returns Accounts Payable GL balance vs Supplier subledger balance.
+ * @deprecated Phase F0 — use GET /api/erp-accounting/reconciliation/ap/integrity
  */
-router.get('/ap', async (_req: Request, res: Response) => {
+router.get('/ap', deprecateLegacyReconciliation('accounting.integrity.ap'), async (_req: Request, res: Response) => {
   try {
     const dbPool = (_req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
     const result = await glValidationService.checkAPReconciliation(dbPool);
@@ -218,12 +220,9 @@ router.get('/ap', async (_req: Request, res: Response) => {
 
 /**
  * GET /api/accounting/integrity/inventory
- * Check Inventory reconciliation only
- *
- * Returns Inventory GL balance (1300) vs Cost Layers subledger balance.
- * CRITICAL: Detects when cost layers exist without corresponding GL entries.
+ * @deprecated Phase F0 — use GET /api/erp-accounting/reconciliation/inventory/integrity
  */
-router.get('/inventory', async (_req: Request, res: Response) => {
+router.get('/inventory', deprecateLegacyReconciliation('accounting.integrity.inventory'), async (_req: Request, res: Response) => {
   try {
     const dbPool = (_req as unknown as { tenantPool?: Pool }).tenantPool || globalPool;
     const result = await glValidationService.checkInventoryReconciliation(dbPool);

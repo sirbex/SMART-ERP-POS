@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Database, History, RefreshCw, ShieldCheck } from 'lucide-react';
 import { apiClient, type ApiResponse } from '../../utils/api';
 import type { FinancialLaneResult } from '../../types/financialLane';
-import { isPeriodCloseClear } from '../../types/financialLane';
 import { FinancialLaneCard } from './FinancialLaneCard';
 
 type ExpandedLane = 'integrity' | 'cache' | 'history' | null;
@@ -17,28 +16,27 @@ async function fetchLane(path: string, asOfDate: string): Promise<FinancialLaneR
 
 interface Props {
     asOfDate: string;
-    onPeriodCloseStatus?: (reconciled: boolean) => void;
 }
 
-export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Props) {
+export function InventoryReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Props) {
     const queryClient = useQueryClient();
     const [expandedLane, setExpandedLane] = useState<ExpandedLane>(null);
 
     const integrityQuery = useQuery({
-        queryKey: ['ap-lane-integrity', asOfDate],
-        queryFn: () => fetchLane('/erp-accounting/reconciliation/ap/integrity', asOfDate),
+        queryKey: ['inventory-lane-integrity', asOfDate],
+        queryFn: () => fetchLane('/erp-accounting/reconciliation/inventory/integrity', asOfDate),
         staleTime: 30_000,
     });
 
     const cacheQuery = useQuery({
-        queryKey: ['ap-lane-cache', asOfDate],
-        queryFn: () => fetchLane('/erp-accounting/reconciliation/ap/cache', asOfDate),
+        queryKey: ['inventory-lane-cache', asOfDate],
+        queryFn: () => fetchLane('/erp-accounting/reconciliation/inventory/cache', asOfDate),
         staleTime: 30_000,
     });
 
     const historyQuery = useQuery({
-        queryKey: ['ap-lane-history', asOfDate],
-        queryFn: () => fetchLane('/erp-accounting/reconciliation/ap/history', asOfDate),
+        queryKey: ['inventory-lane-history', asOfDate],
+        queryFn: () => fetchLane('/erp-accounting/reconciliation/inventory/history', asOfDate),
         staleTime: 30_000,
     });
 
@@ -46,19 +44,14 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
     const cache = cacheQuery.data;
     const history = historyQuery.data;
 
-    useEffect(() => {
-        if (integrity && onPeriodCloseStatus) {
-            onPeriodCloseStatus(isPeriodCloseClear(integrity));
-        }
-    }, [integrity, onPeriodCloseStatus]);
-
     const refreshCacheMutation = useMutation({
         mutationFn: async () => {
-            await apiClient.post('/system/gl/recalc-supplier-balances');
+            await apiClient.post('/system/gl/rebuild-inventory-balances');
         },
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: ['ap-lane-cache', asOfDate] });
+            await queryClient.invalidateQueries({ queryKey: ['inventory-lane-cache', asOfDate] });
             await queryClient.invalidateQueries({ queryKey: ['reconciliation-summary', asOfDate] });
+            await queryClient.invalidateQueries({ queryKey: ['financial-health', asOfDate] });
         },
     });
 
@@ -79,10 +72,10 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
     return (
         <div className="space-y-4 mb-6">
             <div className="px-1">
-                <h2 className="text-lg font-semibold text-gray-900">Accounts Payable Reconciliation</h2>
+                <h2 className="text-lg font-semibold text-gray-900">Inventory Reconciliation</h2>
                 <p className="text-sm text-gray-500 mt-1">
                     Three independent checks — only lanes marked <strong>Period-close gate</strong> block close when
-                    unreconciled. Maintenance and audit lanes are informational.
+                    unreconciled. Batch subledger is SSOT; product cache is maintenance only.
                 </p>
             </div>
 
@@ -92,7 +85,7 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
                     icon={<ShieldCheck className="h-5 w-5" />}
                     expanded={expandedLane === 'integrity'}
                     onToggleExpand={() => toggleLane('integrity')}
-                    entityColumnLabel="Supplier"
+                    entityColumnLabel="Product"
                 />
             )}
 
@@ -102,7 +95,7 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
                     icon={<Database className="h-5 w-5" />}
                     expanded={expandedLane === 'cache'}
                     onToggleExpand={() => toggleLane('cache')}
-                    entityColumnLabel="Supplier"
+                    entityColumnLabel="Product"
                     action={
                         <button
                             type="button"
@@ -113,7 +106,7 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
                             <RefreshCw
                                 className={`h-3.5 w-3.5 ${refreshCacheMutation.isPending ? 'animate-spin' : ''}`}
                             />
-                            Refresh Cache
+                            Rebuild Cache
                         </button>
                     }
                 />
@@ -125,7 +118,7 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
                     icon={<History className="h-5 w-5" />}
                     expanded={expandedLane === 'history'}
                     onToggleExpand={() => toggleLane('history')}
-                    entityColumnLabel="Supplier"
+                    expandLabel="View Journals"
                 />
             )}
         </div>

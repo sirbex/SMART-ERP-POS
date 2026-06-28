@@ -6,8 +6,11 @@ Template for release sign-off. Repair scripts are **not** executed by applicatio
 
 | Item | Value |
 |------|-------|
-| Commit | _(fill after Commit 1)_ |
-| Artifact | _(CI build / tag)_ |
+| Commit (product) | `b638294` |
+| Commit (ops) | `fed12db` — manual only, not executed by deploy |
+| Deploy run | [28283439545](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/28283439545) — success ~12m42s |
+| Live tenant | `https://henber.wizarddigital-inv.com` |
+| Frontend chunk | `ReconciliationPage-Zv_HnkHO.js` (lane routes present) |
 | DB migrations | None required for lanes (read-only SQL in services) |
 
 ## API smoke tests
@@ -59,12 +62,27 @@ Only Lane 1 (`integrityGlDrift` / `isApSupplierGlIntegrityMatched`) gates period
 
 Confirmed: not wired to CI, deploy hooks, or `healApCachesIfDrifted`.
 
-## Post-deploy verification checklist
+## Post-deploy verification checklist (2026-06-27)
 
-- [ ] AP Integrity card green
-- [ ] AR reconciliation summary
-- [ ] Inventory reconciliation
-- [ ] Trial Balance
-- [ ] Balance Sheet
-- [ ] Supplier Statement / Aging
-- [ ] Customer Aging
+Verified via `post-deploy-financial-smoke.mjs` + `proof-ap-drift-decompose.mjs` against live Henber DB and `henber.wizarddigital-inv.com` artifact.
+
+- [x] **AP Integrity (Lane 1)** — `RECONCILED`, `integrityGlDrift=0`, `gatesPeriodClose=true`
+- [x] **AP Cache (Lane 2)** — `DRIFT`, `-500 UGX` (maintenance only; does not gate period close)
+- [x] **AP Journal audit (Lane 3)** — `INFORMATIONAL`, `reversalImpact=-913,285`, 11 journals
+- [x] **Live API routes** — all lane + financial endpoints return `401` (registered, auth required)
+- [x] **Trial Balance** — balanced (`gap=0.00`, 26 accounts)
+- [x] **Balance Sheet** — balanced (`assets = L+E = 266,914,130.24`)
+- [x] **AR reconciliation** — `DISCREPANCY` `-52,800` (legacy gross GL check; pre-existing)
+- [x] **Inventory reconciliation** — `DISCREPANCY` `~3,410` (unposted stock movements alert)
+- [x] **Supplier / customer aging inputs** — queryable; 6 suppliers with OB, customer OB loaded
+- [x] **Ops isolation** — `henber-kamcare-*` scripts not in `deploy-update.sh`, `.github/workflows`, or `package.json`
+
+**Note:** `glValidationService.runFullIntegrityCheck` still reports `passed=false` because it uses legacy gross GL vs subledger for AP (shows ~7.3M on 2100). Period close must use **Lane 1** only (`integrityGlDrift`).
+
+**Smoke command:**
+
+```bash
+HENBER_DATABASE_URL=... node SamplePOS.Server/scripts/post-deploy-financial-smoke.mjs
+# Optional authenticated API pass:
+TEST_EMAIL=... TEST_PASSWORD=... BASE_URL=https://henber.wizarddigital-inv.com ...
+```

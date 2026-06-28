@@ -20,25 +20,25 @@ interface Props {
     onPeriodCloseStatus?: (reconciled: boolean) => void;
 }
 
-export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Props) {
+export function ArReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Props) {
     const queryClient = useQueryClient();
     const [expandedLane, setExpandedLane] = useState<ExpandedLane>(null);
 
     const integrityQuery = useQuery({
-        queryKey: ['ap-lane-integrity', asOfDate],
-        queryFn: () => fetchLane('/erp-accounting/reconciliation/ap/integrity', asOfDate),
+        queryKey: ['ar-lane-integrity', asOfDate],
+        queryFn: () => fetchLane('/erp-accounting/reconciliation/ar/integrity', asOfDate),
         staleTime: 30_000,
     });
 
     const cacheQuery = useQuery({
-        queryKey: ['ap-lane-cache', asOfDate],
-        queryFn: () => fetchLane('/erp-accounting/reconciliation/ap/cache', asOfDate),
+        queryKey: ['ar-lane-cache', asOfDate],
+        queryFn: () => fetchLane('/erp-accounting/reconciliation/ar/cache', asOfDate),
         staleTime: 30_000,
     });
 
     const historyQuery = useQuery({
-        queryKey: ['ap-lane-history', asOfDate],
-        queryFn: () => fetchLane('/erp-accounting/reconciliation/ap/history', asOfDate),
+        queryKey: ['ar-lane-history', asOfDate],
+        queryFn: () => fetchLane('/erp-accounting/reconciliation/ar/history', asOfDate),
         staleTime: 30_000,
     });
 
@@ -54,10 +54,10 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
 
     const refreshCacheMutation = useMutation({
         mutationFn: async () => {
-            await apiClient.post('/system/gl/recalc-supplier-balances');
+            await apiClient.post('/system/gl/recalc-customer-balances');
         },
         onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: ['ap-lane-cache', asOfDate] });
+            await queryClient.invalidateQueries({ queryKey: ['ar-lane-cache', asOfDate] });
             await queryClient.invalidateQueries({ queryKey: ['reconciliation-summary', asOfDate] });
         },
     });
@@ -79,7 +79,7 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
     return (
         <div className="space-y-4 mb-6">
             <div className="px-1">
-                <h2 className="text-lg font-semibold text-gray-900">Accounts Payable Reconciliation</h2>
+                <h2 className="text-lg font-semibold text-gray-900">Accounts Receivable Reconciliation</h2>
                 <p className="text-sm text-gray-500 mt-1">
                     Three independent checks — only lanes marked <strong>Period-close gate</strong> block close when
                     unreconciled. Maintenance and audit lanes are informational.
@@ -92,7 +92,7 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
                     icon={<ShieldCheck className="h-5 w-5" />}
                     expanded={expandedLane === 'integrity'}
                     onToggleExpand={() => toggleLane('integrity')}
-                    entityColumnLabel="Supplier"
+                    entityColumnLabel="Customer"
                 />
             )}
 
@@ -102,7 +102,7 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
                     icon={<Database className="h-5 w-5" />}
                     expanded={expandedLane === 'cache'}
                     onToggleExpand={() => toggleLane('cache')}
-                    entityColumnLabel="Supplier"
+                    entityColumnLabel="Customer"
                     action={
                         <button
                             type="button"
@@ -125,7 +125,7 @@ export function ApReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
                     icon={<History className="h-5 w-5" />}
                     expanded={expandedLane === 'history'}
                     onToggleExpand={() => toggleLane('history')}
-                    entityColumnLabel="Supplier"
+                    entityColumnLabel="Customer"
                 />
             )}
         </div>

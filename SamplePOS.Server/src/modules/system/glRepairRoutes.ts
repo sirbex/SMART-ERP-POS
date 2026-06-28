@@ -115,6 +115,24 @@ router.post('/recalc-supplier-balances', asyncHandler(async (req, res) => {
 }));
 
 // ============================================================================
+// POST /api/system/gl/recalc-customer-balances
+// Recalc every customers.balance from open-item AR subledger.
+// ============================================================================
+router.post('/recalc-customer-balances', asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    logger.info('Customer balance recalc triggered', {
+        userId: req.user?.id, role: req.user?.role,
+    });
+    const result = await glRepairService.recalcAllCustomerBalances(pool);
+    res.json({
+        success: true,
+        data: result,
+        message: `Recalculated ${result.customersScanned} customer balance(s); `
+            + `${result.customersUpdated} corrected in ${result.durationMs}ms`,
+    });
+}));
+
+// ============================================================================
 // POST /api/system/gl/rebase-account-balances
 // Recompute accounts.CurrentBalance from POSTED ledger_entries (no GL JEs).
 // Body: { accountCodes?: string[] } — default all active accounts.
