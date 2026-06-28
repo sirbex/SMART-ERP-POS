@@ -75,6 +75,7 @@ export class ARReconciliationProvider implements FinancialLaneProvider {
         glNetActive: legacy.glNetActive,
         openItemSubledger: legacy.openItemSubledger,
         integrityDifference: legacy.integrityDifference,
+        materialityThreshold: legacy.materialityThreshold,
       },
     };
   }

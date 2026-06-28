@@ -16,6 +16,7 @@ import {
   isApDriftExplainedByExpenses,
   type ApQueryContext,
 } from './apReconciliationEngine.js';
+import { resolveMaterialityThreshold } from '../financial-governance/materialityConfigService.js';
 
 export interface ApReconciliationMetrics {
   asOfDate: string;
@@ -39,6 +40,7 @@ export interface ApReconciliationMetrics {
   expenseOnAp: number;
   unallocatedPayments: number;
   unpostedOpenInvoiceBalance: number;
+  materialityThreshold: number;
 }
 
 export interface ApReconciliationVerification {
@@ -108,6 +110,12 @@ export async function captureApReconciliationMetrics(
     computeUnpostedOpenInvoiceBalance(conn),
   ]);
 
+  const { threshold: materialityThreshold } = await resolveMaterialityThreshold(
+    conn,
+    'ap',
+    glSupplierScopeNetActive,
+  );
+
   return {
     asOfDate: date,
     glTotal2100,
@@ -124,13 +132,20 @@ export async function captureApReconciliationMetrics(
     expenseOnAp,
     unallocatedPayments,
     unpostedOpenInvoiceBalance,
+    materialityThreshold,
   };
 }
 
 /** Supplier-scope GL vs open-item — same rules as GL integrity check. */
-export function isApSupplierGlIntegrityMatched(metrics: ApReconciliationMetrics): boolean {
+export function isApSupplierGlIntegrityMatched(
+  metrics: ApReconciliationMetrics,
+  overrideThreshold?: number,
+): boolean {
   if (Math.abs(metrics.integrityGlDrift) <= 0.01) return true;
-  const threshold = apMaterialityThreshold(metrics.glSupplierScopeNetActive);
+  const threshold =
+    overrideThreshold
+    ?? metrics.materialityThreshold
+    ?? apMaterialityThreshold(metrics.glSupplierScopeNetActive);
   return isApDriftExplainedByExpenses(
     {
       glBalance: metrics.glSupplierScopeNetActive,

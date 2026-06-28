@@ -17,6 +17,7 @@ function metrics(partial: Partial<ArReconciliationMetrics>): ArReconciliationMet
     storedBalanceDrift: 0,
     integrityGlDrift: 0,
     unallocatedPayments: 0,
+    materialityThreshold: 5000,
     ...partial,
   };
 }

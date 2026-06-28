@@ -67,34 +67,42 @@ export async function resolveMaterialityThreshold(
   domain: FinancialDomain,
   glBalance: number,
 ): Promise<{ threshold: number; source: 'default' | 'configured'; mode: MaterialityMode }> {
-  const config = await getMaterialityConfig(conn, domain);
-  if (!config || config.mode === 'default') {
+  try {
+    const config = await getMaterialityConfig(conn, domain);
+    if (!config || config.mode === 'default') {
+      return {
+        threshold: defaultMaterialityThreshold(domain, glBalance),
+        source: 'default',
+        mode: 'default',
+      };
+    }
+
+    const absGl = Math.abs(glBalance);
+
+    if (config.mode === 'exact') {
+      return {
+        threshold: config.exactTolerance ?? 0.01,
+        source: 'configured',
+        mode: config.mode,
+      };
+    }
+
+    const rate = config.percentRate ?? 0.0001;
+    const floor = config.floorAmount ?? 0;
+    let threshold = Math.max(absGl * rate, floor);
+
+    if (config.mode === 'percent_floor_cap' && config.capAmount != null) {
+      threshold = Math.min(threshold, config.capAmount);
+    }
+
+    return { threshold, source: 'configured', mode: config.mode };
+  } catch {
     return {
       threshold: defaultMaterialityThreshold(domain, glBalance),
       source: 'default',
       mode: 'default',
     };
   }
-
-  const absGl = Math.abs(glBalance);
-
-  if (config.mode === 'exact') {
-    return {
-      threshold: config.exactTolerance ?? 0.01,
-      source: 'configured',
-      mode: config.mode,
-    };
-  }
-
-  const rate = config.percentRate ?? 0.0001;
-  const floor = config.floorAmount ?? 0;
-  let threshold = Math.max(absGl * rate, floor);
-
-  if (config.mode === 'percent_floor_cap' && config.capAmount != null) {
-    threshold = Math.min(threshold, config.capAmount);
-  }
-
-  return { threshold, source: 'configured', mode: config.mode };
 }
 
 export interface UpdateMaterialityInput {

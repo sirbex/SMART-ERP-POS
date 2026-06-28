@@ -52,7 +52,33 @@ Known legacy SQL parity (documented, non-blocking):
 | Documentation | FINANCIAL_RECONCILIATION_FRAMEWORK.md + LEGACY audit |
 | Rollback | Legacy code paths remain in repo through F0 |
 
-### Next collection
+---
+
+## Stabilization cycle entry — G2 (governance UI + materiality wiring)
+
+| Field | Value |
+|-------|-------|
+| Collected | 2026-06-28 |
+| Commits | `5ce3999` (G1), G2 pending push |
+| G1 deploy | [28309356007](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/28309356007) — success |
+
+### AR integrity investigation (read-only)
+
+`proof-ar-drift-decompose.mjs` confirms **−52,800 UGX** integrity drift:
+
+- GL 1200 net-active total: 20,847,314 vs open-item: 20,900,114
+- Cache healthy (0 drift) — not a cache maintenance issue
+- Top entity drivers: case hospital (−2.6M entity GL gap), partially offset by BOU (+137K), African Humanitarian (+166K)
+- **Remediation requires authorized GL/open-item alignment — not auto-healed during F0**
+
+Period close remains **blocked on AR** until resolved or materiality override approved via governance config.
+
+### G2 deliverables (in progress)
+
+- `FinancialGovernancePanel` on Reconciliation page
+- Tenant materiality config wired into AP/AR/Inventory metrics
+- Scheduled snapshot script: `npm run capture:governance-snapshot`
+- Post-deploy smoke DB section uses `proof:framework-baseline` via tsx
 
 Re-run after deploy completes and weekly during stabilization:
 

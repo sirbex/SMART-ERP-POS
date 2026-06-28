@@ -13,6 +13,7 @@ import {
   computeUnallocatedArPayments,
   type ArQueryContext,
 } from './arReconciliationEngine.js';
+import { resolveMaterialityThreshold } from '../financial-governance/materialityConfigService.js';
 
 export interface ArReconciliationMetrics {
   asOfDate: string;
@@ -26,6 +27,7 @@ export interface ArReconciliationMetrics {
   storedBalanceDrift: number;
   integrityGlDrift: number;
   unallocatedPayments: number;
+  materialityThreshold: number;
 }
 
 type ArDb = Pool | PoolClient;
@@ -59,6 +61,12 @@ export async function captureArReconciliationMetrics(
     computeUnallocatedArPayments(conn, ctx),
   ]);
 
+  const { threshold: materialityThreshold } = await resolveMaterialityThreshold(
+    conn,
+    'ar',
+    glNetActive1200,
+  );
+
   return {
     asOfDate: date,
     glNetActive1200,
@@ -71,10 +79,18 @@ export async function captureArReconciliationMetrics(
     storedBalanceDrift: glNetActive1200 - storedBalance1200,
     integrityGlDrift: glNetActive1200 - openItemSubledger,
     unallocatedPayments,
+    materialityThreshold,
   };
 }
 
-export function isArGlIntegrityMatched(metrics: ArReconciliationMetrics): boolean {
+export function isArGlIntegrityMatched(
+  metrics: ArReconciliationMetrics,
+  overrideThreshold?: number,
+): boolean {
   if (Math.abs(metrics.integrityGlDrift) <= 0.01) return true;
-  return Math.abs(metrics.integrityGlDrift) <= arMaterialityThreshold(metrics.glNetActive1200);
+  const threshold =
+    overrideThreshold
+    ?? metrics.materialityThreshold
+    ?? arMaterialityThreshold(metrics.glNetActive1200);
+  return Math.abs(metrics.integrityGlDrift) <= threshold;
 }

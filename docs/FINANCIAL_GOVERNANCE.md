@@ -6,12 +6,13 @@ Builds on the **Financial Integrity Framework** (Phases A–E, F0). Governance a
 
 | Capability | Status | API |
 |------------|--------|-----|
-| Configurable materiality thresholds | G1 | `GET/PUT /reconciliation/governance/materiality` |
-| Reconciliation history & trends | G1 | `POST/GET /reconciliation/governance/snapshots`, `GET .../trends/:domain` |
-| Integrity drift alerts | G1 | `GET /reconciliation/governance/alerts`, `POST .../alerts/:id/acknowledge` |
-| Period-close sign-off | G1 | `POST /reconciliation/governance/signoffs`, `POST .../review` |
-| Tenant financial health monitoring | G1 | `GET /reconciliation/governance/dashboard` |
+| Configurable materiality thresholds | G1 API · **G2 wired into lane engines** | `GET/PUT /reconciliation/governance/materiality` |
+| Reconciliation history & trends | G1 API · **G2 UI trend table** | `POST/GET /reconciliation/governance/snapshots`, `GET .../trends/:domain` |
+| Integrity drift alerts | G1 | `GET /reconciliation/governance/alerts` |
+| Period-close sign-off | G1 API | `POST /reconciliation/governance/signoffs` |
+| Tenant financial health monitoring | G1 · **G2 dashboard panel on Reconciliation page** | `GET /reconciliation/governance/dashboard` |
 | Audit evidence packs | G1 | `GET /reconciliation/governance/evidence/:snapshotId` |
+| Scheduled snapshots | G2 | `npm run capture:governance-snapshot` |
 
 ## Relationship to reconciliation framework
 
@@ -57,10 +58,11 @@ During **Phase F0**, legacy endpoints remain available. Governance snapshots cap
 
 ## Roadmap (G2+)
 
-- Scheduled snapshot jobs (daily post-close)
+- ~~UI: Governance tab on Reconciliation page~~ (G2 — `FinancialGovernancePanel`)
+- ~~Wire `resolveMaterialityThreshold` into lane engines~~ (G2)
+- Scheduled snapshot jobs: `npm run capture:governance-snapshot` (cron-ready)
 - Email/webhook alerts for new drift
-- UI: Governance tab on Reconciliation page
-- Wire `resolveMaterialityThreshold` into lane engines (optional tenant override)
+- Materiality edit UI (admin)
 - Cash domain governance when cash lane provider lands
 
 ## Related docs

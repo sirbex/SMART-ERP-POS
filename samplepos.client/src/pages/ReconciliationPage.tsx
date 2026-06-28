@@ -19,6 +19,7 @@ import { ApReconciliationLanesPanel } from '../components/reconciliation/ApRecon
 import { ArReconciliationLanesPanel } from '../components/reconciliation/ArReconciliationLanesPanel';
 import { InventoryReconciliationLanesPanel } from '../components/reconciliation/InventoryReconciliationLanesPanel';
 import { FinancialHealthDashboard } from '../components/reconciliation/FinancialHealthDashboard';
+import { FinancialGovernancePanel } from '../components/reconciliation/FinancialGovernancePanel';
 
 function reconciliationErrorMessage(err: unknown, fallback: string): string {
     const ax = err as AxiosError<ApiResponse>;
@@ -430,6 +431,7 @@ export default function ReconciliationPage() {
             ) : summary?.accounts && summary.accounts.length > 0 ? (
                 <>
                 <FinancialHealthDashboard asOfDate={asOfDate} />
+                <FinancialGovernancePanel asOfDate={asOfDate} />
                 <ApReconciliationLanesPanel asOfDate={asOfDate} />
                 <ArReconciliationLanesPanel asOfDate={asOfDate} />
                 <InventoryReconciliationLanesPanel asOfDate={asOfDate} />

@@ -11,7 +11,12 @@
  * API checks require tenant credentials. DB checks use HENBER_DATABASE_URL.
  * Exit 0 when integrity lane reconciled and financial endpoints respond.
  */
-import pg from 'pg';
+import { spawnSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const serverRoot = path.resolve(scriptDir, '..');
 
 const BASE = process.env.BASE_URL || 'https://henber.wizarddigital-inv.com';
 const EMAIL = process.env.TEST_EMAIL || '';
@@ -289,6 +294,7 @@ async function verifyApi(token) {
   for (const [path, label] of [
     ['/api/erp-accounting/reconciliation/stabilization/consumer-audit', 'Consumer audit catalog'],
     [`/api/erp-accounting/reconciliation/stabilization/parity?asOfDate=${asOf}`, 'Legacy parity check'],
+    ['/api/erp-accounting/reconciliation/governance/dashboard', 'Governance dashboard'],
   ]) {
     const r = await apiGet(path, token);
     if (!r.res.ok) fail(`GET ${path}`, `HTTP ${r.res.status}`);
@@ -343,134 +349,26 @@ async function verifyDbFinancials() {
     skip('DB financial smoke — set HENBER_DATABASE_URL');
     return;
   }
-  info('DB financial smoke (same repository/services as live API)');
-  const pool = new pg.Pool({ connectionString: DB_URL });
-  const asOf = new Date().toISOString().slice(0, 10);
-  try {
-    const { getTrialBalance, getBalanceSheet } = await import('../src/repositories/accountingRepository.js');
-    const { runFullIntegrityCheck } = await import('../src/services/glValidationService.js');
-    const { getReconciliationService } = await import('../src/services/reconciliationService.js');
-    const recon = getReconciliationService(pool);
-    const { getFinancialLane: fetchFinancialLane } = await import('../src/modules/financial-reconciliation/financialLaneService.js');
+  info('DB financial smoke (framework baseline via tsx — same SSOT as live API)');
 
-    const tb = await getTrialBalance(asOf, false, pool);
-    const gap = Math.abs(tb.totals.totalDebits - tb.totals.totalCredits);
-    pass('Trial balance (repository)', `${tb.accounts.length} accounts, gap=${gap.toFixed(2)}`);
-    if (tb.totals.isBalanced || gap <= 0.02) pass('Trial balance balanced');
-    else fail('Trial balance balanced', `gap=${gap.toFixed(2)}`);
+  const baselineRun = spawnSync(
+    'npm',
+    ['run', 'proof:framework-baseline'],
+    {
+      cwd: serverRoot,
+      env: { ...process.env, HENBER_DATABASE_URL: DB_URL },
+      encoding: 'utf8',
+      shell: true,
+    },
+  );
 
-    const bs = await getBalanceSheet(asOf, pool);
-    pass(
-      'Balance sheet (repository)',
-      `assets=${Number(bs.assets?.totalAssets ?? 0).toLocaleString()} L+E=${Number(bs.totalLiabilitiesAndEquity ?? 0).toLocaleString()} balanced=${bs.isBalanced}`,
+  if (baselineRun.status === 0) {
+    pass('Framework baseline proof (all domains + parity logged)');
+  } else {
+    fail(
+      'Framework baseline proof',
+      (baselineRun.stderr || baselineRun.stdout || 'non-zero exit').slice(0, 400),
     );
-
-    const integrity = await runFullIntegrityCheck(pool);
-    pass('Accounting integrity (glValidationService)', `passed=${integrity.passed}`);
-    if (!integrity.passed) {
-      info('Legacy integrity uses gross GL vs subledger — use Lane 1 for AP period-close gate');
-    }
-
-    const { captureApReconciliationMetrics } = await import('../src/modules/supplier-payments/apReconciliationMetrics.js');
-    const metrics = await captureApReconciliationMetrics(pool, asOf);
-    pass(
-      'AP metrics (integrity SSOT)',
-      `integrityGlDrift=${metrics.integrityGlDrift} cacheDrift=${metrics.supplierCacheDrift} storedDrift=${metrics.storedBalanceDrift}`,
-    );
-    if (Math.abs(metrics.integrityGlDrift) < 0.02) pass('integrityGlDrift period-close gate');
-    else fail('integrityGlDrift period-close gate', String(metrics.integrityGlDrift));
-
-    const ar = await recon.reconcileAccountsReceivable(asOf);
-    const inv = await recon.reconcileInventory(asOf);
-    pass('AR reconciliation (metrics SSOT)', `${ar.status} diff=${ar.difference}`);
-    pass('Inventory reconciliation (metrics SSOT)', `${inv.status} diff=${inv.difference}`);
-
-    const { captureArReconciliationMetrics } = await import('../src/modules/customer-payments/arReconciliationMetrics.js');
-    const arMetrics = await captureArReconciliationMetrics(pool, asOf);
-    pass(
-      'AR metrics (integrity SSOT)',
-      `integrityGlDrift=${arMetrics.integrityGlDrift} cacheDrift=${arMetrics.customerCacheDrift}`,
-    );
-    info(`AR integrityGlDrift=${arMetrics.integrityGlDrift} (Lane 1 period-close gate)`);
-
-    const { captureInventoryReconciliationMetrics } = await import('../src/modules/inventory/inventoryReconciliationMetrics.js');
-    const invMetrics = await captureInventoryReconciliationMetrics(pool, asOf);
-    pass(
-      'Inventory metrics (integrity SSOT)',
-      `integrityGlDrift=${invMetrics.integrityGlDrift} threshold=${invMetrics.materialityThreshold}`,
-    );
-    info(`Inventory integrityGlDrift=${invMetrics.integrityGlDrift} (materiality ${invMetrics.materialityThreshold})`);
-
-    const lane1 = await fetchFinancialLane(pool, 'ap', 'integrity', asOf);
-    const lane2 = await fetchFinancialLane(pool, 'ap', 'cache', asOf);
-    const lane3 = await fetchFinancialLane(pool, 'ap', 'history', asOf);
-    const arLane1 = await fetchFinancialLane(pool, 'ar', 'integrity', asOf);
-    const arLane2 = await fetchFinancialLane(pool, 'ar', 'cache', asOf);
-    const arLane3 = await fetchFinancialLane(pool, 'ar', 'history', asOf);
-    const invLane1 = await fetchFinancialLane(pool, 'inventory', 'integrity', asOf);
-    const invLane2 = await fetchFinancialLane(pool, 'inventory', 'cache', asOf);
-    const invLane3 = await fetchFinancialLane(pool, 'inventory', 'history', asOf);
-
-    if (lane1.status === 'RECONCILED' && lane1.periodCloseBlocking === true) {
-      pass('Framework Lane 1 integrity', `diff=${lane1.difference} severity=${lane1.severity}`);
-    } else {
-      fail('Framework Lane 1 integrity', `${lane1.status} diff=${lane1.difference}`);
-    }
-    if (lane2.periodCloseBlocking === false) {
-      pass('Framework Lane 2 cache', `${lane2.status} diff=${lane2.difference} severity=${lane2.severity}`);
-    } else fail('Framework Lane 2 periodCloseBlocking');
-    if (lane3.status === 'INFORMATIONAL' && lane3.periodCloseBlocking === false) {
-      pass('Framework AP Lane 3 audit', `diff=${lane3.difference}`);
-    } else fail('Framework AP Lane 3 audit', lane3.status);
-
-    if (arLane1.domain === 'ar' && arLane1.periodCloseBlocking === true) {
-      pass('Framework AR Lane 1 integrity', `${arLane1.status} diff=${arLane1.difference} severity=${arLane1.severity}`);
-    } else fail('Framework AR Lane 1 integrity', `${arLane1.status}`);
-    if (arLane2.periodCloseBlocking === false) {
-      pass('Framework AR Lane 2 cache', `${arLane2.status} diff=${arLane2.difference}`);
-    } else fail('Framework AR Lane 2 periodCloseBlocking');
-    if (arLane3.status === 'INFORMATIONAL' && arLane3.periodCloseBlocking === false) {
-      pass('Framework AR Lane 3 audit', `diff=${arLane3.difference}`);
-    } else fail('Framework AR Lane 3 audit', arLane3.status);
-
-    if (invLane1.domain === 'inventory' && invLane1.periodCloseBlocking === true) {
-      pass('Framework Inventory Lane 1 integrity', `${invLane1.status} diff=${invLane1.difference} severity=${invLane1.severity}`);
-    } else fail('Framework Inventory Lane 1 integrity', `${invLane1.status}`);
-    if (invLane2.periodCloseBlocking === false) {
-      pass('Framework Inventory Lane 2 cache', `${invLane2.status} diff=${invLane2.difference}`);
-    } else fail('Framework Inventory Lane 2 periodCloseBlocking');
-    if (invLane3.status === 'INFORMATIONAL' && invLane3.periodCloseBlocking === false) {
-      pass('Framework Inventory Lane 3 audit', `diff=${invLane3.difference}`);
-    } else fail('Framework Inventory Lane 3 audit', invLane3.status);
-
-    const health = await import('../src/modules/financial-reconciliation/financialLaneService.js');
-    const { compareSqlSummaryToFramework } = await import('../src/modules/financial-reconciliation/reconciliationParityService.js');
-    const summaries = await health.getAllDomainSummaries(pool, asOf);
-    const domains = summaries.map((s) => s.domain).sort().join(',');
-    if (domains.includes('ap') && domains.includes('ar') && domains.includes('inventory')) {
-      pass('Financial health domains', domains);
-    } else fail('Financial health domains', domains);
-
-    const parity = await compareSqlSummaryToFramework(pool, asOf);
-    if (parity.ok) pass('Legacy SQL parity vs framework', 'ok');
-    else info(`Legacy SQL parity mismatches: ${parity.mismatches.length}`);
-
-    const { reportsRepository } = await import('../src/modules/reports/reportsRepository.js');
-    const { getSupplierAging } = await import('../src/modules/reports/cnDnReportRepository.js');
-    const custAging = await reportsRepository.getCustomerAging(pool, { asOfDate: asOf });
-    const supAging = await getSupplierAging(pool, asOf);
-    pass(
-      'Supplier aging report',
-      `${supAging.length} rows`,
-    );
-    pass(
-      'Customer aging report',
-      `${custAging.summary.totalCustomers} customers, outstanding ${Number(custAging.summary.totalOutstanding).toLocaleString()}`,
-    );
-  } catch (e) {
-    fail('DB financial smoke', e instanceof Error ? e.message : String(e));
-  } finally {
-    await pool.end();
   }
 }
 

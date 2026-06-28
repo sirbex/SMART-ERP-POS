@@ -9,9 +9,9 @@ import {
   computeGl1300NetActive,
   computeProductValuationCache,
   computeStoredBalance1300,
-  inventoryMaterialityThreshold,
   type InventoryQueryContext,
 } from './inventoryReconciliationEngine.js';
+import { resolveMaterialityThreshold } from '../financial-governance/materialityConfigService.js';
 
 export interface InventoryReconciliationMetrics {
   asOfDate: string;
@@ -50,7 +50,11 @@ export async function captureInventoryReconciliationMetrics(
     computeStoredBalance1300(conn),
   ]);
 
-  const materialityThreshold = inventoryMaterialityThreshold(glNetActive1300);
+  const { threshold: materialityThreshold } = await resolveMaterialityThreshold(
+    conn,
+    'inventory',
+    glNetActive1300,
+  );
 
   return {
     asOfDate: date,

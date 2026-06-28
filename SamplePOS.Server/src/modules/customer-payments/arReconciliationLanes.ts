@@ -225,6 +225,7 @@ export async function getArIntegrityLane(conn: ArDb, asOfDate?: string) {
     glNetActive: metrics.glNetActive1200,
     openItemSubledger: metrics.openItemSubledger,
     integrityDifference: metrics.integrityGlDrift,
+    materialityThreshold: metrics.materialityThreshold,
     status: integrityOk ? ('RECONCILED' as const) : ('DISCREPANCY' as const),
     exceptions: mapCustomerRows(exceptionsRes.rows),
   };
