@@ -48,7 +48,10 @@ import {
   withLegacyArFields,
   withLegacyInventoryFields,
 } from '../modules/financial-reconciliation/financialLaneService.js';
-import type { ReconciliationParityReport } from '../modules/financial-reconciliation/reconciliationParityService.js';
+import {
+  compareSqlSummaryToFramework,
+  type ReconciliationParityReport,
+} from '../modules/financial-reconciliation/reconciliationParityService.js';
 import { logLegacyReconciliationAccess } from '../modules/financial-reconciliation/legacyReconciliationAudit.js';
 import type { FinancialLaneResult } from '../modules/financial-reconciliation/types.js';
 
