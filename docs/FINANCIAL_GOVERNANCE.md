@@ -12,7 +12,11 @@ Builds on the **Financial Integrity Framework** (Phases A–E, F0). Governance a
 | Period-close sign-off | G1 API | `POST /reconciliation/governance/signoffs` |
 | Tenant financial health monitoring | G1 · **G2 dashboard panel on Reconciliation page** | `GET /reconciliation/governance/dashboard` |
 | Audit evidence packs | G1 | `GET /reconciliation/governance/evidence/:snapshotId` |
-| Scheduled snapshots | G2 | `npm run capture:governance-snapshot` |
+| Scheduled snapshots | G2 · **G3 smoke auto-capture** | `npm run capture:governance-snapshot` |
+| Materiality edit UI | **G3** | Reconciliation → Governance panel (accounting.manage) |
+| Sign-off request/review UI | **G3** | Same panel (period_manage / approve) |
+| Alert acknowledge | **G3** | Governance panel (accounting.manage) |
+| Audit evidence download | **G3** | Evidence pack button on latest snapshot |
 
 ## Relationship to reconciliation framework
 
@@ -56,13 +60,11 @@ Sign-off approval is rejected if the linked snapshot has `periodCloseBlocked = t
 
 During **Phase F0**, legacy endpoints remain available. Governance snapshots capture framework lane state only. Phase F retirement criteria in [LEGACY_RECONCILIATION_CONSUMER_AUDIT.md](./LEGACY_RECONCILIATION_CONSUMER_AUDIT.md) must be satisfied before removing legacy code.
 
-## Roadmap (G2+)
+## Roadmap (G3+)
 
-- ~~UI: Governance tab on Reconciliation page~~ (G2 — `FinancialGovernancePanel`)
-- ~~Wire `resolveMaterialityThreshold` into lane engines~~ (G2)
-- Scheduled snapshot jobs: `npm run capture:governance-snapshot` (cron-ready)
+- ~~Materiality edit UI (admin)~~ (G3)
+- ~~Sign-off review UI~~ (G3)
 - Email/webhook alerts for new drift
-- Materiality edit UI (admin)
 - Cash domain governance when cash lane provider lands
 
 ## Related docs

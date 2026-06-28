@@ -80,6 +80,36 @@ Period close remains **blocked on AR** until resolved or materiality override ap
 - Scheduled snapshot script: `npm run capture:governance-snapshot`
 - Post-deploy smoke DB section uses `proof:framework-baseline` via tsx
 
+---
+
+## Stabilization cycle entry — G3 (governance ops UI)
+
+| Field | Value |
+|-------|-------|
+| Commit | G3 pending push |
+| Deploy | After G2 `b20a48b` completes |
+
+### Operator checklist (post-deploy)
+
+1. Open **Reconciliation** → **Financial Governance** panel
+2. Click **Capture snapshot** (seeds history + drift alerts)
+3. Review **Open drift alerts** — AR expected until remediation
+4. **Do not** approve period-close sign-off while AR integrity blocked
+5. Download **Evidence pack** for audit trail
+6. Weekly: `npm run proof:framework-baseline` + review `[LEGACY RECON]` logs
+
+### Finance sign-off gate (dashboard adoption criterion)
+
+| Question | Where answered |
+|----------|----------------|
+| Can I close the period? | Financial Health dashboard banner |
+| Which domain blocks? | Blocked domains list (AR on Henber) |
+| Accounting vs maintenance? | Lane severity on cards |
+| Recommended action? | `recommendedAction` on integrity lanes |
+| Governance attestation? | Sign-off request (requires clear snapshot) |
+
+Finance stakeholder sign-off remains **pending** until AR integrity resolved or accepted as known exception with documented attestation.
+
 Re-run after deploy completes and weekly during stabilization:
 
 ```bash

@@ -18,7 +18,7 @@ interface Props {
     asOfDate: string;
 }
 
-export function InventoryReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Props) {
+export function InventoryReconciliationLanesPanel({ asOfDate }: Props) {
     const queryClient = useQueryClient();
     const [expandedLane, setExpandedLane] = useState<ExpandedLane>(null);
 

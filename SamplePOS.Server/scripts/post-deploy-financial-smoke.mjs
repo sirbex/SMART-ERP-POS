@@ -370,6 +370,30 @@ async function verifyDbFinancials() {
       (baselineRun.stderr || baselineRun.stdout || 'non-zero exit').slice(0, 400),
     );
   }
+
+  const snapshotRun = spawnSync(
+    'npm',
+    ['run', 'capture:governance-snapshot'],
+    {
+      cwd: serverRoot,
+      env: {
+        ...process.env,
+        HENBER_DATABASE_URL: DB_URL,
+        CAPTURE_SOURCE: 'stabilization',
+        FRAMEWORK_COMMIT: process.env.GITHUB_SHA || process.env.FRAMEWORK_COMMIT || '',
+      },
+      encoding: 'utf8',
+      shell: true,
+    },
+  );
+
+  if (snapshotRun.status === 0) {
+    pass('Governance stabilization snapshot captured');
+    const line = (snapshotRun.stdout || '').split('\n').find((l) => l.includes('snapshotId'));
+    if (line) info(line.trim());
+  } else {
+    info('Governance snapshot skipped or failed (DB timeout OK off-server)');
+  }
 }
 
 function verifyOpsIsolation() {
