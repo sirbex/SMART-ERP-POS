@@ -46,6 +46,30 @@ import {
   compareSqlSummaryToFramework,
   captureFrameworkBaseline,
 } from '../modules/financial-reconciliation/reconciliationParityService.js';
+import {
+  getGovernanceDashboard,
+  captureSnapshotWithAlerts,
+  buildAuditEvidencePack,
+} from '../modules/financial-governance/financialGovernanceService.js';
+import {
+  listMaterialityConfig,
+  upsertMaterialityConfig,
+  resolveMaterialityThreshold,
+} from '../modules/financial-governance/materialityConfigService.js';
+import {
+  requestPeriodCloseSignoff,
+  reviewPeriodCloseSignoff,
+  getApprovedSignoffForPeriod,
+} from '../modules/financial-governance/periodCloseSignoffService.js';
+import {
+  listSnapshotTrend,
+  listRecentSnapshots,
+} from '../modules/financial-governance/reconciliationSnapshotService.js';
+import {
+  listOpenAlerts,
+  acknowledgeAlert,
+} from '../modules/financial-governance/integrityAlertService.js';
+import type { FinancialDomain } from '../modules/financial-reconciliation/types.js';
 
 const router = Router();
 
@@ -1111,6 +1135,224 @@ router.get(
       success: true,
       data: { parity, baseline },
     });
+  }),
+);
+
+// =============================================================================
+// Financial Governance (Phase G1) — builds on integrity framework
+// =============================================================================
+
+/**
+ * GET /api/erp-accounting/reconciliation/governance/dashboard
+ */
+router.get(
+  '/reconciliation/governance/dashboard',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await getGovernanceDashboard(pool);
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/governance/materiality
+ */
+router.get(
+  '/reconciliation/governance/materiality',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await listMaterialityConfig(pool);
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * PUT /api/erp-accounting/reconciliation/governance/materiality/:domain
+ */
+router.put(
+  '/reconciliation/governance/materiality/:domain',
+  requirePermission('accounting.manage'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const domain = req.params.domain as FinancialDomain;
+    const { mode, exactTolerance, percentRate, floorAmount, capAmount, notes } = req.body;
+    const data = await upsertMaterialityConfig(pool, domain, {
+      mode,
+      exactTolerance,
+      percentRate,
+      floorAmount,
+      capAmount,
+      notes,
+      updatedBy: req.user!.id,
+    });
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/governance/materiality/:domain/resolve
+ */
+router.get(
+  '/reconciliation/governance/materiality/:domain/resolve',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const domain = req.params.domain as FinancialDomain;
+    const glBalance = Number(req.query.glBalance ?? 0);
+    const data = await resolveMaterialityThreshold(pool, domain, glBalance);
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * POST /api/erp-accounting/reconciliation/governance/snapshots
+ */
+router.post(
+  '/reconciliation/governance/snapshots',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const { asOfDate, captureSource, periodYear, periodMonth, frameworkCommit } = req.body;
+    const date = asOfDate || getBusinessDate();
+    const result = await captureSnapshotWithAlerts(pool, {
+      asOfDate: date,
+      captureSource: captureSource ?? 'manual',
+      periodYear,
+      periodMonth,
+      frameworkCommit,
+      createdBy: req.user?.id,
+      includeParity: true,
+    });
+    return res.status(201).json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/governance/snapshots
+ */
+router.get(
+  '/reconciliation/governance/snapshots',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const limit = Number(req.query.limit ?? 30);
+    const data = await listRecentSnapshots(pool, limit);
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/governance/trends/:domain
+ */
+router.get(
+  '/reconciliation/governance/trends/:domain',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const days = Number(req.query.days ?? 90);
+    const data = await listSnapshotTrend(pool, req.params.domain, days);
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/governance/alerts
+ */
+router.get(
+  '/reconciliation/governance/alerts',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await listOpenAlerts(pool);
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * POST /api/erp-accounting/reconciliation/governance/alerts/:id/acknowledge
+ */
+router.post(
+  '/reconciliation/governance/alerts/:id/acknowledge',
+  requirePermission('accounting.manage'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await acknowledgeAlert(pool, req.params.id, req.user!.id);
+    if (!data) {
+      return res.status(404).json({ success: false, error: 'Alert not found' });
+    }
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * POST /api/erp-accounting/reconciliation/governance/signoffs
+ */
+router.post(
+  '/reconciliation/governance/signoffs',
+  requirePermission('accounting.period_manage'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const { periodYear, periodMonth, snapshotId, attestation } = req.body;
+    const data = await requestPeriodCloseSignoff(pool, {
+      periodYear,
+      periodMonth,
+      snapshotId,
+      attestation,
+      requestedBy: req.user!.id,
+    });
+    return res.status(201).json({ success: true, data });
+  }),
+);
+
+/**
+ * POST /api/erp-accounting/reconciliation/governance/signoffs/:id/review
+ */
+router.post(
+  '/reconciliation/governance/signoffs/:id/review',
+  requirePermission('accounting.approve'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const { status, reviewNotes } = req.body;
+    const data = await reviewPeriodCloseSignoff(pool, {
+      signoffId: req.params.id,
+      status,
+      reviewedBy: req.user!.id,
+      reviewNotes,
+    });
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/governance/signoffs/:year/:month
+ */
+router.get(
+  '/reconciliation/governance/signoffs/:year/:month',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await getApprovedSignoffForPeriod(
+      pool,
+      Number(req.params.year),
+      Number(req.params.month),
+    );
+    return res.json({ success: true, data });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/governance/evidence/:snapshotId
+ * Audit evidence pack for a captured snapshot.
+ */
+router.get(
+  '/reconciliation/governance/evidence/:snapshotId',
+  requirePermission('accounting.export'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await buildAuditEvidencePack(pool, req.params.snapshotId);
+    return res.json({ success: true, data });
   }),
 );
 

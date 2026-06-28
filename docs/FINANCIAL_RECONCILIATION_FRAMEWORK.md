@@ -121,7 +121,7 @@ Parity check (framework vs `fn_full_reconciliation_report`):
 | E | Financial health dashboard |
 | **F0** | **Stabilization — dual path, framework authoritative, legacy deprecated** |
 | F | Retire legacy SQL, endpoints, shims (**governance gate — see LEGACY_RECONCILIATION_CONSUMER_AUDIT.md**) |
-| Next | **Financial Governance** — configurable materiality, period-close sign-off, trends, alerts, audit exports |
+| Next | **Financial Governance** — configurable materiality, period-close sign-off, trends, alerts, audit exports ([FINANCIAL_GOVERNANCE.md](./FINANCIAL_GOVERNANCE.md)) |
 
 ## Related docs
 
