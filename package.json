@@ -66,6 +66,7 @@
     "proof:post-deploy-smoke:local": "node SamplePOS.Server/scripts/post-deploy-financial-smoke.mjs --local",
     "proof:henber:ap-decompose": "node SamplePOS.Server/scripts/proof-ap-drift-decompose.mjs",
     "proof:henber:ar-decompose": "node SamplePOS.Server/scripts/proof-ar-drift-decompose.mjs",
+    "proof:production-env-check": "node scripts/verify-proof-production-env.mjs",
     "proof:release-evidence-check": "node scripts/proof-release-evidence-check.mjs",
     "proof:phase-14-warehouse": "npm run proof:warehouse-network-matrix",
     "deploy:gate:warehouse-network": "node scripts/proof-deploy-warehouse-network-gate.mjs",
