@@ -1,0 +1,50 @@
+Step 5 — Review checklist (2026-07-05)
+======================================
+
+Merge commit SHA and release tag
+  [x] Merge SHA recorded: 940a1b7cf324cd691f3890ac19c6fd06ffa0e95f
+  [ ] Tag v2026.07-warehouse-network on de7a834 (recommended deployed HEAD)
+
+Readiness lock for exact commit
+  [ ] deploy-locks/readiness-lock-940a1b7*.json — NOT FOUND
+  [~] Pre-merge lock referenced on 683f70d in merge commit message only
+
+Production deployment log
+  [x] deploy-workflow.log — success run 28736954841 on de7a834
+  [x] Initial failure documented — run 28736346956 on 940a1b7
+
+Henber AP decomposition report
+  [x] PROOF_AP_DRIFT_DECOMPOSE.md — integrityGlDrift 0.00, exit 0
+
+Henber AR decomposition report
+  [x] PROOF_AR_DRIFT_DECOMPOSE.md — integrityGlDrift -52,800, exit 0
+
+Production post-deploy smoke log
+  [x] release-evidence/post-deploy-smoke.log — ALL CHECKS PASSED (exit 0)
+
+Warehouse deployment gate (production, optional)
+  [ ] Not run against production URLs
+  [~] Local gate proven pre-merge on feature branch
+
+Browser E2E (production, optional)
+  [ ] Not run against production URLs
+  [~] Local browser E2E proven pre-merge
+
+Release summary with accepted exceptions
+  [x] release-evidence/RELEASE_SUMMARY.md
+
+Review outputs — governance / reconciliation
+  [x] AP integrityGlDrift = 0 — clear for release
+  [x] AR integrityGlDrift = -52,800 — accepted documented exception; period-close blocked
+  [x] Governance dashboard HTTP 200 after 533 migration
+  [x] No open P0 from decomposition (AP clean; AR pre-existing)
+  [x] Application health 200 on /api/health
+
+Outstanding before tag
+  [ ] Commit shared/sql/533_financial_governance.sql to main
+  [ ] Deploy 533 to all tenants (or confirm Henber-only manual apply sufficient for now)
+  [ ] Rotate admin@test.com temporary smoke password
+
+SIGN-OFF RECOMMENDATION
+  Engineering + deployment + operational evidence complete.
+  Safe to tag with documented AR -52,800 exception and period-close AR block.

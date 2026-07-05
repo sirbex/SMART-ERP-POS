@@ -1,0 +1,31 @@
+Step 4 — Post-deploy financial smoke (re-run after governance fix)
+Run: 2026-07-05T11:03Z (approx)
+Merge commit: 940a1b7cf324cd691f3890ac19c6fd06ffa0e95f
+Target: https://henber.wizarddigital-inv.com
+Mode: production
+
+Overall: ALL CHECKS PASSED (exit 0)
+
+Fix applied before re-run:
+  Root cause: missing financial_materiality_config table (migration never in shared/sql deploy path)
+  Applied: shared/sql/533_financial_governance.sql to pos_tenant_henber_pharmacy
+  Governance dashboard: HTTP 500 → HTTP 200
+
+PASSED (highlights):
+  Health, frontend AP lane markers, all route registration
+  Tenant login (admin@test.com)
+  Trial balance balanced (gap=0)
+  AP Lane 1 RECONCILED diff=0
+  AR Lane 1 DISCREPANCY diff=-52800 (known documented exception)
+  Governance dashboard HTTP 200
+  Framework baseline proof (DB)
+  Governance stabilization snapshot captured (f15c3d94-2b8a-4e92-ab4c-1b4edc9beb35)
+
+Period-close blocked domains: ar (expected — AR -52,800)
+
+Artifacts:
+  release-evidence/step4-post-deploy-smoke/post-deploy-smoke-2026-07-05T14-03-52.log
+  release-evidence/post-deploy-smoke.log
+
+Code change for future deploys:
+  shared/sql/533_financial_governance.sql (will apply to all tenants on next deploy)

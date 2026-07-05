@@ -1,0 +1,2 @@
+Squash source: feature/warehouse-network-v1 @ 683f70d
+Pushed: 2026-07-05T12:32:27.6715412+03:00

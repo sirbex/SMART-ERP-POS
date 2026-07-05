@@ -1,0 +1,20 @@
+Step 3 — Henber AP/AR decompose
+Run: 2026-07-05T10:34Z
+Merge commit: 940a1b7cf324cd691f3890ac19c6fd06ffa0e95f
+Mode: production (HENBER_DATABASE_URL)
+
+AP drift decomposition: PASS (exit 0)
+  integrityGlDrift: UGX 0.00
+  All Layer 1–7 assertions passed
+  Note: STORED_BALANCE − posted GL = UGX 7,275,029.00 (cache maintenance, not integrityGlDrift)
+
+AR drift decomposition: PASS (exit 0)
+  integrityGlDrift: UGX -52,800.00 (known documented exception)
+  Cache healthy (0 drift vs open-item)
+  Top drivers: case hospital (−2.6M entity gap), BOU (+137K), African Humanitarian (+166K)
+
+Artifacts:
+  PROOF_AP_DRIFT_DECOMPOSE.md
+  PROOF_AR_DRIFT_DECOMPOSE.md
+  release-evidence/step3-henber-decompose/ap-decompose-*.log
+  release-evidence/step3-henber-decompose/ar-decompose-*.log

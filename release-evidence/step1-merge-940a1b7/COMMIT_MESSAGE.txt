@@ -1,0 +1,8 @@
+940a1b7cf324cd691f3890ac19c6fd06ffa0e95f
+feat: multi-store warehouse network (Phase 14)
+Squash merge of feature/warehouse-network-v1 ΓÇö schema migrations 525ΓÇô532,
+warehouse services, client UI, deploy gates, and production verification guards.
+Step 0 pre-merge evidence: commit 683f70d, readiness lock 2026-07-05.
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
