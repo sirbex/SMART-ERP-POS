@@ -42,6 +42,7 @@ import { assertSaleLineNotBelowAllocatedCost } from './saleBelowCostGuard.js';
 import { recordSaleLinePriceEvent } from './salePriceAuditService.js';
 import {
   previewFefoIssueCostForBaseQty,
+  previewFefoIssueLayers,
   loadSaleFefoBatchesForIssue,
   type ProductValuationForAtCost,
 } from '../pricing/atCostIssuePrice.js';
@@ -679,6 +680,21 @@ export const salesService = {
           Money.round(itemCost.dividedBy(new Decimal(item.quantity)), 2),
         );
 
+        let fefoLayersForError: Array<{ baseQuantity: number; unitCostPerBase: number; totalCost: number }> = [];
+        if (!multistoreEnabled || !sellingStoreId) {
+          try {
+            fefoLayersForError = await previewFefoIssueLayers(
+              client,
+              item.productId,
+              baseQty,
+              masterCostPerBase,
+              { minDaysBeforeExpiry },
+            );
+          } catch {
+            // Non-fatal — guard still runs without layer breakdown
+          }
+        }
+
         try {
           assertSaleLineNotBelowAllocatedCost({
             productId: item.productId,
@@ -688,6 +704,7 @@ export const salesService = {
             totalAllocatedCost: Money.toNumber(itemCost),
             costPerSellingUnit,
             unitPrice: effectiveUnitPrice,
+            fefoLayers: fefoLayersForError,
           });
         } catch (belowCostError) {
           if (input.auditContext && belowCostError instanceof BusinessError) {

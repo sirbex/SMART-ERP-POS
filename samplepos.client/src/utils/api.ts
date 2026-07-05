@@ -431,6 +431,10 @@ export const api = {
       apiClient.get<ApiResponse>('orders', { params }),
     getById: (id: string) =>
       apiClient.get<ApiResponse>(`orders/${id}`),
+    atCostPreview: (id: string, customerId?: string) =>
+      apiClient.get<ApiResponse>(`orders/${id}/at-cost-preview`, {
+        params: customerId ? { customerId } : undefined,
+      }),
     create: (data: {
       customerId?: string | null;
       quoteId?: string | null;
@@ -449,6 +453,7 @@ export const api = {
       paymentLines?: { paymentMethod: string; amount: number; reference?: string }[];
       customerId?: string | null;
       cashRegisterSessionId?: string;
+      extraDiscountAmount?: number;
     }) => apiClient.post<ApiResponse>(`orders/${id}/complete`, data),
     cancel: (id: string, data: { reason: string }) =>
       apiClient.post<ApiResponse>(`orders/${id}/cancel`, data),

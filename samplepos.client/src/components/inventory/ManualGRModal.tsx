@@ -19,6 +19,7 @@ import {
 } from "./shared";
 import { QuickCreateProductModal } from "./shared/QuickCreateProductModal";
 import { useSubmitOnEnter } from "../../hooks/useSubmitOnEnter";
+import { GrFefoExpiryWarning } from "./GrFefoExpiryWarning";
 
 interface ManualGRItem {
   productId: string;
@@ -372,6 +373,13 @@ export default function ManualGRModal({ open, onClose }: ManualGRModalProps) {
                             minDate={new Date()}
                           />
                         </div>
+                      )}
+                      {item.trackExpiry && item.expiryDate && (
+                        <GrFefoExpiryWarning
+                          productId={item.productId}
+                          expiryDate={item.expiryDate}
+                          unitCost={item.unitCost}
+                        />
                       )}
                       <div className="flex justify-end">
                         <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)}>

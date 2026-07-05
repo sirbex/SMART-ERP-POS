@@ -19,6 +19,8 @@ export interface SaleLineCostCheckInput {
   totalAllocatedCost: number;
   costPerSellingUnit: number;
   unitPrice: number;
+  /** FEFO layers that would be consumed (for diagnostics). */
+  fefoLayers?: Array<{ baseQuantity: number; unitCostPerBase: number; totalCost: number }>;
 }
 
 /**
@@ -52,6 +54,7 @@ export function assertSaleLineNotBelowAllocatedCost(input: SaleLineCostCheckInpu
         costPerSellingUnit: input.costPerSellingUnit,
         minimumUnitPrice: costPerUnit,
         submittedUnitPrice: input.unitPrice,
+        ...(input.fefoLayers?.length ? { fefoAllocation: input.fefoLayers } : {}),
       },
     );
   }
@@ -69,6 +72,7 @@ export function assertSaleLineNotBelowAllocatedCost(input: SaleLineCostCheckInpu
         unitRevenue: Money.toNumber(Money.round(unitRevenue, 2)),
         costPerSellingUnit: input.costPerSellingUnit,
         submittedUnitPrice: input.unitPrice,
+        ...(input.fefoLayers?.length ? { fefoAllocation: input.fefoLayers } : {}),
       },
     );
   }

@@ -12,6 +12,23 @@ import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 // ── Types ────────────────────────────────────────────────────────────
 
+interface AtCostOrderLinePreview {
+  productId: string;
+  productName: string;
+  quantity: number;
+  orderUnitPrice: number;
+  fefoUnitPrice: number;
+  priceDrift: boolean;
+}
+
+interface AtCostOrderPreview {
+  isAtCostCustomer: boolean;
+  hasDrift: boolean;
+  lines: AtCostOrderLinePreview[];
+  orderTotal: number | null;
+  repricedTotal: number | null;
+}
+
 interface OrderItem {
   id: string;
   orderId: string;
@@ -96,10 +113,41 @@ export default function OrderPaymentPage() {
     setCustomerInitialized(true);
   }
 
-  const totalAmount = useMemo(() => {
+  const effectiveCustomerId = selectedCustomer?.id ?? order?.customerId ?? null;
+  const isAtCostCustomer = selectedCustomer?.pricingMode === 'AT_COST';
+
+  const { data: atCostPreview } = useQuery({
+    queryKey: ['orders', id, 'at-cost-preview', effectiveCustomerId],
+    queryFn: async () => {
+      const resp = await api.orders.atCostPreview(id!, effectiveCustomerId ?? undefined);
+      return resp.data.data as AtCostOrderPreview;
+    },
+    enabled: !!id && !!effectiveCustomerId && isAtCostCustomer,
+  });
+
+  const atCostLineByKey = useMemo(() => {
+    const map = new Map<string, AtCostOrderLinePreview>();
+    for (const line of atCostPreview?.lines ?? []) {
+      map.set(`${line.productId}:${line.quantity}`, line);
+    }
+    return map;
+  }, [atCostPreview?.lines]);
+
+  const orderBaseTotal = useMemo(() => {
     if (!order) return 0;
-    return Math.max(0, new Decimal(order.totalAmount).minus(cashierDiscount).toNumber());
-  }, [order, cashierDiscount]);
+    if (
+      atCostPreview?.isAtCostCustomer &&
+      atCostPreview.repricedTotal != null &&
+      atCostPreview.hasDrift
+    ) {
+      return atCostPreview.repricedTotal;
+    }
+    return new Decimal(order.totalAmount).toNumber();
+  }, [order, atCostPreview]);
+
+  const totalAmount = useMemo(() => {
+    return Math.max(0, new Decimal(orderBaseTotal).minus(cashierDiscount).toNumber());
+  }, [orderBaseTotal, cashierDiscount]);
 
   // Split payment calculations
   const totalPaid = useMemo(() => {
@@ -238,8 +286,17 @@ export default function OrderPaymentPage() {
       return resp.data;
     },
     onSuccess: (data) => {
-      const result = data.data as { order?: OrderDetail; sale?: { saleNumber?: string } } | undefined;
-      toast.success(`Sale ${result?.sale?.saleNumber || ''} created successfully!`);
+      const result = data.data as {
+        order?: OrderDetail;
+        sale?: { saleNumber?: string };
+        atCostReprice?: { hasDrift: boolean };
+      } | undefined;
+      const saleNum = result?.sale?.saleNumber || '';
+      if (result?.atCostReprice?.hasDrift) {
+        toast.success(`Sale ${saleNum} created — prices updated to current FEFO stock`);
+      } else {
+        toast.success(`Sale ${saleNum} created successfully!`);
+      }
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
@@ -342,25 +399,49 @@ export default function OrderPaymentPage() {
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left: Order Items (read-only) */}
           <div className="lg:col-span-3">
+            {atCostPreview?.hasDrift && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <p className="font-medium">AT_COST — prices updated to current FEFO stock</p>
+                <p className="mt-1 text-xs text-amber-800">
+                  Order was priced from an earlier snapshot. Totals below match what will post at completion.
+                </p>
+              </div>
+            )}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
               <div className="px-5 py-4 border-b border-gray-100">
                 <h2 className="text-lg font-semibold text-gray-900">Order Items</h2>
                 <p className="text-xs text-gray-500">{order.items.length} item{order.items.length !== 1 ? 's' : ''}</p>
               </div>
               <div className="divide-y divide-gray-100">
-                {order.items.map((item) => (
+                {order.items.map((item) => {
+                  const qty = parseFloat(item.quantity);
+                  const atCostLine = atCostLineByKey.get(`${item.productId}:${qty}`);
+                  const displayUnitPrice =
+                    atCostLine?.priceDrift ? atCostLine.fefoUnitPrice : parseFloat(item.unitPrice);
+                  const displayLineTotal = atCostLine?.priceDrift
+                    ? qty * atCostLine.fefoUnitPrice - parseFloat(item.discountAmount || '0')
+                    : parseFloat(item.lineTotal);
+
+                  return (
                   <div key={item.id} className="px-5 py-3 flex items-center justify-between">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{item.productName}</p>
                       <p className="text-xs text-gray-500">
-                        {parseFloat(item.quantity)} × {formatCurrency(parseFloat(item.unitPrice))}
+                        {qty} × {formatCurrency(displayUnitPrice)}
                       </p>
+                      {atCostLine?.priceDrift && (
+                        <p className="text-xs text-amber-700 mt-0.5">
+                          Order {formatCurrency(atCostLine.orderUnitPrice)} → FEFO{' '}
+                          {formatCurrency(atCostLine.fefoUnitPrice)}
+                        </p>
+                      )}
                     </div>
                     <span className="text-sm font-semibold text-gray-900 ml-3">
-                      {formatCurrency(parseFloat(item.lineTotal))}
+                      {formatCurrency(displayLineTotal)}
                     </span>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Totals */}

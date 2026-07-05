@@ -8,8 +8,6 @@ import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import * as supplierPaymentService from './supplierPaymentService.js';
-import { getSettings } from '../settings/invoiceSettingsService.js';
-import { renderSupplierInvoicePdf } from '../documents/supplierInvoicePdfRenderer.js';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -341,27 +339,12 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         })
     );
 
-    // Generate PDF for supplier invoice
+    // Legacy PDF path — redirect to documents SSOT (same pattern as customer /invoices/:id/export.pdf)
     router.get(
         '/invoices/:id/pdf',
         asyncHandler(async (req, res) => {
-            const { id } = UuidParamSchema.parse(req.params);
-            const details = await supplierPaymentService.getSupplierInvoiceWithDetails(p(req), id);
-            if (!details) {
-                return res.status(404).json({ success: false, error: 'Invoice not found' });
-            }
-
-            const { invoice, lineItems, allocations } = details;
-
-            // Get company settings for branding
-            const settings = await getSettings(p(req));
-
-            renderSupplierInvoicePdf(
-                res,
-                { invoice, lineItems, allocations },
-                settings,
-            );
-        })
+            res.redirect(307, `/api/documents/SUPPLIER_INVOICE/${req.params.id}`);
+        }),
     );
 
     // ============================================================

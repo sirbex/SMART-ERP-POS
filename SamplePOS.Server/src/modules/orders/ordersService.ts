@@ -46,9 +46,10 @@ export interface CreateOrderInput {
 export function buildOrderCompletionSaleTotals(
   order: Pick<OrderRecord, 'subtotal' | 'discountAmount' | 'taxAmount' | 'items'>,
   extraDiscountAmount = 0,
+  saleItemsOverride?: Array<{ quantity: number; unitPrice: number; discountAmount?: number }>,
 ): { subtotal: number; discountAmount: number; taxAmount: number; totalAmount: number } {
-  const items = order.items ?? [];
-  const itemDiscountSum = items.reduce(
+  const orderItems = order.items ?? [];
+  const itemDiscountSum = orderItems.reduce(
     (sum, item) => sum.plus(Money.parseDb(item.discountAmount || '0')),
     new Decimal(0),
   );
@@ -59,10 +60,18 @@ export function buildOrderCompletionSaleTotals(
   const headerSurplus = orderDiscountAmount.minus(itemDiscountSum);
   const headerOnlyDiscount = headerSurplus.lessThan(0) ? new Decimal(0) : headerSurplus;
 
-  const itemsNet = items.reduce((sum, item) => {
-    const qty = Money.parseDb(item.quantity);
-    const price = Money.parseDb(item.unitPrice);
-    const lineDisc = Money.parseDb(item.discountAmount || '0');
+  const pricedLines = saleItemsOverride ?? orderItems.map((item) => ({
+    quantity: Money.toNumber(Money.parseDb(item.quantity)),
+    unitPrice: Money.toNumber(Money.parseDb(item.unitPrice)),
+    discountAmount: item.discountAmount
+      ? Money.toNumber(Money.parseDb(item.discountAmount))
+      : undefined,
+  }));
+
+  const itemsNet = pricedLines.reduce((sum, item) => {
+    const qty = new Decimal(item.quantity);
+    const price = new Decimal(item.unitPrice);
+    const lineDisc = new Decimal(item.discountAmount || 0);
     return sum.plus(qty.times(price).minus(lineDisc));
   }, new Decimal(0));
 
@@ -70,8 +79,15 @@ export function buildOrderCompletionSaleTotals(
 
   const totalBeforeFloor = itemsNet.minus(cartDiscountForSale).plus(orderTaxAmount);
 
+  const repricedSubtotal = pricedLines.reduce(
+    (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitPrice)),
+    new Decimal(0),
+  );
+
   return {
-    subtotal: Money.toNumber(Money.parseDb(order.subtotal)),
+    subtotal: Money.toNumber(
+      saleItemsOverride ? Money.round(repricedSubtotal, 2) : Money.parseDb(order.subtotal),
+    ),
     taxAmount: Money.toNumber(orderTaxAmount),
     discountAmount: Money.toNumber(cartDiscountForSale),
     totalAmount: Money.toNumber(totalBeforeFloor.lessThan(0) ? new Decimal(0) : totalBeforeFloor),

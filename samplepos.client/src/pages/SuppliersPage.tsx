@@ -1310,7 +1310,7 @@ function SupplierDetailModal({
     setDownloadingPdf(invoiceId);
     try {
       await downloadFile(
-        `/supplier-payments/invoices/${invoiceId}/pdf`,
+        `/documents/SUPPLIER_INVOICE/${invoiceId}`,
         `supplier-invoice-${invoiceNumber}.pdf`
       );
     } catch (error) {

@@ -2,11 +2,13 @@ import { Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { ordersService, CreateOrderInput, OrderItemInput, buildOrderCompletionSaleTotals } from './ordersService.js';
+import { repriceSaleItemsForAtCostCustomer, isAtCostCustomer } from './orderAtCostPricing.js';
 import { salesService, CreateSaleInput, SaleItemInput } from '../sales/salesService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { Money } from '../../utils/money.js';
+import logger from '../../utils/logger.js';
 
 // ── Validation Schemas ────────────────────────────────────────────────
 
@@ -151,6 +153,62 @@ router.get(
 );
 
 /**
+ * GET /api/orders/:id/at-cost-preview
+ * Live FEFO AT_COST prices for order lines (payment screen).
+ * Access: orders.pay
+ */
+router.get(
+  '/:id/at-cost-preview',
+  requirePermission('orders.pay'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const order = await ordersService.prepareOrderForPayment(pool, req.params.id);
+    const customerId =
+      typeof req.query.customerId === 'string' && req.query.customerId.length > 0
+        ? req.query.customerId
+        : order.customerId;
+
+    if (!customerId || !(await isAtCostCustomer(pool, customerId))) {
+      res.json({
+        success: true,
+        data: { isAtCostCustomer: false, hasDrift: false, lines: [], repricedTotal: null },
+      });
+      return;
+    }
+
+    const saleItems: SaleItemInput[] = order.items!.map((item) => ({
+      productId: item.productId ?? `custom_svc_order_${item.id}`,
+      productName: item.productName,
+      quantity: Money.toNumber(Money.parseDb(item.quantity)),
+      unitPrice: Money.toNumber(Money.parseDb(item.unitPrice)),
+      discountAmount: item.discountAmount
+        ? Money.toNumber(Money.parseDb(item.discountAmount))
+        : undefined,
+      uomId: item.uomId || undefined,
+    }));
+
+    const { preview, hasDrift, repricedItems } = await repriceSaleItemsForAtCostCustomer(
+      pool,
+      saleItems,
+      customerId,
+    );
+
+    const repricedTotals = buildOrderCompletionSaleTotals(order, 0, repricedItems);
+
+    res.json({
+      success: true,
+      data: {
+        isAtCostCustomer: true,
+        hasDrift,
+        lines: preview,
+        orderTotal: Money.toNumber(Money.parseDb(order.totalAmount)),
+        repricedTotal: repricedTotals.totalAmount,
+      },
+    });
+  }),
+);
+
+/**
  * GET /api/orders/:id
  * Get a single order by ID or order number.
  */
@@ -195,9 +253,28 @@ router.post(
     // Allow customer override at payment time (cashier can assign/change customer)
     const effectiveCustomerId = paymentData.customerId ?? order.customerId;
 
+    let atCostRepriceMeta: { hasDrift: boolean; lines: unknown[] } | null = null;
+    if (effectiveCustomerId && (await isAtCostCustomer(pool, effectiveCustomerId))) {
+      const reprice = await repriceSaleItemsForAtCostCustomer(pool, saleItems, effectiveCustomerId);
+      saleItems.length = 0;
+      saleItems.push(...reprice.repricedItems);
+      atCostRepriceMeta = { hasDrift: reprice.hasDrift, lines: reprice.preview };
+      if (reprice.hasDrift) {
+        logger.info('AT_COST order completion: repriced lines to current FEFO', {
+          orderId,
+          orderNumber: order.orderNumber,
+          driftLines: reprice.preview.filter((l) => l.priceDrift).length,
+        });
+      }
+    }
+
     // Combine order header discount with cashier extra discount — avoid double-counting
     // line discounts already passed on sale items (createSale nets lines then subtracts cart).
-    const saleTotals = buildOrderCompletionSaleTotals(order, paymentData.extraDiscountAmount ?? 0);
+    const saleTotals = buildOrderCompletionSaleTotals(
+      order,
+      paymentData.extraDiscountAmount ?? 0,
+      saleItems,
+    );
 
     const saleInput: CreateSaleInput = {
       customerId: effectiveCustomerId,
@@ -221,7 +298,13 @@ router.post(
 
     res.json({
       success: true,
-      data: { order: { ...order, status: 'COMPLETED' }, sale: result.sale },
+      data: {
+        order: { ...order, status: 'COMPLETED' },
+        sale: result.sale,
+        ...(atCostRepriceMeta?.hasDrift
+          ? { atCostReprice: atCostRepriceMeta }
+          : {}),
+      },
       message: `Order ${order.orderNumber} completed → Sale ${result.sale.saleNumber}`,
     });
   })

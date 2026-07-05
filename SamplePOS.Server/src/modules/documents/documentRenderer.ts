@@ -62,11 +62,16 @@ import {
     renderPaymentVoucherBody,
     type PaymentVoucherBodyData,
 } from './bodies/paymentVoucherBody.js';
+import {
+    renderSupplierInvoiceBody,
+    type SupplierInvoiceBodyData,
+} from './bodies/supplierInvoiceBody.js';
 import { getCustomerStatement } from '../customers/customerService.js';
 import { findCustomerById } from '../customers/customerRepository.js';
 import { getSmartSupplierStatementData } from '../reports/cnDnReportService.js';
 import {
     getSupplierPaymentById,
+    getSupplierInvoiceWithDetails,
 } from '../supplier-payments/supplierPaymentService.js';
 import { findAllocationsByPaymentId } from '../supplier-payments/supplierPaymentRepository.js';
 import {
@@ -117,6 +122,7 @@ export type DocumentType =
     | 'CREDIT_NOTE'
     | 'CUSTOMER_STATEMENT'
     | 'SUPPLIER_STATEMENT'
+    | 'SUPPLIER_INVOICE'
     | 'PAYMENT_VOUCHER'
     | 'PROFIT_LOSS'
     | 'BALANCE_SHEET'
@@ -174,6 +180,8 @@ export async function render(
             return renderCustomerStatement(pool, req, theme, output);
         case 'SUPPLIER_STATEMENT':
             return renderSupplierStatement(pool, req, theme, output);
+        case 'SUPPLIER_INVOICE':
+            return renderSupplierInvoice(pool, req, theme, output);
         case 'PAYMENT_VOUCHER':
             return renderPaymentVoucher(pool, req, theme, output);
         case 'PROFIT_LOSS':
@@ -911,6 +919,81 @@ async function renderSupplierStatement(
 
     return {
         filename: `supplier-statement-${req.id}-${stmt.periodEnd}.pdf`,
+        contentType: 'application/pdf',
+    };
+}
+
+// =============================================================================
+// SUPPLIER INVOICE (AP bill)
+// =============================================================================
+
+async function renderSupplierInvoice(
+    pool: Pool,
+    req: RenderRequest,
+    theme: DocumentTheme,
+    output: Writable,
+): Promise<RenderResult> {
+    const details = await getSupplierInvoiceWithDetails(pool, req.id);
+    if (!details) throw new Error('Supplier invoice not found');
+
+    const { invoice, lineItems, allocations } = details;
+    const status = String(invoice.status ?? 'DRAFT');
+    const meta: DocumentMeta = {
+        title: 'SUPPLIER INVOICE',
+        number: invoice.invoiceNumber,
+        subtitle: invoice.supplierName ?? undefined,
+        watermark:
+            status.toUpperCase() === 'CANCELLED'
+                ? 'CANCELLED'
+                : status.toUpperCase() === 'DRAFT'
+                    ? 'DRAFT'
+                    : undefined,
+    };
+
+    const ctx = createDocument(meta, theme, output, { paperSize: req.paperSize ?? 'A4' });
+
+    const body: SupplierInvoiceBodyData = {
+        invoice: {
+            invoiceNumber: invoice.invoiceNumber,
+            supplierInvoiceNumber: invoice.supplierInvoiceNumber ?? null,
+            invoiceDate: isoDate(invoice.invoiceDate),
+            dueDate: isoDate(invoice.dueDate),
+            status,
+            subtotal: num(invoice.subtotal ?? invoice.totalAmount),
+            taxAmount: num(invoice.taxAmount),
+            totalAmount: num(invoice.totalAmount),
+            amountPaid: num(invoice.amountPaid),
+            outstandingBalance: num(invoice.outstandingBalance),
+            notes: invoice.notes ?? null,
+        },
+        supplier: {
+            name: invoice.supplierName ?? '—',
+            contactName: invoice.supplierContactName ?? null,
+            email: invoice.supplierEmail ?? null,
+            phone: invoice.supplierPhone ?? null,
+            address: invoice.supplierAddress ?? null,
+        },
+        lineItems: lineItems.map((item) => ({
+            lineNumber: item.lineNumber,
+            productName: item.productName,
+            quantity: num(item.quantity),
+            unitOfMeasure: item.unitOfMeasure,
+            unitCost: num(item.unitCost),
+            lineTotal: num(item.lineTotal),
+        })),
+        allocations: allocations.map((a) => ({
+            paymentNumber: a.paymentNumber,
+            allocationDate: isoDate(a.allocationDate),
+            paymentMethod: a.paymentMethod,
+            amountAllocated: num(a.amountAllocated),
+        })),
+    };
+
+    renderSupplierInvoiceBody(ctx, body);
+    finalizeDocument(ctx, meta);
+
+    return {
+        filename: `supplier-invoice-${invoice.invoiceNumber || req.id}.pdf`,
         contentType: 'application/pdf',
     };
 }
