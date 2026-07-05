@@ -209,6 +209,14 @@ while IFS= read -r line; do
   DB=$(echo "$KEY" | cut -d. -f1)
   TABLE=$(echo "$KEY" | cut -d. -f2)
 
+  # pos_template is a provisioning clone (schema + seed rows), rebuilt/refreshed from a
+  # reference tenant on backend startup (ensureTemplateDatabase). Business tables like
+  # suppliers are intentionally empty — row drops here are not production data loss.
+  if [ "$DB" = "pos_template" ]; then
+    echo "  ℹ️  SKIP $KEY (template DB — not production tenant data)"
+    continue
+  fi
+
   AFTER=$(docker exec "$POSTGRES_CONTAINER" psql -U postgres -d "$DB" -t -c \
     "SELECT COUNT(*) FROM $TABLE;" 2>/dev/null | tr -d '[:space:]')
 
