@@ -237,6 +237,8 @@ describe('glEntryService — GL Posting Accuracy', () => {
             const arLine = findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE);
             expect(arLine).toBeDefined();
             expect(arLine!.debitAmount).toBe(7000);
+            expect(arLine!.entityType).toBe('customer');
+            expect(arLine!.entityId).toBe('cust-1');
 
             // CR Revenue 10000
             const revLine = findLine(lines, AccountCodes.SALES_REVENUE);
@@ -270,6 +272,8 @@ describe('glEntryService — GL Posting Accuracy', () => {
             // DR AR 10000 (full amount)
             const arLine = findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE);
             expect(arLine!.debitAmount).toBe(10000);
+            expect(arLine!.entityType).toBe('customer');
+            expect(arLine!.entityId).toBe('cust-1');
 
             assertBalanced(lines);
         });
@@ -466,6 +470,7 @@ describe('glEntryService — GL Posting Accuracy', () => {
                 totalAmount: 8000,
                 costAmount: 5000,
                 paymentMethod: 'DEPOSIT',
+                customerId: 'cust-deposit',
                 saleItems: [
                     { productType: 'inventory', totalPrice: 8000, unitCost: 5000, quantity: 1 },
                 ],
@@ -473,8 +478,10 @@ describe('glEntryService — GL Posting Accuracy', () => {
 
             const lines = capturedEntries[0].lines;
 
-            // AR debited (deposit application clears it later)
-            expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.debitAmount).toBe(8000);
+            const arLine = findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!;
+            expect(arLine.debitAmount).toBe(8000);
+            expect(arLine.entityType).toBe('customer');
+            expect(arLine.entityId).toBe('cust-deposit');
 
             // No Cash debit
             expect(findLine(lines, AccountCodes.CASH)).toBeUndefined();

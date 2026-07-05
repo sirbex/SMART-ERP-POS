@@ -444,11 +444,13 @@ export class AccountingCore {
                 idempotencyKey: request.idempotencyKey,
             });
 
-            const { validateApJournalPosting } = await import(
-                '../modules/supplier-payments/apJournalGovernance.js'
+            const { validateJournal } = await import(
+                '../modules/accounting-governance/accountingJournalGovernance.js'
             );
-            validateApJournalPosting({
+            validateJournal({
                 referenceType: request.referenceType,
+                referenceId: request.referenceId,
+                referenceNumber: request.referenceNumber,
                 source: governanceSource,
                 idempotencyKey: request.idempotencyKey,
                 lines: request.lines,

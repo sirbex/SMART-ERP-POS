@@ -33,6 +33,7 @@ import { pool as globalPool } from '../db/pool.js';
 import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
+import { customerArLine, requireCustomerIdForAr } from '../modules/accounting-governance/arPostingHelpers.js';
 
 // =============================================================================
 // ACCOUNT CODE CONSTANTS
@@ -301,12 +302,14 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
         totalAmount: sale.totalAmount
       });
       // Debit AR - this gets cleared by the deposit application
-      ledgerLines.push({
-        accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
-        description: `DEPOSIT sale - A/R pending deposit application`,
-        debitAmount: sale.totalAmount,
-        creditAmount: 0
-      });
+      const customerId = requireCustomerIdForAr(sale.customerId, `deposit sale ${sale.saleNumber}`);
+      ledgerLines.push(
+        customerArLine({
+          customerId,
+          debitAmount: sale.totalAmount,
+          description: 'DEPOSIT sale - A/R pending deposit application',
+        }),
+      );
 
       // Credit Revenue - split by product type
       if (invRevenueNum > 0) {
@@ -343,16 +346,14 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
       }
 
       if (unpaidAmount.gt(0)) {
-        // Debit AR only for the unpaid portion
-        ledgerLines.push({
-          accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
-          description: `Credit sale to ${sale.customerName || 'customer'} - ${sale.saleNumber}`,
-          debitAmount: unpaidAmount.toNumber(),
-          creditAmount: 0,
-          ...(sale.customerId
-            ? { entityType: 'customer' as const, entityId: sale.customerId }
-            : {}),
-        });
+        const customerId = requireCustomerIdForAr(sale.customerId, `credit sale ${sale.saleNumber}`);
+        ledgerLines.push(
+          customerArLine({
+            customerId,
+            debitAmount: unpaidAmount.toNumber(),
+            description: `Credit sale to ${sale.customerName || 'customer'} - ${sale.saleNumber}`,
+          }),
+        );
       }
 
       // Credit Revenue - split by product type
@@ -1696,6 +1697,84 @@ export async function recordSaleVoidToGL(data: SaleVoidData, pool?: pg.Pool, txC
 // SALE REFUND (PARTIAL/FULL REVERSAL) JOURNAL ENTRIES
 // =============================================================================
 
+function buildRefundRevenueCreditLines(data: SaleRefundData): JournalLine[] {
+  const total = data.totalAmount;
+  if (total <= 0.009) return [];
+
+  const isExchange = data.refundType === 'EXCHANGE';
+
+  if (isExchange && data.paymentMethod !== 'CREDIT') {
+    return [
+      {
+        accountCode: AccountCodes.CUSTOMER_DEPOSITS,
+        debitAmount: 0,
+        creditAmount: total,
+        description: `Exchange ${data.refundNumber}: store credit for ${data.saleNumber}`,
+        ...(data.customerId ? { entityType: 'customer' as const, entityId: data.customerId } : {}),
+      },
+    ];
+  }
+
+  if (data.paymentMethod === 'CREDIT') {
+    const arCredit = data.arCreditAmount ?? total;
+    if (arCredit < -0.001 || arCredit > total + 0.01) {
+      throw new BusinessRuleException(
+        `Refund AR credit (${arCredit}) cannot exceed refund total (${total})`,
+        'AR_REFUND_CREDIT_EXCEEDS_TOTAL',
+        { refundNumber: data.refundNumber, arCredit, total },
+      );
+    }
+    const cashCredit = total - arCredit;
+    const lines: JournalLine[] = [];
+    if (arCredit > 0.009) {
+      const customerId = requireCustomerIdForAr(data.customerId, `refund ${data.refundNumber}`);
+      lines.push(
+        customerArLine({
+          customerId,
+          creditAmount: arCredit,
+          description: `Refund ${data.refundNumber}: credit refund for ${data.saleNumber}`,
+        }),
+      );
+    }
+    if (cashCredit > 0.009) {
+      lines.push({
+        accountCode: AccountCodes.CASH,
+        debitAmount: 0,
+        creditAmount: cashCredit,
+        description: `Refund ${data.refundNumber}: cash portion for ${data.saleNumber}`,
+      });
+    }
+    return lines;
+  }
+
+  let creditAccountCode: string;
+  switch (data.paymentMethod) {
+    case 'CARD':
+      creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
+      break;
+    case 'MOBILE_MONEY':
+      creditAccountCode = AccountCodes.MOBILE_MONEY;
+      break;
+    case 'DEPOSIT':
+      creditAccountCode = AccountCodes.CUSTOMER_DEPOSITS;
+      break;
+    default:
+      creditAccountCode = AccountCodes.CASH;
+  }
+
+  return [
+    {
+      accountCode: creditAccountCode,
+      debitAmount: 0,
+      creditAmount: total,
+      description: `Refund ${data.refundNumber}: ${data.paymentMethod} refund for ${data.saleNumber}`,
+      ...(creditAccountCode === AccountCodes.CUSTOMER_DEPOSITS && data.customerId
+        ? { entityType: 'customer' as const, entityId: data.customerId }
+        : {}),
+    },
+  ];
+}
+
 export interface SaleRefundData {
   refundId: string;
   refundNumber: string;
@@ -1707,6 +1786,8 @@ export interface SaleRefundData {
   totalCost: number;    // COGS to reverse
   paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
   customerId?: string;
+  /** AR credit portion for CREDIT-method refunds (capped to open-item reduction). Defaults to totalAmount. */
+  arCreditAmount?: number;
   /** REFUND = cash/AR repayment; EXCHANGE = store credit (2200) for POS replacement */
   refundType?: 'REFUND' | 'EXCHANGE';
 }
@@ -1749,46 +1830,9 @@ export async function recordSaleRefundToGL(
       // Fall through to create a standalone refund entry below
     }
 
-    // Determine credit account (where economic value goes back to customer)
-    const isExchange = data.refundType === 'EXCHANGE';
-    let creditAccountCode: string;
-    if (isExchange && data.paymentMethod !== 'CREDIT') {
-      // Walk-in exchange: store credit liability until applied at POS replacement sale
-      creditAccountCode = AccountCodes.CUSTOMER_DEPOSITS;
-    } else {
-      switch (data.paymentMethod) {
-        case 'CREDIT':
-          creditAccountCode = AccountCodes.ACCOUNTS_RECEIVABLE;
-          break;
-        case 'CARD':
-          creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
-          break;
-        case 'MOBILE_MONEY':
-          creditAccountCode = AccountCodes.MOBILE_MONEY;
-          break;
-        default:
-          creditAccountCode = AccountCodes.CASH;
-      }
-    }
-
-    // Build journal entries for the refund.
-    //
-    // SAP-GOVERNANCE SPLIT (migration 013):
-    //   Inventory restoration lines (DR 1300 / CR 5000) must live in a
-    //   separate INVENTORY_MOVE journal from the revenue reversal journal.
-    //   We build two parallel line arrays and post two journals below.
-    const revenueEntries: Array<{
-      accountCode: string;
-      debitAmount: number;
-      creditAmount: number;
-      description: string;
-    }> = [];
-    const inventoryEntries: Array<{
-      accountCode: string;
-      debitAmount: number;
-      creditAmount: number;
-      description: string;
-    }> = [];
+    // Determine credit lines (where economic value goes back to customer)
+    const revenueEntries: JournalLine[] = [];
+    const inventoryEntries: JournalLine[] = [];
 
     // 1. DR Sales Returns — reverse revenue (4010, same account as customer credit notes)
     if (data.totalAmount > 0) {
@@ -1796,18 +1840,10 @@ export async function recordSaleRefundToGL(
         accountCode: AccountCodes.SALES_RETURNS,
         debitAmount: data.totalAmount,
         creditAmount: 0,
-        description: `${isExchange ? 'Exchange' : 'Refund'} ${data.refundNumber}: Sales return for ${data.saleNumber}`,
+        description: `${data.refundType === 'EXCHANGE' ? 'Exchange' : 'Refund'} ${data.refundNumber}: Sales return for ${data.saleNumber}`,
       });
 
-      // 2. CR Cash/AR/Store credit
-      revenueEntries.push({
-        accountCode: creditAccountCode,
-        debitAmount: 0,
-        creditAmount: data.totalAmount,
-        description: isExchange
-          ? `Exchange ${data.refundNumber}: store credit for ${data.saleNumber}`
-          : `Refund ${data.refundNumber}: ${data.paymentMethod} refund for ${data.saleNumber}`,
-      });
+      revenueEntries.push(...buildRefundRevenueCreditLines(data));
     }
 
     // 3. DR Inventory — restore inventory asset
@@ -1845,12 +1881,7 @@ export async function recordSaleRefundToGL(
         referenceType: 'SALE_REFUND',
         referenceId: data.refundId,
         referenceNumber: data.refundNumber,
-        lines: revenueEntries.map((e) => ({
-          accountCode: e.accountCode,
-          debitAmount: e.debitAmount,
-          creditAmount: e.creditAmount,
-          description: e.description,
-        })),
+        lines: revenueEntries,
         userId: SYSTEM_USER_ID,
         idempotencyKey: `SALE_REFUND-${data.refundId}`,
         source: 'SALES_REFUND' as const,
@@ -1866,12 +1897,7 @@ export async function recordSaleRefundToGL(
         referenceType: 'SALE_REFUND',
         referenceId: data.refundId,
         referenceNumber: data.refundNumber,
-        lines: inventoryEntries.map((e) => ({
-          accountCode: e.accountCode,
-          debitAmount: e.debitAmount,
-          creditAmount: e.creditAmount,
-          description: e.description,
-        })),
+        lines: inventoryEntries,
         userId: SYSTEM_USER_ID,
         idempotencyKey: `SALE_REFUND-INV-${data.refundId}`,
         source: 'INVENTORY_MOVE' as const,
@@ -2192,6 +2218,8 @@ export interface InvoicePaymentData {
   paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
   invoiceId: string;
   invoiceNumber: string;
+  customerId: string;
+  customerName?: string;
 }
 
 /**
@@ -2218,6 +2246,11 @@ export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool
       return;
     }
 
+    const customerId = requireCustomerIdForAr(
+      payment.customerId,
+      `invoice payment ${payment.receiptNumber}`,
+    );
+
     await AccountingCore.createJournalEntry({
       entryDate: payment.paymentDate,
       description: `Invoice Payment: ${payment.receiptNumber} for ${payment.invoiceNumber}`,
@@ -2230,13 +2263,14 @@ export async function recordInvoicePaymentToGL(payment: InvoicePaymentData, pool
           description: `Payment received — ${payment.receiptNumber}`,
           debitAmount: payment.amount,
           creditAmount: 0,
+          entityType: 'customer',
+          entityId: customerId,
         },
-        {
-          accountCode: AccountCodes.ACCOUNTS_RECEIVABLE,
-          description: `AR reduced — ${payment.receiptNumber}`,
-          debitAmount: 0,
+        customerArLine({
+          customerId,
           creditAmount: payment.amount,
-        },
+          description: `AR reduced — ${payment.receiptNumber}`,
+        }),
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `INVOICE_PAYMENT-${payment.paymentId}`,

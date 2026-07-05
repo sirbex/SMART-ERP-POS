@@ -318,6 +318,7 @@ async function addLegacyInvoicePayment(
         paymentMethod: input.paymentMethod,
         invoiceId,
         invoiceNumber: inv.invoice_number,
+        customerId: inv.customer_id,
       },
       pool,
       client,

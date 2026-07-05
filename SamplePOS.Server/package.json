@@ -40,6 +40,8 @@
     "test:watch": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --watch",
     "test:coverage": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --coverage",
     "test:accounting": "tsx src/tests/accounting-integrity.test.ts",
+    "test:accounting-governance": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/modules/accounting-governance --no-coverage",
+    "test:posting-integrity": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/services/postingIntegrity.ar.test.ts src/services/glEntryService.accuracy.test.ts --no-coverage",
     "migrate": "node ../shared/sql/migrate.mjs",
     "migrate:dry": "node ../shared/sql/migrate.mjs --dry-run",
     "migrate:fresh": "node ../shared/sql/migrate-verify-idempotent.mjs",

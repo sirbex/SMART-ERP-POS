@@ -6,6 +6,8 @@
   "scripts": {
     "prepare": "husky install",
     "test:accounting": "cd SamplePOS.Server && npm run test:accounting",
+    "test:accounting-governance": "cd SamplePOS.Server && npm run test:accounting-governance",
+    "test:posting-integrity": "cd SamplePOS.Server && npm run test:posting-integrity",
     "test:integrity": "cd SamplePOS.Server && npm run test:integrity",
     "typecheck": "cd SamplePOS.Server && npx tsc --noEmit && cd ../samplepos.client && npx tsc --noEmit",
     "dev:client": "cd samplepos.client && npm run dev",
@@ -39,6 +41,9 @@
     "test:inventory-coupling": "cd SamplePOS.Server && npm run test:inventory-coupling",
     "proof:customer-ob:local": "node scripts/proof-customer-opening-balance-local.mjs",
     "proof:ar-allocation:local": "node scripts/proof-ar-allocation-local.mjs",
+    "audit:posting-paths": "node scripts/audit-posting-paths.mjs",
+    "ci:posting-guardrails": "node scripts/ci-posting-guardrails.mjs",
+    "summarize:ar-governance-warns": "node scripts/summarize-ar-governance-warns.mjs",
     "proof:sale-integrity:local": "node scripts/proof-sale-integrity-local.mjs",
     "proof:order-complete-discount": "node scripts/proof-order-complete-discount.mjs",
     "proof:sale-below-cost:local": "node scripts/proof-sale-below-cost-local.mjs",

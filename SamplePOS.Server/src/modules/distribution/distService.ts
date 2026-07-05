@@ -758,6 +758,7 @@ export async function processClearing(
         paymentMethod: input.cashPayment.paymentMethod,
         invoiceId: input.invoiceId,
         invoiceNumber: invoice.invoice_number,
+        customerId: input.customerId,
       }, undefined, client);
     }
   });

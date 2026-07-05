@@ -468,6 +468,17 @@ async function startServer() {
 
     logger.info('Database connection successful');
 
+    const { getArGovernanceMode } = await import(
+      './modules/accounting-governance/arJournalGovernance.js'
+    );
+    const arGovernanceMode = getArGovernanceMode();
+    logger.info('AR governance mode active', { arGovernanceMode });
+    if (arGovernanceMode === 'warn') {
+      logger.info(
+        'AR_GOVERNANCE_MODE=warn — entity violations will be logged as AR_GOVERNANCE_WARN without blocking posts',
+      );
+    }
+
     // Self-healing guard: ensure every product has its child rows in
     // product_valuation and product_inventory. Safe to call at any time —
     // the underlying INSERT uses ON CONFLICT DO NOTHING. This recovers from

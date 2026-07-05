@@ -3386,7 +3386,20 @@ export const salesService = {
 
       // ── 6. Handle customer balance (credit sale refund) ─────────
 
+      let arCreditAmount: number | undefined;
       if (sale.customer_id && sale.payment_method === 'CREDIT') {
+        const dueResult = await client.query<{ amount_due: string }>(
+          `SELECT amount_due::text AS amount_due
+           FROM invoices
+           WHERE sale_id = $1
+             AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [saleId],
+        );
+        const currentDue = parseFloat(dueResult.rows[0]?.amount_due ?? '0');
+        arCreditAmount = Math.min(refundTotalAmount.toNumber(), Math.max(currentDue, 0));
+
         // Step 6a: Reduce the invoice's amount_due by the refund amount FIRST.
         // syncCustomerBalanceFromInvoices (Wave 3 open-item SSOT) reads open invoice
         // due minus unallocated AR receipts — invoice amount_due must be updated here
@@ -3431,6 +3444,7 @@ export const salesService = {
         totalCost: refundTotalCost.toNumber(),
         paymentMethod: sale.payment_method,
         customerId: sale.customer_id || undefined,
+        arCreditAmount,
         refundType,
       };
 

@@ -67,6 +67,17 @@ jobs:
           DATABASE_URL: postgresql://postgres:password@localhost:5432/pos_system
         run: npm run test:accounting
 
+      - name: Posting path CI guardrails (Phase 1A)
+        run: npm run ci:posting-guardrails
+
+      - name: Accounting journal governance (Phase 1B + AR rules)
+        working-directory: SamplePOS.Server
+        run: npm run test:accounting-governance
+
+      - name: AR posting integrity proofs (Phase 2)
+        working-directory: SamplePOS.Server
+        run: npm run test:posting-integrity
+
       - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
