@@ -60,6 +60,22 @@ function isSupplierPosted(status: string): boolean {
     return status === 'POSTED' || status === 'APPLIED';
 }
 
+/** APPLIED = user allocated credit to bill(s) via Apply to Open Bills. */
+function supplierNoteStatusLabel(note: SupplierCreditDebitNote): string {
+    if (note.status === 'APPLIED' && note.referenceInvoiceNumber) {
+        return `Allocated → ${note.referenceInvoiceNumber}`;
+    }
+    if (note.status === 'APPLIED') return 'Fully allocated';
+    return note.status;
+}
+
+function isReturnGrnCreditNote(note: SupplierCreditDebitNote): boolean {
+    return (
+        note.documentType === 'SUPPLIER_CREDIT_NOTE'
+        && (note.reason?.includes('RGRN-') === true || note.notes?.toLowerCase().includes('return grn') === true)
+    );
+}
+
 // ============================================================
 // Main Page
 // ============================================================
@@ -644,8 +660,16 @@ function SupplierNotesTab() {
                                                     : isSupplierPosted(note.status) ? 'default'
                                                         : 'secondary'
                                             }>
-                                                {note.status}
+                                                {supplierNoteStatusLabel(note)}
                                             </Badge>
+                                            {note.documentType === 'SUPPLIER_CREDIT_NOTE'
+                                                && note.status === 'POSTED'
+                                                && note.outstandingBalance > 0
+                                                && isReturnGrnCreditNote(note) && (
+                                                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
+                                                    Apply to bill required
+                                                </Badge>
+                                            )}
                                             {isNoteDraft(note.status) && (
                                                 <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-800">
                                                     Needs posting
@@ -757,7 +781,7 @@ function SupplierNotesTab() {
                         <div className="space-y-3 text-sm">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                 <div><span className="text-gray-500">Supplier:</span> {selectedNote.supplierName}</div>
-                                <div><span className="text-gray-500">Status:</span> {selectedNote.status}</div>
+                                <div><span className="text-gray-500">Status:</span> {supplierNoteStatusLabel(selectedNote)}</div>
                                 <div><span className="text-gray-500">Subtotal:</span> {formatCurrency(selectedNote.subtotal)}</div>
                                 <div><span className="text-gray-500">Tax:</span> {formatCurrency(selectedNote.taxAmount)}</div>
                                 <div><span className="text-gray-500">Total:</span> {formatCurrency(selectedNote.totalAmount)}</div>
@@ -779,6 +803,18 @@ function SupplierNotesTab() {
                                 </div>
                             )}
                             {selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE'
+                                && selectedNote.status === 'APPLIED'
+                                && selectedNote.referenceInvoiceNumber && (
+                                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
+                                    <p className="font-medium">Credit allocated to {selectedNote.referenceInvoiceNumber}</p>
+                                    <p className="mt-1 text-xs">
+                                        This credit note&apos;s full amount ({formatCurrency(selectedNote.totalAmount)}) was
+                                        applied to the referenced bill. The bill&apos;s outstanding balance is reduced in
+                                        Supplier Payments.
+                                    </p>
+                                </div>
+                            )}
+                            {selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE'
                                 && selectedNote.status === 'POSTED'
                                 && selectedNote.outstandingBalance > 0 && (
                                 <div className="rounded-md border border-purple-200 bg-purple-50 p-3 text-purple-900">
@@ -786,6 +822,12 @@ function SupplierNotesTab() {
                                     <p className="mt-1 text-xs">
                                         On-account balance {formatCurrency(selectedNote.outstandingBalance)} —
                                         use <strong>Apply to Open Bills</strong> on the list.
+                                        {isReturnGrnCreditNote(selectedNote) && selectedNote.referenceInvoiceNumber && (
+                                            <>
+                                                {' '}Return credits target <strong>{selectedNote.referenceInvoiceNumber}</strong> first,
+                                                then any remaining amount goes to other open bills (FIFO).
+                                            </>
+                                        )}
                                     </p>
                                 </div>
                             )}

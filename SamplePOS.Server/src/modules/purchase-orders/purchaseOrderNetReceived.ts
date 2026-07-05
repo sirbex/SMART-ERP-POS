@@ -46,3 +46,40 @@ export function poFullyReceivedHavingSql(poAlias = 'po'): string {
       AND COALESCE(poi.ordered_quantity, 0)::numeric > (${net})::numeric
   )`;
 }
+
+/** Sum ordered qty across PO lines (list/detail receipt progress). */
+export function poOrderedQtyTotalSql(poAlias = 'po'): string {
+  return `(
+    SELECT COALESCE(SUM(COALESCE(poi.ordered_quantity, 0)::numeric), 0)
+    FROM purchase_order_items poi
+    WHERE poi.purchase_order_id = ${poAlias}.id
+  )`;
+}
+
+/** Sum net received qty across PO lines. */
+export function poNetReceivedQtyTotalSql(poAlias = 'po'): string {
+  const net = poItemNetReceivedQuantitySql('poi');
+  return `(
+    SELECT COALESCE(SUM((${net})::numeric), 0)
+    FROM purchase_order_items poi
+    WHERE poi.purchase_order_id = ${poAlias}.id
+  )`;
+}
+
+/** Sum open receipt qty across PO lines. */
+export function poOpenQtyTotalSql(poAlias = 'po'): string {
+  const open = poItemOpenQuantitySql('poi');
+  return `(
+    SELECT COALESCE(SUM((${open})::numeric), 0)
+    FROM purchase_order_items poi
+    WHERE poi.purchase_order_id = ${poAlias}.id
+  )`;
+}
+
+/** Count completed goods receipts linked to PO. */
+export function poCompletedGrCountSql(poAlias = 'po'): string {
+  return `(
+    SELECT COUNT(*)::int FROM goods_receipts gr
+    WHERE gr.purchase_order_id = ${poAlias}.id AND gr.status = 'COMPLETED'
+  )`;
+}

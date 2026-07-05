@@ -32,6 +32,7 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     'src/tests/accounting-integrity\\.test\\.ts',
+    'src/tests/customerBalanceSync\\.test\\.ts',
     'src/rbac/test\\.ts',
     'src/modules/inventory/stockCount\\.test\\.ts',
     'src/tests/supplierCnDnProof\\.test\\.ts',

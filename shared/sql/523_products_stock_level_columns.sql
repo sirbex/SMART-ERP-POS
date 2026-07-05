@@ -7,3 +7,5 @@ ALTER TABLE products
 CREATE INDEX IF NOT EXISTS idx_products_stock_levels
     ON products (max_stock_level, reorder_point)
     WHERE max_stock_level IS NOT NULL;
+
+INSERT INTO schema_version (version) VALUES (523) ON CONFLICT DO NOTHING;

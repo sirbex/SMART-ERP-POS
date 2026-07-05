@@ -968,7 +968,7 @@ export class GLIntegrityChecker {
           COALESCE(ib.quantity_on_hand, 0) AS state_qoh,
           ABS(COALESCE(p.quantity_on_hand, 0) - COALESCE(ib.quantity_on_hand, 0)) AS qoh_drift
         FROM products p
-        LEFT JOIN inventory_balances ib ON ib.product_id = p.id
+        LEFT JOIN inventory_aggregate_balances ib ON ib.product_id = p.id
         WHERE ABS(COALESCE(p.quantity_on_hand, 0) - COALESCE(ib.quantity_on_hand, 0)) > 0.001
         LIMIT 50
       `);
@@ -977,13 +977,13 @@ export class GLIntegrityChecker {
         findings.push({
           check: 'inventory_balances_reconciliation',
           severity: 'INFO',
-          message: 'inventory_balances matches products.quantity_on_hand.',
+          message: 'inventory_aggregate_balances matches products.quantity_on_hand.',
         });
       } else {
         findings.push({
           check: 'inventory_balances_reconciliation',
           severity: 'WARNING',
-          message: `${result.rows.length} inventory_balances rows drift from products.quantity_on_hand. Run backfill to heal.`,
+          message: `${result.rows.length} inventory_aggregate_balances rows drift from products.quantity_on_hand. Run backfill to heal.`,
           details: {
             driftCount: result.rows.length,
             samples: result.rows.slice(0, 5).map(r => ({
@@ -1000,7 +1000,7 @@ export class GLIntegrityChecker {
       findings.push({
         check: 'inventory_balances_reconciliation',
         severity: 'INFO',
-        message: 'inventory_balances table not yet created — skipping check.',
+        message: 'inventory_aggregate_balances table not yet created — skipping check.',
       });
     }
 

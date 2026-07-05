@@ -92,10 +92,12 @@ export const stockCountController = {
     const limit = parseInt(req.query.limit as string) || 20;
     const state = req.query.state as string | undefined;
     const createdById = req.query.createdById as string | undefined;
+    const locationId = req.query.locationId as string | undefined;
 
     const result = await stockCountService.listStockCounts(pool, {
       state,
       createdById,
+      locationId,
       page,
       limit,
     });
@@ -122,6 +124,7 @@ export const stockCountController = {
       const line = await stockCountService.updateCountLine(pool, {
         stockCountId,
         productId: data.productId,
+        productLotId: data.productLotId,
         batchId: data.batchId,
         countedQty: data.countedQty,
         uom: data.uom,

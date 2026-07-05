@@ -57,7 +57,7 @@ interface QuoteItem {
   stockOnHand?: number;
 }
 
-interface StockLevelItem extends StockLevelProductRow {}
+type StockLevelItem = StockLevelProductRow;
 
 export default function EditQuotationPage() {
   const navigate = useNavigate();
@@ -80,6 +80,7 @@ export default function EditQuotationPage() {
   const [deliveryTerms, setDeliveryTerms] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
   const [requiresApproval, setRequiresApproval] = useState(false);
+  const [activeTab, setActiveTab] = useState<'terms' | 'notes'>('terms');
 
   const { isAuthenticated } = useAuth();
   const { data: masterUoms = [] } = useMasterUoms();
@@ -570,8 +571,6 @@ export default function EditQuotationPage() {
       </Layout>
     );
   }
-
-  const [activeTab, setActiveTab] = useState<'terms' | 'notes'>('terms');
 
   return (
     <Layout>

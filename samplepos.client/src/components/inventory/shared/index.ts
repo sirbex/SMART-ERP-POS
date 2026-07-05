@@ -15,9 +15,15 @@ export { SupplierSelector } from "./SupplierSelector";
 export { NotesField } from "./NotesField";
 export { ProductSearchBar, type SearchableProduct } from "./ProductSearchBar";
 export { ProcurementProductSearch, type ProcurementProduct } from "./ProcurementProductSearch";
+export {
+  EnterpriseProductSearch,
+  type WarehouseSearchProduct,
+  type EnterpriseProductSearchProps,
+} from "./EnterpriseProductSearch";
 export { QuickCreateSupplierModal } from "./QuickCreateSupplierModal";
 export { QuickCreateProductModal } from "./QuickCreateProductModal";
 export { BusinessRulesInfo, PURCHASE_ORDER_RULES, GOODS_RECEIPT_RULES } from "./BusinessRulesInfo";
+export { WorkflowHelpTrigger } from "./WorkflowHelpTrigger";
 export { TotalsSummary } from "./TotalsSummary";
 export { ModalHeader } from "./ModalHeader";
 export { ModalFooter } from "./ModalFooter";

@@ -166,7 +166,7 @@ async function prewarmStockLevels(): Promise<void> {
     // POS catalog sync already replicates stock-levels — skip duplicate download (Odoo/SAP pattern).
     if (Date.now() - getLastSyncTime() < CATALOG_STALE_MS) return;
 
-    const res = await apiClient.get('/inventory/stock-levels');
+    const res = await apiClient.get('/inventory/pos/catalog');
     const raw: ApiRow[] = res.data?.data || [];
     await putStockLevels(raw.map(mapApiStockLevel));
   } catch {

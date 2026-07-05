@@ -5,7 +5,7 @@
 // to look up users in the correct tenant database. Falls back to the
 // global pool ONLY in single-tenant mode when tenantMiddleware is not active.
 
-/// <reference path="../types/express.d.ts" />
+import '../types/express.js';
 import type { Request, Response, NextFunction } from 'express';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 import { User, UserRole, hasPermission, UserPermissions } from '../../../shared/types/user.js';
@@ -208,7 +208,7 @@ export function generateToken(user: {
   if (user.tenantId) payload.tenantId = user.tenantId;
   if (user.tenantSlug) payload.tenantSlug = user.tenantSlug;
 
-  // @ts-ignore - JWT types are overly strict, expiresIn accepts string
+  // @ts-expect-error JWT types are overly strict; expiresIn accepts string duration
   return jwt.sign(payload, jwtSecret, { expiresIn: process.env.JWT_EXPIRES_IN || '24h' });
 }
 

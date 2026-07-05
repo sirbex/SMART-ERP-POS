@@ -238,7 +238,7 @@ function formatDisplayTime(timestamp: string | null | undefined): string {
       second: '2-digit',
       timeZone: BUSINESS_TIMEZONE,
     });
-  } catch (error) {
+  } catch {
     return 'N/A';
   }
 }
@@ -293,14 +293,15 @@ function getDateRange(filterType: DateFilterType): { start: string; end: string 
       // Start and end are today
       break;
 
-    case 'yesterday':
+    case 'yesterday': {
       const yesterday = new Date(year, month - 1, day - 1);
       startYear = endYear = yesterday.getFullYear();
       startMonth = endMonth = yesterday.getMonth() + 1;
       startDay = endDay = yesterday.getDate();
       break;
+    }
 
-    case 'this-week':
+    case 'this-week': {
       // Find Monday of current week
       const currentDay = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
       const daysFromMonday = currentDay === 0 ? 6 : currentDay - 1;
@@ -309,8 +310,9 @@ function getDateRange(filterType: DateFilterType): { start: string; end: string 
       startMonth = monday.getMonth() + 1;
       startDay = monday.getDate();
       break;
+    }
 
-    case 'last-week':
+    case 'last-week': {
       // Find Monday and Sunday of last week
       const currentWeekDay = today.getDay();
       const daysToLastSunday = currentWeekDay === 0 ? 7 : currentWeekDay;
@@ -324,12 +326,13 @@ function getDateRange(filterType: DateFilterType): { start: string; end: string 
       endMonth = lastSunday.getMonth() + 1;
       endDay = lastSunday.getDate();
       break;
+    }
 
     case 'this-month':
       startDay = 1; // First day of current month
       break;
 
-    case 'last-month':
+    case 'last-month': {
       const lastMonth = new Date(year, month - 2, 1); // month - 2 because getMonth() is 0-based
       const lastDayOfLastMonth = new Date(year, month - 1, 0); // Day 0 = last day of previous month
 
@@ -340,6 +343,7 @@ function getDateRange(filterType: DateFilterType): { start: string; end: string 
       endMonth = lastDayOfLastMonth.getMonth() + 1;
       endDay = lastDayOfLastMonth.getDate();
       break;
+    }
 
     default:
       return { start: '', end: '' };

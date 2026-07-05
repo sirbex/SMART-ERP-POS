@@ -34,6 +34,13 @@ const BACKEND_TO_LEGACY: Record<string, Permission> = {
     'inventory.delete': Permission.DELETE_INVENTORY,
     'inventory.manage': Permission.MANAGE_INVENTORY,
     'inventory.adjust': Permission.ADJUST_STOCK,
+    'inventory.approve': Permission.MANAGE_INVENTORY,
+    'inventory.transfer.request': Permission.MANAGE_INVENTORY,
+    'inventory.transfer.approve': Permission.MANAGE_INVENTORY,
+    'inventory.transfer.dispatch': Permission.MANAGE_INVENTORY,
+    'inventory.transfer.receive': Permission.MANAGE_INVENTORY,
+    'inventory.transfer.direct': Permission.MANAGE_INVENTORY,
+    'inventory.transfer.override': Permission.MANAGE_INVENTORY,
     // Purchasing
     'purchasing.read': Permission.VIEW_PURCHASE_ORDERS,
     'purchasing.create': Permission.CREATE_PURCHASE_ORDERS,

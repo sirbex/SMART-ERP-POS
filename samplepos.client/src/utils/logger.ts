@@ -66,7 +66,7 @@ class Logger {
                 logs.shift();
             }
             localStorage.setItem('error_logs', JSON.stringify(logs));
-        } catch (e) {
+        } catch {
             // Ignore localStorage errors
         }
     }

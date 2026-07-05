@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import {
     SystemSettings,
     SystemSettingsDbRow,
@@ -10,8 +10,8 @@ export const systemSettingsRepository = {
     /**
      * Get system settings (singleton - always returns the first/only row)
      */
-    async getSettings(pool: Pool): Promise<SystemSettings | null> {
-        const result = await pool.query<SystemSettingsDbRow>(
+    async getSettings(conn: Pool | PoolClient): Promise<SystemSettings | null> {
+        const result = await conn.query<SystemSettingsDbRow>(
             `SELECT * FROM system_settings LIMIT 1`
         );
 
@@ -26,7 +26,7 @@ export const systemSettingsRepository = {
      * Update system settings
      */
     async updateSettings(
-        pool: Pool,
+        conn: Pool | PoolClient,
         updates: UpdateSystemSettingsDto
     ): Promise<SystemSettings> {
         // Build dynamic SET clause
@@ -166,6 +166,38 @@ export const systemSettingsRepository = {
             setClauses.push(`low_stock_threshold = $${paramIndex++}`);
             values.push(updates.lowStockThreshold);
         }
+        if (updates.isMultistoreEnabled !== undefined) {
+            setClauses.push(`is_multistore_enabled = $${paramIndex++}`);
+            values.push(updates.isMultistoreEnabled);
+        }
+        if (updates.transferPolicyRequireApprovalAll !== undefined) {
+            setClauses.push(`transfer_policy_require_approval_all = $${paramIndex++}`);
+            values.push(updates.transferPolicyRequireApprovalAll);
+        }
+        if (updates.transferPolicyAllowDirect !== undefined) {
+            setClauses.push(`transfer_policy_allow_direct = $${paramIndex++}`);
+            values.push(updates.transferPolicyAllowDirect);
+        }
+        if (updates.transferPolicyValueThreshold !== undefined) {
+            setClauses.push(`transfer_policy_value_threshold = $${paramIndex++}`);
+            values.push(updates.transferPolicyValueThreshold);
+        }
+        if (updates.transferPolicyQtyThreshold !== undefined) {
+            setClauses.push(`transfer_policy_qty_threshold = $${paramIndex++}`);
+            values.push(updates.transferPolicyQtyThreshold);
+        }
+        if (updates.transferPolicySpecialStoresRequireApproval !== undefined) {
+            setClauses.push(`transfer_policy_special_stores_require_approval = $${paramIndex++}`);
+            values.push(updates.transferPolicySpecialStoresRequireApproval);
+        }
+        if (updates.transferAssortmentExpansionPolicy !== undefined) {
+            setClauses.push(`transfer_assortment_expansion_policy = $${paramIndex++}`);
+            values.push(updates.transferAssortmentExpansionPolicy);
+        }
+        if (updates.expiryAutomationEnabled !== undefined) {
+            setClauses.push(`expiry_automation_enabled = $${paramIndex++}`);
+            values.push(updates.expiryAutomationEnabled);
+        }
         if (updates.updatedById !== undefined) {
             setClauses.push(`updated_by_id = $${paramIndex++}`);
             values.push(updates.updatedById);
@@ -184,7 +216,7 @@ export const systemSettingsRepository = {
       RETURNING *
     `;
 
-        const result = await pool.query<SystemSettingsDbRow>(query, values);
+        const result = await conn.query<SystemSettingsDbRow>(query, values);
 
         if (result.rows.length === 0) {
             throw new Error('Failed to update system settings');

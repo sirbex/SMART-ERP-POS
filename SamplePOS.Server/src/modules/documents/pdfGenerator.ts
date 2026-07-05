@@ -402,9 +402,12 @@ export class ReportPDFGenerator {
 
       const centerX = this.pageWidth / 2;
 
+      type PdfFragmentFn = (text: string, x: number, y: number, options: object) => void;
+      const docWithFragment = this.doc as unknown as Record<string, PdfFragmentFn>;
+
       // Draw text without triggering pagination - use _fragment directly
-      (this.doc as unknown as Record<string, Function>)._fragment(pageText, centerX - pageTextWidth / 2, this.doc.page.height - 40, {});
-      (this.doc as unknown as Record<string, Function>)._fragment(companyText, centerX - companyTextWidth / 2, this.doc.page.height - 28, {});
+      docWithFragment._fragment(pageText, centerX - pageTextWidth / 2, this.doc.page.height - 40, {});
+      docWithFragment._fragment(companyText, centerX - companyTextWidth / 2, this.doc.page.height - 28, {});
 
       // Restore graphics state
       this.doc.restore();

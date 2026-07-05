@@ -16,6 +16,8 @@ import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useColumnSort } from '../../hooks/useColumnSort';
 import { applyTableSort } from '../../lib/tableSortUtils';
+import SlideDrawer from '../../components/ui/SlideDrawer';
+import { WorkflowHelpTrigger } from '../../components/inventory/shared';
 
 type BatchSortField =
   | 'product'
@@ -290,7 +292,19 @@ export default function BatchManagementPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Batch Management</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-gray-900">Batch Management</h2>
+            <WorkflowHelpTrigger title="FEFO (First Expiry First Out)">
+              <ul className="space-y-1">
+                <li>• Batches are sorted by expiry date (earliest first) to ensure proper stock rotation</li>
+                <li>• POS system automatically selects batches in FEFO order during sales</li>
+                <li>• <strong>CRITICAL:</strong> Batches expiring in ≤7 days (red alert)</li>
+                <li>• <strong>WARNING:</strong> Batches expiring in ≤30 days (yellow alert)</li>
+                <li>• <strong>NORMAL:</strong> Batches expiring in &gt;30 days (green status)</li>
+                <li>• Batches without expiry dates appear last in the queue</li>
+              </ul>
+            </WorkflowHelpTrigger>
+          </div>
           <p className="text-gray-600 mt-1">FEFO inventory tracking with expiry monitoring</p>
         </div>
         <button
@@ -633,27 +647,6 @@ export default function BatchManagementPage() {
         </div>
       </div>
 
-      {/* Info Box */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-blue-900 mb-2">📦 FEFO (First Expiry First Out)</h3>
-        <ul className="text-xs text-blue-800 space-y-1">
-          <li>
-            • Batches are sorted by expiry date (earliest first) to ensure proper stock rotation
-          </li>
-          <li>• POS system automatically selects batches in FEFO order during sales</li>
-          <li>
-            • <strong>CRITICAL:</strong> Batches expiring in ≤7 days (red alert)
-          </li>
-          <li>
-            • <strong>WARNING:</strong> Batches expiring in ≤30 days (yellow alert)
-          </li>
-          <li>
-            • <strong>NORMAL:</strong> Batches expiring in &gt;30 days (green status)
-          </li>
-          <li>• Batches without expiry dates appear last in the queue</li>
-        </ul>
-      </div>
-
       {/* Batch Details Modal */}
       {showDetailsModal && selectedBatch && (
         <BatchDetailsModal
@@ -849,37 +842,50 @@ function BatchDetailsModal({
 
   return (
     <>
-      {/* ── Main Batch Details Modal ── */}
-      <div
-        className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-        onClick={onClose}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Batch details for ${batch.batch_number}`}
-      >
-        <div
-          ref={modalRef}
-          className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-2xl w-full mx-2 sm:mx-4 max-h-[90vh] overflow-hidden flex flex-col"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Header */}
-          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-start">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">Batch Details</h3>
-              <p className="text-sm text-gray-600 mt-1">
-                {batch.product_name} — <span className="font-mono">{batch.batch_number}</span>
-              </p>
-            </div>
-            {/* Keyboard shortcut hint bar */}
+      <SlideDrawer
+        open
+        onClose={() => {
+          if (showEditDialog) {
+            closeEditDialog();
+            return;
+          }
+          if (showHistory) {
+            setShowHistory(false);
+            return;
+          }
+          onClose();
+        }}
+        title="Batch Details"
+        subtitle={`${batch.product_name} — ${batch.batch_number}`}
+        width="full"
+        footer={
+          <div className="flex justify-between items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 text-xs text-gray-400">
               {canEdit && <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">F2 Edit</span>}
               <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">Ctrl+H History</span>
               <span className="bg-gray-100 px-1.5 py-0.5 rounded font-mono">Esc Close</span>
             </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setShowHistory(true)}
+                className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-1"
+                title="View expiry change history (Ctrl+H)"
+              >
+                📋 History <span className="text-xs text-gray-400 ml-1">(Ctrl+H)</span>
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
+              >
+                Close (Esc)
+              </button>
+            </div>
           </div>
-
-          <div className="flex-1 overflow-y-auto px-6 py-4">
-            <div className="space-y-4">
+        }
+      >
+          <div ref={modalRef} className="space-y-4 -mt-2">
               {/* Product Info */}
               <div className="bg-gray-50 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-gray-700 mb-3">Product Information</h4>
@@ -1026,48 +1032,53 @@ function BatchDetailsModal({
                 </div>
               </div>
             </div>
-          </div>
+      </SlideDrawer>
 
-          <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center">
-            <button
-              onClick={() => setShowHistory(true)}
-              className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-1"
-              title="View expiry change history (Ctrl+H)"
-            >
-              📋 History <span className="text-xs text-gray-400 ml-1">(Ctrl+H)</span>
-            </button>
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
-            >
-              Close (Esc)
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Edit Expiry Dialog ── */}
-      {showEditDialog && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]"
-          onClick={closeEditDialog}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Edit batch expiry date"
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-base font-semibold text-gray-900">Edit Expiry Date</h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Batch: <span className="font-mono font-medium">{batch.batch_number}</span>
-                {' — '}{batch.product_name}
-              </p>
+      {/* ── Edit Expiry workspace ── */}
+      <SlideDrawer
+        open={showEditDialog}
+        onClose={closeEditDialog}
+        title="Edit Expiry Date"
+        subtitle={`${batch.batch_number} — ${batch.product_name}`}
+        width="lg"
+        transactional
+        guardLabel="Edit batch expiry"
+        footer={
+          <div className="flex justify-between items-center gap-3 flex-wrap">
+            <p className="text-xs text-gray-400">F8 = Save · Esc = Cancel · Tab = Next field</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={closeEditDialog}
+                className="px-3 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
+              >
+                Cancel (Esc)
+              </button>
+              <button
+                ref={saveButtonRef}
+                type="button"
+                onClick={handleSave}
+                disabled={updateExpiry.isPending}
+                onKeyDown={(e) => {
+                  if (e.key === 'Tab' && e.shiftKey) {
+                    e.preventDefault();
+                    editReasonRef.current?.focus();
+                  }
+                  if (e.key === 'F8') {
+                    e.preventDefault();
+                    handleSave();
+                  }
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg"
+                aria-label="Save expiry date change"
+              >
+                {updateExpiry.isPending ? 'Saving…' : 'Save (F8)'}
+              </button>
             </div>
-
-            <div className="px-6 py-4 space-y-4">
+          </div>
+        }
+      >
+            <div className="space-y-4 -mt-2">
               {/* New Expiry Date */}
               <div>
                 <label htmlFor="edit-expiry-date" className="block text-sm font-medium text-gray-700 mb-1">
@@ -1131,60 +1142,28 @@ function BatchDetailsModal({
                 </div>
               )}
             </div>
+      </SlideDrawer>
 
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-between items-center">
-              <p className="text-xs text-gray-400">F8 = Save &nbsp;·&nbsp; Esc = Cancel &nbsp;·&nbsp; Tab = Next field</p>
-              <div className="flex gap-2">
-                <button
-                  onClick={closeEditDialog}
-                  className="px-3 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg"
-                >
-                  Cancel (Esc)
-                </button>
-                <button
-                  ref={saveButtonRef}
-                  onClick={handleSave}
-                  disabled={updateExpiry.isPending}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Tab' && e.shiftKey) {
-                      e.preventDefault();
-                      editReasonRef.current?.focus();
-                    }
-                    if (e.key === 'F8') { e.preventDefault(); handleSave(); }
-                  }}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg"
-                  aria-label="Save expiry date change"
-                >
-                  {updateExpiry.isPending ? 'Saving…' : 'Save (F8)'}
-                </button>
-              </div>
-            </div>
+      {/* ── Expiry History workspace ── */}
+      <SlideDrawer
+        open={showHistory}
+        onClose={() => setShowHistory(false)}
+        title="Expiry Change History"
+        subtitle={`${batch.batch_number} — ${batch.product_name}`}
+        width="2xl"
+        footer={
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowHistory(false)}
+              className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
+            >
+              Close (Esc)
+            </button>
           </div>
-        </div>
-      )}
-
-      {/* ── Expiry History Modal (Ctrl+H) ── */}
-      {showHistory && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]"
-          onClick={() => setShowHistory(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Expiry change history"
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-base font-semibold text-gray-900">Expiry Change History</h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Batch: <span className="font-mono font-medium">{batch.batch_number}</span>
-                {' — '}{batch.product_name}
-              </p>
-            </div>
-
-            <div className="flex-1 overflow-y-auto">
+        }
+      >
+            <div className="-mt-2">
               {auditHistory.length === 0 ? (
                 <div className="px-6 py-8 text-center text-gray-500">
                   <p>No expiry changes recorded for this batch.</p>
@@ -1226,18 +1205,7 @@ function BatchDetailsModal({
                 </table>
               )}
             </div>
-
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-              <button
-                onClick={() => setShowHistory(false)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg font-medium"
-              >
-                Close (Esc)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </SlideDrawer>
     </>
   );
 }

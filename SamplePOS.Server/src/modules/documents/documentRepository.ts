@@ -191,7 +191,7 @@ export class DocumentRepository {
     limit?: number;
     offset?: number;
   }): Promise<{ documents: Document[]; total: number }> {
-    let whereConditions = ['is_active = true'];
+    const whereConditions = ['is_active = true'];
     const queryParams: unknown[] = [];
     let paramCount = 0;
 

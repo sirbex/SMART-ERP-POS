@@ -23,7 +23,7 @@ export const systemSettingsController = {
         const userId = req.user?.id;
         const updates = req.body;
 
-        const settings = await systemSettingsService.updateSettings(
+        const result = await systemSettingsService.updateSettings(
             pool,
             updates,
             userId
@@ -31,7 +31,10 @@ export const systemSettingsController = {
 
         res.json({
             success: true,
-            data: settings,
+            data: result.settings,
+            meta: result.multistoreBootstrap
+                ? { multistoreBootstrap: result.multistoreBootstrap }
+                : undefined,
             message: 'System settings updated successfully',
         });
     }),

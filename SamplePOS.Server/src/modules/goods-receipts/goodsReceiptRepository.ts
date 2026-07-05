@@ -1,6 +1,5 @@
 import { Pool, PoolClient } from 'pg';
 import logger from '../../utils/logger.js';
-import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
 import {
@@ -11,7 +10,6 @@ import {
 import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
 import {
   poItemNetReceivedQuantitySql,
-  poItemOpenQuantitySql,
   poItemReturnedQuantitySql,
 } from '../purchase-orders/purchaseOrderNetReceived.js';
 
@@ -69,6 +67,41 @@ async function grReversalSelectSql(pool: Pool | PoolClient, fullyReversedSql?: s
          (${isReversedExpr}) AS "isReversed"`;
 }
 
+function buildGrItemRowSelectSql(options: {
+  hasUomSnapshot: boolean;
+  hasTargetStore: boolean;
+}): string {
+  const baseQtySelect = options.hasUomSnapshot
+    ? 'base_qty as "baseQty"'
+    : 'NULL::numeric as "baseQty"';
+  const baseUomSelect = options.hasUomSnapshot
+    ? 'base_uom_id as "baseUomId"'
+    : 'NULL::uuid as "baseUomId"';
+  const conversionSelect = options.hasUomSnapshot
+    ? 'conversion_factor as "conversionFactor"'
+    : 'NULL::numeric as "conversionFactor"';
+  const targetStoreSelect = options.hasTargetStore
+    ? 'target_store_location_id as "targetStoreLocationId"'
+    : 'NULL::uuid as "targetStoreLocationId"';
+
+  return `
+         id,
+         goods_receipt_id as "goodsReceiptId",
+         product_id as "productId",
+         received_quantity as "receivedQuantity",
+         batch_number as "batchNumber",
+         expiry_date as "expiryDate",
+         cost_price as "unitCost",
+         COALESCE(is_bonus, false) as "isBonus",
+         uom_id as "uomId",
+         ${baseQtySelect},
+         ${baseUomSelect},
+         ${conversionSelect},
+         ${targetStoreSelect},
+         created_at as "createdAt",
+         version`;
+}
+
 export interface GoodsReceipt {
   id: string;
   grNumber: string;
@@ -99,6 +132,13 @@ export interface GoodsReceipt {
   reversalTimestamp?: string | null;
   reversalReason?: string | null;
   isReversed?: boolean;
+  /** When another GR on the same PO already has a supplier bill (top-up receipt). */
+  poSiblingBill?: {
+    invoiceId: string;
+    invoiceNumber: string;
+    grnId: string;
+    grnNumber: string;
+  } | null;
 }
 
 export interface GoodsReceiptItem {
@@ -125,6 +165,7 @@ export interface GoodsReceiptItem {
   uomId?: string | null;
   baseQty?: number | null;
   baseUomId?: string | null;
+  targetStoreLocationId?: string | null;
 }
 
 export interface CreateGRData {
@@ -149,6 +190,7 @@ export interface CreateGRItemData {
   baseQty?: number | null; // SAP UoM snapshot: received quantity in base unit
   baseUomId?: string | null; // SAP UoM snapshot: base UoM ID at posting time
   conversionFactor?: number; // SAP UoM snapshot: conversion factor at posting time
+  targetStoreLocationId?: string | null;
 }
 
 export interface UpdateGRItemData {
@@ -157,6 +199,11 @@ export interface UpdateGRItemData {
   batchNumber?: string | null;
   isBonus?: boolean;
   expiryDate?: string | null;
+  uomId?: string | null;
+  baseQty?: number | null;
+  baseUomId?: string | null;
+  conversionFactor?: number;
+  targetStoreLocationId?: string | null;
 }
 
 export const goodsReceiptRepository = {
@@ -232,17 +279,15 @@ export const goodsReceiptRepository = {
     if (items.length === 0) return [];
 
     const hasUomSnapshot = await tableHasColumn(pool, 'goods_receipt_items', 'base_qty');
+    const hasTargetStore = await tableHasColumn(pool, 'goods_receipt_items', 'target_store_location_id');
     const values: unknown[] = [];
     const placeholders: string[] = [];
-    const fieldsPerRow = hasUomSnapshot ? 11 : 8;
+    const fieldsPerRow = (hasUomSnapshot ? 11 : 8) + (hasTargetStore ? 1 : 0);
 
     items.forEach((item, index) => {
       const offset = index * fieldsPerRow;
       if (hasUomSnapshot) {
-        placeholders.push(
-          `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11})`
-        );
-        values.push(
+        const rowValues: unknown[] = [
           item.goodsReceiptId,
           item.productId,
           item.receivedQuantity,
@@ -253,13 +298,17 @@ export const goodsReceiptRepository = {
           item.poItemId || null,
           item.baseQty ?? null,
           item.baseUomId ?? null,
-          item.conversionFactor ?? 1
-        );
-      } else {
+          item.conversionFactor ?? 1,
+        ];
+        if (hasTargetStore) {
+          rowValues.push(item.targetStoreLocationId ?? null);
+        }
         placeholders.push(
-          `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8})`
+          `(${rowValues.map((_, i) => `$${offset + i + 1}`).join(', ')})`
         );
-        values.push(
+        values.push(...rowValues);
+      } else {
+        const rowValues: unknown[] = [
           item.goodsReceiptId,
           item.productId,
           item.receivedQuantity,
@@ -267,14 +316,24 @@ export const goodsReceiptRepository = {
           item.expiryDate || null,
           item.unitCost,
           item.uomId || null,
-          item.poItemId || null
+          item.poItemId || null,
+        ];
+        if (hasTargetStore) {
+          rowValues.push(item.targetStoreLocationId ?? null);
+        }
+        placeholders.push(
+          `(${rowValues.map((_, i) => `$${offset + i + 1}`).join(', ')})`
         );
+        values.push(...rowValues);
       }
     });
 
-    const insertColumns = hasUomSnapshot
+    const baseColumns = hasUomSnapshot
       ? `goods_receipt_id, product_id, received_quantity, batch_number, expiry_date, cost_price, uom_id, po_item_id, base_qty, base_uom_id, conversion_factor`
       : `goods_receipt_id, product_id, received_quantity, batch_number, expiry_date, cost_price, uom_id, po_item_id`;
+    const insertColumns = hasTargetStore
+      ? `${baseColumns}, target_store_location_id`
+      : baseColumns;
 
     const result = await pool.query(
       `INSERT INTO goods_receipt_items (${insertColumns})
@@ -357,6 +416,10 @@ export const goodsReceiptRepository = {
     const hasUomSnapshot = await tableHasColumn(pool, 'goods_receipt_items', 'base_qty');
     const baseQtySelect = hasUomSnapshot ? 'gri.base_qty as "baseQty"' : 'NULL::numeric as "baseQty"';
     const baseUomSelect = hasUomSnapshot ? 'gri.base_uom_id as "baseUomId"' : 'NULL::uuid as "baseUomId"';
+    const hasTargetStore = await tableHasColumn(pool, 'goods_receipt_items', 'target_store_location_id');
+    const targetStoreSelect = hasTargetStore
+      ? 'gri.target_store_location_id as "targetStoreLocationId"'
+      : 'NULL::uuid as "targetStoreLocationId"';
     const returnedSql = poItemReturnedQuantitySql('poi');
     const netSql = poItemNetReceivedQuantitySql('poi');
 
@@ -386,7 +449,8 @@ export const goodsReceiptRepository = {
          ${conversionFactorExpr} as "conversionFactor",
          COALESCE(gri.uom_id, poi.uom_id) as "uomId",
          ${baseQtySelect},
-         ${baseUomSelect}
+         ${baseUomSelect},
+         ${targetStoreSelect}
        FROM goods_receipt_items gri
        JOIN goods_receipts gr ON gr.id = gri.goods_receipt_id
        LEFT JOIN products p ON gri.product_id = p.id
@@ -406,7 +470,7 @@ export const goodsReceiptRepository = {
 
     // Batch-fetch all product UoMs for every product in this GR (eliminates N+1)
     const productIds = [...new Set(itemsResult.rows.map((r: { productId: string }) => r.productId))];
-    let productUomsMap: Record<string, Array<{
+    const productUomsMap: Record<string, Array<{
       id: string; uomId: string; uomName: string; uomSymbol: string | null;
       conversionFactor: string; barcode: string | null; isDefault: boolean;
       priceOverride: string | null; costOverride: string | null;
@@ -450,10 +514,61 @@ export const goodsReceiptRepository = {
     }
 
     return {
-      gr: grResult.rows[0],
+      gr: {
+        ...grResult.rows[0],
+        poSiblingBill: await this.resolvePoSiblingBill(pool, grResult.rows[0], id),
+      },
       items: itemsResult.rows,
       productUomsMap,
     };
+  },
+
+  /**
+   * Active supplier bill on another completed GR for the same PO (re-receive / top-up).
+   */
+  async findPoSiblingSupplierBill(
+    pool: Pool | PoolClient,
+    poId: string,
+    excludeGrId: string,
+  ): Promise<{
+    invoiceId: string;
+    invoiceNumber: string;
+    grnId: string;
+    grnNumber: string;
+  } | null> {
+    const result = await pool.query(
+      `SELECT si."Id" AS "invoiceId",
+              si."SupplierInvoiceNumber" AS "invoiceNumber",
+              gr.id AS "grnId",
+              gr.receipt_number AS "grnNumber"
+       FROM goods_receipts gr
+       JOIN supplier_invoice_grn_links sigl ON sigl.grn_id = gr.id
+       JOIN supplier_invoices si ON si."Id" = sigl.invoice_id
+       WHERE gr.purchase_order_id = $1
+         AND gr.id <> $2
+         AND gr.status = 'COMPLETED'
+         AND si.deleted_at IS NULL
+         AND COALESCE(si."Status", '') NOT IN ('Cancelled', 'CANCELLED', 'Voided', 'VOIDED')
+         AND COALESCE(si.document_type, 'SUPPLIER_INVOICE') = 'SUPPLIER_INVOICE'
+       ORDER BY si."CreatedAt" DESC
+       LIMIT 1`,
+      [poId, excludeGrId],
+    );
+    return result.rows[0] ?? null;
+  },
+
+  async resolvePoSiblingBill(
+    pool: Pool | PoolClient,
+    gr: GoodsReceipt,
+    grId: string,
+  ): Promise<GoodsReceipt['poSiblingBill']> {
+    if (!gr.purchaseOrderId) return null;
+    const direct = await pool.query(
+      `SELECT 1 FROM supplier_invoice_grn_links WHERE grn_id = $1 LIMIT 1`,
+      [grId],
+    );
+    if (direct.rows.length > 0 || gr.supplierBillNumber) return null;
+    return this.findPoSiblingSupplierBill(pool, gr.purchaseOrderId, grId);
   },
 
   /**
@@ -465,6 +580,8 @@ export const goodsReceiptRepository = {
   ): Promise<{ item: GoodsReceiptItem & { ordered_quantity?: number }; gr: GoodsReceipt } | null> {
     // Fetch item with proper camelCase aliases, joining PO items for ordered quantity
     const isBonusExpr = await grItemsIsBonusExpr(pool);
+    const returnedSql = poItemReturnedQuantitySql('poi');
+    const netSql = poItemNetReceivedQuantitySql('poi');
 
     const itemRes = await pool.query(
       `SELECT 
@@ -480,7 +597,9 @@ export const goodsReceiptRepository = {
          gri.cost_price as "unitCost",
          ${isBonusExpr} as "isBonus",
          COALESCE(poi.ordered_quantity, gri.received_quantity) as "orderedQuantity",
-         COALESCE(poi.received_quantity, 0) as "poAlreadyReceived"
+         ROUND(COALESCE(poi.received_quantity, 0)::numeric, 2) as "poGrossReceived",
+         ROUND((${returnedSql})::numeric, 2) as "poReturnedQuantity",
+         ROUND((${netSql})::numeric, 2) as "poAlreadyReceived"
        FROM goods_receipt_items gri
        LEFT JOIN products p ON gri.product_id = p.id
        LEFT JOIN purchase_order_items poi ON poi.id = gri.po_item_id
@@ -517,6 +636,10 @@ export const goodsReceiptRepository = {
     itemId: string,
     data: UpdateGRItemData
   ): Promise<GoodsReceiptItem> {
+    const hasUomSnapshot = await tableHasColumn(pool, 'goods_receipt_items', 'base_qty');
+    const hasTargetStore = await tableHasColumn(pool, 'goods_receipt_items', 'target_store_location_id');
+    const rowSelect = buildGrItemRowSelectSql({ hasUomSnapshot, hasTargetStore });
+
     const fields: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
@@ -541,21 +664,31 @@ export const goodsReceiptRepository = {
       fields.push(`expiry_date = $${idx++}`);
       values.push(data.expiryDate);
     }
+    if (data.uomId !== undefined) {
+      fields.push(`uom_id = $${idx++}`);
+      values.push(data.uomId);
+    }
+    if (hasUomSnapshot && data.baseQty !== undefined) {
+      fields.push(`base_qty = $${idx++}`);
+      values.push(data.baseQty);
+    }
+    if (hasUomSnapshot && data.baseUomId !== undefined) {
+      fields.push(`base_uom_id = $${idx++}`);
+      values.push(data.baseUomId);
+    }
+    if (hasUomSnapshot && data.conversionFactor !== undefined) {
+      fields.push(`conversion_factor = $${idx++}`);
+      values.push(data.conversionFactor);
+    }
+    if (hasTargetStore && data.targetStoreLocationId !== undefined) {
+      fields.push(`target_store_location_id = $${idx++}`);
+      values.push(data.targetStoreLocationId);
+    }
 
     if (fields.length === 0) {
       // Nothing to update, return current row with aliases
       const current = await pool.query(
-        `SELECT 
-           id,
-           goods_receipt_id as "goodsReceiptId",
-           product_id as "productId",
-           received_quantity as "receivedQuantity",
-           batch_number as "batchNumber",
-           expiry_date as "expiryDate",
-           cost_price as "unitCost",
-           COALESCE(is_bonus, false) as "isBonus",
-           created_at as "createdAt",
-           version
+        `SELECT ${rowSelect}
          FROM goods_receipt_items WHERE id = $1`,
         [itemId]
       );
@@ -570,17 +703,7 @@ export const goodsReceiptRepository = {
       `UPDATE goods_receipt_items
        SET ${fields.join(', ')}
        WHERE id = $${idx}
-       RETURNING 
-         id,
-         goods_receipt_id as "goodsReceiptId",
-         product_id as "productId",
-         received_quantity as "receivedQuantity",
-         batch_number as "batchNumber",
-         expiry_date as "expiryDate",
-         cost_price as "unitCost",
-         is_bonus as "isBonus",
-         created_at as "createdAt",
-         version`,
+       RETURNING ${rowSelect}`,
       [...values, itemId]
     );
 

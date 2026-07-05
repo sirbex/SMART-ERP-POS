@@ -58,6 +58,8 @@ export interface VoidSaleItemRecord {
   saleId: string;
   productId: string;
   batchId: string | null;
+  storeLocationId?: string | null;
+  productLotId?: string | null;
   quantity: string;
   baseQty: string | null;         // SAP MUoM: base-unit qty at posting time
   conversionFactor: string | null; // SAP MUoM: display→base factor at posting time
@@ -76,6 +78,8 @@ export interface RefundableSaleItemRecord {
   saleId: string;
   productId: string | null;
   batchId: string | null;
+  storeLocationId?: string | null;
+  productLotId?: string | null;
   quantity: string;
   baseQty: string | null;         // SAP MUoM: base-unit qty at posting time
   conversionFactor: string | null; // SAP MUoM: display→base factor at posting time
@@ -458,6 +462,47 @@ export const salesRepository = {
         new Decimal(header.profitMargin).toFixed(4),
         saleId,
       ],
+    );
+  },
+
+  async updateSaleItemWarehouseTrace(
+    pool: Pool | PoolClient,
+    saleItemId: string,
+    trace: {
+      storeLocationId?: string | null;
+      productLotId?: string | null;
+      batchId?: string | null;
+    },
+  ): Promise<void> {
+    await pool.query(
+      `UPDATE sale_items
+       SET store_location_id = COALESCE($1, store_location_id),
+           product_lot_id = COALESCE($2, product_lot_id),
+           batch_id = COALESCE($3, batch_id)
+       WHERE id = $4`,
+      [
+        trace.storeLocationId ?? null,
+        trace.productLotId ?? null,
+        trace.batchId ?? null,
+        saleItemId,
+      ],
+    );
+  },
+
+  async updateRefundItemWarehouseTrace(
+    pool: Pool | PoolClient,
+    refundItemId: string,
+    trace: {
+      storeLocationId?: string | null;
+      productLotId?: string | null;
+    },
+  ): Promise<void> {
+    await pool.query(
+      `UPDATE sale_refund_items
+       SET store_location_id = COALESCE($1, store_location_id),
+           product_lot_id = COALESCE($2, product_lot_id)
+       WHERE id = $3`,
+      [trace.storeLocationId ?? null, trace.productLotId ?? null, refundItemId],
     );
   },
 
@@ -1306,6 +1351,8 @@ export const salesRepository = {
         si.sale_id as "saleId",
         si.product_id as "productId",
         si.batch_id as "batchId",
+        si.store_location_id AS "storeLocationId",
+        si.product_lot_id AS "productLotId",
         si.quantity,
         si.base_qty AS "baseQty",
         si.conversion_factor AS "conversionFactor",
@@ -1358,6 +1405,8 @@ export const salesRepository = {
         si.sale_id AS "saleId",
         si.product_id AS "productId",
         si.batch_id AS "batchId",
+        si.store_location_id AS "storeLocationId",
+        si.product_lot_id AS "productLotId",
         si.quantity,
         si.base_qty AS "baseQty",
         si.conversion_factor AS "conversionFactor",

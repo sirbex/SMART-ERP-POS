@@ -57,6 +57,22 @@ export interface SystemSettings {
     lowStockAlertsEnabled: boolean;
     lowStockThreshold: number;
 
+    // Multi-Store Warehouse Network (default false — legacy single-store behaviour)
+    isMultistoreEnabled: boolean;
+
+    // Transfer workflow policy (Phase E)
+    transferPolicyRequireApprovalAll: boolean;
+    transferPolicyAllowDirect: boolean;
+    transferPolicyValueThreshold: number | null;
+    transferPolicyQtyThreshold: number | null;
+    transferPolicySpecialStoresRequireApproval: boolean;
+
+    /** Phase 3 — assortment expansion when transferring restricted/hidden products */
+    transferAssortmentExpansionPolicy: import('./transferAssortment.js').TransferAssortmentExpansionPolicy;
+
+    /** Phase 9 — nightly move of expired stock to EXPIRED store */
+    expiryAutomationEnabled: boolean;
+
     // Audit
     createdAt: string;
     updatedAt: string;
@@ -98,6 +114,14 @@ export interface SystemSettingsDbRow {
     pos_transaction_mode: string;
     low_stock_alerts_enabled: boolean;
     low_stock_threshold: number;
+    is_multistore_enabled: boolean;
+    transfer_policy_require_approval_all: boolean;
+    transfer_policy_allow_direct: boolean;
+    transfer_policy_value_threshold: string | null;
+    transfer_policy_qty_threshold: string | null;
+    transfer_policy_special_stores_require_approval: boolean;
+    transfer_assortment_expansion_policy: string;
+    expiry_automation_enabled: boolean;
     created_at: string;
     updated_at: string;
     updated_by_id?: string;
@@ -137,6 +161,14 @@ export interface UpdateSystemSettingsDto {
     posTransactionMode?: 'DirectSale' | 'OrderToPayment';
     lowStockAlertsEnabled?: boolean;
     lowStockThreshold?: number;
+    isMultistoreEnabled?: boolean;
+    transferPolicyRequireApprovalAll?: boolean;
+    transferPolicyAllowDirect?: boolean;
+    transferPolicyValueThreshold?: number | null;
+    transferPolicyQtyThreshold?: number | null;
+    transferPolicySpecialStoresRequireApproval?: boolean;
+    transferAssortmentExpansionPolicy?: import('./transferAssortment.js').TransferAssortmentExpansionPolicy;
+    expiryAutomationEnabled?: boolean;
     updatedById?: string;
 }
 
@@ -176,6 +208,23 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
         posTransactionMode: (dbRow.pos_transaction_mode || 'DirectSale') as SystemSettings['posTransactionMode'],
         lowStockAlertsEnabled: dbRow.low_stock_alerts_enabled,
         lowStockThreshold: dbRow.low_stock_threshold,
+        isMultistoreEnabled: dbRow.is_multistore_enabled ?? false,
+        transferPolicyRequireApprovalAll: dbRow.transfer_policy_require_approval_all ?? true,
+        transferPolicyAllowDirect: dbRow.transfer_policy_allow_direct ?? true,
+        transferPolicyValueThreshold:
+            dbRow.transfer_policy_value_threshold != null
+                ? parseFloat(dbRow.transfer_policy_value_threshold)
+                : null,
+        transferPolicyQtyThreshold:
+            dbRow.transfer_policy_qty_threshold != null
+                ? parseFloat(dbRow.transfer_policy_qty_threshold)
+                : null,
+        transferPolicySpecialStoresRequireApproval:
+            dbRow.transfer_policy_special_stores_require_approval ?? true,
+        transferAssortmentExpansionPolicy:
+            (dbRow.transfer_assortment_expansion_policy as SystemSettings['transferAssortmentExpansionPolicy']) ??
+            'PROMPT',
+        expiryAutomationEnabled: dbRow.expiry_automation_enabled ?? false,
         createdAt: dbRow.created_at,
         updatedAt: dbRow.updated_at,
         updatedById: dbRow.updated_by_id,

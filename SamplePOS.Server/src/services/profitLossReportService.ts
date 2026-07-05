@@ -449,7 +449,7 @@ export class ProfitLossReportService {
 }
 
 // Export singleton factory
-let plReportServiceInstance: ProfitLossReportService | null = null;
+const plReportServiceInstance: ProfitLossReportService | null = null;
 
 export function getProfitLossReportService(pool: Pool): ProfitLossReportService {
     return new ProfitLossReportService(pool);

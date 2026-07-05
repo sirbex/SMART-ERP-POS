@@ -382,11 +382,16 @@ export function useCreateSale() {
   );
 }
 
-export function useSalesSummary(startDate?: string, endDate?: string, groupBy?: string) {
+export function useSalesSummary(
+  startDate?: string,
+  endDate?: string,
+  groupBy?: string,
+  options?: { enabled?: boolean },
+) {
   return useApiQuery(
     queryKeys.sales.summary(startDate, endDate, groupBy),
     () => api.sales.summary({ startDate, endDate, groupBy }),
-    { staleTime: 60000 } // 1 minute
+    { staleTime: 60000, enabled: options?.enabled !== false },
   );
 }
 
@@ -400,12 +405,15 @@ export function useProductSalesSummary(filters?: { startDate?: string; endDate?:
   );
 }
 
-export function useTopSellingProducts(limit = 10, filters?: { startDate?: string; endDate?: string }) {
-  const { startDate, endDate } = filters || {};
+export function useTopSellingProducts(
+  limit = 10,
+  filters?: { startDate?: string; endDate?: string; enabled?: boolean },
+) {
+  const { startDate, endDate, enabled } = filters || {};
   return useApiQuery(
     queryKeys.sales.topSelling(limit, startDate, endDate),
     () => api.sales.topSelling({ limit, startDate, endDate }),
-    { staleTime: 60000 } // 1 minute
+    { staleTime: 60000, enabled: enabled !== false },
   );
 }
 

@@ -6,6 +6,7 @@ import type { PoolClient } from 'pg';
 import { Money } from './money.js';
 import { syncProductQuantity } from './inventorySync.js';
 import { recordMovement } from '../modules/stock-movements/stockMovementRepository.js';
+import { warehouseReturnInventoryService } from '../modules/inventory/warehouse/warehouseReturnInventoryService.js';
 import { assertPositiveFinite } from './safeParse.js';
 
 const SALE_ITEM_ID_RE = /sale_item:([0-9a-f-]{36})/i;
@@ -264,6 +265,32 @@ export async function restoreInventoryForCustomerCreditNoteReturn(
 ): Promise<CustomerReturnRestoreResult> {
   const beforeQty = await readOnHand(client, params.productId);
   const resolved = await resolveReturnQuantities(client, params);
+
+  const multistoreOutcome = await warehouseReturnInventoryService.restoreCustomerReturn(client, {
+    productId: params.productId,
+    quantity: resolved.baseQty,
+    unitCost: resolved.unitCost,
+    batchId: resolved.batchId,
+    referenceType: 'CREDIT_NOTE',
+    referenceId: params.noteId,
+    notes: `Customer return: ${params.noteNumber}`,
+  });
+
+  if (multistoreOutcome) {
+    await assertOnHandAfterCustomerReturn(
+      client,
+      params.productId,
+      beforeQty,
+      resolved.baseQty,
+      params.noteNumber,
+    );
+    return {
+      batchId: multistoreOutcome.batchId,
+      baseQty: multistoreOutcome.baseQty,
+      unitCost: multistoreOutcome.unitCost,
+    };
+  }
+
   const batchId = await applyBatchRestore(
     client,
     params.productId,

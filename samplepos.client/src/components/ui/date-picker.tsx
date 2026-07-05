@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
+import './date-picker.css';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -24,12 +25,11 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   disabled = false,
   maxDate,
   minDate,
-  className
+  className,
 }) => {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState(value || '');
 
-  // Parse the value to a Date object
   const selectedDate = value ? parse(value, 'yyyy-MM-dd', new Date()) : undefined;
   const isValidDate = selectedDate && isValid(selectedDate);
 
@@ -46,13 +46,11 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     const val = e.target.value;
     setInputValue(val);
 
-    // Try to parse the input
     if (val === '') {
       onChange?.('');
       return;
     }
 
-    // Support multiple date formats
     const formats = ['yyyy-MM-dd', 'MM/dd/yyyy', 'dd/MM/yyyy', 'MM-dd-yyyy'];
     for (const fmt of formats) {
       const parsed = parse(val, fmt, new Date());
@@ -79,47 +77,36 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           variant="outline"
           disabled={disabled}
           className={cn(
-            'w-full justify-start text-left font-normal',
+            'w-full min-h-10 justify-start text-left font-normal',
             !isValidDate && 'text-muted-foreground',
-            className
+            className,
           )}
         >
           <CalendarIcon className="mr-2 h-4 w-4 flex-shrink-0" />
-          {isValidDate ? format(selectedDate, 'PPP') : placeholder}
+          <span className="truncate">
+            {isValidDate ? format(selectedDate, 'PPP') : placeholder}
+          </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start">
-        <div className="p-4 space-y-4">
-          {/* Quick Select Buttons */}
-          <div className="grid grid-cols-3 gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleQuickSelect(0)}
-              className="text-xs"
-            >
-              Today
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleQuickSelect(1)}
-              className="text-xs"
-            >
-              Yesterday
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleQuickSelect(7)}
-              className="text-xs"
-            >
-              Last Week
-            </Button>
-          </div>
-
-          {/* Calendar */}
-          <div className="border-t pt-4">
+      <PopoverContent
+        align="center"
+        side="bottom"
+        sideOffset={8}
+        collisionPadding={20}
+        avoidCollisions
+        className={cn(
+          'date-picker-popover p-0 w-[min(100vw-1.5rem,22rem)]',
+          'sm:w-[min(100vw-2rem,28rem)]',
+          'md:w-[min(100vw-2rem,40rem)]',
+          'lg:w-[min(42rem,calc(100vw-2rem))]',
+          'max-h-[min(var(--radix-popover-content-available-height),calc(100vh-1.5rem))]',
+          'overflow-hidden shadow-xl border-gray-200',
+        )}
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <div className="flex max-h-[inherit] flex-col md:flex-row md:divide-x md:divide-gray-100">
+          {/* Calendar — primary focus; grows on large screens */}
+          <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
             <DayPicker
               mode="single"
               selected={isValidDate ? selectedDate : undefined}
@@ -129,36 +116,80 @@ export const DatePicker: React.FC<DatePickerProps> = ({
                 if (minDate && date < minDate) return true;
                 return false;
               }}
-              showOutsideDays={true}
+              showOutsideDays
+              className="mx-auto w-fit"
             />
           </div>
 
-          {/* Manual Input */}
-          <div className="border-t pt-4 space-y-2">
-            <label className="text-xs font-medium text-gray-600">
-              Or type a date (YYYY-MM-DD)
-            </label>
-            <input
-              type="text"
-              value={inputValue}
-              onChange={handleInputChange}
-              placeholder="YYYY-MM-DD"
-              className={cn(
-                'w-full px-3 py-2 text-sm border rounded-md',
-                'focus:outline-none focus:ring-2 focus:ring-blue-500',
-                'placeholder-gray-400'
-              )}
-            />
-          </div>
-
-          {/* Selected Date Display */}
-          {isValidDate && (
-            <div className="bg-blue-50 p-3 rounded text-sm">
-              <p className="text-gray-700">
-                <strong>Selected:</strong> {format(selectedDate, 'EEEE, MMMM d, yyyy')}
+          {/* Actions panel — beside calendar on md+, below on mobile */}
+          <div className="flex shrink-0 flex-col gap-4 border-t border-gray-100 p-4 sm:p-5 md:w-56 md:border-t-0 md:bg-gray-50/80">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Quick pick
               </p>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 md:grid-cols-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleQuickSelect(0)}
+                  className="h-10 w-full text-sm"
+                >
+                  Today
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleQuickSelect(1)}
+                  className="h-10 w-full text-sm"
+                >
+                  Yesterday
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleQuickSelect(7)}
+                  className="h-10 w-full text-sm"
+                >
+                  Last week
+                </Button>
+              </div>
             </div>
-          )}
+
+            <div className="space-y-2">
+              <label
+                htmlFor="date-picker-manual-input"
+                className="text-xs font-semibold uppercase tracking-wide text-gray-500"
+              >
+                Type a date
+              </label>
+              <input
+                id="date-picker-manual-input"
+                type="text"
+                value={inputValue}
+                onChange={handleInputChange}
+                placeholder="YYYY-MM-DD"
+                className={cn(
+                  'h-10 w-full rounded-md border px-3 text-sm',
+                  'focus:outline-none focus:ring-2 focus:ring-blue-500',
+                  'placeholder:text-gray-400',
+                )}
+              />
+            </div>
+
+            {isValidDate && (
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-gray-800">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  Selected
+                </p>
+                <p className="mt-1 font-medium leading-snug">
+                  {format(selectedDate, 'EEEE, MMMM d, yyyy')}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </PopoverContent>
     </Popover>

@@ -1721,21 +1721,23 @@ export class BankingService {
         const nextDate = new Date(today);
 
         switch (frequency) {
-            case 'WEEKLY':
+            case 'WEEKLY': {
                 // expectedDay = day of week (1=Mon, 7=Sun)
                 const currentDayOfWeek = today.getDay() || 7; // Convert 0 to 7 for Sunday
                 let daysUntil = expectedDay - currentDayOfWeek;
                 if (daysUntil <= 0) daysUntil += 7;
                 nextDate.setDate(today.getDate() + daysUntil);
                 break;
+            }
 
-            case 'BIWEEKLY':
+            case 'BIWEEKLY': {
                 const currentDow = today.getDay() || 7;
                 let days = expectedDay - currentDow;
                 if (days <= 0) days += 14;
                 else days += 7; // Add extra week for biweekly
                 nextDate.setDate(today.getDate() + days);
                 break;
+            }
 
             case 'MONTHLY':
                 // expectedDay = day of month (1-31)

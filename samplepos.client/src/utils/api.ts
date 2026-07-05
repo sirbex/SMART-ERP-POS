@@ -476,7 +476,16 @@ export const api = {
 
   // Inventory
   inventory: {
-    stockLevels: () => apiClient.get<ApiResponse>('inventory/stock-levels'),
+    stockLevels: (storeLocationId?: string) =>
+      apiClient.get<ApiResponse>('inventory/stock-levels', {
+        params: storeLocationId ? { storeLocationId } : undefined,
+      }),
+    posCatalog: () => apiClient.get<ApiResponse>('inventory/pos/catalog'),
+    posProductSearch: (q: string, limit?: number) =>
+      apiClient.get<ApiResponse>('inventory/pos/product-search', { params: { q, limit } }),
+    lockPosAllocation: (data: { productId: string; quantity: number }) =>
+      apiClient.post<ApiResponse>('inventory/pos/lock-allocation', data),
+    stockVisibility: () => apiClient.get<ApiResponse>('inventory/stock-visibility'),
     stockLevelByProduct: (productId: string) =>
       apiClient.get<ApiResponse>(`inventory/stock-levels/${productId}`),
     batchesByProduct: (productId: string) =>
@@ -502,7 +511,135 @@ export const api = {
       notes: string;
       userId: string;
       documentId?: string;
+      storeLocationId?: string;
+      productLotId?: string;
+      unitCost?: number;
     }) => apiClient.post<ApiResponse>('inventory/adjust-batch', data),
+  },
+
+  warehouse: {
+    storeLocations: {
+      list: () => apiClient.get<ApiResponse>('inventory/store-locations'),
+      ensureDefaults: () => apiClient.post<ApiResponse>('inventory/store-locations/ensure-defaults'),
+      create: (data: {
+        code: string;
+        name: string;
+        storeType: string;
+        isDefaultReceiving?: boolean;
+        isPosSelling?: boolean;
+      }) => apiClient.post<ApiResponse>('inventory/store-locations', data),
+      update: (id: string, data: Record<string, unknown>) =>
+        apiClient.patch<ApiResponse>(`inventory/store-locations/${id}`, data),
+    },
+    storeTransfers: {
+      workflowCapabilities: () =>
+        apiClient.get<ApiResponse>('inventory/store-transfers/workflow-capabilities'),
+      list: () => apiClient.get<ApiResponse>('inventory/store-transfers'),
+      getById: (id: string) => apiClient.get<ApiResponse>(`inventory/store-transfers/${id}`),
+      create: (data: {
+        destinationStoreId?: string;
+        notes?: string | null;
+        overrideReason?: string | null;
+        overrideComments?: string | null;
+        assortmentExpansions?: Array<{ productId: string; expandPermanently: boolean }>;
+        lines: Array<{ productLotId: string; quantity: number }>;
+      }) => apiClient.post<ApiResponse>('inventory/store-transfers', data),
+      previewAssortment: (data: {
+        destinationStoreId: string;
+        lines: Array<{ productLotId: string; quantity: number }>;
+      }) => apiClient.post<ApiResponse>('inventory/store-transfers/preview-assortment', data),
+      approve: (id: string, data?: { lines?: Array<{ lineId: string; quantity: number; comment?: string | null }> }) =>
+        apiClient.post<ApiResponse>(`inventory/store-transfers/${id}/approve`, data ?? {}),
+      saveApprovalDraft: (id: string, data?: { lines?: Array<{ lineId: string; quantity: number; comment?: string | null }> }) =>
+        apiClient.post<ApiResponse>(`inventory/store-transfers/${id}/approval-draft`, data ?? {}),
+      dispatch: (id: string, data?: { lines?: Array<{ lineId: string; quantity: number; comment?: string | null }> }) =>
+        apiClient.post<ApiResponse>(`inventory/store-transfers/${id}/dispatch`, data ?? {}),
+      receive: (id: string, data?: { lines?: Array<{ lineId: string; quantity: number; comment?: string | null }> }) =>
+        apiClient.post<ApiResponse>(`inventory/store-transfers/${id}/receive`, data ?? {}),
+      cancel: (id: string, data?: { reason?: string | null }) =>
+        apiClient.post<ApiResponse>(`inventory/store-transfers/${id}/cancel`, data ?? {}),
+      complete: (id: string, data?: { lines?: Array<{ lineId: string; quantity: number; comment?: string | null }> }) =>
+        apiClient.post<ApiResponse>(`inventory/store-transfers/${id}/complete`, data ?? {}),
+    },
+    productStoreDistribution: (productId: string) =>
+      apiClient.get<ApiResponse>(`inventory/products/${productId}/store-distribution`),
+    getProductDistributionPolicy: (productId: string) =>
+      apiClient.get<ApiResponse>(`inventory/products/${productId}/distribution-policy`),
+    updateProductDistributionPolicy: (
+      productId: string,
+      data: {
+        distributionPolicy: 'GLOBAL' | 'RESTRICTED';
+        assignments: Array<{
+          storeLocationId: string;
+          isAssigned?: boolean;
+          isPosVisible?: boolean;
+        }>;
+      },
+    ) => apiClient.put<ApiResponse>(`inventory/products/${productId}/distribution-policy`, data),
+    getAssortmentMatrix: (params: { search?: string; category?: string; page?: number; pageSize?: number }) =>
+      apiClient.get<ApiResponse>('inventory/assortment-matrix', { params }),
+    updateAssortmentMatrixCell: (data: {
+      productId: string;
+      storeLocationId: string;
+      status: 'ACTIVE' | 'HIDDEN' | 'UNASSIGNED';
+    }) => apiClient.patch<ApiResponse>('inventory/assortment-matrix/cell', data),
+    storeLots: (storeLocationId: string) =>
+      apiClient.get<ApiResponse>('inventory/store-lots', { params: { storeLocationId } }),
+    searchStoreLots: (storeLocationId: string, q: string, limit?: number) =>
+      apiClient.get<ApiResponse>('inventory/store-lots/search', {
+        params: { storeLocationId, q, limit },
+      }),
+    searchStoreProducts: (storeLocationId: string, q: string, limit?: number) =>
+      apiClient.get<ApiResponse>('inventory/store-products/search', {
+        params: { storeLocationId, q, limit },
+      }),
+    storeProductLots: (storeLocationId: string, productId: string) =>
+      apiClient.get<ApiResponse>(`inventory/store-products/${productId}/lots`, {
+        params: { storeLocationId },
+      }),
+    expiryAutomation: {
+      preview: () => apiClient.get<ApiResponse>('inventory/expiry-automation/preview'),
+      process: (data?: { dryRun?: boolean; force?: boolean }) =>
+        apiClient.post<ApiResponse>('inventory/expiry-automation/process', data ?? {}),
+    },
+    reports: {
+      network: (days?: number) =>
+        apiClient.get<ApiResponse>('inventory/reports/network', { params: { days } }),
+      summary: (days?: number) =>
+        apiClient.get<ApiResponse>('inventory/reports/network/summary', { params: { days } }),
+      stockByStore: () => apiClient.get<ApiResponse>('inventory/reports/network/stock-by-store'),
+      transfers: (days?: number) =>
+        apiClient.get<ApiResponse>('inventory/reports/network/transfers', { params: { days } }),
+      expiry: () => apiClient.get<ApiResponse>('inventory/reports/network/expiry'),
+      quarantine: () => apiClient.get<ApiResponse>('inventory/reports/network/quarantine'),
+    },
+    stockCounts: {
+      list: (params?: { state?: string; locationId?: string; page?: number; limit?: number }) =>
+        apiClient.get<ApiResponse>('inventory/stockcounts', { params }),
+      getById: (id: string, params?: { page?: number; limit?: number }) =>
+        apiClient.get<ApiResponse>(`inventory/stockcounts/${id}`, { params }),
+      create: (data: {
+        name: string;
+        locationId?: string | null;
+        notes?: string | null;
+        includeAllProducts?: boolean;
+      }) => apiClient.post<ApiResponse>('inventory/stockcounts', data),
+      updateLine: (
+        id: string,
+        data: {
+          productId: string;
+          productLotId?: string | null;
+          batchId?: string | null;
+          countedQty: number;
+          uom: string;
+          notes?: string | null;
+        },
+      ) => apiClient.post<ApiResponse>(`inventory/stockcounts/${id}/lines`, data),
+      validate: (id: string, data?: { notes?: string; allowNegativeAdjustments?: boolean }) =>
+        apiClient.post<ApiResponse>(`inventory/stockcounts/${id}/validate`, data ?? {}),
+      cancel: (id: string, notes?: string) =>
+        apiClient.post<ApiResponse>(`inventory/stockcounts/${id}/cancel`, { notes }),
+    },
   },
 
   // Purchase Orders
@@ -532,8 +669,14 @@ export const api = {
     delete: (id: string) => apiClient.delete<ApiResponse>(`purchase-orders/${id}`),
     update: (id: string, data: { supplierId?: string; expectedDate?: string | null; notes?: string | null; items?: Array<{ productId: string; productName: string; quantity: number; unitCost: number; lineTotal?: number; uomId?: string | null }> }) =>
       apiClient.put<ApiResponse>(`purchase-orders/${id}`, data),
+    /** @deprecated Prefer supplier-payments/invoices/from-grn (used by Goods Receipts billing UI) */
     createInvoice: (data: CreatePOInvoiceInput) =>
-      apiClient.post<ApiResponse>('purchase-orders/invoices', data),
+      apiClient.post<ApiResponse>('supplier-payments/invoices/from-grn', {
+        grnId: data.goodsReceiptId,
+        supplierInvoiceNumber: data.invoiceNumber,
+        dueDate: data.dueDate,
+        notes: data.notes,
+      }),
     recordPayment: (data: RecordPOPaymentInput) =>
       apiClient.post<ApiResponse>('purchase-orders/payments', data),
     resolveUnitCost: (params: { productId: string; supplierId: string }) =>
@@ -572,7 +715,7 @@ export const api = {
     finalize: (id: string) => apiClient.post<ApiResponse>(`goods-receipts/${id}/finalize`),
     updateItem: (grId: string, itemId: string, data: UpdateGoodsReceiptItemInput) =>
       apiClient.put<ApiResponse>(`goods-receipts/${grId}/items/${itemId}`, data),
-    batchUpdateItems: (grId: string, items: Array<{ itemId: string; receivedQuantity?: number; unitCost?: number; batchNumber?: string | null; isBonus?: boolean; expiryDate?: string | null }>) =>
+    batchUpdateItems: (grId: string, items: Array<{ itemId: string; receivedQuantity?: number; unitCost?: number; batchNumber?: string | null; isBonus?: boolean; uomId?: string | null; expiryDate?: string | null; targetStoreLocationId?: string | null }>) =>
       apiClient.put<ApiResponse>(`goods-receipts/${grId}/items`, { items }),
     addItem: (grId: string, data: { productId: string; productName: string; receivedQuantity: number; unitCost: number; batchNumber?: string | null; expiryDate?: string | null }) =>
       apiClient.post<ApiResponse>(`goods-receipts/${grId}/items`, data),

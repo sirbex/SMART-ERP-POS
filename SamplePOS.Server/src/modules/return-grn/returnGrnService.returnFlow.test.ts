@@ -147,6 +147,15 @@ jest.unstable_mockModule('../../utils/inventorySync.js', () => ({
     syncProductQuantity: jest.fn<AnyMock>().mockResolvedValue(undefined),
 }));
 
+jest.unstable_mockModule('../inventory/warehouse/warehouseSupplierReturnDeductionService.js', () => ({
+    warehouseSupplierReturnDeductionService: {
+        deductForSupplierReturn: jest.fn<AnyMock>().mockResolvedValue({
+            costPrice: 100,
+            remainingQuantity: 0,
+        }),
+    },
+}));
+
 jest.unstable_mockModule('../products/uomService.js', () => ({
     resolveCanonicalProductUom: jest.fn<AnyMock>().mockResolvedValue({ conversionFactor: 1 }),
 }));

@@ -5,16 +5,16 @@
  * All functions accept a PoolClient and run INSIDE the posting transaction.
  * Uses ON CONFLICT DO UPDATE with additive math — never full replacement.
  *
- * Tables: product_daily_summary, customer_balances, supplier_balances, inventory_balances
+ * Tables: product_daily_summary, customer_balances, supplier_balances, inventory_aggregate_balances
  * (sales_daily_summary is maintained by salesRepository.incrementDailySummary)
  *
  * FEATURE FLAG: DISABLE_SHADOW_TABLE_WRITES
  *   Set to "true" to stop all incremental writes to customer_balances,
- *   supplier_balances, and inventory_balances.  These are shadow/cache tables
+ *   supplier_balances, and inventory_aggregate_balances.  These are shadow/cache tables
  *   only — no financial report reads from them.  The authoritative sources are:
  *     • customers.balance            → customer_balances
  *     • suppliers."OutstandingBalance" → supplier_balances
- *     • products.quantity_on_hand    → inventory_balances
+ *     • products.quantity_on_hand    → inventory_aggregate_balances
  *   glRepairService can rebuild all three from those sources at any time.
  *   Default: false (writes enabled — legacy behaviour unchanged).
  */
@@ -24,7 +24,7 @@ import Decimal from 'decimal.js';
 
 /**
  * When DISABLE_SHADOW_TABLE_WRITES=true all incremental UPSERTs to
- * customer_balances, supplier_balances, and inventory_balances are skipped.
+ * customer_balances, supplier_balances, and inventory_aggregate_balances are skipped.
  * Set this flag in the environment to disable the writes without a code deploy.
  * Rollback: set to "false" or remove the variable — writes resume immediately.
  */
@@ -244,7 +244,7 @@ export interface InventoryBatchItem {
 }
 
 /**
- * Batch UPSERT inventory_balances for a single movement type.
+ * Batch UPSERT inventory_aggregate_balances for a single movement type.
  * Items must be pre-aggregated by productId.
  */
 export async function batchUpsertInventoryBalance(
@@ -288,7 +288,7 @@ export async function batchUpsertInventoryBalance(
     }
 
     await client.query(
-        `INSERT INTO inventory_balances (
+        `INSERT INTO inventory_aggregate_balances (
         product_id, quantity_on_hand, total_received, total_sold,
         total_adjusted, last_movement_date, updated_at
      )
@@ -300,10 +300,10 @@ export async function batchUpsertInventoryBalance(
         unnest($5::numeric[]),
         $6::date, NOW()
      ON CONFLICT (product_id) DO UPDATE SET
-        quantity_on_hand   = inventory_balances.quantity_on_hand + EXCLUDED.quantity_on_hand,
-        total_received     = inventory_balances.total_received + EXCLUDED.total_received,
-        total_sold         = inventory_balances.total_sold + EXCLUDED.total_sold,
-        total_adjusted     = inventory_balances.total_adjusted + EXCLUDED.total_adjusted,
+        quantity_on_hand   = inventory_aggregate_balances.quantity_on_hand + EXCLUDED.quantity_on_hand,
+        total_received     = inventory_aggregate_balances.total_received + EXCLUDED.total_received,
+        total_sold         = inventory_aggregate_balances.total_sold + EXCLUDED.total_sold,
+        total_adjusted     = inventory_aggregate_balances.total_adjusted + EXCLUDED.total_adjusted,
         last_movement_date = EXCLUDED.last_movement_date,
         updated_at         = NOW()`,
         [productIds, qohDeltas, receivedDeltas, soldDeltas, adjustedDeltas, movementDate]
@@ -443,15 +443,15 @@ export async function upsertInventoryBalance(
     }
 
     await client.query(
-        `INSERT INTO inventory_balances (
+        `INSERT INTO inventory_aggregate_balances (
         product_id, quantity_on_hand, total_received, total_sold,
         total_adjusted, last_movement_date, updated_at
      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
      ON CONFLICT (product_id) DO UPDATE SET
-        quantity_on_hand   = inventory_balances.quantity_on_hand + EXCLUDED.quantity_on_hand,
-        total_received     = inventory_balances.total_received + EXCLUDED.total_received,
-        total_sold         = inventory_balances.total_sold + EXCLUDED.total_sold,
-        total_adjusted     = inventory_balances.total_adjusted + EXCLUDED.total_adjusted,
+        quantity_on_hand   = inventory_aggregate_balances.quantity_on_hand + EXCLUDED.quantity_on_hand,
+        total_received     = inventory_aggregate_balances.total_received + EXCLUDED.total_received,
+        total_sold         = inventory_aggregate_balances.total_sold + EXCLUDED.total_sold,
+        total_adjusted     = inventory_aggregate_balances.total_adjusted + EXCLUDED.total_adjusted,
         last_movement_date = EXCLUDED.last_movement_date,
         updated_at         = NOW()`,
         [

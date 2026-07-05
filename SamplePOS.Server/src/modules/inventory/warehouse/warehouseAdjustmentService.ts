@@ -1,0 +1,361 @@
+import type { Pool, PoolClient } from 'pg';
+import { UnitOfWork, type DbConnection } from '../../../db/unitOfWork.js';
+import { ValidationError } from '../../../middleware/errorHandler.js';
+import { StockMovementHandler } from '../stockMovementHandler.js';
+import type { StockMovementType } from '../stockMovementHandler.js';
+import { getBusinessYear } from '../../../utils/dateRange.js';
+import { isMultistoreEnabled } from './multistoreSettings.js';
+import { storeLocationRepository } from './storeLocationRepository.js';
+import { productLotRepository } from './productLotRepository.js';
+import { warehouseInventoryRepository } from './warehouseInventoryRepository.js';
+import { pool as defaultPool } from '../../../db/pool.js';
+import { alignBatchSubledgerToStoreBalances, assertWarehouseLayerConsistent } from '../../../services/warehouseInventoryCoupling.js';
+import { recordMovement } from '../../stock-movements/stockMovementRepository.js';
+
+export type AdjustmentDirection = 'IN' | 'OUT';
+export type AdjustmentReason =
+    | 'ADJUSTMENT'
+    | 'DAMAGE'
+    | 'EXPIRY'
+    | 'PHYSICAL_COUNT'
+    | 'WRITE_OFF';
+
+export interface StoreAdjustmentParams {
+    storeLocationId: string;
+    productId: string;
+    productLotId?: string;
+    batchId?: string;
+    quantity: number;
+    direction: AdjustmentDirection;
+    reason: AdjustmentReason;
+    notes: string;
+    userId: string;
+    documentId?: string;
+    unitCost?: number;
+}
+
+async function resolveBatchUnitCost(
+    client: PoolClient,
+    batchId: string | undefined,
+): Promise<number | undefined> {
+    if (!batchId) return undefined;
+    const costRow = await client.query(
+        'SELECT cost_price FROM inventory_batches WHERE id = $1',
+        [batchId],
+    );
+    const dbCost = costRow.rows[0]?.cost_price;
+    if (dbCost && parseFloat(String(dbCost)) > 0) {
+        return parseFloat(String(dbCost));
+    }
+    return undefined;
+}
+
+async function ensureDamageStore(client: PoolClient) {
+    let store = await storeLocationRepository.getStoreByType(client, 'DAMAGE');
+    if (!store) {
+        store = await storeLocationRepository.upsertByCode(client, {
+            code: 'DAMAGE',
+            name: 'Damaged Quarantine',
+            storeType: 'DAMAGE',
+        });
+    }
+    return store;
+}
+
+async function resolveDefaultStoreId(conn: PoolClient): Promise<string> {
+    const main = await storeLocationRepository.getDefaultReceivingStore(conn);
+    if (!main) {
+        throw new ValidationError('No MAIN receiving store configured for adjustments');
+    }
+    return main.id;
+}
+
+async function resolveProductLotForAdjustment(
+    client: PoolClient,
+    params: StoreAdjustmentParams,
+): Promise<string> {
+    if (params.productLotId) {
+        return params.productLotId;
+    }
+
+    if (params.batchId) {
+        const byBatch = await client.query<{ id: string }>(
+            `SELECT id FROM product_lots
+             WHERE inventory_batch_id = $1 AND product_id = $2
+             ORDER BY created_at ASC
+             LIMIT 1`,
+            [params.batchId, params.productId],
+        );
+        if (byBatch.rows[0]?.id) {
+            return byBatch.rows[0].id;
+        }
+    }
+
+    if (params.direction === 'OUT') {
+        return selectFefoLotAtStore(client, params.storeLocationId, params.productId);
+    }
+
+    return resolveOrCreateLotForIncrease(
+        client,
+        params.storeLocationId,
+        params.productId,
+        params.batchId,
+    );
+}
+
+async function selectFefoLotAtStore(
+    client: PoolClient,
+    storeLocationId: string,
+    productId: string,
+): Promise<string> {
+    const result = await client.query<{ product_lot_id: string }>(
+        `SELECT ib.product_lot_id
+         FROM inventory_balances ib
+         INNER JOIN product_lots pl ON pl.id = ib.product_lot_id
+         WHERE ib.store_location_id = $1
+           AND ib.product_id = $2
+           AND pl.status = 'ACTIVE'
+           AND NOT ib.blocked
+           AND (ib.quantity_on_hand - ib.quantity_reserved - ib.quantity_committed) > 0
+         ORDER BY pl.expiry_date ASC NULLS LAST, pl.lot_number ASC
+         LIMIT 1
+         FOR UPDATE OF ib`,
+        [storeLocationId, productId],
+    );
+
+    if (result.rows.length === 0) {
+        throw new ValidationError('No sellable lot found at the selected store for this product');
+    }
+
+    return result.rows[0].product_lot_id;
+}
+
+async function resolveOrCreateLotForIncrease(
+    client: PoolClient,
+    storeLocationId: string,
+    productId: string,
+    batchId?: string,
+): Promise<string> {
+    const existingAtStore = await client.query<{ product_lot_id: string }>(
+        `SELECT ib.product_lot_id
+         FROM inventory_balances ib
+         INNER JOIN product_lots pl ON pl.id = ib.product_lot_id
+         WHERE ib.store_location_id = $1
+           AND ib.product_id = $2
+           AND pl.status = 'ACTIVE'
+         ORDER BY pl.expiry_date ASC NULLS LAST, pl.lot_number ASC
+         LIMIT 1`,
+        [storeLocationId, productId],
+    );
+    if (existingAtStore.rows.length > 0) {
+        return existingAtStore.rows[0].product_lot_id;
+    }
+
+    const batchResult = await client.query<{ id: string; batch_number: string; cost_price: string }>(
+        batchId
+            ? `SELECT id, batch_number, cost_price FROM inventory_batches WHERE id = $1`
+            : `SELECT id, batch_number, cost_price
+               FROM inventory_batches
+               WHERE product_id = $1 AND status = 'ACTIVE'
+               ORDER BY received_date ASC NULLS LAST
+               LIMIT 1`,
+        batchId ? [batchId] : [productId],
+    );
+
+    const batch = batchResult.rows[0];
+    const lot = await productLotRepository.upsertLot(client, {
+        productId,
+        lotNumber: batch?.batch_number ?? 'MAIN',
+        costPrice: batch ? parseFloat(batch.cost_price) : 0,
+        inventoryBatchId: batch?.id ?? null,
+        status: 'ACTIVE',
+    });
+
+    return lot.id;
+}
+
+function mapMovementType(
+    reason: AdjustmentReason,
+    direction: AdjustmentDirection,
+): StockMovementType {
+    switch (reason) {
+        case 'DAMAGE':
+            return 'DAMAGE';
+        case 'EXPIRY':
+            return 'EXPIRY';
+        case 'PHYSICAL_COUNT':
+            return direction === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+        case 'WRITE_OFF':
+            return 'ADJUSTMENT_OUT';
+        case 'ADJUSTMENT':
+        default:
+            return direction === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+    }
+}
+
+export const warehouseAdjustmentService = {
+    async resolveStoreLocationId(conn: Pool | PoolClient, storeLocationId?: string): Promise<string> {
+        if (storeLocationId) {
+            const store = await storeLocationRepository.getById(conn, storeLocationId);
+            if (!store?.isActive) {
+                throw new ValidationError('Selected store is not active');
+            }
+            return storeLocationId;
+        }
+        return resolveDefaultStoreId(conn as PoolClient);
+    },
+
+    async adjustAtStore(conn: DbConnection, params: StoreAdjustmentParams) {
+        if (!(await isMultistoreEnabled(conn))) {
+            throw new ValidationError('Store-scoped adjustments require multistore mode');
+        }
+
+        return UnitOfWork.runOrJoin(conn, async (client) => {
+            const store = await storeLocationRepository.getById(client, params.storeLocationId);
+            if (!store?.isActive) {
+                throw new ValidationError('Selected store is not active');
+            }
+
+            await alignBatchSubledgerToStoreBalances(client, params.productId);
+
+            const productLotId = await resolveProductLotForAdjustment(client, params);
+
+            const lot = await productLotRepository.getById(client, productLotId);
+            if (!lot || lot.productId !== params.productId) {
+                throw new ValidationError('Product lot not found for this product');
+            }
+
+            const batchId = params.batchId ?? lot.inventoryBatchId ?? undefined;
+            if (
+                params.batchId &&
+                lot.inventoryBatchId &&
+                params.batchId !== lot.inventoryBatchId
+            ) {
+                throw new ValidationError(
+                    'Selected batch does not match the store lot for this adjustment',
+                );
+            }
+
+            let documentId = params.documentId;
+            if (!documentId) {
+                const year = getBusinessYear();
+                const seqResult = await client.query(`SELECT nextval('adj_doc_seq') AS seq`);
+                const seq = String(seqResult.rows[0].seq).padStart(5, '0');
+                const documentNumber = `ADJ-${year}-${seq}`;
+
+                const docResult = await client.query(
+                    `INSERT INTO inventory_adjustment_documents (document_number, reason, notes, created_by)
+                     VALUES ($1, $2, $3, $4)
+                     RETURNING id`,
+                    [documentNumber, params.reason, params.notes, params.userId],
+                );
+                documentId = docResult.rows[0].id as string;
+            }
+
+            // DAMAGE quarantine = internal store transfer only. Batch total and GL stay unchanged
+            // until a later write-off/disposal consumes stock from the DAMAGE location.
+            if (params.reason === 'DAMAGE' && params.direction === 'OUT') {
+                const damageStore = await ensureDamageStore(client);
+                await warehouseInventoryRepository.moveLotQuantityBetweenStores(client, {
+                    fromStoreId: params.storeLocationId,
+                    toStoreId: damageStore.id,
+                    productId: params.productId,
+                    productLotId,
+                    quantity: params.quantity,
+                });
+
+                const resolvedUnitCost =
+                    params.unitCost && params.unitCost > 0
+                        ? params.unitCost
+                        : await resolveBatchUnitCost(client, batchId);
+
+                const storeTag = `[store:${store.code}→${damageStore.code}]`;
+                const movement = await recordMovement(client, {
+                    productId: params.productId,
+                    batchId: batchId ?? null,
+                    movementType: 'DAMAGE',
+                    quantity: params.quantity,
+                    unitCost: resolvedUnitCost ?? null,
+                    referenceType: 'ADJ_DOC',
+                    referenceId: documentId,
+                    notes: `${params.reason}: ${params.notes} ${storeTag} (internal quarantine transfer)`,
+                    createdBy: params.userId,
+                });
+
+                await assertWarehouseLayerConsistent(
+                    client,
+                    'damageQuarantineTransfer',
+                    params.productId,
+                );
+
+                return {
+                    documentId,
+                    storeLocationId: params.storeLocationId,
+                    productLotId,
+                    quarantineStoreId: damageStore.id,
+                    movementId: movement.id,
+                    movementNumber: movement.movementNumber,
+                    batchId: batchId ?? null,
+                    actualQuantityChanged: params.quantity,
+                };
+            }
+
+            await warehouseInventoryRepository.adjustSellableQuantity(client, {
+                storeLocationId: params.storeLocationId,
+                productLotId,
+                productId: params.productId,
+                quantity: params.quantity,
+                direction: params.direction,
+            });
+
+            const movementType = mapMovementType(params.reason, params.direction);
+            let referenceType = 'ADJ_DOC';
+            if (params.reason === 'PHYSICAL_COUNT') referenceType = 'PHYSICAL_COUNT';
+            if (params.reason === 'WRITE_OFF') referenceType = 'WRITE_OFF';
+
+            let resolvedUnitCost = params.unitCost;
+            if (movementType === 'ADJUSTMENT_IN' && (!resolvedUnitCost || resolvedUnitCost <= 0)) {
+                const costRow = await client.query(
+                    'SELECT cost_price FROM product_valuation WHERE product_id = $1',
+                    [params.productId],
+                );
+                const dbCost = costRow.rows[0]?.cost_price;
+                if (dbCost && parseFloat(String(dbCost)) > 0) {
+                    resolvedUnitCost = parseFloat(String(dbCost));
+                }
+            }
+            if (
+                (movementType === 'DAMAGE' || movementType === 'EXPIRY') &&
+                (!resolvedUnitCost || resolvedUnitCost <= 0)
+            ) {
+                resolvedUnitCost = await resolveBatchUnitCost(client, batchId);
+            }
+
+            const storeTag = `[store:${store.code}]`;
+
+            const handlerPool = UnitOfWork.isPool(conn) ? conn : defaultPool;
+            const handler = new StockMovementHandler(handlerPool);
+            const result = await handler.processMovement(
+                {
+                    productId: params.productId,
+                    batchId,
+                    movementType,
+                    quantity: params.quantity,
+                    unitCost: resolvedUnitCost,
+                    reason: `${params.reason}: ${params.notes} ${storeTag}`,
+                    referenceType,
+                    referenceId: documentId,
+                    userId: params.userId,
+                },
+                client,
+            );
+
+            return {
+                documentId,
+                storeLocationId: params.storeLocationId,
+                productLotId: productLotId ?? null,
+                ...result,
+            };
+        });
+    },
+};

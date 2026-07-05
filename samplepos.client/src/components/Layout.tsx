@@ -5,6 +5,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useTenant } from '../contexts/TenantContext';
 import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
 import ServerClock from './ServerClock';
+import { CASHIER_NAV_ITEMS, isCashierRole } from '../utils/cashierLockdown';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -49,7 +50,7 @@ export default function Layout({ children }: LayoutProps) {
 
   const adminNavItems: NavItem[] = [
     { name: 'Import', path: '/import', icon: '📥', color: 'text-violet-600', permissions: ['admin.create'] },
-    { name: 'Settings', path: '/settings', icon: '⚙️', color: 'text-gray-600', permissions: ['system.manage'] },
+    { name: 'Settings', path: '/settings', icon: '⚙️', color: 'text-gray-600', permissions: ['system.read'] },
     { name: 'Roles', path: '/admin/roles', icon: '🔐', color: 'text-pink-600', permissions: ['admin.update'] },
   ];
 
@@ -59,6 +60,15 @@ export default function Layout({ children }: LayoutProps) {
   const planFeatures = config.planFeatures ?? [];
 
   const allNavItems = useMemo(() => {
+    if (isCashierRole(user?.role)) {
+      return CASHIER_NAV_ITEMS.map((item) => ({
+        name: item.name,
+        path: item.path,
+        icon: item.icon,
+        color: 'text-gray-700',
+      }));
+    }
+
     const items = [...navItems, ...adminNavItems];
     return items.filter(item => {
       // Plan feature gate — hide if plan doesn't include the feature

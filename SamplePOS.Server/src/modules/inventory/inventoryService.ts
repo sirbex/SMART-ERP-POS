@@ -1,6 +1,12 @@
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import { inventoryRepository } from './inventoryRepository.js';
+import { inventoryStockQueryService } from './warehouse/inventoryStockQueryService.js';
+import { isMultistoreEnabled } from './warehouse/multistoreSettings.js';
+import { warehouseAdjustmentService } from './warehouse/warehouseAdjustmentService.js';
+import type { StockLevel } from './inventoryRepository.js';
+import { posProductSearchService } from './warehouse/posProductSearchService.js';
+import { stockVisibilityService } from './warehouse/stockVisibilityService.js';
 import { InventoryBusinessRules } from '../../middleware/businessRules.js';
 import { StockMovementHandler, StockMovementType } from './stockMovementHandler.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
@@ -96,17 +102,19 @@ export const inventoryService = {
   },
 
   /**
-   * Get stock levels for all products
+   * Get stock levels for all products.
+   * Routes to legacy batches or composite multistore balances based on tenant settings.
    */
-  async getStockLevels(pool: Pool) {
-    return inventoryRepository.getStockLevels(pool);
+  async getStockLevels(pool: Pool, storeLocationId?: string) {
+    return inventoryStockQueryService.getStockLevels(pool, storeLocationId);
   },
 
   /**
-   * Get stock level for specific product
+   * Get stock level for specific product.
+   * Routes to legacy batches or composite multistore balances based on tenant settings.
    */
   async getStockLevelByProduct(pool: Pool, productId: string) {
-    const stockLevel = await inventoryRepository.getStockLevelByProduct(pool, productId);
+    const stockLevel = await inventoryStockQueryService.getStockLevelByProduct(pool, productId);
 
     if (!stockLevel) {
       throw new Error(`Product ${productId} not found or inactive`);
@@ -119,8 +127,11 @@ export const inventoryService = {
    * Get products that need reordering
    */
   async getProductsNeedingReorder(pool: Pool) {
-    const stockLevels = await inventoryRepository.getStockLevels(pool);
-    return stockLevels.filter((item) => item.needsReorder);
+    const stockLevels = await inventoryStockQueryService.getStockLevels(pool);
+    return stockLevels.filter((item) => {
+      const row = item as StockLevel & { needs_reorder?: boolean };
+      return row.needsReorder === true || row.needs_reorder === true;
+    });
   },
 
   /**
@@ -137,7 +148,8 @@ export const inventoryService = {
     productId: string,
     adjustment: number,
     reason: string,
-    userId: string
+    userId: string,
+    options?: { storeLocationId?: string },
   ) {
     // Validate adjustment is not zero
     if (adjustment === 0) {
@@ -148,17 +160,57 @@ export const inventoryService = {
       throw new Error('Adjustment reason must be at least 5 characters');
     }
 
-    // Determine movement type based on adjustment sign
-    const movementType = adjustment > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+    const direction: AdjustmentDirection = adjustment > 0 ? 'IN' : 'OUT';
     const absoluteQuantity = Math.abs(adjustment);
 
-    // Delegate directly to StockMovementHandler which manages its own transaction.
-    // No outer transaction wrapper — the handler's BEGIN/COMMIT is the real boundary.
+    if (await isMultistoreEnabled(pool)) {
+      const storeLocationId = await warehouseAdjustmentService.resolveStoreLocationId(
+        pool,
+        options?.storeLocationId,
+      );
+      const result = await warehouseAdjustmentService.adjustAtStore(pool, {
+        storeLocationId,
+        productId,
+        quantity: absoluteQuantity,
+        direction,
+        reason: 'ADJUSTMENT',
+        notes: reason,
+        userId,
+      });
+
+      logger.info('Inventory adjusted successfully (multistore)', {
+        productId,
+        adjustment,
+        reason,
+        userId,
+        storeLocationId,
+        movementId: 'movementId' in result ? result.movementId : undefined,
+      });
+
+      return result;
+    }
+
+    // Legacy single-store path — delegate to StockMovementHandler
+    const movementType = direction === 'IN' ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT';
+
+    let resolvedUnitCost: number | undefined;
+    if (movementType === 'ADJUSTMENT_IN') {
+      const costRow = await pool.query(
+        'SELECT cost_price FROM product_valuation WHERE product_id = $1',
+        [productId],
+      );
+      const dbCost = costRow.rows[0]?.cost_price;
+      if (dbCost && parseFloat(String(dbCost)) > 0) {
+        resolvedUnitCost = parseFloat(String(dbCost));
+      }
+    }
+
     const handler = new StockMovementHandler(pool);
     const result = await handler.processMovement({
       productId,
       movementType,
       quantity: absoluteQuantity,
+      unitCost: resolvedUnitCost,
       reason,
       userId,
       referenceType: 'ADJUSTMENT',
@@ -207,12 +259,35 @@ export const inventoryService = {
       userId: string;
       documentId?: string; // If provided, links to an existing document
       unitCost?: number;   // Optional: auto-looked up from product_valuation for ADJUSTMENT_IN
+      storeLocationId?: string;
+      productLotId?: string;
     }
   ) {
     if (params.quantity <= 0) {
       throw new ValidationError('Adjustment quantity must be positive');
     }
 
+    if (await isMultistoreEnabled(pool)) {
+      const storeLocationId = await warehouseAdjustmentService.resolveStoreLocationId(
+        pool,
+        params.storeLocationId,
+      );
+      return warehouseAdjustmentService.adjustAtStore(pool, {
+        storeLocationId,
+        productId: params.productId,
+        productLotId: params.productLotId,
+        batchId: params.batchId,
+        quantity: params.quantity,
+        direction: params.direction,
+        reason: params.reason,
+        notes: params.notes,
+        userId: params.userId,
+        documentId: params.documentId,
+        unitCost: params.unitCost,
+      });
+    }
+
+    // Legacy single-store path (unchanged)
     // Map reason + direction to StockMovementHandler's movement type
     let movementType: StockMovementType;
     let referenceType: string = 'ADJ_DOC';
@@ -305,9 +380,6 @@ export const inventoryService = {
     return inventoryRepository.selectFEFOBatches(pool, productId, quantity);
   },
 
-  /**
-   * Get inventory value by product
-   */
   async getInventoryValue(pool: Pool, productId?: string) {
     let query = `
       SELECT 
@@ -330,5 +402,25 @@ export const inventoryService = {
 
     const result = await pool.query(query, params);
     return result.rows;
+  },
+
+  /** POS catalog — sellable products only (store-isolated when multistore). */
+  async getPosCatalog(pool: Pool) {
+    return posProductSearchService.getPosCatalog(pool);
+  },
+
+  /** POS product search — omits zero-stock and expired inventory. */
+  async searchPosProducts(pool: Pool, query: string, limit?: number) {
+    return posProductSearchService.searchProducts(pool, { query, limit });
+  },
+
+  /** FEFO allocation lock preview (SELECT … FOR UPDATE inside transaction). */
+  async lockPosAllocation(pool: Pool, productId: string, quantity: number) {
+    return posProductSearchService.lockAllocation(pool, productId, quantity);
+  },
+
+  /** Stock visibility — legacy global or multistore store-scoped dimensions. */
+  async getStockVisibility(pool: Pool) {
+    return stockVisibilityService.getStockVisibility(pool);
   },
 };

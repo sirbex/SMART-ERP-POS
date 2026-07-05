@@ -7,6 +7,7 @@ import {
   poItemNetReceivedQuantitySql,
   poItemOpenQuantitySql,
 } from './purchaseOrderNetReceived.js';
+import { derivePOReceiptStatusBadge } from '../../../../shared/utils/purchaseOrderReceiptDisplay.js';
 
 describe('purchaseOrderNetReceived SQL helpers', () => {
   it('returned qty subquery references po_item_id and POSTED return GRN', () => {
@@ -26,5 +27,23 @@ describe('purchaseOrderNetReceived SQL helpers', () => {
     const sql = poItemOpenQuantitySql('poi');
     expect(sql).toContain('ordered_quantity');
     expect(sql).toContain('GREATEST(0');
+  });
+
+  it('derivePOReceiptStatusBadge shows Partially Received after return reopen', () => {
+    const badge = derivePOReceiptStatusBadge('PENDING', {
+      completedGrCount: 1,
+      netReceivedQtyTotal: 29,
+      openQtyTotal: 1,
+    });
+    expect(badge.label).toBe('Partially Received');
+  });
+
+  it('derivePOReceiptStatusBadge shows Awaiting Receipt before first GR', () => {
+    const badge = derivePOReceiptStatusBadge('PENDING', {
+      completedGrCount: 0,
+      netReceivedQtyTotal: 0,
+      openQtyTotal: 10,
+    });
+    expect(badge.label).toBe('Awaiting Receipt');
   });
 });

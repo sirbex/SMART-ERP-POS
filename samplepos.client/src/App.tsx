@@ -4,13 +4,17 @@ import { Toaster, toast } from 'react-hot-toast';
 import { Toaster as SonnerToaster } from 'sonner';
 import { useAuth } from './hooks/useAuth';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
+import { CashierPathGuard } from './components/auth/CashierPathGuard';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBanner from './components/NetworkStatusBanner';
 import BusinessDateSync from './components/BusinessDateSync';
+import { CASHIER_HOME_PATH, isCashierRole } from './utils/cashierLockdown';
 import OfflineAutoSync from './components/OfflineAutoSync';
 
 // Layouts stay static (small, shared across routes)
 import InventoryLayout from './components/InventoryLayout';
+import { StoreNetworkStoresRedirect } from './components/inventory/StoreNetworkLayout';
+import { StoreNetworkSection } from './components/inventory/StoreNetworkSection';
 import AccountingLayout from './components/AccountingLayout';
 
 /**
@@ -61,6 +65,7 @@ const InventoryAnalyticsReportPage = lazyWithRetry(() => import('./pages/reports
 const InventoryMarginsReportPage = lazyWithRetry(() => import('./pages/reports/inventory/InventoryMarginsReportPage'));
 const CategoryIntelligencePage = lazyWithRetry(() => import('./pages/reports/CategoryIntelligencePage'));
 const AdminDataManagementPage = lazyWithRetry(() => import('./pages/AdminDataManagementPage'));
+const InventoryCommandCenterPage = lazyWithRetry(() => import('./pages/inventory/InventoryCommandCenterPage'));
 const StockLevelsPage = lazyWithRetry(() => import('./pages/inventory/StockLevelsPage'));
 const ProductsPage = lazyWithRetry(() => import('./pages/inventory/ProductsPage'));
 const StockMovementsPage = lazyWithRetry(() => import('./pages/inventory/StockMovementsPage'));
@@ -118,6 +123,15 @@ const DistInvoiceListPage = lazyWithRetry(() => import('./pages/distribution/Dis
 const DistClearingPage = lazyWithRetry(() => import('./pages/distribution/DistClearingPage'));
 const ImportPage = lazyWithRetry(() => import('./pages/ImportPage'));
 const BarcodeLookupPage = lazyWithRetry(() => import('./pages/inventory/BarcodeLookupPage'));
+const StoreManagementPage = lazyWithRetry(() => import('./pages/inventory/StoreManagementPage'));
+const StoreNetworkLocationsPage = lazyWithRetry(() => import('./pages/inventory/StoreNetworkLocationsPage'));
+const StoreNetworkSettingsPage = lazyWithRetry(() => import('./pages/inventory/StoreNetworkSettingsPage'));
+const StoreNetworkReportPage = lazyWithRetry(() => import('./pages/reports/inventory/StoreNetworkReportPage'));
+const StoreAssortmentMatrixPage = lazyWithRetry(() => import('./pages/inventory/StoreAssortmentMatrixPage'));
+const StockCountsPage = lazyWithRetry(() => import('./pages/inventory/StockCountsPage'));
+const StoreDashboardPage = lazyWithRetry(() => import('./pages/inventory/StoreDashboardPage'));
+const StoreTransfersPage = lazyWithRetry(() => import('./pages/inventory/StoreTransfersPage'));
+const TransferApprovalsPage = lazyWithRetry(() => import('./pages/inventory/TransferApprovalsPage'));
 const CRMPage = lazyWithRetry(() => import('./pages/crm/CRMPage'));
 const HRPage = lazyWithRetry(() => import('./pages/hr/HRPage'));
 const PriceGroupsPage = lazyWithRetry(() => import('./pages/pricing/PriceGroupsPage'));
@@ -136,6 +150,12 @@ const PlatformDashboardPage = lazyWithRetry(() => import('./pages/platform/Platf
 const TenantsPage = lazyWithRetry(() => import('./pages/platform/TenantsPage'));
 const AdminsPage = lazyWithRetry(() => import('./pages/platform/AdminsPage'));
 const PlatformHealthPage = lazyWithRetry(() => import('./pages/platform/PlatformHealthPage'));
+
+// Redirect home: cashiers land on POS, everyone else on dashboard
+function HomeRedirect() {
+  const { user } = useAuth();
+  return <Navigate to={isCashierRole(user?.role) ? CASHIER_HOME_PATH : '/dashboard'} replace />;
+}
 
 // Platform route guard
 function PlatformProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -285,7 +305,7 @@ function App() {
               </Route>
 
               {isAuthenticated ? (
-                <>
+                <Route element={<CashierPathGuard />}>
                   {/* Dashboard - All authenticated users */}
                   <Route
                     path="/dashboard"
@@ -310,7 +330,7 @@ function App() {
                   <Route
                     path="/orders-queue"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']} requiredPermissions={['orders.read']} requiredFeature="pos">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']} requiredPermissions={['orders.read']} requiredFeature="pos">
                         <OrdersQueuePage />
                       </ProtectedRoute>
                     }
@@ -368,7 +388,7 @@ function App() {
                   <Route
                     path="/quotations"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.read']} requiredFeature="invoices">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['quotations.read']} requiredFeature="invoices">
                         <QuotationsPage />
                       </ProtectedRoute>
                     }
@@ -376,7 +396,7 @@ function App() {
                   <Route
                     path="/quotations/new"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.create']} requiredFeature="invoices">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['quotations.create']} requiredFeature="invoices">
                         <NewQuotationPage />
                       </ProtectedRoute>
                     }
@@ -384,7 +404,7 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber/edit"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.update']} requiredFeature="invoices">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['quotations.update']} requiredFeature="invoices">
                         <EditQuotationPage />
                       </ProtectedRoute>
                     }
@@ -392,7 +412,7 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber/convert"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['sales.create']} requiredFeature="invoices">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['sales.create']} requiredFeature="invoices">
                         <QuoteConversionPage />
                       </ProtectedRoute>
                     }
@@ -400,7 +420,7 @@ function App() {
                   <Route
                     path="/quotations/:quoteNumber"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['quotations.read']} requiredFeature="invoices">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['quotations.read']} requiredFeature="invoices">
                         <QuoteDetailPage />
                       </ProtectedRoute>
                     }
@@ -541,7 +561,7 @@ function App() {
                   <Route
                     path="/accounting/expenses"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermissions={['expenses.read']} requiredFeature="accounting">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['expenses.read']} requiredFeature="accounting">
                         <AccountingLayout>
                           <ExpensesPage />
                         </AccountingLayout>
@@ -842,7 +862,7 @@ function App() {
                   <Route
                     path="/settings"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['system.manage']}>
+                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['system.read']}>
                         <SettingsPage />
                       </ProtectedRoute>
                     }
@@ -850,7 +870,7 @@ function App() {
                   <Route
                     path="/settings/security"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['system.manage']}>
+                      <ProtectedRoute requiredRoles={['ADMIN']} requiredPermissions={['system.read']}>
                         <SecuritySettingsPage />
                       </ProtectedRoute>
                     }
@@ -926,6 +946,14 @@ function App() {
                     element={
                       <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.inventory_view', 'reports.read']} requiredFeature="reports">
                         <InventoryMarginsReportPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/reports/inventory/network"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['reports.inventory_view', 'reports.read', 'inventory.read']} requiredFeature="reports">
+                        <StoreNetworkReportPage />
                       </ProtectedRoute>
                     }
                   />
@@ -1022,7 +1050,7 @@ function App() {
                   <Route
                     path="/distribution/invoices"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['invoices.read']} requiredFeature="invoices">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['accounting.read']} requiredFeature="invoices">
                         <DistInvoiceListPage />
                       </ProtectedRoute>
                     }
@@ -1050,7 +1078,17 @@ function App() {
                   <Route
                     path="/inventory"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <InventoryCommandCenterPage />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/stock-levels"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
                         <InventoryLayout>
                           <StockLevelsPage />
                         </InventoryLayout>
@@ -1073,6 +1111,138 @@ function App() {
                       <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
                         <InventoryLayout>
                           <BatchManagementPage />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/stock-counts"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <StoreNetworkSection>
+                            <StockCountsPage />
+                          </StoreNetworkSection>
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/reports"
+                    element={<Navigate to="/reports" replace />}
+                  />
+                  <Route
+                    path="/inventory/reports/*"
+                    element={<Navigate to="/reports" replace />}
+                  />
+                  <Route
+                    path="/inventory/store-network/stores"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read', 'inventory.approve']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <StoreManagementPage />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/store-network/locations"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read', 'inventory.approve']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <StoreNetworkLocationsPage />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/store-network/assortment"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read', 'inventory.manage']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <StoreAssortmentMatrixPage />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/store-network/reports"
+                    element={<Navigate to="/reports/inventory/network" replace />}
+                  />
+                  <Route
+                    path="/inventory/store-network/settings"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read', 'settings.update']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <StoreNetworkSettingsPage />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/store-network"
+                    element={<Navigate to="/inventory/store-network/stores" replace />}
+                  />
+                  <Route
+                    path="/inventory/stores"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read', 'inventory.approve']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <StoreNetworkStoresRedirect />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/stores/:storeId"
+                    element={
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <StoreDashboardPage />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/store-transfers"
+                    element={
+                      <ProtectedRoute
+                        requiredRoles={['ADMIN', 'MANAGER', 'STAFF']}
+                        requiredPermissions={[
+                          'inventory.read',
+                          'inventory.transfer.request',
+                          'inventory.transfer.direct',
+                          'inventory.transfer.override',
+                          'inventory.approve',
+                        ]}
+                        requiredFeature="inventory"
+                      >
+                        <InventoryLayout>
+                          <StoreNetworkSection>
+                            <StoreTransfersPage />
+                          </StoreNetworkSection>
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/transfer-approvals"
+                    element={
+                      <ProtectedRoute
+                        requiredRoles={['ADMIN', 'MANAGER', 'STAFF']}
+                        requiredPermissions={[
+                          'inventory.read',
+                          'inventory.transfer.approve',
+                          'inventory.transfer.dispatch',
+                          'inventory.transfer.receive',
+                          'inventory.approve',
+                        ]}
+                        requiredFeature="inventory"
+                      >
+                        <InventoryLayout>
+                          <StoreNetworkSection>
+                            <TransferApprovalsPage />
+                          </StoreNetworkSection>
                         </InventoryLayout>
                       </ProtectedRoute>
                     }
@@ -1130,7 +1300,7 @@ function App() {
                   <Route
                     path="/inventory/barcode-lookup"
                     element={
-                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF', 'CASHIER']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
+                      <ProtectedRoute requiredRoles={['ADMIN', 'MANAGER', 'STAFF']} requiredPermissions={['inventory.read']} requiredFeature="inventory">
                         <InventoryLayout>
                           <BarcodeLookupPage />
                         </InventoryLayout>
@@ -1138,8 +1308,8 @@ function App() {
                     }
                   />
 
-                  <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                </>
+                  <Route path="/" element={<HomeRedirect />} />
+                </Route>
               ) : (
                 <Route path="*" element={<Navigate to="/login" replace />} />
               )}

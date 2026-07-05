@@ -390,7 +390,7 @@ const SupplierPaymentsPage: React.FC = () => {
             url.searchParams.delete('amount');
             window.history.replaceState({}, '', url.toString());
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+         
     }, []);
 
     const loadTabData = async () => {

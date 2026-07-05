@@ -21,16 +21,16 @@ import {
 
 const router = Router();
 
-// View routes - authenticated users
-router.get('/', authenticate, getSuppliers);
-router.get('/search', authenticate, searchSuppliers);
-router.get('/by-number/:supplierNumber', authenticate, getSupplierByNumber);
-router.get('/:id', authenticate, getSupplier);
-router.get('/:id/performance', authenticate, getSupplierPerformance);
-router.get('/:id/orders', authenticate, getSupplierOrders);
-router.get('/:id/products', authenticate, getSupplierProducts);
-router.get('/:id/ledger', authenticate, getSupplierLedger);
-router.get('/:id/smart-statement', authenticate, getSmartSupplierStatement);
+// View routes
+router.get('/', authenticate, requirePermission('suppliers.read'), getSuppliers);
+router.get('/search', authenticate, requirePermission('suppliers.read'), searchSuppliers);
+router.get('/by-number/:supplierNumber', authenticate, requirePermission('suppliers.read'), getSupplierByNumber);
+router.get('/:id', authenticate, requirePermission('suppliers.read'), getSupplier);
+router.get('/:id/performance', authenticate, requirePermission('suppliers.read'), getSupplierPerformance);
+router.get('/:id/orders', authenticate, requirePermission('suppliers.read'), getSupplierOrders);
+router.get('/:id/products', authenticate, requirePermission('suppliers.read'), getSupplierProducts);
+router.get('/:id/ledger', authenticate, requirePermission('suppliers.read'), getSupplierLedger);
+router.get('/:id/smart-statement', authenticate, requirePermission('suppliers.read'), getSmartSupplierStatement);
 
 // Modify routes - requires supplier permissions
 router.post('/', authenticate, requirePermission('suppliers.create'), createSupplier);

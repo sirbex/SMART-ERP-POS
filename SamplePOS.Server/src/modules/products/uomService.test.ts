@@ -36,6 +36,8 @@ jest.unstable_mockModule('../audit/auditService.js', () => ({
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
   UnitOfWork: {
     run: async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => fn({}),
+    runOrJoin: async (_handle: unknown, fn: (client: unknown) => Promise<unknown>) => fn({}),
+    isPool: (handle: unknown) => typeof (handle as Pool).totalCount === 'number',
   },
 }));
 

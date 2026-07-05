@@ -15,15 +15,34 @@ const mockGetStockLevelByProduct = jest.fn<MockFn>();
 const mockGetBatchesExpiringSoon = jest.fn<MockFn>();
 const mockSelectFEFOBatches = jest.fn<MockFn>();
 const mockProcessMovement = jest.fn<MockFn>();
+const mockIsMultistoreEnabled = jest.fn<MockFn>();
+const mockAdjustAtStore = jest.fn<MockFn>();
+const mockResolveStoreLocationId = jest.fn<MockFn>();
+
+jest.unstable_mockModule('./warehouse/multistoreSettings.js', () => ({
+    isMultistoreEnabled: mockIsMultistoreEnabled,
+}));
+
+jest.unstable_mockModule('./warehouse/warehouseAdjustmentService.js', () => ({
+    warehouseAdjustmentService: {
+        resolveStoreLocationId: mockResolveStoreLocationId,
+        adjustAtStore: mockAdjustAtStore,
+    },
+}));
 
 jest.unstable_mockModule('./inventoryRepository.js', () => ({
     inventoryRepository: {
         getBatchesByProduct: mockGetBatchesByProduct,
         getAllActiveBatches: mockGetAllActiveBatches,
-        getStockLevels: mockGetStockLevels,
-        getStockLevelByProduct: mockGetStockLevelByProduct,
         getBatchesExpiringSoon: mockGetBatchesExpiringSoon,
         selectFEFOBatches: mockSelectFEFOBatches,
+    },
+}));
+
+jest.unstable_mockModule('./warehouse/inventoryStockQueryService.js', () => ({
+    inventoryStockQueryService: {
+        getStockLevels: mockGetStockLevels,
+        getStockLevelByProduct: mockGetStockLevelByProduct,
     },
 }));
 
@@ -47,7 +66,10 @@ const mockPool = {
 } as unknown as Pool;
 
 describe('inventoryService', () => {
-    beforeEach(() => jest.clearAllMocks());
+    beforeEach(() => {
+        jest.clearAllMocks();
+        mockIsMultistoreEnabled.mockResolvedValue(false);
+    });
 
     describe('getBatchesByProduct', () => {
         it('should return batches for a product', async () => {
@@ -114,8 +136,9 @@ describe('inventoryService', () => {
             ).rejects.toThrow('Adjustment amount cannot be zero');
         });
 
-        it('should call processMovement for positive adjustment', async () => {
+        it('should call processMovement for positive adjustment (legacy)', async () => {
             mockProcessMovement.mockResolvedValue({ movementId: 'm1', movementNumber: 'SM-001' });
+            (mockPool.query as jest.Mock<MockFn>).mockResolvedValue({ rows: [{ cost_price: '10' }] });
 
             const result = await inventoryService.adjustInventory(
                 mockPool,
@@ -127,6 +150,34 @@ describe('inventoryService', () => {
 
             expect(result.movementId).toBe('m1');
             expect(mockProcessMovement).toHaveBeenCalled();
+            expect(mockAdjustAtStore).not.toHaveBeenCalled();
+        });
+
+        it('should route to warehouseAdjustmentService when multistore is enabled', async () => {
+            mockIsMultistoreEnabled.mockResolvedValue(true);
+            mockResolveStoreLocationId.mockResolvedValue('store-main');
+            mockAdjustAtStore.mockResolvedValue({ movementId: 'm2', documentId: 'doc-1' });
+
+            const result = await inventoryService.adjustInventory(
+                mockPool,
+                'p1',
+                -5,
+                'Shrinkage correction',
+                'u1',
+            );
+
+            expect(mockAdjustAtStore).toHaveBeenCalledWith(
+                mockPool,
+                expect.objectContaining({
+                    storeLocationId: 'store-main',
+                    productId: 'p1',
+                    quantity: 5,
+                    direction: 'OUT',
+                    reason: 'ADJUSTMENT',
+                }),
+            );
+            expect(mockProcessMovement).not.toHaveBeenCalled();
+            expect(result).toMatchObject({ movementId: 'm2' });
         });
     });
 

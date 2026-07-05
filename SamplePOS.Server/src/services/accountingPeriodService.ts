@@ -609,7 +609,7 @@ export class AccountingPeriodService {
 }
 
 // Export singleton factory
-let periodServiceInstance: AccountingPeriodService | null = null;
+const periodServiceInstance: AccountingPeriodService | null = null;
 
 export function getAccountingPeriodService(pool: Pool): AccountingPeriodService {
     return new AccountingPeriodService(pool);

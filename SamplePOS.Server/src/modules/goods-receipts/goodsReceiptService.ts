@@ -10,7 +10,8 @@ import {
   GoodsReceipt,
   GoodsReceiptItem,
 } from './goodsReceiptRepository.js';
-import { purchaseOrderRepository } from '../purchase-orders/purchaseOrderRepository.js';
+import { purchaseOrderRepository, type CreatePOItemData } from '../purchase-orders/purchaseOrderRepository.js';
+import { linkInvoiceToGRNs } from '../supplier-payments/supplierPaymentRepository.js';
 import { inventoryRepository } from '../inventory/inventoryRepository.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import * as pricingService from '../../services/pricingService.js';
@@ -20,11 +21,11 @@ import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppl
 import { batchFetchProducts } from '../../db/batchFetch.js';
 import logger from '../../utils/logger.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
-import * as stateTablesRepo from '../../repositories/stateTablesRepository.js';
 import {
   InventoryBusinessRules,
   PurchaseOrderBusinessRules,
 } from '../../middleware/businessRules.js';
+import { assertSupplierCreditHeadroom } from '../suppliers/supplierCreditGuard.js';
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../../utils/dateRange.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
@@ -41,7 +42,8 @@ import { returnGrnService } from '../return-grn/returnGrnService.js';
 import { returnGrnRepository } from '../return-grn/returnGrnRepository.js';
 import { returnGrnPurchaseQuantityFromBase } from '../return-grn/returnGrnQuantity.js';
 import type { CorrectionEligibilityResult } from '../corrections/correctionEligibilityTypes.js';
-import { BusinessError } from '../../middleware/errorHandler.js';
+import { BusinessError, ValidationError } from '../../middleware/errorHandler.js';
+import { warehouseGrnService } from '../inventory/warehouse/warehouseGrnService.js';
 
 // Alert shape consumed by controller for finalize response
 export interface CostPriceChangeAlert {
@@ -74,6 +76,12 @@ export interface FinalizeGRResult {
   hasAlerts: boolean;
   alertSummary: string | null;
   warnings?: string[];
+  linkedSiblingBill?: {
+    invoiceId: string;
+    invoiceNumber: string;
+    grnId: string;
+    grnNumber: string;
+  } | null;
 }
 
 export interface ListGRsResult {
@@ -239,14 +247,47 @@ export const goodsReceiptService = {
       if (!purchaseOrderId && data.supplierId) {
         logger.info(`Creating manual PO for supplier ${data.supplierId}`);
 
-        // Prepare PO items from GR items
-        const poItems = data.items.map((item) => ({
-          purchaseOrderId: '', // Will be set by createManualPO
-          productId: item.productId,
-          productName: item.productName,
-          quantity: item.receivedQuantity, // For manual receipts, ordered = received
-          unitCost: item.unitCost,
-        }));
+        await PurchaseOrderBusinessRules.validateSupplierExists(client, data.supplierId);
+
+        // Prepare PO items from GR items (UoM snapshot matches purchaseOrderService.createPO)
+        const poItems: CreatePOItemData[] = [];
+        for (const item of data.items) {
+          const { baseUomId, conversionFactor } = await resolveCanonicalProductUom(
+            item.productId,
+            item.uomId,
+            client,
+          );
+          const baseQty = PricingEngine.calculateBaseQuantity(item.receivedQuantity, conversionFactor).toNumber();
+          const baseUnitCost = PricingEngine.normalizeDisplayUnitCost(item.unitCost, conversionFactor);
+          const canonicalLineTotal = PricingEngine.calculateDocumentLineFromBase(
+            baseQty,
+            baseUnitCost.toNumber(),
+          ).toNumber();
+
+          poItems.push({
+            purchaseOrderId: '',
+            productId: item.productId,
+            productName: item.productName,
+            quantity: item.receivedQuantity,
+            unitCost: Money.toNumber(new Decimal(item.unitCost)),
+            lineTotal: canonicalLineTotal,
+            uomId: item.uomId || null,
+            baseQty,
+            baseUomId,
+            conversionFactor,
+          });
+        }
+
+        const manualTotal = Money.toNumber(poItems.reduce(
+          (sum, item) => sum.plus(new Decimal(item.lineTotal ?? 0)),
+          new Decimal(0),
+        ));
+        await assertSupplierCreditHeadroom(
+          client,
+          data.supplierId,
+          manualTotal,
+          'manual goods receipt',
+        );
 
         // Create manual PO with items
         const poResult = await purchaseOrderRepository.createManualPO(client, {
@@ -289,7 +330,7 @@ export const goodsReceiptService = {
       for (const it of data.items) {
         const orderedQty = it.orderedQuantity;
         const receivedQty = it.receivedQuantity;
-        let unitCost = it.unitCost;
+        const unitCost = it.unitCost;
         const expiry = it.expiryDate ?? null;
 
         const productData = grProductsMap.get(it.productId);
@@ -304,21 +345,20 @@ export const goodsReceiptService = {
           expiryDate: expiry,
           trackExpiry,
         });
-        logger.info('BR-INV-011: GR item completeness validation passed', {
-          productId: it.productId,
-        });
+        if (receivedQty > 0) {
+          logger.info('BR-INV-011: GR item completeness validation passed', {
+            productId: it.productId,
+          });
 
-        // BR-INV-002: Validate positive quantity
-        InventoryBusinessRules.validatePositiveQuantity(
-          Math.max(receivedQty, 0),
-          'goods receipt item'
-        );
+          // BR-INV-002: Validate positive quantity
+          InventoryBusinessRules.validatePositiveQuantity(receivedQty, 'goods receipt item');
+        }
 
         // BR-PO-003: Validate unit cost
         PurchaseOrderBusinessRules.validateUnitCost(unitCost);
 
         // BR-PO-006: PO-linked qty — open PO qty billable; excess is bonus (free)
-        if (purchaseOrderId && !manualPO) {
+        if (purchaseOrderId && !manualPO && receivedQty > 0) {
           const poAlready = Money.parseDb(
             (it as { poAlreadyReceived?: number }).poAlreadyReceived ?? 0
           ).toNumber();
@@ -390,9 +430,6 @@ export const goodsReceiptService = {
           );
         }
 
-        // BR-INV-009: Check if receiving would exceed max stock
-        await InventoryBusinessRules.validateMaxStockLevel(client, it.productId, receivedQty);
-
         const { baseUomId: grBaseUomId, conversionFactor: grConversionFactor } = await resolveCanonicalProductUom(
           it.productId,
           it.uomId,
@@ -414,10 +451,11 @@ export const goodsReceiptService = {
           baseQty: grBaseQty,
           baseUomId: grBaseUomId,
           conversionFactor: grConversionFactor,
+          targetStoreLocationId: (it as { targetStoreLocationId?: string | null }).targetStoreLocationId ?? null,
         });
       }
 
-      const items = await goodsReceiptRepository.addGRItems(client, itemsToInsert);
+      await goodsReceiptRepository.addGRItems(client, itemsToInsert);
 
       // Document Flow: PO → Goods Receipt
       if (purchaseOrderId) {
@@ -451,8 +489,9 @@ export const goodsReceiptService = {
 
   // Finalize a goods receipt: create batches, stock movements, cost layers, pricing updates
   async finalizeGR(pool: Pool, id: string): Promise<FinalizeGRResult> {
-    const { alerts, warnings } = await UnitOfWork.run(pool, async (client) => {
+    const { alerts, warnings, linkedSiblingBill } = await UnitOfWork.run(pool, async (client) => {
       const warnings: string[] = [];
+      let linkedSiblingBill: FinalizeGRResult['linkedSiblingBill'] = null;
 
       const grResult = await goodsReceiptRepository.getGRById(client, id);
       if (!grResult) throw new Error(`Goods receipt ${id} not found`);
@@ -543,6 +582,10 @@ export const goodsReceiptService = {
 
       const inventoryCouplingBefore = await captureInventoryCoupling(client);
 
+      // Inventory SSOT for lot-based GRN: createBatch + warehouseGrnService.postReceiptSegment.
+      // StockMovementHandler GOODS_RECEIPT targets MAIN-batch adjustments only and does not
+      // support per-lot expiry, bonus splits, or multistore inventory_balances coupling.
+
       for (const item of items) {
         const productId: string = item.productId;
         const productName: string = item.productName;
@@ -606,7 +649,6 @@ export const goodsReceiptService = {
         for (const segment of segments) {
           const segmentQty = segment.qty;
           const isBonus = segment.isBonusSegment;
-          const effectiveCost: number = isBonus ? 0 : unitCost;
           const baseQty = PricingEngine.calculateBaseQuantity(segmentQty, finConversionFactor).toNumber();
           const baseCostPerUnit: number = isBonus
             ? 0
@@ -663,6 +705,18 @@ export const goodsReceiptService = {
             goodsReceiptItemId: item.id ?? null,
             purchaseOrderId: gr.purchaseOrderId ?? null,
             purchaseOrderItemId: poItemId ?? null,
+            isBonus,
+          });
+
+          await warehouseGrnService.postReceiptSegment(client, {
+            productId,
+            lotNumber: batchNumber,
+            quantity: baseQty,
+            costPrice: baseCostPerUnit,
+            expiryDate,
+            goodsReceiptId: gr.id,
+            inventoryBatchId: String((batch as { id: string }).id),
+            targetStoreLocationId: item.targetStoreLocationId ?? null,
             isBonus,
           });
 
@@ -805,22 +859,18 @@ export const goodsReceiptService = {
           await pricingService.onCostChange(costData.productId, pool);
         } catch (err: unknown) {
           const errMsg = err instanceof Error ? err.message : String(err);
-          // CRITICAL: Cost layer creation failed - GR exists but cost valuation incomplete
-          // This affects FIFO/AVCO costing for future sales
-          logger.error('CRITICAL: Cost layer creation failed - REQUIRES MANUAL REMEDIATION', {
+          logger.error('Cost layer creation failed — GR finalize rolled back', {
             grId: id,
             grNumber,
             productId: costData.productId,
             quantity: costData.quantity,
             unitCost: costData.unitCost,
             error: errMsg,
-            remediation: 'Manually create cost layer via system management or re-process GR',
           });
-          warnings.push(
-            `Cost layer creation failed for product ${costData.productId}: ${errMsg}. Manual remediation required.`
+          throw new ValidationError(
+            `Cost layer creation failed for product ${costData.productId}: ${errMsg}. ` +
+              'GR finalize aborted to prevent FIFO/AVCO valuation drift.',
           );
-          // Note: Not throwing - cost layer failure should not block GR
-          // Missing cost layer affects costing, not inventory quantity
         }
       }
 
@@ -888,7 +938,6 @@ export const goodsReceiptService = {
       // ============================================================
       try {
         await client.query('SAVEPOINT gr_state_tables');
-        const grDateStr = gr.receivedDate || getBusinessDate();
 
         // Pre-aggregate by productId for batch UPSERT
         const invMap = new Map<string, Decimal>();
@@ -957,7 +1006,34 @@ export const goodsReceiptService = {
         `goods receipt ${grNumber || id}`,
       );
 
-      return { alerts, warnings };
+      if (gr.purchaseOrderId) {
+        const siblingBill = await goodsReceiptRepository.findPoSiblingSupplierBill(
+          client,
+          gr.purchaseOrderId,
+          id,
+        );
+        if (siblingBill) {
+          const existingLink = await client.query(
+            `SELECT 1 FROM supplier_invoice_grn_links WHERE grn_id = $1 LIMIT 1`,
+            [id],
+          );
+          if (existingLink.rows.length === 0) {
+            await linkInvoiceToGRNs(client, siblingBill.invoiceId, [id]);
+            linkedSiblingBill = siblingBill;
+            warnings.push(
+              `Top-up receipt linked to existing supplier bill ${siblingBill.invoiceNumber} ` +
+                `from ${siblingBill.grnNumber} — no new supplier invoice for this PO.`,
+            );
+            logger.info('Follow-up GR linked to PO sibling supplier bill', {
+              grId: id,
+              poId: gr.purchaseOrderId,
+              ...siblingBill,
+            });
+          }
+        }
+      }
+
+      return { alerts, warnings, linkedSiblingBill };
     });
 
     // Reload completed GR for response
@@ -972,6 +1048,7 @@ export const goodsReceiptService = {
       alertSummary:
         alerts.length > 0 ? `${alerts.length} product(s) with cost price changes` : null,
       warnings: warnings.length > 0 ? warnings : undefined,
+      linkedSiblingBill: linkedSiblingBill ?? undefined,
     };
   },
 
@@ -1057,6 +1134,8 @@ export const goodsReceiptService = {
         data.unitCost !== undefined ? data.unitCost : Money.parseDb(item.unitCost).toNumber();
       const effectiveExpiry =
         data.expiryDate !== undefined ? data.expiryDate : item.expiryDate ?? null;
+      const effectiveUomId =
+        data.uomId !== undefined ? data.uomId : item.uomId ?? null;
       const productMap = await batchFetchProducts(client, [item.productId]);
       const trackExpiry = !!(productMap.get(item.productId)?.track_expiry);
       InventoryBusinessRules.validateGRItemCompleteness({
@@ -1068,7 +1147,18 @@ export const goodsReceiptService = {
         trackExpiry,
       });
 
-      const updateData = { ...data };
+      const { baseUomId, conversionFactor } = await resolveCanonicalProductUom(
+        item.productId,
+        effectiveUomId,
+        client,
+      );
+      const updateData = {
+        ...data,
+        uomId: effectiveUomId,
+        baseQty: PricingEngine.calculateBaseQuantity(effectiveQty, conversionFactor).toNumber(),
+        baseUomId,
+        conversionFactor,
+      };
 
       const updated = await goodsReceiptRepository.updateGRItem(client, itemId, updateData);
       return updated;
@@ -1089,6 +1179,8 @@ export const goodsReceiptService = {
       batchNumber?: string | null;
       isBonus?: boolean;
       expiryDate?: string | null;
+      uomId?: string | null;
+      targetStoreLocationId?: string | null;
     }>
   ): Promise<GoodsReceiptItem[]> {
     return UnitOfWork.run(pool, async (client) => {
@@ -1148,6 +1240,8 @@ export const goodsReceiptService = {
             : Money.parseDb(existing.unitCost).toNumber();
         const effectiveExpiry =
           update.expiryDate !== undefined ? update.expiryDate : existing.expiryDate ?? null;
+        const effectiveUomId =
+          update.uomId !== undefined ? update.uomId : existing.uomId ?? null;
         const trackExpiry = !!(batchProductsMap.get(existing.productId)?.track_expiry);
         InventoryBusinessRules.validateGRItemCompleteness({
           productId: existing.productId,
@@ -1158,12 +1252,29 @@ export const goodsReceiptService = {
           trackExpiry,
         });
 
+        const { baseUomId, conversionFactor } = await resolveCanonicalProductUom(
+          existing.productId,
+          effectiveUomId,
+          client,
+        );
         const data: UpdateGRItemData = {};
         if (update.receivedQuantity !== undefined) data.receivedQuantity = update.receivedQuantity;
         if (update.unitCost !== undefined) data.unitCost = update.unitCost;
         if (update.batchNumber !== undefined) data.batchNumber = update.batchNumber ?? undefined;
         if (update.expiryDate !== undefined) data.expiryDate = update.expiryDate ?? undefined;
         if (update.isBonus !== undefined) data.isBonus = update.isBonus;
+        if (update.uomId !== undefined) data.uomId = update.uomId;
+        if (update.targetStoreLocationId !== undefined) {
+          data.targetStoreLocationId = update.targetStoreLocationId ?? undefined;
+        }
+        if (
+          update.receivedQuantity !== undefined ||
+          update.uomId !== undefined
+        ) {
+          data.baseQty = PricingEngine.calculateBaseQuantity(effectiveQty, conversionFactor).toNumber();
+          data.baseUomId = baseUomId;
+          data.conversionFactor = conversionFactor;
+        }
 
         // Only update if there's something to change
         if (Object.keys(data).length > 0) {

@@ -1060,7 +1060,10 @@ export const supplierCreditDebitNoteRepository = {
     async cancelSupplierNote(client: Pool | PoolClient, noteId: string): Promise<SupplierCreditDebitNoteRecord | null> {
         const result = await client.query(
             `UPDATE supplier_invoices
-       SET "Status" = 'CANCELLED', "UpdatedAt" = NOW()
+       SET "Status" = 'CANCELLED',
+           "AmountPaid" = 0,
+           "OutstandingBalance" = 0,
+           "UpdatedAt" = NOW()
        WHERE "Id" = $1 AND "Status" IN ('POSTED', 'APPLIED') AND document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')
        RETURNING *`,
             [noteId]

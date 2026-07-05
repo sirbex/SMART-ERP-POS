@@ -58,7 +58,7 @@ export default function BrandingSettingsTab() {
             if (res.data.success) {
                 setMessage({ type: 'success', text: 'Branding saved. Users who reinstall the app will see the new name and colors.' });
             }
-        } catch (err) {
+        } catch {
             setMessage({ type: 'error', text: 'Failed to save branding settings.' });
         } finally {
             setSaving(false);

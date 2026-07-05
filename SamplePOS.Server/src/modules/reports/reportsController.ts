@@ -1,7 +1,7 @@
 // Reports Controller - HTTP endpoints for report generation
 // Handles parameter validation, authentication, and response formatting
 
-/// <reference path="../../types/express.d.ts" />
+import '../../types/express.js';
 import { Request, Response } from 'express';
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
@@ -18,7 +18,7 @@ import {
   formatDatePDF,
   formatDateTimePDF,
   PDFColors,
-} from '../../utils/pdfGenerator.js';
+} from '../documents/pdfGenerator.js';
 import { cnDnReportsController } from './cnDnReportController.js';
 import { buildReorderDashboardCsv, buildReorderExportRows } from './reorderDashboardExport.js';
 

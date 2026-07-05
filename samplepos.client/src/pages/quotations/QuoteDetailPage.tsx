@@ -1,4 +1,3 @@
-/* eslint-disable react/forbid-dom-props */
 /**
  * Quote Detail View Page — Static Timeline Layout
  *

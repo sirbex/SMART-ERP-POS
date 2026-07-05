@@ -19,6 +19,8 @@ import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import crypto from 'crypto';
 import { deductStockFEFO } from '../../utils/fefoDeduction.js';
+import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
+import { warehouseSaleDeductionService } from '../inventory/warehouse/warehouseSaleDeductionService.js';
 import { quotationRepository, QuotationDbRow, QuotationItemDbRow } from './quotationRepository.js';
 import { salesService } from '../sales/salesService.js';
 import { salesRepository, CreateSaleData, CreateSaleItemData } from '../sales/salesRepository.js';
@@ -924,19 +926,74 @@ export const quotationService = {
         };
       });
 
-      await salesRepository.addSaleItems(client, saleItemData);
+      const postedSaleItems = await salesRepository.addSaleItems(client, saleItemData);
 
-      // FEFO STOCK DEDUCTION — base_quantity SSOT (Rule 2).
-      for (const item of saleItems) {
+      const multistoreEnabled = await isMultistoreEnabled(client);
+      const sellingStoreId = multistoreEnabled
+        ? await warehouseSaleDeductionService.resolveSellingStoreId(client)
+        : null;
+
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
+      const movNumRes = await client.query(
+        `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' ||
+         CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
+              THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
+              ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
+         END AS movement_number
+         FROM stock_movements
+         WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`,
+      );
+      let movementSeq = parseInt(movNumRes.rows[0]?.movement_number?.split('-')[2] || '1', 10);
+
+      // FEFO / multistore store deduction — base_quantity SSOT (Rule 2).
+      for (let index = 0; index < saleItems.length; index++) {
+        const item = saleItems[index];
         const isServiceItem = !item.productId || item.productId.startsWith('custom_');
         if (isServiceItem) continue;
         const snap = item.uomSnapshot;
         const deductQty = snap ? snap.deductQuantity : new Decimal(item.quantity);
-        await InventoryBusinessRules.validateStockAvailability(
-          client,
-          item.productId!,
-          deductQty.toNumber(),
-        );
+
+        if (multistoreEnabled && sellingStoreId) {
+          await warehouseSaleDeductionService.validateSellableAtStore(
+            client,
+            sellingStoreId,
+            item.productId!,
+            deductQty.toNumber(),
+          );
+        } else {
+          await InventoryBusinessRules.validateStockAvailability(
+            client,
+            item.productId!,
+            deductQty.toNumber(),
+          );
+        }
+
+        if (multistoreEnabled && sellingStoreId) {
+          const deductResult = await warehouseSaleDeductionService.deductForSaleLine(client, {
+            storeLocationId: sellingStoreId,
+            productId: item.productId!,
+            productName: item.productName,
+            baseQty: deductQty,
+            saleId: saleRecord.id,
+            saleNumber: saleRecord.sale_number,
+            soldBy: data.cashierId,
+            enteredQty: item.quantity,
+            baseUomId: snap?.baseUomId ?? item.uomId ?? '',
+            conversionFactor: snap ? String(snap.conversionFactor) : '1',
+            movementSeqStart: movementSeq,
+          });
+          movementSeq = deductResult.nextMovementSeq;
+          const posted = postedSaleItems[index];
+          if (posted?.id) {
+            await salesRepository.updateSaleItemWarehouseTrace(client, posted.id, {
+              storeLocationId: deductResult.storeLocationId,
+              productLotId: deductResult.primaryProductLotId,
+              batchId: deductResult.primaryBatchId,
+            });
+          }
+          continue;
+        }
+
         await deductStockFEFO(client, {
           productId: item.productId!,
           quantity: deductQty,

@@ -3,6 +3,16 @@ import { systemSettingsRepository } from './systemSettingsRepository.js';
 import { SystemSettings, UpdateSystemSettingsDto } from '../../../../shared/types/systemSettings.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { storeLocationRepository } from '../inventory/warehouse/storeLocationRepository.js';
+import { clearMultistoreSettingsCache } from '../inventory/warehouse/multistoreSettings.js';
+
+export interface MultistoreToggleResult {
+    settings: SystemSettings;
+    multistoreBootstrap?: {
+        enabled: boolean;
+        storesEnsured: boolean;
+    };
+}
 
 export const systemSettingsService = {
     /**
@@ -27,26 +37,42 @@ export const systemSettingsService = {
         pool: Pool,
         updates: UpdateSystemSettingsDto,
         userId?: string
-    ): Promise<SystemSettings> {
-        // Add userId to updates for audit trail
+    ): Promise<MultistoreToggleResult> {
         const updatesWithUser = {
             ...updates,
             updatedById: userId,
         };
 
-        // Transaction: Update settings atomically
-        return UnitOfWork.run(pool, async (_client) => {
+        return UnitOfWork.run(pool, async (client) => {
             const updated = await systemSettingsRepository.updateSettings(
-                pool,
+                client,
                 updatesWithUser
             );
+
+            let multistoreBootstrap: MultistoreToggleResult['multistoreBootstrap'];
+
+            if (updates.isMultistoreEnabled !== undefined) {
+                clearMultistoreSettingsCache();
+                if (updates.isMultistoreEnabled) {
+                    await storeLocationRepository.ensureDefaultNetworkStores(client);
+                    multistoreBootstrap = { enabled: true, storesEnsured: true };
+                    logger.info('Multistore enabled — default store network ensured', {
+                        updatedBy: userId,
+                    });
+                } else {
+                    multistoreBootstrap = { enabled: false, storesEnsured: false };
+                    logger.info('Multistore disabled — legacy inventory paths active', {
+                        updatedBy: userId,
+                    });
+                }
+            }
 
             logger.info('System settings updated (transaction committed)', {
                 updatedBy: userId,
                 changes: Object.keys(updates),
             });
 
-            return updated;
+            return { settings: updated, multistoreBootstrap };
         });
     },
 

@@ -664,7 +664,7 @@ export class JournalEntryService {
 }
 
 // Export singleton factory
-let journalEntryServiceInstance: JournalEntryService | null = null;
+const journalEntryServiceInstance: JournalEntryService | null = null;
 
 export function getJournalEntryService(pool: Pool): JournalEntryService {
   return new JournalEntryService(pool);

@@ -106,6 +106,18 @@ jest.unstable_mockModule('../../utils/inventorySync.js', () => ({
   syncProductQuantity: mockSyncProductQuantity,
 }));
 
+jest.unstable_mockModule('../inventory/warehouse/warehouseSupplierReturnDeductionService.js', () => ({
+  warehouseSupplierReturnDeductionService: {
+    deductForSupplierReturn: jest.fn<AnyMock>().mockImplementation(async () => {
+      batchTotal = 500;
+      return {
+        costPrice: 100,
+        remainingQuantity: 0,
+      };
+    }),
+  },
+}));
+
 const mockClient = {
   query: jest.fn<(...args: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>>(),
 } as unknown as PoolClient;

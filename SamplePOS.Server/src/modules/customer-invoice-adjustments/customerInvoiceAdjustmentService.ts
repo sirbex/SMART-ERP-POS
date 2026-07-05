@@ -277,7 +277,7 @@ export const customerInvoiceAdjustmentService = {
             (sum, l) => sum + l.suggestedLineCredit,
             0,
         );
-        let remainingOverchargeCredit = Math.max(
+        const remainingOverchargeCredit = Math.max(
             0,
             Math.max(grossOverchargeTotal, totalSuggestedCredit) - existingCreditNoteTotal,
         );

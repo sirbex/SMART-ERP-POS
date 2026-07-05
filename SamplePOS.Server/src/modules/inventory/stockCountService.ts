@@ -21,6 +21,11 @@ import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { resolveCanonicalProductUom, requireProductBaseUom } from '../products/uomService.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
+import { isMultistoreEnabled } from './warehouse/multistoreSettings.js';
+import { warehouseAdjustmentService } from './warehouse/warehouseAdjustmentService.js';
+import { storeLocationRepository } from './warehouse/storeLocationRepository.js';
+import { ValidationError } from '../../middleware/errorHandler.js';
+import { productLotRepository } from './warehouse/productLotRepository.js';
 
 export const stockCountService = {
   /**
@@ -40,6 +45,21 @@ export const stockCountService = {
     }
   ) {
     return UnitOfWork.run(pool, async (client) => {
+      const multistore = await isMultistoreEnabled(client);
+
+      if (multistore) {
+        if (!data.locationId) {
+          throw new ValidationError('Store location is required for stock counts when multistore is enabled');
+        }
+        const store = await storeLocationRepository.getById(client, data.locationId);
+        if (!store?.isActive) {
+          throw new ValidationError('Selected store is not active');
+        }
+        if (store.storeType === 'TRANSIT') {
+          throw new ValidationError('Stock counts cannot be run against the in-transit store');
+        }
+      }
+
       // Create stock count
       const stockCount = await stockCountRepository.createStockCount(client, {
         name: data.name,
@@ -50,7 +70,59 @@ export const stockCountService = {
 
       logger.info('Stock count created', { stockCountId: stockCount.id, name: data.name });
 
-      // Determine which products to include
+      let linesCreated = 0;
+
+      if (multistore && data.locationId) {
+        let snapshotQuery = `
+          SELECT
+            pl.product_id,
+            pl.id AS product_lot_id,
+            pl.inventory_batch_id AS batch_id,
+            GREATEST(
+              ib.quantity_on_hand - ib.quantity_reserved - ib.quantity_committed,
+              0
+            ) AS expected_qty
+          FROM inventory_balances ib
+          INNER JOIN product_lots pl ON pl.id = ib.product_lot_id
+          INNER JOIN products p ON p.id = pl.product_id
+          WHERE ib.store_location_id = $1
+            AND pl.status = 'ACTIVE'
+            AND NOT ib.blocked
+            AND p.is_active = true
+        `;
+        const queryParams: unknown[] = [data.locationId];
+        let paramIndex = 2;
+
+        if (data.categoryId) {
+          snapshotQuery += ` AND p.category_id = $${paramIndex++}`;
+          queryParams.push(data.categoryId);
+        } else if (data.productIds && data.productIds.length > 0) {
+          snapshotQuery += ` AND p.id = ANY($${paramIndex++})`;
+          queryParams.push(data.productIds);
+        }
+
+        snapshotQuery += `
+          ORDER BY p.name ASC, pl.expiry_date ASC NULLS LAST, pl.lot_number ASC
+        `;
+
+        const productsResult = await client.query(snapshotQuery, queryParams);
+
+        for (const row of productsResult.rows) {
+          const expectedQty = Number(row.expected_qty || 0);
+          if (expectedQty <= 0 && !data.includeAllProducts) continue;
+
+          await stockCountRepository.createStockCountLine(client, {
+            stockCountId: stockCount.id,
+            productId: row.product_id,
+            productLotId: row.product_lot_id,
+            batchId: row.batch_id,
+            expectedQtyBase: expectedQty,
+            createdById: data.createdById,
+          });
+          linesCreated++;
+        }
+      } else {
+      // Determine which products to include (legacy global batches)
       let productQuery = `
         SELECT 
           p.id as product_id,
@@ -77,8 +149,6 @@ export const stockCountService = {
 
       const productsResult = await client.query(productQuery, queryParams);
 
-      // Create lines for each product/batch combination
-      let linesCreated = 0;
       for (const row of productsResult.rows) {
         await stockCountRepository.createStockCountLine(client, {
           stockCountId: stockCount.id,
@@ -88,6 +158,7 @@ export const stockCountService = {
           createdById: data.createdById,
         });
         linesCreated++;
+      }
       }
 
       // Update state to 'counting'
@@ -168,6 +239,7 @@ export const stockCountService = {
     data: {
       stockCountId: string;
       productId: string;
+      productLotId?: string | null;
       batchId?: string | null;
       countedQty: number;
       uom: string;
@@ -205,7 +277,8 @@ export const stockCountService = {
         client,
         data.stockCountId,
         data.productId,
-        data.batchId
+        data.batchId,
+        data.productLotId,
       );
 
       let line;
@@ -217,7 +290,23 @@ export const stockCountService = {
           notes: data.notes,
         });
       } else {
-        // Create new line (ad-hoc product not in initial scope)
+        const multistore = await isMultistoreEnabled(client);
+        let expectedQty = 0;
+
+        if (multistore && stockCount.location_id) {
+          if (data.productLotId) {
+            const balanceResult = await client.query(
+              `SELECT GREATEST(
+                 quantity_on_hand - quantity_reserved - quantity_committed,
+                 0
+               ) AS available
+               FROM inventory_balances
+               WHERE store_location_id = $1 AND product_lot_id = $2`,
+              [stockCount.location_id, data.productLotId],
+            );
+            expectedQty = Number(balanceResult.rows[0]?.available || 0);
+          }
+        } else {
         // Get expected quantity from current inventory
         const batchQuery = data.batchId
           ? 'SELECT remaining_quantity FROM inventory_batches WHERE id = $1'
@@ -229,11 +318,13 @@ export const stockCountService = {
           data.batchId ? [data.batchId] : [data.productId]
         );
 
-        const expectedQty = Number(batchResult.rows[0]?.remaining_quantity || 0);
+        expectedQty = Number(batchResult.rows[0]?.remaining_quantity || 0);
+        }
 
         line = await stockCountRepository.createStockCountLine(client, {
           stockCountId: data.stockCountId,
           productId: data.productId,
+          productLotId: data.productLotId,
           batchId: data.batchId,
           expectedQtyBase: expectedQty,
           countedQtyBase,
@@ -350,6 +441,10 @@ export const stockCountService = {
         totalLines: lines.length,
       });
 
+      const multistore = await isMultistoreEnabled(client);
+      const storeLocationId = stockCount.location_id;
+      const useStoreReconciliation = multistore && !!storeLocationId;
+
       let linesProcessed = 0;
 
       // Process each line
@@ -387,6 +482,63 @@ export const stockCountService = {
         });
 
         try {
+          if (useStoreReconciliation) {
+            const productLotId = line.product_lot_id as string | null | undefined;
+            if (!productLotId) {
+              errors.push(`Line ${line.id}: Missing product lot for store-scoped reconciliation`);
+              continue;
+            }
+
+            const lot = await productLotRepository.getById(client, productLotId);
+            if (!lot) {
+              errors.push(`Line ${line.id}: Product lot ${productLotId} not found`);
+              continue;
+            }
+
+            const direction = isIncrease ? 'IN' : 'OUT';
+            const notes = `Stocktake reconciliation - ${data.notes || 'Physical count adjustment'}`;
+
+            if (!isIncrease && !data.allowNegativeAdjustments) {
+              const sellableRes = await client.query<{ sellable: string }>(
+                `SELECT GREATEST(0,
+                   COALESCE(ib.quantity_on_hand, 0)::numeric
+                   - COALESCE(ib.quantity_reserved, 0)::numeric
+                   - COALESCE(ib.quantity_committed, 0)::numeric
+                 ) AS sellable
+                 FROM inventory_balances ib
+                 WHERE ib.store_location_id = $1 AND ib.product_lot_id = $2`,
+                [storeLocationId!, productLotId],
+              );
+              const sellable = new Decimal(sellableRes.rows[0]?.sellable ?? 0);
+              if (sellable.lessThan(absoluteDiff)) {
+                errors.push(
+                  `Line ${line.id}: Insufficient store stock (sellable: ${sellable}, need: ${absoluteDiff})`,
+                );
+                continue;
+              }
+            }
+
+            const result = await warehouseAdjustmentService.adjustAtStore(client, {
+              storeLocationId: storeLocationId!,
+              productId: line.product_id,
+              productLotId,
+              batchId: line.batch_id ?? lot.inventoryBatchId ?? undefined,
+              quantity: absoluteDiff,
+              direction,
+              reason: 'PHYSICAL_COUNT',
+              notes,
+              userId: data.validatedById,
+              documentId: data.stockCountId,
+            });
+
+            if ('movementId' in result) {
+              movementIds.push(result.movementId);
+            }
+            linesProcessed++;
+            continue;
+          }
+
+          // Legacy global batch reconciliation
           // Check for negative resulting quantity
           if (!isIncrease && !data.allowNegativeAdjustments) {
             // Verify we have enough stock
@@ -408,11 +560,24 @@ export const stockCountService = {
 
           // Use unified stock movement handler — pass txClient so movements
           // are atomic with the stock count state transition
+          let resolvedUnitCost: number | undefined;
+          if (isIncrease) {
+            const costRow = await client.query(
+              'SELECT cost_price FROM product_valuation WHERE product_id = $1',
+              [line.product_id],
+            );
+            const dbCost = costRow.rows[0]?.cost_price;
+            if (dbCost && parseFloat(String(dbCost)) > 0) {
+              resolvedUnitCost = parseFloat(String(dbCost));
+            }
+          }
+
           const result = await handler.processMovement({
             productId: line.product_id,
             batchId: line.batch_id,
             movementType: movementType as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT',
             quantity: absoluteDiff,
+            unitCost: resolvedUnitCost,
             reason: `Stocktake reconciliation - ${data.notes || 'Physical count adjustment'}`,
             referenceType: 'STOCK_COUNT',
             referenceId: data.stockCountId,
@@ -511,6 +676,7 @@ export const stockCountService = {
     filters: {
       state?: string;
       createdById?: string;
+      locationId?: string;
       page?: number;
       limit?: number;
     }

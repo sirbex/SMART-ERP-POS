@@ -19,10 +19,10 @@ import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import Decimal from 'decimal.js';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
-import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
-import type { GuardHandle } from '../../hooks/useTransactionGuard';
+import SlideDrawer from '../../components/ui/SlideDrawer';
 
 import { DatePicker } from '../../components/ui/date-picker';
+import { derivePOReceiptStatusBadge } from '../../../../shared/utils/purchaseOrderReceiptDisplay';
 import { downloadFile } from '../../utils/download';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
@@ -36,10 +36,10 @@ import {
   QuickCreateProductModal,
   BusinessRulesInfo,
   TotalsSummary,
-  ModalHeader,
   ModalFooter,
   ModalContainer,
   PURCHASE_ORDER_RULES,
+  WorkflowHelpTrigger,
 } from '../../components/inventory/shared';
 import type { ProcurementProduct } from '../../components/inventory/shared';
 import { UomSelector } from '../../components/inventory/UomSelector';
@@ -119,6 +119,14 @@ interface PORow {
   sent_date?: string;
   notes?: string;
   items?: POItemRow[];
+  orderedQtyTotal?: number | string;
+  ordered_qty_total?: number | string;
+  netReceivedQtyTotal?: number | string;
+  net_received_qty_total?: number | string;
+  openQtyTotal?: number | string;
+  open_qty_total?: number | string;
+  completedGrCount?: number | string;
+  completed_gr_count?: number | string;
 }
 
 /** Shape of the data returned when sending a PO to supplier */
@@ -389,15 +397,6 @@ function mapReorderItemsToLineItems(items: ReorderItemState[]): POLineItem[] {
 
 function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModalProps) {
   const { user } = useAuth();
-
-  // ── Transaction Guard ──────────────────────────────────────────────────
-  const { openGuard: openCreateGuard, closeGuard: closeCreateGuard } = useTransactionGuard();
-  const createGuardRef = useRef<GuardHandle | null>(null);
-  useEffect(() => {
-    createGuardRef.current = openCreateGuard({ cancellable: false, label: 'Create purchase order' });
-    return () => { if (createGuardRef.current) { closeCreateGuard(createGuardRef.current.id); createGuardRef.current = null; } };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const [supplierId, setSupplierId] = useState('');
   const [expectedDelivery, setExpectedDelivery] = useState('');
@@ -675,14 +674,29 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   });
 
   return (
-    <ModalContainer zIndex={createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
-      <ModalHeader
-        title="Create Purchase Order"
-        description="ERP-grade procurement — search, add, Tab through. Ctrl+Enter to submit."
-        onClose={onClose}
-      />
-
+    <ModalContainer
+      onClose={onClose}
+      title="Create Purchase Order"
+      subtitle="ERP-grade procurement — search, add, Tab through. Ctrl+Enter to submit."
+      transactional
+      cancellable={false}
+      guardLabel="Create purchase order"
+      footer={
+        <ModalFooter
+          onCancel={onClose}
+          onSubmit={() =>
+            handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>)
+          }
+          submitLabel="Create Purchase Order"
+          isSubmitting={isSubmitting}
+          submitDisabled={lineItems.length === 0}
+        />
+      }
+    >
       <form onSubmit={handleSubmit}>
+        <div className="flex justify-end mb-4">
+          <BusinessRulesInfo rules={PURCHASE_ORDER_RULES} title="Business Rules Applied" />
+        </div>
         {/* Header Section */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 mb-6">
           {/* Supplier Selection */}
@@ -826,20 +840,6 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
             />
           )}
         </div>
-
-        {/* Business Rules Info */}
-        <BusinessRulesInfo rules={PURCHASE_ORDER_RULES} className="mb-6" />
-
-        {/* Form Actions */}
-        <ModalFooter
-          onCancel={onClose}
-          onSubmit={() =>
-            handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>)
-          }
-          submitLabel="Create Purchase Order"
-          isSubmitting={isSubmitting}
-          submitDisabled={lineItems.length === 0}
-        />
       </form>
 
       {/* Quick-create supplier inline modal */}
@@ -869,11 +869,16 @@ function CreatePOModal({ onClose, onSuccess, initialReorderItems }: CreatePOModa
   );
 }
 
+function poStatusBadge(po: PORow) {
+  return derivePOReceiptStatusBadge(po.status, po);
+}
+
 function poCanChangeSupplier(po: PORow): boolean {
   if (po.status !== 'PENDING') return false;
   const items = po.items || [];
   return !items.some(
-    (i) => Number(i.receivedQuantity ?? i.received_quantity ?? 0) > 0
+    (i) =>
+      Number(i.net_received_quantity ?? i.netReceivedQuantity ?? i.receivedQuantity ?? i.received_quantity ?? 0) > 0
   );
 }
 
@@ -886,15 +891,6 @@ interface EditPOModalProps {
 
 function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
   const [supplierId, setSupplierId] = useState(po.supplierId || '');
-
-  // ── Transaction Guard ──────────────────────────────────────────────────
-  const { openGuard: openEditGuard, closeGuard: closeEditGuard } = useTransactionGuard();
-  const editGuardRef = useRef<GuardHandle | null>(null);
-  useEffect(() => {
-    editGuardRef.current = openEditGuard({ cancellable: false, label: 'Edit purchase order' });
-    return () => { if (editGuardRef.current) { closeEditGuard(editGuardRef.current.id); editGuardRef.current = null; } };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const [expectedDelivery, setExpectedDelivery] = useState(
     () => toApiDateOnly(po.expectedDelivery || po.expected_delivery_date) || ''
@@ -1137,13 +1133,23 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
   });
 
   return (
-    <ModalContainer zIndex={editGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
-      <ModalHeader
-        title={`Edit Purchase Order — ${po.poNumber || po.order_number}`}
-        description="Edit draft PO — modify header, add/remove items. Ctrl+Enter to save."
-        onClose={onClose}
-      />
-
+    <ModalContainer
+      onClose={onClose}
+      title={`Edit Purchase Order — ${po.poNumber || po.order_number}`}
+      subtitle="Edit draft PO — modify header, add/remove items. Ctrl+Enter to save."
+      transactional
+      cancellable={false}
+      guardLabel="Edit purchase order"
+      footer={
+        <ModalFooter
+          onCancel={onClose}
+          onSubmit={() => handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>)}
+          submitLabel="Save Changes"
+          isSubmitting={isSubmitting}
+          submitDisabled={lineItems.length === 0}
+        />
+      }
+    >
       <form onSubmit={handleSubmit}>
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1223,11 +1229,9 @@ function EditPOModal({ po, onClose, onSuccess }: EditPOModalProps) {
           )}
         </div>
 
-        <BusinessRulesInfo rules={PURCHASE_ORDER_RULES} className="mb-6" />
-
-        <ModalFooter onCancel={onClose}
-          onSubmit={() => handleSubmit(new Event('submit') as unknown as React.FormEvent<HTMLFormElement>)}
-          submitLabel="Save Changes" isSubmitting={isSubmitting} submitDisabled={lineItems.length === 0} />
+        <div className="flex justify-end mb-4">
+          <BusinessRulesInfo rules={PURCHASE_ORDER_RULES} title="Business Rules Applied" />
+        </div>
       </form>
 
       {showQuickProduct && (
@@ -1247,16 +1251,6 @@ export default function PurchaseOrdersPage() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [editingPO, setEditingPO] = useState<PORow | null>(null);
 
-  // ── Transaction Guard for Details overlay ──────────────────────────────────
-  const { openGuard: openDetailsGuard, closeGuard: closeDetailsGuard } = useTransactionGuard();
-  const detailsGuardRef = useRef<GuardHandle | null>(null);
-  useEffect(() => {
-    if (showDetailsModal) {
-      detailsGuardRef.current = openDetailsGuard({ cancellable: true, label: 'View purchase order' });
-      return () => { if (detailsGuardRef.current) { closeDetailsGuard(detailsGuardRef.current.id); detailsGuardRef.current = null; } };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showDetailsModal]);
   const [selectedStatus, setSelectedStatus] = useState<POStatus | 'ALL'>('ALL');
   const [selectedSupplier, setSelectedSupplier] = useState('');
   const [page, setPage] = useState(1);
@@ -1331,6 +1325,10 @@ export default function PurchaseOrdersPage() {
     createdAt: po.created_at || po.createdAt,
     updatedAt: po.updated_at || po.updatedAt,
     sentDate: po.sent_date || po.sentDate,
+    orderedQtyTotal: po.ordered_qty_total ?? po.orderedQtyTotal,
+    netReceivedQtyTotal: po.net_received_qty_total ?? po.netReceivedQtyTotal,
+    openQtyTotal: po.open_qty_total ?? po.openQtyTotal,
+    completedGrCount: po.completed_gr_count ?? po.completedGrCount,
   });
 
   // Extract data
@@ -1590,7 +1588,38 @@ export default function PurchaseOrdersPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Purchase Orders</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-gray-900">Purchase Orders</h2>
+            <WorkflowHelpTrigger title="Purchase Order Workflow">
+              <ul className="space-y-1">
+                <li>
+                  • <strong>PO Numbers:</strong> Auto-generated in format PO-YYYY-####
+                </li>
+                <li>
+                  • <strong>Status Flow:</strong> DRAFT → PENDING → APPROVED → COMPLETED
+                </li>
+                <li>
+                  • <strong>BR-PO-001:</strong> Supplier validation required for all purchase orders
+                </li>
+                <li>
+                  • <strong>BR-PO-003:</strong> Unit costs must be non-negative
+                </li>
+                <li>
+                  • <strong>BR-PO-005:</strong> Expected delivery date validated (warns if in the past)
+                </li>
+                <li>
+                  • <strong>Line Items:</strong> Add products with quantities and unit costs
+                </li>
+                <li>
+                  • <strong>Goods Receipts:</strong> Create GR when items are received to update inventory
+                </li>
+                <li>• <strong>DRAFT:</strong> Can edit, submit, or delete</li>
+                <li>• <strong>PENDING/APPROVED:</strong> Can cancel only</li>
+                <li>• <strong>COMPLETED:</strong> Immutable, linked to goods receipts</li>
+                <li>• <strong>CANCELLED:</strong> Excluded from total value calculations</li>
+              </ul>
+            </WorkflowHelpTrigger>
+          </div>
           <p className="text-gray-600 mt-1">Manage supplier orders with full workflow tracking</p>
         </div>
         {canCreatePO && (
@@ -1726,7 +1755,7 @@ export default function PurchaseOrdersPage() {
             </div>
           ) : (
             purchaseOrders.map((po: PORow) => {
-              const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
+              const statusConfig = poStatusBadge(po);
               const totalAmount = new Decimal(po.totalAmount || 0);
               return (
                 <div key={po.id} className="border border-gray-200 rounded-lg p-4" onClick={() => handleViewDetails(po)}>
@@ -1735,7 +1764,10 @@ export default function PurchaseOrdersPage() {
                       <div className="text-sm font-semibold text-blue-600">{po.poNumber}</div>
                       <div className="text-xs text-gray-600">{po.supplierName}</div>
                     </div>
-                    <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusConfig.color}`}>
+                    <span
+                      className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusConfig.color}`}
+                      title={statusConfig.title}
+                    >
                       {statusConfig.icon} {statusConfig.label}
                     </span>
                   </div>
@@ -1798,7 +1830,7 @@ export default function PurchaseOrdersPage() {
                   </tr>
                 ) : (
                   purchaseOrders.map((po: PORow) => {
-                    const statusConfig = PO_STATUSES[po.status as POStatus] || PO_STATUSES.DRAFT;
+                    const statusConfig = poStatusBadge(po);
                     const totalAmount = new Decimal(po.totalAmount || 0);
 
                     return (
@@ -1834,9 +1866,18 @@ export default function PurchaseOrdersPage() {
                         <td className="px-4 py-4 whitespace-nowrap">
                           <span
                             className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusConfig.color}`}
+                            title={statusConfig.title}
                           >
                             {statusConfig.icon} {statusConfig.label}
                           </span>
+                          {Number(po.netReceivedQtyTotal ?? 0) > 0 && (
+                            <div className="text-xs text-gray-500 mt-1">
+                              {Number(po.netReceivedQtyTotal)} / {Number(po.orderedQtyTotal ?? 0)} net received
+                              {Number(po.openQtyTotal ?? 0) > 0
+                                ? ` · ${Number(po.openQtyTotal)} open`
+                                : ''}
+                            </div>
+                          )}
                         </td>
 
                         {/* Total Amount */}
@@ -1933,43 +1974,6 @@ export default function PurchaseOrdersPage() {
         </div>
       )}
 
-      {/* Business Rules Info */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-blue-900 mb-2">📋 Purchase Order Workflow</h3>
-        <ul className="text-xs text-blue-800 space-y-1">
-          <li>
-            • <strong>PO Numbers:</strong> Auto-generated in format PO-YYYY-####
-          </li>
-          <li>
-            • <strong>Status Flow:</strong> DRAFT → PENDING → APPROVED → COMPLETED
-          </li>
-          <li>
-            • <strong>BR-PO-001:</strong> Supplier validation required for all purchase orders
-          </li>
-          <li>
-            • <strong>BR-PO-003:</strong> Expected delivery date must be in the future
-          </li>
-          <li>
-            • <strong>Line Items:</strong> Add products with quantities and unit costs
-          </li>
-          <li>
-            • <strong>Goods Receipts:</strong> Create GR when items are received to update inventory
-          </li>
-          <li>
-            • <strong>DRAFT:</strong> Can edit, submit, or delete
-          </li>
-          <li>
-            • <strong>PENDING/APPROVED:</strong> Can cancel only
-          </li>
-          <li>
-            • <strong>COMPLETED:</strong> Immutable, linked to goods receipts
-          </li>
-          <li>
-            • <strong>CANCELLED:</strong> Excluded from total value calculations
-          </li>
-        </ul>
-      </div>
-
       {/* Create PO Modal */}
       {showCreateModal && (
         <CreatePOModal
@@ -2000,42 +2004,78 @@ export default function PurchaseOrdersPage() {
         />
       )}
 
-      {/* Details Modal */}
+      {/* Details workspace */}
       {showDetailsModal && selectedPO && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4"
-          style={{ zIndex: detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
-          onClick={() => setShowDetailsModal(false)}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-4xl w-full max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">Purchase Order Details</h2>
-                <p className="text-sm text-gray-500">{selectedPO.poNumber}</p>
+        <SlideDrawer
+          open
+          onClose={() => setShowDetailsModal(false)}
+          title="Purchase Order Details"
+          subtitle={selectedPO.poNumber}
+          width="full"
+          footer={
+            <div className="flex justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => handleExportPDF(selectedPO)}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-4 w-4"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+                    />
+                  </svg>
+                  Export PDF
+                </button>
+                <DocumentFlowButton entityType="PURCHASE_ORDER" entityId={selectedPO.id} size="sm" />
               </div>
               <button
                 onClick={() => setShowDetailsModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
               >
-                ✕
+                Close
               </button>
             </div>
-
-            {/* Content */}
-            <div className="p-6 space-y-6">
+          }
+        >
+            <div className="space-y-6 -mt-2">
               {/* Status Badge */}
-              <div>
-                <span
-                  className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${PO_STATUSES[selectedPO.status as POStatus]?.color || 'bg-gray-100 text-gray-800'
-                    }`}
-                >
-                  {PO_STATUSES[selectedPO.status as POStatus]?.icon}{' '}
-                  {PO_STATUSES[selectedPO.status as POStatus]?.label}
-                </span>
+              <div className="space-y-2">
+                {(() => {
+                  const badge = poStatusBadge(selectedPO);
+                  return (
+                    <span
+                      className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${badge.color}`}
+                      title={badge.title}
+                    >
+                      {badge.icon} {badge.label}
+                    </span>
+                  );
+                })()}
+                {Number(selectedPO.netReceivedQtyTotal ?? 0) > 0 && (
+                  <p className="text-sm text-gray-600">
+                    Receipt progress:{' '}
+                    <strong>
+                      {Number(selectedPO.netReceivedQtyTotal)} / {Number(selectedPO.orderedQtyTotal ?? 0)}
+                    </strong>{' '}
+                    units net received
+                    {Number(selectedPO.openQtyTotal ?? 0) > 0 ? (
+                      <>
+                        {' '}
+                        — <strong>{Number(selectedPO.openQtyTotal)}</strong> still open (receive again on
+                        Goods Receipt or after supplier return).
+                      </>
+                    ) : null}
+                  </p>
+                )}
               </div>
 
               {/* General Information */}
@@ -2205,43 +2245,7 @@ export default function PurchaseOrdersPage() {
                 </div>
               </div>
             </div>
-
-            {/* Footer */}
-            <div className="sticky bottom-0 bg-gray-50 px-6 py-4 flex justify-between gap-3 border-t">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => handleExportPDF(selectedPO)}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                    />
-                  </svg>
-                  Export PDF
-                </button>
-                {selectedPO && (
-                  <DocumentFlowButton entityType="PURCHASE_ORDER" entityId={selectedPO.id} size="sm" />
-                )}
-              </div>
-              <button
-                onClick={() => setShowDetailsModal(false)}
-                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        </SlideDrawer>
       )}
 
     </div>

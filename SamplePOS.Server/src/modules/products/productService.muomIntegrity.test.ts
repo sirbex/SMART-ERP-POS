@@ -17,11 +17,13 @@ const mockUomRepo = {
 };
 
 const mockValidate = jest.fn<MockFn>();
+const mockAssertConfigured = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./productRepository.js', () => mockProductRepo);
 jest.unstable_mockModule('./uomRepository.js', () => mockUomRepo);
 jest.unstable_mockModule('./uomService.js', () => ({
   bootstrapProductUomsFromCreateInput: jest.fn<MockFn>(),
+  assertPurchaseUomConfiguredInProductUoms: mockAssertConfigured,
   validateProductPurchaseUomIntegrity: mockValidate,
   checkProductPurchaseUomIntegrity: jest.fn<MockFn>(),
 }));
@@ -53,11 +55,13 @@ describe('updateProduct MUoM integrity', () => {
       sellingPrice: 20,
     });
     mockProductRepo.updateProduct.mockResolvedValue({ id: productId, sku: '5551' });
+    mockAssertConfigured.mockResolvedValue(undefined);
     mockValidate.mockResolvedValue({});
   });
 
   it('validates purchase UoM when existing product has purchase_uom_id even if payload omits it', async () => {
     await updateProduct(productId, { costPrice: 11 }, mockPool);
+    expect(mockAssertConfigured).toHaveBeenCalledWith(productId, pktUomId, expect.anything());
     expect(mockValidate).toHaveBeenCalledWith(productId, expect.anything());
   });
 

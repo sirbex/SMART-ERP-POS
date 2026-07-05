@@ -213,7 +213,7 @@ describe('State Tables — SAVEPOINT simulation', () => {
             expect.stringContaining('INSERT INTO product_daily_summary'),
             'ROLLBACK TO SAVEPOINT daily_summary',
             'SAVEPOINT state_tables',
-            expect.stringContaining('INSERT INTO inventory_balances'),
+            expect.stringContaining('INSERT INTO inventory_aggregate_balances'),
             'COMMIT',
         ]);
     });

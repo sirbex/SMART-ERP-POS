@@ -83,6 +83,8 @@ import type { CreateSaleInput } from '../../types/inputs';
 import { syncOfflineCustomers } from '../../services/offlineSyncEngine';
 import { useAuth } from '../../hooks/useAuth';
 import { getBusinessDate, formatTimestampDate, formatTimestampTime } from '../../utils/businessDate';
+import { CASHIER_NAV_ITEMS, isCashierRole } from '../../utils/cashierLockdown';
+import { usePosAssignedStore } from '../../hooks/usePosAssignedStore';
 
 // ── Discount applied from DiscountDialog (before manager approval extension) ──
 interface AppliedDiscount {
@@ -346,6 +348,7 @@ export default function POSPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { data: assignedStore } = usePosAssignedStore();
   const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [items, setItems] = useState<LineItem[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -400,7 +403,7 @@ export default function POSPage() {
 
   // Order mode state
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
-  const { isOnline, saveSaleOffline, saveOrderOffline, syncPendingSales, syncQueue, retryFailedSale, retryAllFailed, cancelOfflineSale, pendingCount, pendingOrderCount: _pendingOrderCount, reviewCount, failedCount } =
+  const { isOnline, saveSaleOffline, saveOrderOffline, syncPendingSales, syncQueue, retryFailedSale, retryAllFailed, cancelOfflineSale, pendingCount, reviewCount, failedCount } =
     useOfflineMode();
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
@@ -1589,7 +1592,8 @@ export default function POSPage() {
     }
   };
 
-  const handleManagerApproval = async (_pin: string) => {
+  const handleManagerApproval = async (pin: string) => {
+    void pin;
     if (!pendingDiscount) return;
 
     try {
@@ -1599,7 +1603,7 @@ export default function POSPage() {
       setShowManagerApprovalDialog(false);
       setPendingDiscount(null);
       toast.success('Manager approval granted');
-    } catch (error) {
+    } catch {
       toast.error('Manager approval failed');
     }
   };
@@ -1647,7 +1651,7 @@ export default function POSPage() {
     try {
       // CRITICAL: Always check response.data.success (not response.success)
       // Axios wraps backend response: { data: { success, data, message } }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Hold API accepts richer payload than CreateHoldOrderInput
+       
       const response = await (
         api.hold.create as unknown as (
           data: Record<string, unknown>
@@ -2799,7 +2803,7 @@ export default function POSPage() {
     // BUSINESS LOGIC: Auto-calculate credit for unpaid balance when customer is selected
     // If customer selected and there's remaining balance, automatically create CREDIT payment line
     const hasCashPayment = paymentLines.some((line) => line.paymentMethod === 'CASH');
-    let finalPaymentLines = [...paymentLines];
+    const finalPaymentLines = [...paymentLines];
     let finalRemainingBalance = remainingBalance; // Track updated balance
 
     if (selectedCustomer && remainingBalance > 0.01) {
@@ -3337,6 +3341,31 @@ export default function POSPage() {
     }
   };
 
+  const posNavItems = useMemo(() => {
+    if (isCashierRole(user?.role)) {
+      return CASHIER_NAV_ITEMS;
+    }
+    return [
+      { name: 'Dashboard', path: '/dashboard', icon: '📊' },
+      { name: 'Point of Sale', path: '/pos', icon: '🛒' },
+      { name: 'Inventory', path: '/inventory', icon: '📦' },
+      { name: 'Customers', path: '/customers', icon: '👥' },
+      { name: 'Suppliers', path: '/suppliers', icon: '🏢' },
+      { name: 'Sales', path: '/sales', icon: '💰' },
+      { name: 'Quotations', path: '/quotations', icon: '💼' },
+      { name: 'Delivery', path: '/delivery', icon: '🚚' },
+      { name: 'Accounting', path: '/accounting', icon: '🧾' },
+      { name: 'Reports', path: '/reports', icon: '📈' },
+      ...(user?.role === 'ADMIN'
+        ? [
+            { name: 'Import', path: '/import', icon: '📥' },
+            { name: 'Settings', path: '/settings', icon: '⚙️' },
+            { name: 'Roles', path: '/admin/roles', icon: '🔐' },
+          ]
+        : []),
+    ];
+  }, [user?.role]);
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Navigation Drawer */}
@@ -3361,23 +3390,7 @@ export default function POSPage() {
             </div>
             <nav className="flex-1 overflow-y-auto py-2">
               <ul className="space-y-0.5 px-2">
-                {[
-                  { name: 'Dashboard', path: '/dashboard', icon: '📊' },
-                  { name: 'Point of Sale', path: '/pos', icon: '🛒' },
-                  { name: 'Inventory', path: '/inventory', icon: '📦' },
-                  { name: 'Customers', path: '/customers', icon: '👥' },
-                  { name: 'Suppliers', path: '/suppliers', icon: '🏢' },
-                  { name: 'Sales', path: '/sales', icon: '💰' },
-                  { name: 'Quotations', path: '/quotations', icon: '💼' },
-                  { name: 'Delivery', path: '/delivery', icon: '🚚' },
-                  { name: 'Accounting', path: '/accounting', icon: '🧾' },
-                  { name: 'Reports', path: '/reports', icon: '📈' },
-                  ...(user?.role === 'ADMIN' ? [
-                    { name: 'Import', path: '/import', icon: '📥' },
-                    { name: 'Settings', path: '/settings', icon: '⚙️' },
-                    { name: 'Roles', path: '/admin/roles', icon: '🔐' },
-                  ] : []),
-                ].map((item) => (
+                {posNavItems.map((item) => (
                   <li key={item.path}>
                     <Link
                       to={item.path}
@@ -3428,6 +3441,14 @@ export default function POSPage() {
             </svg>
           </button>
           <h1 className="text-lg sm:text-2xl font-bold text-gray-900">Point of Sale</h1>
+          {assignedStore?.storeName && (
+            <span
+              className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-800 font-medium"
+              title="Stock and search are scoped to this location"
+            >
+              {assignedStore.storeName}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
           {/* Cash Register Status */}

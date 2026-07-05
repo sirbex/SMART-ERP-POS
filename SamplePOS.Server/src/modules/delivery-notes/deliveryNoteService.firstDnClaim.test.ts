@@ -100,6 +100,7 @@ jest.unstable_mockModule('./deliveryNoteUom.js', () => ({
 
 jest.unstable_mockModule('../../utils/dateRange.js', () => ({
   getBusinessDate: () => '2026-06-20',
+  getBusinessYear: () => 2026,
 }));
 
 // --- fixtures ------------------------------------------------------------

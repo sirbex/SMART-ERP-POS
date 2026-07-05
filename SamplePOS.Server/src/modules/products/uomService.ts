@@ -7,7 +7,7 @@ import * as auditService from '../audit/auditService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { ConflictError, ValidationError } from '../../middleware/errorHandler.js';
-import { UnitOfWork } from '../../db/unitOfWork.js';
+import { UnitOfWork, type DbConnection } from '../../db/unitOfWork.js';
 import type pg from 'pg';
 import {
   assertCanonicalUomGraph,
@@ -387,6 +387,131 @@ export async function validateProductPurchaseUomIntegrity(
 }
 
 /**
+ * Purchase UoM on the product master must exist in product_uoms before save.
+ * Product Form restricts the selector; this guards direct API calls.
+ */
+export async function assertPurchaseUomConfiguredInProductUoms(
+  productId: string,
+  purchaseUomId: string,
+  db: Queryable,
+): Promise<void> {
+  const baseUomId = await repo.getProductBaseUomId(productId, db);
+  if (!baseUomId || purchaseUomId === baseUomId) {
+    return;
+  }
+
+  const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
+  if (productUoms.some((row) => row.uomId === purchaseUomId)) {
+    return;
+  }
+
+  const summary = await repo.getProductSummary(productId, db);
+  const purchaseUom = await repo.getUomById(purchaseUomId, db);
+  const label = purchaseUom?.symbol ?? purchaseUom?.name ?? 'Purchase UoM';
+  throw new ValidationError(
+    `Purchase UoM "${label}" is not configured for "${summary?.name ?? 'this product'}". ` +
+      'Add it under Product UoMs first, then set it as Purchase UoM.',
+  );
+}
+
+export type RepairOrphanedPurchaseUomResult = {
+  productId: string;
+  sku: string | null;
+  productName: string;
+  purchaseUomId: string;
+  conversionFactor: number;
+  insertedProductUomsRow: boolean;
+  syncedConversion: boolean;
+};
+
+/**
+ * Repair one product whose purchase_uom_id is orphaned from product_uoms.
+ * Idempotent — safe to re-run before deployment.
+ */
+export async function repairOrphanedPurchaseUom(
+  productId: string,
+  db: Queryable,
+  options?: { conversionFactor?: number },
+): Promise<RepairOrphanedPurchaseUomResult | null> {
+  const orphans = (await repo.listOrphanedPurchaseUomProducts(db)).filter((row) => row.productId === productId);
+  const row = orphans[0];
+  if (!row) {
+    return null;
+  }
+
+  const conversionFactor =
+    options?.conversionFactor ??
+    row.existingConversionFactor ??
+    null;
+
+  if (conversionFactor == null || !Number.isFinite(conversionFactor) || conversionFactor <= 0) {
+    throw new ValidationError(
+      `Cannot repair "${row.productName}" (SKU ${row.sku ?? 'n/a'}): ` +
+        'supply a positive conversionFactor for the purchase unit.',
+    );
+  }
+
+  let insertedProductUomsRow = false;
+  if (row.missingProductUomsRow) {
+    await repo.createProductUom(
+      {
+        productId: row.productId,
+        uomId: row.purchaseUomId,
+        conversionFactor,
+        isDefault: false,
+      },
+      db,
+    );
+    insertedProductUomsRow = true;
+  }
+
+  await syncCanonicalConversion(row.productId, row.purchaseUomId, conversionFactor, false, db);
+  await validateProductPurchaseUomIntegrity(row.productId, db);
+
+  return {
+    productId: row.productId,
+    sku: row.sku,
+    productName: row.productName,
+    purchaseUomId: row.purchaseUomId,
+    conversionFactor,
+    insertedProductUomsRow,
+    syncedConversion: true,
+  };
+}
+
+/** Batch repair for deployment — one transaction per product. */
+export async function repairAllOrphanedPurchaseUoms(
+  db: pg.Pool,
+  options?: {
+    conversionFactorByProductId?: Record<string, number>;
+    defaultConversionFactor?: number;
+    dryRun?: boolean;
+  },
+): Promise<{ dryRun: boolean; orphans: repo.OrphanedPurchaseUomRow[]; repaired: RepairOrphanedPurchaseUomResult[] }> {
+  const orphans = await repo.listOrphanedPurchaseUomProducts(db);
+  if (options?.dryRun || orphans.length === 0) {
+    return { dryRun: Boolean(options?.dryRun), orphans, repaired: [] };
+  }
+
+  const repaired: RepairOrphanedPurchaseUomResult[] = [];
+  for (const orphan of orphans) {
+    const factor =
+      options?.conversionFactorByProductId?.[orphan.productId] ??
+      orphan.existingConversionFactor ??
+      options?.defaultConversionFactor;
+
+    const result = await UnitOfWork.run(db, async (client) =>
+      repairOrphanedPurchaseUom(orphan.productId, client, { conversionFactor: factor ?? undefined }),
+    );
+    if (result) {
+      repaired.push(result);
+    }
+  }
+
+  return { dryRun: false, orphans, repaired };
+}
+
+/**
  * Persist canonical edges from product_uoms (repairs legacy/partial item_uom_conversions).
  * Idempotent — safe before PO/GR/sales posting.
  */
@@ -691,7 +816,7 @@ export async function deleteMasterUom(id: string, dbPool?: pg.Pool) {
  *  - baseCost × factor / basePrice × factor  (redundant: same as computed)
  */
 async function clearRedundantOverrides(
-  pool: pg.Pool,
+  pool: Queryable,
   productId: string,
   conversionFactor: number,
   costOverride: number | null,
@@ -837,7 +962,7 @@ export async function addProductUom(input: unknown, auditContext?: AuditContext,
           priceOverride: data.priceOverride,
         },
         auditContext,
-        client as unknown as pg.Pool,
+        client,
       );
     }
 
@@ -920,96 +1045,95 @@ export async function updateProductUom(
   id: string,
   payload: unknown,
   auditContext?: AuditContext,
-  dbPool?: pg.Pool
+  dbHandle?: DbConnection,
 ) {
-  const pool = dbPool || globalPool;
-  // Use the update-specific schema that doesn't require productId/uomId
+  const handle = dbHandle || globalPool;
   const parsed = ProductUomUpdateSchema.parse(payload);
-  const existing = await repo.getProductUomById(id, pool);
+  const existing = await repo.getProductUomById(id, handle);
   if (!existing) {
     return null;
   }
 
-  await ensureProductBaseUomContext(existing.productId, pool);
+  return UnitOfWork.runOrJoin(handle, async (client) => {
+    await ensureProductBaseUomContext(existing.productId, client);
 
-  // Determine effective uomId: use the incoming one if supplied, else keep existing
-  const effectiveUomId = parsed.uomId ?? existing.uomId;
-  const uomIdChanging = parsed.uomId !== undefined && parsed.uomId !== existing.uomId;
+    const effectiveUomId = parsed.uomId ?? existing.uomId;
+    const uomIdChanging = parsed.uomId !== undefined && parsed.uomId !== existing.uomId;
 
-  await assertNoCanonicalDuplicateMeaning(existing.productId, effectiveUomId, pool, id);
+    await assertNoCanonicalDuplicateMeaning(existing.productId, effectiveUomId, client, id);
 
-  // Safeguard: clear redundant overrides (same logic as addProductUom)
-  let costOverride = parsed.costOverride;
-  let priceOverride = parsed.priceOverride;
+    let costOverride = parsed.costOverride;
+    let priceOverride = parsed.priceOverride;
 
-  if (costOverride !== undefined || priceOverride !== undefined) {
-    // Look up the existing product_uom to get productId and conversionFactor
-    const factor = parsed.conversionFactor ?? parseFloat(existing.conversionFactor);
-    const cleared = await clearRedundantOverrides(
-      pool,
-      existing.productId,
-      factor,
-      costOverride ?? null,
-      priceOverride ?? null,
-    );
-    costOverride = cleared.costOverride;
-    priceOverride = cleared.priceOverride;
-  }
-
-  // When the uomId is changing, detect canonical state BEFORE unsetDefaultForProduct
-  // clears all is_default flags (which would make getProductBaseUomId return NULL via COALESCE).
-  let pendingBaseUomId: string | null = null;
-  if (uomIdChanging) {
-    const currentBaseUomId = await repo.getProductBaseUomId(existing.productId, pool);
-    if (currentBaseUomId === existing.uomId) {
-      // This UoM is the base; record the new base to write after unsetDefaultForProduct.
-      // Delete ALL conversions now — they all pointed to the old base and are stale.
-      await repo.deleteAllItemUomConversionsForProduct(existing.productId, pool);
-      pendingBaseUomId = effectiveUomId;
-    } else {
-      // Not the base UoM, just clean up this UoM's own stale conversion entry
-      await repo.deleteItemUomConversionBySource(existing.productId, existing.uomId, pool);
+    if (costOverride !== undefined || priceOverride !== undefined) {
+      const factor = parsed.conversionFactor ?? parseFloat(existing.conversionFactor);
+      const cleared = await clearRedundantOverrides(
+        client,
+        existing.productId,
+        factor,
+        costOverride ?? null,
+        priceOverride ?? null,
+      );
+      costOverride = cleared.costOverride;
+      priceOverride = cleared.priceOverride;
     }
-  }
 
-  if (parsed.isDefault) {
-    await repo.unsetDefaultForProduct(existing.productId, dbPool);
-  }
+    let pendingBaseUomId: string | null = null;
+    if (uomIdChanging) {
+      const purchaseCtxBefore = await repo.getProductPurchaseUomContext(existing.productId, client);
+      if (purchaseCtxBefore?.purchaseUomId === existing.uomId) {
+        await repo.setProductPurchaseUomId(existing.productId, effectiveUomId, client);
+      }
 
-  // Now apply the base_uom_id transfer (safe here: unsetDefaultForProduct already ran)
-  if (pendingBaseUomId) {
-    await repo.setProductBaseUomId(existing.productId, pendingBaseUomId, pool);
-  }
+      const currentBaseUomId = await repo.getProductBaseUomId(existing.productId, client);
+      if (currentBaseUomId === existing.uomId) {
+        await repo.deleteAllItemUomConversionsForProduct(existing.productId, client);
+        pendingBaseUomId = effectiveUomId;
+      } else {
+        await repo.deleteItemUomConversionBySource(existing.productId, existing.uomId, client);
+      }
+    }
 
-  const result = await repo.updateProductUom(
-    id,
-    {
-      uomId: parsed.uomId,
-      barcode: parsed.barcode,
-      conversionFactor: parsed.conversionFactor,
-      isDefault: parsed.isDefault,
-      priceOverride: priceOverride,
-      costOverride: costOverride,
-    },
-    dbPool
-  );
+    if (parsed.isDefault) {
+      await repo.unsetDefaultForProduct(existing.productId, client);
+    }
 
-  if (result) {
+    if (pendingBaseUomId) {
+      await repo.setProductBaseUomId(existing.productId, pendingBaseUomId, client);
+    }
+
+    const result = await repo.updateProductUom(
+      id,
+      {
+        uomId: parsed.uomId,
+        barcode: parsed.barcode,
+        conversionFactor: parsed.conversionFactor,
+        isDefault: parsed.isDefault,
+        priceOverride,
+        costOverride,
+      },
+      client as unknown as pg.Pool,
+    );
+
+    if (!result) {
+      return null;
+    }
+
     await syncCanonicalConversion(
       result.productId,
       result.uomId,
       parsed.conversionFactor ?? parseFloat(result.conversionFactor),
       parsed.isDefault ?? result.isDefault,
-      pool,
+      client,
     );
 
-    const purchaseCtx = await repo.getProductPurchaseUomContext(result.productId, pool);
+    const purchaseCtx = await repo.getProductPurchaseUomContext(result.productId, client);
     if (purchaseCtx?.purchaseUomId && purchaseCtx.purchaseUomId !== purchaseCtx.baseUomId) {
-      await validateProductPurchaseUomIntegrity(result.productId, pool);
+      await validateProductPurchaseUomIntegrity(result.productId, client);
     }
-  }
 
-  return result;
+    return result;
+  });
 }
 
 export async function removeProductUom(id: string, dbPool?: pg.Pool) {

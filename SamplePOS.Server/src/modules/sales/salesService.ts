@@ -45,6 +45,10 @@ import {
   loadSaleFefoBatchesForIssue,
   type ProductValuationForAtCost,
 } from '../pricing/atCostIssuePrice.js';
+import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
+import { warehouseSaleDeductionService } from '../inventory/warehouse/warehouseSaleDeductionService.js';
+import { warehouseReturnInventoryService } from '../inventory/warehouse/warehouseReturnInventoryService.js';
+import { warehouseSaleVoidRestoreService } from '../inventory/warehouse/warehouseSaleVoidRestoreService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import {
   assertSaleHeaderMatchesCalculatedTotal,
@@ -155,6 +159,12 @@ export const salesService = {
 
       // Maintenance mode guard (replaces trg_maintenance_check_sales)
       await checkMaintenanceMode(client);
+
+      const multistoreEnabled = await isMultistoreEnabled(client);
+      let sellingStoreId: string | null = null;
+      if (multistoreEnabled) {
+        sellingStoreId = await warehouseSaleDeductionService.resolveSellingStoreId(client);
+      }
 
       // ========== POS SESSION ENFORCEMENT ==========
       // Reads policy via the SAME transactional client to avoid race conditions.
@@ -461,7 +471,7 @@ export const salesService = {
           );
         }
 
-        let baseQty = new Decimal(uomSnapshot.baseQuantity);
+        const baseQty = new Decimal(uomSnapshot.baseQuantity);
         const snapshotConversionFactor = new Decimal(uomSnapshot.conversionFactor);
         const snapshotBaseUomId = uomSnapshot.baseUomId;
         const snapshotSellingUomId = uomSnapshot.sellingUomId;
@@ -559,11 +569,20 @@ export const salesService = {
         }
 
         // BR-INV-001: Validate stock availability
+        if (multistoreEnabled && sellingStoreId) {
+          await warehouseSaleDeductionService.validateSellableAtStore(
+            client,
+            sellingStoreId,
+            item.productId,
+            baseQty.toNumber(),
+          );
+        } else {
         await InventoryBusinessRules.validateStockAvailability(
           client,
           item.productId,
           baseQty.toNumber()
         );
+        }
 
         const expiryRuleRes = await client.query(
           `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days
@@ -587,6 +606,28 @@ export const salesService = {
           costingMethod,
         };
         try {
+          if (multistoreEnabled && sellingStoreId) {
+            const storePreview = await warehouseSaleDeductionService.previewSaleCostAtStore(
+              client,
+              sellingStoreId,
+              item.productId,
+              baseQty,
+              masterCostPerBase,
+            );
+            itemCostDecimal = storePreview.totalCost;
+            if (storePreview.shortfall.greaterThan(0.001)) {
+              const avgCost = Money.parseDb(productData.average_cost);
+              const costPriceDec = Money.parseDb(productData.cost_price);
+              const shortfallUnit = avgCost.greaterThan(0) ? avgCost : costPriceDec;
+              itemCostDecimal = itemCostDecimal.plus(storePreview.shortfall.times(shortfallUnit));
+              logger.warn('[COGS DRIFT RISK] Store FEFO insufficient for GL cost preview — shortfall priced at average/master', {
+                productId: item.productId,
+                productName: item.productName,
+                requestedBaseQty: baseQty.toFixed(4),
+                shortfall: storePreview.shortfall.toFixed(4),
+              });
+            }
+          } else {
           const { totalCost: batchTotal, shortfall } = await previewFefoIssueCostForBaseQty(
             client,
             item.productId,
@@ -607,6 +648,7 @@ export const salesService = {
               requestedBaseQty: baseQty.toFixed(4),
               shortfall: shortfall.toFixed(4),
             });
+          }
           }
 
           unitCost = baseQty.greaterThan(0)
@@ -1085,6 +1127,10 @@ export const salesService = {
       // Map to accumulate actual FEFO batch deduction costs per productId.
       // Used after all deductions to verify GL COGS matches actual batch costs (drift guard).
       const actualBatchCostMap = new Map<string, Decimal>();
+      const warehouseTraces = new Map<
+        number,
+        { storeLocationId: string; productLotId: string | null; batchId: string | null }
+      >();
 
       const inventoryCouplingBefore = await captureInventoryCoupling(client);
 
@@ -1147,17 +1193,6 @@ export const salesService = {
         );
         const masterCostPerBase = Money.parseDb(costRow.rows[0]?.cost_price ?? 0);
 
-        const batchRows = await loadSaleFefoBatchesForIssue(
-          client,
-          item.productId,
-          baseQty,
-          masterCostPerBase,
-          { minDaysBeforeExpiry, forUpdate: true },
-        );
-
-        // Generate movement number ONCE for all batch deductions per item
-        // This drastically reduces DB queries (from O(batches) to O(1) per item)
-        // Advisory lock prevents concurrent duplicate movement number generation
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
         const movNumRes = await client.query(
           `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
@@ -1170,6 +1205,44 @@ export const salesService = {
            WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
         );
         let movementSeq = parseInt(movNumRes.rows[0]?.movement_number?.split('-')[2] || '1');
+
+        if (multistoreEnabled && sellingStoreId) {
+          const deductResult = await warehouseSaleDeductionService.deductForSaleLine(client, {
+            storeLocationId: sellingStoreId,
+            productId: item.productId,
+            productName: item.productName,
+            baseQty,
+            saleId: sale.id,
+            saleNumber: sale.saleNumber,
+            soldBy: input.soldBy ?? null,
+            enteredQty: item.quantity,
+            baseUomId: deductBaseUomId,
+            conversionFactor: deductConversionFactor.toFixed(6),
+            movementSeqStart: movementSeq,
+          });
+
+          const prevActual = actualBatchCostMap.get(item.productId) ?? new Decimal(0);
+          actualBatchCostMap.set(
+            item.productId,
+            prevActual.plus(deductResult.actualBatchCost),
+          );
+
+          warehouseTraces.set(lineIdx, {
+            storeLocationId: deductResult.storeLocationId,
+            productLotId: deductResult.primaryProductLotId,
+            batchId: deductResult.primaryBatchId,
+          });
+
+          continue;
+        }
+
+        const batchRows = await loadSaleFefoBatchesForIssue(
+          client,
+          item.productId,
+          baseQty,
+          masterCostPerBase,
+          { minDaysBeforeExpiry, forUpdate: true },
+        );
 
         for (const batch of batchRows) {
           if (remainingQty.lessThanOrEqualTo(0)) break;
@@ -1337,6 +1410,13 @@ export const salesService = {
           profit: itemsWithCosts[index]?.profit ?? 0,
         })),
       );
+
+      for (let lineIdx = 0; lineIdx < items.length; lineIdx++) {
+        const trace = warehouseTraces.get(lineIdx);
+        if (trace) {
+          await salesRepository.updateSaleItemWarehouseTrace(client, items[lineIdx].id, trace);
+        }
+      }
 
       sale.totalCost = exactInventoryIssueCost;
 
@@ -2551,6 +2631,22 @@ export const salesService = {
         const productId = String(item.productId);
         const batchId = item.batchId;
 
+        const multistoreRestored = await warehouseSaleVoidRestoreService.restoreVoidedSaleLine(
+          client,
+          {
+            productId,
+            quantity,
+            unitCost: Money.toNumber(Money.parseDb(item.unitCost ?? 0)),
+            storeLocationId: item.storeLocationId,
+            productLotId: item.productLotId,
+            batchId,
+            saleId,
+            saleNumber: sale.sale_number,
+            voidReason,
+            voidedById,
+          },
+        );
+
         // Get product costing method
         const productResult = await client.query(
           'SELECT costing_method FROM product_valuation WHERE product_id = $1',
@@ -2585,7 +2681,15 @@ export const salesService = {
         }
 
         // 2. PHYSICAL: Restore inventory batch (reverse FEFO deduction)
-        if (batchId) {
+        if (multistoreRestored) {
+          logger.info('Multistore void — stock restored to original store/lot', {
+            productId,
+            quantity,
+            storeLocationId: item.storeLocationId,
+            productLotId: item.productLotId,
+            saleNumber: sale.sale_number,
+          });
+        } else if (batchId) {
           // Restore to specific batch
           await client.query(
             `UPDATE inventory_batches
@@ -2636,6 +2740,7 @@ export const salesService = {
           });
         }
 
+        if (!multistoreRestored) {
         // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
         await syncProductQuantity(client, productId);
 
@@ -2673,6 +2778,7 @@ export const salesService = {
             voidedById,
           ]
         );
+        }
       }
 
       // Cancel linked invoice if exists (SINGLE SOURCE OF TRUTH)
@@ -3169,7 +3275,29 @@ export const salesService = {
           });
         }
 
-        // 5b. Restore inventory batch
+        const multistoreRestore = await warehouseReturnInventoryService.restoreCustomerReturn(client, {
+          productId,
+          quantity,
+          unitCost,
+          batchId,
+          productLotId: saleItem.productLotId ?? null,
+          referenceType: 'SALE_REFUND',
+          referenceId: refund.id,
+          notes: `Refund ${refund.refundNumber} for sale ${sale.sale_number}: ${input.reason}`,
+        });
+
+        if (multistoreRestore) {
+          const refundLine = refundItems.find((ri) => ri.saleItemId === saleItem.id);
+          if (refundLine) {
+            await salesRepository.updateRefundItemWarehouseTrace(client, refundLine.id, {
+              storeLocationId: multistoreRestore.storeLocationId,
+              productLotId: multistoreRestore.productLotId,
+            });
+          }
+          continue;
+        }
+
+        // 5b. Restore inventory batch (legacy single-store)
         if (batchId) {
           await client.query(
             `UPDATE inventory_batches

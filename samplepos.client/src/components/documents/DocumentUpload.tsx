@@ -87,18 +87,18 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
     setFiles(prev => prev.filter(f => f.id !== fileId));
   };
 
-  const uploadFile = async (uploadFile: UploadFile): Promise<void> => {
-    return new Promise(async (resolve, reject) => {
+  const uploadFile = (fileToUpload: UploadFile): Promise<void> => {
+    return new Promise((resolve, reject) => {
       try {
         // Update file status to uploading
         setFiles(prev => prev.map(f =>
-          f.id === uploadFile.id
+          f.id === fileToUpload.id
             ? { ...f, status: 'uploading', progress: 0 }
             : f
         ));
 
         const formData = new FormData();
-        formData.append('file', uploadFile.file);
+        formData.append('file', fileToUpload.file);
 
         // Add metadata
         const metadata = {
@@ -125,7 +125,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
           if (e.lengthComputable) {
             const progress = (e.loaded / e.total) * 100;
             setFiles(prev => prev.map(f =>
-              f.id === uploadFile.id
+              f.id === fileToUpload.id
                 ? { ...f, progress: Math.round(progress) }
                 : f
             ));
@@ -138,7 +138,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
               const result = JSON.parse(xhr.responseText);
               if (result.success) {
                 setFiles(prev => prev.map(f =>
-                  f.id === uploadFile.id
+                  f.id === fileToUpload.id
                     ? { ...f, status: 'success', progress: 100, result: result.data }
                     : f
                 ));
@@ -147,8 +147,9 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
               } else {
                 throw new Error(result.error || 'Upload failed');
               }
-            } catch (parseError) {
-              throw new Error('Invalid response from server');
+            } catch {
+              reject(new Error('Invalid response from server'));
+              return;
             }
           } else {
             throw new Error(`Upload failed with status ${xhr.status}`);
@@ -167,7 +168,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
         const errorMessage = error instanceof Error ? error.message : 'Upload failed';
 
         setFiles(prev => prev.map(f =>
-          f.id === uploadFile.id
+          f.id === fileToUpload.id
             ? { ...f, status: 'error', error: errorMessage }
             : f
         ));

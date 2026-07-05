@@ -74,7 +74,7 @@ const formatFieldValue = (key: string, value: ReportDataValue): string => {
 };
 
 // Color coding for values
-const getFieldColorClass = (key: string, _value: unknown): string => {
+const getFieldColorClass = (key: string): string => {
     const lowerKey = key.toLowerCase();
     if (lowerKey.includes('amount') || lowerKey.includes('total') || lowerKey.includes('revenue')) {
         return 'text-green-600 font-semibold';
@@ -271,7 +271,7 @@ const ExpenseReportsPage: React.FC = () => {
             a.click();
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
-        } catch (err) {
+        } catch {
             alert('Failed to export report');
         }
     };
@@ -332,7 +332,7 @@ const ExpenseReportsPage: React.FC = () => {
                         <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
                             {key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim().replace(/^\w/, c => c.toUpperCase())}
                         </div>
-                        <div className={`text-xl font-bold ${getFieldColorClass(key, value)}`}>
+                        <div className={`text-xl font-bold ${getFieldColorClass(key)}`}>
                             {formatFieldValue(key, value)}
                         </div>
                     </div>
@@ -366,7 +366,7 @@ const ExpenseReportsPage: React.FC = () => {
                             <tr key={idx} className="hover:bg-gray-50">
                                 {columns.map((col) => (
                                     <td key={col} className="px-4 py-3 text-sm whitespace-nowrap">
-                                        <span className={getFieldColorClass(col, row[col])}>
+                                        <span className={getFieldColorClass(col)}>
                                             {formatFieldValue(col, row[col])}
                                         </span>
                                     </td>

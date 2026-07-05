@@ -251,6 +251,81 @@ export async function setProductBaseUomId(productId: string, uomId: string, db?:
   );
 }
 
+/** Keep products.purchase_uom_id aligned when the active purchase Product UoM row is renamed. */
+export async function setProductPurchaseUomId(
+  productId: string,
+  purchaseUomId: string | null,
+  db?: Queryable,
+): Promise<void> {
+  const pool = db || globalPool;
+  await pool.query(
+    `UPDATE products
+     SET purchase_uom_id = $2
+     WHERE id = $1`,
+    [productId, purchaseUomId],
+  );
+}
+
+export type OrphanedPurchaseUomRow = {
+  productId: string;
+  sku: string | null;
+  productName: string;
+  purchaseUomId: string;
+  purchaseUomLabel: string;
+  baseUomId: string;
+  baseUomLabel: string;
+  missingProductUomsRow: boolean;
+  missingConversionPath: boolean;
+  existingConversionFactor: number | null;
+};
+
+/** Products whose purchase_uom_id is not fully wired in product_uoms / item_uom_conversions. */
+export async function listOrphanedPurchaseUomProducts(db?: Queryable): Promise<OrphanedPurchaseUomRow[]> {
+  const pool = db || globalPool;
+  const res = await pool.query(
+    `SELECT p.id AS "productId",
+            p.sku,
+            p.name AS "productName",
+            p.purchase_uom_id AS "purchaseUomId",
+            COALESCE(pu.symbol, pu.name) AS "purchaseUomLabel",
+            p.base_uom_id AS "baseUomId",
+            COALESCE(bu.symbol, bu.name) AS "baseUomLabel",
+            NOT EXISTS (
+              SELECT 1 FROM product_uoms pum
+              WHERE pum.product_id = p.id AND pum.uom_id = p.purchase_uom_id
+            ) AS "missingProductUomsRow",
+            NOT EXISTS (
+              SELECT 1 FROM item_uom_conversions iuc
+              WHERE iuc.item_id = p.id
+                AND iuc.from_uom_id = p.purchase_uom_id
+                AND iuc.to_uom_id = p.base_uom_id
+            ) AS "missingConversionPath",
+            pum.conversion_factor::float AS "existingConversionFactor"
+     FROM products p
+     JOIN uoms bu ON bu.id = p.base_uom_id
+     JOIN uoms pu ON pu.id = p.purchase_uom_id
+     LEFT JOIN product_uoms pum ON pum.product_id = p.id AND pum.uom_id = p.purchase_uom_id
+     WHERE p.is_active = true
+       AND p.base_uom_id IS NOT NULL
+       AND p.purchase_uom_id IS NOT NULL
+       AND p.purchase_uom_id <> p.base_uom_id
+       AND (
+         NOT EXISTS (
+           SELECT 1 FROM product_uoms pum2
+           WHERE pum2.product_id = p.id AND pum2.uom_id = p.purchase_uom_id
+         )
+         OR NOT EXISTS (
+           SELECT 1 FROM item_uom_conversions iuc2
+           WHERE iuc2.item_id = p.id
+             AND iuc2.from_uom_id = p.purchase_uom_id
+             AND iuc2.to_uom_id = p.base_uom_id
+         )
+       )
+     ORDER BY p.name ASC`,
+  );
+  return res.rows;
+}
+
 export async function listItemUomConversions(itemId: string, db?: Queryable): Promise<DbItemUomConversion[]> {
   const pool = db || globalPool;
   const res = await pool.query(
@@ -466,7 +541,7 @@ export async function deleteProductUom(id: string, dbPool?: pg.Pool): Promise<bo
   return (res.rowCount ?? 0) > 0;
 }
 
-export async function getProductUomById(id: string, dbPool?: pg.Pool): Promise<DbProductUom | null> {
+export async function getProductUomById(id: string, dbPool?: Queryable): Promise<DbProductUom | null> {
   const pool = dbPool || globalPool;
   const res = await pool.query(
     `SELECT 

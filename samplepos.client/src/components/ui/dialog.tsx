@@ -19,29 +19,52 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
+const DialogScrollArea = ({
+  className = "",
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div
+    className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pr-12 sm:p-6 sm:pr-14 ${className}`}
+    {...props}
+  />
+)
+DialogScrollArea.displayName = "DialogScrollArea"
+
+function usesCompoundDialogLayout(children: React.ReactNode): boolean {
+  return React.Children.toArray(children).some(
+    (child) =>
+      React.isValidElement(child) &&
+      (child.type === DialogHeader ||
+        child.type === DialogBody ||
+        child.type === DialogFooter),
+  );
+}
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className = "", children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={`fixed left-[50%] top-[50%] z-50 w-[95vw] sm:w-[90vw] md:w-[85vw] lg:w-[80vw] xl:w-[75vw] max-w-6xl max-h-[90vh] translate-x-[-50%] translate-y-[-50%] border bg-white shadow-2xl duration-300 ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-lg ${className}`}
-      {...props}
-    >
-      <div className="flex h-full max-h-[90vh] flex-col">
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          {children}
+>(({ className = "", children, ...props }, ref) => {
+  const compound = usesCompoundDialogLayout(children);
+
+  return (
+    <DialogPortal>
+      <DialogOverlay />
+      <DialogPrimitive.Content
+        ref={ref}
+        className={`fixed left-[50%] top-[50%] z-50 flex w-[95vw] sm:w-[90vw] md:w-[85vw] lg:w-[80vw] xl:w-[75vw] max-w-6xl max-h-[90vh] translate-x-[-50%] translate-y-[-50%] flex-col border bg-white shadow-2xl duration-300 ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-lg overflow-hidden ${className}`}
+        {...props}
+      >
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {compound ? children : <DialogScrollArea>{children}</DialogScrollArea>}
         </div>
-      </div>
-      <DialogPrimitive.Close className="absolute right-3 top-3 sm:right-4 sm:top-4 z-10 rounded-full p-1.5 sm:p-2 opacity-70 ring-offset-white transition-all hover:opacity-100 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2 disabled:pointer-events-none">
-        <X className="h-4 w-4 sm:h-5 sm:w-5" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-))
+        <DialogPrimitive.Close className="absolute right-3 top-3 sm:right-4 sm:top-4 z-20 rounded-full p-1.5 sm:p-2 opacity-70 ring-offset-white transition-all hover:opacity-100 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2 disabled:pointer-events-none">
+          <X className="h-4 w-4 sm:h-5 sm:w-5" />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  );
+})
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 const DialogHeader = ({
@@ -49,11 +72,22 @@ const DialogHeader = ({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={`flex flex-col space-y-1.5 text-center sm:text-left ${className}`}
+    className={`flex shrink-0 flex-col space-y-1.5 px-4 pt-4 text-center sm:px-6 sm:pt-6 sm:text-left pr-12 sm:pr-14 ${className}`}
     {...props}
   />
 )
 DialogHeader.displayName = "DialogHeader"
+
+const DialogBody = ({
+  className = "",
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div
+    className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6 ${className}`}
+    {...props}
+  />
+)
+DialogBody.displayName = "DialogBody"
 
 const DialogTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,
@@ -84,10 +118,23 @@ const DialogFooter = ({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={`flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 ${className}`}
+    className={`flex shrink-0 flex-col-reverse gap-2 border-t bg-white px-4 py-3 sm:flex-row sm:justify-end sm:space-x-2 sm:px-6 sm:py-4 ${className}`}
     {...props}
   />
 )
 DialogFooter.displayName = "DialogFooter"
 
-export { Dialog, DialogPortal, DialogOverlay, DialogClose, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter }
+export {
+  Dialog,
+  DialogPortal,
+  DialogOverlay,
+  DialogClose,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogBody,
+  DialogScrollArea,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+}

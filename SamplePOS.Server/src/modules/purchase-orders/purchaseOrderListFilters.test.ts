@@ -30,4 +30,14 @@ describe('purchaseOrderRepository.listPOs', () => {
     const params = (mockPool.query as jest.Mock).mock.calls[0][1] as unknown[];
     expect(params).toContain('CANCELLED');
   });
+
+  test('status=PENDING includes POs with open receipt quantity', async () => {
+    await purchaseOrderRepository.listPOs(mockPool, 1, 50, { status: 'PENDING' });
+
+    const countSql = String((mockPool.query as jest.Mock).mock.calls[0][0]);
+    expect(countSql).toContain('purchase_order_items poi');
+    expect(countSql).toContain('ordered_quantity');
+    expect(countSql).not.toContain('NOT EXISTS');
+    expect(countSql).not.toContain('goods_receipts gr');
+  });
 });

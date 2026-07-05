@@ -21,6 +21,7 @@ import * as auditRepository from '../audit/auditRepository.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
+import { assertSupplierCreditHeadroom } from '../suppliers/supplierCreditGuard.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -682,6 +683,20 @@ export async function createInvoiceFromGRN(
         );
     }
 
+    if (gr.purchaseOrderId) {
+        const siblingBill = await goodsReceiptRepository.findPoSiblingSupplierBill(
+            pool,
+            gr.purchaseOrderId,
+            input.grnId,
+        );
+        if (siblingBill) {
+            throw new ValidationError(
+                `PO already billed on ${siblingBill.grnNumber} (${siblingBill.invoiceNumber}). ` +
+                    `Top-up receipts on the same PO are covered by that bill — no separate supplier invoice.`,
+            );
+        }
+    }
+
     // Build line items from received non-bonus items.
     // RULE: Totals are derived exclusively from GRN quantities × unit costs.
     //       The supplier-reported total is a REFERENCE field only.
@@ -853,6 +868,13 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
         if (totalAmount <= 0) {
             throw new Error(`Supplier invoice ${inv.SupplierInvoiceNumber} has zero amount — nothing to post`);
         }
+
+        await assertSupplierCreditHeadroom(
+            client,
+            inv.SupplierId,
+            totalAmount,
+            `supplier invoice ${inv.SupplierInvoiceNumber}`,
+        );
 
         // Determine routing path:
         //   GR-linked invoice → DR GR/IR Clearing (2150) / CR AP (2100)  [2-line or 3-line]

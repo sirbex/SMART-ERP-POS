@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { formatCurrency } from '../utils/currency';
 import { BUSINESS_TIMEZONE, getBusinessDate, addDaysToDateString } from '../utils/businessDate';
@@ -13,6 +13,7 @@ import {
 } from '../hooks/useApi';
 import { useNeedingReorder, useStockLevels } from '../hooks/useInventory';
 import ExpiryAlertsWidget from '../components/ExpiryAlertsWidget';
+import { CASHIER_HOME_PATH, isCashierRole } from '../utils/cashierLockdown';
 import {
   ShoppingCart,
   Package,
@@ -169,6 +170,14 @@ function PaymentMethodIcon({ method }: { method: string }) {
 }
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  if (isCashierRole(user?.role)) {
+    return <Navigate to={CASHIER_HOME_PATH} replace />;
+  }
+  return <DashboardContent />;
+}
+
+function DashboardContent() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const today = todayStr();

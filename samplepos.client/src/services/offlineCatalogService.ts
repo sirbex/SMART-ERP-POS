@@ -152,7 +152,7 @@ export function clearPersistedCart(): void {
 // ── Sync catalog from server ──────────────────────────────────
 /**
  * Fetch the full POS-ready product catalog from the inventory
- * stock-levels endpoint and cache it locally together with a
+ * POS catalog endpoint and cache it locally together with a
  * stock mirror.
  *
  * Call on POS page load (when online).
@@ -170,7 +170,7 @@ export async function syncProductCatalog(): Promise<CachedProduct[]> {
 
 async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
     try {
-        const res = await apiClient.get('/inventory/stock-levels');
+        const res = await apiClient.get('/inventory/pos/catalog');
         interface StockLevelRow {
             product_id: string;
             product_name: string;
@@ -193,7 +193,6 @@ async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
         const missingUomProducts: string[] = [];
 
         const products: CachedProduct[] = stockLevels
-            .filter((item: StockLevelRow) => Number(item.total_stock || 0) > 0 || item.product_type === 'service')
             .map((item: StockLevelRow) => {
                 const sellingPrice = parseFloat(item.selling_price || '0');
                 const averageCost = parseFloat(item.average_cost || '0');
@@ -271,9 +270,14 @@ export function searchCachedProducts(query: string): CachedProduct[] {
 
     return products
         .filter((p) => {
-            // Services always show, inventory items need stock
-            const hasStock = p.productType === 'service' || (localStock[p.id] ?? p.stockOnHand) > 0;
+            const stock = localStock[p.id] ?? p.stockOnHand;
+            const hasStock = p.productType === 'service' || stock > 0;
             if (!hasStock) return false;
+
+            if (p.nearestExpiry && p.productType !== 'service') {
+                const today = new Date().toISOString().slice(0, 10);
+                if (p.nearestExpiry <= today) return false;
+            }
 
             return (
                 p.name.toLowerCase().includes(term) ||

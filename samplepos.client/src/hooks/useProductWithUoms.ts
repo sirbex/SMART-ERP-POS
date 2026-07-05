@@ -33,7 +33,7 @@ export type ProductWithUoms = {
   // ... other product fields
 };
 
-async function fetchProductWithUoms(productId: string): Promise<ProductWithUoms> {
+export async function fetchProductWithUoms(productId: string): Promise<ProductWithUoms> {
   const token = localStorage.getItem('auth_token');
   const res = await fetch(`/api/products/${productId}?includeUoms=true`, {
     headers: {

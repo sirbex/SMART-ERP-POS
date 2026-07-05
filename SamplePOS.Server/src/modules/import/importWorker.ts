@@ -629,6 +629,17 @@ async function flushChunk(
 
 // ── CSV Row Mapping ───────────────────────────────────────
 
+function stripControlCharacters(value: string): string {
+  let sanitized = '';
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 32 && code !== 127) {
+      sanitized += value[i];
+    }
+  }
+  return sanitized.trim();
+}
+
 /**
  * Map a raw CSV row (keyed by header names) to entity field names.
  * Handles case-insensitive header matching.
@@ -647,7 +658,7 @@ function mapCsvRow(
     if (!fieldName) continue; // Unmapped column — skip silently
 
     // Sanitize: strip control characters, limit length
-    const sanitized = value.replace(/[\x00-\x1F\x7F]/g, '').trim();
+    const sanitized = stripControlCharacters(value);
     if (sanitized === '') continue; // Skip empty values
 
     result[fieldName] = coerceValue(fieldName, sanitized, entityType);

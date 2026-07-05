@@ -142,7 +142,7 @@ function ledgerDerivedOpenInvoiceSql(
       FROM supplier_invoices scn
       WHERE scn.document_type = 'SUPPLIER_CREDIT_NOTE'
         AND scn.deleted_at IS NULL
-        AND UPPER(scn."Status") IN ('POSTED', 'APPLIED')
+        AND UPPER(scn."Status") = 'APPLIED'
         AND scn.reference_invoice_id IS NOT NULL
         ${ctx?.asOfDate ? `AND scn."InvoiceDate"::DATE <= $1::date` : ''}
       GROUP BY scn.reference_invoice_id
@@ -427,7 +427,7 @@ function correlatedLedgerInvoiceOpenSql(supplierIdColumn: string, ctx?: ApQueryC
                 WHERE scn.reference_invoice_id = si."Id"
                   AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
                   AND scn.deleted_at IS NULL
-                  AND UPPER(scn."Status") IN ('POSTED', 'APPLIED')
+                  AND UPPER(scn."Status") = 'APPLIED'
                   ${scnDate}
               ), 0)
             - COALESCE((
@@ -438,7 +438,7 @@ function correlatedLedgerInvoiceOpenSql(supplierIdColumn: string, ctx?: ApQueryC
                 WHERE scn.reference_invoice_id = si."Id"
                   AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
                   AND scn.deleted_at IS NULL
-                  AND UPPER(scn."Status") IN ('POSTED', 'APPLIED')
+                  AND UPPER(scn."Status") = 'APPLIED'
                   ${scnDate}
               ), 0)
           )

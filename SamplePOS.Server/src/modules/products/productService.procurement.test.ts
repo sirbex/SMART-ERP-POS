@@ -17,6 +17,7 @@ const mockIntegrity = {
 jest.unstable_mockModule('./productRepository.js', () => mockProductRepo);
 jest.unstable_mockModule('./uomService.js', () => ({
   bootstrapProductUomsFromCreateInput: jest.fn<MockFn>(),
+  assertPurchaseUomConfiguredInProductUoms: jest.fn<MockFn>(),
   validateProductPurchaseUomIntegrity: jest.fn<MockFn>(),
   checkProductPurchaseUomIntegrity: mockIntegrity.checkProductPurchaseUomIntegrity,
 }));

@@ -147,7 +147,7 @@ export default function BalanceSheetPage() {
             } else {
                 toast.error(result.error || 'Failed to load balance sheet');
             }
-        } catch (err) {
+        } catch {
             toast.error('Failed to load balance sheet');
         } finally {
             setLoading(false);

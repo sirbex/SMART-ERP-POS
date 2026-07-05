@@ -566,7 +566,10 @@ export const systemManagementRepository = {
             'depreciation_entries',
             // Inventory derived
             'inventory_adjustment_documents',
+            'inventory_aggregate_balances',
             'inventory_balances',
+            'product_lots',
+            'store_locations',
             'customer_balances',
             // State/aggregate tables (derived from sales/purchasing — must match txns)
             'product_daily_summary',
@@ -969,6 +972,9 @@ export const systemManagementRepository = {
         // Inventory derived tables
         tablesCleared['inventory_adjustment_documents'] = await safeDelete('inventory_adjustment_documents', step++);
         tablesCleared['inventory_balances'] = await safeDelete('inventory_balances', step++);
+        tablesCleared['product_lots'] = await safeDelete('product_lots', step++);
+        tablesCleared['store_locations'] = await safeDelete('store_locations', step++);
+        tablesCleared['inventory_aggregate_balances'] = await safeDelete('inventory_aggregate_balances', step++);
 
         // Use TRUNCATE CASCADE to handle FK dependencies automatically
         tablesCleared['stock_movements'] = await safeTruncate('stock_movements', step++);

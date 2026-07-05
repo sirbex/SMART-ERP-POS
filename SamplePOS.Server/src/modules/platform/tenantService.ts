@@ -519,7 +519,7 @@ export const tenantService = {
       try {
         pgShellExec(
           `psql -h ${dbHost} -p ${dbPort} -U ${dbUser} ` +
-          `-d ${TEMPLATE_DB_NAME} -c "UPDATE accounts SET \\\"CurrentBalance\\\" = 0 WHERE \\\"CurrentBalance\\\" != 0;"`,
+          `-d ${TEMPLATE_DB_NAME} -c 'UPDATE accounts SET "CurrentBalance" = 0 WHERE "CurrentBalance" != 0;'`,
           dbPassword,
           { timeout: 10_000, stdio: ['pipe', 'pipe', 'pipe'] },
         );

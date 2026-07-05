@@ -57,4 +57,15 @@ describe('InventoryBusinessRules.validateGRItemCompleteness — trackExpiry gate
       }),
     ).not.toThrow();
   });
+
+  it('allows draft placeholder lines with qty 0 and no expiry', () => {
+    expect(() =>
+      InventoryBusinessRules.validateGRItemCompleteness({
+        ...base,
+        receivedQuantity: 0,
+        expiryDate: null,
+        trackExpiry: true,
+      }),
+    ).not.toThrow();
+  });
 });

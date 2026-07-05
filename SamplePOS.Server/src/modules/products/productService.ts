@@ -15,7 +15,7 @@ import logger from '../../utils/logger.js';
 import type { BulkImportProductRow, BulkUpsertResult } from './productRepository.js';
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 import * as pricingService from '../../services/pricingService.js';
-import { bootstrapProductUomsFromCreateInput, validateProductPurchaseUomIntegrity, checkProductPurchaseUomIntegrity } from './uomService.js';
+import { bootstrapProductUomsFromCreateInput, validateProductPurchaseUomIntegrity, checkProductPurchaseUomIntegrity, assertPurchaseUomConfiguredInProductUoms } from './uomService.js';
 
 // Server-side limit cap — safe with lightweight flat query (no json_agg/GROUP BY).
 // 1800 products + batch UOM = ~25ms total. Cap at 5000 for safety.
@@ -329,6 +329,7 @@ export async function updateProduct(
         : (existing.purchaseUomId as string | null | undefined) ?? null;
 
     if (purchaseUomAfterSave) {
+      await assertPurchaseUomConfiguredInProductUoms(id, purchaseUomAfterSave, client);
       await validateProductPurchaseUomIntegrity(id, client);
     }
 

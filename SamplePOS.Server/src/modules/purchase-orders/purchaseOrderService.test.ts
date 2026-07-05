@@ -23,12 +23,25 @@ jest.unstable_mockModule('./purchaseOrderRepository.js', () => ({
     default: mockPORepo,
 }));
 
-jest.unstable_mockModule('../../middleware/businessRules.js', () => ({
-    PurchaseOrderBusinessRules: {
-        MAX_ITEMS_PER_PO: 100,
-        VALID_STATUSES: ['DRAFT', 'PENDING', 'COMPLETED', 'CANCELLED'],
-    },
-    InventoryBusinessRules: {},
+jest.unstable_mockModule('../../middleware/businessRules.js', () => {
+    class BusinessRuleViolation extends Error {
+        constructor(message: string) {
+            super(message);
+            this.name = 'BusinessRuleViolation';
+        }
+    }
+    return {
+        BusinessRuleViolation,
+        PurchaseOrderBusinessRules: {
+            MAX_ITEMS_PER_PO: 100,
+            VALID_STATUSES: ['DRAFT', 'PENDING', 'COMPLETED', 'CANCELLED'],
+        },
+        InventoryBusinessRules: {},
+    };
+});
+
+jest.unstable_mockModule('../suppliers/supplierCreditGuard.js', () => ({
+    assertSupplierCreditHeadroom: jest.fn<MockFn>().mockResolvedValue(undefined),
 }));
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({

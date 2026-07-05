@@ -6,6 +6,7 @@ import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseListQuery.js';
+import logger from '../../utils/logger.js';
 
 // Validation schemas
 const GRItemSchema = z.object({
@@ -22,6 +23,7 @@ const GRItemSchema = z.object({
     .string()
     .optional()
     .nullable(),
+  targetStoreLocationId: z.string().uuid().optional().nullable(),
 });
 
 const CreateGRSchema = z
@@ -74,10 +76,12 @@ const UpdateGRItemSchema = z
     unitCost: z.number().nonnegative().optional(),
     batchNumber: z.string().nullable().optional(),
     isBonus: z.boolean().optional(),
+    uomId: z.string().uuid().nullable().optional(),
     expiryDate: z
       .string()
       .nullable()
       .optional(),
+    targetStoreLocationId: z.string().uuid().nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided to update',
@@ -90,7 +94,9 @@ const BatchUpdateGRItemsSchema = z.object({
     unitCost: z.number().nonnegative().optional(),
     batchNumber: z.string().nullable().optional(),
     isBonus: z.boolean().optional(),
+    uomId: z.string().uuid().nullable().optional(),
     expiryDate: z.string().nullable().optional(),
+    targetStoreLocationId: z.string().uuid().nullable().optional(),
   })).min(1, 'At least one item must be provided'),
 });
 
@@ -105,6 +111,7 @@ const AddGRItemSchema = z.object({
   unitCost: z.number().nonnegative('Unit cost must be non-negative'),
   batchNumber: z.string().optional().nullable(),
   expiryDate: z.string().optional().nullable(),
+  targetStoreLocationId: z.string().uuid().optional().nullable(),
 });
 
 const ReverseUninvoicedSchema = z.object({
@@ -117,48 +124,17 @@ export const goodsReceiptController = {
    */
   async createGR(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('📦 [GR CREATE] Incoming Request');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('Request Body:', JSON.stringify(req.body, null, 2));
-    console.log('\n🔍 [GR CREATE] Field Analysis:');
-    console.log(
-      '  - purchaseOrderId:',
-      req.body.purchaseOrderId,
-      '(type:',
-      typeof req.body.purchaseOrderId,
-      ')'
-    );
-    console.log(
-      '  - supplierId:',
-      req.body.supplierId,
-      '(type:',
-      typeof req.body.supplierId,
-      ')'
-    );
-    console.log(
-      '  - receivedBy:',
-      req.body.receivedBy,
-      '(type:',
-      typeof req.body.receivedBy,
-      ')'
-    );
-    console.log(
-      '  - receiptDate:',
-      req.body.receiptDate,
-      '(type:',
-      typeof req.body.receiptDate,
-      ')'
-    );
-    console.log('  - items count:', req.body.items?.length || 0);
-    if (req.body.items && req.body.items.length > 0) {
-      console.log('\n📋 [GR CREATE] First Item Sample:');
-      console.log(JSON.stringify(req.body.items[0], null, 2));
-    }
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    logger.debug('GR CREATE incoming request', {
+      purchaseOrderId: req.body.purchaseOrderId,
+      supplierId: req.body.supplierId,
+      receivedBy: req.body.receivedBy,
+      receiptDate: req.body.receiptDate,
+      itemCount: req.body.items?.length ?? 0,
+      firstItem: req.body.items?.[0] ?? null,
+    });
 
     const validatedData = CreateGRSchema.parse(req.body);
-    console.log('✅ [GR CREATE] Validation passed!\n');
+    logger.debug('GR CREATE validation passed');
 
     const result = await goodsReceiptService.createGR(pool, validatedData);
 
@@ -198,24 +174,14 @@ export const goodsReceiptController = {
       });
     } catch (error: unknown) {
       if (error instanceof z.ZodError) {
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('❌ [GR CREATE] VALIDATION FAILED');
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-        console.log('Error Count:', error.errors.length);
-        error.errors.forEach((err, idx) => {
-          console.log(`\n🔴 Error ${idx + 1}:`);
-          console.log('  Path:', err.path.join(' → ') || 'root');
-          console.log('  Code:', err.code);
-          console.log('  Message:', err.message);
-          if (err.code === 'invalid_type') {
-            console.log('  Expected:', 'expected' in err ? err.expected : undefined);
-            console.log('  Received:', 'received' in err ? err.received : undefined);
-          }
-          if (err.code === 'invalid_string') {
-            console.log('  Validation:', 'validation' in err ? err.validation : undefined);
-          }
+        logger.warn('GR CREATE validation failed', {
+          errorCount: error.errors.length,
+          errors: error.errors.map((err) => ({
+            path: err.path.join(' → ') || 'root',
+            code: err.code,
+            message: err.message,
+          })),
         });
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
         res.status(400).json({
           success: false,
@@ -391,7 +357,10 @@ export const goodsReceiptController = {
       receivedQuantity: payload.receivedQuantity,
       unitCost: payload.unitCost,
       batchNumber: payload.batchNumber ?? undefined,
+      isBonus: payload.isBonus,
+      uomId: payload.uomId ?? undefined,
       expiryDate: payload.expiryDate ?? undefined,
+      targetStoreLocationId: payload.targetStoreLocationId ?? undefined,
     });
 
     res.json({ success: true, data: updated, message: 'Goods receipt item updated' });
@@ -517,7 +486,7 @@ goodsReceiptRoutes.get(
 goodsReceiptRoutes.post(
   '/:id/reverse-uninvoiced',
   authenticate,
-  requirePermission('inventory.create'),
+  requirePermission('purchasing.post'),
   asyncHandler(goodsReceiptController.reverseUninvoicedReceipt)
 );
 goodsReceiptRoutes.post(

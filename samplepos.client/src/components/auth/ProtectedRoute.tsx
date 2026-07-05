@@ -12,6 +12,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { FeatureGate } from './FeatureGate';
 import { UserRole } from '../../types';
+import { CASHIER_HOME_PATH, isCashierRole } from '../../utils/cashierLockdown';
 
 interface ProtectedRouteProps {
     children: React.ReactNode;
@@ -92,8 +93,8 @@ export function ProtectedRoute({
         );
     }
 
-    // Redirect to dashboard if unauthorized
-    return <Navigate to="/dashboard" replace />;
+    // Redirect to dashboard if unauthorized (cashiers → POS)
+    return <Navigate to={isCashierRole(user.role) ? CASHIER_HOME_PATH : '/dashboard'} replace />;
 }
 
 /**

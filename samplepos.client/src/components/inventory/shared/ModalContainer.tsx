@@ -1,42 +1,60 @@
 /**
- * Shared Modal Container Component
- * Used in: Purchase Orders, Manual Goods Receipt, all inventory modals
- * Provides consistent modal backdrop and container styling
+ * Shared document workspace shell — full-width SlideDrawer for inventory forms.
+ * Used in: Purchase Orders create/edit, Manual Goods Receipt, procurement modals.
  */
+import type { ReactNode } from 'react';
+import SlideDrawer from '../../ui/SlideDrawer';
 
 interface ModalContainerProps {
-  children: React.ReactNode;
-  maxWidth?: "2xl" | "4xl" | "6xl";
+  children: ReactNode;
+  onClose: () => void;
+  title: string;
+  subtitle?: string;
+  footer?: ReactNode;
+  width?: 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | 'full';
+  transactional?: boolean;
+  cancellable?: boolean;
+  guardLabel?: string;
+  /** @deprecated Use width="full" */
+  maxWidth?: '2xl' | '4xl' | '6xl';
   className?: string;
-  onClose?: () => void;
+  /** @deprecated Guard z-index handled by SlideDrawer */
   zIndex?: number;
 }
 
+const legacyWidthMap: Record<NonNullable<ModalContainerProps['maxWidth']>, ModalContainerProps['width']> = {
+  '2xl': '2xl',
+  '4xl': '4xl',
+  '6xl': 'full',
+};
+
 export function ModalContainer({
   children,
-  maxWidth = "6xl",
-  className = "",
   onClose,
-  zIndex,
+  title,
+  subtitle,
+  footer,
+  width,
+  transactional = true,
+  cancellable = true,
+  guardLabel,
+  maxWidth,
 }: ModalContainerProps) {
-  const widthClasses = {
-    "2xl": "max-w-2xl",
-    "4xl": "max-w-4xl",
-    "6xl": "max-w-6xl",
-  };
+  const drawerWidth = width ?? (maxWidth ? legacyWidthMap[maxWidth] : 'full');
 
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"
-      style={{ zIndex: zIndex ?? 50 }}
-      onClick={onClose}
+    <SlideDrawer
+      open
+      onClose={onClose}
+      title={title}
+      subtitle={subtitle}
+      width={drawerWidth}
+      transactional={transactional}
+      cancellable={cancellable}
+      guardLabel={guardLabel ?? title}
+      footer={footer}
     >
-      <div
-        className={`bg-white rounded-lg p-6 ${widthClasses[maxWidth]} w-full mx-4 max-h-[90vh] overflow-y-auto ${className}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {children}
-      </div>
-    </div>
+      {children}
+    </SlideDrawer>
   );
 }

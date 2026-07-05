@@ -54,7 +54,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
         toast.error(`${failedResults.length} sale(s) failed: ${firstError}`, { duration: 6000 });
       }
       if (synced === 0 && failedResults.length === 0) toast.success('Nothing to sync');
-    } catch (err) {
+    } catch {
       toast.error('Sync failed');
     } finally {
       setIsSyncing(false);

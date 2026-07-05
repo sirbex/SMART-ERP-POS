@@ -140,6 +140,7 @@ export interface UpdateGoodsReceiptItemInput {
   expiryDate?: string | null;
   notes?: string;
   isBonus?: boolean;
+  targetStoreLocationId?: string | null;
 }
 
 // ─── Inventory ─────────────────────────────────────────────────────────
@@ -243,9 +244,11 @@ export interface InvoiceSettingsInput {
 // ─── PO Invoices/Payments (Supplier) ───────────────────────────────────
 
 export interface CreatePOInvoiceInput {
-  purchaseOrderId: string;
-  invoiceNumber: string;
-  amount: number | string;
+  /** Goods receipt to bill — required for canonical from-grn billing */
+  goodsReceiptId: string;
+  purchaseOrderId?: string;
+  invoiceNumber?: string;
+  amount?: number | string;
   dueDate?: string;
   notes?: string;
 }

@@ -253,8 +253,8 @@ export function AdjustSupplierInvoiceModal({ open, onClose, invoiceId, invoiceNu
             const data = result.data.data;
             if (intent === 'RETURN') {
                 toast.success(
-                    `Return posted: ${data.returnGrnNumber} → Credit Note: ${data.creditNoteNumber}`,
-                    { duration: 6000 },
+                    `Return posted: ${data.returnGrnNumber} → Credit Note: ${data.creditNoteNumber}. Apply it to open bills in Credit Notes.`,
+                    { duration: 8000 },
                 );
             } else {
                 toast.success(`Credit note issued: ${data.creditNoteNumber}`, { duration: 6000 });
@@ -537,7 +537,7 @@ export function AdjustSupplierInvoiceModal({ open, onClose, invoiceId, invoiceNu
                                     {intent === 'RETURN' ? (
                                         <>
                                             <div>• <span className="font-medium">Return GRN (RGRN-…)</span> — stock will be deducted</div>
-                                            <div>• <span className="font-medium">Supplier Credit Note (SCN-…)</span> — reduces invoice balance</div>
+                                            <div>• <span className="font-medium">Supplier Credit Note (SCN-…)</span> — posted to GL; apply to bill in Credit Notes</div>
                                             <div className="mt-1 text-gray-500">GL: DR AP / CR Inventory (net effect)</div>
                                         </>
                                     ) : (

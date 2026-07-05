@@ -5,7 +5,7 @@
  * Allows users to create rules for automatic categorization.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Brain, Check, X, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,23 +56,7 @@ export const PatternLearningModal: React.FC<PatternLearningModalProps> = ({
         }
     }, [description]);
 
-    if (!isOpen) return null;
-
-    const handleApplyPattern = (pattern: BankPattern) => {
-        if (pattern.categoryId && onPatternApplied) {
-            onPatternApplied(pattern.categoryId);
-        }
-        // Positive feedback
-        feedbackMutation.mutate({ patternId: pattern.id, wasCorrect: true });
-        onClose();
-    };
-
-    const handleRejectPattern = (pattern: BankPattern) => {
-        // Negative feedback
-        feedbackMutation.mutate({ patternId: pattern.id, wasCorrect: false });
-    };
-
-    const handleCreatePattern = async () => {
+    const handleCreatePattern = useCallback(async () => {
         if (!patternText || !selectedCategoryId) return;
 
         try {
@@ -90,16 +74,40 @@ export const PatternLearningModal: React.FC<PatternLearningModalProps> = ({
         } catch (error) {
             console.error('Failed to create pattern:', error);
         }
-    };
-
-    const filteredCategories = categories.filter(
-        cat => cat.direction === (transactionType === 'CREDIT' ? 'IN' : 'OUT')
-    );
+    }, [
+        learnMutation,
+        notes,
+        onClose,
+        onPatternApplied,
+        patternText,
+        selectedCategoryId,
+        transactionType,
+    ]);
 
     useSubmitOnEnter(
         isOpen,
         !learnMutation.isPending && !!patternText && !!selectedCategoryId,
         handleCreatePattern
+    );
+
+    if (!isOpen) return null;
+
+    const handleApplyPattern = (pattern: BankPattern) => {
+        if (pattern.categoryId && onPatternApplied) {
+            onPatternApplied(pattern.categoryId);
+        }
+        // Positive feedback
+        feedbackMutation.mutate({ patternId: pattern.id, wasCorrect: true });
+        onClose();
+    };
+
+    const handleRejectPattern = (pattern: BankPattern) => {
+        // Negative feedback
+        feedbackMutation.mutate({ patternId: pattern.id, wasCorrect: false });
+    };
+
+    const filteredCategories = categories.filter(
+        cat => cat.direction === (transactionType === 'CREDIT' ? 'IN' : 'OUT')
     );
 
     return (

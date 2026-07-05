@@ -169,6 +169,17 @@ jest.unstable_mockModule('../suppliers/supplierRepository.js', () => ({
     recalculateOutstandingBalance: mockRecalcSupplierBalance,
 }));
 
+const mockApplyInvoiceLedgerOutstanding = jest.fn<MockFn>().mockResolvedValue({
+    changed: true,
+    before: 590000,
+    after: 600000,
+});
+jest.unstable_mockModule('../supplier-payments/supplierPaymentRepository.js', () => ({
+    applyInvoiceLedgerOutstanding: mockApplyInvoiceLedgerOutstanding,
+    lockAndComputeInvoiceOutstanding: jest.fn<MockFn>(),
+    repairSupplierInvoiceOutstandingFromLedger: jest.fn<MockFn>(),
+}));
+
 // ── Date utilities ────────────────────────────────────────────
 jest.unstable_mockModule('../../utils/dateRange.js', () => ({
     getBusinessDate: jest.fn<SyncMockFn>().mockReturnValue('2026-05-01'),
@@ -289,8 +300,25 @@ function resetAll() {
     mockCreateJournalEntry.mockResolvedValue({ transactionId: 'txn-1' });
     mockReverseTransaction.mockResolvedValue({ transactionId: 'txn-rev-1' });
     mockRecalcSupplierBalance.mockResolvedValue(undefined);
-    // Pool query: default to no GL transaction found (cancel path)
+    mockApplyInvoiceLedgerOutstanding.mockClear();
+    mockApplyInvoiceLedgerOutstanding.mockResolvedValue({
+        changed: true,
+        before: 590000,
+        after: 600000,
+    });
+    // Pool query: default to no GL transaction found (legacy cancel path)
     mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    // Client query: supplier cancel uses client for GL lookup + CN AmountPaid read
+    mockClientQuery.mockImplementation(async (sql: unknown) => {
+        const text = String(sql);
+        if (text.includes('ledger_transactions')) {
+            return { rows: [], rowCount: 0 } as unknown as QueryResult;
+        }
+        if (text.includes('COALESCE("AmountPaid"')) {
+            return { rows: [{ amount_paid: '0' }], rowCount: 1 } as unknown as QueryResult;
+        }
+        return { rows: [], rowCount: 0 } as unknown as QueryResult;
+    });
     mockCnRepo.sumPostedCreditNotesForInvoice.mockResolvedValue(0);
 }
 
@@ -804,20 +832,12 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             issueDate: '2026-05-01',
         };
 
-        // postNote delegates bill-application to applySupplierCreditNote when referenceInvoiceId is set.
-        // Spy prevents real execution of that inner method in these postNote-focused tests.
+        // postNote no longer auto-applies — user applies via Apply to Open Bills.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let applySpy: any;
         beforeEach(() => {
             mockClientQuery.mockResolvedValue({ rows: [{ return_grn_id: null }], rowCount: 1 } as QueryResult);
-            applySpy = jest.spyOn(supplierCreditDebitNoteService, 'applySupplierCreditNote')
-                .mockResolvedValue({
-                    creditNoteId: 'scn-uuid-1',
-                    totalApplied: 40000,
-                    residual: 0,
-                    status: 'APPLIED',
-                    allocations: [{ billId: 'sinv-001', amount: 40000 }],
-                });
+            applySpy = jest.spyOn(supplierCreditDebitNoteService, 'applySupplierCreditNote');
         });
         afterEach(() => {
             applySpy.mockRestore();
@@ -855,17 +875,12 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             expect(glCall.clearingAccountCode).toBe('2160');
         });
 
-        it('calls applySupplierCreditNote with primaryBillId when referenceInvoiceId is set', async () => {
+        it('does NOT auto-apply when referenceInvoiceId is set (manual apply only)', async () => {
             mockSupplierRepo.postSupplierNote.mockResolvedValue(draftSupplierCN);
 
             await supplierCreditDebitNoteService.postNote(mockPool, 'scn-uuid-1');
 
-            // postNote now delegates bill-application to applySupplierCreditNote (not direct adjustSupplierInvoiceBalance)
-            expect(applySpy).toHaveBeenCalledWith(
-                mockClient,
-                'scn-uuid-1',
-                { primaryBillId: 'sinv-001', allowFIFO: false },
-            );
+            expect(applySpy).not.toHaveBeenCalled();
         });
 
         it('calls recalcSupplierBalance after posting (SSOT enforcement)', async () => {
@@ -919,9 +934,12 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
         it('reverses bill application using AmountPaid (not full totalAmount)', async () => {
             mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedSupplierCN);
             mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedSupplierCN, status: 'CANCELLED' });
-            mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
             mockClientQuery.mockImplementation(async (sql: unknown) => {
-                if (String(sql).includes('COALESCE("AmountPaid"')) {
+                const text = String(sql);
+                if (text.includes('ledger_transactions')) {
+                    return { rows: [], rowCount: 0 } as unknown as QueryResult;
+                }
+                if (text.includes('COALESCE("AmountPaid"')) {
                     return mockQueryResult([{ amount_paid: '25000' }]);
                 }
                 return mockQueryResult([]);
@@ -935,25 +953,47 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
                 'sinv-001',
                 25000,
             );
+            expect(mockApplyInvoiceLedgerOutstanding).not.toHaveBeenCalled();
             expect(mockSupplierRepo.adjustSupplierInvoiceBalance).not.toHaveBeenCalled();
         });
 
         it('skips bill reversal when SCN was on-account (AmountPaid = 0)', async () => {
             mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedSupplierCN);
             mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedSupplierCN, status: 'CANCELLED' });
-            mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
-            mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '0' }], rowCount: 1 } as QueryResult);
+            mockClientQuery.mockImplementation(async (sql: unknown) => {
+                const text = String(sql);
+                if (text.includes('ledger_transactions')) {
+                    return { rows: [], rowCount: 0 } as unknown as QueryResult;
+                }
+                if (text.includes('COALESCE("AmountPaid"')) {
+                    return { rows: [{ amount_paid: '0' }], rowCount: 1 } as unknown as QueryResult;
+                }
+                return { rows: [], rowCount: 0 } as unknown as QueryResult;
+            });
 
             await supplierCreditDebitNoteService.cancelNote(mockPool, 'scn-uuid-1', 'Test');
 
             expect(mockSupplierRepo.reverseAmountFromSupplierBill).not.toHaveBeenCalled();
+            expect(mockApplyInvoiceLedgerOutstanding).toHaveBeenCalledWith(
+                mockClient,
+                'sinv-001',
+            );
+            expect(mockRecalcSupplierBalance).toHaveBeenCalledWith(mockClient, 'sup-001');
         });
 
         it('calls recalcSupplierBalance after cancellation', async () => {
             mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedSupplierCN);
             mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedSupplierCN, status: 'CANCELLED' });
-            mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
-            mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '0' }], rowCount: 1 } as QueryResult);
+            mockClientQuery.mockImplementation(async (sql: unknown) => {
+                const text = String(sql);
+                if (text.includes('ledger_transactions')) {
+                    return { rows: [], rowCount: 0 } as unknown as QueryResult;
+                }
+                if (text.includes('COALESCE("AmountPaid"')) {
+                    return { rows: [{ amount_paid: '0' }], rowCount: 1 } as unknown as QueryResult;
+                }
+                return { rows: [], rowCount: 0 } as unknown as QueryResult;
+            });
 
             await supplierCreditDebitNoteService.cancelNote(mockPool, 'scn-uuid-1', 'Test');
 
@@ -963,11 +1003,16 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
         it('calls AccountingCore.reverseTransaction when GL record exists', async () => {
             mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedSupplierCN);
             mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedSupplierCN, status: 'CANCELLED' });
-            mockPoolQuery.mockResolvedValue({
-                rows: [{ Id: 'gl-txn-supp-1' }],
-                rowCount: 1,
-            } as unknown as QueryResult);
-            mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '0' }], rowCount: 1 } as QueryResult);
+            mockClientQuery.mockImplementation(async (sql: unknown) => {
+                const text = String(sql);
+                if (text.includes('ledger_transactions')) {
+                    return { rows: [{ Id: 'gl-txn-supp-1' }], rowCount: 1 } as unknown as QueryResult;
+                }
+                if (text.includes('COALESCE("AmountPaid"')) {
+                    return { rows: [{ amount_paid: '0' }], rowCount: 1 } as unknown as QueryResult;
+                }
+                return { rows: [], rowCount: 0 } as unknown as QueryResult;
+            });
 
             await supplierCreditDebitNoteService.cancelNote(mockPool, 'scn-uuid-1', 'Cancel reason');
 
@@ -1323,33 +1368,19 @@ describe('Credit/Debit Note — balance direction invariants', () => {
         const noteId = 'scn-inv-1';
         const postedNote = {
             id: noteId, invoiceNumber: 'SCN-2026-0099', documentType: 'SUPPLIER_CREDIT_NOTE',
-            status: 'POSTED', subtotal: 25000, taxAmount: 0, totalAmount: 25000,
+            status: 'APPLIED', subtotal: 25000, taxAmount: 0, totalAmount: 25000,
             supplierId: 'sup-1', supplierName: 'S', referenceInvoiceId: 'sinv-x',
             issueDate: '2026-05-01',
         };
 
-        // postNote delegates bill-application to applySupplierCreditNote; spy it to avoid unmocked call chains
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const postSpy: any = jest.spyOn(supplierCreditDebitNoteService, 'applySupplierCreditNote')
-            .mockResolvedValue({ creditNoteId: noteId, totalApplied: 25000, residual: 0, status: 'APPLIED', allocations: [] });
-        try {
-            mockSupplierRepo.postSupplierNote.mockResolvedValue(postedNote);
-            await supplierCreditDebitNoteService.postNote(mockPool, noteId);
-            // Verify applySupplierCreditNote was called (the post-direction invariant)
-            expect(postSpy).toHaveBeenCalledWith(mockClient, noteId, { primaryBillId: 'sinv-x', allowFIFO: false });
-
-            jest.clearAllMocks();
-            mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedNote);
-            mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedNote, status: 'CANCELLED' });
-            mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
-            mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '25000' }], rowCount: 1 } as QueryResult);
-            await supplierCreditDebitNoteService.cancelNote(mockPool, noteId, 'Test');
-            expect(mockSupplierRepo.reverseAmountFromSupplierBill).toHaveBeenCalledWith(
-                mockClient, 'sinv-x', 25000,
-            );
-        } finally {
-            postSpy.mockRestore();
-        }
+        mockSupplierRepo.getSupplierNoteById.mockResolvedValue(postedNote);
+        mockSupplierRepo.cancelSupplierNote.mockResolvedValue({ ...postedNote, status: 'CANCELLED' });
+        mockPoolQuery.mockResolvedValue({ rows: [], rowCount: 0 } as unknown as QueryResult);
+        mockClientQuery.mockResolvedValue({ rows: [{ amount_paid: '25000' }], rowCount: 1 } as QueryResult);
+        await supplierCreditDebitNoteService.cancelNote(mockPool, noteId, 'Test');
+        expect(mockSupplierRepo.reverseAmountFromSupplierBill).toHaveBeenCalledWith(
+            mockClient, 'sinv-x', 25000,
+        );
     });
 
     /**

@@ -157,7 +157,7 @@ export default function BarcodeLookupPage() {
         ]);
         toast.error(`Not found: ${barcode}`);
       }
-    } catch (err) {
+    } catch {
       setCurrentResult(null);
       setScanHistory((prev) => [
         { barcode, timestamp: Date.now(), result: null, error: 'Lookup failed' },

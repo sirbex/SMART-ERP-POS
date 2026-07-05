@@ -1,6 +1,7 @@
 // Reusable Product Form used across ProductsPage and ManualGRModal
 import { useMemo } from 'react';
 import CategoryCombobox from './CategoryCombobox';
+import { buildPurchaseUomOptions } from '@/validation/product';
 
 /**
  * SAP/Odoo formula preview: safely evaluates the pricing formula in the browser
@@ -10,7 +11,7 @@ import CategoryCombobox from './CategoryCombobox';
 function evalFormulaPreview(formula: string, costPrice: number): number | null {
   if (!formula.trim() || costPrice <= 0) return null;
   try {
-    // eslint-disable-next-line no-new-func
+     
     const fn = new Function('cost', 'lastCost', 'sellingPrice', 'quantity', 'Math',
       `return (${formula});`);
     const result = fn(costPrice, costPrice, 0, 1, Math);
@@ -56,17 +57,42 @@ export interface ProductFormProps {
   disabled?: boolean;
   /** Supplier list for the Procurement tab dropdown (if not provided, tab is hidden) */
   suppliers?: Array<{ id: string; name: string }>;
-  /** Master UoMs for the Purchase UoM dropdown */
+  /** Master UoMs (fallback for quick-create bootstrap flow) */
   masterUoms?: Array<{ id: string; name: string; symbol?: string | null }>;
+  /** Product UoMs already configured on this item — SSOT for Purchase UoM on edit */
+  configuredProductUoms?: Array<{ id: string; name: string; symbol?: string | null }>;
+  /** When true, Purchase UoM may only be chosen from configuredProductUoms */
+  restrictPurchaseUomToConfigured?: boolean;
   /** Last purchase price (read-only, populated from DB) */
   lastPurchasePrice?: string;
 }
 
-export default function ProductForm({ values, onChange, validationErrors = {}, disabled = false, suppliers, masterUoms, lastPurchasePrice }: ProductFormProps) {
+export default function ProductForm({
+  values,
+  onChange,
+  validationErrors = {},
+  disabled = false,
+  suppliers,
+  masterUoms,
+  configuredProductUoms,
+  restrictPurchaseUomToConfigured = false,
+  lastPurchasePrice,
+}: ProductFormProps) {
   const costNum = parseFloat(values.costPrice) || 0;
   const formulaPreviewPrice = useMemo(
     () => values.autoUpdatePrice ? evalFormulaPreview(values.pricingFormula, costNum) : null,
     [values.pricingFormula, values.autoUpdatePrice, costNum]
+  );
+
+  const purchaseUomOptions = useMemo(
+    () =>
+      buildPurchaseUomOptions({
+        restrictToConfigured: restrictPurchaseUomToConfigured,
+        configuredProductUoms,
+        masterUoms,
+        currentPurchaseUomId: values.purchaseUomId,
+      }),
+    [restrictPurchaseUomToConfigured, configuredProductUoms, masterUoms, values.purchaseUomId],
   );
   return (
     <div className="space-y-4">
@@ -450,7 +476,7 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
               <label htmlFor="purchase-uom" className="block text-sm font-medium text-gray-700 mb-1">
                 Purchase UoM
               </label>
-              {masterUoms && masterUoms.length > 0 ? (
+              {purchaseUomOptions.length > 0 ? (
                 <select
                   id="purchase-uom"
                   value={values.purchaseUomId}
@@ -459,7 +485,7 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="">Default (base unit)</option>
-                  {masterUoms.map((u) => (
+                  {purchaseUomOptions.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}{u.symbol ? ` (${u.symbol})` : ''}
                     </option>
@@ -473,10 +499,14 @@ export default function ProductForm({ values, onChange, validationErrors = {}, d
                   readOnly
                   disabled
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
-                  placeholder="No UoMs configured"
+                  placeholder={restrictPurchaseUomToConfigured ? 'Add Product UoMs first' : 'No UoMs configured'}
                 />
               )}
-              <p className="text-xs text-gray-500 mt-1">Default unit of measure for purchasing</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {restrictPurchaseUomToConfigured
+                  ? 'Must match a unit configured under Product UoMs'
+                  : 'Default unit of measure for purchasing'}
+              </p>
             </div>
 
             <div>

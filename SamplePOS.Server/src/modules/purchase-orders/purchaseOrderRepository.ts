@@ -9,6 +9,10 @@ import {
   poItemNetReceivedQuantitySql,
   poItemOpenQuantitySql,
   poItemReturnedQuantitySql,
+  poOrderedQtyTotalSql,
+  poNetReceivedQtyTotalSql,
+  poOpenQtyTotalSql,
+  poCompletedGrCountSql,
 } from './purchaseOrderNetReceived.js';
 
 const PO_SORT_COLUMNS: Record<string, string> = {
@@ -32,6 +36,11 @@ export interface PurchaseOrder {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** Receipt progress (list/detail aggregates). */
+  orderedQtyTotal?: number;
+  netReceivedQtyTotal?: number;
+  openQtyTotal?: number;
+  completedGrCount?: number;
 }
 
 export interface PurchaseOrderItem {
@@ -73,6 +82,83 @@ export interface CreatePOItemData {
   conversionFactor?: number; // SAP UoM snapshot: conversion factor at posting time
 }
 
+type DbRow = Record<string, unknown>;
+
+function mapPurchaseOrderRow(row: DbRow): PurchaseOrder {
+  return {
+    id: row.id as string,
+    poNumber: (row.poNumber ?? row.order_number) as string,
+    supplierId: (row.supplierId ?? row.supplier_id) as string,
+    orderDate: String(row.orderDate ?? row.order_date ?? ''),
+    expectedDate: (row.expectedDate ?? row.expected_delivery_date ?? null) as string | null,
+    status: row.status as PurchaseOrder['status'],
+    totalAmount: Number(row.totalAmount ?? row.total_amount ?? 0),
+    notes: (row.notes ?? null) as string | null,
+    createdBy: (row.createdBy ?? row.created_by_id) as string,
+    createdAt: String(row.createdAt ?? row.created_at ?? ''),
+    updatedAt: String(row.updatedAt ?? row.updated_at ?? ''),
+    orderedQtyTotal:
+      row.orderedQtyTotal != null
+        ? Number(row.orderedQtyTotal)
+        : row.ordered_qty_total != null
+          ? Number(row.ordered_qty_total)
+          : undefined,
+    netReceivedQtyTotal:
+      row.netReceivedQtyTotal != null
+        ? Number(row.netReceivedQtyTotal)
+        : row.net_received_qty_total != null
+          ? Number(row.net_received_qty_total)
+          : undefined,
+    openQtyTotal:
+      row.openQtyTotal != null
+        ? Number(row.openQtyTotal)
+        : row.open_qty_total != null
+          ? Number(row.open_qty_total)
+          : undefined,
+    completedGrCount:
+      row.completedGrCount != null
+        ? Number(row.completedGrCount)
+        : row.completed_gr_count != null
+          ? Number(row.completed_gr_count)
+          : undefined,
+  };
+}
+
+function mapPurchaseOrderItemRow(row: DbRow): PurchaseOrderItem {
+  return {
+    id: row.id as string,
+    purchaseOrderId: (row.purchaseOrderId ?? row.purchase_order_id) as string,
+    productId: (row.productId ?? row.product_id) as string,
+    productName: (row.productName ?? row.product_name ?? 'Unknown Product') as string,
+    quantity: Number(row.quantity ?? row.ordered_quantity ?? 0),
+    unitCost: Number(row.unitCost ?? row.unit_price ?? 0),
+    lineTotal: Number(row.lineTotal ?? row.total_price ?? 0),
+    receivedQuantity: Number(
+      row.receivedQuantity ?? row.gross_received_quantity ?? row.received_quantity ?? 0,
+    ),
+    returnedQuantity:
+      row.returnedQuantity != null
+        ? Number(row.returnedQuantity)
+        : row.returned_quantity != null
+          ? Number(row.returned_quantity)
+          : undefined,
+    netReceivedQuantity:
+      row.netReceivedQuantity != null
+        ? Number(row.netReceivedQuantity)
+        : row.net_received_quantity != null
+          ? Number(row.net_received_quantity)
+          : undefined,
+    openQuantity:
+      row.openQuantity != null
+        ? Number(row.openQuantity)
+        : row.open_quantity != null
+          ? Number(row.open_quantity)
+          : undefined,
+    uomId: (row.uomId ?? row.uom_id ?? null) as string | null,
+    uomName: (row.uomName ?? row.uom_name ?? null) as string | null,
+  };
+}
+
 export const purchaseOrderRepository = {
   /**
    * Generate next PO number (PO-YYYY-NNNN format)
@@ -112,7 +198,7 @@ export const purchaseOrderRepository = {
       [poNumber, data.supplierId, data.orderDate, data.expectedDate, data.notes, data.createdBy]
     );
 
-    return result.rows[0];
+    return mapPurchaseOrderRow(result.rows[0]);
   },
 
   /**
@@ -244,7 +330,11 @@ export const purchaseOrderRepository = {
     id: string
   ): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] } | null> {
     const poResult = await pool.query(
-      `SELECT po.*, s."CompanyName" as supplier_name 
+      `SELECT po.*, s."CompanyName" as supplier_name,
+              ROUND((${poOrderedQtyTotalSql('po')})::numeric, 4) AS ordered_qty_total,
+              ROUND((${poNetReceivedQtyTotalSql('po')})::numeric, 4) AS net_received_qty_total,
+              ROUND((${poOpenQtyTotalSql('po')})::numeric, 4) AS open_qty_total,
+              ${poCompletedGrCountSql('po')} AS completed_gr_count
        FROM purchase_orders po
        JOIN suppliers s ON po.supplier_id = s."Id"
        WHERE po.id = $1`,
@@ -283,8 +373,8 @@ export const purchaseOrderRepository = {
     );
 
     return {
-      po: poResult.rows[0],
-      items: itemsResult.rows,
+      po: mapPurchaseOrderRow(poResult.rows[0]),
+      items: itemsResult.rows.map(mapPurchaseOrderItemRow),
     };
   },
 
@@ -306,11 +396,13 @@ export const purchaseOrderRepository = {
       whereClauses.push(`po.status = $${paramIndex++}`);
       values.push(filters.status);
 
-      // If filtering by PENDING, exclude POs that already have goods receipts
+      // PENDING + open receipt qty (first delivery or re-receive after return).
       if (filters.status === 'PENDING') {
-        whereClauses.push(`NOT EXISTS (
-          SELECT 1 FROM goods_receipts gr 
-          WHERE gr.purchase_order_id = po.id
+        const openSql = poItemOpenQuantitySql('poi');
+        whereClauses.push(`EXISTS (
+          SELECT 1 FROM purchase_order_items poi
+          WHERE poi.purchase_order_id = po.id
+            AND (${openSql})::numeric > 0.0001
         )`);
       }
     }
@@ -336,7 +428,11 @@ export const purchaseOrderRepository = {
     const orderDir = sqlSortOrder(filters?.sortOrder ?? (filters?.sortBy ? 'asc' : 'desc'));
 
     const result = await pool.query(
-      `SELECT po.*, s."CompanyName" as supplier_name 
+      `SELECT po.*, s."CompanyName" as supplier_name,
+              ROUND((${poOrderedQtyTotalSql('po')})::numeric, 4) AS ordered_qty_total,
+              ROUND((${poNetReceivedQtyTotalSql('po')})::numeric, 4) AS net_received_qty_total,
+              ROUND((${poOpenQtyTotalSql('po')})::numeric, 4) AS open_qty_total,
+              ${poCompletedGrCountSql('po')} AS completed_gr_count
        FROM purchase_orders po
        JOIN suppliers s ON po.supplier_id = s."Id"
        ${whereClause} 
@@ -346,7 +442,7 @@ export const purchaseOrderRepository = {
     );
 
     return {
-      pos: result.rows,
+      pos: result.rows.map(mapPurchaseOrderRow),
       total: parseInt(countResult.rows[0].count),
     };
   },
@@ -377,7 +473,7 @@ export const purchaseOrderRepository = {
       throw new Error(`Purchase order ${id} not found`);
     }
 
-    return result.rows[0];
+    return mapPurchaseOrderRow(result.rows[0]);
   },
 
   /**
@@ -504,7 +600,7 @@ export const purchaseOrderRepository = {
       );
     }
 
-    return result.rows[0];
+    return mapPurchaseOrderRow(result.rows[0]);
   },
 
   /**
@@ -556,7 +652,7 @@ export const purchaseOrderRepository = {
       throw new Error(`PO item ${itemId} not found for purchase order ${poId}`);
     }
 
-    return result.rows[0];
+    return mapPurchaseOrderItemRow(result.rows[0]);
   },
 
   /**

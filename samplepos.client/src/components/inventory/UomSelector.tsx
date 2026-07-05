@@ -59,6 +59,7 @@ export function UomSelector({
   // When server UOM data loads with a pre-selected UOM,
   // ensure the parent's displayed cost reflects baseCost × factor, computed locally.
   useEffect(() => {
+    if (disabled) return;
     if (uoms.length === 0) return;
 
     if (!selectedUomId) return;
@@ -91,7 +92,7 @@ export function UomSelector({
       conversionFactor: String(selected.conversionFactor),
       uomName: selected.uomName,
     });
-  }, [selectedUomId, uoms, baseCost]);
+  }, [disabled, selectedUomId, uoms, baseCost]);
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;

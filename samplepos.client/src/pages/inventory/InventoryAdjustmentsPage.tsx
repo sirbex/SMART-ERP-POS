@@ -10,13 +10,14 @@
  */
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
-import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import { ResponsiveGrid } from '../../components/ui/ResponsiveGrid';
 import { useStockLevels, useAdjustInventory, useAdjustBatch } from '../../hooks/useInventory';
+import { useMultistoreEnabled } from '../../hooks/useMultistore';
+import { useStoreLocations, useStockLevelsByStore, useStoreLotsAtStore } from '../../hooks/useWarehouse';
+import { StoreLocationSelect } from '../../components/inventory/StoreLocationSelect';
 import { useProducts } from '../../hooks/useProducts';
 import { useStockMovements } from '../../hooks/useStockMovements';
 import { BatchAdjustmentSchema } from '@shared/zod/inventory';
@@ -29,6 +30,8 @@ import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useColumnSort } from '../../hooks/useColumnSort';
 import { applyTableSort } from '../../lib/tableSortUtils';
+import SlideDrawer from '../../components/ui/SlideDrawer';
+import { WorkflowHelpTrigger } from '../../components/inventory/shared';
 
 type AdjustmentBatchSortField =
   | 'product'
@@ -105,7 +108,26 @@ interface StockLevelRow {
 export default function InventoryAdjustmentsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isMultistoreEnabled } = useMultistoreEnabled();
+  const { data: stores = [] } = useStoreLocations(isMultistoreEnabled);
+  const mainStore = stores.find((s) => s.storeType === 'MAIN') ?? stores.find((s) => s.isDefaultReceiving);
+  const [adjustmentStoreId, setAdjustmentStoreId] = useState<string>('');
+
+  useEffect(() => {
+    if (mainStore?.id && !adjustmentStoreId) {
+      setAdjustmentStoreId(mainStore.id);
+    }
+  }, [mainStore?.id, adjustmentStoreId]);
+
   const { data: stockLevelsData, isLoading, error } = useStockLevels();
+  const { data: storeStockLevels = [] } = useStockLevelsByStore(
+    adjustmentStoreId || null,
+    isMultistoreEnabled && !!adjustmentStoreId,
+  );
+  const { data: storeLots = [] } = useStoreLotsAtStore(
+    adjustmentStoreId || null,
+    isMultistoreEnabled && !!adjustmentStoreId,
+  );
   const adjustInventoryMutation = useAdjustInventory();
   void adjustInventoryMutation;
   const adjustBatchMutation = useAdjustBatch();
@@ -141,26 +163,6 @@ export default function InventoryAdjustmentsPage() {
   // Physical Count modal state
   const [showPhysicalCountModal, setShowPhysicalCountModal] = useState(false);
 
-  // ── Transaction Guard ──────────────────────────────────────────────────
-  const { openGuard, closeGuard } = useTransactionGuard();
-  const adjustGuardRef = useRef<GuardHandle | null>(null);
-  const physicalCountGuardRef = useRef<GuardHandle | null>(null);
-
-  useEffect(() => {
-    if (showAdjustModal) {
-      adjustGuardRef.current = openGuard({ cancellable: false, label: 'Stock adjustment' });
-      return () => { if (adjustGuardRef.current) { closeGuard(adjustGuardRef.current.id); adjustGuardRef.current = null; } };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showAdjustModal]);
-
-  useEffect(() => {
-    if (showPhysicalCountModal) {
-      physicalCountGuardRef.current = openGuard({ cancellable: false, label: 'Physical stock count' });
-      return () => { if (physicalCountGuardRef.current) { closeGuard(physicalCountGuardRef.current.id); physicalCountGuardRef.current = null; } };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPhysicalCountModal]);
   const [countedQuantities, setCountedQuantities] = useState<Record<string, string>>({});
   const [physicalCountReason, setPhysicalCountReason] = useState('Physical inventory count - ' + getBusinessDate());
   const [isProcessingCount, setIsProcessingCount] = useState(false);
@@ -192,10 +194,6 @@ export default function InventoryAdjustmentsPage() {
     if (!showAdjustModal) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Escape to close
-      if (e.key === 'Escape') {
-        setShowAdjustModal(false);
-      }
       // Enter to submit (if not in textarea)
       if (e.key === 'Enter' && !e.shiftKey && e.target !== reasonInputRef.current) {
         e.preventDefault();
@@ -215,9 +213,6 @@ export default function InventoryAdjustmentsPage() {
     if (!showPhysicalCountModal) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (!isProcessingCount) setShowPhysicalCountModal(false);
-      }
       // Enter submits Process Count (only when not in an input/textarea to avoid conflicts)
       if (e.key === 'Enter' && !e.shiftKey) {
         const tag = (e.target as HTMLElement).tagName;
@@ -246,14 +241,34 @@ export default function InventoryAdjustmentsPage() {
     return currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER');
   }, [currentUser]);
 
+  const adjustmentStores = useMemo(
+    () => stores.filter((s) => s.isActive && ['MAIN', 'SELLING', 'DAMAGE', 'EXPIRED', 'RETURN'].includes(s.storeType)),
+    [stores],
+  );
+
   // Extract stock levels and create batch list
   const batches = useMemo(() => {
-    if (!stockLevelsData?.data) return [];
-    const levels = Array.isArray(stockLevelsData.data) ? stockLevelsData.data : [];
+    if (isMultistoreEnabled && storeLots.length > 0) {
+      return storeLots.map((lot) => ({
+        id: lot.productLotId,
+        product_id: lot.productId,
+        product_name: lot.productName,
+        batch_number: lot.lotNumber,
+        remaining_quantity: lot.availableQuantity,
+        expiry_date: lot.expiryDate,
+        cost_price: 0,
+        status: 'ACTIVE',
+        created_at: getBusinessDate(),
+      }));
+    }
 
-    // For now, create mock batches from stock levels
-    // In production, this would come from a dedicated batches endpoint
-    return levels.flatMap(
+    const levelsSource = isMultistoreEnabled
+      ? (Array.isArray(storeStockLevels) ? storeStockLevels : [])
+      : (stockLevelsData?.data ? (Array.isArray(stockLevelsData.data) ? stockLevelsData.data : []) : []);
+
+    if (!levelsSource.length && !isMultistoreEnabled) return [];
+
+    return levelsSource.flatMap(
       (level: {
         product_id: string;
         product_name: string;
@@ -281,7 +296,7 @@ export default function InventoryAdjustmentsPage() {
         ];
       }
     );
-  }, [stockLevelsData]);
+  }, [stockLevelsData, isMultistoreEnabled, storeLots, storeStockLevels]);
 
   // Product category lookup by product_id
   const productCategoryMap = useMemo(() => {
@@ -372,14 +387,14 @@ export default function InventoryAdjustmentsPage() {
   // Stock level lookup by product_id
   const stockLevelMap = useMemo(() => {
     const map = new Map<string, number>();
-    if (stockLevelsData?.data) {
-      const levels = Array.isArray(stockLevelsData.data) ? stockLevelsData.data : [];
-      levels.forEach((level: StockLevelRow) => {
-        map.set(level.product_id, parseFloat(String(level.total_stock || level.total_quantity || 0)));
-      });
-    }
+    const levels = isMultistoreEnabled
+      ? (Array.isArray(storeStockLevels) ? storeStockLevels : [])
+      : (stockLevelsData?.data ? (Array.isArray(stockLevelsData.data) ? stockLevelsData.data : []) : []);
+    levels.forEach((level: StockLevelRow) => {
+      map.set(level.product_id, parseFloat(String(level.total_stock || level.total_quantity || 0)));
+    });
     return map;
-  }, [stockLevelsData]);
+  }, [stockLevelsData, isMultistoreEnabled, storeStockLevels]);
 
   // Product-based list for physical counting
   const physicalCountItems = useMemo((): PhysicalCountItem[] => {
@@ -491,6 +506,7 @@ export default function InventoryAdjustmentsPage() {
         try {
           const validatedData = BatchAdjustmentSchema.parse({
             productId: adj.productId,
+            storeLocationId: isMultistoreEnabled ? adjustmentStoreId || undefined : undefined,
             quantity: adj.quantity,
             direction: adj.direction,
             reason: 'PHYSICAL_COUNT',
@@ -618,6 +634,7 @@ export default function InventoryAdjustmentsPage() {
             ? selectedBatch.id
             : undefined,
         productId: selectedBatch.product_id,
+        storeLocationId: isMultistoreEnabled ? adjustmentStoreId || undefined : undefined,
         quantity: qty,
         direction,
         reason,
@@ -676,6 +693,13 @@ export default function InventoryAdjustmentsPage() {
         alert(
           apiErr?.response?.data?.error ??
             'This batch has no unit cost. Repair batch valuation or receive stock with cost before reducing inventory.'
+        );
+        return;
+      }
+      if (errorCode === 'ERR_WAREHOUSE_LAYER_COUPLING') {
+        alert(
+          apiErr?.response?.data?.error ??
+            'Warehouse batch and store balances are out of sync for this product. Retry the adjustment; if it persists, contact support.',
         );
         return;
       }
@@ -785,10 +809,37 @@ export default function InventoryAdjustmentsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Adjustments & Stock Count</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-gray-900">Adjustments & Stock Count</h2>
+            <WorkflowHelpTrigger title="About Adjustments & Stock Count">
+              <ul className="space-y-1">
+                <li>• <strong>Adjustment:</strong> Increase or decrease stock for corrections</li>
+                <li>• <strong>Damage:</strong> Record stock lost due to physical damage</li>
+                <li>• <strong>Expiry:</strong> Write off expired stock</li>
+                <li>• <strong>Physical Count:</strong> Compare physical stock vs system, auto-create adjustments for discrepancies</li>
+                <li>• All records create immutable stock movement entries for full audit trail</li>
+                <li>• View <strong>Movement History</strong> for the complete audit trail</li>
+                <li>• <strong>Role Required:</strong> ADMIN or MANAGER</li>
+              </ul>
+            </WorkflowHelpTrigger>
+          </div>
           <p className="text-gray-600 mt-1">
             Record stock adjustments, damages, expiry write-offs, and physical counts
           </p>
+          {isMultistoreEnabled && adjustmentStores.length > 0 && (
+            <div className="mt-4 max-w-sm">
+              <StoreLocationSelect
+                id="adjustment-store"
+                label="Adjust at store"
+                stores={adjustmentStores}
+                value={adjustmentStoreId}
+                onChange={setAdjustmentStoreId}
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Stock changes apply to the selected location&apos;s lot balances.
+              </p>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -1035,33 +1086,54 @@ export default function InventoryAdjustmentsPage() {
         </div>
       )}
 
-      {/* Adjustment Modal */}
+      {/* Adjustment workspace */}
       {showAdjustModal && selectedBatch && (
-        <div
-          className="fixed inset-0 flex items-center justify-center"
-          style={{ zIndex: adjustGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4"
-            onClick={(e) => {
-              console.log('🟢 Modal content clicked', e.target);
-              e.stopPropagation(); // Prevent overlay click
-            }}
-          >
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">
-                {movementCategory === 'DAMAGE'
-                  ? '⚠️ Record Damage'
-                  : movementCategory === 'EXPIRY'
-                    ? '⏰ Record Expiry Write-Off'
-                    : '⚖️ Adjust Inventory'}
-              </h3>
-              <p className="text-sm text-gray-600 mt-1">
-                {selectedBatch.product_name} - {selectedBatch.batch_number}
-              </p>
+        <SlideDrawer
+          open
+          onClose={() => setShowAdjustModal(false)}
+          title={
+            movementCategory === 'DAMAGE'
+              ? 'Record Damage'
+              : movementCategory === 'EXPIRY'
+                ? 'Record Expiry Write-Off'
+                : 'Adjust Inventory'
+          }
+          subtitle={`${selectedBatch.product_name} — ${selectedBatch.batch_number}`}
+          width="xl"
+          transactional
+          cancellable={false}
+          guardLabel="Stock adjustment"
+          footer={
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowAdjustModal(false)}
+                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium"
+                disabled={adjustBatchMutation.isPending}
+              >
+                Cancel (Esc)
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSubmitAdjustment();
+                }}
+                disabled={adjustBatchMutation.isPending || !formValidation.isValid}
+                className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                {adjustBatchMutation.isPending
+                  ? 'Saving...'
+                  : movementCategory === 'DAMAGE'
+                    ? 'Record Damage'
+                    : movementCategory === 'EXPIRY'
+                      ? 'Record Expiry'
+                      : 'Save Adjustment (Enter)'}
+              </button>
             </div>
-
-            <div className="px-6 py-4 space-y-4">
+          }
+        >
+            <div className="space-y-4 -mt-2">
               {/* Current Quantity */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1244,65 +1316,65 @@ export default function InventoryAdjustmentsPage() {
                 </p>
               </div>
             </div>
+        </SlideDrawer>
+      )}
 
-            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+      {/* Physical count workspace */}
+      <SlideDrawer
+        open={showPhysicalCountModal}
+        onClose={() => {
+          if (!isProcessingCount) setShowPhysicalCountModal(false);
+        }}
+        title="Physical Inventory Count"
+        subtitle="Enter actual counted quantities for each product"
+        width="full"
+        transactional
+        cancellable={false}
+        guardLabel="Physical stock count"
+        footer={
+          <div className="flex justify-between items-center gap-4 flex-wrap">
+            <div className="text-sm text-gray-600">
+              {physicalCountStats.discrepancies > 0 ? (
+                <span className="text-yellow-600 font-medium">
+                  ⚠️ {physicalCountStats.discrepancies} item(s) with discrepancies will be adjusted
+                </span>
+              ) : physicalCountStats.counted > 0 ? (
+                <span className="text-green-600 font-medium">
+                  ✅ All counted quantities match expected
+                </span>
+              ) : (
+                <span>Enter counted quantities to see discrepancies</span>
+              )}
+            </div>
+            <div className="flex gap-3">
               <button
-                onClick={() => {
-                  console.log('Cancel button clicked');
-                  setShowAdjustModal(false);
-                }}
-                className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium"
-                disabled={adjustBatchMutation.isPending}
+                onClick={() => setShowPhysicalCountModal(false)}
+                className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium"
+                disabled={isProcessingCount}
               >
-                Cancel (Esc)
+                Cancel
               </button>
               <button
-                type="button"
-                onClick={(e) => {
-                  console.log('Save button clicked!', e);
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleSubmitAdjustment();
-                }}
-                disabled={adjustBatchMutation.isPending || !formValidation.isValid}
-                className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed"
+                onClick={handleSubmitPhysicalCount}
+                disabled={isProcessingCount || physicalCountStats.counted === 0 || !physicalCountReason.trim()}
+                className="px-4 py-2 bg-purple-600 text-white hover:bg-purple-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                {adjustBatchMutation.isPending
-                  ? 'Saving...'
-                  : movementCategory === 'DAMAGE'
-                    ? 'Record Damage'
-                    : movementCategory === 'EXPIRY'
-                      ? 'Record Expiry'
-                      : 'Save Adjustment (Enter)'}
+                {isProcessingCount ? (
+                  <>
+                    <span className="animate-spin">⏳</span>
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>✅</span>
+                    <span>Process Count ({physicalCountStats.discrepancies} adjustments)</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Physical Count Modal */}
-      {showPhysicalCountModal && (
-        <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: physicalCountGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}>
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-[95vw] sm:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-gray-200 bg-purple-600">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-xl font-semibold text-white">Physical Inventory Count</h3>
-                  <p className="text-purple-100 text-sm mt-1">
-                    Enter actual counted quantities for each product
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowPhysicalCountModal(false)}
-                  className="text-white hover:text-purple-200 text-2xl leading-none"
-                  disabled={isProcessingCount}
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-
+        }
+      >
             {/* Statistics Bar */}
             <div className="px-6 py-3 bg-gray-50 border-b border-gray-200">
               <ResponsiveGrid cols={4} className="gap-4 text-center">
@@ -1481,77 +1553,8 @@ export default function InventoryAdjustmentsPage() {
               </p>
             </div>
 
-            {/* Footer */}
-            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex justify-between items-center">
-              <div className="text-sm text-gray-600">
-                {physicalCountStats.discrepancies > 0 ? (
-                  <span className="text-yellow-600 font-medium">
-                    ⚠️ {physicalCountStats.discrepancies} item(s) with discrepancies will be adjusted
-                  </span>
-                ) : physicalCountStats.counted > 0 ? (
-                  <span className="text-green-600 font-medium">
-                    ✅ All counted quantities match expected
-                  </span>
-                ) : (
-                  <span>Enter counted quantities to see discrepancies</span>
-                )}
-              </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowPhysicalCountModal(false)}
-                  className="px-4 py-2 text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg font-medium"
-                  disabled={isProcessingCount}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSubmitPhysicalCount}
-                  disabled={isProcessingCount || physicalCountStats.counted === 0 || !physicalCountReason.trim()}
-                  className="px-4 py-2 bg-purple-600 text-white hover:bg-purple-700 rounded-lg font-medium disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {isProcessingCount ? (
-                    <>
-                      <span className="animate-spin">⏳</span>
-                      <span>Processing...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>✅</span>
-                      <span>Process Count ({physicalCountStats.discrepancies} adjustments)</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </SlideDrawer>
 
-      {/* Info Box */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-blue-900 mb-2">
-          ℹ️ About Adjustments & Stock Count
-        </h3>
-        <ul className="text-xs text-blue-800 space-y-1">
-          <li>
-            • <strong>Adjustment:</strong> Increase or decrease stock for corrections
-          </li>
-          <li>
-            • <strong>Damage:</strong> Record stock lost due to physical damage
-          </li>
-          <li>
-            • <strong>Expiry:</strong> Write off expired stock
-          </li>
-          <li>
-            • <strong>Physical Count:</strong> Compare physical stock vs system, auto-create adjustments for discrepancies
-          </li>
-          <li>• All records create immutable stock movement entries for full audit trail</li>
-          <li>• View <strong>Movement History</strong> for the complete audit trail</li>
-          <li>
-            • <strong>Role Required:</strong> ADMIN or MANAGER
-          </li>
-        </ul>
-      </div>
     </div>
   );
 }

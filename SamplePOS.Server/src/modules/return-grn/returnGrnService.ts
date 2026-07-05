@@ -10,7 +10,8 @@
  * - Deducts FIFO cost_layers (keeps layer subledger aligned with inventory GL)
  * - Recalculates product_inventory.quantity_on_hand
  * - Posts GL: DR GRN/IR Clearing (2150) or Return Clearing (2160) / CR Inventory (1300)
- * - When GRN was already invoiced: auto-creates Supplier Credit Note (DR AP / CR clearing)
+ * - Supplier Credit Note is created separately from the GR detail screen (POST …/credit-note);
+ *   user must apply the SCN to open bills manually on Credit Notes
  */
 
 import type { Pool, PoolClient } from 'pg';
@@ -30,7 +31,6 @@ import * as documentFlowService from '../document-flow/documentFlowService.js';
 import {
     supplierCreditDebitNoteRepository,
 } from '../credit-debit-notes/creditDebitNoteRepository.js';
-import { supplierCreditDebitNoteService } from '../credit-debit-notes/creditDebitNoteService.js';
 import { recordSupplierCreditNoteToGL, AccountCodes } from '../../services/glEntryService.js';
 import { resolveRgrnClearingAccountCode } from './rgrnClearingAccount.js';
 import {
@@ -50,6 +50,7 @@ import {
 import { resolveCanonicalProductUom } from '../products/uomService.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
 import { purchaseOrderRepository } from '../purchase-orders/purchaseOrderRepository.js';
+import { warehouseSupplierReturnDeductionService } from '../inventory/warehouse/warehouseSupplierReturnDeductionService.js';
 import {
     assertWithinReturnableLimits,
     pickReturnableRow,
@@ -365,33 +366,18 @@ export const returnGrnService = {
                     line.productName ?? 'product',
                 );
 
-                // 3c. Reduce batch remaining_quantity and capture batch.cost_price for GL
+                // 3c. Reduce batch + warehouse balances (multistore) and capture batch.cost_price for GL
                 let batchCostPrice = new Decimal(line.unitCost || 0); // fallback to line.unitCost
                 if (effectiveBatchId) {
-                    const batchUpdate = await client.query(
-                        `UPDATE inventory_batches
-             SET remaining_quantity = remaining_quantity - $1,
-                 updated_at = CURRENT_TIMESTAMP
-             WHERE id = $2 AND remaining_quantity >= $1
-             RETURNING remaining_quantity, cost_price`,
-                        [line.baseQuantity, effectiveBatchId]
+                    const deduction = await warehouseSupplierReturnDeductionService.deductForSupplierReturn(
+                        client,
+                        {
+                            productId: line.productId,
+                            inventoryBatchId: effectiveBatchId,
+                            quantity: line.baseQuantity,
+                        },
                     );
-                    if (batchUpdate.rows.length === 0) {
-                        assertWithinReturnableLimits(
-                            pickReturnableRow(
-                                returnableSnapshot,
-                                line.productId,
-                                effectiveBatchId ?? null,
-                            ),
-                            line.baseQuantity,
-                            line.productName ?? 'product',
-                        );
-                        throw new ValidationError(
-                            `Insufficient on-hand batch quantity for ${line.productName} (batch ${line.batchNumber || 'auto'}).`,
-                        );
-                    }
-                    // Use actual batch cost_price for GL — this is the authoritative cost
-                    batchCostPrice = new Decimal(batchUpdate.rows[0].cost_price || 0);
+                    batchCostPrice = deduction.costPrice;
                 } else {
                     logger.warn('No batch found for return line — stock movement will be recorded but batch not deducted', {
                         productId: line.productId,
@@ -551,23 +537,6 @@ export const returnGrnService = {
                 await captureInventoryCoupling(client),
                 `return GRN ${posted.returnGrnNumber || rgrnId}`,
             );
-
-            if (hasInvoice) {
-                try {
-                    await returnGrnService.createCreditNoteFromReturn(
-                        pool,
-                        rgrnId,
-                        undefined,
-                        client,
-                    );
-                } catch (scnErr: unknown) {
-                    const msg = scnErr instanceof Error ? scnErr.message : String(scnErr);
-                    if (!msg.includes('already exists')) {
-                        throw scnErr;
-                    }
-                    logger.info('Return GRN SCN already exists — skip auto-create', { rgrnId });
-                }
-            }
 
             logger.info('Return GRN posted — stock decreased, GL posted', {
                 rgrnId: posted.id,
@@ -760,6 +729,68 @@ export const returnGrnService = {
                 );
             }
 
+            const billRow = await client.query<{ TotalAmount: string; Status: string }>(
+                `SELECT "TotalAmount", "Status"
+                 FROM supplier_invoices
+                 WHERE "Id" = $1 AND deleted_at IS NULL`,
+                [referenceInvoiceId],
+            );
+            if (!billRow.rows[0]) {
+                throw new Error('Reference supplier bill not found');
+            }
+            const billTotal = Money.toNumber(Money.parseDb(billRow.rows[0].TotalAmount));
+            const billStatus = String(billRow.rows[0].Status || '').toUpperCase();
+            if (['CANCELLED', 'VOIDED', 'VOID', 'DELETED'].includes(billStatus)) {
+                throw new BusinessError(
+                    'Cannot create credit note against a cancelled supplier bill',
+                    'ERR_SCN_BILL_CANCELLED',
+                    { referenceInvoiceId, returnGrnId: rgrnId },
+                );
+            }
+
+            const existingNotes = await supplierCreditDebitNoteRepository.getNotesForSupplierInvoice(
+                client,
+                referenceInvoiceId,
+                'SUPPLIER_CREDIT_NOTE',
+            );
+            const cumulativeCredits = existingNotes.reduce(
+                (sum, note) => sum.plus(note.totalAmount),
+                new Decimal(0),
+            );
+            if (Money.toNumber(cumulativeCredits.plus(returnTotalNum)) > billTotal + 0.009) {
+                throw new BusinessError(
+                    `Return credit note would exceed supplier bill total (${billTotal.toFixed(2)})`,
+                    'ERR_SCN_EXCEEDS_BILL',
+                    {
+                        referenceInvoiceId,
+                        returnGrnId: rgrnId,
+                        billTotal,
+                        returnTotal: returnTotalNum,
+                        existingCredits: Money.toNumber(cumulativeCredits),
+                    },
+                );
+            }
+
+            const { lockAndComputeInvoiceOutstanding } = await import(
+                '../supplier-payments/supplierPaymentRepository.js'
+            );
+            const ledger = await lockAndComputeInvoiceOutstanding(client, referenceInvoiceId);
+            if (
+                ledger
+                && returnTotalNum > Money.toNumber(ledger.outstandingBalance) + 0.009
+            ) {
+                throw new BusinessError(
+                    `Return credit (${returnTotalNum.toFixed(2)}) exceeds bill open balance (${Money.toNumber(ledger.outstandingBalance).toFixed(2)})`,
+                    'ERR_SCN_EXCEEDS_BILL_OPEN',
+                    {
+                        referenceInvoiceId,
+                        returnGrnId: rgrnId,
+                        returnTotal: returnTotalNum,
+                        billOpenBalance: Money.toNumber(ledger.outstandingBalance),
+                    },
+                );
+            }
+
             // 6. Generate SCN number and create header
             const scnNumber = await supplierCreditDebitNoteRepository.generateSupplierCreditNoteNumber(client);
 
@@ -819,17 +850,8 @@ export const returnGrnService = {
                 clearingAccountCode: rgrnClearingCode,
             }, undefined, client);
 
-            // 10. Auto-allocate the credit note against the referenced bill
-            //     (SAP/Odoo Case 1 — Return-derived CN, bill is known with
-            //     certainty). The bill's outstanding is reduced and the CN is
-            //     marked APPLIED if fully consumed. No floating credit.
-            if (referenceInvoiceId) {
-                await supplierCreditDebitNoteService.applySupplierCreditNote(
-                    client,
-                    postedScn.id,
-                    { primaryBillId: referenceInvoiceId, allowFIFO: false },
-                );
-            }
+            // 10. Credit note stays POSTED (on-account) until the user clicks
+            //     "Apply to Open Bills" on the Credit Notes screen.
 
             // 11. Recalculate supplier outstanding balance
             if (supplierId) {

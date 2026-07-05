@@ -273,8 +273,8 @@ const CustomerFinancialPage = () => {
                     credits = response.data.data.credits || [];
                     creditBalance = response.data.data.availableCreditBalance || 0;
                 }
-            } catch (csharpError) {
-                console.warn('C# Accounting API not available for credits:', csharpError);
+            } catch {
+                console.warn('C# Accounting API not available for credits');
             }
 
             // Build unified customer account from both sources
@@ -366,7 +366,7 @@ const CustomerFinancialPage = () => {
                     loadCustomerAccount(selectedCustomer);
                     return;
                 }
-            } catch (csharpError) {
+            } catch {
                 console.warn('C# Accounting API not available for credits');
                 toast.error('Credit recording requires the Accounting API to be running. Please contact administrator.');
                 return;
@@ -399,7 +399,7 @@ const CustomerFinancialPage = () => {
                     loadCustomerAccount(selectedCustomer);
                     return;
                 }
-            } catch (csharpError) {
+            } catch {
                 console.warn('C# Accounting API not available for receivables');
                 toast.error('Debt recording requires the Accounting API to be running. Please contact administrator.');
                 return;

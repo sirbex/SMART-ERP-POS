@@ -9,8 +9,8 @@
  *  1. Supplier Credit Note lifecycle: DRAFT → POST → CANCEL
  *     - GL entry is posted with correct accounts (DR AP=2100, CR PURCHASE_RETURNS=5010)
  *     - Journal is balanced (ΣDebit = ΣCredit, within 0.001 tolerance)
- *     - Supplier outstanding balance decreases when note is posted
- *     - Supplier invoice outstanding balance decreases
+ *     - Supplier outstanding balance decreases when note is posted (on-account credit)
+ *     - Supplier invoice outstanding decreases only after manual Apply
  *     - GL reversal is created on cancel
  *     - Supplier balance is fully restored after cancel (net zero)
  *
@@ -310,12 +310,9 @@ describe('Supplier CN/DN — Real Database Proof Tests', () => {
       console.log(`  [SCN GL] DR AP(2100)=${debitTotal}, CR PURCHASE_RETURNS(5010)=${creditTotal}`);
     });
 
-    test('POST: supplier outstanding balance decreased after credit note', async () => {
+    test('POST: supplier outstanding balance decreased after credit note (on-account)', async () => {
       const balanceAfterPost = await getSupplierBalance(TEST_SUPPLIER_ID);
-      // applySupplierCreditNote applies the CN to the referenced bill:
-      //   - invoice AmountPaid += NOTE_AMOUNT → invoice OB decreases by NOTE_AMOUNT
-      //   - CN status → APPLIED, CN OB → 0 (excluded from recalc as OB=0)
-      // Net change from clean baseline = -1 * NOTE_AMOUNT (single reduction, no double counting).
+      // POSTED CN sits on-account (OutstandingBalance = NOTE_AMOUNT) until user applies.
       const expected = supplierCleanBaseline - NOTE_AMOUNT;
 
       console.log(`  [SCN POST] Supplier balance (clean baseline): ${supplierCleanBaseline} → ${balanceAfterPost} (expected ~${expected})`);
@@ -323,13 +320,26 @@ describe('Supplier CN/DN — Real Database Proof Tests', () => {
       expect(balanceAfterPost).toBeCloseTo(expected, 2);
     });
 
-    test('POST: supplier invoice outstanding balance decreased', async () => {
-      const invoiceOutstandingAfter = await getInvoiceOutstandingBalance(TEST_INVOICE_ID);
+    test('POST: supplier invoice outstanding unchanged until apply', async () => {
+      const invoiceOutstandingAfterPost = await getInvoiceOutstandingBalance(TEST_INVOICE_ID);
+
+      console.log(`  [SCN POST] Invoice outstanding unchanged: ${invoiceOutstandingBefore} → ${invoiceOutstandingAfterPost}`);
+
+      expect(invoiceOutstandingAfterPost).toBeCloseTo(invoiceOutstandingBefore, 2);
+    });
+
+    test('APPLY: manual apply reduces invoice outstanding', async () => {
+      const result = await supplierCreditDebitNoteService.applyCreditNoteToOpenBillsFIFO(pool, creditNoteId);
+
+      expect(result.totalApplied).toBeCloseTo(NOTE_AMOUNT, 2);
+      expect(result.status).toBe('APPLIED');
+
+      const invoiceOutstandingAfterApply = await getInvoiceOutstandingBalance(TEST_INVOICE_ID);
       const expected = invoiceOutstandingBefore - NOTE_AMOUNT;
 
-      console.log(`  [SCN POST] Invoice outstanding: ${invoiceOutstandingBefore} → ${invoiceOutstandingAfter} (expected ~${expected})`);
+      console.log(`  [SCN APPLY] Invoice outstanding: ${invoiceOutstandingBefore} → ${invoiceOutstandingAfterApply} (expected ~${expected})`);
 
-      expect(invoiceOutstandingAfter).toBeCloseTo(expected, 2);
+      expect(invoiceOutstandingAfterApply).toBeCloseTo(expected, 2);
     });
 
     test('CANCEL: cancel the supplier credit note', async () => {

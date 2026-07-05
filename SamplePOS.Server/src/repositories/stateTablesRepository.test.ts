@@ -255,7 +255,7 @@ describe('stateTablesRepository', () => {
             expect(params[4]).toEqual(['7.0000']); // adjustedDeltas: positive
         });
 
-        it('SQL should INSERT 7 columns matching inventory_balances DDL', async () => {
+        it('SQL should INSERT 7 columns matching inventory_aggregate_balances DDL', async () => {
             const items = [{ productId: 'p1', quantity: 1 }];
             await batchUpsertInventoryBalance(mockClient, items, 'SOLD', '2025-01-01');
 
@@ -282,10 +282,10 @@ describe('stateTablesRepository', () => {
             await batchUpsertInventoryBalance(mockClient, items, 'SOLD', '2025-01-01');
 
             const [sql] = (mockClient.query as jest.Mock<MockFn>).mock.calls[0] as [string, unknown[]];
-            expect(sql).toContain('inventory_balances.quantity_on_hand + EXCLUDED.quantity_on_hand');
-            expect(sql).toContain('inventory_balances.total_received + EXCLUDED.total_received');
-            expect(sql).toContain('inventory_balances.total_sold + EXCLUDED.total_sold');
-            expect(sql).toContain('inventory_balances.total_adjusted + EXCLUDED.total_adjusted');
+            expect(sql).toContain('inventory_aggregate_balances.quantity_on_hand + EXCLUDED.quantity_on_hand');
+            expect(sql).toContain('inventory_aggregate_balances.total_received + EXCLUDED.total_received');
+            expect(sql).toContain('inventory_aggregate_balances.total_sold + EXCLUDED.total_sold');
+            expect(sql).toContain('inventory_aggregate_balances.total_adjusted + EXCLUDED.total_adjusted');
         });
     });
 

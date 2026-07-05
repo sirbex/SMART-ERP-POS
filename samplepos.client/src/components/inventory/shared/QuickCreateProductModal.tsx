@@ -1,12 +1,25 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import ProductForm, { type ProductFormValues, type ProductFormField } from '@/components/products/ProductForm';
-import { validateProductValues } from '@/validation/product';
+import {
+    buildCreateProductInput,
+    focusFirstProductValidationError,
+    resolveDefaultStockUomId,
+    validateProductValues,
+} from '@/validation/product';
 import { useCreateProduct } from '@/hooks/useProducts';
 import { useSuppliers } from '@/hooks/useSuppliers';
-import { api } from '@/utils/api';
-import { getErrorMessage } from '@/utils/api';
-import type { CreateProductInput } from '@/types/inputs';
+import { api, getErrorMessage } from '@/utils/api';
+import { ZINDEX } from '@/hooks/useTransactionGuard';
+
+export type QuickCreatedProduct = {
+    id: string;
+    name: string;
+    costPrice: number;
+    trackExpiry: boolean;
+    purchaseUomId: string | null;
+};
 
 const initialValues: ProductFormValues = {
     name: '',
@@ -35,7 +48,7 @@ const initialValues: ProductFormValues = {
 
 interface QuickCreateProductModalProps {
     onClose: () => void;
-    onCreated: (product: { id: string; name: string }) => void;
+    onCreated: (product: QuickCreatedProduct) => void;
     /** Pre-fill suggested name from search text */
     suggestedName?: string;
     /** Pre-fill preferred supplier from active PO */
@@ -86,12 +99,7 @@ export function QuickCreateProductModal({
     });
     const masterUoms = masterUomsResponse ?? [];
 
-    const resolvedStockUomId =
-        stockUomId ||
-        masterUoms.find((u) => u.name.toUpperCase() === 'EACH')?.id ||
-        masterUoms.find((u) => u.name.toUpperCase() === 'PIECE')?.id ||
-        masterUoms[0]?.id ||
-        '';
+    const resolvedStockUomId = resolveDefaultStockUomId(stockUomId, masterUoms);
 
     const purchaseUomDiffersFromBase =
         !!values.purchaseUomId &&
@@ -116,6 +124,7 @@ export function QuickCreateProductModal({
         const result = validateProductValues(values);
         if (!result.valid) {
             setValidationErrors(result.errors);
+            focusFirstProductValidationError(result.errors);
             return;
         }
 
@@ -123,78 +132,86 @@ export function QuickCreateProductModal({
             const factor = parseFloat(purchaseConversionFactor);
             if (!Number.isFinite(factor) || factor < 1) {
                 setError('Enter how many base units are in one purchase unit (e.g. 12 for 1 BOX = 12 PC).');
+                requestAnimationFrame(() => {
+                    document.getElementById('purchase-conversion')?.focus();
+                });
                 return;
             }
         }
 
         try {
-            const stockUom = masterUoms.find((u) => u.id === resolvedStockUomId);
-            const factor = purchaseUomDiffersFromBase
-                ? parseFloat(purchaseConversionFactor)
-                : 1;
+            const built = buildCreateProductInput(values, {
+                stockUomId: resolvedStockUomId,
+                masterUoms,
+                purchaseConversionFactor: purchaseUomDiffersFromBase
+                    ? parseFloat(purchaseConversionFactor)
+                    : 1,
+            });
+            if (!built.ok) {
+                setValidationErrors(built.errors);
+                focusFirstProductValidationError(built.errors);
+                return;
+            }
 
-            const productData: CreateProductInput = {
-                name: values.name.trim(),
-                sku: values.sku.trim(),
-                barcode: values.barcode?.trim() || undefined,
-                description: values.description?.trim() || undefined,
-                category: values.category?.trim() || undefined,
-                unitOfMeasure: stockUom?.name || 'EACH',
-                conversionFactor: factor,
-                costPrice: parseFloat(values.costPrice) || 0,
-                sellingPrice: parseFloat(values.sellingPrice) || 0,
-                costingMethod: values.costingMethod as 'FIFO' | 'AVCO' | 'STANDARD',
-                isTaxable: values.isTaxable,
-                taxRate: parseFloat(values.taxRate) || 0,
-                reorderLevel: parseFloat(values.reorderLevel) || 0,
-                trackExpiry: values.trackExpiry,
-                isActive: values.isActive,
-                preferredSupplierId: values.preferredSupplierId || undefined,
-                supplierProductCode: values.supplierProductCode?.trim() || undefined,
-                purchaseUomId: values.purchaseUomId || undefined,
-                leadTimeDays: parseInt(values.leadTimeDays, 10) || 0,
-                reorderQuantity: parseFloat(values.reorderQuantity) || 0,
-            };
-
-            const response = await createMutation.mutateAsync(productData);
-            const created = response?.data as { id: string; name: string } | undefined;
+            const response = await createMutation.mutateAsync(built.data);
+            const created = response?.data as {
+                id: string;
+                name?: string;
+                costPrice?: number;
+                trackExpiry?: boolean;
+                purchaseUomId?: string | null;
+            } | undefined;
 
             if (created?.id) {
-                onCreated({ id: created.id, name: created.name || values.name.trim() });
+                onCreated({
+                    id: created.id,
+                    name: created.name || values.name.trim(),
+                    costPrice: Number(created.costPrice ?? built.data.costPrice ?? 0),
+                    trackExpiry: created.trackExpiry ?? values.trackExpiry,
+                    purchaseUomId: created.purchaseUomId ?? values.purchaseUomId ?? null,
+                });
             }
         } catch (err: unknown) {
             setError(getErrorMessage(err));
         }
     };
 
-    return (
+    return createPortal(
         <div
-            className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60]"
+            className="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+            style={{ zIndex: ZINDEX.NESTED_PANEL }}
             onClick={onClose}
+            role="presentation"
         >
             <div
-                className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[85vh] overflow-y-auto"
+                className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[min(90vh,48rem)] flex flex-col"
                 onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="quick-add-product-title"
             >
-                <div className="sticky top-0 bg-white border-b px-5 py-3 flex justify-between items-center">
-                    <h3 className="text-lg font-semibold text-gray-900">Quick Add Product</h3>
+                <div className="shrink-0 border-b px-5 py-3 flex justify-between items-center gap-3">
+                    <h3 id="quick-add-product-title" className="text-lg font-semibold text-gray-900">
+                        Quick Add Product
+                    </h3>
                     <button
+                        type="button"
                         onClick={onClose}
-                        className="text-gray-400 hover:text-gray-600 text-xl leading-none"
+                        className="shrink-0 rounded-lg p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
                         aria-label="Close"
                     >
-                        &times;
+                        <span className="text-xl leading-none" aria-hidden>&times;</span>
                     </button>
                 </div>
 
-                <div className="p-5">
-                    {error && (
-                        <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                            {error}
-                        </div>
-                    )}
+                <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+                    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-5">
+                        {error && (
+                            <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                                {error}
+                            </div>
+                        )}
 
-                    <form onSubmit={handleSubmit}>
                         <ProductForm
                             values={values}
                             onChange={handleChange}
@@ -248,26 +265,27 @@ export function QuickCreateProductModal({
                                 )}
                             </div>
                         )}
+                    </div>
 
-                        <div className="flex justify-end gap-2 pt-4 mt-4 border-t">
-                            <button
-                                type="button"
-                                onClick={onClose}
-                                className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="submit"
-                                disabled={createMutation.isPending}
-                                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                            >
-                                {createMutation.isPending ? 'Creating...' : 'Create Product'}
-                            </button>
-                        </div>
-                    </form>
-                </div>
+                    <div className="shrink-0 flex justify-end gap-2 border-t bg-white px-5 py-3">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={createMutation.isPending}
+                            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            {createMutation.isPending ? 'Creating...' : 'Create Product'}
+                        </button>
+                    </div>
+                </form>
             </div>
-        </div>
+        </div>,
+        document.body,
     );
 }

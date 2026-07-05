@@ -3,15 +3,20 @@
  * @description SINGLE SOURCE OF TRUTH for product quantity synchronization.
  *
  * Every code path that modifies inventory_batches.remaining_quantity MUST call
- * syncProductQuantity() afterward to keep the three quantity sources consistent:
+ * syncProductQuantity() afterward to keep quantity sources consistent:
  *   1. inventory_batches  (individual batch remaining_quantity + status)
  *   2. product_inventory  (aggregate quantity_on_hand — used by most API reads)
  *   3. products           (aggregate quantity_on_hand — legacy / POS reads)
+ *
+ * When multistore is enabled, syncProductQuantity() also asserts:
+ *   SUM(inventory_balances.quantity_on_hand) per lot = batch.remaining_quantity
+ * and rolls back the transaction on mismatch (ERR_WAREHOUSE_LAYER_COUPLING).
  *
  * DO NOT inline the sync SQL elsewhere. Import this function instead.
  */
 
 import { PoolClient } from 'pg';
+import { assertWarehouseLayerConsistent } from '../services/warehouseInventoryCoupling.js';
 
 /**
  * Synchronize product quantity across all tables after batch changes.
@@ -68,4 +73,6 @@ export async function syncProductQuantity(client: PoolClient, productId: string)
      WHERE id = $1`,
         [productId]
     );
+
+    await assertWarehouseLayerConsistent(client, `syncProductQuantity ${productId}`, productId);
 }

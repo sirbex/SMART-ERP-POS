@@ -158,7 +158,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
         }
     };
 
-    const useCredit = (creditId: string, amountToUse: number) => {
+    const applyStoreCredit = (creditId: string, amountToUse: number) => {
         try {
             const stored = localStorage.getItem('store_credits');
             const allCredits: StoreCredit[] = stored ? JSON.parse(stored) : [];
@@ -249,7 +249,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
     // Export function for use in POS
     const windowExports = window as unknown as Record<string, unknown>;
     windowExports.getCustomerAvailableCredits = getCustomerAvailableCredits;
-    windowExports.useStoreCredit = useCredit;
+    windowExports.useStoreCredit = applyStoreCredit;
 
     return (
         <div className={`bg-white rounded-lg shadow ${className}`}>
@@ -408,7 +408,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                                                             if (amount) {
                                                                 const numAmount = parseFloat(amount);
                                                                 if (!isNaN(numAmount) && numAmount > 0) {
-                                                                    useCredit(credit.id, numAmount);
+                                                                    applyStoreCredit(credit.id, numAmount);
                                                                 }
                                                             }
                                                         }}

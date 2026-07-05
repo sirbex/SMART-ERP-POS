@@ -143,6 +143,8 @@ export const BatchAdjustmentSchema = z
     userId: z.string().uuid('Invalid user ID'),
     documentId: z.string().uuid().optional(),
     unitCost: z.number().positive('Unit cost must be positive').optional(), // Optional: backend falls back to product_valuation.cost_price for ADJUSTMENT_IN
+    storeLocationId: z.string().uuid().optional(),
+    productLotId: z.string().uuid().optional(),
   })
   .refine(
     (data) => {

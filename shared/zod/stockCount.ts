@@ -30,6 +30,7 @@ export const StockCountLineSchema = z.object({
   id: z.string().uuid(),
   stockCountId: z.string().uuid(),
   productId: z.string().uuid(),
+  productLotId: z.string().uuid().optional().nullable(),
   batchId: z.string().uuid().optional().nullable(),
   expectedQtyBase: z.number().nonnegative(),
   countedQtyBase: z.number().nonnegative().optional().nullable(),
@@ -58,6 +59,7 @@ export type CreateStockCount = z.infer<typeof CreateStockCountSchema>;
 // Update/Add Count Line Request
 export const UpdateCountLineSchema = z.object({
   productId: z.string().uuid('Invalid product ID'),
+  productLotId: z.string().uuid().optional().nullable(),
   batchId: z.string().uuid().optional().nullable(),
   countedQty: z.number().nonnegative('Counted quantity must be non-negative'),
   uom: z.string().max(50, 'UOM symbol too long'),
@@ -79,6 +81,7 @@ export type ValidateStockCount = z.infer<typeof ValidateStockCountSchema>;
 export const StockCountLineWithDetailsSchema = StockCountLineSchema.extend({
   productName: z.string(),
   productSku: z.string().optional().nullable(),
+  lotNumber: z.string().optional().nullable(),
   batchNumber: z.string().optional().nullable(),
   expiryDate: z.string().optional().nullable(),
   difference: z.number(), // counted - expected
@@ -128,6 +131,7 @@ export interface StockCountLineDbRow {
   id: string;
   stock_count_id: string;
   product_id: string;
+  product_lot_id?: string | null;
   batch_id?: string | null;
   expected_qty_base: string; // PostgreSQL numeric
   counted_qty_base?: string | null; // PostgreSQL numeric

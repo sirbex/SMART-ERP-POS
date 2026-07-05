@@ -59,11 +59,12 @@ export const stockCountRepository = {
     filters: {
       state?: string;
       createdById?: string;
+      locationId?: string;
       page?: number;
       limit?: number;
     }
   ): Promise<{ counts: StockCountDbRow[]; total: number }> {
-    const { state, createdById, page = 1, limit = 50 } = filters;
+    const { state, createdById, locationId, page = 1, limit = 50 } = filters;
     const offset = (page - 1) * limit;
 
     const whereClauses: string[] = [];
@@ -78,6 +79,11 @@ export const stockCountRepository = {
     if (createdById) {
       whereClauses.push(`created_by_id = $${paramIndex++}`);
       values.push(createdById);
+    }
+
+    if (locationId) {
+      whereClauses.push(`location_id = $${paramIndex++}`);
+      values.push(locationId);
     }
 
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -129,6 +135,7 @@ export const stockCountRepository = {
     data: {
       stockCountId: string;
       productId: string;
+      productLotId?: string | null;
       batchId?: string | null;
       expectedQtyBase: number;
       countedQtyBase?: number | null;
@@ -139,12 +146,13 @@ export const stockCountRepository = {
   ): Promise<StockCountLineDbRow> {
     const result = await client.query(
       `INSERT INTO stock_count_lines 
-       (stock_count_id, product_id, batch_id, expected_qty_base, counted_qty_base, uom_recorded, notes, created_by_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       (stock_count_id, product_id, product_lot_id, batch_id, expected_qty_base, counted_qty_base, uom_recorded, notes, created_by_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         data.stockCountId,
         data.productId,
+        data.productLotId || null,
         data.batchId || null,
         data.expectedQtyBase,
         data.countedQtyBase ?? null,
@@ -232,14 +240,17 @@ export const stockCountRepository = {
          scl.*,
          p.name as product_name,
          p.sku as product_sku,
-         ib.batch_number,
-         ib.expiry_date,
-         ib.remaining_quantity as current_batch_qty
+         pl.lot_number,
+         COALESCE(ib.batch_number, ib2.batch_number) as batch_number,
+         COALESCE(pl.expiry_date, ib.expiry_date, ib2.expiry_date) as expiry_date,
+         COALESCE(ib.remaining_quantity, ib2.remaining_quantity) as current_batch_qty
        FROM stock_count_lines scl
        JOIN products p ON scl.product_id = p.id
+       LEFT JOIN product_lots pl ON scl.product_lot_id = pl.id
        LEFT JOIN inventory_batches ib ON scl.batch_id = ib.id
+       LEFT JOIN inventory_batches ib2 ON pl.inventory_batch_id = ib2.id
        WHERE scl.stock_count_id = $1
-       ORDER BY p.name ASC, ib.expiry_date ASC NULLS LAST
+       ORDER BY p.name ASC, pl.lot_number ASC NULLS LAST, ib.expiry_date ASC NULLS LAST
        LIMIT $2 OFFSET $3`,
       [stockCountId, limit, offset]
     );
@@ -257,8 +268,18 @@ export const stockCountRepository = {
     client: PoolClient,
     stockCountId: string,
     productId: string,
-    batchId?: string | null
+    batchId?: string | null,
+    productLotId?: string | null,
   ): Promise<StockCountLineDbRow | null> {
+    if (productLotId) {
+      const byLot = await client.query(
+        `SELECT * FROM stock_count_lines 
+         WHERE stock_count_id = $1 AND product_lot_id = $2`,
+        [stockCountId, productLotId],
+      );
+      if (byLot.rows[0]) return byLot.rows[0];
+    }
+
     const result = await client.query(
       `SELECT * FROM stock_count_lines 
        WHERE stock_count_id = $1 AND product_id = $2 AND (batch_id = $3 OR ($3 IS NULL AND batch_id IS NULL))`,

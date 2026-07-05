@@ -49,6 +49,11 @@ import { api } from '../services/api';
 import CustomerAgingReport from '../components/reports/CustomerAgingReport';
 import { DateRangeFilter } from '../components/ui/DateRangeFilter';
 import { formatTimestamp, formatTimestampDate, getBusinessDate } from '../utils/businessDate';
+import {
+  INVENTORY_LEDGER_REPORTS,
+  INVENTORY_NETWORK_REPORTS,
+  INVENTORY_OPERATIONAL_REPORTS,
+} from '../config/inventoryReportCatalog';
 
 // TIMEZONE STRATEGY: DATE columns stay as YYYY-MM-DD; TIMESTAMPTZ uses business TZ display.
 const formatDisplayDate = (dateString: string | null | undefined): string => {
@@ -3472,102 +3477,77 @@ export default function ReportsPage() {
                       </button>
                     ))}
 
-                    {/* SAP/Odoo Inventory Suite — link-cards rendered only under Inventory category */}
+                    {/* Inventory module reports — canonical paths under /reports/inventory/* */}
                     {category === 'Inventory' && (
                       <>
                         {[
-                          {
-                            to: '/reports/inventory/valuation',
-                            icon: '📦',
-                            label: 'Inventory Valuation',
-                            desc: 'Book value from cost layers (subledger). Product | Qty | Unit Cost | Stock Value.',
-                            badge: 'Finance',
-                            badgeColor: 'bg-blue-100 text-blue-700',
-                          },
-                          {
-                            to: '/reports/inventory/reconciliation',
-                            icon: '⚖️',
-                            label: 'Inventory Reconciliation',
-                            desc: 'Subledger vs GL 1300 control account. Drift detection & internal consistency.',
-                            badge: 'Accounting',
-                            badgeColor: 'bg-purple-100 text-purple-700',
-                          },
-                          {
-                            to: '/reports/inventory/analytics',
-                            icon: '📊',
-                            label: 'Inventory Analytics',
-                            desc: 'ABC classification, movement velocity, dead-stock flags. No money columns.',
-                            badge: 'Operations',
-                            badgeColor: 'bg-emerald-100 text-emerald-700',
-                          },
-                          {
-                            to: '/reports/inventory/margins',
-                            icon: '📈',
-                            label: 'Price & Margin Analysis',
-                            desc: 'Per-product margin %, markup %, and potential profit on current stock.',
-                            badge: 'Commercial',
-                            badgeColor: 'bg-indigo-100 text-indigo-700',
-                          },
-                        ].map((card) => (
-                          <Link key={card.to} to={card.to} className="group relative bg-white p-4 sm:p-6 rounded-xl border-2 border-emerald-200 hover:border-emerald-400 hover:shadow-xl transition-all duration-200 text-left block">
-                            <div className="absolute -top-2 sm:-top-3 -right-2 sm:-right-3 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-full flex items-center justify-center text-xl sm:text-2xl shadow-lg group-hover:scale-110 transition-transform">
-                              {card.icon}
-                            </div>
-                            <div className="pr-6 sm:pr-8">
-                              <h3 className="font-bold text-gray-900 mb-1 sm:mb-2 text-base sm:text-lg group-hover:text-emerald-700 transition-colors">
-                                {card.label}
-                              </h3>
-                              <p className="text-xs sm:text-sm text-gray-600 mb-2 sm:mb-3 line-clamp-2">{card.desc}</p>
-                              <div className="flex flex-wrap gap-1.5">
-                                <span className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium ${card.badgeColor}`}>
-                                  {card.badge}
-                                </span>
-                                <span className="inline-flex items-center text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-medium">
-                                  Ledger-based
-                                </span>
+                          ...INVENTORY_NETWORK_REPORTS,
+                          ...INVENTORY_LEDGER_REPORTS,
+                          ...INVENTORY_OPERATIONAL_REPORTS,
+                        ].map((card) => {
+                          const badgeColor =
+                            card.badge === 'Finance'
+                              ? 'bg-blue-100 text-blue-700'
+                              : card.badge === 'Accounting'
+                                ? 'bg-purple-100 text-purple-700'
+                                : card.badge === 'Commercial'
+                                  ? 'bg-indigo-100 text-indigo-700'
+                                  : card.badge === 'Multistore'
+                                    ? 'bg-violet-100 text-violet-700'
+                                    : card.badge === 'Cross-Module'
+                                      ? 'bg-indigo-100 text-indigo-700'
+                                      : 'bg-emerald-100 text-emerald-700';
+                          const borderAccent =
+                            card.id === 'network'
+                              ? 'border-violet-200 hover:border-violet-400'
+                              : card.id === 'category-intelligence'
+                                ? 'border-indigo-200 hover:border-indigo-400'
+                                : 'border-emerald-200 hover:border-emerald-400';
+                          const gradientAccent =
+                            card.id === 'network'
+                              ? 'from-violet-500 to-indigo-600'
+                              : card.id === 'category-intelligence'
+                                ? 'from-indigo-500 to-violet-600'
+                                : 'from-emerald-500 to-teal-600';
+                          return (
+                            <Link
+                              key={card.path}
+                              to={card.path}
+                              className={`group relative bg-white p-4 sm:p-6 rounded-xl border-2 ${borderAccent} hover:shadow-xl transition-all duration-200 text-left block`}
+                            >
+                              <div
+                                className={`absolute -top-2 sm:-top-3 -right-2 sm:-right-3 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br ${gradientAccent} rounded-full flex items-center justify-center text-xl sm:text-2xl shadow-lg group-hover:scale-110 transition-transform`}
+                              >
+                                {card.icon}
                               </div>
-                            </div>
-                            <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                              →
-                            </div>
-                          </Link>
-                        ))}
-                      </>
-                    )}
-
-                    {/* Category Intelligence — standalone page, rendered under Inventory */}
-                    {category === 'Inventory' && (
-                      <>
-                        <Link
-                          to="/reports/category-intelligence"
-                          className="group relative bg-white p-4 sm:p-6 rounded-xl border-2 border-indigo-200 hover:border-indigo-400 hover:shadow-xl transition-all duration-200 text-left block"
-                        >
-                          <div className="absolute -top-2 sm:-top-3 -right-2 sm:-right-3 w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-full flex items-center justify-center text-xl sm:text-2xl shadow-lg group-hover:scale-110 transition-transform">
-                            🏷️
-                          </div>
-                          <div className="pr-6 sm:pr-8">
-                            <h3 className="font-bold text-gray-900 mb-1 sm:mb-2 text-base sm:text-lg group-hover:text-indigo-700 transition-colors">
-                              Category Intelligence
-                            </h3>
-                            <p className="text-xs sm:text-sm text-gray-600 mb-2 sm:mb-3 line-clamp-2">
-                              Multi-dimensional analysis across inventory, sales, purchases, stock valuation, and expiry exposure — from ledger and stock tables, reconciled with GL.
-                            </p>
-                            <div className="flex flex-wrap gap-1.5">
-                              <span className="inline-flex items-center text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
-                                Cross-Module
-                              </span>
-                              <span className="inline-flex items-center text-xs bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full font-medium">
-                                Ledger-based
-                              </span>
-                              <span className="inline-flex items-center text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
-                                PDF Export
-                              </span>
-                            </div>
-                          </div>
-                          <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                            →
-                          </div>
-                        </Link>
+                              <div className="pr-6 sm:pr-8">
+                                <h3 className="font-bold text-gray-900 mb-1 sm:mb-2 text-base sm:text-lg group-hover:text-emerald-700 transition-colors">
+                                  {card.title}
+                                </h3>
+                                <p className="text-xs sm:text-sm text-gray-600 mb-2 sm:mb-3 line-clamp-2">
+                                  {card.description}
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {card.badge && (
+                                    <span
+                                      className={`inline-flex items-center text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}`}
+                                    >
+                                      {card.badge}
+                                    </span>
+                                  )}
+                                  {card.multistoreOnly && (
+                                    <span className="inline-flex items-center text-xs bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full font-medium">
+                                      Multistore
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="absolute bottom-3 sm:bottom-4 right-3 sm:right-4 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                                →
+                              </div>
+                            </Link>
+                          );
+                        })}
                       </>
                     )}
                   </div>

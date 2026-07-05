@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { resolvePostLoginPath } from '../utils/cashierLockdown';
 import { api } from '../utils/api';
 import { TwoFactorVerifyModal } from '../components/auth/TwoFactorVerifyModal';
 import type { UserRole } from '../types';
@@ -183,7 +184,7 @@ export default function LoginPage() {
   const [requiresCaptcha, setRequiresCaptcha] = useState(false);
   const [captchaVerified, setCaptchaVerified] = useState(false);
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
-  const { login, isAuthenticated } = useAuth();
+  const { login, isAuthenticated, user } = useAuth();
   const { config } = useTenant();
   const brandName = config.branding.companyName || config.name || 'SMART ERP';
   const navigate = useNavigate();
@@ -198,11 +199,11 @@ export default function LoginPage() {
   }, []);
 
   // Where to go after login — honours ProtectedRoute's "from" state
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
 
   // Redirect if already authenticated
   if (isAuthenticated) {
-    return <Navigate to={from} replace />;
+    return <Navigate to={resolvePostLoginPath(user?.role, from)} replace />;
   }
 
   // Show idle-logout message if redirected from session timeout
@@ -234,7 +235,7 @@ export default function LoginPage() {
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             await login(offlineUser, existingToken);
-            navigate(from, { replace: true });
+            navigate(resolvePostLoginPath(offlineUser.role, from), { replace: true });
             return;
           }
         } catch {
@@ -279,7 +280,7 @@ export default function LoginPage() {
         await login(user, accessToken || token, refreshToken, expiresIn);
         // Cache for offline login
         await cacheLoginCredential(email, password, user);
-        navigate(from, { replace: true });
+        navigate(resolvePostLoginPath(user.role, from), { replace: true });
       } else {
         setError(response.data.error || 'Login failed');
       }
@@ -301,7 +302,7 @@ export default function LoginPage() {
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             await login(offlineUser, existingToken);
-            navigate(from, { replace: true });
+            navigate(resolvePostLoginPath(offlineUser.role, from), { replace: true });
             return;
           }
         } catch {
@@ -356,7 +357,7 @@ export default function LoginPage() {
     if (email && password) {
       cacheLoginCredential(email, password, authUser).catch(() => { });
     }
-    navigate(from, { replace: true });
+    navigate(resolvePostLoginPath(authUser.role, from), { replace: true });
   };
 
   const handle2FACancel = () => {

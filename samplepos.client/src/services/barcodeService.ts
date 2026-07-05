@@ -102,7 +102,7 @@ export function isValidBarcode(barcode: string): boolean {
   const validPatterns = [
     /^\d{8}$/,        // EAN-8
     /^\d{12,13}$/,    // UPC-A, EAN-13
-    /^[A-Z0-9\-]+$/,  // Code128, Code39
+    /^[A-Z0-9-]+$/,  // Code128, Code39
   ];
 
   return validPatterns.some(pattern => pattern.test(trimmed));

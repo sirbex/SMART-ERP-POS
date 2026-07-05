@@ -662,19 +662,8 @@ export const supplierCreditDebitNoteService = {
                     client,
                 );
 
-                // SAP/Odoo hybrid model:
-                //  • If the CN points at a specific bill (referenceInvoiceId is
-                //    set — typical for RGRN-derived or user-targeted CNs), apply
-                //    immediately to that bill. No floating credit.
-                //  • If the CN is standalone (no reference), leave it as
-                //    on-account credit (Status='POSTED', OB=full). The user can
-                //    later click "Apply to Open Bills" to auto-FIFO it.
-                if (note.referenceInvoiceId) {
-                    await this.applySupplierCreditNote(client, note.id, {
-                        primaryBillId: note.referenceInvoiceId,
-                        allowFIFO: false,
-                    });
-                }
+                // Credit notes stay POSTED (on-account) until the user applies them
+                // via "Apply to Open Bills" — including return-GRN-derived notes.
             } else {
                 await recordSupplierDebitNoteToGL(glData, pool, client);
                 // Debit notes track their additional AP obligation via the note's own
@@ -723,7 +712,7 @@ export const supplierCreditDebitNoteService = {
 
             // 3. Reverse the GL journal entry
             const refType = noteData.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'SUPPLIER_CREDIT_NOTE' : 'SUPPLIER_DEBIT_NOTE';
-            const glTxn = await pool.query(
+            const glTxn = await client.query(
                 `SELECT "Id" FROM ledger_transactions
          WHERE "ReferenceType" = $1 AND "ReferenceId" = $2
            AND "IsReversed" = FALSE
@@ -739,7 +728,7 @@ export const supplierCreditDebitNoteService = {
                         reason: `CANCEL: ${noteData.invoiceNumber} — ${reason}`,
                         userId: SYSTEM_USER_ID,
                         idempotencyKey: `${refType}_CANCEL-${noteId}`,
-                    }, pool);
+                    }, pool, client);
                 } catch (error: unknown) {
                     if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
                         logger.info('Supplier note GL already reversed (idempotent)', { noteId });
@@ -749,30 +738,32 @@ export const supplierCreditDebitNoteService = {
                 }
             }
 
-            // 4. Reverse bill application (applySupplierCreditNote path — not adjustSupplierInvoiceBalance)
-            if (noteData.documentType === 'SUPPLIER_CREDIT_NOTE') {
+            // 4. Restore reference bill from ledger SSOT.
+            // Applied CNs reduce bill outstanding via APPLIED-status ledger credits, not via
+            // bill AmountPaid (which tracks payment allocations only). reverseAmountFromSupplierBill
+            // is a best-effort legacy bump reversal; ledger realignment is authoritative.
+            if (noteData.documentType === 'SUPPLIER_CREDIT_NOTE' && noteData.referenceInvoiceId) {
                 const cnPaidRes = await client.query<{ amount_paid: string }>(
                     `SELECT COALESCE("AmountPaid", 0) AS amount_paid
                      FROM supplier_invoices WHERE "Id" = $1`,
                     [noteId],
                 );
                 const amountApplied = Number(cnPaidRes?.rows?.[0]?.amount_paid ?? 0);
-                if (amountApplied > 0 && noteData.referenceInvoiceId) {
+                if (amountApplied > 0) {
                     await supplierCreditDebitNoteRepository.reverseAmountFromSupplierBill(
                         client,
                         noteData.referenceInvoiceId,
                         amountApplied,
                     );
+                } else {
+                    const { applyInvoiceLedgerOutstanding } = await import(
+                        '../supplier-payments/supplierPaymentRepository.js'
+                    );
+                    await applyInvoiceLedgerOutstanding(client, noteData.referenceInvoiceId);
                 }
-            } else {
-                // Debit note: no invoice balance was adjusted during post (see postNote),
-                // so no reversal is needed here. The note's CANCELLED status is sufficient
-                // for recalcSupplierBalance to exclude it from the total.
             }
 
             // Recalculate supplier outstanding balance from sub-ledger (SSOT).
-            // adjustSupplierInvoiceBalance only updates supplier_invoices; without this
-            // call, suppliers."OutstandingBalance" stays stale after note cancellation.
             if (noteData.supplierId) {
                 await recalcSupplierBalance(client, noteData.supplierId);
             }
@@ -950,8 +941,9 @@ export const supplierCreditDebitNoteService = {
         creditNoteId: string,
     ) {
         return UnitOfWork.run(pool, async (client) => {
+            const note = await supplierCreditDebitNoteRepository.getSupplierNoteById(client, creditNoteId);
             return this.applySupplierCreditNote(client, creditNoteId, {
-                primaryBillId: null,
+                primaryBillId: note?.referenceInvoiceId ?? null,
                 allowFIFO: true,
             });
         });

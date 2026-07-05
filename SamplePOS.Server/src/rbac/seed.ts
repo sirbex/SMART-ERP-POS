@@ -221,7 +221,6 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       'pos.read', 'pos.create',
       'sales.read', 'sales.create',
       'customers.read', 'customers.create',
-      'inventory.read',
       'delivery.read',
       'settings.read',
       'quotations.read', 'quotations.create',
@@ -292,7 +291,13 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     );
     const warehouseRoleId = warehouseResult.rows[0].id;
     const warehousePerms = permissions.filter(p =>
-      ['inventory', 'delivery'].includes(p.module) ||
+      (['inventory', 'delivery'].includes(p.module) &&
+        ![
+          'inventory.transfer.direct',
+          'inventory.transfer.override',
+          'inventory.transfer.approve',
+          'inventory.transfer.dispatch',
+        ].includes(p.key)) ||
       ['purchasing.read', 'purchasing.post', 'suppliers.read', 'settings.read', 'reports.read'].includes(p.key)
     );
     for (const permission of warehousePerms) {

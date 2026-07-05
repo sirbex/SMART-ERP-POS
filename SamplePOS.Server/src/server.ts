@@ -94,6 +94,7 @@ import { requirePermission } from './rbac/middleware.js';
 import { correlationId } from './middleware/correlationId.js';
 import { initDemandForecastJobs } from './modules/reports/demandForecastJobs.js';
 import { initInventoryGLIntegrityJobs } from './services/inventoryGLIntegrityJobs.js';
+import { initExpiryAutomationJobs } from './services/expiryAutomationJobs.js';
 import healthRoutes, { incrementMetric, closeHealthRedis } from './routes/health.js';
 import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger.js';
@@ -598,6 +599,14 @@ async function startServer() {
         initInventoryGLIntegrityJobs(pool);
       } catch (err) {
         logger.warn('Inventory/GL integrity jobs not started (Redis may be offline)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      try {
+        initExpiryAutomationJobs(pool);
+      } catch (err) {
+        logger.warn('Expiry automation jobs not started (Redis may be offline)', {
           error: err instanceof Error ? err.message : String(err),
         });
       }

@@ -1281,7 +1281,7 @@ export async function lockAndComputeInvoiceOutstanding(
          WHERE reference_invoice_id = $1
            AND document_type = 'SUPPLIER_CREDIT_NOTE'
            AND deleted_at IS NULL
-           AND UPPER("Status") IN ('POSTED', 'APPLIED')`,
+           AND UPPER("Status") = 'APPLIED'`,
         [invoiceId]
     );
     const returnCredits = new Decimal(creditRes.rows[0].return_credits || 0);
@@ -1483,7 +1483,7 @@ export async function findAllUnpaidInvoicesForMassPayment(
            FROM supplier_invoices scn
            WHERE scn.document_type = 'SUPPLIER_CREDIT_NOTE'
              AND scn.deleted_at IS NULL
-             AND UPPER(scn."Status") IN ('POSTED', 'APPLIED')
+             AND UPPER(scn."Status") = 'APPLIED'
              AND scn.reference_invoice_id IS NOT NULL
            GROUP BY scn.reference_invoice_id
          )

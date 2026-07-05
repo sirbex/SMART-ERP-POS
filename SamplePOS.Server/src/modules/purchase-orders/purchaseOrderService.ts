@@ -22,6 +22,7 @@ import { PricingEngine } from '../../utils/pricingEngine.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
 import { goodsReceiptService } from '../goods-receipts/goodsReceiptService.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import { assertSupplierCreditHeadroom } from '../suppliers/supplierCreditGuard.js';
 
 export interface CreatePOInput {
   supplierId: string;
@@ -126,16 +127,12 @@ export const purchaseOrderService = {
         new Decimal(0)
       ));
 
-      // BR-PO-007 & BR-PO-011: Validate supplier lead time
-      if (input.expectedDate) {
-        await PurchaseOrderBusinessRules.validateLeadTime(
-          client,
-          input.supplierId,
-          input.orderDate,
-          input.expectedDate
-        );
-        logger.info('BR-PO-011: Lead time validation passed');
-      }
+      await assertSupplierCreditHeadroom(
+        client,
+        input.supplierId,
+        totalAmount,
+        'purchase order',
+      );
 
       // BR-PO-009: Check for duplicate PO (warning only)
       await PurchaseOrderBusinessRules.validateDuplicatePO(
@@ -145,14 +142,6 @@ export const purchaseOrderService = {
         input.createdBy,
         24
       );
-
-      // BR-PO-012: Validate minimum order value
-      await PurchaseOrderBusinessRules.validateMinimumOrderValue(
-        client,
-        input.supplierId,
-        totalAmount
-      );
-      logger.info('BR-PO-012: Minimum order value validation passed', { totalAmount });
 
       // Create PO
       const poData: CreatePOData = {
@@ -306,16 +295,12 @@ export const purchaseOrderService = {
           new Decimal(0)
         ));
 
-        if (input.expectedDate) {
-          await PurchaseOrderBusinessRules.validateLeadTime(
-            client,
-            supplierId,
-            existing.po.orderDate,
-            input.expectedDate
-          );
-        }
-
-        await PurchaseOrderBusinessRules.validateMinimumOrderValue(client, supplierId, totalAmount);
+        await assertSupplierCreditHeadroom(
+          client,
+          supplierId,
+          totalAmount,
+          'purchase order draft update',
+        );
 
         // Delete existing items and re-insert
         await client.query(
@@ -365,9 +350,34 @@ export const purchaseOrderService = {
   },
 
   /**
+   * Keep workflow status aligned with net-received totals (finalize / return GRN).
+   */
+  async syncPOStatusWithReceipts(
+    pool: Pool | PoolClient,
+    poId: string,
+  ): Promise<void> {
+    const statusRes = await pool.query<{ status: string }>(
+      `SELECT status FROM purchase_orders WHERE id = $1`,
+      [poId],
+    );
+    const status = statusRes.rows[0]?.status;
+    if (!status || status === 'DRAFT' || status === 'CANCELLED') return;
+
+    const fullyReceived = await goodsReceiptRepository.isPOFullyReceived(pool, poId);
+    if (fullyReceived && status !== 'COMPLETED') {
+      await purchaseOrderRepository.updatePOStatus(pool, poId, 'COMPLETED');
+      return;
+    }
+    if (!fullyReceived && status === 'COMPLETED') {
+      await purchaseOrderRepository.updatePOStatus(pool, poId, 'PENDING');
+    }
+  },
+
+  /**
    * Get PO by ID
    */
   async getPOById(pool: Pool, id: string): Promise<{ po: PurchaseOrder; items: PurchaseOrderItem[] }> {
+    await this.syncPOStatusWithReceipts(pool, id);
     const result = await purchaseOrderRepository.getPOById(pool, id);
 
     if (!result) {
@@ -476,14 +486,30 @@ export const purchaseOrderService = {
    * Submit purchase order (DRAFT -> PENDING)
    */
   async submitPO(pool: Pool, id: string): Promise<PurchaseOrder> {
-    const existing = await purchaseOrderRepository.getPOById(pool, id);
-    if (!existing) {
-      throw new Error(`Purchase order ${id} not found`);
-    }
-    if (!existing.items?.length) {
-      throw new Error('Cannot submit a purchase order with no line items');
-    }
-    return this.updatePOStatus(pool, id, 'PENDING');
+    return UnitOfWork.run(pool, async (client) => {
+      await checkMaintenanceMode(client);
+
+      const existing = await purchaseOrderRepository.getPOById(client, id);
+      if (!existing) {
+        throw new Error(`Purchase order ${id} not found`);
+      }
+      if (!existing.items?.length) {
+        throw new Error('Cannot submit a purchase order with no line items');
+      }
+      if (existing.po.status !== 'DRAFT') {
+        throw new Error(`Cannot change status from ${existing.po.status} to PENDING`);
+      }
+
+      await PurchaseOrderBusinessRules.validateSupplierExists(client, existing.po.supplierId);
+
+      const totalAmount = Money.toNumber(existing.items.reduce(
+        (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitCost)),
+        new Decimal(0),
+      ));
+      await assertSupplierCreditHeadroom(client, existing.po.supplierId, totalAmount, 'PO submit');
+
+      return purchaseOrderRepository.updatePOStatus(client, id, 'PENDING');
+    });
   },
 
   /**
@@ -536,6 +562,19 @@ export const purchaseOrderService = {
       if (!items?.length) {
         throw new Error('Cannot send purchase order to supplier without line items');
       }
+
+      await PurchaseOrderBusinessRules.validateSupplierExists(client, po.supplierId);
+
+      const totalAmount = Money.toNumber(items.reduce(
+        (sum, item) => sum.plus(new Decimal(item.quantity).times(item.unitCost)),
+        new Decimal(0),
+      ));
+      await assertSupplierCreditHeadroom(
+        client,
+        po.supplierId,
+        totalAmount,
+        'send PO to supplier',
+      );
 
       // Update PO with sent_date
       await client.query(
@@ -654,7 +693,8 @@ export const purchaseOrderService = {
   },
 
   /**
-   * Create supplier invoice after goods receipt is finalized
+   * @deprecated Delegates to supplierPaymentService.createInvoiceFromGRN (canonical AP + GL path).
+   * Legacy route POST /purchase-orders/invoices still calls this for backward compatibility.
    */
   async createSupplierInvoice(
     pool: Pool,
@@ -671,38 +711,25 @@ export const purchaseOrderService = {
       createdBy: string;
     }
   ): Promise<Record<string, unknown>> {
-    return UnitOfWork.run(pool, async (client) => {
-      // Create invoice
-      const result = await client.query(
-        `INSERT INTO supplier_invoices (
-          invoice_number, supplier_id, purchase_order_id, goods_receipt_id,
-          invoice_date, due_date, total_amount, outstanding_amount,
-          payment_terms, notes, created_by_id, status
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, 'PENDING')
-        RETURNING *`,
-        [
-          data.invoiceNumber,
-          data.supplierId,
-          data.purchaseOrderId,
-          data.goodsReceiptId,
-          data.invoiceDate,
-          data.dueDate,
-          data.totalAmount,
-          data.paymentTerms,
-          data.notes,
-          data.createdBy,
-        ]
-      );
-
-      logger.info('Supplier invoice created', { invoiceId: result.rows[0].id });
-
-      // Document Flow: PO → Supplier Invoice
-      await documentFlowService.linkDocuments(client, 'PURCHASE_ORDER', data.purchaseOrderId, 'SUPPLIER_INVOICE', result.rows[0].id as string, 'CREATED_FROM');
-      // Document Flow: GR → Supplier Invoice
-      await documentFlowService.linkDocuments(client, 'GOODS_RECEIPT', data.goodsReceiptId, 'SUPPLIER_INVOICE', result.rows[0].id as string, 'CREATED_FROM');
-
-      return result.rows[0] as Record<string, unknown>;
+    logger.warn('DEPRECATED: purchaseOrderService.createSupplierInvoice — delegating to createInvoiceFromGRN', {
+      goodsReceiptId: data.goodsReceiptId,
+      purchaseOrderId: data.purchaseOrderId,
     });
+
+    const { createInvoiceFromGRN } = await import('../supplier-payments/supplierPaymentService.js');
+    const invoice = await createInvoiceFromGRN(
+      pool,
+      {
+        grnId: data.goodsReceiptId,
+        supplierInvoiceNumber: data.invoiceNumber,
+        invoiceDate: data.invoiceDate.toISOString().slice(0, 10),
+        dueDate: data.dueDate.toISOString().slice(0, 10),
+        notes: data.notes,
+      },
+      data.createdBy,
+    );
+
+    return invoice as unknown as Record<string, unknown>;
   },
 
   /**

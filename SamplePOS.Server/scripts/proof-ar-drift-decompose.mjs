@@ -3,13 +3,22 @@
  * Read-only proof: decompose AR (1200) integrityGlDrift into auditable line items.
  * No mutations. Exit 0 only if arithmetic reconciles to reported integrityGlDrift.
  *
- * Usage:
+ * Usage (production — required):
  *   HENBER_DATABASE_URL=... node scripts/proof-ar-drift-decompose.mjs
+ *
+ * Usage (local dev only):
+ *   PROOF_ALLOW_LOCAL=1 DATABASE_URL=... node scripts/proof-ar-drift-decompose.mjs
  */
 import pg from 'pg';
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveVerificationEnvironment } from '../../scripts/lib/production-verification-guard.mjs';
+
+const { mode, henberDatabaseUrl } = resolveVerificationEnvironment({
+  scriptName: 'Henber AR drift decomposition',
+  requireHenberDatabase: true,
+});
 
 const NET_ACTIVE = `
   lt."Status" = 'POSTED'
@@ -21,9 +30,7 @@ const NET_ACTIVE = `
 `;
 
 const pool = new pg.Pool({
-  connectionString:
-    process.env.HENBER_DATABASE_URL
-    || 'postgresql://postgres:55b9bed51c599b26e7115ab126a974e8@209.38.203.138:5432/pos_tenant_henber_pharmacy',
+  connectionString: henberDatabaseUrl,
 });
 
 const fmt = (n) =>
@@ -47,6 +54,8 @@ try {
   log('═'.repeat(72));
   log(' AR DRIFT DECOMPOSITION PROOF (read-only)');
   log(` Generated: ${ts}`);
+  log(` Mode: ${mode}`);
+  log(` Database: ${mode === 'production' ? 'HENBER_DATABASE_URL (configured)' : henberDatabaseUrl.replace(/:[^:@/]+@/, ':***@')}`);
   log('═'.repeat(72));
 
   const snap = await pool.query(`

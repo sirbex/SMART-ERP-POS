@@ -273,13 +273,14 @@ const FinancialStatementsPage = () => {
           start: formatDateStr(new Date(currentYear, currentMonth - 1, 1)),
           end: formatDateStr(new Date(currentYear, currentMonth, 0))
         };
-      case 'last-quarter':
+      case 'last-quarter': {
         const lastQuarter = currentQuarter === 0 ? 3 : currentQuarter - 1;
         const quarterYear = currentQuarter === 0 ? currentYear - 1 : currentYear;
         return {
           start: formatDateStr(new Date(quarterYear, lastQuarter * 3, 1)),
           end: formatDateStr(new Date(quarterYear, (lastQuarter + 1) * 3, 0))
         };
+      }
       case 'last-year':
         return {
           start: formatDateStr(new Date(currentYear - 1, 0, 1)),
@@ -304,7 +305,7 @@ const FinancialStatementsPage = () => {
       const { start, end } = getDateRange();
 
       let endpoint = '';
-      let params = new URLSearchParams();
+      const params = new URLSearchParams();
 
       if (reportType === 'income-statement' || reportType === 'cash-flow') {
         params.append('startDate', start);
@@ -329,7 +330,7 @@ const FinancialStatementsPage = () => {
       const result = response.data;
       if (result.success) {
         switch (reportType) {
-          case 'income-statement':
+          case 'income-statement': {
             // Transform the Node.js API response to match the expected frontend structure
             // Backend returns nested objects: { items: [...], totalRevenue: number }
             // Frontend expects flat arrays with mapped property names
@@ -370,7 +371,8 @@ const FinancialStatementsPage = () => {
             setCashFlow(null);
             setIntegrity(data.integrity || null);
             break;
-          case 'balance-sheet':
+          }
+          case 'balance-sheet': {
             // Transform the Node.js API response to match the expected frontend structure
             const bsData = result.data;
             console.log('Balance Sheet API Response:', bsData);
@@ -413,7 +415,8 @@ const FinancialStatementsPage = () => {
             setCashFlow(null);
             setIntegrity(bsData.integrity || null);
             break;
-          case 'cash-flow':
+          }
+          case 'cash-flow': {
             // Transform the Node.js API response to match the expected frontend structure
             const cfData = result.data;
             const mapCfItems = (items: RawStatementItem[] | undefined): FinancialStatementItem[] => (items || []).map((item: RawStatementItem) => ({
@@ -444,6 +447,7 @@ const FinancialStatementsPage = () => {
             setBalanceSheet(null);
             setIntegrity(cfData.integrity || null);
             break;
+          }
         }
       } else {
         throw new Error(result.error || 'Failed to load financial statement');
@@ -465,7 +469,7 @@ const FinancialStatementsPage = () => {
   const exportToPDF = async () => {
     try {
       const { start, end } = getDateRange();
-      let params = new URLSearchParams({
+      const params = new URLSearchParams({
         format: 'pdf'
       });
 

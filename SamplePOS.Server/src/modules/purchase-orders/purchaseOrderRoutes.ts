@@ -392,7 +392,8 @@ export const purchaseOrderController = {
     res.status(201).json({
       success: true,
       data: invoice,
-      message: 'Supplier invoice created successfully',
+      message: 'Supplier invoice created via canonical GRN billing path',
+      deprecated: 'Use POST /supplier-payments/invoices/from-grn',
     });
   },
 
@@ -409,19 +410,21 @@ export const purchaseOrderController = {
       return;
     }
 
-    // Normalize DB snake_case columns to camelCase for the frontend
-    const items = (result.items as unknown as Record<string, unknown>[]).map((row) => ({
+    // Net received (purchase UoM) is the operational SSOT for supplier/PO displays.
+    // Gross received is immutable receipt history; returns reduce net, not gross.
+    const items = result.items.map((row) => ({
       id: row.id,
-      productId: row.product_id,
-      productName: row.product_name,
-      orderedQuantity: row.ordered_quantity ?? row.quantity ?? 0,
-      receivedQuantity: row.gross_received_quantity ?? row.received_quantity ?? row.receivedQuantity ?? 0,
-      returnedQuantity: row.returned_quantity ?? 0,
-      netReceivedQuantity: row.net_received_quantity ?? row.received_quantity ?? 0,
-      openQuantity: row.open_quantity ?? 0,
-      unitPrice: row.unit_price ?? row.unitCost ?? 0,
-      lineTotal: row.total_price ?? row.lineTotal ?? 0,
-      uomName: row.uom_name ?? null,
+      productId: row.productId,
+      productName: row.productName,
+      orderedQuantity: row.quantity,
+      receivedQuantity: row.netReceivedQuantity ?? row.receivedQuantity ?? 0,
+      grossReceivedQuantity: row.receivedQuantity ?? 0,
+      returnedQuantity: row.returnedQuantity ?? 0,
+      netReceivedQuantity: row.netReceivedQuantity ?? row.receivedQuantity ?? 0,
+      openQuantity: row.openQuantity ?? 0,
+      unitPrice: row.unitCost,
+      lineTotal: row.lineTotal,
+      uomName: row.uomName ?? null,
     }));
 
     res.json({ success: true, data: items });

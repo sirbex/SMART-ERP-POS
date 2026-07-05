@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
-import type { GuardHandle } from '../../hooks/useTransactionGuard';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+/**
+ * Goods Receipt / GRN (spec: GoodsReceipt.tsx) — route `/inventory/goods-receipts`
+ * Multistore: per-line Destination Store selector, default MAIN warehouse when flag is on.
+ */
+import { ZINDEX } from '../../hooks/useTransactionGuard';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
 import { downloadFile } from '../../utils/download';
@@ -12,6 +15,7 @@ import {
   useFinalizeGoodsReceipt,
   useGoodsReceipt,
   useCreateGoodsReceipt,
+  useCancelGoodsReceipt,
   useHydrateGRFromPO,
   useAddGRItem,
   useRemoveGRItem,
@@ -48,11 +52,23 @@ import { useServerTableSort } from '../../hooks/useServerTableSort';
 import { ListSkeleton } from '../../components/ui/ListSkeleton';
 import { MobileListCard, ResponsiveActionBar, mobileActionBtnClass } from '../../components/ui/ResponsiveActionBar';
 import ManualGRButton from '../../components/inventory/ManualGRButton';
+import { getCachedMultistoreEnabled, useMultistoreEnabled } from '../../hooks/useMultistore';
+import { useStoreLocations } from '../../hooks/useWarehouse';
+import { buildStoreLabelMap, resolveStoreLabel } from '../../components/inventory/storeLocationUtils';
+import {
+  readGrReceivingStoreId,
+  writeGrReceivingStoreId,
+} from '../../components/inventory/grReceivingStorePrefs';
+import { StoreLocationSelect } from '../../components/inventory/StoreLocationSelect';
+import type { StoreLocation } from '../../../../shared/types/warehouseNetwork';
 import { ProcurementProductSearch } from '../../components/inventory/shared';
 import type { ProcurementProduct } from '../../components/inventory/shared';
+import { UomSelector } from '../../components/inventory/UomSelector';
+import type { ProductUomDetail } from '../../hooks/useProductWithUoms';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import { inventoryKeys } from '../../hooks/useInventory';
 import { DatePicker } from '../../components/ui/date-picker';
+import SlideDrawer from '../../components/ui/SlideDrawer';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -70,6 +86,20 @@ const formatDisplayDate = (dateString: string | null | undefined): string => {
 
   return dateString;
 };
+
+/** Avoid mixing ?? and || — Babel/Vite rejects bare chains in this file. */
+function resolveGrLineTargetStoreId(
+  item: Pick<GRItemRow, 'targetStoreLocationId' | 'target_store_location_id'>,
+  editStoreId: string | null | undefined,
+  defaultStoreId: string,
+): string | null {
+  const resolved =
+    editStoreId ??
+    item.targetStoreLocationId ??
+    item.target_store_location_id ??
+    defaultStoreId;
+  return resolved || null;
+}
 
 interface CostAlert {
   type: string;
@@ -132,6 +162,19 @@ interface GRRow {
   reversal_timestamp?: string | null;
   reversalReason?: string | null;
   reversal_reason?: string | null;
+  /** Another GR on the same PO already has the supplier bill (top-up receipt). */
+  poSiblingBill?: {
+    invoiceId: string;
+    invoiceNumber: string;
+    grnId: string;
+    grnNumber: string;
+  } | null;
+  po_sibling_bill?: {
+    invoice_id: string;
+    invoice_number: string;
+    grn_id: string;
+    grn_number: string;
+  } | null;
 }
 
 type GRSortField =
@@ -178,6 +221,8 @@ interface GRItemRow {
   conversion_factor?: number | string;
   trackExpiry?: boolean;
   track_expiry?: boolean;
+  targetStoreLocationId?: string | null;
+  target_store_location_id?: string | null;
 }
 
 interface PORow {
@@ -206,6 +251,8 @@ interface POItemData {
   unitCost?: number | string;
   product_cost_price?: number | string;
   productCostPrice?: number | string;
+  open_quantity?: number | string;
+  openQuantity?: number | string;
   uom_id?: string | null;
   uomId?: string | null;
 }
@@ -224,6 +271,7 @@ interface EditItemState {
   selectedUomId?: string;
   receivedUomQty?: number;
   receivedLooseQty?: number;
+  targetStoreLocationId?: string | null;
 }
 
 
@@ -316,9 +364,6 @@ export default function GoodsReceiptsPage() {
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // ── Transaction Guard ──────────────────────────────────────────────────
-  const { openGuard, closeGuard } = useTransactionGuard();
-
   // Debounce search (300ms)
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchTerm), 300);
@@ -327,30 +372,43 @@ export default function GoodsReceiptsPage() {
 
   // Reset page when search/dates change
   useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter, billingFilter, startDate, endDate]);
-  const detailsGuardRef = useRef<GuardHandle | null>(null);
-  const createGuardRef = useRef<GuardHandle | null>(null);
-  const returnGuardRef = useRef<GuardHandle | null>(null);
 
-  useEffect(() => {
-    if (showDetailsModal) {
-      detailsGuardRef.current = openGuard({ cancellable: true, label: 'Goods receipt details' });
-      return () => { if (detailsGuardRef.current) { closeGuard(detailsGuardRef.current.id); detailsGuardRef.current = null; } };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showDetailsModal]);
-
-  useEffect(() => {
-    if (showCreateModal) {
-      createGuardRef.current = openGuard({ cancellable: true, label: 'Create goods receipt' });
-      return () => { if (createGuardRef.current) { closeGuard(createGuardRef.current.id); createGuardRef.current = null; } };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showCreateModal]);
+  const closeCreateGrModal = useCallback(() => {
+    setShowCreateModal(false);
+    setSelectedPoId('');
+    setPoSearch('');
+    setPoPage(1);
+    setFocusedPoIndex(0);
+  }, []);
 
   // Permission gating
   const canCreateGR = useCanAccess([], ['purchasing.create']);
+  const canUpdateGR = useCanAccess([], ['purchasing.update']);
   const canFinalizeGR = useCanAccess([], ['purchasing.post']);
   const canReassignSupplier = useCanAccess([], ['corrections.execute']);
+  const { isMultistoreEnabled } = useMultistoreEnabled();
+  const showMultistoreGrUi =
+    isMultistoreEnabled || getCachedMultistoreEnabled() === true;
+  const { data: grStoreLocations = [] } = useStoreLocations(showMultistoreGrUi && showDetailsModal);
+  const defaultReceivingStoreId = useMemo(() => {
+    const mainStore = grStoreLocations.find((s) => s.storeType === 'MAIN');
+    const defaultReceiving = grStoreLocations.find((s) => s.isDefaultReceiving);
+    return (mainStore ?? defaultReceiving)?.id ?? '';
+  }, [grStoreLocations]);
+  const grDestinationStores = useMemo(
+    () =>
+      grStoreLocations.filter(
+        (s) => s.isActive && (s.storeType === 'MAIN' || s.storeType === 'SELLING'),
+      ),
+    [grStoreLocations],
+  );
+  const grStoreLabelMap = useMemo(
+    () => buildStoreLabelMap(grStoreLocations),
+    [grStoreLocations],
+  );
+  const [headerReceivingStoreId, setHeaderReceivingStoreId] = useState('');
+  const [showPerLineStoreOverride, setShowPerLineStoreOverride] = useState(false);
+  const effectiveReceivingStoreId = headerReceivingStoreId || defaultReceivingStoreId;
   const [showAlertsModal, setShowAlertsModal] = useState(false);
   const [costAlerts, setCostAlerts] = useState<CostAlert[]>([]);
   // Post-finalize "Create Bill?" prompt (designed modal, not browser confirm)
@@ -379,14 +437,6 @@ export default function GoodsReceiptsPage() {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showSupplierReassignModal, setShowSupplierReassignModal] = useState(false);
   const [creatingBillForGR, setCreatingBillForGR] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (showReturnModal) {
-      returnGuardRef.current = openGuard({ cancellable: false, label: 'Return goods to supplier' });
-      return () => { if (returnGuardRef.current) { closeGuard(returnGuardRef.current.id); returnGuardRef.current = null; } };
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showReturnModal]);
 
   const [returnReason, setReturnReason] = useState('');
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
@@ -460,6 +510,7 @@ export default function GoodsReceiptsPage() {
   });
 
   const finalizeMutation = useFinalizeGoodsReceipt();
+  const cancelGRMutation = useCancelGoodsReceipt();
   const createReturnGrnMutation = useCreateReturnGrn();
   const postReturnGrnMutation = usePostReturnGrn();
   const createCreditNoteMutation = useCreateCreditNoteFromReturn();
@@ -534,6 +585,50 @@ export default function GoodsReceiptsPage() {
   useEffect(() => {
     localStorage.setItem('gr_cost_baseline', baseline);
   }, [baseline]);
+
+  useEffect(() => {
+    if (!showDetailsModal || !showMultistoreGrUi || grDestinationStores.length === 0) return;
+    const remembered = readGrReceivingStoreId(user?.id);
+    const validRemembered =
+      remembered && grDestinationStores.some((s) => s.id === remembered);
+    const resolved = validRemembered ? remembered : defaultReceivingStoreId;
+    if (resolved) {
+      setHeaderReceivingStoreId(resolved);
+    }
+  }, [
+    showDetailsModal,
+    showMultistoreGrUi,
+    grDestinationStores,
+    defaultReceivingStoreId,
+    user?.id,
+  ]);
+
+  useEffect(() => {
+    if (
+      !showDetailsModal ||
+      !showMultistoreGrUi ||
+      !effectiveReceivingStoreId ||
+      showPerLineStoreOverride
+    ) {
+      return;
+    }
+    setEditItems((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of Object.keys(next)) {
+        if (next[id].targetStoreLocationId !== effectiveReceivingStoreId) {
+          next[id] = { ...next[id], targetStoreLocationId: effectiveReceivingStoreId };
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [
+    effectiveReceivingStoreId,
+    showPerLineStoreOverride,
+    showDetailsModal,
+    showMultistoreGrUi,
+  ]);
 
   // Load GR details when modal opens
   const detailsQuery = useGoodsReceipt(selectedGR?.id || '');
@@ -644,28 +739,54 @@ export default function GoodsReceiptsPage() {
   }, [items, editItems]);
 
   useEffect(() => {
-    if (showDetailsModal && items.length > 0) {
-      // initialize edit state with current values
-      const init: Record<string, EditItemState> = {};
+    if (!showDetailsModal || items.length === 0) return;
+
+    setEditItems((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
       items.forEach((it: GRItemRow) => {
         const ordered = Number(it.orderedQuantity ?? it.ordered_quantity ?? 0);
         const currentReceived = Number(it.receivedQuantity ?? it.received_quantity ?? 0);
-        // Problem 7: Auto-fill received = ordered for DRAFT GR from PO when not yet received
-        const shouldAutoFill = isFromPO && selectedGR?.status === 'DRAFT' && currentReceived === 0 && ordered > 0;
-        init[it.id] = {
-          batchNumber: it.batchNumber ?? it.batch_number ?? '',
-          expiryDate:
-            it.expiryDate || it.expiry_date
-              ? String(it.expiryDate || it.expiry_date).slice(0, 10)
-              : '',
-          receivedQuantity: shouldAutoFill ? ordered : currentReceived,
-          unitCost: Number(it.unitCost ?? it.unit_cost ?? 0),
-          isBonus: !!(it.isBonus ?? it.is_bonus ?? false),
-        };
+        const shouldAutoFill =
+          isFromPO && selectedGR?.status === 'DRAFT' && currentReceived === 0 && ordered > 0;
+        const resolvedStoreId = resolveGrLineTargetStoreId(
+          it,
+          undefined,
+          effectiveReceivingStoreId,
+        );
+
+        if (!next[it.id]) {
+          next[it.id] = {
+            batchNumber: it.batchNumber ?? it.batch_number ?? '',
+            expiryDate:
+              it.expiryDate || it.expiry_date
+                ? String(it.expiryDate || it.expiry_date).slice(0, 10)
+                : '',
+            receivedQuantity: shouldAutoFill ? ordered : currentReceived,
+            unitCost: Number(it.unitCost ?? it.unit_cost ?? 0),
+            isBonus: !!(it.isBonus ?? it.is_bonus ?? false),
+            targetStoreLocationId: resolvedStoreId,
+          };
+          changed = true;
+          return;
+        }
+
+        if (
+          isMultistoreEnabled &&
+          effectiveReceivingStoreId &&
+          !next[it.id].targetStoreLocationId &&
+          !it.targetStoreLocationId &&
+          !it.target_store_location_id
+        ) {
+          next[it.id] = { ...next[it.id], targetStoreLocationId: effectiveReceivingStoreId };
+          changed = true;
+        }
       });
-      setEditItems(init);
-    }
-  }, [showDetailsModal, items, isFromPO, selectedGR?.status]);
+
+      return changed ? next : prev;
+    });
+  }, [showDetailsModal, items, isFromPO, selectedGR?.status, effectiveReceivingStoreId, isMultistoreEnabled]);
 
   const handleFinalize = async (id: string) => {
     const validationErrors: string[] = [];
@@ -706,7 +827,16 @@ export default function GoodsReceiptsPage() {
 
     try {
       // Collect all pending edits into a single batch payload
-      const batchItems: Array<{ itemId: string; receivedQuantity?: number; unitCost?: number; batchNumber?: string | null; isBonus?: boolean; expiryDate?: string | null }> = [];
+      const batchItems: Array<{
+        itemId: string;
+        receivedQuantity?: number;
+        unitCost?: number;
+        batchNumber?: string | null;
+        isBonus?: boolean;
+        uomId?: string | null;
+        expiryDate?: string | null;
+        targetStoreLocationId?: string | null;
+      }> = [];
 
       for (const item of items as GRItemRow[]) {
         const itemId = item.id;
@@ -723,7 +853,12 @@ export default function GoodsReceiptsPage() {
             edits.receivedQuantity !== (item.receivedQuantity || item.received_quantity)) ||
           (edits.unitCost !== undefined &&
             edits.unitCost !== (item.unitCost || item.unit_cost)) ||
-          (edits.isBonus !== undefined && edits.isBonus !== !!(item.isBonus ?? item.is_bonus));
+          (edits.isBonus !== undefined && edits.isBonus !== !!(item.isBonus ?? item.is_bonus)) ||
+          (edits.selectedUomId !== undefined &&
+            edits.selectedUomId !== (item.uomId || item.uom_id || null)) ||
+          (edits.targetStoreLocationId !== undefined &&
+            edits.targetStoreLocationId !==
+              (item.targetStoreLocationId ?? item.target_store_location_id ?? null));
 
         if (hasChanges) {
           const entry: typeof batchItems[number] = { itemId };
@@ -736,6 +871,18 @@ export default function GoodsReceiptsPage() {
               ? String(edits.expiryDate)
               : null;
           if (edits.isBonus !== undefined) entry.isBonus = !!edits.isBonus;
+          if (edits.selectedUomId !== undefined) {
+            entry.uomId = edits.selectedUomId || null;
+          }
+          if (isMultistoreEnabled) {
+            entry.targetStoreLocationId = resolveGrLineTargetStoreId(
+              item,
+              edits.targetStoreLocationId,
+              effectiveReceivingStoreId,
+            );
+          } else if (edits.targetStoreLocationId !== undefined) {
+            entry.targetStoreLocationId = edits.targetStoreLocationId || null;
+          }
           batchItems.push(entry);
         }
       }
@@ -805,13 +952,27 @@ export default function GoodsReceiptsPage() {
         const grNumber = selectedGR?.grNumber || selectedGR?.receiptNumber || selectedGR?.receipt_number || '';
         const alreadyBilled =
           ((grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '').length > 0;
+        const resultPayload = response.data as {
+          linkedSiblingBill?: { invoiceNumber: string; grnNumber: string };
+        } | undefined;
+        const linkedSiblingBill = resultPayload?.linkedSiblingBill;
+        const grRow = grDetail?.gr as GRRow | undefined;
+        const poSiblingBill =
+          grRow?.poSiblingBill ??
+          (grRow?.po_sibling_bill
+            ? {
+                invoiceNumber: grRow.po_sibling_bill.invoice_number,
+                grnNumber: grRow.po_sibling_bill.grn_number,
+              }
+            : undefined);
+        const skipBillPrompt = alreadyBilled || !!linkedSiblingBill || !!poSiblingBill;
         const supplierName =
           (grDetail?.gr as { supplierName?: string; supplier_name?: string } | undefined)?.supplierName ||
           (grDetail?.gr as { supplierName?: string; supplier_name?: string } | undefined)?.supplier_name ||
           (selectedGR as { supplierName?: string; supplier_name?: string } | undefined)?.supplierName ||
           (selectedGR as { supplierName?: string; supplier_name?: string } | undefined)?.supplier_name ||
           '';
-        if (grTotal > 0 && !alreadyBilled) {
+        if (grTotal > 0 && !skipBillPrompt) {
           // Open designed modal (not browser confirm) — see post-finalize modal below.
           setBillPrompt({
             grId: id,
@@ -823,6 +984,11 @@ export default function GoodsReceiptsPage() {
             supplierReportedTotal: '',
             varianceReason: '',
           });
+        } else if (linkedSiblingBill) {
+          toast.success(
+            `Received. Linked to existing bill ${linkedSiblingBill.invoiceNumber} from ${linkedSiblingBill.grnNumber} — no new supplier invoice.`,
+            { duration: 8000 },
+          );
         }
       } catch {
         // Non-fatal: finalize already succeeded, bill prompt is opportunistic.
@@ -835,6 +1001,9 @@ export default function GoodsReceiptsPage() {
   };
 
   const handleViewDetails = (gr: GRRow) => {
+    setEditItems({});
+    setShowPerLineStoreOverride(false);
+    setHeaderReceivingStoreId('');
     setSelectedGR(gr);
     setShowDetailsModal(true);
   };
@@ -879,6 +1048,25 @@ export default function GoodsReceiptsPage() {
   const handleOpenReverseModal = () => {
     setReverseReason('');
     setShowReverseModal(true);
+  };
+
+  const handleCancelDraft = async (grId: string) => {
+    if (
+      !window.confirm(
+        'Cancel this draft goods receipt? No inventory or ledger entries will be posted.',
+      )
+    ) {
+      return;
+    }
+    try {
+      await cancelGRMutation.mutateAsync(grId);
+      toast.success('Draft goods receipt cancelled.');
+      setShowDetailsModal(false);
+      setSelectedGR(null);
+      queryClient.invalidateQueries({ queryKey: ['goods-receipts'] });
+    } catch (err) {
+      handleApiError(err, { fallback: 'Failed to cancel draft goods receipt' });
+    }
   };
 
   const handleSubmitReverseUninvoiced = async () => {
@@ -1013,25 +1201,36 @@ export default function GoodsReceiptsPage() {
       if (!poData?.po || !poData?.items) {
         throw new Error('Purchase order not found');
       }
+      const lines = poData.items
+        .flatMap((it: POItemData) => {
+          const rawUnit = Number(it.unit_price ?? it.unitCost ?? 0);
+          const openQty = Number(
+            it.open_quantity ?? it.openQuantity ?? it.ordered_quantity ?? it.quantity ?? 0,
+          );
+          if (openQty <= 0) return [];
+          return [{
+            poItemId: it.id,
+            productId: it.product_id || it.productId || '',
+            productName: it.product_name || it.productName,
+            orderedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
+            receivedQuantity: 0,
+            unitCost: rawUnit,
+            batchNumber: null,
+            expiryDate: null,
+            uomId: it.uom_id || it.uomId || null,
+          }];
+        });
+
+      if (lines.length === 0) {
+        throw new Error('This purchase order has no open quantity left to receive.');
+      }
+
       const payload = {
         purchaseOrderId: poData.po.id,
         receiptDate: getBusinessDate(),
         notes: null,
         receivedBy: user.id,
-        items: poData.items.map((it: POItemData) => {
-          const rawUnit = Number(it.unit_price ?? it.unitCost ?? 0);
-          return {
-            poItemId: it.id,
-            productId: it.product_id || it.productId || '',
-            productName: it.product_name || it.productName,
-            orderedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
-            receivedQuantity: Number(it.ordered_quantity ?? it.quantity ?? 0),
-            unitCost: rawUnit,
-            batchNumber: null,
-            expiryDate: null,
-            uomId: it.uom_id || it.uomId || null,
-          };
-        }),
+        items: lines,
       };
       console.log(
         '🚀 [Frontend] Creating GR from PO with payload:',
@@ -1507,37 +1706,17 @@ export default function GoodsReceiptsPage() {
         </div>
       )}
 
-      {/* Details Modal */}
+      {/* Details workspace */}
       {showDetailsModal && selectedGR && (
-        <div
-          className="fixed inset-0 flex items-center justify-center"
-          style={{ zIndex: detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
-          onClick={() => setShowDetailsModal(false)}
+        <SlideDrawer
+          open
+          onClose={() => setShowDetailsModal(false)}
+          title={selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || 'Goods Receipt'}
+          subtitle={`PO: ${selectedGR.poNumber || selectedGR.po_number} · ${selectedGR.supplierName || selectedGR.supplier_name}`}
+          width="full"
+          transactional
+          guardLabel="Goods receipt details"
         >
-          <div
-            className="bg-white rounded-xl shadow-2xl max-w-[95vw] sm:max-w-4xl w-full max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 sm:p-6 border-b border-gray-200">
-              <div className="flex justify-between items-start gap-3">
-                <div className="min-w-0">
-                  <h3 className="text-lg sm:text-2xl font-bold text-gray-900 truncate">
-                    {selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number}
-                  </h3>
-                  <p className="text-sm sm:text-base text-gray-600 mt-1 break-words">
-                    PO: {selectedGR.poNumber || selectedGR.po_number} · {selectedGR.supplierName || selectedGR.supplier_name}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowDetailsModal(false)}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-
-            <div className="p-4 sm:p-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
                 <div>
                   <label className="text-sm font-medium text-gray-700">Received Date</label>
@@ -1567,6 +1746,53 @@ export default function GoodsReceiptsPage() {
                 <div className="mb-6">
                   <label className="text-sm font-medium text-gray-700">Notes</label>
                   <p className="text-gray-900 mt-1">{selectedGR.notes}</p>
+                </div>
+              )}
+
+              {showMultistoreGrUi && (
+                <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="flex-1 min-w-[240px]">
+                      <label
+                        htmlFor="gr-destination-store"
+                        className="text-sm font-semibold text-gray-900"
+                      >
+                        Destination store
+                      </label>
+                      <p className="text-xs text-gray-600 mt-0.5 mb-2">
+                        Choose where received stock is posted when you finalize. Defaults to your
+                        main receiving warehouse.
+                      </p>
+                      {selectedGR.status === 'DRAFT' ? (
+                        <StoreLocationSelect
+                          id="gr-destination-store"
+                          stores={grDestinationStores}
+                          value={effectiveReceivingStoreId}
+                          onChange={(storeId) => {
+                            setHeaderReceivingStoreId(storeId);
+                            writeGrReceivingStoreId(user?.id, storeId);
+                          }}
+                          disabled={grDestinationStores.length === 0}
+                          triggerClassName="h-10 min-w-[220px] text-sm bg-white"
+                        />
+                      ) : (
+                        <p className="text-gray-900 font-semibold">
+                          {resolveStoreLabel(grStoreLabelMap, effectiveReceivingStoreId)}
+                        </p>
+                      )}
+                    </div>
+                    {selectedGR.status === 'DRAFT' && (
+                      <label className="flex items-center gap-2 text-xs text-gray-700 cursor-pointer pt-1">
+                        <input
+                          type="checkbox"
+                          checked={showPerLineStoreOverride}
+                          onChange={(e) => setShowPerLineStoreOverride(e.target.checked)}
+                          className="rounded border-gray-300"
+                        />
+                        Different destination per line
+                      </label>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1638,6 +1864,12 @@ export default function GoodsReceiptsPage() {
                 {showAddItemForm && selectedGR.status === 'DRAFT' && (
                   <AddGRItemForm
                     grId={selectedGR.id}
+                    supplierId={
+                      (grDetail?.gr?.supplierId as string) ||
+                      selectedGR.supplierId ||
+                      selectedGR.supplier_id ||
+                      ''
+                    }
                     addMutation={addGRItemMutation}
                     onClose={() => setShowAddItemForm(false)}
                     onSuccess={() => {
@@ -1669,6 +1901,11 @@ export default function GoodsReceiptsPage() {
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Batch # / Expiry
                         </th>
+                        {showMultistoreGrUi && showPerLineStoreOverride && (
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Destination Store
+                          </th>
+                        )}
                         <th
                           className="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider"
                           title="Bonus stock from supplier (zero cost)"
@@ -1687,7 +1924,7 @@ export default function GoodsReceiptsPage() {
                     <tbody className="bg-white divide-y divide-gray-200">
                       {items.length === 0 ? (
                         <tr>
-                          <td className="px-4 py-6 text-center text-gray-500" colSpan={8}>
+                          <td className="px-4 py-6 text-center text-gray-500" colSpan={showMultistoreGrUi && showPerLineStoreOverride ? 9 : 8}>
                             No items
                           </td>
                         </tr>
@@ -1707,6 +1944,10 @@ export default function GoodsReceiptsPage() {
                             itemIndex={idx}
                             totalItems={items.length}
                             bundledUoms={productUomsMap[it.productId || it.product_id || ''] || []}
+                            destinationStores={grDestinationStores}
+                            storeLabelMap={grStoreLabelMap}
+                            defaultStoreId={effectiveReceivingStoreId}
+                            showStoreColumn={showMultistoreGrUi && showPerLineStoreOverride}
                             onRemove={selectedGR.status === 'DRAFT' && !isFromPO && items.length > 1 ? (itemId: string) => {
                               if (!confirm('Remove this item from the goods receipt?')) return;
                               removeGRItemMutation.mutate({ grId: selectedGR.id, itemId }, {
@@ -1790,6 +2031,16 @@ export default function GoodsReceiptsPage() {
                         className="text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 px-4"
                       >
                         ✓ Finalize Goods Receipt
+                      </button>
+                    )}
+                    {canUpdateGR && selectedGR.status === 'DRAFT' && (
+                      <button
+                        type="button"
+                        onClick={() => handleCancelDraft(selectedGR.id)}
+                        disabled={cancelGRMutation.isPending}
+                        className="text-sm font-medium border border-red-300 text-red-700 rounded-lg hover:bg-red-50 px-4 disabled:opacity-50"
+                      >
+                        {cancelGRMutation.isPending ? 'Cancelling…' : 'Cancel Draft'}
                       </button>
                     )}
                     <button
@@ -1877,7 +2128,7 @@ export default function GoodsReceiptsPage() {
                                 onSuccess: (res) => {
                                   const num = (res as { data?: { data?: { creditNoteNumber?: string } } })?.data?.data?.creditNoteNumber;
                                   toast.success(
-                                    `Supplier Credit Note ${num ?? ''} created. Supplier payable reduced.`,
+                                    `Supplier Credit Note ${num ?? ''} created. Apply it to the bill in Credit Notes.`,
                                     { duration: 6000 },
                                   );
                                 },
@@ -1888,7 +2139,7 @@ export default function GoodsReceiptsPage() {
                               })
                             }
                             disabled={createCreditNoteMutation.isPending}
-                            title={`Create Credit Note for ${r.returnGrnNumber || r.return_grn_number} — reduces AP on the supplier bill`}
+                            title={`Create Credit Note for ${r.returnGrnNumber || r.return_grn_number} — then apply to the supplier bill in Credit Notes`}
                             className={`${mobileActionBtnClass} text-sm px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex`}
                           >
                             {createCreditNoteMutation.isPending ? 'Creating…' : 'Create Credit Note'}
@@ -1935,6 +2186,17 @@ export default function GoodsReceiptsPage() {
                       const grId = selectedGR.id || (selectedGR as { gr_id?: string }).gr_id || '';
                       const grNumber = selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || '';
                       const existingBillNum = (grDetail?.gr as { supplierBillNumber?: string } | undefined)?.supplierBillNumber || '';
+                      const grRow = grDetail?.gr as GRRow | undefined;
+                      const poSiblingBill =
+                        grRow?.poSiblingBill ??
+                        (grRow?.po_sibling_bill
+                          ? {
+                              invoiceId: grRow.po_sibling_bill.invoice_id,
+                              invoiceNumber: grRow.po_sibling_bill.invoice_number,
+                              grnId: grRow.po_sibling_bill.grn_id,
+                              grnNumber: grRow.po_sibling_bill.grn_number,
+                            }
+                          : null);
                       const totalVal = items.reduce((sum, it) => {
                         const qty = Number(it.receivedQuantity ?? it.received_quantity ?? 0);
                         const cost = Number(it.unitCost ?? it.unit_cost ?? 0);
@@ -1952,6 +2214,24 @@ export default function GoodsReceiptsPage() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                             </svg>
                             Billed: {existingBillNum}
+                          </div>
+                        );
+                      }
+                      if (poSiblingBill) {
+                        return (
+                          <div
+                            className={`${mobileActionBtnClass} px-4 bg-sky-50 border border-sky-300 text-sky-900 rounded-lg flex flex-col gap-1 text-sm`}
+                            title="Top-up on same PO — covered by the original receipt's supplier bill"
+                          >
+                            <span className="font-semibold flex gap-2 items-center">
+                              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                              Covered by {poSiblingBill.invoiceNumber}
+                            </span>
+                            <span className="text-xs text-sky-800">
+                              From {poSiblingBill.grnNumber} — finalize links this receipt; no separate supplier invoice.
+                            </span>
                           </div>
                         );
                       }
@@ -1999,9 +2279,7 @@ export default function GoodsReceiptsPage() {
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        </div>
+        </SlideDrawer>
       )}
 
       {showSupplierReassignModal && selectedGR && isFinalized && (
@@ -2032,59 +2310,20 @@ export default function GoodsReceiptsPage() {
         />
       )}
 
-      {/* Reverse Uninvoiced Receipt Modal */}
+      {/* Reverse uninvoiced receipt workspace */}
       {showReverseModal && selectedGR && (
-        <div
-          className="fixed inset-0 flex items-end sm:items-center justify-center p-0 sm:p-4"
-          style={{ zIndex: ZINDEX.NESTED_PANEL }}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="reverse-gr-title"
-          onClick={() => !reverseSubmitting && setShowReverseModal(false)}
-        >
-          <div className="absolute inset-0 bg-black/50" aria-hidden="true" />
-          <div
-            className="relative bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-xl shadow-xl p-5 sm:p-6 max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <h3 id="reverse-gr-title" className="text-lg font-bold text-gray-900">
-                  Reverse Uninvoiced Receipt
-                </h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  Creates and posts a full Return GRN (DR 2150 / CR 1300). Original{' '}
-                  <strong>{selectedGR.grNumber || selectedGR.receipt_number}</strong> stays{' '}
-                  <strong>COMPLETED</strong> for audit.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => !reverseSubmitting && setShowReverseModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
-            {reverseEligibility?.blockers && reverseEligibility.blockers.length > 0 && (
-              <ul className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 list-disc pl-5">
-                {reverseEligibility.blockers.map((b) => (
-                  <li key={b}>{b}</li>
-                ))}
-              </ul>
-            )}
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Reversal reason <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={reverseReason}
-              onChange={(e) => setReverseReason(e.target.value)}
-              rows={3}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
-              placeholder="e.g. Wrong delivery — full return before supplier invoice"
-              disabled={reverseSubmitting}
-            />
+        <SlideDrawer
+          open
+          onClose={() => {
+            if (!reverseSubmitting) setShowReverseModal(false);
+          }}
+          title="Reverse Uninvoiced Receipt"
+          subtitle={`Creates a full Return GRN — original ${selectedGR.grNumber || selectedGR.receipt_number} stays COMPLETED for audit`}
+          width="lg"
+          transactional
+          cancellable={!reverseSubmitting}
+          guardLabel="Reverse goods receipt"
+          footer={
             <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
               <button
                 type="button"
@@ -2103,47 +2342,81 @@ export default function GoodsReceiptsPage() {
                 Cancel
               </button>
             </ResponsiveActionBar>
-          </div>
-        </div>
+          }
+        >
+            <div className="-mt-2 space-y-4">
+            {reverseEligibility?.blockers && reverseEligibility.blockers.length > 0 && (
+              <ul className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 list-disc pl-5">
+                {reverseEligibility.blockers.map((b) => (
+                  <li key={b}>{b}</li>
+                ))}
+              </ul>
+            )}
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Reversal reason <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mb-4"
+              placeholder="e.g. Wrong delivery — full return before supplier invoice"
+              disabled={reverseSubmitting}
+            />
+            </div>
+        </SlideDrawer>
       )}
 
-      {/* Return to Supplier Modal */}
+      {/* Return to supplier workspace */}
       {showReturnModal && selectedGR && (
-        <div
-          className="fixed inset-0 flex items-center justify-center"
-          style={{ zIndex: returnGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
-          onClick={() => !returnSubmitting && setShowReturnModal(false)}
+        <SlideDrawer
+          open
+          onClose={() => {
+            if (!returnSubmitting) setShowReturnModal(false);
+          }}
+          title="Return to Supplier"
+          subtitle={`${selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || selectedGR.gr_number} — ${selectedGR.supplierName || selectedGR.supplier_name}`}
+          width="full"
+          transactional
+          cancellable={false}
+          guardLabel="Return goods to supplier"
+          footer={
+            <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
+              <button
+                onClick={handleSubmitReturn}
+                disabled={
+                  returnSubmitting ||
+                  returnableItems.every((i) => i.returnableQuantity <= 0)
+                }
+                className="text-sm font-medium bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4"
+              >
+                {returnSubmitting ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Posting return…
+                  </>
+                ) : (
+                  'Create & Post Return'
+                )}
+              </button>
+              <button
+                onClick={() => setShowReturnModal(false)}
+                className="text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 px-4"
+                disabled={returnSubmitting}
+              >
+                Cancel
+              </button>
+            </ResponsiveActionBar>
+          }
         >
-          <div
-            className="bg-white rounded-xl shadow-2xl max-w-[95vw] sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 sm:p-6 border-b border-gray-200">
-              <div className="flex justify-between items-start gap-3">
-                <div className="min-w-0">
-                  <h3 className="text-lg sm:text-xl font-bold text-gray-900">Return to Supplier</h3>
-                  <p className="text-sm text-gray-600 mt-1 break-words">
-                    GR: {selectedGR.grNumber || selectedGR.receiptNumber || selectedGR.receipt_number || selectedGR.gr_number}
-                    {' — '}
-                    {selectedGR.supplierName || selectedGR.supplier_name}
-                  </p>
-                  <p className="text-xs sm:text-sm text-gray-500 mt-2">
-                    Wrong product or quantity? Return it here (stock and GR/IR adjust). Receive the correct item on a{' '}
-                    <strong>new Goods Receipt</strong> from the same PO. If you already created a supplier bill, post the
-                    return then click <strong>Create Credit Note</strong> on the return badge.
-                  </p>
-                </div>
-                <button
-                  onClick={() => !returnSubmitting && setShowReturnModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                  aria-label="Close return modal"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            <div className="p-4 sm:p-6">
+            <p className="text-xs sm:text-sm text-gray-500 -mt-2 mb-4">
+              Wrong product or quantity? Return it here (stock and GR/IR adjust). Receive the correct item on a{' '}
+              <strong>new Goods Receipt</strong> from the same PO. If you already created a supplier bill, post the
+              return then click <strong>Create Credit Note</strong> on the return badge.
+            </p>
               {/* Reason */}
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -2461,41 +2734,7 @@ export default function GoodsReceiptsPage() {
                   </div>
                 </>
               )}
-            </div>
-
-            <div className="p-4 sm:p-6 border-t border-gray-200">
-              <ResponsiveActionBar divider={false} className="sm:flex-row-reverse">
-                <button
-                  onClick={handleSubmitReturn}
-                  disabled={
-                    returnSubmitting ||
-                    returnableItems.every((i) => i.returnableQuantity <= 0)
-                  }
-                  className="text-sm font-medium bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 px-4"
-                >
-                  {returnSubmitting ? (
-                  <>
-                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Processing...
-                  </>
-                ) : (
-                  'Create & Post Return'
-                )}
-              </button>
-                <button
-                  onClick={() => setShowReturnModal(false)}
-                  className="text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 px-4"
-                  disabled={returnSubmitting}
-                >
-                  Cancel
-                </button>
-              </ResponsiveActionBar>
-            </div>
-          </div>
-        </div>
+        </SlideDrawer>
       )}
 
       {/* Post-Finalize: Create Supplier Bill Prompt (variance-aware ERP modal) */}
@@ -2516,7 +2755,7 @@ export default function GoodsReceiptsPage() {
         return (
           <div
             className="fixed inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-            style={{ zIndex: (detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL) + 1 }}
+            style={{ zIndex: ZINDEX.NESTED_PANEL + 1 }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="bill-prompt-title"
@@ -2742,35 +2981,26 @@ export default function GoodsReceiptsPage() {
         );
       })()}
 
-      {/* Cost Alerts Modal */}
+      {/* Cost alerts workspace */}
       {showAlertsModal && costAlerts.length > 0 && (
-        <div
-          className="fixed inset-0 flex items-center justify-center"
-          style={{ zIndex: detailsGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
-          onClick={() => setShowAlertsModal(false)}
-        >
-          <div
-            className="bg-white rounded-xl shadow-2xl max-w-[95vw] sm:max-w-3xl w-full max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-6 border-b border-gray-200">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="text-2xl font-bold text-gray-900">⚠️ Cost Price Change Alerts</h3>
-                  <p className="text-gray-600 mt-1">
-                    {costAlerts.length} product(s) with cost changes
-                  </p>
-                </div>
-                <button
-                  onClick={() => setShowAlertsModal(false)}
-                  className="text-gray-400 hover:text-gray-600 text-2xl"
-                >
-                  ×
-                </button>
-              </div>
+        <SlideDrawer
+          open
+          onClose={() => setShowAlertsModal(false)}
+          title="Cost Price Change Alerts"
+          subtitle={`${costAlerts.length} product(s) with cost changes`}
+          width="2xl"
+          footer={
+            <div className="flex justify-end">
+              <button
+                onClick={() => setShowAlertsModal(false)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Acknowledge
+              </button>
             </div>
-
-            <div className="p-6 space-y-4">
+          }
+        >
+            <div className="space-y-4 -mt-2">
               {costAlerts.map((alert, index) => (
                 <div
                   key={index}
@@ -2843,56 +3073,38 @@ export default function GoodsReceiptsPage() {
                   automatically.
                 </p>
               </div>
-
-              <div className="flex justify-end">
-                <button
-                  onClick={() => setShowAlertsModal(false)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                >
-                  Acknowledge
-                </button>
-              </div>
             </div>
-          </div>
-        </div>
+        </SlideDrawer>
       )}
 
-      {/* Create GR Modal */}
-      {showCreateModal && (
-        <div
-          className="fixed inset-0 flex items-center justify-center"
-          style={{ zIndex: createGuardRef.current?.panelZIndex ?? ZINDEX.PANEL }}
-          onClick={() => {
-            setShowCreateModal(false);
-            setSelectedPoId('');
-            setPoSearch('');
-            setPoPage(1);
-            setFocusedPoIndex(0);
-          }}
-        >
-          <div
-            className="bg-white rounded-xl shadow-2xl w-full max-w-md"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900">Create Goods Receipt from PO</h3>
-              <button
-                onClick={() => {
-                  setShowCreateModal(false);
-                  setSelectedPoId('');
-                  setPoSearch('');
-                  setPoPage(1);
-                  setFocusedPoIndex(0);
-                }}
-                className="text-gray-400 hover:text-gray-600 text-xl"
-              >
-                ×
-              </button>
-            </div>
-            <div className="p-5 space-y-4">
+      {/* Create GR workspace */}
+      <SlideDrawer
+        open={showCreateModal}
+        onClose={closeCreateGrModal}
+        title="Create Goods Receipt from PO"
+        subtitle="Select an open purchase order to receive against"
+        width="xl"
+        transactional
+        guardLabel="Create goods receipt"
+        footer={
+          <div className="flex justify-end gap-3">
+            <button onClick={closeCreateGrModal} className="px-4 py-2 border rounded-lg">
+              Cancel
+            </button>
+            <button
+              onClick={handleCreateGR}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              disabled={createGRMutation.isPending || !selectedPoId}
+            >
+              {createGRMutation.isPending ? 'Creating…' : 'Create GR'}
+            </button>
+          </div>
+        }
+      >
+            <div className="space-y-4 -mt-2">
               <div>
                 <label htmlFor="po-search" className="block text-sm font-medium text-gray-700 mb-1">
-                  Search POs (status: PENDING)
+                  Search POs (open for receipt)
                 </label>
                 <input
                   id="po-search"
@@ -3006,31 +3218,8 @@ export default function GoodsReceiptsPage() {
                   </div>
                 </div>
               )}
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => {
-                    setShowCreateModal(false);
-                    setSelectedPoId('');
-                    setPoSearch('');
-                    setPoPage(1);
-                    setFocusedPoIndex(0);
-                  }}
-                  className="px-4 py-2 border rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCreateGR}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-                  disabled={createGRMutation.isPending || !selectedPoId}
-                >
-                  {createGRMutation.isPending ? 'Creating…' : 'Create GR'}
-                </button>
-              </div>
             </div>
-          </div>
-        </div>
-      )}
+      </SlideDrawer>
 
     </div>
   );
@@ -3039,11 +3228,13 @@ export default function GoodsReceiptsPage() {
 // ── Inline Add Item Form for DRAFT GRs ──
 function AddGRItemForm({
   grId,
+  supplierId,
   addMutation,
   onClose,
   onSuccess,
 }: {
   grId: string;
+  supplierId?: string;
   addMutation: ReturnType<typeof useAddGRItem>;
   onClose: () => void;
   onSuccess: () => void;
@@ -3106,7 +3297,17 @@ function AddGRItemForm({
               <button onClick={() => setSelectedProduct(null)} className="text-xs text-red-500 hover:text-red-700">change</button>
             </div>
           ) : (
-            <ProcurementProductSearch supplierId="" onProductSelect={handleProductSelect} disabled={addMutation.isPending} className="w-full" />
+            <ProcurementProductSearch
+              supplierId={supplierId || undefined}
+              onProductSelect={handleProductSelect}
+              disabled={addMutation.isPending}
+              className="w-full"
+              placeholder={
+                supplierId
+                  ? undefined
+                  : 'Search products by name, SKU, or barcode...'
+              }
+            />
           )}
         </div>
         <div>
@@ -3165,6 +3366,10 @@ function GRItemRow({
   itemIndex,
   totalItems,
   bundledUoms,
+  destinationStores,
+  storeLabelMap,
+  defaultStoreId,
+  showStoreColumn,
   onRemove,
 }: {
   item: GRItemRow;
@@ -3183,6 +3388,10 @@ function GRItemRow({
   itemIndex: number;
   totalItems: number;
   bundledUoms: ProductUomEntry[];
+  destinationStores: StoreLocation[];
+  storeLabelMap: ReadonlyMap<string, string>;
+  defaultStoreId: string;
+  showStoreColumn: boolean;
   onRemove?: (itemId: string) => void;
 }) {
   const es = editState || {};
@@ -3209,7 +3418,8 @@ function GRItemRow({
     ? uomList.find(u => u.uomId === itemUomId || u.id === itemUomId)
     : undefined;
   const defaultUom = poUom || uomList.find(u => u.isDefault) || uomList[0];
-  const selectedUomId = es.selectedUomId || defaultUom?.id;
+  // UomSelector option values use master uoms.id (uomId), not product_uoms.id
+  const selectedUomId = es.selectedUomId || defaultUom?.uomId || itemUomId;
 
   const displayedOrdered = ordered;
   const displayedReceived = receivedQty;
@@ -3288,21 +3498,23 @@ function GRItemRow({
         {uomList.length === 0 ? (
           <span className="text-gray-400">—</span>
         ) : (
-          <select
-            className="border rounded px-2 py-1 text-sm"
+          <UomSelector
+            productId={item.productId || item.product_id || ''}
+            baseCost={costBaseline > 0 ? costBaseline : displayUnitCost}
+            selectedUomId={selectedUomId}
             disabled={disabled || isFromPO}
-            value={selectedUomId}
-            onChange={(e) => onFieldChange(item.id, 'selectedUomId', e.target.value)}
-            aria-label={`Unit of Measure for ${item.productName || item.product_name}`}
-            title={isFromPO ? 'UoM locked — defined by Purchase Order' : 'Unit of Measure'}
-          >
-            {uomList.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.uomSymbol || u.uomName}
-                {u.isDefault ? ' •' : ''}
-              </option>
-            ))}
-          </select>
+            prefetchedUoms={uomList as ProductUomDetail[]}
+            className="text-sm"
+            onChange={(params) => {
+              onFieldChange(item.id, 'selectedUomId', params.uomId || '');
+              if (!isFromPO) {
+                onFieldChange(item.id, 'unitCost', parseFloat(params.newCost));
+              }
+            }}
+          />
+        )}
+        {isFromPO && !disabled && (
+          <p className="text-[10px] text-gray-500 mt-0.5">Locked to PO UoM</p>
         )}
       </td>
       {/* Ordered / open */}
@@ -3427,6 +3639,34 @@ function GRItemRow({
           )}
         </div>
       </td>
+      {showStoreColumn && (
+        <td className="px-4 py-2 text-sm">
+          {disabled ? (
+            <span className="text-gray-700">
+              {resolveStoreLabel(
+                storeLabelMap,
+                es.targetStoreLocationId ??
+                  item.targetStoreLocationId ??
+                  item.target_store_location_id ??
+                  defaultStoreId,
+              )}
+            </span>
+          ) : (
+            <StoreLocationSelect
+              stores={destinationStores}
+              value={
+                es.targetStoreLocationId ??
+                item.targetStoreLocationId ??
+                item.target_store_location_id ??
+                defaultStoreId
+              }
+              onChange={(storeId) => onFieldChange(item.id, 'targetStoreLocationId', storeId)}
+              disabled={disabled || destinationStores.length === 0}
+              triggerClassName="h-9 min-w-[140px] text-sm"
+            />
+          )}
+        </td>
+      )}
       {/* Bonus */}
       <td className="px-4 py-2 text-sm text-center">
         <label

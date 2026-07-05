@@ -6,6 +6,7 @@ import { assertRowUpdated } from '../../utils/optimisticUpdate.js';
 import {
   syncSupplierBalanceFromOpenItems,
   SUPPLIER_OPEN_ITEM_BALANCE_SQL,
+  AP_OPEN_INVOICE_GL_POSTED_SQL,
 } from '../supplier-payments/apReconciliationEngine.js';
 import {
   pickSortColumn,
@@ -115,11 +116,12 @@ function paymentTermsStringToDays(terms: string): number {
     case 'NET30': return 30;
     case 'NET60': return 60;
     case 'NET90': return 90;
-    default:
+    default: {
       // Try to parse NET## format
       const match = terms?.match(/NET(\d+)/i);
       if (match) return parseInt(match[1], 10);
       return 30; // Default to 30 days
+    }
   }
 }
 
@@ -458,6 +460,7 @@ export async function getTotalOutstanding(pool: Pool): Promise<number> {
        WHERE si."SupplierId" = s."Id"
          AND si.deleted_at IS NULL
          AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+         ${AP_OPEN_INVOICE_GL_POSTED_SQL}
      ) inv ON TRUE
      LEFT JOIN LATERAL (
        SELECT SUM(

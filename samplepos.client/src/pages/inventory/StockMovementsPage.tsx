@@ -8,6 +8,7 @@ import Decimal from 'decimal.js';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useServerTableSort } from '../../hooks/useServerTableSort';
+import { WorkflowHelpTrigger } from '../../components/inventory/shared';
 
 type MovementSortField =
   | 'dateTime'
@@ -422,7 +423,20 @@ export default function StockMovementsPage() {
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Movement History</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-gray-900">Movement History</h2>
+            <WorkflowHelpTrigger title="About Movement History">
+              <ul className="space-y-1">
+                <li>• <strong>Audit Trail:</strong> Read-only view of ALL inventory movements (immutable records)</li>
+                <li>• All stock movements are immutable — they cannot be edited or deleted once recorded</li>
+                <li>• Each movement updates the running balance automatically</li>
+                <li>• <strong>Stock Increases (+):</strong> GOODS_RECEIPT, ADJUSTMENT_IN, TRANSFER_IN, RETURN</li>
+                <li>• <strong>Stock Decreases (-):</strong> SALE, ADJUSTMENT_OUT, TRANSFER_OUT, DAMAGE, EXPIRY</li>
+                <li>• All movements are linked to source documents (PO, Sales, etc.) for full traceability</li>
+                <li>• To create adjustments, record damages, or run a physical count, go to <strong>Adjustments &amp; Stock Count</strong></li>
+              </ul>
+            </WorkflowHelpTrigger>
+          </div>
           <p className="text-gray-600 mt-1">Complete audit trail of all inventory movements</p>
         </div>
         <div className="flex gap-2">
@@ -863,19 +877,6 @@ export default function StockMovementsPage() {
         </div>
       )}
 
-      {/* Business Rules Info */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-        <h3 className="text-sm font-medium text-blue-900 mb-2">📋 About Movement History</h3>
-        <ul className="text-xs text-blue-800 space-y-1">
-          <li>• <strong>Audit Trail:</strong> Read-only view of ALL inventory movements (immutable records)</li>
-          <li>• All stock movements are immutable — they cannot be edited or deleted once recorded</li>
-          <li>• Each movement updates the running balance automatically</li>
-          <li>• <strong>Stock Increases (+):</strong> GOODS_RECEIPT, ADJUSTMENT_IN, TRANSFER_IN, RETURN</li>
-          <li>• <strong>Stock Decreases (-):</strong> SALE, ADJUSTMENT_OUT, TRANSFER_OUT, DAMAGE, EXPIRY</li>
-          <li>• All movements are linked to source documents (PO, Sales, etc.) for full traceability</li>
-          <li>• To create adjustments, record damages, or run a physical count, go to <strong>Adjustments &amp; Stock Count</strong></li>
-        </ul>
-      </div>
     </div>
   );
 }

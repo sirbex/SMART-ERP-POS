@@ -17,6 +17,7 @@ import { useCanAccess } from '../components/auth/ProtectedRoute';
 import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { useServerTableSort } from '../hooks/useServerTableSort';
+import { WorkflowHelpTrigger } from '../components/inventory/shared';
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
 // Frontend displays as-is without parsing to Date object
@@ -435,7 +436,26 @@ export default function SuppliersPage() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
           <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Supplier Management</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Supplier Management</h2>
+              <WorkflowHelpTrigger title="Supplier Management">
+                <ul className="space-y-1">
+                  <li>
+                    • <strong>Payment Terms:</strong> Standard terms NET30 (30 days), NET60, NET90, COD, or Prepaid
+                  </li>
+                  <li>
+                    • <strong>Contact Information:</strong> Keep supplier details up-to-date for smooth communication
+                  </li>
+                  <li>
+                    • <strong>Active Status:</strong> Inactive suppliers won&apos;t appear in purchase order creation
+                  </li>
+                  <li>• <strong>BR-PO-001:</strong> Valid supplier required for all purchase orders</li>
+                  <li>
+                    • <strong>Search:</strong> Find suppliers quickly by name, contact person, email, or phone
+                  </li>
+                </ul>
+              </WorkflowHelpTrigger>
+            </div>
             <p className="text-sm text-gray-600 mt-1">Manage your suppliers and vendor relationships</p>
           </div>
           <div className="flex gap-2 self-start sm:self-auto">
@@ -972,32 +992,6 @@ export default function SuppliersPage() {
             </Link>
           </div>
         )}
-
-        {/* Info Panel */}
-        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <h3 className="text-sm font-medium text-blue-900 mb-2">📋 Supplier Management</h3>
-          <ul className="text-xs text-blue-800 space-y-1">
-            <li>
-              • <strong>Payment Terms:</strong> Standard terms NET30 (30 days), NET60, NET90, COD,
-              or Prepaid
-            </li>
-            <li>
-              • <strong>Contact Information:</strong> Keep supplier details up-to-date for smooth
-              communication
-            </li>
-            <li>
-              • <strong>Active Status:</strong> Inactive suppliers won't appear in purchase order
-              creation
-            </li>
-            <li>
-              • <strong>BR-PO-001:</strong> Valid supplier required for all purchase orders
-            </li>
-            <li>
-              • <strong>Search:</strong> Find suppliers quickly by name, contact person, email, or
-              phone
-            </li>
-          </ul>
-        </div>
 
         {/* Supplier Detail Modal */}
         {viewingSupplier && (

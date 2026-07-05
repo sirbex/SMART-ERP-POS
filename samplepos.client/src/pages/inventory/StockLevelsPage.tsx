@@ -1,12 +1,39 @@
-import { useState, useMemo, useEffect } from 'react';
+/**
+ * Inventory List (spec: InventoryList.tsx) — route `/inventory/stock-levels`
+ * Multistore: Location filter + Store column gated by is_multistore_enabled.
+ */
+import { useEffect, useMemo, useState } from 'react';
 import { useOfflineStockLevels, useOfflineProducts } from '../../hooks/useOfflineData';
 import { useOfflineContext } from '../../contexts/OfflineContext';
-import { formatMultiUomQuantity } from '../../utils/formatQuantity';
+import { useMultistoreEnabled } from '../../hooks/useMultistore';
+import { useAuth } from '../../hooks/useAuth';
+import { hasWarehouseNetworkAccess } from '../../../../shared/utils/warehouseRbac';
+import { useStoreLocations, useStockLevelsByStore } from '../../hooks/useWarehouse';
+import { StoreLocationSelect } from '../../components/inventory/StoreLocationSelect';
+import { StockViewModeToggle } from '../../components/inventory/StockViewModeToggle';
+import {
+  readStockViewMode,
+  writeStockViewMode,
+  type StockViewMode,
+} from '../../components/inventory/stockViewPrefs';
+import { formatMultiUomQuantity, productFromApiUoms } from '../../utils/formatQuantity';
 import { formatCurrency } from '../../utils/currency';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useColumnSort } from '../../hooks/useColumnSort';
 import { applyTableSort } from '../../lib/tableSortUtils';
+
+function unwrapStockListPayload(payload: unknown): unknown[] {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  const record = payload as { data?: unknown };
+  if (Array.isArray(record.data)) return record.data;
+  if (record.data && typeof record.data === 'object') {
+    const nested = record.data as { data?: unknown };
+    if (Array.isArray(nested.data)) return nested.data;
+  }
+  return [];
+}
 
 type StockLevelSortField =
   | 'product'
@@ -34,6 +61,12 @@ interface StockLevelItem {
   needs_reorder: boolean;
   selling_price: string | number;
   nearest_expiry?: string | null;
+  store_location_id?: string;
+  store_location_name?: string;
+  store_location_code?: string;
+  /** Pre-flattened display label (multistore only). */
+  storeDisplayLabel?: string;
+  uoms?: unknown;
 }
 
 interface ProductItem {
@@ -65,9 +98,47 @@ interface ProductItem {
 
 export default function StockLevelsPage() {
   const { isOnline } = useOfflineContext();
+  const { isMultistoreEnabled } = useMultistoreEnabled();
+  const { permissions, user } = useAuth();
+  const canUseStoreFilter = useMemo(() => {
+    if (!isMultistoreEnabled) return false;
+    if (user?.role === 'ADMIN' || user?.role === 'MANAGER') return true;
+    return hasWarehouseNetworkAccess(permissions);
+  }, [isMultistoreEnabled, permissions, user?.role]);
+  const [stockViewMode, setStockViewMode] = useState<StockViewMode>(() => readStockViewMode());
+  const byStoreView = canUseStoreFilter && stockViewMode === 'store';
+  const { data: storeLocations = [] } = useStoreLocations(byStoreView && isOnline);
+  const [storeFilterId, setStoreFilterId] = useState('');
+
+  const useMultistoreStock = byStoreView && isOnline;
+
+  useEffect(() => {
+    if (!useMultistoreStock || storeFilterId || storeLocations.length === 0) return;
+    const defaultStore =
+      storeLocations.find((s) => s.isDefaultReceiving) ||
+      storeLocations.find((s) => s.storeType === 'MAIN') ||
+      storeLocations[0];
+    if (defaultStore) setStoreFilterId(defaultStore.id);
+  }, [useMultistoreStock, storeFilterId, storeLocations]);
 
   // Use offline-aware hooks that cache to IndexedDB and fall back when offline
-  const { data: stockLevelsData, isLoading, error, refetch } = useOfflineStockLevels();
+  const {
+    data: stockLevelsData,
+    isLoading: offlineLoading,
+    error: offlineError,
+    refetch: offlineRefetch,
+  } = useOfflineStockLevels();
+  const {
+    data: storeStockData,
+    isLoading: storeLoading,
+    error: storeError,
+    refetch: storeRefetch,
+  } = useStockLevelsByStore(storeFilterId, useMultistoreStock && !!storeFilterId);
+
+  const isLoading = useMultistoreStock ? storeLoading : offlineLoading;
+  const error = useMultistoreStock ? storeError : offlineError;
+  const refetch = useMultistoreStock ? storeRefetch : offlineRefetch;
+  const rawStockData = useMultistoreStock ? storeStockData : stockLevelsData;
   const { data: productsData } = useOfflineProducts({ limit: 10000, includeUoms: true });
 
   const ITEMS_PER_PAGE = 50;
@@ -101,13 +172,10 @@ export default function StockLevelsPage() {
   };
 
   // Extract stock levels from API response
-  const stockLevels = useMemo(() => {
-    if (!stockLevelsData) return [];
-    if (stockLevelsData.data && Array.isArray(stockLevelsData.data)) {
-      return stockLevelsData.data;
-    }
-    return Array.isArray(stockLevelsData) ? stockLevelsData : [];
-  }, [stockLevelsData]);
+  const stockLevels = useMemo(
+    () => unwrapStockListPayload(rawStockData) as StockLevelItem[],
+    [rawStockData],
+  );
 
   const products = useMemo(() => {
     if (!productsData) return [];
@@ -135,9 +203,31 @@ export default function StockLevelsPage() {
     return Array.from(cats).sort((a, b) => a.localeCompare(b));
   }, [products]);
 
+  const selectedStoreLabel = useMemo(() => {
+    if (!storeFilterId) return '';
+    const store = storeLocations.find((s) => s.id === storeFilterId);
+    return store ? `${store.name} (${store.code})` : '';
+  }, [storeFilterId, storeLocations]);
+
+  const stockLevelsWithStoreLabel = useMemo(() => {
+    if (!byStoreView) return stockLevels;
+    return stockLevels.map((item: StockLevelItem) => ({
+      ...item,
+      storeDisplayLabel: item.store_location_name
+        ? `${item.store_location_name}${item.store_location_code ? ` (${item.store_location_code})` : ''}`
+        : selectedStoreLabel || '—',
+    }));
+  }, [stockLevels, byStoreView, selectedStoreLabel]);
+
+  const handleStockViewModeChange = (mode: StockViewMode) => {
+    setStockViewMode(mode);
+    writeStockViewMode(mode);
+    setCurrentPage(1);
+  };
+
   // Filter stock levels
   const filteredStockLevels = useMemo(() => {
-    let filtered = stockLevels;
+    let filtered = stockLevelsWithStoreLabel;
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -170,7 +260,7 @@ export default function StockLevelsPage() {
     }
 
     return filtered;
-  }, [stockLevels, searchTerm, filterStatus, filterCategory, productMap]);
+  }, [stockLevelsWithStoreLabel, searchTerm, filterStatus, filterCategory, productMap]);
 
   const stockLevelSortAccessors = useMemo(
     () => ({
@@ -223,7 +313,9 @@ export default function StockLevelsPage() {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus, filterCategory, filterQtyOnly, sortField, sortOrder]);
+  }, [searchTerm, filterStatus, filterCategory, filterQtyOnly, sortField, sortOrder, storeFilterId]);
+
+  const tableColSpan = byStoreView ? 8 : 7;
 
   // Paginated stock levels
   const totalPages = Math.max(1, Math.ceil(sortedStockLevels.length / ITEMS_PER_PAGE));
@@ -290,9 +382,15 @@ export default function StockLevelsPage() {
         </button>
       </div>
 
+      {canUseStoreFilter && (
+        <StockViewModeToggle mode={stockViewMode} onChange={handleStockViewModeChange} />
+      )}
+
       {/* Filters */}
       <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div
+          className={`grid grid-cols-1 gap-4 ${byStoreView ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}
+        >
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Search Products</label>
             <input
@@ -303,6 +401,15 @@ export default function StockLevelsPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
+          {byStoreView && (
+            <StoreLocationSelect
+              id="filter-store-location"
+              label="Location"
+              stores={storeLocations}
+              value={storeFilterId}
+              onChange={setStoreFilterId}
+            />
+          )}
           <div>
             <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-2">
               Category
@@ -379,6 +486,11 @@ export default function StockLevelsPage() {
                 direction={sortOrder}
                 onSort={handleColumnSort}
               />
+              {byStoreView && (
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Store
+                </th>
+              )}
               <SortableTableHeader
                 label="Quantity"
                 field="quantity"
@@ -424,7 +536,7 @@ export default function StockLevelsPage() {
           <tbody className="bg-white divide-y divide-gray-200">
             {paginatedStockLevels.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                <td colSpan={tableColSpan} className="px-6 py-8 text-center text-gray-500">
                   {searchTerm || filterStatus !== 'all' || filterCategory !== 'all'
                     ? 'No products match your filters'
                     : 'No inventory data. Create products on the Products page.'}
@@ -433,7 +545,10 @@ export default function StockLevelsPage() {
             ) : (
               paginatedStockLevels.map((item: StockLevelItem) => {
                 const product = productMap.get(item.product_id);
-                // Backend returns total_stock, not total_quantity
+                const uomProduct =
+                  product && (product.product_uoms?.length || product.productUoms?.length)
+                    ? product
+                    : productFromApiUoms(item.uoms, product?.unitOfMeasure ?? product?.baseUom);
                 const totalQty =
                   parseFloat(String(item.total_stock || item.total_quantity || 0)) || 0;
                 const reorderLevel = parseFloat(String(item.reorder_level)) || 0;
@@ -458,10 +573,15 @@ export default function StockLevelsPage() {
                         {product?.category || '\u2014'}
                       </span>
                     </td>
+                    {byStoreView && (
+                      <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-700">
+                        {item.storeDisplayLabel ?? '—'}
+                      </td>
+                    )}
                     <td className="px-4 py-4">
                       <div className="flex flex-col gap-1">
                         <div className="text-sm font-bold text-blue-600">
-                          {formatMultiUomQuantity(totalQty, product)}
+                          {formatMultiUomQuantity(totalQty, uomProduct)}
                         </div>
                         <div className="text-xs text-gray-500">{totalQty.toFixed(2)} base</div>
                       </div>

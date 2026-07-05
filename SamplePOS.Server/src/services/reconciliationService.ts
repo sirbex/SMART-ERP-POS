@@ -844,7 +844,7 @@ export class ReconciliationService {
 }
 
 // Export singleton factory
-let reconciliationServiceInstance: ReconciliationService | null = null;
+const reconciliationServiceInstance: ReconciliationService | null = null;
 
 export function getReconciliationService(pool: Pool): ReconciliationService {
     return new ReconciliationService(pool);

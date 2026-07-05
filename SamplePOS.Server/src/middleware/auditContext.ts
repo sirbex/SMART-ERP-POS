@@ -10,9 +10,8 @@ import { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { AuditContext } from '../../../shared/types/audit.js';
 
-// Extend Express Request to include audit context
-// eslint-disable-next-line @typescript-eslint/no-namespace
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Express Request augmentation requires namespace
   namespace Express {
     interface Request {
       auditContext?: AuditContext;

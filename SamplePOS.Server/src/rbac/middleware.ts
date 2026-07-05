@@ -5,6 +5,7 @@ import type { AuthorizationContext } from './types.js';
 import logger from '../utils/logger.js';
 
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace -- Express Request augmentation requires namespace
   namespace Express {
     interface Request {
       authContext?: AuthorizationContext;

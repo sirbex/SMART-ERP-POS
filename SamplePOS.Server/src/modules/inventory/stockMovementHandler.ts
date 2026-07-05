@@ -1,7 +1,10 @@
 /**
  * @module StockMovementHandler
- * @description Centralized, authoritative handler for ALL stock modifications
- * @architecture Single point of entry for inventory changes
+ * @description Centralized handler for stock modifications (adjustments, issues, simple inbound).
+ * @architecture
+ *   - ADJUSTMENT_*, DAMAGE, EXPIRY, SALE, TRANSFER_* → this handler (batch + audit + GL where applicable)
+ *   - Lot-based goods receipt (GRN finalize) → goodsReceiptService.finalizeGR + warehouseGrnService
+ *     (creates per-lot batches, expiry, bonus splits, and multistore inventory_balances)
  * @rules
  *   - ALL stock changes must go through this handler
  *   - Enforces business rules consistently

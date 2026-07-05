@@ -47,6 +47,20 @@ test_gl.sh
 # Temporary diagnostic / investigation scripts (not part of codebase)
 _*.sql
 _*.txt
+_void_*.sh
+
+# IDE / local agent config
+.cursor/
+
+# Generated audit / ops artifacts (not product code)
+warehouse-audit-output.txt
+deploy-locks/
+*.dump.sql
+tenant-backup/
+tenant_backups/
+
+# Generated PDF exports (keep source templates)
+**/generated-pdfs/
 fix_drift_*.sql
 SamplePOS.Server/_q.sql
 SamplePOS.Server/do_reversal.mjs

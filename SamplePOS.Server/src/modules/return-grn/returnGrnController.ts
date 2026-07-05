@@ -157,7 +157,7 @@ export const returnGrnController = {
             res.status(201).json({
                 success: true,
                 data: result,
-                message: `Supplier Credit Note ${result.creditNoteNumber} created — AP reduced`,
+                message: `Supplier Credit Note ${result.creditNoteNumber} created — apply to bills in Credit Notes`,
             });
         } catch (error: unknown) {
             if (error instanceof AppError) throw error;

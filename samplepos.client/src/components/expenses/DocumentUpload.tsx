@@ -84,7 +84,7 @@ export const DocumentUpload: React.FC<DocumentUploadProps> = ({
         ));
 
         onUploadSuccess?.(documentId);
-      } catch (error) {
+      } catch {
         setDocuments(prev => prev.map(doc =>
           doc.id === tempId
             ? { ...doc, status: 'error' as const, error: 'Upload failed' }

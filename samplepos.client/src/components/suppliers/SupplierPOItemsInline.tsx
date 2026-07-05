@@ -9,6 +9,8 @@ interface POItemRow {
     productName: string;
     orderedQuantity: number | string;
     receivedQuantity: number | string;
+    grossReceivedQuantity?: number | string;
+    returnedQuantity?: number | string;
     unitPrice: number | string;
     lineTotal: number | string;
     uomName?: string | null;
@@ -78,6 +80,17 @@ export default function SupplierPOItemsInline({ poId }: Props) {
                             </td>
                             <td className="py-2 pr-6 text-right text-gray-700 tabular-nums">
                                 {new Decimal(item.receivedQuantity || 0).toFixed(2)}
+                                {item.uomName ? (
+                                    <span className="ml-1 text-xs text-gray-400">{item.uomName}</span>
+                                ) : null}
+                                {Number(item.returnedQuantity || 0) > 0 ? (
+                                    <span
+                                        className="ml-1 text-xs text-amber-600"
+                                        title={`Gross received: ${new Decimal(item.grossReceivedQuantity || 0).toFixed(2)}${item.uomName ? ` ${item.uomName}` : ''}; returned: ${new Decimal(item.returnedQuantity || 0).toFixed(2)}`}
+                                    >
+                                        (ret. {new Decimal(item.returnedQuantity || 0).toFixed(2)})
+                                    </span>
+                                ) : null}
                             </td>
                             <td className="py-2 pr-6 text-right text-gray-700 tabular-nums">
                                 {formatCurrency(Number(item.unitPrice))}

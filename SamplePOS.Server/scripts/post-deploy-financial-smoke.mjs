@@ -2,11 +2,14 @@
 /**
  * Post-deploy financial smoke — live API (tenant) + DB lane parity.
  *
- * Usage:
+ * Usage (production — all required):
  *   BASE_URL=https://henber.wizarddigital-inv.com \
  *   TEST_EMAIL=... TEST_PASSWORD=... \
  *   HENBER_DATABASE_URL=... \
  *   node SamplePOS.Server/scripts/post-deploy-financial-smoke.mjs
+ *
+ * Local dev only:
+ *   PROOF_ALLOW_LOCAL=1 BASE_URL=http://localhost:3001 ... node ...
  *
  * API checks require tenant credentials. DB checks use HENBER_DATABASE_URL.
  * Exit 0 when integrity lane reconciled and financial endpoints respond.
@@ -14,17 +17,23 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveVerificationEnvironment } from '../../scripts/lib/production-verification-guard.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const serverRoot = path.resolve(scriptDir, '..');
 
-const BASE = process.env.BASE_URL || 'https://henber.wizarddigital-inv.com';
-const EMAIL = process.env.TEST_EMAIL || '';
-const PASSWORD = process.env.TEST_PASSWORD || '';
-const DB_URL =
-  process.env.HENBER_DATABASE_URL ||
-  process.env.DATABASE_URL ||
-  '';
+const {
+  mode,
+  henberDatabaseUrl: DB_URL,
+  baseUrl: BASE,
+  testEmail: EMAIL,
+  testPassword: PASSWORD,
+} = resolveVerificationEnvironment({
+  scriptName: 'Post-deploy financial smoke',
+  requireHenberDatabase: true,
+  requireBaseUrl: true,
+  requireTenantCredentials: true,
+});
 
 let failed = 0;
 function pass(msg, detail = '') {
@@ -345,10 +354,6 @@ async function verifyLiveRoutes() {
 }
 
 async function verifyDbFinancials() {
-  if (!DB_URL) {
-    skip('DB financial smoke — set HENBER_DATABASE_URL');
-    return;
-  }
   info('DB financial smoke (framework baseline via tsx — same SSOT as live API)');
 
   const baselineRun = spawnSync(
@@ -408,6 +413,7 @@ function verifyOpsIsolation() {
 
 console.log('═'.repeat(72));
 console.log(' POST-DEPLOY FINANCIAL SMOKE');
+console.log(` Mode:   ${mode}`);
 console.log(` Target: ${BASE}`);
 console.log('═'.repeat(72));
 
@@ -416,16 +422,12 @@ await verifyFrontendMarker();
 await verifyLiveRoutes();
 verifyOpsIsolation();
 
-if (EMAIL && PASSWORD) {
-  try {
-    const token = await login();
-    pass('Tenant login', EMAIL);
-    await verifyApi(token);
-  } catch (e) {
-    fail('Tenant login / API smoke', e instanceof Error ? e.message : String(e));
-  }
-} else {
-  skip('API financial smoke — set TEST_EMAIL and TEST_PASSWORD for Henber admin');
+try {
+  const token = await login();
+  pass('Tenant login', EMAIL);
+  await verifyApi(token);
+} catch (e) {
+  fail('Tenant login / API smoke', e instanceof Error ? e.message : String(e));
 }
 
 await verifyDbFinancials();

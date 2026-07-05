@@ -7,6 +7,11 @@
 
 import type { Pool, PoolClient } from 'pg';
 import { getBusinessYear } from '../../utils/dateRange.js';
+import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
+import {
+    supplierReturnDocumentEntitlementSql,
+    supplierReturnOnHandQuantityExpr,
+} from './returnGrnReturnableSql.js';
 
 // ============================================================
 // Types
@@ -314,7 +319,7 @@ export const returnGrnRepository = {
         returnedQuantity: number;
         /** Received (or batch qty) minus prior posted returns — document entitlement */
         documentReturnableQuantity: number;
-        /** Active batch remaining_quantity — physical stock available */
+        /** Physical stock available for return (batch; multistore caps by warehouse balances) */
         onHandQuantity: number;
         /** Sold, consumed, or otherwise not on hand (document − returnable) */
         consumedQuantity: number;
@@ -325,6 +330,10 @@ export const returnGrnRepository = {
         // Join batches via goods_receipt_id+product_id (batch_number on GR items is often NULL
         // because batches are auto-generated during finalization, not written back to GR items).
         // When goods_receipt_item_id is set, prefer that for an exact 1:1 match.
+        const multistore = await isMultistoreEnabled(pool);
+        const onHandSql = supplierReturnOnHandQuantityExpr(multistore);
+        const docEntitlementSql = supplierReturnDocumentEntitlementSql();
+
         const result = await pool.query(
             `SELECT
          gri.id                    AS "grItemId",
@@ -363,44 +372,17 @@ export const returnGrnRepository = {
          END AS "receivedQuantity",
          ROUND(gri.cost_price::numeric, 2) AS "unitCost",
          COALESCE(returned.qty, 0) AS "returnedQuantity",
-         GREATEST(0,
-           CASE
-             WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-             ELSE gri.received_quantity::numeric
-                  * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
-                  - COALESCE(returned.qty, 0)
-           END
-         ) AS "documentReturnableQuantity",
-         COALESCE(ib.remaining_quantity, 0)::numeric AS "onHandQuantity",
+         GREATEST(0, (${docEntitlementSql})) AS "documentReturnableQuantity",
+         ${onHandSql} AS "onHandQuantity",
          LEAST(
-           GREATEST(0,
-             CASE
-               WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-               ELSE gri.received_quantity::numeric
-                    * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
-                    - COALESCE(returned.qty, 0)
-             END
-           ),
-           COALESCE(ib.remaining_quantity, 0)::numeric
+           GREATEST(0, (${docEntitlementSql})),
+           ${onHandSql}
          ) AS "returnableQuantity",
          GREATEST(0,
-           GREATEST(0,
-             CASE
-               WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-               ELSE gri.received_quantity::numeric
-                    * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
-                    - COALESCE(returned.qty, 0)
-             END
-           ) - LEAST(
-             GREATEST(0,
-               CASE
-                 WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-                 ELSE gri.received_quantity::numeric
-                      * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
-                      - COALESCE(returned.qty, 0)
-               END
-             ),
-             COALESCE(ib.remaining_quantity, 0)::numeric
+           GREATEST(0, (${docEntitlementSql}))
+           - LEAST(
+             GREATEST(0, (${docEntitlementSql})),
+             ${onHandSql}
            )
          ) AS "consumedQuantity",
          CASE
@@ -414,15 +396,8 @@ export const returnGrnRepository = {
              THEN 'Already fully returned to supplier'
            WHEN ib.id IS NULL
              THEN 'No active receipt batch — stock is not available for a supplier return'
-           WHEN COALESCE(ib.remaining_quantity, 0) <= 0
-             AND GREATEST(0,
-               CASE
-                 WHEN ib.id IS NOT NULL THEN COALESCE(ib.quantity, 0)::numeric - COALESCE(returned.qty, 0)
-                 ELSE gri.received_quantity::numeric
-                      * COALESCE(pu.conversion_factor, def_pu.conversion_factor, 1)::numeric
-                      - COALESCE(returned.qty, 0)
-               END
-             ) > 0
+           WHEN ${onHandSql} <= 0
+             AND GREATEST(0, (${docEntitlementSql})) > 0
              THEN 'Sold or consumed — only on-hand quantity can be returned to the supplier'
            ELSE NULL
          END AS "returnBlockReason"

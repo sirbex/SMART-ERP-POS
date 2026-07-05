@@ -164,6 +164,42 @@ export const PERMISSIONS: Record<string, Permission> = {
     'Manage physical stock counts'
   ),
   INVENTORY_ADJUST: p('inventory.adjust', 'inventory', 'adjust', 'Perform stock adjustments (add, remove, transfer)'),
+  INVENTORY_TRANSFER_REQUEST: p(
+    'inventory.transfer.request',
+    'inventory',
+    'create',
+    'Create inter-store transfer requests',
+  ),
+  INVENTORY_TRANSFER_APPROVE: p(
+    'inventory.transfer.approve',
+    'inventory',
+    'approve',
+    'Approve pending transfer requests',
+  ),
+  INVENTORY_TRANSFER_DISPATCH: p(
+    'inventory.transfer.dispatch',
+    'inventory',
+    'post',
+    'Dispatch approved transfers to transit',
+  ),
+  INVENTORY_TRANSFER_RECEIVE: p(
+    'inventory.transfer.receive',
+    'inventory',
+    'post',
+    'Receive inbound transfers at destination stores',
+  ),
+  INVENTORY_TRANSFER_DIRECT: p(
+    'inventory.transfer.direct',
+    'inventory',
+    'execute',
+    'Execute transfers immediately without approval workflow',
+  ),
+  INVENTORY_TRANSFER_OVERRIDE: p(
+    'inventory.transfer.override',
+    'inventory',
+    'manage',
+    'Emergency override of transfer approval policies',
+  ),
 
   // Expenses Module
   EXPENSES_READ: p('expenses.read', 'expenses', 'read', 'View expenses and expense summaries'),

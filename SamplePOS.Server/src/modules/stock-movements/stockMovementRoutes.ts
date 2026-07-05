@@ -9,12 +9,13 @@ import { requirePermission } from '../../rbac/middleware.js';
 export const stockMovementRoutes = Router();
 
 // Get all movements with optional filters
-stockMovementRoutes.get('/', authenticate, stockMovementController.getAllMovements);
+stockMovementRoutes.get('/', authenticate, requirePermission('inventory.read'), stockMovementController.getAllMovements);
 
 // Get movements by product
 stockMovementRoutes.get(
   '/product/:productId',
   authenticate,
+  requirePermission('inventory.read'),
   stockMovementController.getMovementsByProduct
 );
 
@@ -22,6 +23,7 @@ stockMovementRoutes.get(
 stockMovementRoutes.get(
   '/batch/:batchId',
   authenticate,
+  requirePermission('inventory.read'),
   stockMovementController.getMovementsByBatch
 );
 

@@ -23,6 +23,7 @@ export function useGoodsReceipts(params?: {
   startDate?: string;
   endDate?: string;
   billingStatus?: 'TO_INVOICE' | 'INVOICED';
+  enabled?: boolean;
 } & ServerListParams) {
   return useQuery({
     queryKey: GOODS_RECEIPTS_KEYS.list((params || {}) as Record<string, unknown>),
@@ -38,6 +39,7 @@ export function useGoodsReceipts(params?: {
         billingStatus: params?.billingStatus,
         ...toServerListQuery(params ?? {}),
       }),
+    enabled: params?.enabled !== false,
   });
 }
 

@@ -8,19 +8,62 @@
  * - "10.00 PCS" (no UOMs defined)
  */
 
-interface ProductUomEntry {
+export interface ProductUomEntry {
   conversionFactor: number;
   isDefault?: boolean;
   uomSymbol?: string;
   uom_symbol?: string;
   uomName?: string;
   uom_name?: string;
+  name?: string;
+  symbol?: string;
 }
 
-interface ProductWithUoms {
+export interface ProductWithUoms {
   product_uoms?: ProductUomEntry[];
   productUoms?: ProductUomEntry[];
   unitOfMeasure?: string;
+}
+
+/** Normalize UoM JSON from stock-level / warehouse API rows. */
+export function normalizeApiUoms(uoms: unknown): ProductUomEntry[] {
+  if (!uoms) return [];
+  const raw = typeof uoms === 'string' ? (JSON.parse(uoms) as unknown) : uoms;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((entry) => {
+    const row = entry as Record<string, unknown>;
+    return {
+      conversionFactor: Number(row.conversionFactor ?? row.conversion_factor ?? 1),
+      isDefault: Boolean(row.isDefault ?? row.is_default),
+      uomSymbol: String(row.symbol ?? row.uomSymbol ?? row.uom_symbol ?? ''),
+      uomName: String(row.name ?? row.uomName ?? row.uom_name ?? ''),
+      name: String(row.name ?? ''),
+      symbol: String(row.symbol ?? ''),
+    };
+  });
+}
+
+/** Build a product-shaped object for formatMultiUomQuantity from API `uoms` JSON. */
+export function productFromApiUoms(uoms: unknown, fallbackUnit = 'PCS'): ProductWithUoms {
+  const productUoms = normalizeApiUoms(uoms);
+  const base =
+    productUoms.find((u) => u.isDefault) ??
+    [...productUoms].sort((a, b) => a.conversionFactor - b.conversionFactor)[0];
+  const unitOfMeasure =
+    base?.uomSymbol || base?.symbol || base?.uomName || base?.name || fallbackUnit;
+  return { productUoms, unitOfMeasure };
+}
+
+/** Short label for matrix headers — e.g. "BOX (×12) + PCS". */
+export function formatUomSummary(uoms: unknown, maxUnits = 3): string {
+  const list = normalizeApiUoms(uoms);
+  if (list.length === 0) return 'PCS';
+  const sorted = [...list].sort((a, b) => b.conversionFactor - a.conversionFactor);
+  const parts = sorted.slice(0, maxUnits).map((u) => {
+    const label = u.uomSymbol || u.symbol || u.uomName || u.name || 'UOM';
+    return u.conversionFactor > 1 ? `${label} (×${u.conversionFactor})` : label;
+  });
+  return parts.join(' · ');
 }
 
 /**

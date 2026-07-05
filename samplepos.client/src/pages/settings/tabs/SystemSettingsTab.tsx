@@ -1,9 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiResponse } from '../../../services/api';
 import { useRegisters, useCreateRegister, useUpdateRegister } from '../../../hooks/useCashRegister';
 import type { CashRegister } from '../../../types/cashRegister';
+import { TransferPolicySettingsPanel } from '../../../components/inventory/TransferPolicySettingsPanel';
+import {
+    invalidateMultistoreModeQueries,
+    multistoreKeys,
+    setMultistoreEnabledOptimistic,
+} from '../../../hooks/useMultistore';
 
 interface TaxRate {
     name: string;
@@ -47,6 +53,14 @@ interface SystemSettings {
     lowStockThreshold: number;
     posSessionPolicy: 'DISABLED' | 'PER_CASHIER_SESSION' | 'PER_COUNTER_SHARED_SESSION' | 'GLOBAL_STORE_SESSION';
     posTransactionMode: 'DirectSale' | 'OrderToPayment';
+    isMultistoreEnabled?: boolean;
+    transferPolicyRequireApprovalAll?: boolean;
+    transferPolicyAllowDirect?: boolean;
+    transferPolicyValueThreshold?: number | null;
+    transferPolicyQtyThreshold?: number | null;
+    transferPolicySpecialStoresRequireApproval?: boolean;
+    transferAssortmentExpansionPolicy?: 'PROMPT' | 'ALWAYS_EXPAND' | 'TRANSFER_ONLY';
+    expiryAutomationEnabled?: boolean;
 }
 
 async function fetchSettings(): Promise<SystemSettings> {
@@ -55,10 +69,20 @@ async function fetchSettings(): Promise<SystemSettings> {
     return response.data.data!;
 }
 
-async function updateSettings(updates: Partial<SystemSettings>): Promise<SystemSettings> {
-    const response = await api.patch<ApiResponse<SystemSettings>>('/system-settings', updates);
+async function updateSettings(updates: Partial<SystemSettings>): Promise<{
+    settings: SystemSettings;
+    multistoreBootstrap?: { enabled: boolean; storesEnsured: boolean };
+}> {
+    const response = await api.patch<
+        ApiResponse<SystemSettings> & {
+            meta?: { multistoreBootstrap?: { enabled: boolean; storesEnsured: boolean } };
+        }
+    >('/system-settings', updates);
     if (!response.data.success) throw new Error(response.data.error);
-    return response.data.data!;
+    return {
+        settings: response.data.data!,
+        multistoreBootstrap: response.data.meta?.multistoreBootstrap,
+    };
 }
 
 interface SettingsComponentProps {
@@ -80,8 +104,24 @@ export default function SystemSettingsTab() {
 
     const mutation = useMutation({
         mutationFn: updateSettings,
-        onSuccess: (_data, variables) => {
-            queryClient.invalidateQueries({ queryKey: ['systemSettings'] });
+        onSuccess: (result, variables) => {
+            queryClient.setQueryData(['systemSettings'], result.settings);
+            if (variables.isMultistoreEnabled !== undefined) {
+                setMultistoreEnabledOptimistic(queryClient, variables.isMultistoreEnabled);
+                invalidateMultistoreModeQueries(queryClient);
+                if (variables.isMultistoreEnabled && result.multistoreBootstrap?.storesEnsured) {
+                    setSaveMessage(
+                        'Multi-store warehouse enabled. MAIN, TRANSIT, and SELLING stores are ready.',
+                    );
+                } else if (variables.isMultistoreEnabled === false) {
+                    setSaveMessage('Multi-store warehouse disabled. Legacy single-store inventory is active.');
+                } else {
+                    setSaveMessage('Settings saved successfully!');
+                }
+            } else {
+                queryClient.invalidateQueries({ queryKey: ['systemSettings'] });
+                setSaveMessage('Settings saved successfully!');
+            }
             // Immediately write transaction mode to localStorage so that:
             // 1. Same-tab POS page picks it up on next render (via cache read)
             // 2. Other tabs receive a 'storage' event and invalidate their query
@@ -91,10 +131,13 @@ export default function SystemSettingsTab() {
             // Invalidate cash register session so POS refetches from server immediately
             queryClient.invalidateQueries({ queryKey: ['cash-register-session', 'current'] });
             setIsSaving(false);
-            setSaveMessage('Settings saved successfully!');
-            setTimeout(() => setSaveMessage(''), 3000);
+            setTimeout(() => setSaveMessage(''), 5000);
         },
-        onError: (error: Error) => {
+        onError: (error: Error, variables) => {
+            if (variables.isMultistoreEnabled !== undefined) {
+                void queryClient.invalidateQueries({ queryKey: multistoreKeys.settings() });
+                invalidateMultistoreModeQueries(queryClient);
+            }
             setIsSaving(false);
             setSaveMessage(`Error: ${error.message}`);
             setTimeout(() => setSaveMessage(''), 5000);
@@ -160,6 +203,12 @@ export default function SystemSettingsTab() {
                         Alerts
                     </Tabs.Trigger>
                     <Tabs.Trigger
+                        value="inventory"
+                        className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
+                    >
+                        Inventory
+                    </Tabs.Trigger>
+                    <Tabs.Trigger
                         value="registers"
                         className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 whitespace-nowrap"
                     >
@@ -181,6 +230,10 @@ export default function SystemSettingsTab() {
 
                 <Tabs.Content value="alerts" className="p-6">
                     <AlertSettings settings={settings} onSave={handleSave} isSaving={isSaving} />
+                </Tabs.Content>
+
+                <Tabs.Content value="inventory" className="p-6">
+                    <InventorySettings settings={settings} onSave={handleSave} isSaving={isSaving} />
                 </Tabs.Content>
 
                 <Tabs.Content value="registers" className="p-6">
@@ -936,6 +989,102 @@ function POSTransactionModeInline({
                 </button>
             </div>
         </div>
+    );
+}
+
+function InventorySettings({
+    settings,
+    onSave,
+    isSaving,
+}: SettingsComponentProps) {
+    const queryClient = useQueryClient();
+    const [formData, setFormData] = useState({
+        isMultistoreEnabled: settings.isMultistoreEnabled ?? false,
+        transferPolicyRequireApprovalAll: settings.transferPolicyRequireApprovalAll ?? true,
+        transferPolicyAllowDirect: settings.transferPolicyAllowDirect ?? true,
+        transferPolicyValueThreshold: settings.transferPolicyValueThreshold ?? null,
+        transferPolicyQtyThreshold: settings.transferPolicyQtyThreshold ?? null,
+        transferPolicySpecialStoresRequireApproval:
+            settings.transferPolicySpecialStoresRequireApproval ?? true,
+        transferAssortmentExpansionPolicy: settings.transferAssortmentExpansionPolicy ?? 'PROMPT',
+    });
+
+    useEffect(() => {
+        setFormData({
+            isMultistoreEnabled: settings.isMultistoreEnabled ?? false,
+            transferPolicyRequireApprovalAll: settings.transferPolicyRequireApprovalAll ?? true,
+            transferPolicyAllowDirect: settings.transferPolicyAllowDirect ?? true,
+            transferPolicyValueThreshold: settings.transferPolicyValueThreshold ?? null,
+            transferPolicyQtyThreshold: settings.transferPolicyQtyThreshold ?? null,
+            transferPolicySpecialStoresRequireApproval:
+                settings.transferPolicySpecialStoresRequireApproval ?? true,
+            transferAssortmentExpansionPolicy: settings.transferAssortmentExpansionPolicy ?? 'PROMPT',
+        });
+    }, [settings]);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave(formData);
+    };
+
+    const patchPolicy = (updates: Partial<typeof formData>) => {
+        const next = { ...formData, ...updates };
+        setFormData(next);
+        onSave({
+            transferPolicyRequireApprovalAll: next.transferPolicyRequireApprovalAll,
+            transferPolicyAllowDirect: next.transferPolicyAllowDirect,
+            transferPolicyValueThreshold: next.transferPolicyValueThreshold,
+            transferPolicyQtyThreshold: next.transferPolicyQtyThreshold,
+            transferPolicySpecialStoresRequireApproval: next.transferPolicySpecialStoresRequireApproval,
+            transferAssortmentExpansionPolicy: next.transferAssortmentExpansionPolicy,
+        });
+    };
+
+    return (
+        <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Warehouse Network</h3>
+                <label className="flex items-center gap-2 text-sm">
+                    <input
+                        type="checkbox"
+                        checked={formData.isMultistoreEnabled}
+                        disabled={isSaving}
+                        onChange={(e) => {
+                            const isMultistoreEnabled = e.target.checked;
+                            setFormData((prev) => ({ ...prev, isMultistoreEnabled }));
+                            setMultistoreEnabledOptimistic(queryClient, isMultistoreEnabled);
+                            onSave({ isMultistoreEnabled });
+                        }}
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    />
+                    Enable multi-store warehouse network
+                </label>
+                <p className="mt-1 text-sm text-gray-500">
+                    Required for inter-store transfers, per-store stock, and warehouse dashboards.
+                </p>
+            </div>
+
+            <TransferPolicySettingsPanel
+                requireApprovalAll={formData.transferPolicyRequireApprovalAll}
+                allowDirect={formData.transferPolicyAllowDirect}
+                valueThreshold={formData.transferPolicyValueThreshold}
+                qtyThreshold={formData.transferPolicyQtyThreshold}
+                specialStoresRequireApproval={formData.transferPolicySpecialStoresRequireApproval}
+                assortmentExpansionPolicy={formData.transferAssortmentExpansionPolicy}
+                onChange={patchPolicy}
+                isSaving={isSaving}
+            />
+
+            <div className="flex justify-end">
+                <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                >
+                    {isSaving ? 'Saving...' : 'Save Inventory Settings'}
+                </button>
+            </div>
+        </form>
     );
 }
 

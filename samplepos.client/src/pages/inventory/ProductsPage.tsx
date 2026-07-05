@@ -1,4 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
+/**
+ * Product catalog + detail (spec: ProductDetail.tsx) — route `/inventory/products`
+ * Product detail surface: history modal with conditional Stock Distribution tab (multistore only).
+ */
 import ProductForm, { ProductFormField } from '@/components/products/ProductForm';
 import { formatCurrency, parseCurrency } from '../../utils/currency';
 import { BUSINESS_RULES } from '../../utils/constants';
@@ -8,6 +12,17 @@ import { useCreateProduct, useUpdateProduct, useDeleteProduct, productKeys } fro
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useOfflineProducts } from '../../hooks/useOfflineData';
 import { useOfflineContext } from '../../contexts/OfflineContext';
+import { useMultistoreEnabled } from '../../hooks/useMultistore';
+import { useAuth } from '../../hooks/useAuth';
+import { hasWarehouseNetworkAccess } from '../../../../shared/utils/warehouseRbac';
+import { useStoreLocations, useStockLevelsByStore } from '../../hooks/useWarehouse';
+import { StoreLocationSelect } from '../../components/inventory/StoreLocationSelect';
+import { StockViewModeToggle } from '../../components/inventory/StockViewModeToggle';
+import {
+  readStockViewMode,
+  writeStockViewMode,
+  type StockViewMode,
+} from '../../components/inventory/stockViewPrefs';
 import { getErrorMessage, api } from '../../utils/api';
 import Decimal from 'decimal.js';
 import { computeUomPrices } from '@shared/utils/uom-pricing';
@@ -24,6 +39,9 @@ import {
 } from '../../hooks/useProductHistory';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import { DamagedItemsBanner, OpeningStockDialog } from '../../components/inventory/DamagedItemsBanner';
+import { ProductStockDetailCards } from '../../components/inventory/ProductStockDetailCards';
+import { MultistoreGate } from '../../components/inventory/MultistoreGate';
+import { ProductDistributionPolicySection } from '../../components/inventory/ProductDistributionPolicySection';
 import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useColumnSort } from '../../hooks/useColumnSort';
@@ -156,10 +174,49 @@ const initialFormData: ProductFormData = {
 export default function ProductsPage() {
   // Offline-awareness
   const { isOnline } = useOfflineContext();
+  const { isMultistoreEnabled } = useMultistoreEnabled();
+  const { permissions, user } = useAuth();
+  const canUseStoreFilter = useMemo(() => {
+    if (!isMultistoreEnabled) return false;
+    if (user?.role === 'ADMIN' || user?.role === 'MANAGER') return true;
+    return hasWarehouseNetworkAccess(permissions);
+  }, [isMultistoreEnabled, permissions, user?.role]);
+  const [stockViewMode, setStockViewMode] = useState<StockViewMode>(() => readStockViewMode());
+  const byStoreView = canUseStoreFilter && stockViewMode === 'store';
+  const { data: storeLocations = [] } = useStoreLocations(byStoreView && isOnline);
+  const [storeFilterId, setStoreFilterId] = useState('');
+  const useMultistoreStock = byStoreView && isOnline;
+
+  useEffect(() => {
+    if (!useMultistoreStock || storeFilterId || storeLocations.length === 0) return;
+    const defaultStore =
+      storeLocations.find((s) => s.isDefaultReceiving) ||
+      storeLocations.find((s) => s.storeType === 'MAIN') ||
+      storeLocations[0];
+    if (defaultStore) setStoreFilterId(defaultStore.id);
+  }, [useMultistoreStock, storeFilterId, storeLocations]);
 
   // API Hooks — use offline-aware hook for reading, standard hooks for mutations
   const queryClient = useQueryClient();
-  const { data: productsResponse, isLoading, error, refetch } = useOfflineProducts({ includeUoms: true, limit: 5000 });
+  const {
+    data: productsResponse,
+    isLoading: productsLoading,
+    error: productsError,
+    refetch: productsRefetch,
+  } = useOfflineProducts({ includeUoms: true, limit: 5000 });
+  const {
+    data: storeStockData,
+    isLoading: storeStockLoading,
+    error: storeStockError,
+    refetch: storeStockRefetch,
+  } = useStockLevelsByStore(storeFilterId, useMultistoreStock && !!storeFilterId);
+
+  const isLoading = productsLoading || (useMultistoreStock && storeStockLoading);
+  const error = productsError ?? (useMultistoreStock ? storeStockError : null);
+  const refetch = () => {
+    void productsRefetch();
+    if (useMultistoreStock) void storeStockRefetch();
+  };
   const createProductMutation = useCreateProduct();
   const updateProductMutation = useUpdateProduct();
   const deleteProductMutation = useDeleteProduct();
@@ -265,6 +322,52 @@ export default function ProductsPage() {
     return Array.isArray(productsResponse.data) ? productsResponse.data : [];
   }, [productsResponse]);
 
+  const productById = useMemo(() => {
+    const map = new Map<string, ProductListItem>();
+    for (const p of products) {
+      if (p.id) map.set(p.id, p);
+    }
+    return map;
+  }, [products]);
+
+  const selectedStoreLabel = useMemo(() => {
+    if (!storeFilterId) return '';
+    const store = storeLocations.find((s) => s.id === storeFilterId);
+    return store ? `${store.name} (${store.code})` : '';
+  }, [storeFilterId, storeLocations]);
+
+  const storeStockByProductId = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!Array.isArray(storeStockData)) return map;
+    for (const row of storeStockData as Array<{
+      product_id?: string;
+      total_stock?: string | number;
+      total_quantity?: string | number;
+    }>) {
+      if (!row.product_id) continue;
+      map.set(
+        row.product_id,
+        parseFloat(String(row.total_stock ?? row.total_quantity ?? 0)) || 0,
+      );
+    }
+    return map;
+  }, [storeStockData]);
+
+  /** List rows: company catalog with optional per-store stock overlay (multistore by-store view). */
+  const catalogProducts = useMemo(() => {
+    if (!byStoreView) return products;
+    return products.map((p) => ({
+      ...p,
+      quantityOnHand: String(storeStockByProductId.get(p.id!) ?? 0),
+    }));
+  }, [products, byStoreView, storeStockByProductId]);
+
+  const handleStockViewModeChange = (mode: StockViewMode) => {
+    setStockViewMode(mode);
+    writeStockViewMode(mode);
+    setCurrentPage(1);
+  };
+
   // Helper function to format quantity with multi-UOM breakdown
   const formatMultiUomQuantity = (product: ProductListItem): string => {
     const baseQuantity = parseFloat(product.quantityOnHand) || 0;
@@ -313,9 +416,9 @@ export default function ProductsPage() {
     return breakdown.join(' + ');
   };
 
-  // Product history query (only when modal is open)
+  // Product history query when detail modal is open
   const { data: historyData, isLoading: historyLoading, error: historyError } = useProductHistory(
-    selectedProductForHistory || '',
+    showHistoryModal && selectedProductForHistory ? selectedProductForHistory : '',
     {
       page: 1,
       limit: 50,
@@ -399,7 +502,7 @@ export default function ProductsPage() {
 
   // Filter products
   const filteredProducts = useMemo(() => {
-    let filtered = products;
+    let filtered = catalogProducts;
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
@@ -424,7 +527,7 @@ export default function ProductsPage() {
     }
 
     return filtered;
-  }, [products, searchTerm, filterStatus, filterCategory]);
+  }, [catalogProducts, searchTerm, filterStatus, filterCategory]);
 
   const productSortAccessors = useMemo(
     () => ({
@@ -474,7 +577,9 @@ export default function ProductsPage() {
   // Reset page when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, filterStatus, filterCategory, filterStockOnly, sortField, sortOrder]);
+  }, [searchTerm, filterStatus, filterCategory, filterStockOnly, sortField, sortOrder, storeFilterId, stockViewMode]);
+
+  const tableColSpan = byStoreView ? 9 : 8;
 
   // Paginated products
   const totalPages = Math.max(1, Math.ceil(sortedProducts.length / ITEMS_PER_PAGE));
@@ -777,6 +882,17 @@ export default function ProductsPage() {
     return products.find(p => p.id === selectedProductForHistory);
   }, [selectedProductForHistory, products]);
 
+  const selectedProductUnitCost = useMemo(() => {
+    const p = selectedProductWithUom as { costPrice?: number; cost_price?: number } | null;
+    return Number(p?.costPrice ?? p?.cost_price ?? 0) || 0;
+  }, [selectedProductWithUom]);
+
+  const closeHistoryModal = () => {
+    setShowHistoryModal(false);
+    setSelectedProductForHistory(null);
+    setHistoryFilters({});
+  };
+
   // Handle form field change
   const handleFieldChange = (field: keyof ProductFormData, value: string | boolean) => {
     setFormData({ ...formData, [field]: value });
@@ -1000,7 +1116,9 @@ export default function ProductsPage() {
         setUomFormData(next);
         setUomAutoApplied(true);
       }
-    } catch { }
+    } catch {
+      // UoM auto-fill is best-effort when product row data is incomplete
+    }
   }, [showAddUomForm, uomFormData.conversionFactor, formData.costPrice, formData.sellingPrice, productUoms]);
 
   useSubmitOnEnter(showModal, !createProductMutation.isPending && !updateProductMutation.isPending, handleSave);
@@ -1040,6 +1158,10 @@ export default function ProductsPage() {
         </button>
       </div>
 
+      {canUseStoreFilter && (
+        <StockViewModeToggle mode={stockViewMode} onChange={handleStockViewModeChange} />
+      )}
+
       {/* Success/Error Messages */}
       {successMessage && (
         <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
@@ -1075,7 +1197,9 @@ export default function ProductsPage() {
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div
+          className={`grid grid-cols-1 gap-4 ${byStoreView ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}
+        >
           <div>
             <label htmlFor="search-products" className="block text-sm font-medium text-gray-700 mb-2">
               Search Products
@@ -1089,6 +1213,15 @@ export default function ProductsPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
+          {byStoreView && (
+            <StoreLocationSelect
+              id="filter-store-location-products"
+              label="Location"
+              stores={storeLocations}
+              value={storeFilterId}
+              onChange={setStoreFilterId}
+            />
+          )}
           <div>
             <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-2">
               Category
@@ -1191,10 +1324,15 @@ export default function ProductsPage() {
                       <div className={`text-sm font-medium ${parseFloat(margin) >= 30 ? 'text-green-600' : parseFloat(margin) >= 15 ? 'text-yellow-600' : 'text-red-600'}`}>{margin}%</div>
                     </div>
                   </div>
-                  <div className="text-xs text-gray-600 mb-2">Stock: {formatMultiUomQuantity(product)} | Reorder: {product.reorderLevel}</div>
+                  <div className="text-xs text-gray-600 mb-2">
+                    {byStoreView && selectedStoreLabel && (
+                      <span className="block text-gray-500 mb-0.5">Store: {selectedStoreLabel}</span>
+                    )}
+                    Stock: {formatMultiUomQuantity(product)} | Reorder: {product.reorderLevel}
+                  </div>
                   <div className="flex gap-3 border-t border-gray-100 pt-2">
                     <button onClick={() => handleViewHistory(product.id!)} className="text-xs text-purple-600 hover:text-purple-800 font-medium">History</button>
-                    <button onClick={() => handleEdit(product)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                    <button onClick={() => handleEdit(productById.get(product.id!) ?? product)} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
                     <button onClick={() => setOpeningStockProduct({ id: product.id!, name: product.name, sku: product.sku })} className="text-xs text-green-600 hover:text-green-800 font-medium">Opening Stock</button>
                     <button onClick={() => handleDeleteClick(product.id!)} className="text-xs text-red-600 hover:text-red-800 font-medium">Delete</button>
                   </div>
@@ -1214,6 +1352,11 @@ export default function ProductsPage() {
                 <SortableTableHeader label="SKU/Barcode" field="sku" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
                 <SortableTableHeader label="Pricing" field="pricing" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
                 <SortableTableHeader label="Margin" field="margin" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
+                {byStoreView && (
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Store
+                  </th>
+                )}
                 <SortableTableHeader label="Stock Levels" field="stock" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" filtered={filterStockOnly} />
                 <SortableTableHeader label="Status" field="status" activeField={sortField} direction={sortOrder} onSort={handleColumnSort} className="px-6" />
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
@@ -1222,7 +1365,7 @@ export default function ProductsPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {paginatedProducts.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={tableColSpan} className="px-6 py-8 text-center text-gray-500">
                     {searchTerm || filterStatus !== 'all' || filterCategory !== 'all'
                       ? 'No products match your filters'
                       : 'No products yet. Click "Add Product" to create your first product.'}
@@ -1276,6 +1419,11 @@ export default function ProductsPage() {
                           {margin}%
                         </div>
                       </td>
+                      {byStoreView && (
+                        <td className="px-6 py-4 text-sm text-gray-700">
+                          {selectedStoreLabel || '—'}
+                        </td>
+                      )}
                       <td className="px-6 py-4">
                         <div className="text-xs text-gray-600">
                           <div>On Hand: {formatMultiUomQuantity(product)}</div>
@@ -1300,7 +1448,7 @@ export default function ProductsPage() {
                             📊 History
                           </button>
                           <button
-                            onClick={() => handleEdit(product)}
+                            onClick={() => handleEdit(productById.get(product.id!) ?? product)}
                             className="text-blue-600 hover:text-blue-800 text-sm font-medium"
                           >
                             Edit
@@ -1390,8 +1538,20 @@ export default function ProductsPage() {
                 validationErrors={validationErrors as Partial<Record<ProductFormField, string>>}
                 suppliers={suppliersList}
                 masterUoms={masterUoms}
+                configuredProductUoms={productUoms
+                  .filter((u) => u.uomId)
+                  .map((u) => ({
+                    id: u.uomId,
+                    name: u.uomName || masterUomById[u.uomId]?.name || u.uomId,
+                    symbol: u.uomSymbol || masterUomById[u.uomId]?.symbol,
+                  }))}
+                restrictPurchaseUomToConfigured={modalMode === 'edit' || productUoms.some((u) => u.uomId)}
                 lastPurchasePrice={formData.lastCost !== '0' ? formData.lastCost : undefined}
               />
+
+              {modalMode === 'edit' && formData.id && (
+                <ProductDistributionPolicySection productId={formData.id} />
+              )}
 
               {/* Cost Tracking (Read-only for AVCO/FIFO) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
@@ -1658,24 +1818,43 @@ export default function ProductsPage() {
 
       {/* Product History Modal */}
       {showHistoryModal && selectedProductForHistory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => { setShowHistoryModal(false); setSelectedProductForHistory(null); setHistoryFilters({}); }}>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={closeHistoryModal}>
           <div className="bg-white rounded-lg shadow-xl max-w-[95vw] sm:max-w-5xl w-full max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center rounded-t-lg">
+            <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center rounded-t-lg z-10">
               <div>
-                <h3 className="text-xl font-bold text-gray-900">Product History</h3>
-                <p className="text-sm text-gray-600 mt-1">{selectedProductName}</p>
+                <h3 className="text-xl font-bold text-gray-900">{selectedProductName}</h3>
+                <p className="text-sm text-gray-600 mt-1">Stock & movement history</p>
               </div>
               <button
-                onClick={() => {
-                  setShowHistoryModal(false);
-                  setSelectedProductForHistory(null);
-                  setHistoryFilters({});
-                }}
+                onClick={closeHistoryModal}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
               >
                 ×
               </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto min-h-0">
+            <MultistoreGate>
+              {selectedProductForHistory && (
+                <div className="px-6 pt-4">
+                  <ProductDistributionPolicySection
+                    productId={selectedProductForHistory}
+                    readOnly
+                  />
+                </div>
+              )}
+              <ProductStockDetailCards
+                productId={selectedProductForHistory ?? ''}
+                enabled={!!selectedProductForHistory}
+                unitCost={selectedProductUnitCost}
+              />
+            </MultistoreGate>
+
+            <div className="px-6 py-3 border-b bg-white">
+              <h4 className="text-sm font-semibold text-gray-800 uppercase tracking-wide">
+                Movement History
+              </h4>
             </div>
 
             {/* Filters */}
@@ -2023,15 +2202,12 @@ export default function ProductsPage() {
             {/* Modal Footer */}
             <div className="sticky bottom-0 bg-gray-50 px-6 py-4 border-t rounded-b-lg">
               <button
-                onClick={() => {
-                  setShowHistoryModal(false);
-                  setSelectedProductForHistory(null);
-                  setHistoryFilters({});
-                }}
+                onClick={closeHistoryModal}
                 className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 Close
               </button>
+            </div>
             </div>
           </div>
         </div>

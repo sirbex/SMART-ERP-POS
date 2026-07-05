@@ -1262,11 +1262,11 @@ export async function rebuildInventoryBalances(
     const startedAt = Date.now();
 
     const beforeRes = await pool.query(
-        `SELECT COUNT(*)::INT AS n FROM inventory_balances`,
+        `SELECT COUNT(*)::INT AS n FROM inventory_aggregate_balances`,
     );
     const before: number = beforeRes.rows[0]?.n ?? 0;
 
-    // UPSERT: snap inventory_balances.quantity_on_hand to products.quantity_on_hand
+    // UPSERT: snap inventory_aggregate_balances.quantity_on_hand to products.quantity_on_hand
     // for every product, leaving cumulative tallies (total_received/sold/adjusted)
     // alone — those are write-time movement counters that the rebuild has no way
     // to recompute without scanning stock_movements (separate concern).
@@ -1275,16 +1275,16 @@ export async function rebuildInventoryBalances(
            SELECT p.id, COALESCE(p.quantity_on_hand, 0) AS qoh
            FROM products p
          )
-         INSERT INTO inventory_balances (product_id, quantity_on_hand, updated_at)
+         INSERT INTO inventory_aggregate_balances (product_id, quantity_on_hand, updated_at)
          SELECT id, qoh, NOW() FROM src
          ON CONFLICT (product_id) DO UPDATE
             SET quantity_on_hand = EXCLUDED.quantity_on_hand,
                 updated_at       = NOW()
-          WHERE ABS(inventory_balances.quantity_on_hand - EXCLUDED.quantity_on_hand) > 0.001`,
+          WHERE ABS(inventory_aggregate_balances.quantity_on_hand - EXCLUDED.quantity_on_hand) > 0.001`,
     );
 
     const afterRes = await pool.query(
-        `SELECT COUNT(*)::INT AS n FROM inventory_balances`,
+        `SELECT COUNT(*)::INT AS n FROM inventory_aggregate_balances`,
     );
     const after: number = afterRes.rows[0]?.n ?? 0;
 

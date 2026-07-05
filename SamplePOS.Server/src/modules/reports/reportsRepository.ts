@@ -5307,7 +5307,7 @@ export const reportsRepository = {
 
     // Fetch all UoM levels for these products in one query
     const productIds: string[] = rows.map((r) => r.product_id);
-    let uomLevelsByProduct: Map<string, UomLevel[]> = new Map();
+    const uomLevelsByProduct: Map<string, UomLevel[]> = new Map();
     if (productIds.length > 0) {
       const uomQuery = `
         SELECT

@@ -52,7 +52,7 @@ interface QuoteItem {
   stockOnHand?: number;
 }
 
-interface StockLevelItem extends StockLevelProductRow {}
+type StockLevelItem = StockLevelProductRow;
 
 export default function NewQuotationPage() {
   const navigate = useNavigate();

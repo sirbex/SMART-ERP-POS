@@ -19,7 +19,7 @@ interface SlideDrawerProps {
     /** Optional subtitle shown under the title */
     subtitle?: string;
     /** Width class — defaults to max-w-2xl */
-    width?: 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl';
+    width?: 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | 'full';
     children: ReactNode;
     /** Optional footer content (action buttons) */
     footer?: ReactNode;
@@ -52,6 +52,7 @@ const widthMap: Record<string, string> = {
     '2xl': 'max-w-2xl',
     '3xl': 'max-w-3xl',
     '4xl': 'max-w-4xl',
+    full: 'max-w-[min(100vw,96rem)]',
 };
 
 export default function SlideDrawer({

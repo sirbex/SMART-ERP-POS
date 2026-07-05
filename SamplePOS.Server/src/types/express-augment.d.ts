@@ -5,7 +5,7 @@ import type { Tenant } from '../../../shared/types/tenant.js';
 
 declare global {
   namespace Express {
-    export interface Request {
+    interface Request {
       user?: {
         id: string;
         email: string;
@@ -39,4 +39,4 @@ declare global {
   }
 }
 
-export { };
+export {};

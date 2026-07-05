@@ -331,20 +331,17 @@ export class InventoryBusinessRules {
       );
     }
 
-    if (!item.receivedQuantity || item.receivedQuantity <= 0) {
-      throw new BusinessRuleViolation(
-        'BR-INV-011',
-        'Received quantity must be positive',
-        'INVALID_RECEIVED_QUANTITY'
-      );
-    }
-
     if (item.unitCost === undefined || item.unitCost === null || item.unitCost < 0) {
       throw new BusinessRuleViolation(
         'BR-INV-011',
         'Unit cost must be non-negative',
         'INVALID_UNIT_COST'
       );
+    }
+
+    // DRAFT placeholder lines (qty 0) — expiry/qty validated at finalize.
+    if (!item.receivedQuantity || item.receivedQuantity <= 0) {
+      return;
     }
 
     if (item.trackExpiry) {

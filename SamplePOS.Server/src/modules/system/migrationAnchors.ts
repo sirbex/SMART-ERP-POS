@@ -113,6 +113,44 @@ export const MIGRATION_COLUMN_ANCHORS: Readonly<
     '523_products_stock_level_columns.sql': {
         products: ['max_stock_level', 'reorder_point', 'optimal_stock_level'],
     },
+    '525_warehouse_network_foundation.sql': {
+        system_settings: ['is_multistore_enabled'],
+        store_locations: ['code', 'store_type'],
+        product_lots: ['lot_number', 'cost_price'],
+        inventory_balances: ['store_location_id', 'product_lot_id'],
+    },
+    '526_warehouse_grn_transfers.sql': {
+        goods_receipt_items: ['target_store_location_id'],
+        store_transfers: ['transfer_number', 'status', 'transit_store_id'],
+        store_transfer_lines: ['store_transfer_id', 'product_lot_id', 'quantity_dispatched'],
+    },
+    '527_transfer_workflow_engine.sql': {
+        store_transfers: ['workflow_mode', 'permission_used', 'total_inventory_value'],
+        system_settings: [
+            'transfer_policy_require_approval_all',
+            'transfer_policy_allow_direct',
+        ],
+        store_transfer_audit_events: ['store_transfer_id', 'event_type', 'workflow_mode'],
+    },
+    '528_product_store_distribution.sql': {
+        products: ['distribution_policy'],
+        product_store_assignments: ['product_id', 'store_location_id', 'is_assigned', 'is_pos_visible'],
+    },
+    '529_transfer_assortment_expansion.sql': {
+        system_settings: ['transfer_assortment_expansion_policy'],
+        store_transfers: ['assortment_expansion_decisions'],
+    },
+    '530_stock_count_store_lot_expiry_automation.sql': {
+        stock_count_lines: ['product_lot_id'],
+        system_settings: ['expiry_automation_enabled'],
+    },
+    '531_sale_return_store_trace.sql': {
+        sale_items: ['store_location_id', 'product_lot_id'],
+        sale_refund_items: ['store_location_id', 'product_lot_id'],
+    },
+    '532_transfer_line_negotiation.sql': {
+        store_transfer_lines: ['quantity_approved', 'quantity_shortage', 'approval_comment'],
+    },
 };
 
 export type TableColumnMap = ReadonlyMap<string, ReadonlySet<string>>;

@@ -44,7 +44,7 @@ const ExpensesPage: React.FC = () => {
   }, [isCreateModalOpen]);
 
   useEffect(() => {
-    if (!!selectedExpense) {
+    if (selectedExpense) {
       viewGuardRef.current = openGuard({ cancellable: true, label: 'View expense' });
       return () => { if (viewGuardRef.current) { closeGuard(viewGuardRef.current.id); viewGuardRef.current = null; } };
     }

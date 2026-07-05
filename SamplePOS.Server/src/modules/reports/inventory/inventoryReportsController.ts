@@ -16,7 +16,7 @@ import {
   PDFTableColumn,
   formatCurrencyPDF,
   PDFColors,
-} from '../../../utils/pdfGenerator.js';
+} from '../../documents/pdfGenerator.js';
 import { reportsService } from '../reportsService.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────

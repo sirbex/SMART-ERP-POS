@@ -153,6 +153,9 @@ export function useAdjustBatch() {
       notes: string;
       userId: string;
       documentId?: string;
+      storeLocationId?: string;
+      productLotId?: string;
+      unitCost?: number;
     }) => {
       const response = await api.inventory.adjustBatch(data);
       return response.data;
@@ -161,6 +164,7 @@ export function useAdjustBatch() {
       queryClient.invalidateQueries({ queryKey: inventoryKeys.all });
       queryClient.invalidateQueries({ queryKey: ['stockMovements'] });
       queryClient.invalidateQueries({ queryKey: ['offline', 'stock-levels'] });
+      queryClient.invalidateQueries({ queryKey: ['warehouse'] });
     },
     onError: (error) => {
       console.error('Failed to adjust batch:', getErrorMessage(error));
