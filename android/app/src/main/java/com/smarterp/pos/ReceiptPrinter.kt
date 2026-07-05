@@ -72,6 +72,12 @@ object ReceiptPrinter {
             if (!data.customerName.isNullOrBlank()) {
                 p.printText("Customer: ${data.customerName}\n", null)
             }
+            if (!data.customerPhone.isNullOrBlank()) {
+                p.printText("Tel: ${data.customerPhone}\n", null)
+            }
+            if (!data.customerEmail.isNullOrBlank()) {
+                p.printText("${data.customerEmail}\n", null)
+            }
             p.printText("--------------------------------\n", null)
 
             // ── Line items ───────────────────────────────────────────────────────────

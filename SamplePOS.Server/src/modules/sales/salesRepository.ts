@@ -521,6 +521,8 @@ export const salesRepository = {
       `SELECT
         s.*,
         c.name AS customer_name,
+        c.phone AS customer_phone,
+        c.email AS customer_email,
         u.full_name AS cashier_name
        FROM sales s
        LEFT JOIN customers c ON s.customer_id = c.id
@@ -685,6 +687,8 @@ export const salesRepository = {
         s.cashier_id,
         s.created_at,
         c.name as customer_name,
+        c.phone as customer_phone,
+        c.email as customer_email,
         u.full_name as cashier_name
        FROM sales s
        LEFT JOIN customers c ON s.customer_id = c.id

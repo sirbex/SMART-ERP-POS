@@ -22,6 +22,8 @@ data class ReceiptData(
     val payments: List<SplitPayment>? = null,
     val changeGiven: Double? = null,
     val customerName: String? = null,
+    val customerPhone: String? = null,
+    val customerEmail: String? = null,
     val companyName: String? = null,
     val companyAddress: String? = null,
     val companyPhone: String? = null,

@@ -19,8 +19,6 @@ export interface InventoryNavItem {
   path: string;
   icon: string;
   multistoreOnly?: boolean;
-  /** Shown on primary bar only when multistore is OFF (e.g. stock counts in single-store). */
-  singleStoreOnly?: boolean;
   description?: string;
   group?: InventoryMoreNavGroup;
   matchPrefix?: string;
@@ -55,13 +53,6 @@ export const INVENTORY_PRIMARY_NAV: InventoryNavItem[] = [
     label: 'Purchase Orders',
     path: '/inventory/purchase-orders',
     icon: '📝',
-  },
-  {
-    id: 'stock-counts',
-    label: 'Stock Counts',
-    path: '/inventory/stock-counts',
-    icon: '🔢',
-    singleStoreOnly: true,
   },
   { id: 'adjustments', label: 'Adjustments', path: '/inventory/adjustments', icon: '⚖️' },
   {

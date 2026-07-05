@@ -136,7 +136,7 @@ function gateStoreNetworkNavStatic() {
   assert(!primaryBlock.includes("id: 'transfers'"), 'Transfers off primary nav');
   assert(navSrc.includes("id: 'transfers'"), 'Transfers in STORE_NETWORK_NAV');
   assert(navSrc.includes("id: 'stock-counts'"), 'Stock counts in STORE_NETWORK_NAV');
-  assert(navSrc.includes('singleStoreOnly: true'), 'Stock counts primary tab is single-store only');
+  assert(!primaryBlock.includes("id: 'stock-counts'"), 'Stock counts off primary nav (multistore only)');
   assert(fileContains(nav, 'STORE_NETWORK_ROUTE_PREFIXES'), 'Store network route prefixes defined');
   assert(fileContains(nav, '/inventory/store-transfers'), 'Transfers route in store network section');
   assert(fileContains('samplepos.client/src/components/inventory/StoreNetworkSection.tsx', 'StoreNetworkLayout'), 'StoreNetworkSection wraps sub-nav');

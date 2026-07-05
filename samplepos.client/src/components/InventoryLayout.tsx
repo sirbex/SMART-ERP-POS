@@ -91,11 +91,7 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
   const primaryTabs = useMemo(
     () =>
       filterInventoryNavByPermissions(
-        INVENTORY_PRIMARY_NAV.filter((tab) => {
-          if (tab.multistoreOnly && !isMultistoreEnabled) return false;
-          if (tab.singleStoreOnly && isMultistoreEnabled) return false;
-          return true;
-        }),
+        INVENTORY_PRIMARY_NAV.filter((tab) => !tab.multistoreOnly || isMultistoreEnabled),
         permissions,
         user?.role,
       ),

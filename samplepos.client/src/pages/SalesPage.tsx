@@ -10,6 +10,7 @@ import { DatePicker } from '../components/ui/date-picker';
 import { printReceipt } from '../lib/print';
 import {
   buildReceiptDataFromSale,
+  mergeSaleForReceipt,
   fetchInvoiceSettingsForReceipt,
   type InvoiceSettingsForReceipt,
 } from '../lib/receiptFromSale';
@@ -31,6 +32,8 @@ interface SaleRow {
   saleNumber: string;
   customerId?: string;
   customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
   cashierId?: string;
   cashierName?: string;
   soldById?: string;
@@ -481,6 +484,8 @@ export default function SalesPage() {
         // Relations
         customerId: String(sale.customer_id || sale.customerId || ''),
         customerName: String(sale.customer_name || sale.customerName || ''),
+        customerPhone: String(sale.customer_phone || sale.customerPhone || '') || undefined,
+        customerEmail: String(sale.customer_email || sale.customerEmail || '') || undefined,
         cashierId: String(sale.cashier_id || sale.cashierId || ''),
         cashierName: String(sale.cashier_name || sale.cashierName || ''),
         soldById: String(sale.cashier_id || sale.cashierId || ''), // Alias
@@ -2801,7 +2806,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
               {canReprintReceipt && (
                 <button
                   onClick={async () => {
-                    const s = saleDetails ?? sale;
+                    const s = mergeSaleForReceipt(sale, saleDetails);
 
                     // Log reprint to audit trail and increment print count
                     try {

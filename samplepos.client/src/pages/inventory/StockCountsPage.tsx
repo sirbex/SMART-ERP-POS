@@ -160,10 +160,7 @@ export default function StockCountsPage() {
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Stock Counts</h2>
-          <p className="text-gray-600 mt-1">
-            Physical stocktake sessions
-            {isMultistoreEnabled ? ' — scoped per store location.' : '.'}
-          </p>
+          <p className="text-gray-600 mt-1">Physical stocktake sessions — scoped per store location.</p>
         </div>
         <Button type="button" onClick={() => setCreateOpen(true)}>
           New count

@@ -40,6 +40,8 @@ export interface ReceiptData {
   }>;
   changeGiven?: number; // Unified change field for both single and split payments
   customerName?: string;
+  customerPhone?: string;
+  customerEmail?: string;
   // Company branding from settings
   companyName?: string;
   companyAddress?: string;
@@ -154,6 +156,31 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
       reject(error);
     }
   });
+}
+
+/** Shared customer block for thermal/browser receipts (SSOT with receiptFromSale). */
+function renderReceiptCustomerHTML(
+  data: Pick<ReceiptData, 'customerName' | 'customerPhone' | 'customerEmail'>,
+  style: 'detailed' | 'compact'
+): string {
+  const lines: string[] = [];
+  if (data.customerName) {
+    lines.push(style === 'detailed' ? `Customer: ${data.customerName}` : data.customerName);
+  }
+  if (data.customerPhone) {
+    lines.push(style === 'detailed' ? `Tel: ${data.customerPhone}` : data.customerPhone);
+  }
+  if (data.customerEmail) {
+    lines.push(data.customerEmail);
+  }
+
+  const fontSize = style === 'detailed' ? '11px' : '10px';
+  return lines
+    .map(
+      (line) =>
+        `<div style="font-size: ${fontSize}; font-weight: bold;">${line}</div>`
+    )
+    .join('');
 }
 
 /**
@@ -280,7 +307,7 @@ function generateDetailedReceiptHTML(data: ReceiptData): string {
           ${data.companyPhone ? `<div style="font-size: 11px; font-weight: bold;">${data.companyPhone}</div>` : ''}
           <div style="margin-top: 8px; font-weight: bold;">Sale #: ${data.saleNumber}</div>
           <div style="font-weight: bold;">Date: ${data.saleDate}</div>
-          ${data.customerName ? `<div style="font-weight: bold;">Customer: ${data.customerName}</div>` : ''}
+          ${renderReceiptCustomerHTML(data, 'detailed')}
           ${data.cashierName ? `<div style="font-weight: bold;">Served by: ${data.cashierName}</div>` : ''}
         </div>
 
@@ -509,7 +536,7 @@ function generateCompactReceiptHTML(data: ReceiptData): string {
           ${data.companyPhone ? `<div style="font-size: 10px; font-weight: bold;">${data.companyPhone}</div>` : ''}
           <div style="margin-top: 4px; font-weight: bold;">#${data.saleNumber}</div>
           <div style="font-size: 10px; font-weight: bold;">${data.saleDate}</div>
-          ${data.customerName ? `<div style="font-size: 10px; font-weight: bold;">${data.customerName}</div>` : ''}
+          ${renderReceiptCustomerHTML(data, 'compact')}
           ${data.cashierName ? `<div style="font-size: 10px; font-weight: bold;">Served by: ${data.cashierName}</div>` : ''}
         </div>
 

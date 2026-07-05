@@ -61,6 +61,7 @@
     "proof:warehouse-network-matrix": "node scripts/proof-warehouse-network-matrix.mjs",
     "proof:warehouse-network:all": "npm run proof:warehouse-network-phases && npm run proof:warehouse-network-matrix",
     "proof:inventory-ux-gates": "node scripts/proof-inventory-ux-gates.mjs",
+    "proof:receipt-customer-ssot": "node scripts/proof-receipt-customer-ssot.mjs",
     "proof:warehouse-12-steps": "node scripts/proof-warehouse-12-steps.mjs",
     "proof:inventory-modes-parity": "node scripts/proof-inventory-modes-parity.mjs",
     "proof:inventory-full": "npm run proof:inventory-modes-parity",

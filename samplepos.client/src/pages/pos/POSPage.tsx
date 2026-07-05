@@ -47,6 +47,10 @@ import { useCreateInvoice } from '../../hooks/useApi';
 import { api } from '../../utils/api';
 import type { ReceiptData } from '../../lib/print';
 import {
+  buildReceiptDataFromCheckout,
+  type CheckoutReceiptInput,
+} from '../../lib/receiptFromSale';
+import {
   findProductByBarcode,
   preWarmProductCache,
   getProductCatalog,
@@ -483,6 +487,23 @@ export default function POSPage() {
       return null;
     }
   }, []);
+
+  const makePosReceiptData = useCallback(
+    (input: Omit<CheckoutReceiptInput, 'cashierName' | 'customer' | 'invoiceSettings'>) =>
+      buildReceiptDataFromCheckout({
+        ...input,
+        cashierName: currentUser?.fullName,
+        customer: selectedCustomer
+          ? {
+              name: selectedCustomer.name,
+              phone: selectedCustomer.phone,
+              email: selectedCustomer.email,
+            }
+          : undefined,
+        invoiceSettings,
+      }),
+    [currentUser?.fullName, selectedCustomer, invoiceSettings]
+  );
 
   // ── Fullscreen: enter fullscreen when not already in standalone/fullscreen mode ──
   useEffect(() => {
@@ -2494,31 +2515,24 @@ export default function POSPage() {
 
         // Build order receipt data BEFORE clearing cart
         const today = new Date();
-        setReceiptData({
-          saleNumber: `ORDER: ${offlineId}`,
-          saleDate: formatReceiptDateTime(today),
-          subtotal,
-          discountAmount: items.reduce((sum, item) => sum + (item.discount?.amount || 0), 0),
-          taxAmount: tax,
-          totalAmount: grandTotal,
-          cashierName: currentUser?.fullName,
-          items: items.map((item) => ({
-            name: item.name,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            subtotal: item.subtotal,
-            uom: item.uom,
-            discountAmount: item.discount?.amount,
-          })),
-          customerName: selectedCustomer?.name,
-          companyName: invoiceSettings?.companyName,
-          companyAddress: invoiceSettings?.companyAddress || undefined,
-          companyPhone: invoiceSettings?.companyPhone || undefined,
-          paymentAccounts: invoiceSettings?.paymentAccounts
-            ?.filter(a => a.isActive && a.showOnReceipt)
-            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
-          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
-        });
+        setReceiptData(
+          makePosReceiptData({
+            saleNumber: `ORDER: ${offlineId}`,
+            saleDate: formatReceiptDateTime(today),
+            subtotal,
+            discountAmount: items.reduce((sum, item) => sum + (item.discount?.amount || 0), 0),
+            taxAmount: tax,
+            totalAmount: grandTotal,
+            items: items.map((item) => ({
+              name: item.name,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.subtotal,
+              uom: item.uom,
+              discountAmount: item.discount?.amount,
+            })),
+          })
+        );
         setLastSale({
           id: offlineId,
           saleNumber: offlineId,
@@ -2571,34 +2585,27 @@ export default function POSPage() {
 
         // Build order receipt data BEFORE clearing cart
         const today = new Date();
-        setReceiptData({
-          saleNumber: `ORDER: ${orderNum}`,
-          saleDate: formatReceiptDateTime(today),
-          subtotal,
-          discountAmount: items.reduce(
-            (sum, item) => sum + (item.discount?.amount || 0),
-            0
-          ),
-          taxAmount: tax,
-          totalAmount: grandTotal,
-          cashierName: currentUser?.fullName,
-          items: items.map((item) => ({
-            name: item.name,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            subtotal: item.subtotal,
-            uom: item.uom,
-            discountAmount: item.discount?.amount,
-          })),
-          customerName: selectedCustomer?.name,
-          companyName: invoiceSettings?.companyName,
-          companyAddress: invoiceSettings?.companyAddress || undefined,
-          companyPhone: invoiceSettings?.companyPhone || undefined,
-          paymentAccounts: invoiceSettings?.paymentAccounts
-            ?.filter(a => a.isActive && a.showOnReceipt)
-            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
-          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
-        });
+        setReceiptData(
+          makePosReceiptData({
+            saleNumber: `ORDER: ${orderNum}`,
+            saleDate: formatReceiptDateTime(today),
+            subtotal,
+            discountAmount: items.reduce(
+              (sum, item) => sum + (item.discount?.amount || 0),
+              0
+            ),
+            taxAmount: tax,
+            totalAmount: grandTotal,
+            items: items.map((item) => ({
+              name: item.name,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.subtotal,
+              uom: item.uom,
+              discountAmount: item.discount?.amount,
+            })),
+          })
+        );
         setLastSale({
           id: order.id || orderNum,
           saleNumber: orderNum,
@@ -2634,31 +2641,24 @@ export default function POSPage() {
         toast.success(`Network failed — order saved offline (${offlineId}). Will sync when online.`);
 
         const today = new Date();
-        setReceiptData({
-          saleNumber: `ORDER: ${offlineId}`,
-          saleDate: formatReceiptDateTime(today),
-          subtotal,
-          discountAmount: items.reduce((sum, item) => sum + (item.discount?.amount || 0), 0),
-          taxAmount: tax,
-          totalAmount: grandTotal,
-          cashierName: currentUser?.fullName,
-          items: items.map((item) => ({
-            name: item.name,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            subtotal: item.subtotal,
-            uom: item.uom,
-            discountAmount: item.discount?.amount,
-          })),
-          customerName: selectedCustomer?.name,
-          companyName: invoiceSettings?.companyName,
-          companyAddress: invoiceSettings?.companyAddress || undefined,
-          companyPhone: invoiceSettings?.companyPhone || undefined,
-          paymentAccounts: invoiceSettings?.paymentAccounts
-            ?.filter(a => a.isActive && a.showOnReceipt)
-            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
-          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
-        });
+        setReceiptData(
+          makePosReceiptData({
+            saleNumber: `ORDER: ${offlineId}`,
+            saleDate: formatReceiptDateTime(today),
+            subtotal,
+            discountAmount: items.reduce((sum, item) => sum + (item.discount?.amount || 0), 0),
+            taxAmount: tax,
+            totalAmount: grandTotal,
+            items: items.map((item) => ({
+              name: item.name,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.subtotal,
+              uom: item.uom,
+              discountAmount: item.discount?.amount,
+            })),
+          })
+        );
         setLastSale({
           id: offlineId,
           saleNumber: offlineId,
@@ -3045,37 +3045,30 @@ export default function POSPage() {
         const today = new Date();
         const offlineSaleDate = getBusinessDate();
 
-        setReceiptData({
-          saleNumber: offlineId,
-          saleDate: formatReceiptDateTime(today),
-          subtotal,
-          discountAmount: cartDiscountAmount + itemDiscountTotalOffline,
-          taxAmount: tax,
-          totalAmount: grandTotal,
-          cashierName: currentUser?.fullName,
-          items: items.map((item) => ({
-            name: item.name,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            subtotal: item.subtotal,
-            uom: item.uom,
-            discountAmount: item.discount?.amount,
-          })),
-          payments: finalPaymentLines.map((line) => ({
-            method: line.paymentMethod,
-            amount: line.amount,
-            reference: line.reference,
-          })),
-          changeGiven: changeAmount,
-          customerName: selectedCustomer?.name,
-          companyName: invoiceSettings?.companyName,
-          companyAddress: invoiceSettings?.companyAddress || undefined,
-          companyPhone: invoiceSettings?.companyPhone || undefined,
-          paymentAccounts: invoiceSettings?.paymentAccounts
-            ?.filter(a => a.isActive && a.showOnReceipt)
-            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
-          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
-        });
+        setReceiptData(
+          makePosReceiptData({
+            saleNumber: offlineId,
+            saleDate: formatReceiptDateTime(today),
+            subtotal,
+            discountAmount: cartDiscountAmount + itemDiscountTotalOffline,
+            taxAmount: tax,
+            totalAmount: grandTotal,
+            items: items.map((item) => ({
+              name: item.name,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.subtotal,
+              uom: item.uom,
+              discountAmount: item.discount?.amount,
+            })),
+            payments: finalPaymentLines.map((line) => ({
+              method: line.paymentMethod,
+              amount: line.amount,
+              reference: line.reference,
+            })),
+            changeGiven: changeAmount,
+          })
+        );
         setLastSale({
           id: offlineId,
           saleNumber: offlineId,
@@ -3136,40 +3129,32 @@ export default function POSPage() {
           (sum, item) => new Decimal(sum).plus(item.discount?.amount || 0).toNumber(),
           0
         );
-        setReceiptData({
-          saleNumber: sale.saleNumber || sale.sale_number || '',
-          saleDate: formatReceiptDateTime(
-            (sale.createdAt || sale.created_at) ? new Date(sale.createdAt || sale.created_at || '') : new Date()
-          ),
-          subtotal,
-          discountAmount: cartDiscountAmount + itemDiscountTotal,
-          taxAmount: tax,
-          totalAmount: sale.totalAmount || sale.total_amount || grandTotal,
-          cashierName: currentUser?.fullName,
-          items: items.map((item) => ({
-            name: item.name,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            subtotal: item.subtotal,
-            uom: item.uom,
-            discountAmount: item.discount?.amount,
-          })),
-          payments: finalPaymentLines.map((line) => ({
-            method: line.paymentMethod,
-            amount: line.amount,
-            reference: line.reference,
-          })),
-          changeGiven: changeAmount, // Actual change if overpaid with cash
-          customerName: selectedCustomer?.name,
-          // Company branding from invoice settings
-          companyName: invoiceSettings?.companyName,
-          companyAddress: invoiceSettings?.companyAddress || undefined,
-          companyPhone: invoiceSettings?.companyPhone || undefined,
-          paymentAccounts: invoiceSettings?.paymentAccounts
-            ?.filter(a => a.isActive && a.showOnReceipt)
-            .map(a => ({ type: a.type, provider: a.provider, accountName: a.accountName, accountNumber: a.accountNumber, branchOrCode: a.branchOrCode })),
-          customReceiptNote: invoiceSettings?.customReceiptNote || undefined,
-        });
+        setReceiptData(
+          makePosReceiptData({
+            saleNumber: sale.saleNumber || sale.sale_number || '',
+            saleDate: formatReceiptDateTime(
+              (sale.createdAt || sale.created_at) ? new Date(sale.createdAt || sale.created_at || '') : new Date()
+            ),
+            subtotal,
+            discountAmount: cartDiscountAmount + itemDiscountTotal,
+            taxAmount: tax,
+            totalAmount: sale.totalAmount || sale.total_amount || grandTotal,
+            items: items.map((item) => ({
+              name: item.name,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              subtotal: item.subtotal,
+              uom: item.uom,
+              discountAmount: item.discount?.amount,
+            })),
+            payments: finalPaymentLines.map((line) => ({
+              method: line.paymentMethod,
+              amount: line.amount,
+              reference: line.reference,
+            })),
+            changeGiven: changeAmount,
+          })
+        );
 
         // Clear cart and payment lines
         console.log('🧹 Clearing cart and closing modals...');

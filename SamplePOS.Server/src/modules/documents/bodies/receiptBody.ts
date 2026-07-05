@@ -14,6 +14,8 @@ export interface ReceiptBodyData {
         saleNumber: string;
         saleDate: string | null;
         customerName: string | null;
+        customerPhone?: string | null;
+        customerEmail?: string | null;
         cashierName: string | null;
         paymentMethod: string;
         status: string;
@@ -37,6 +39,19 @@ export interface ReceiptBodyData {
     }>;
 }
 
+function customerMetaRows(sale: ReceiptBodyData['sale']): Array<[string, string]> {
+    const rows: Array<[string, string]> = [
+        ['Customer', sale.customerName?.trim() || 'Walk-in'],
+    ];
+    if (sale.customerPhone?.trim()) {
+        rows.push(['Phone', sale.customerPhone.trim()]);
+    }
+    if (sale.customerEmail?.trim()) {
+        rows.push(['Email', sale.customerEmail.trim()]);
+    }
+    return rows;
+}
+
 export function renderReceiptBody(ctx: LayoutContext, data: ReceiptBodyData): void {
     const { theme, paper, doc, contentWidth } = ctx;
     const fmt = (n: number) => Money.formatCurrency(n);
@@ -47,7 +62,7 @@ export function renderReceiptBody(ctx: LayoutContext, data: ReceiptBodyData): vo
         const compact: Array<[string, string]> = [
             ['Date', formatDate(data.sale.saleDate)],
             ['Cashier', data.sale.cashierName ?? '—'],
-            ['Customer', data.sale.customerName ?? 'Walk-in'],
+            ...customerMetaRows(data.sale),
             ['Payment', data.sale.paymentMethod],
         ];
         Layout.kvGrid(ctx, compact.map(([label, value]) => ({ label, value })), { columns: 1 });
@@ -76,7 +91,7 @@ export function renderReceiptBody(ctx: LayoutContext, data: ReceiptBodyData): vo
         Layout.kvGrid(ctx, [
             { label: 'Sale Date', value: formatDate(data.sale.saleDate) },
             { label: 'Cashier', value: data.sale.cashierName ?? '—' },
-            { label: 'Customer', value: data.sale.customerName ?? 'Walk-in' },
+            ...customerMetaRows(data.sale).map(([label, value]) => ({ label, value })),
             { label: 'Payment Method', value: data.sale.paymentMethod },
         ]);
 

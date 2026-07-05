@@ -347,9 +347,16 @@ async function renderReceipt(
     }
 
     let customerName: string | null = (s.customer_name as string) ?? null;
-    if (!customerName && s.customer_id) {
-        const cr = await pool.query('SELECT name FROM customers WHERE id = $1', [s.customer_id]);
-        customerName = (cr.rows[0]?.name as string) ?? null;
+    let customerPhone: string | null = (s.customer_phone as string) ?? null;
+    let customerEmail: string | null = (s.customer_email as string) ?? null;
+    if ((!customerName || !customerPhone || !customerEmail) && s.customer_id) {
+        const cr = await pool.query(
+            'SELECT name, phone, email FROM customers WHERE id = $1',
+            [s.customer_id],
+        );
+        customerName = customerName ?? (cr.rows[0]?.name as string) ?? null;
+        customerPhone = customerPhone ?? (cr.rows[0]?.phone as string) ?? null;
+        customerEmail = customerEmail ?? (cr.rows[0]?.email as string) ?? null;
     }
 
     const saleNumber = (s.sale_number as string) ?? '';
@@ -371,6 +378,8 @@ async function renderReceipt(
             saleNumber,
             saleDate: isoDate(s.sale_date) ?? isoDate(s.created_at) ?? '',
             customerName,
+            customerPhone,
+            customerEmail,
             cashierName,
             paymentMethod: (s.payment_method as string) ?? '—',
             status,

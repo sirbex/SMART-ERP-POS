@@ -230,12 +230,24 @@ export default function PrintReceiptDialog({
                                 <span className="text-gray-600">Date:</span>
                                 <span className="font-medium">{receiptData.saleDate}</span>
                             </div>
-                            {receiptData.customerName && (
-                                <div className="flex justify-between text-sm">
-                                    <span className="text-gray-600">Customer:</span>
-                                    <span className="font-medium">{receiptData.customerName}</span>
-                                </div>
-                            )}
+            {receiptData.customerName && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Customer:</span>
+                <span className="font-medium">{receiptData.customerName}</span>
+              </div>
+            )}
+            {receiptData.customerPhone && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Phone:</span>
+                <span className="font-medium">{receiptData.customerPhone}</span>
+              </div>
+            )}
+            {receiptData.customerEmail && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Email:</span>
+                <span className="font-medium truncate max-w-[60%]">{receiptData.customerEmail}</span>
+              </div>
+            )}
                             {receiptData.cashierName && (
                                 <div className="flex justify-between text-sm">
                                     <span className="text-gray-600">Served by:</span>

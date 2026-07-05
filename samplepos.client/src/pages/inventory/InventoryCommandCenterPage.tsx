@@ -161,12 +161,14 @@ export default function InventoryCommandCenterPage() {
               onClick={() => navigate('/inventory/store-transfers')}
             />
           </MultistoreGate>
-          <QuickAction
-            label="Count inventory"
-            description="Physical stock counts and reconciliation"
-            icon="🔢"
-            onClick={() => navigate('/inventory/adjustments')}
-          />
+          <MultistoreGate>
+            <QuickAction
+              label="Count inventory"
+              description="Physical stocktake sessions per store location"
+              icon="🔢"
+              onClick={() => navigate('/inventory/stock-counts')}
+            />
+          </MultistoreGate>
           <QuickAction
             label="Adjust stock"
             description="Corrections, damage, and write-offs"

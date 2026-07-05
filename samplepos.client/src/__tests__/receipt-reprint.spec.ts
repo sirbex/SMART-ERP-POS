@@ -3,6 +3,8 @@ import {
   buildReceiptDataFromSale,
   formatReceiptDateTime,
   invoiceSettingsToReceiptBranding,
+  mergeSaleForReceipt,
+  resolveReceiptCustomerFields,
 } from '../lib/receiptFromSale';
 
 describe('receipt reprint parity', () => {
@@ -55,6 +57,8 @@ describe('receipt reprint parity', () => {
         taxAmount: 0,
         cashierName: 'Jane Cashier',
         customerName: 'John Customer',
+        customerPhone: '+256700000001',
+        customerEmail: 'john@example.com',
         paymentMethod: 'CASH',
         amountPaid: 60000,
         changeAmount: 10000,
@@ -90,6 +94,8 @@ describe('receipt reprint parity', () => {
     expect(receipt.isReprint).toBe(true);
     expect(receipt.saleNumber).toBe('SALE-2026-0100');
     expect(receipt.customerName).toBe('John Customer');
+    expect(receipt.customerPhone).toBe('+256700000001');
+    expect(receipt.customerEmail).toBe('john@example.com');
     expect(receipt.cashierName).toBe('Jane Cashier');
     expect(receipt.companyName).toBe('Henber Pharmacy');
     expect(receipt.companyAddress).toBe('Main Street');
@@ -108,6 +114,8 @@ describe('receipt reprint parity', () => {
         totalAmount: 10000,
         cashier_name: 'Mary Seller',
         customer_name: 'Acme Ltd',
+        customer_phone: '0700111222',
+        customer_email: 'acme@example.com',
       },
       null,
       { isReprint: true }
@@ -115,5 +123,43 @@ describe('receipt reprint parity', () => {
 
     expect(receipt.cashierName).toBe('Mary Seller');
     expect(receipt.customerName).toBe('Acme Ltd');
+    expect(receipt.customerPhone).toBe('0700111222');
+    expect(receipt.customerEmail).toBe('acme@example.com');
+  });
+
+  it('mergeSaleForReceipt keeps list customer when detail payload omits it', () => {
+    const merged = mergeSaleForReceipt(
+      {
+        saleNumber: 'SALE-2026-0300',
+        customerName: 'Henber BOU',
+        customerPhone: '0700123456',
+        totalAmount: 25000,
+      },
+      {
+        sale_number: 'SALE-2026-0300',
+        total_amount: 25000,
+        items: [{ product_name: 'Item A', quantity: 1, unit_price: 25000, total_price: 25000 }],
+      }
+    );
+
+    expect(resolveReceiptCustomerFields(merged).customerName).toBe('Henber BOU');
+    expect(resolveReceiptCustomerFields(merged).customerPhone).toBe('0700123456');
+    expect(merged.items).toHaveLength(1);
+
+    const reprint = buildReceiptDataFromSale(merged, null, { isReprint: true });
+    expect(reprint.customerName).toBe('Henber BOU');
+    expect(reprint.customerPhone).toBe('0700123456');
+    expect(reprint.isReprint).toBe(true);
+  });
+
+  it('print.ts renders customer name, phone, and email in shared HTML helper', () => {
+    const { readFileSync } = require('node:fs');
+    const { resolve } = require('node:path');
+    const src = readFileSync(resolve(__dirname, '../lib/print.ts'), 'utf8');
+    expect(src).toContain('function renderReceiptCustomerHTML');
+    expect(src).toContain('Tel: ${data.customerPhone}');
+    expect(src).toContain('data.customerEmail');
+    expect(src).toContain("renderReceiptCustomerHTML(data, 'detailed')");
+    expect(src).toContain("renderReceiptCustomerHTML(data, 'compact')");
   });
 });
