@@ -3,7 +3,7 @@
  * @description Centralized handler for stock modifications (adjustments, issues, simple inbound).
  * @architecture
  *   - ADJUSTMENT_*, DAMAGE, EXPIRY, SALE, TRANSFER_* → this handler (batch + audit + GL where applicable)
- *   - Lot-based goods receipt (GRN finalize) → goodsReceiptService.finalizeGR + warehouseGrnService
+ *   - Lot-based goods receipt (GRN finalize) → goodsReceiptService.finalizeGR + LotService.receiveLot
  *     (creates per-lot batches, expiry, bonus splits, and multistore inventory_balances)
  * @rules
  *   - ALL stock changes must go through this handler
@@ -31,6 +31,9 @@ import {
   resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
 import { Money } from '../../utils/money.js';
+import { lotService } from '../inventory-lot/lotService.js';
+import { postgresLotRepository } from '../inventory-lot/postgresLotRepository.js';
+import { loadGlobalSelectableLots } from '../inventory-lot/postgresLotSelector.js';
 
 export type StockMovementType =
   | 'GOODS_RECEIPT'
@@ -62,6 +65,8 @@ export interface StockMovementParams {
   userId: string;
   // Optional: for multi-warehouse support (future)
   warehouseId?: string | null;
+  // Optional: explicit multistore destination for inbound lot returns/adjustments
+  targetStoreLocationId?: string | null;
   // Optional: for UOM conversions (future)
   uomId?: string | null;
   conversionFactor?: number;
@@ -156,14 +161,32 @@ export class StockMovementHandler {
       const absQtyDec = Money.parseDb(Math.abs(quantityChange));
       const unitCostDec = Money.parseDb(params.unitCost ?? batch.cost_price ?? 0);
 
-      // Step 6: Update batch quantity
-      await client.query(
-        `UPDATE inventory_batches 
-         SET remaining_quantity = $1, 
-             updated_at = CURRENT_TIMESTAMP 
-         WHERE id = $2`,
-        [newQty.toNumber(), batch.id]
-      );
+      // Step 6: Mutate lot quantity through LotService gateway
+      if (changeQty.gt(0)) {
+        await lotService.returnLot(client, {
+          productId: params.productId,
+          batchId: batch.id,
+          quantity: absQtyDec.toNumber(),
+          costPrice: Money.toNumber(unitCostDec),
+          referenceType: params.referenceType || params.movementType,
+          referenceId: params.referenceId || batch.id,
+          notes: params.reason || params.notes || undefined,
+          targetStoreLocationId: params.targetStoreLocationId ?? undefined,
+          userId: params.userId,
+        });
+      } else if (changeQty.lt(0)) {
+        await lotService.consumeLot(client, {
+          productId: params.productId,
+          quantity: absQtyDec.toNumber(),
+          specificLotId: batch.id,
+          selectionPolicy: 'MANUAL',
+          recordMovement: false,
+          syncProduct: false,
+          referenceType: params.referenceType || params.movementType,
+          referenceId: params.referenceId || batch.id,
+          userId: params.userId,
+        });
+      }
 
       // Step 7: GL amount from batch subledger delta (SAP MM-FI — same SQL as coupling guard)
       let movementValueDec = Money.multiply(unitCostDec, absQtyDec);
@@ -436,23 +459,17 @@ export class StockMovementHandler {
     const isInbound = !isOutbound;
 
     if (isOutbound) {
-      // For outbound movements, pick the batch with the earliest expiry (FEFO)
-      // that has sufficient remaining_quantity. Fall back to any batch with stock.
-      const fefoResult = await client.query(
-        `SELECT id, product_id, batch_number, remaining_quantity, cost_price
-         FROM inventory_batches
-         WHERE product_id = $1 AND status = 'ACTIVE' AND remaining_quantity > 0
-         ORDER BY expiry_date ASC NULLS LAST, created_at ASC
-         LIMIT 1
-         FOR UPDATE`,
-        [params.productId]
-      );
-
-      if (fefoResult.rows.length > 0) {
-        return fefoResult.rows[0];
+      const lots = await loadGlobalSelectableLots(client, params.productId, { forUpdate: true });
+      if (lots.length > 0) {
+        const first = lots[0];
+        return {
+          id: first.lotId,
+          product_id: params.productId,
+          batch_number: first.lotNumber,
+          remaining_quantity: first.remainingQuantity,
+          cost_price: first.costPrice,
+        };
       }
-      // No batch with stock — fall through to MAIN batch creation below
-      // (will fail at validateResultingQuantity for outbound)
     }
 
     // For inbound movements (or outbound with zero stock), find or create MAIN batch
@@ -469,26 +486,18 @@ export class StockMovementHandler {
 
     if (result.rows.length > 0) {
       const batch = result.rows[0];
-      // Reactivate DEPLETED MAIN batch for inbound movements
       if (batch.status !== 'ACTIVE' && isInbound) {
-        await client.query(
-          `UPDATE inventory_batches SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-          [batch.id]
-        );
+        await postgresLotRepository.reactivateMasterBatch(client, batch.id);
         logger.info('Reactivated DEPLETED MAIN batch for inbound movement', {
           productId: params.productId,
           batchId: batch.id,
         });
-      } else if (batch.status !== 'ACTIVE') {
-        // Outbound on a depleted batch — fall through to create
-      } else {
+        return { ...batch, status: 'ACTIVE' };
+      } else if (batch.status === 'ACTIVE') {
         return batch;
       }
-      // Return the reactivated batch
-      if (isInbound) return { ...batch, status: 'ACTIVE' };
     }
 
-    // MAIN batch doesn't exist - create it atomically with ON CONFLICT
     const product = await client.query(
       'SELECT p.name, pv.cost_price FROM products p LEFT JOIN product_valuation pv ON pv.product_id = p.id WHERE p.id = $1',
       [params.productId]
@@ -499,23 +508,21 @@ export class StockMovementHandler {
     }
 
     const costPrice = product.rows[0].cost_price || 0;
-
-    result = await client.query(
-      `INSERT INTO inventory_batches 
-       (product_id, batch_number, quantity, remaining_quantity, cost_price, received_date, status)
-       VALUES ($1, 'MAIN', 0, 0, $2, CURRENT_TIMESTAMP, 'ACTIVE')
-       ON CONFLICT (product_id, batch_number) DO UPDATE 
-       SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
-       RETURNING id, product_id, batch_number, remaining_quantity, cost_price`,
-      [params.productId, costPrice]
-    );
+    const mainLot = await postgresLotRepository.ensureMainBatch(client, params.productId, costPrice);
 
     logger.info('Created/reactivated MAIN batch for product', {
       productId: params.productId,
-      batchId: result.rows[0].id,
+      batchId: mainLot.id,
     });
 
-    return result.rows[0];
+    return {
+      id: mainLot.id,
+      product_id: mainLot.productId,
+      batch_number: mainLot.lotNumber,
+      remaining_quantity: mainLot.remainingQuantity,
+      cost_price: mainLot.costPrice,
+      status: mainLot.status,
+    };
   }
 
   /**

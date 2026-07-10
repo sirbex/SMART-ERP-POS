@@ -6,6 +6,7 @@ import { inventoryService } from './inventoryService.js';
 import { inventoryRepository } from './inventoryRepository.js';
 import { inventoryLedgerRepository } from './inventoryLedgerRepository.js';
 import { validateExpiryEdit } from './batchExpiryGovernanceService.js';
+import { correctLotExpiry } from '../inventory-lot/lotService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
@@ -710,19 +711,14 @@ inventoryRoutes.patch(
       body.reason
     );
 
-    // Atomic update + audit (single transaction)
+    // Atomic update + audit via LotService (master + projection sync)
     await UnitOfWork.run(pool, async (client) => {
-      await inventoryRepository.updateBatchExpiry(client, id, validated.newExpiryDate);
-      await inventoryRepository.createExpiryAuditRecord(client, {
-        batchId: validated.batchId,
-        batchNumber: validated.batchNumber,
-        productId: batch.product_id as string,
-        productName: batch.product_name as string,
-        oldExpiryDate: validated.oldExpiryDate,
+      await correctLotExpiry(client, {
+        lotId: id,
         newExpiryDate: validated.newExpiryDate,
-        changedById: validated.userId,
-        changedByName: validated.userName,
         reason: validated.reason,
+        userId: validated.userId,
+        userName: validated.userName,
         ipAddress: req.ip ?? null,
       });
     });

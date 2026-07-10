@@ -1,0 +1,107 @@
+# Inventory UX Gates — Proof
+
+- **Date:** 2026-07-05T19:10:15.913Z
+- **API:** http://localhost:3001
+
+- **PASS** formatQuantity + warehouseNetworkUtils tests
+- **PASS** Group labels defined
+- **PASS** More items have descriptions
+- **PASS** Inventory Reports link to /reports
+- **PASS** groupInventoryMoreNav helper
+- **PASS** Layout uses grouped More menu
+- **PASS** Layout shows active More page on button
+- **PASS** Dropdown header explains purpose
+- **PASS** PO on primary nav
+- **PASS** PO removed from More menu
+- **PASS** Transfers off primary nav
+- **PASS** Transfers in STORE_NETWORK_NAV
+- **PASS** Stock counts in STORE_NETWORK_NAV
+- **PASS** Stock counts off primary nav (multistore only)
+- **PASS** Store network route prefixes defined
+- **PASS** Transfers route in store network section
+- **PASS** StoreNetworkSection wraps sub-nav
+- **PASS** App routes use StoreNetworkSection
+- **PASS** Store network sub-nav RBAC filtered
+- **PASS** ModalContainer delegates to SlideDrawer
+- **PASS** PO page uses SlideDrawer
+- **PASS** GR page uses SlideDrawer
+- **PASS** Adjustments page uses SlideDrawer
+- **PASS** Batch management uses SlideDrawer
+- **PASS** PO details no longer centered modal
+- **PASS** Adjust modal no longer narrow centered dialog
+- **PASS** Batch details no longer centered modal
+- **PASS** InventoryLayout filters More menu by permissions
+- **PASS** Shared warehouse RBAC keys
+- **PASS** Cashier path guard component
+- **PASS** Cashier lockdown blocks warehouse routes
+- **PASS** Cashier guard wraps authenticated routes
+- **PASS** Transfer list API requires transfer permissions
+- **PASS** Store locations API requires warehouse permissions
+- **PASS** Inventory nav items declare required permissions
+- **PASS** Stock levels store filter gated by warehouse RBAC
+- **PASS** Products page store filter gated by warehouse RBAC
+- **PASS** Products page reuses stock view mode toggle (SSOT)
+- **PASS** Products page reuses store location select (SSOT)
+- **PASS** Products by-store view uses stock levels API (SSOT)
+- **PASS** Workflow help icon popover component (SSOT)
+- **PASS** PO page workflow help uses icon popover
+- **PASS** PO page no longer shows inline workflow reading panel
+- **PASS** Purchase Orders: ℹ icon directly beside page h2 title
+- **PASS** Movement History: ℹ icon directly beside page h2 title
+- **PASS** Batch Management: ℹ icon directly beside page h2 title
+- **PASS** Adjustments & Stock Count: ℹ icon directly beside page h2 title
+- **PASS** Supplier Management: ℹ icon directly beside page h2 title
+- **PASS** BusinessRulesInfo delegates to WorkflowHelpTrigger (modal rules icon)
+- **PASS** PO create/edit modal: rules icon top-right of form
+- **PASS** Manual GR modal: rules icon top-right of dialog header
+- **PASS** Icon button has accessible aria-label
+- **PASS** Popover dismisses on outside click (Radix)
+- **PASS** Renders Lucide Info (ℹ) icon — 32×32px blue circle
+- **PASS** PurchaseOrdersPage.tsx: no bottom inline reading panel
+- **PASS** StockMovementsPage.tsx: no bottom inline reading panel
+- **PASS** BatchManagementPage.tsx: no bottom inline reading panel
+- **PASS** InventoryAdjustmentsPage.tsx: no bottom inline reading panel
+- **PASS** SuppliersPage.tsx: no bottom inline reading panel
+- **PASS** Adjustments manual submit sends storeLocationId (UI E2E parity)
+- **PASS** Assortment API includes productUomsJsonSql
+- **PASS** Assortment cells include availableQty
+- **PASS** AssortmentMatrixCell type has availableQty
+- **PASS** Assortment UI shows UoM summary column
+- **PASS** Assortment UI formats cell qty with MUoM
+- **PASS** Store dashboard uses MUoM formatter or API quantityLabel
+- **PASS** Request-only outlet workflow helper
+- **PASS** Store dashboard defaults to Inventory Overview tab
+- **PASS** Store dashboard has current inventory panel
+- **PASS** Store dashboard KPIs include outgoing transfers
+- **PASS** Stock levels uses API uoms fallback
+- **PASS** Special stores hidden when zero qty
+- **PASS** Store map uses stock filter for special stores
+- **PASS** test:warehouse-network
+- **PASS** Login
+- **PASS** GET assortment-matrix
+- **PASS** rows array
+- **PASS** store columns — count=3
+- **PASS** row has uoms field
+- **PASS** uoms is array or null — type=object
+- **PASS** row has cells
+- **PASS** cell.availableQty is number — 495
+- **PASS** cell status valid — ACTIVE
+- **PASS** Cashier RBAC lacks inventory.transfer.request
+- **PASS** Cashier RBAC lacks inventory.transfer.approve
+- **PASS** Cashier RBAC lacks inventory.transfer.dispatch
+- **PASS** Cashier RBAC lacks inventory.transfer.direct
+- **PASS** Cashier RBAC lacks inventory.transfer.override
+- **PASS** Cashier RBAC lacks inventory.approve
+- **PASS** Cashier RBAC lacks inventory.manage
+- **PASS** Cashier RBAC retains pos.read
+- **PASS** Cashier cannot list store locations — 403
+- **PASS** Cashier cannot list store transfers — 403
+- **PASS** Cashier cannot read transfer capabilities — 403
+- **PASS** Cashier can read POS stock visibility — 200
+
+## Summary
+
+- **Passed:** 95
+- **Failed:** 0
+
+**RESULT: PASS**

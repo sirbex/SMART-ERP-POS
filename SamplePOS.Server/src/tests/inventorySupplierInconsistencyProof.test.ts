@@ -277,13 +277,11 @@ describe('PROOF: Inventory × Supplier inconsistency audit', () => {
       expect(server).not.toContain('supplierModule');
     });
 
-    it('L02: lot-based GRN uses warehouseGrnService as authorized receipt path', () => {
+    it('L02: lot-based GRN uses LotService.receiveLot as authorized receipt path', () => {
       const handler = src('src/modules/inventory/stockMovementHandler.ts');
-      expect(handler).toContain('warehouseGrnService');
       expect(handler).toContain('goodsReceiptService.finalizeGR');
       const gr = src('src/modules/goods-receipts/goodsReceiptService.ts');
-      expect(gr).toContain('warehouseGrnService.postReceiptSegment');
-      expect(gr).toContain('inventoryRepository.createBatch');
+      expect(gr).toContain('lotService.receiveLot');
     });
 
     it('L03: supplier invoice list GET requires suppliers.read', () => {

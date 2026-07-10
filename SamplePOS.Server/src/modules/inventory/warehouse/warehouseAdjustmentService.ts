@@ -6,6 +6,7 @@ import type { StockMovementType } from '../stockMovementHandler.js';
 import { getBusinessYear } from '../../../utils/dateRange.js';
 import { isMultistoreEnabled } from './multistoreSettings.js';
 import { storeLocationRepository } from './storeLocationRepository.js';
+import { ensureProjectionFromMaster, lotService } from '../../inventory-lot/lotService.js';
 import { productLotRepository } from './productLotRepository.js';
 import { warehouseInventoryRepository } from './warehouseInventoryRepository.js';
 import { pool as defaultPool } from '../../../db/pool.js';
@@ -73,6 +74,8 @@ async function resolveDefaultStoreId(conn: PoolClient): Promise<string> {
 async function resolveProductLotForAdjustment(
     client: PoolClient,
     params: StoreAdjustmentParams,
+    documentId?: string,
+    resolvedUnitCost?: number,
 ): Promise<string> {
     if (params.productLotId) {
         return params.productLotId;
@@ -100,6 +103,9 @@ async function resolveProductLotForAdjustment(
         params.storeLocationId,
         params.productId,
         params.batchId,
+        params.userId,
+        documentId,
+        resolvedUnitCost,
     );
 }
 
@@ -135,6 +141,9 @@ async function resolveOrCreateLotForIncrease(
     storeLocationId: string,
     productId: string,
     batchId?: string,
+    userId?: string,
+    documentId?: string,
+    resolvedUnitCost?: number,
 ): Promise<string> {
     const existingAtStore = await client.query<{ product_lot_id: string }>(
         `SELECT ib.product_lot_id
@@ -163,15 +172,58 @@ async function resolveOrCreateLotForIncrease(
     );
 
     const batch = batchResult.rows[0];
-    const lot = await productLotRepository.upsertLot(client, {
-        productId,
-        lotNumber: batch?.batch_number ?? 'MAIN',
-        costPrice: batch ? parseFloat(batch.cost_price) : 0,
-        inventoryBatchId: batch?.id ?? null,
-        status: 'ACTIVE',
-    });
+    if (!batch) {
+        if (!userId) {
+            throw new ValidationError('No inventory batch found to link adjustment lot');
+        }
 
-    return lot.id;
+        const created = await lotService.receiveLot(client, {
+            productId,
+            lotNumber: `ADJ-${(documentId ?? Date.now().toString()).slice(0, 12)}`,
+            quantity: 0,
+            costPrice: resolvedUnitCost && resolvedUnitCost > 0 ? resolvedUnitCost : 0,
+            attributes: {
+                receivedDate: new Date().toISOString().slice(0, 10),
+                expiryDate: null,
+            },
+            sourceType: 'ADJUSTMENT',
+            targetStoreLocationId: storeLocationId,
+            userId,
+        });
+
+        const createdProjectionId = await ensureProjectionFromMaster(client, created.id);
+        if (!createdProjectionId) {
+            throw new ValidationError('Failed to create lot projection for adjustment');
+        }
+        return createdProjectionId;
+    }
+
+    const productLotId = await ensureProjectionFromMaster(client, batch.id);
+    if (!productLotId) {
+        throw new ValidationError('Failed to sync lot projection from batch master');
+    }
+
+    return productLotId;
+}
+
+async function resolveIncreaseUnitCost(
+    client: PoolClient,
+    productId: string,
+    explicitUnitCost?: number,
+): Promise<number | undefined> {
+    if (explicitUnitCost && explicitUnitCost > 0) {
+        return explicitUnitCost;
+    }
+
+    const costRow = await client.query(
+        'SELECT cost_price FROM product_valuation WHERE product_id = $1',
+        [productId],
+    );
+    const dbCost = costRow.rows[0]?.cost_price;
+    if (dbCost && parseFloat(String(dbCost)) > 0) {
+        return parseFloat(String(dbCost));
+    }
+    return undefined;
 }
 
 function mapMovementType(
@@ -216,9 +268,35 @@ export const warehouseAdjustmentService = {
                 throw new ValidationError('Selected store is not active');
             }
 
+            let documentId = params.documentId;
+            if (!documentId) {
+                const year = getBusinessYear();
+                const seqResult = await client.query(`SELECT nextval('adj_doc_seq') AS seq`);
+                const seq = String(seqResult.rows[0].seq).padStart(5, '0');
+                const documentNumber = `ADJ-${year}-${seq}`;
+
+                const docResult = await client.query(
+                    `INSERT INTO inventory_adjustment_documents (document_number, reason, notes, created_by)
+                     VALUES ($1, $2, $3, $4)
+                     RETURNING id`,
+                    [documentNumber, params.reason, params.notes, params.userId],
+                );
+                documentId = docResult.rows[0].id as string;
+            }
+
+            const resolvedIncomingUnitCost =
+                params.direction === 'IN'
+                    ? await resolveIncreaseUnitCost(client, params.productId, params.unitCost)
+                    : params.unitCost;
+
             await alignBatchSubledgerToStoreBalances(client, params.productId);
 
-            const productLotId = await resolveProductLotForAdjustment(client, params);
+            const productLotId = await resolveProductLotForAdjustment(
+                client,
+                params,
+                documentId,
+                resolvedIncomingUnitCost,
+            );
 
             const lot = await productLotRepository.getById(client, productLotId);
             if (!lot || lot.productId !== params.productId) {
@@ -234,22 +312,6 @@ export const warehouseAdjustmentService = {
                 throw new ValidationError(
                     'Selected batch does not match the store lot for this adjustment',
                 );
-            }
-
-            let documentId = params.documentId;
-            if (!documentId) {
-                const year = getBusinessYear();
-                const seqResult = await client.query(`SELECT nextval('adj_doc_seq') AS seq`);
-                const seq = String(seqResult.rows[0].seq).padStart(5, '0');
-                const documentNumber = `ADJ-${year}-${seq}`;
-
-                const docResult = await client.query(
-                    `INSERT INTO inventory_adjustment_documents (document_number, reason, notes, created_by)
-                     VALUES ($1, $2, $3, $4)
-                     RETURNING id`,
-                    [documentNumber, params.reason, params.notes, params.userId],
-                );
-                documentId = docResult.rows[0].id as string;
             }
 
             // DAMAGE quarantine = internal store transfer only. Batch total and GL stay unchanged
@@ -300,13 +362,15 @@ export const warehouseAdjustmentService = {
                 };
             }
 
-            await warehouseInventoryRepository.adjustSellableQuantity(client, {
-                storeLocationId: params.storeLocationId,
-                productLotId,
-                productId: params.productId,
-                quantity: params.quantity,
-                direction: params.direction,
-            });
+            if (params.direction === 'OUT') {
+                await warehouseInventoryRepository.adjustSellableQuantity(client, {
+                    storeLocationId: params.storeLocationId,
+                    productLotId,
+                    productId: params.productId,
+                    quantity: params.quantity,
+                    direction: params.direction,
+                });
+            }
 
             const movementType = mapMovementType(params.reason, params.direction);
             let referenceType = 'ADJ_DOC';
@@ -315,14 +379,7 @@ export const warehouseAdjustmentService = {
 
             let resolvedUnitCost = params.unitCost;
             if (movementType === 'ADJUSTMENT_IN' && (!resolvedUnitCost || resolvedUnitCost <= 0)) {
-                const costRow = await client.query(
-                    'SELECT cost_price FROM product_valuation WHERE product_id = $1',
-                    [params.productId],
-                );
-                const dbCost = costRow.rows[0]?.cost_price;
-                if (dbCost && parseFloat(String(dbCost)) > 0) {
-                    resolvedUnitCost = parseFloat(String(dbCost));
-                }
+                resolvedUnitCost = resolvedIncomingUnitCost;
             }
             if (
                 (movementType === 'DAMAGE' || movementType === 'EXPIRY') &&
@@ -342,6 +399,8 @@ export const warehouseAdjustmentService = {
                     movementType,
                     quantity: params.quantity,
                     unitCost: resolvedUnitCost,
+                    targetStoreLocationId:
+                        params.direction === 'IN' ? params.storeLocationId : undefined,
                     reason: `${params.reason}: ${params.notes} ${storeTag}`,
                     referenceType,
                     referenceId: documentId,

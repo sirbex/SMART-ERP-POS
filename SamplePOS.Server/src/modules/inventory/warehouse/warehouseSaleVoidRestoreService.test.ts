@@ -7,8 +7,8 @@ const mockMultistore = {
     isMultistoreEnabled: jest.fn<MockFn>(),
 };
 
-const mockWarehouseInventory = {
-    adjustSellableQuantity: jest.fn<MockFn>(),
+const mockLotService = {
+    returnLot: jest.fn<MockFn>(),
 };
 
 const mockInventorySync = {
@@ -16,8 +16,8 @@ const mockInventorySync = {
 };
 
 jest.unstable_mockModule('./multistoreSettings.js', () => mockMultistore);
-jest.unstable_mockModule('./warehouseInventoryRepository.js', () => ({
-    warehouseInventoryRepository: mockWarehouseInventory,
+jest.unstable_mockModule('../../inventory-lot/lotService.js', () => ({
+    lotService: mockLotService,
 }));
 jest.unstable_mockModule('../../../utils/inventorySync.js', () => mockInventorySync);
 
@@ -37,6 +37,7 @@ function mockClient(rows: Record<string, unknown>[] = []): PoolClient {
 describe('warehouseSaleVoidRestoreService', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+        mockLotService.returnLot.mockResolvedValue({ id: 'batch-1' });
     });
 
     it('returns false when multistore is disabled', async () => {
@@ -56,14 +57,13 @@ describe('warehouseSaleVoidRestoreService', () => {
         });
 
         expect(handled).toBe(false);
-        expect(mockWarehouseInventory.adjustSellableQuantity).not.toHaveBeenCalled();
+        expect(mockLotService.returnLot).not.toHaveBeenCalled();
     });
 
-    it('restores composite balance when store and lot trace exist', async () => {
+    it('restores via LotService.returnLot when store and lot trace exist', async () => {
         mockMultistore.isMultistoreEnabled.mockResolvedValue(true);
         const client = mockClient([
-            { product_id: 'p1' },
-            { inventory_batch_id: 'batch-1' },
+            { product_id: 'p1', inventory_batch_id: 'batch-1' },
             { movement_number: 'MOV-2026-0001' },
         ]);
 
@@ -81,14 +81,16 @@ describe('warehouseSaleVoidRestoreService', () => {
         });
 
         expect(handled).toBe(true);
-        expect(mockWarehouseInventory.adjustSellableQuantity).toHaveBeenCalledWith(
+        expect(mockLotService.returnLot).toHaveBeenCalledWith(
             client,
             expect.objectContaining({
-                storeLocationId: 'store-1',
-                productLotId: 'lot-1',
-                direction: 'IN',
+                productId: 'p1',
+                batchId: 'batch-1',
                 quantity: 3,
+                targetStoreLocationId: 'store-1',
+                referenceType: 'VOID',
             }),
         );
+        expect(mockInventorySync.syncProductQuantity).toHaveBeenCalledWith(client, 'p1');
     });
 });

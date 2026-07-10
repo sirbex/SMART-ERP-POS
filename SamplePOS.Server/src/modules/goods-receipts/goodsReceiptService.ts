@@ -12,7 +12,6 @@ import {
 } from './goodsReceiptRepository.js';
 import { purchaseOrderRepository, type CreatePOItemData } from '../purchase-orders/purchaseOrderRepository.js';
 import { linkInvoiceToGRNs } from '../supplier-payments/supplierPaymentRepository.js';
-import { inventoryRepository } from '../inventory/inventoryRepository.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import * as pricingService from '../../services/pricingService.js';
 import * as glEntryService from '../../services/glEntryService.js';
@@ -43,7 +42,7 @@ import { returnGrnRepository } from '../return-grn/returnGrnRepository.js';
 import { returnGrnPurchaseQuantityFromBase } from '../return-grn/returnGrnQuantity.js';
 import type { CorrectionEligibilityResult } from '../corrections/correctionEligibilityTypes.js';
 import { BusinessError, ValidationError } from '../../middleware/errorHandler.js';
-import { warehouseGrnService } from '../inventory/warehouse/warehouseGrnService.js';
+import { lotService, receiveOpeningLot } from '../inventory-lot/lotService.js';
 
 // Alert shape consumed by controller for finalize response
 export interface CostPriceChangeAlert {
@@ -582,7 +581,7 @@ export const goodsReceiptService = {
 
       const inventoryCouplingBefore = await captureInventoryCoupling(client);
 
-      // Inventory SSOT for lot-based GRN: createBatch + warehouseGrnService.postReceiptSegment.
+      // Inventory SSOT for lot-based GRN: LotService.receiveLot (master + projection + store allocation).
       // StockMovementHandler GOODS_RECEIPT targets MAIN-batch adjustments only and does not
       // support per-lot expiry, bonus splits, or multistore inventory_balances coupling.
 
@@ -695,29 +694,23 @@ export const goodsReceiptService = {
             }
           }
 
-          const batch = await inventoryRepository.createBatch(client, {
-            productId,
-            batchNumber,
-            quantity: baseQty,
-            expiryDate,
-            costPrice: baseCostPerUnit,
-            goodsReceiptId: gr.id,
-            goodsReceiptItemId: item.id ?? null,
-            purchaseOrderId: gr.purchaseOrderId ?? null,
-            purchaseOrderItemId: poItemId ?? null,
-            isBonus,
-          });
-
-          await warehouseGrnService.postReceiptSegment(client, {
+          const lot = await lotService.receiveLot(client, {
             productId,
             lotNumber: batchNumber,
             quantity: baseQty,
             costPrice: baseCostPerUnit,
-            expiryDate,
+            attributes: {
+              receivedDate: getBusinessDate(),
+              expiryDate,
+            },
+            sourceType: 'GOODS_RECEIPT',
             goodsReceiptId: gr.id,
-            inventoryBatchId: String((batch as { id: string }).id),
+            goodsReceiptItemId: item.id ?? null,
+            purchaseOrderId: gr.purchaseOrderId ?? null,
+            purchaseOrderItemId: poItemId ?? null,
             targetStoreLocationId: item.targetStoreLocationId ?? null,
             isBonus,
+            userId: receivedBy || 'system',
           });
 
           await syncProductQuantity(client, productId);
@@ -745,7 +738,7 @@ export const goodsReceiptService = {
             [
               movementNumber,
               productId,
-              batch.id,
+              lot.id,
               'GOODS_RECEIPT',
               baseQty,
               baseCostPerUnit,
@@ -1646,39 +1639,26 @@ export const goodsReceiptService = {
           item.batchNumber ||
           `IMP-INIT-${item.sku.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 40)}`;
 
-        // Upsert batch
-        const batchConflict =
-          duplicateStrategy === 'UPDATE'
-            ? `ON CONFLICT (product_id, batch_number) DO UPDATE SET
-                quantity = EXCLUDED.quantity,
-                remaining_quantity = EXCLUDED.remaining_quantity,
-                cost_price = EXCLUDED.cost_price,
-                expiry_date = COALESCE(EXCLUDED.expiry_date, inventory_batches.expiry_date)`
-            : `ON CONFLICT (product_id, batch_number) DO NOTHING`;
+        const openingReceive = await receiveOpeningLot(client, {
+          productId: item.productId,
+          lotNumber: batchNumber,
+          quantity: item.quantity,
+          costPrice: item.costPrice,
+          attributes: {
+            receivedDate: getBusinessDate(),
+            expiryDate: item.expiryDate ?? null,
+          },
+          sourceType: 'OPENING_BALANCE',
+          goodsReceiptId: gr.id,
+          duplicateStrategy,
+          userId,
+        });
 
-        const batchResult = await client.query(
-          `INSERT INTO inventory_batches (
-            product_id, batch_number, quantity, remaining_quantity,
-            cost_price, expiry_date, source_type, goods_receipt_id
-          ) VALUES ($1, $2, $3, $4, $5, $6, 'OPENING_BALANCE', $7)
-          ${batchConflict}
-          RETURNING id, remaining_quantity, cost_price`,
-          [
-            item.productId,
-            batchNumber,
-            item.quantity,
-            item.quantity,
-            item.costPrice,
-            item.expiryDate || null,
-            gr.id,
-          ]
-        );
+        if (openingReceive.skipped || !openingReceive.lot) continue;
 
-        if (batchResult.rows.length === 0) continue; // Skipped by DO NOTHING
-
-        const batch = batchResult.rows[0];
-        const batchQty = Money.parseDb(batch.remaining_quantity).toNumber();
-        const batchCost = Money.parseDb(batch.cost_price).toNumber();
+        const lot = openingReceive.lot;
+        const batchQty = lot.remainingQuantity;
+        const batchCost = lot.costPrice;
 
         // Compute value delta for GL posting
         const existingKey = `${item.productId}|${batchNumber}`;
@@ -1728,7 +1708,7 @@ export const goodsReceiptService = {
           [
             movementNumber,
             item.productId,
-            batch.id,
+            lot.id,
             Math.abs(qtyDelta),
             batchCost,
             gr.id,

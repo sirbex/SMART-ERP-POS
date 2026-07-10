@@ -37,9 +37,22 @@ jest.unstable_mockModule('../purchase-orders/purchaseOrderRepository.js', () => 
     },
 }));
 
+jest.unstable_mockModule('../inventory-lot/lotService.js', () => ({
+    lotService: {
+        receiveLot: jest.fn<MockFn>().mockResolvedValue({ id: 'batch1', lotNumber: 'BATCH-1', remainingQuantity: 10, costPrice: 5 }),
+        receiveOpeningLot: jest.fn<MockFn>().mockResolvedValue({
+            lot: { id: 'batch1', lotNumber: 'BATCH-1', remainingQuantity: 10, costPrice: 5 },
+            skipped: false,
+        }),
+    },
+    receiveOpeningLot: jest.fn<MockFn>().mockResolvedValue({
+        lot: { id: 'batch1', lotNumber: 'BATCH-1', remainingQuantity: 10, costPrice: 5 },
+        skipped: false,
+    }),
+}));
+
 jest.unstable_mockModule('../inventory/inventoryRepository.js', () => ({
     inventoryRepository: {
-        createBatch: jest.fn<MockFn>().mockResolvedValue({ id: 'batch1' }),
         updateProductInventory: jest.fn<MockFn>().mockResolvedValue(undefined),
     },
 }));
@@ -105,6 +118,8 @@ jest.unstable_mockModule('../inventory/warehouse/warehouseGrnService.js', () => 
         postReceiptSegment: jest.fn<MockFn>().mockResolvedValue(undefined),
     },
 }));
+
+// warehouseGrnService retained for legacy imports; finalizeGR uses lotService.receiveLot
 
 jest.unstable_mockModule('../products/uomService.js', () => ({
     resolveCanonicalProductUom: mockResolveCanonicalProductUom,

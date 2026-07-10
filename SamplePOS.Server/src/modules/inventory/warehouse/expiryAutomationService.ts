@@ -5,6 +5,7 @@ import { isMultistoreEnabled } from './multistoreSettings.js';
 import { storeLocationRepository } from './storeLocationRepository.js';
 import { warehouseInventoryRepository } from './warehouseInventoryRepository.js';
 import logger from '../../../utils/logger.js';
+import { lotService } from '../../inventory-lot/lotService.js';
 import { recordMovement } from '../../stock-movements/stockMovementRepository.js';
 import { syncProductQuantity } from '../../../utils/inventorySync.js';
 
@@ -201,12 +202,21 @@ export const expiryAutomationService = {
                         await syncProductQuantity(client, row.productId);
                     }
 
-                    await client.query(
-                        `UPDATE product_lots
-                         SET status = 'EXPIRED', updated_at = NOW()
-                         WHERE id = $1`,
-                        [row.productLotId],
-                    );
+                    if (row.inventoryBatchId) {
+                        await lotService.transitionLotStatus(client, {
+                            lotId: row.inventoryBatchId,
+                            newStatus: 'EXPIRED',
+                            reason: 'Expiry automation — sellable stock quarantined',
+                            userId,
+                        });
+                    } else {
+                        skipped.push(
+                            `${row.productName} / ${row.lotNumber}: orphan projection — no inventory_batch_id (INV-001)`,
+                        );
+                        logger.warn('Expiry automation skipped orphan projection', {
+                            productLotId: row.productLotId,
+                        });
+                    }
 
                     lines.push({
                         productLotId: row.productLotId,

@@ -2,16 +2,17 @@ import type { PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../../../middleware/errorHandler.js';
 import { Money } from '../../../utils/money.js';
-import { getBusinessYear } from '../../../utils/dateRange.js';
+import { getBusinessDate, getBusinessYear } from '../../../utils/dateRange.js';
 import { syncProductQuantity } from '../../../utils/inventorySync.js';
 import { posProductSearchService } from './posProductSearchService.js';
 import {
-    lockMultistoreBalancesForAllocation,
     previewMultistoreBalancesForAllocation,
     type PosAllocationLockRow,
 } from './posAllocationLockRepository.js';
-import { warehouseInventoryRepository } from './warehouseInventoryRepository.js';
 import { storeLocationRepository } from './storeLocationRepository.js';
+import { lotService } from '../../inventory-lot/lotService.js';
+import { loadStoreSelectableLots } from '../../inventory-lot/postgresLotSelector.js';
+import { selectLots } from '@shared/inventory-lot/index.js';
 
 export interface MultistoreSaleDeductionResult {
     storeLocationId: string;
@@ -42,35 +43,6 @@ export interface MultistoreStockDeductionParams {
     baseUomId?: string;
     conversionFactor?: string;
     movementSeqStart: number;
-}
-
-async function resolveLotBatchId(
-    client: PoolClient,
-    productLotId: string,
-): Promise<string | null> {
-    const res = await client.query<{ inventory_batch_id: string | null }>(
-        `SELECT inventory_batch_id FROM product_lots WHERE id = $1`,
-        [productLotId],
-    );
-    return res.rows[0]?.inventory_batch_id ?? null;
-}
-
-async function deductBatchQuantity(
-    client: PoolClient,
-    batchId: string,
-    qty: Decimal,
-): Promise<void> {
-    await client.query(
-        `UPDATE inventory_batches
-         SET remaining_quantity = remaining_quantity - $1,
-             status = CASE
-               WHEN remaining_quantity - $1 <= 0 THEN 'DEPLETED'::batch_status
-               ELSE status
-             END,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [qty.toFixed(4), batchId],
-    );
 }
 
 async function insertStockMovement(
@@ -196,82 +168,87 @@ export const warehouseSaleDeductionService = {
     },
 
     /**
-     * Deduct sellable stock at a store (SELLING for POS, MAIN for wholesale/DN) and mirror batch subledger.
+     * Deduct sellable stock at a store via LotService.consumeLot (store-scoped FEFO).
      */
     async deductAtStore(
         client: PoolClient,
         params: MultistoreStockDeductionParams,
     ): Promise<MultistoreSaleDeductionResult> {
-        const allocation = await lockMultistoreBalancesForAllocation(
-            client,
-            params.storeLocationId,
-            params.productId,
-            params.baseQty.toNumber(),
+        const minDaysRes = await client.query<{ min_days: string }>(
+            `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days FROM products WHERE id = $1`,
+            [params.productId],
         );
+        const minDaysBeforeExpiry = parseInt(minDaysRes.rows[0]?.min_days ?? '0', 10);
 
-        if (!allocation.sufficient) {
+        const selectableLots = await loadStoreSelectableLots(
+            client,
+            params.productId,
+            params.storeLocationId,
+            { forUpdate: true, minDaysBeforeExpiry },
+        );
+        const consumptionPlan = selectLots({
+            policy: 'FEFO',
+            lots: selectableLots,
+            quantity: params.baseQty.toNumber(),
+            businessDate: getBusinessDate(),
+            minDaysBeforeExpirySale: minDaysBeforeExpiry,
+        });
+
+        if (consumptionPlan.shortfall > 0.001) {
             throw new BusinessError(
                 `Not enough stock for "${params.productName}" at the selected store. ` +
-                    `Requested: ${params.baseQty.toFixed(2)}, Available: ${allocation.allocatedQuantity}.`,
+                    `Requested: ${params.baseQty.toFixed(2)}, Available: ${consumptionPlan.totalAllocated.toFixed(2)}.`,
                 'ERR_STOCK_001',
                 {
                     product: params.productName,
                     productId: params.productId,
                     requested: Money.toNumber(params.baseQty),
-                    available: allocation.allocatedQuantity,
+                    available: consumptionPlan.totalAllocated,
                 },
             );
         }
 
+        const consumeResult = await lotService.consumeLot(client, {
+            productId: params.productId,
+            quantity: params.baseQty.toNumber(),
+            storeLocationId: params.storeLocationId,
+            selectionPolicy: 'FEFO',
+            minDaysBeforeExpiry: minDaysBeforeExpiry,
+            referenceType: params.referenceType,
+            referenceId: params.referenceId,
+            userId: params.userId ?? 'system',
+            productName: params.productName,
+            recordMovement: false,
+            syncProduct: false,
+        });
+
         let movementSeq = params.movementSeqStart;
-        let actualBatchCost = new Decimal(0);
         let primaryProductLotId: string | null = null;
         let primaryBatchId: string | null = null;
 
-        for (const row of allocation.rows) {
-            if (!row.lotId || row.quantityAvailable <= 0) continue;
-
-            const qty = new Decimal(row.quantityAvailable);
-            const batchId = await resolveLotBatchId(client, row.lotId);
-
-            await warehouseInventoryRepository.adjustSellableQuantity(client, {
-                storeLocationId: params.storeLocationId,
-                productLotId: row.lotId,
-                productId: params.productId,
-                quantity: row.quantityAvailable,
-                direction: 'OUT',
-            });
-
-            if (batchId) {
-                await deductBatchQuantity(client, batchId, qty);
-            }
-
+        for (const layer of consumeResult.layers) {
             const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
             movementSeq++;
 
-            if (batchId) {
-                await insertStockMovement(client, {
-                    movementNumber,
-                    productId: params.productId,
-                    batchId,
-                    quantity: qty,
-                    unitCost: row.costPrice,
-                    movementType: params.movementType,
-                    referenceType: params.referenceType,
-                    referenceId: params.referenceId,
-                    notes: params.notes,
-                    userId: params.userId,
-                    enteredQty: params.enteredQty,
-                    baseUomId: params.baseUomId,
-                    conversionFactor: params.conversionFactor,
-                });
-            }
+            await insertStockMovement(client, {
+                movementNumber,
+                productId: params.productId,
+                batchId: layer.lotId,
+                quantity: new Decimal(layer.quantity),
+                unitCost: layer.costPrice,
+                movementType: params.movementType,
+                referenceType: params.referenceType,
+                referenceId: params.referenceId,
+                notes: params.notes,
+                userId: params.userId,
+                enteredQty: params.enteredQty,
+                baseUomId: params.baseUomId,
+                conversionFactor: params.conversionFactor,
+            });
 
-            actualBatchCost = actualBatchCost.plus(qty.times(row.costPrice));
-
-            if (!primaryProductLotId) {
-                primaryProductLotId = row.lotId;
-                primaryBatchId = batchId;
+            if (!primaryProductLotId && layer.productLotId) {
+                primaryProductLotId = layer.productLotId;
+                primaryBatchId = layer.lotId;
             }
         }
 
@@ -281,16 +258,12 @@ export const warehouseSaleDeductionService = {
             storeLocationId: params.storeLocationId,
             primaryProductLotId,
             primaryBatchId,
-            actualBatchCost,
-            movementCount: allocation.rows.length,
+            actualBatchCost: Money.parseDb(consumeResult.totalCost),
+            movementCount: consumeResult.layers.length,
             nextMovementSeq: movementSeq,
         };
     },
 
-    /**
-     * Deduct sellable stock at the POS selling store and mirror batch subledger + SALE movements.
-     * Must run inside the sale transaction (rows locked via FOR UPDATE).
-     */
     async deductForSaleLine(
         client: PoolClient,
         params: {

@@ -1,4 +1,8 @@
-/** GR expiry validation — product-driven (trackExpiry), never global. */
+/** GR expiry validation — delegates to shared/inventory-lot (ADR-002). */
+import {
+  requiresExpiryOnReceipt,
+  receiptExpirySatisfied,
+} from '@shared/inventory-lot/lotRules.js';
 
 export function grItemTrackExpiry(item: {
   trackExpiry?: boolean;
@@ -8,7 +12,7 @@ export function grItemTrackExpiry(item: {
 }
 
 export function grLineExpiryRequired(trackExpiry: boolean, receivedQty: number): boolean {
-  return trackExpiry && receivedQty > 0;
+  return requiresExpiryOnReceipt({ trackExpiry }, receivedQty);
 }
 
 export function grLineExpirySatisfied(
@@ -16,6 +20,5 @@ export function grLineExpirySatisfied(
   receivedQty: number,
   expiryDate?: string | null,
 ): boolean {
-  if (!grLineExpiryRequired(trackExpiry, receivedQty)) return true;
-  return !!(expiryDate && String(expiryDate).trim());
+  return receiptExpirySatisfied({ trackExpiry }, receivedQty, expiryDate ?? null);
 }

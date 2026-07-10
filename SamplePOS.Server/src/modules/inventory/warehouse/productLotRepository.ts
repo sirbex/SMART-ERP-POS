@@ -31,11 +31,11 @@ export const productLotRepository = {
     },
 
     /**
-     * UPSERT lot identity — prevents duplicate lot rows per product + lot_number.
+     * @deprecated Use LotService / postgresLotRepository.upsertProjection — projection writes are gateway-only.
      */
     async upsertLot(
-        conn: DbConn,
-        data: {
+        _conn: DbConn,
+        _data: {
             productId: string;
             lotNumber: string;
             expiryDate?: string | null;
@@ -47,33 +47,8 @@ export const productLotRepository = {
             notes?: string | null;
         },
     ): Promise<ProductLot> {
-        const result = await conn.query<ProductLotDbRow>(
-            `INSERT INTO product_lots (
-               product_id, lot_number, expiry_date, cost_price,
-               goods_receipt_id, inventory_batch_id, is_bonus, status, notes
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             ON CONFLICT (product_id, lot_number) DO UPDATE SET
-               expiry_date = COALESCE(EXCLUDED.expiry_date, product_lots.expiry_date),
-               cost_price = EXCLUDED.cost_price,
-               goods_receipt_id = COALESCE(EXCLUDED.goods_receipt_id, product_lots.goods_receipt_id),
-               inventory_batch_id = COALESCE(EXCLUDED.inventory_batch_id, product_lots.inventory_batch_id),
-               is_bonus = EXCLUDED.is_bonus,
-               status = EXCLUDED.status,
-               notes = COALESCE(EXCLUDED.notes, product_lots.notes),
-               updated_at = NOW()
-             RETURNING *`,
-            [
-                data.productId,
-                data.lotNumber,
-                data.expiryDate ?? null,
-                data.costPrice,
-                data.goodsReceiptId ?? null,
-                data.inventoryBatchId ?? null,
-                data.isBonus ?? false,
-                data.status ?? 'ACTIVE',
-                data.notes ?? null,
-            ],
+        throw new Error(
+            'productLotRepository.upsertLot is retired — use LotService.receiveLot or postgresLotRepository.upsertProjection',
         );
-        return normalizeProductLot(result.rows[0]);
     },
 };

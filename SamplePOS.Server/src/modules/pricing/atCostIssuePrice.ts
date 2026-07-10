@@ -9,6 +9,7 @@ import type { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
+import { loadGlobalSelectableLots } from '../inventory-lot/postgresLotSelector.js';
 
 export type CostingMethod = 'FIFO' | 'AVCO' | 'STANDARD';
 
@@ -120,33 +121,27 @@ export async function loadSaleFefoBatchesForIssue(
     options: LoadSaleFefoBatchesOptions = {},
 ): Promise<SaleFefoBatchRow[]> {
     const minDays = options.minDaysBeforeExpiry ?? 0;
-    const lockSql = options.forUpdate ? ' FOR UPDATE' : '';
 
-    let result: { rows: SaleFefoBatchRow[] };
+    let selectable = await loadGlobalSelectableLots(conn as PoolClient, productId, {
+        forUpdate: options.forUpdate,
+        minDaysBeforeExpiry: minDays,
+    });
 
-    if (minDays > 0) {
-        result = await conn.query<SaleFefoBatchRow>(
-            `SELECT id, remaining_quantity, expiry_date, cost_price
-             FROM inventory_batches
-             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
-               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE + $2 * INTERVAL '1 day')
-             ORDER BY expiry_date ASC NULLS LAST, received_date ASC${lockSql}`,
-            [productId, minDays],
-        );
-    } else {
-        result = { rows: [] };
+    if (!selectable.length && minDays > 0) {
+        selectable = await loadGlobalSelectableLots(conn as PoolClient, productId, {
+            forUpdate: options.forUpdate,
+            minDaysBeforeExpiry: 0,
+        });
     }
 
-    if (!result.rows.length) {
-        result = await conn.query<SaleFefoBatchRow>(
-            `SELECT id, remaining_quantity, expiry_date, cost_price
-             FROM inventory_batches
-             WHERE product_id = $1 AND remaining_quantity > 0 AND status = 'ACTIVE'
-               AND (expiry_date IS NULL OR expiry_date > CURRENT_DATE)
-             ORDER BY expiry_date ASC NULLS LAST, received_date ASC${lockSql}`,
-            [productId],
-        );
-    }
+    const result = {
+        rows: selectable.map((lot) => ({
+            id: lot.lotId,
+            remaining_quantity: String(lot.remainingQuantity),
+            cost_price: String(lot.costPrice),
+            expiry_date: lot.expiryDate ?? null,
+        })),
+    };
 
     const sellingFactor = await getProductMaxSellingFactor(conn, productId);
     const normalized = normalizeLegacyFefoBatchRows(

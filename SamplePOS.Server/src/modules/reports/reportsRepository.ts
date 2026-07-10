@@ -5,6 +5,7 @@ import { Pool } from 'pg';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
 import { toUtcRange, BUSINESS_TIMEZONE, formatDateBusiness, getBusinessDate } from '../../utils/dateRange.js';
+import { computeDaysUntilExpiry } from '../inventory-lot/lotReportHelpers.js';
 import { demandForecastRepository, type ProductDemandStats } from './demandForecastRepository.js';
 import { classifyReorderPriority } from './reorderDashboardLogic.js';
 import { poItemOpenQuantitySql } from '../purchase-orders/purchaseOrderNetReceived.js';
@@ -849,7 +850,6 @@ export const reportsRepository = {
         b.batch_number,
         b.expiry_date,
         b.cost_price as unit_cost,
-        (b.expiry_date - CURRENT_DATE) as days_until_expiry,
         b.remaining_quantity as quantity_remaining
       FROM inventory_batches b
       INNER JOIN products p ON p.id = b.product_id
@@ -873,7 +873,7 @@ export const reportsRepository = {
         productName: row.product_name,
         batchNumber: row.batch_number,
         expiryDate: formatDateOnly(row.expiry_date),
-        daysUntilExpiry: row.days_until_expiry,
+        daysUntilExpiry: computeDaysUntilExpiry(row.expiry_date),
         quantityRemaining: quantityRemaining.toDecimalPlaces(3).toNumber(),
         unitCost: unitCost.toDecimalPlaces(2).toNumber(),
         potentialLoss: potentialLoss.toDecimalPlaces(2).toNumber(),
@@ -2922,11 +2922,7 @@ export const reportsRepository = {
         b.remaining_quantity * b.cost_price as total_value,
         b.received_date,
         CURRENT_DATE - b.received_date as days_in_stock,
-        b.expiry_date,
-        CASE 
-          WHEN b.expiry_date IS NOT NULL THEN b.expiry_date - CURRENT_DATE
-          ELSE NULL
-        END as days_until_expiry
+        b.expiry_date
       FROM inventory_batches b
       INNER JOIN products p ON p.id = b.product_id
       WHERE ${whereClause}
@@ -2947,7 +2943,7 @@ export const reportsRepository = {
       receivedDate: formatDate(row.received_date),
       daysInStock: parseInt(row.days_in_stock),
       expiryDate: formatDateOnly(row.expiry_date),
-      daysUntilExpiry: row.days_until_expiry !== null ? parseInt(row.days_until_expiry) : null,
+      daysUntilExpiry: computeDaysUntilExpiry(row.expiry_date),
     }));
   },
 
@@ -5472,8 +5468,7 @@ export const reportsRepository = {
         ib.remaining_quantity,
         ib.cost_price,
         ib.remaining_quantity * ib.cost_price AS exposed_value,
-        ib.status,
-        (ib.expiry_date - CURRENT_DATE) AS days_until_expiry
+        ib.status
       FROM inventory_batches ib
       JOIN products p ON p.id = ib.product_id
       LEFT JOIN product_uoms pu ON pu.product_id = p.id AND pu.is_default = TRUE
@@ -5497,7 +5492,7 @@ export const reportsRepository = {
       costPrice: new Decimal(row.cost_price || 0).toDecimalPlaces(2).toNumber(),
       exposedValue: new Decimal(row.exposed_value || 0).toDecimalPlaces(2).toNumber(),
       status: row.status,
-      daysUntilExpiry: parseInt(row.days_until_expiry) || 0,
+      daysUntilExpiry: computeDaysUntilExpiry(row.expiry_date) ?? 0,
     }));
   },
 };

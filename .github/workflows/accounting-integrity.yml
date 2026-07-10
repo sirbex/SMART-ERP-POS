@@ -70,6 +70,12 @@ jobs:
       - name: Posting path CI guardrails (Phase 1A)
         run: npm run ci:posting-guardrails
 
+      - name: Inventory lot domain CI guardrails (ADR-002)
+        run: npm run ci:inventory-lot-guardrails
+
+      - name: Inventory lot architecture fitness (Gate J)
+        run: npm run ci:inventory-lot-fitness
+
       - name: Accounting journal governance (Phase 1B + AR rules)
         working-directory: SamplePOS.Server
         run: npm run test:accounting-governance

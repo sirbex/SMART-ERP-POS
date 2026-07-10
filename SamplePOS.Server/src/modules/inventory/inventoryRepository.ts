@@ -1,6 +1,8 @@
 import { Pool, PoolClient } from 'pg';
 import { poItemNetReceivedQuantitySql, poItemOpenQuantitySql } from '../purchase-orders/purchaseOrderNetReceived.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { lotService } from '../inventory-lot/lotService.js';
+import { postgresLotRepository } from '../inventory-lot/postgresLotRepository.js';
 
 export interface InventoryBatch {
   id: string;
@@ -99,10 +101,19 @@ export const inventoryRepository = {
    * Accepts Pool or PoolClient to participate in caller's transaction
    */
   async updateBatchQuantity(pool: Pool | PoolClient, batchId: string, newQuantity: number): Promise<void> {
-    await pool.query(
-      'UPDATE inventory_batches SET remaining_quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-      [newQuantity, batchId]
+    const current = await pool.query<{ remaining_quantity: string }>(
+      'SELECT remaining_quantity FROM inventory_batches WHERE id = $1',
+      [batchId],
     );
+    if (current.rows.length === 0) {
+      throw new Error(`Batch ${batchId} not found`);
+    }
+    const delta = newQuantity - parseFloat(current.rows[0].remaining_quantity);
+    if (delta > 0.0001) {
+      await postgresLotRepository.increaseMasterRemainingQuantity(pool, batchId, delta);
+    } else if (delta < -0.0001) {
+      await postgresLotRepository.decrementMasterRemainingQuantity(pool, batchId, -delta);
+    }
   },
 
   /**
@@ -263,36 +274,33 @@ export const inventoryRepository = {
       }
 
       const batch = batchResult.rows[0] as InventoryBatch & { product_id: string; remaining_quantity: number };
-      const newQuantity = batch.remaining_quantity + adjustment;
+      const delta = adjustment;
 
-      if (newQuantity < 0) {
-        throw new Error(`Adjustment would result in negative quantity for batch ${batchId}`);
+      if (delta > 0) {
+        await lotService.returnLot(client, {
+          productId: batch.product_id,
+          batchId,
+          quantity: delta,
+          costPrice: 0,
+          referenceType: 'ADJUSTMENT',
+          referenceId: batchId,
+          notes: reason,
+          userId,
+        });
+      } else if (delta < 0) {
+        await lotService.consumeLot(client, {
+          productId: batch.product_id,
+          quantity: -delta,
+          specificLotId: batchId,
+          selectionPolicy: 'MANUAL',
+          recordMovement: false,
+          syncProduct: false,
+          referenceType: 'ADJUSTMENT',
+          referenceId: batchId,
+          userId,
+        });
       }
 
-      // Update batch
-      await client.query(
-        'UPDATE inventory_batches SET remaining_quantity = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
-        [newQuantity, batchId]
-      );
-
-      // Record stock movement
-      await client.query(
-        `INSERT INTO stock_movements (
-          product_id, batch_id, movement_type, quantity, reference_type, reference_id, notes, created_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          batch.product_id,
-          batchId,
-          adjustment > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
-          adjustment,
-          'ADJUSTMENT',
-          batchId,
-          reason,
-          userId,
-        ]
-      );
-
-      // Get updated batch
       const updatedResult = await client.query('SELECT * FROM inventory_batches WHERE id = $1', [
         batchId,
       ]);
@@ -344,33 +352,29 @@ export const inventoryRepository = {
       );
     }
 
-    const result = await pool.query(
-      `INSERT INTO inventory_batches (
-        product_id, batch_number, quantity, remaining_quantity,
-        expiry_date, cost_price, goods_receipt_id, goods_receipt_item_id,
-        purchase_order_id, purchase_order_item_id, is_bonus, source_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      RETURNING *`,
-      [
-        data.productId,
-        data.batchNumber,
-        data.quantity,
-        data.quantity,
-        data.expiryDate,
-        data.costPrice,
-        data.goodsReceiptId || null,
-        data.goodsReceiptItemId || null,
-        data.purchaseOrderId || null,
-        data.purchaseOrderItemId || null,
-        data.isBonus ?? false,
-        // Auto-populate source_type (replaces trg_prevent_ghost_batches)
-        data.goodsReceiptId ? 'GOODS_RECEIPT'
-          : data.adjustmentId ? 'STOCK_ADJUSTMENT'
-            : data.isOpeningBalance ? 'OPENING_BALANCE'
-              : 'DIRECT_ENTRY',
-      ]
-    );
-    return result.rows[0];
+    const result = await lotService.receiveLot(pool, {
+      productId: data.productId,
+      lotNumber: data.batchNumber,
+      quantity: data.quantity,
+      costPrice: data.costPrice,
+      attributes: {
+        receivedDate: new Date().toISOString().slice(0, 10),
+        expiryDate: data.expiryDate,
+      },
+      sourceType: data.goodsReceiptId
+        ? 'GOODS_RECEIPT'
+        : data.isOpeningBalance
+          ? 'OPENING_BALANCE'
+          : 'ADJUSTMENT',
+      goodsReceiptId: data.goodsReceiptId ?? null,
+      goodsReceiptItemId: data.goodsReceiptItemId ?? null,
+      purchaseOrderId: data.purchaseOrderId ?? null,
+      purchaseOrderItemId: data.purchaseOrderItemId ?? null,
+      isBonus: data.isBonus,
+      userId: 'system',
+    });
+    const row = await pool.query('SELECT * FROM inventory_batches WHERE id = $1', [result.id]);
+    return row.rows[0];
   },
 
   // ──────────────────────────────────────────────────────────────────
@@ -392,61 +396,6 @@ export const inventoryRepository = {
       [batchId]
     );
     return result.rows.length > 0 ? result.rows[0] : null;
-  },
-
-  /**
-   * Update expiry_date on a batch (inside a transaction).
-   * Uses FOR UPDATE to prevent concurrent edits.
-   */
-  async updateBatchExpiry(
-    client: PoolClient,
-    batchId: string,
-    newExpiryDate: string
-  ): Promise<void> {
-    await client.query('SELECT id FROM inventory_batches WHERE id = $1 FOR UPDATE', [batchId]);
-    await client.query(
-      `UPDATE inventory_batches SET expiry_date = $1, updated_at = NOW() WHERE id = $2`,
-      [newExpiryDate, batchId]
-    );
-  },
-
-  /**
-   * Insert a row into batch_expiry_audit (inside a transaction).
-   */
-  async createExpiryAuditRecord(
-    client: PoolClient,
-    data: {
-      batchId: string;
-      batchNumber: string;
-      productId: string;
-      productName: string;
-      oldExpiryDate: string | null;
-      newExpiryDate: string;
-      changedById: string;
-      changedByName: string;
-      reason: string;
-      ipAddress?: string | null;
-    }
-  ): Promise<void> {
-    await client.query(
-      `INSERT INTO batch_expiry_audit
-         (batch_id, batch_number, product_id, product_name,
-          old_expiry_date, new_expiry_date,
-          changed_by_id, changed_by_name, reason, ip_address)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [
-        data.batchId,
-        data.batchNumber,
-        data.productId,
-        data.productName,
-        data.oldExpiryDate ?? null,
-        data.newExpiryDate,
-        data.changedById,
-        data.changedByName,
-        data.reason,
-        data.ipAddress ?? null,
-      ]
-    );
   },
 
   /**

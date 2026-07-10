@@ -3,8 +3,8 @@ import Decimal from 'decimal.js';
 import { syncProductQuantity } from '../../../utils/inventorySync.js';
 import { getBusinessYear } from '../../../utils/dateRange.js';
 import { isMultistoreEnabled } from './multistoreSettings.js';
-import { warehouseInventoryRepository } from './warehouseInventoryRepository.js';
 import { posProductSearchService } from './posProductSearchService.js';
+import { lotService } from '../../inventory-lot/lotService.js';
 
 export interface VoidSaleRestoreParams {
     productId: string;
@@ -19,38 +19,9 @@ export interface VoidSaleRestoreParams {
     voidedById: string;
 }
 
-async function resolveLotBatchId(
-    client: PoolClient,
-    productLotId: string,
-): Promise<string | null> {
-    const res = await client.query<{ inventory_batch_id: string | null }>(
-        `SELECT inventory_batch_id FROM product_lots WHERE id = $1`,
-        [productLotId],
-    );
-    return res.rows[0]?.inventory_batch_id ?? null;
-}
-
-async function increaseBatchQuantity(
-    client: PoolClient,
-    batchId: string,
-    quantity: number,
-): Promise<void> {
-    await client.query(
-        `UPDATE inventory_batches
-         SET remaining_quantity = remaining_quantity + $1,
-             status = CASE
-               WHEN remaining_quantity + $1 > 0 THEN 'ACTIVE'::batch_status
-               ELSE status
-             END,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [quantity, batchId],
-    );
-}
-
 export const warehouseSaleVoidRestoreService = {
     /**
-     * Reverse a multistore sale deduction — restore sellable qty to the original store/lot.
+     * Reverse a multistore sale deduction — restore via LotService.returnLot (ADR-002 W21).
      * Returns true when the multistore path handled restoration (caller skips legacy batch restore).
      */
     async restoreVoidedSaleLine(
@@ -72,8 +43,8 @@ export const warehouseSaleVoidRestoreService = {
             return false;
         }
 
-        const lotCheck = await client.query<{ product_id: string }>(
-            `SELECT product_id FROM product_lots WHERE id = $1`,
+        const lotCheck = await client.query<{ product_id: string; inventory_batch_id: string | null }>(
+            `SELECT product_id, inventory_batch_id FROM product_lots WHERE id = $1`,
             [productLotId],
         );
         if (!lotCheck.rows[0] || lotCheck.rows[0].product_id !== params.productId) {
@@ -85,18 +56,22 @@ export const warehouseSaleVoidRestoreService = {
             return true;
         }
 
-        await warehouseInventoryRepository.adjustSellableQuantity(client, {
-            storeLocationId,
-            productLotId,
-            productId: params.productId,
-            quantity: qty.toNumber(),
-            direction: 'IN',
-        });
-
-        const batchId = params.batchId ?? (await resolveLotBatchId(client, productLotId));
-        if (batchId) {
-            await increaseBatchQuantity(client, batchId, qty.toNumber());
+        const batchId = params.batchId ?? lotCheck.rows[0].inventory_batch_id;
+        if (!batchId) {
+            return false;
         }
+
+        await lotService.returnLot(client, {
+            productId: params.productId,
+            batchId,
+            quantity: qty.toNumber(),
+            costPrice: params.unitCost,
+            targetStoreLocationId: storeLocationId,
+            referenceType: 'VOID',
+            referenceId: params.saleId,
+            notes: `Void sale ${params.saleNumber}: ${params.voidReason}`,
+            userId: params.voidedById,
+        });
 
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
         const movNumRes = await client.query<{ movement_number: string }>(

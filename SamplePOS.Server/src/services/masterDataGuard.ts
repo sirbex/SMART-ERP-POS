@@ -25,7 +25,10 @@ import { ValidationError, BusinessError } from '../middleware/errorHandler.js';
 import * as glEntryService from './glEntryService.js';
 import * as AccountingCore from './accountingCore.js';
 import logger from '../utils/logger.js';
-import { getBusinessDate } from '../utils/dateRange.js';
+import { Money } from '../utils/money.js';
+import { lotService } from '../modules/inventory-lot/lotService.js';
+import { postgresLotRepository } from '../modules/inventory-lot/postgresLotRepository.js';
+import { loadGlobalSelectableLots } from '../modules/inventory-lot/postgresLotSelector.js';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -418,17 +421,28 @@ export async function createOpeningStockEntry(
        WHERE movement_number LIKE 'OPST-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`,
         );
         const movementNumber = seqRes.rows[0]?.movement_number ?? `OPST-${new Date().getFullYear()}-0001`;
-
-        // 3. Create batch
         const today = getBusinessDate();
-        const batchRes = await client.query<{ id: string }>(
-            `INSERT INTO inventory_batches
-         (product_id, batch_number, quantity, cost_price, remaining_quantity, received_date, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $3, $5, 'ACTIVE', NOW(), NOW())
-       RETURNING id`,
-            [productId, movementNumber, quantity, unitCost, today],
-        );
-        const batchId = batchRes.rows[0].id;
+
+        const openingResult = await lotService.receiveOpeningLot(client, {
+            productId,
+            lotNumber: movementNumber,
+            quantity,
+            costPrice: unitCost,
+            attributes: {
+                receivedDate: today,
+                expiryDate: null,
+            },
+            sourceType: 'OPENING_BALANCE',
+            duplicateStrategy: 'FAIL',
+            userId,
+        });
+
+        if (openingResult.skipped || !openingResult.lot) {
+            throw new ValidationError(
+                `Opening stock lot ${movementNumber} already exists for this product`,
+            );
+        }
+        const batchId = openingResult.lot.id;
 
         // 4. Create stock_movement record
         const movRes = await client.query<{ id: string }>(

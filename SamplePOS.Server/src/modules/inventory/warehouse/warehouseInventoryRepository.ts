@@ -5,7 +5,11 @@ import {
     type InventoryBalance,
     type InventoryBalanceDbRow,
 } from '../../../../../shared/types/warehouseNetwork.js';
-import { productLotRepository } from './productLotRepository.js';
+import {
+    getLotByIdWithClient,
+    getProductLotIdByBatchId,
+    postgresLotRepository,
+} from '../../inventory-lot/postgresLotRepository.js';
 
 export interface UpsertReceiptParams {
     storeLocationId: string;
@@ -44,17 +48,32 @@ export const warehouseInventoryRepository = {
         if (params.quantity <= 0) {
             throw new ValidationError('Receipt quantity must be positive');
         }
+        if (!params.inventoryBatchId) {
+            throw new ValidationError(
+                'upsertLotAndIncrementBalance requires inventoryBatchId — use LotService.receiveLot for new lots',
+            );
+        }
 
-        const lot = await productLotRepository.upsertLot(client, {
+        const master = await getLotByIdWithClient(client, params.inventoryBatchId);
+        if (!master || master.productId !== params.productId) {
+            throw new ValidationError('Inventory batch master not found for receipt segment');
+        }
+
+        await postgresLotRepository.upsertProjection(client, {
+            inventoryBatchId: params.inventoryBatchId,
             productId: params.productId,
             lotNumber: params.lotNumber,
-            expiryDate: params.expiryDate,
+            expiryDate: master.attributes.expiryDate,
             costPrice: params.costPrice,
             goodsReceiptId: params.goodsReceiptId,
-            inventoryBatchId: params.inventoryBatchId,
             isBonus: params.isBonus,
             status: 'ACTIVE',
         });
+
+        const lotId = await getProductLotIdByBatchId(client, params.inventoryBatchId);
+        if (!lotId) {
+            throw new ValidationError('Product lot projection missing after receipt upsert');
+        }
 
         const balanceResult = await client.query<InventoryBalanceDbRow>(
             `INSERT INTO inventory_balances (
@@ -65,11 +84,11 @@ export const warehouseInventoryRepository = {
                product_id = EXCLUDED.product_id,
                updated_at = NOW()
              RETURNING *`,
-            [params.storeLocationId, params.productId, lot.id, params.quantity],
+            [params.storeLocationId, params.productId, lotId, params.quantity],
         );
 
         return {
-            lotId: lot.id,
+            lotId,
             balance: normalizeInventoryBalance(balanceResult.rows[0]),
         };
     },
@@ -135,6 +154,34 @@ export const warehouseInventoryRepository = {
                product_id = EXCLUDED.product_id${transferInSql},
                updated_at = NOW()`,
             [params.toStoreId, params.productId, params.productLotId, params.quantity],
+        );
+    },
+
+    /**
+     * Increment sellable quantity for an existing product_lot at a store.
+     */
+    async incrementBalanceAtStore(
+        client: PoolClient,
+        params: {
+            storeLocationId: string;
+            productId: string;
+            productLotId: string;
+            quantity: number;
+        },
+    ): Promise<void> {
+        if (params.quantity <= 0) {
+            throw new ValidationError('Receipt quantity must be positive');
+        }
+
+        await client.query(
+            `INSERT INTO inventory_balances (
+               store_location_id, product_id, product_lot_id, quantity_on_hand
+             ) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (store_location_id, product_lot_id) DO UPDATE SET
+               quantity_on_hand = inventory_balances.quantity_on_hand + EXCLUDED.quantity_on_hand,
+               product_id = EXCLUDED.product_id,
+               updated_at = NOW()`,
+            [params.storeLocationId, params.productId, params.productLotId, params.quantity],
         );
     },
 

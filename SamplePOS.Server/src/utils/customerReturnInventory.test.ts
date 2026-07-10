@@ -3,6 +3,7 @@ import type { PoolClient, QueryResult } from 'pg';
 
 const mockSyncProductQuantity = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
 const mockRecordMovement = jest.fn<() => Promise<{ id: string }>>().mockResolvedValue({ id: 'mov-1' });
+const mockReturnLot = jest.fn<() => Promise<{ id: string }>>();
 
 jest.unstable_mockModule('./inventorySync.js', () => ({
   syncProductQuantity: mockSyncProductQuantity,
@@ -10,6 +11,16 @@ jest.unstable_mockModule('./inventorySync.js', () => ({
 
 jest.unstable_mockModule('../modules/stock-movements/stockMovementRepository.js', () => ({
   recordMovement: mockRecordMovement,
+}));
+
+jest.unstable_mockModule('../modules/inventory-lot/lotService.js', () => ({
+  lotService: { returnLot: mockReturnLot },
+}));
+
+jest.unstable_mockModule('../modules/inventory/warehouse/warehouseReturnInventoryService.js', () => ({
+  warehouseReturnInventoryService: {
+    restoreCustomerReturn: jest.fn<() => Promise<null>>().mockResolvedValue(null),
+  },
 }));
 
 const { restoreInventoryForCustomerCreditNoteReturn } = await import('./customerReturnInventory.js');
@@ -20,9 +31,10 @@ describe('restoreInventoryForCustomerCreditNoteReturn', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockReturnLot.mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' });
   });
 
-  it('restores depleted sale batch and syncs on-hand (no ACTIVE batch)', async () => {
+  it('restores depleted sale batch via LotService.returnLot (legacy single-store)', async () => {
     const saleItemId = '11111111-1111-1111-1111-111111111111';
     const batchId = '22222222-2222-2222-2222-222222222222';
     const productId = '33333333-3333-3333-3333-333333333333';
@@ -39,16 +51,7 @@ describe('restoreInventoryForCustomerCreditNoteReturn', () => {
           rows: [{ batch_id: batchId, conversion_factor: '1', unit_cost: '45000' }],
         } as QueryResult;
       }
-      if (sql.includes('INSERT INTO product_inventory')) {
-        return { rows: [] } as QueryResult;
-      }
-      if (sql.includes('UPDATE inventory_batches') && sql.includes('remaining_quantity')) {
-        return { rows: [], rowCount: 1 } as QueryResult;
-      }
       if (sql.includes('INSERT INTO cost_layers')) {
-        return { rows: [] } as QueryResult;
-      }
-      if (sql.includes('UPDATE product_inventory') || sql.includes('UPDATE products')) {
         return { rows: [] } as QueryResult;
       }
       return { rows: [] } as QueryResult;
@@ -65,6 +68,16 @@ describe('restoreInventoryForCustomerCreditNoteReturn', () => {
 
     expect(result.baseQty).toBe(2);
     expect(result.batchId).toBe(batchId);
+    expect(mockReturnLot).toHaveBeenCalledWith(
+      client,
+      expect.objectContaining({
+        productId,
+        batchId,
+        quantity: 2,
+        costPrice: 45000,
+        referenceType: 'CREDIT_NOTE',
+      }),
+    );
     expect(mockSyncProductQuantity).toHaveBeenCalledWith(client, productId);
     expect(mockRecordMovement).toHaveBeenCalledWith(
       client,
@@ -75,11 +88,5 @@ describe('restoreInventoryForCustomerCreditNoteReturn', () => {
         quantity: 2,
       }),
     );
-
-    const batchUpdate = mockQuery.mock.calls.find(
-      (c) => typeof c[0] === 'string' && c[0].includes('UPDATE inventory_batches'),
-    );
-    expect(batchUpdate).toBeDefined();
-    expect(batchUpdate?.[1]).toEqual(expect.arrayContaining([2, batchId]));
   });
 });

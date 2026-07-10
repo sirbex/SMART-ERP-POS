@@ -129,24 +129,26 @@ async function fetchMultistoreSellableBalances(
            ib.quantity_on_hand,
            ib.quantity_reserved,
            ib.quantity_committed,
-           pl.cost_price,
-           pl.expiry_date,
+           bat.cost_price,
+           bat.expiry_date,
            pl.lot_number,
            pl.id AS product_lot_id
          FROM inventory_balances ib
          INNER JOIN product_lots pl ON pl.id = ib.product_lot_id
+         INNER JOIN inventory_batches bat ON bat.id = pl.inventory_batch_id
          INNER JOIN products p ON p.id = ib.product_id
          WHERE ib.store_location_id = $1
            AND ib.product_id = $2
            AND pl.status = 'ACTIVE'
+           AND bat.status = 'ACTIVE'
            AND NOT ib.blocked
            AND ib.quantity_on_hand > 0
-           AND (pl.expiry_date IS NULL OR pl.expiry_date > CURRENT_DATE)
+           AND (bat.expiry_date IS NULL OR bat.expiry_date > CURRENT_DATE)
            AND (
-             pl.expiry_date IS NULL
-             OR pl.expiry_date > CURRENT_DATE + COALESCE(p.min_days_before_expiry_sale, 0) * INTERVAL '1 day'
+             bat.expiry_date IS NULL
+             OR bat.expiry_date > CURRENT_DATE + COALESCE(p.min_days_before_expiry_sale, 0) * INTERVAL '1 day'
            )
-         ORDER BY pl.expiry_date ASC NULLS LAST, pl.received_date ASC${lockSql}`,
+         ORDER BY bat.expiry_date ASC NULLS LAST, bat.received_date ASC, pl.lot_number ASC${lockSql}`,
         [storeLocationId, productId],
     );
 }
