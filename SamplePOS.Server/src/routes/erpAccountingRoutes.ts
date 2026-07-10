@@ -47,6 +47,10 @@ import {
   captureFrameworkBaseline,
 } from '../modules/financial-reconciliation/reconciliationParityService.js';
 import {
+  getExceptionTrace,
+  getTraceJournalDetail,
+} from '../modules/financial-reconciliation/exceptionTraceService.js';
+import {
   getGovernanceDashboard,
   captureSnapshotWithAlerts,
   buildAuditEvidencePack,
@@ -1059,6 +1063,53 @@ router.get(
     const result = await reconciliationService.getFinancialHealthSummary(asOfDate as string);
     res.setHeader('X-Reconciliation-Framework', 'authoritative');
     return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/workspace/exceptions/:id/trace
+ * Phase 2D — document drill-down chain for a workspace exception inbox item.
+ */
+router.get(
+  '/workspace/exceptions/:id/trace',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { asOfDate } = req.query;
+    const pool = req.tenantPool || globalPool;
+    try {
+      const data = await getExceptionTrace(pool, id, asOfDate as string | undefined);
+      return res.json({ success: true, data });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Trace failed';
+      if (message.includes('Unknown exception') || message.includes('Invalid exception')) {
+        return res.status(400).json({ success: false, error: message });
+      }
+      if (message.includes('not found')) {
+        return res.status(404).json({ success: false, error: message });
+      }
+      if (message.includes('not yet supported')) {
+        return res.status(422).json({ success: false, error: message });
+      }
+      throw err;
+    }
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/workspace/journals/:transactionId
+ * Journal detail for exception trace expand.
+ */
+router.get(
+  '/workspace/journals/:transactionId',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const detail = await getTraceJournalDetail(pool, req.params.transactionId);
+    if (!detail) {
+      return res.status(404).json({ success: false, error: 'Journal not found' });
+    }
+    return res.json({ success: true, data: detail });
   }),
 );
 
