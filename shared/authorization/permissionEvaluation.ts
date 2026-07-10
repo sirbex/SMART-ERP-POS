@@ -4,7 +4,7 @@
  */
 
 import { legacyRoleGrantsPermission } from './legacyRoleFallback.js';
-import type { AuthorizationResult, AuthorizeInput, AuthorizationSubject, PolicyContext } from './types.js';
+import type { AuthorizationResult, AuthorizeInput, AuthorizationSubject } from './types.js';
 
 export function hasPermissionInSet(
   permissions: ReadonlySet<string>,

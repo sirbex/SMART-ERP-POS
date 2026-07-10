@@ -8,7 +8,6 @@ import {
     Scale,
     ShieldCheck,
 } from 'lucide-react';
-import { formatCurrency } from '../../utils/currency';
 
 export interface GlReviewTask {
     id: string;

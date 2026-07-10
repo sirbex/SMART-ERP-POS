@@ -74,6 +74,11 @@ export interface ILotRepository {
     batchId: string,
     quantity: number,
   ): Promise<InventoryLot>;
+
+  /** Ensure MAIN batch exists for legacy single-store adjustment flows. */
+  ensureMainBatch(client: unknown, productId: string, costPrice: number): Promise<InventoryLot>;
+
+  reactivateMasterBatch(client: unknown, batchId: string): Promise<void>;
 }
 
 export interface ILotAuditRepository {

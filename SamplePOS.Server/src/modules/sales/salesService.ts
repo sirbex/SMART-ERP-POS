@@ -1149,7 +1149,7 @@ export const salesService = {
       const actualBatchCostMap = new Map<string, Decimal>();
       const warehouseTraces = new Map<
         number,
-        { storeLocationId: string; productLotId: string | null; batchId: string | null }
+        { storeLocationId: string | null; productLotId: string | null; batchId: string | null }
       >();
 
       const inventoryCouplingBefore = await captureInventoryCoupling(client);
@@ -1336,7 +1336,6 @@ export const salesService = {
           logger.info(`Inventory batch deducted for product ${item.productId}`, {
             batchId: layer.lotId,
             quantity: qtyToDeduct.toFixed(4),
-            expiryDate: layer.expiryDate,
           });
         }
 

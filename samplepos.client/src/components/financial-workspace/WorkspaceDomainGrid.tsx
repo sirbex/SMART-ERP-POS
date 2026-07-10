@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ChevronRight, FileBarChart } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import type { WorkspaceDomainCard } from '../../lib/financialWorkspace';
 import { TONE_STYLES } from '../../lib/financialBusinessLabels';
 

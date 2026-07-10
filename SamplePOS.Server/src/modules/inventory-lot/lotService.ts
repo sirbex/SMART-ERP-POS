@@ -28,6 +28,7 @@ import { ValidationError } from '../../middleware/errorHandler.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import { recordMovement } from '../stock-movements/stockMovementRepository.js';
+import type { MovementType } from '../stock-movements/types.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { storeLocationRepository } from '../inventory/warehouse/storeLocationRepository.js';
 import { warehouseInventoryRepository } from '../inventory/warehouse/warehouseInventoryRepository.js';
@@ -541,7 +542,7 @@ export const lotService: ILotService = {
         await recordMovement(db, {
           productId: input.productId,
           batchId: layer.lotId,
-          movementType: input.movementType,
+          movementType: input.movementType as MovementType,
           quantity: layer.quantity,
           unitCost: layer.costPrice,
           referenceType: input.referenceType,

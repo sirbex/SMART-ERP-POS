@@ -31,6 +31,7 @@ function makeSummary(
                 asOfDate: '2026-07-05',
                 lastCalculated: '2026-07-05',
                 exceptions: [],
+                auditJournals: [],
             },
         ],
     };
@@ -74,7 +75,13 @@ describe('financialCloseChecklist', () => {
             readyToClose: true,
             asOfDate: '2026-07-05',
             canClosePeriod: true,
-            governance: { recentSnapshots: [{ asOfDate: '2026-07-05' } as never] },
+            governance: {
+                materiality: [],
+                latestSnapshot: null,
+                openAlerts: [],
+                pendingSignoffs: [],
+                recentSnapshots: [{ asOfDate: '2026-07-05' } as never],
+            },
         });
 
         const progress = checklistProgress(steps);

@@ -1,6 +1,6 @@
 import type { DomainLaneSummary } from '../types/financialLane';
 import type { GovernanceDashboard } from '../types/financialGovernance';
-import { cacheLane, domainNavigatePath, integrityLane } from './financialBusinessLabels';
+import { cacheLane, integrityLane } from './financialBusinessLabels';
 import { domainReconciliationPath, ledgerReviewPath, periodCloseWorkspacePath } from './financialWorkspaceRoutes';
 import type { ExceptionInboxItem } from './financialWorkspace';
 

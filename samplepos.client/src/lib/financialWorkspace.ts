@@ -3,7 +3,6 @@ import type { GovernanceDashboard } from '../types/financialGovernance';
 import { formatCurrency } from '../utils/currency';
 import {
     buildHealthCards,
-    buildWarnings,
     cacheLane,
     domainBusinessName,
     domainNavigatePath,
@@ -11,6 +10,7 @@ import {
     integrityLane,
     type HealthDomainCard,
 } from './financialBusinessLabels';
+import { domainReconciliationPath } from './financialWorkspaceRoutes';
 
 export type ExceptionDomain = FinancialDomain | 'cash' | 'gl' | 'bank';
 export type ExceptionPriority = 'high' | 'medium' | 'low';

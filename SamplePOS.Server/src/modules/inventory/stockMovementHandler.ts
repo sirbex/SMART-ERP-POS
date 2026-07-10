@@ -492,9 +492,21 @@ export class StockMovementHandler {
           productId: params.productId,
           batchId: batch.id,
         });
-        return { ...batch, status: 'ACTIVE' };
+        return {
+          id: batch.id,
+          product_id: batch.product_id,
+          batch_number: batch.batch_number,
+          remaining_quantity: batch.remaining_quantity,
+          cost_price: batch.cost_price,
+        };
       } else if (batch.status === 'ACTIVE') {
-        return batch;
+        return {
+          id: batch.id,
+          product_id: batch.product_id,
+          batch_number: batch.batch_number,
+          remaining_quantity: batch.remaining_quantity,
+          cost_price: batch.cost_price,
+        };
       }
     }
 
@@ -521,7 +533,6 @@ export class StockMovementHandler {
       batch_number: mainLot.lotNumber,
       remaining_quantity: mainLot.remainingQuantity,
       cost_price: mainLot.costPrice,
-      status: mainLot.status,
     };
   }
 

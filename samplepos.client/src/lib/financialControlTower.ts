@@ -9,7 +9,6 @@ import {
     domainReconciliationPath,
     exceptionWorkspacePath,
     ledgerReviewPath,
-    periodCloseWorkspacePath,
     type ReconWorkspaceKey,
 } from './financialWorkspaceRoutes';
 

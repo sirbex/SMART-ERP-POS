@@ -873,7 +873,7 @@ export const reportsRepository = {
         productName: row.product_name,
         batchNumber: row.batch_number,
         expiryDate: formatDateOnly(row.expiry_date),
-        daysUntilExpiry: computeDaysUntilExpiry(row.expiry_date),
+        daysUntilExpiry: computeDaysUntilExpiry(row.expiry_date) ?? 0,
         quantityRemaining: quantityRemaining.toDecimalPlaces(3).toNumber(),
         unitCost: unitCost.toDecimalPlaces(2).toNumber(),
         potentialLoss: potentialLoss.toDecimalPlaces(2).toNumber(),
