@@ -4,7 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useQuickLoginSettings, useTrustedDevices, getDeviceFingerprint } from '../../hooks/useQuickLogin';
 import type { TrustedDevice } from '../../hooks/useQuickLogin';
-import { useAuth } from '../../hooks/useAuth';
+import { useHasPermission } from '../../authorization/useAuthorization';
 import { toast } from 'react-hot-toast';
 
 export default function QuickLoginSettings() {
@@ -363,10 +363,9 @@ export default function QuickLoginSettings() {
 // ============================================================
 
 function TrustedDevicesSection() {
-    const { user } = useAuth();
-    const isAdmin = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+    const canManageTrustedDevices = useHasPermission('system.update');
 
-    if (!isAdmin) return null;
+    if (!canManageTrustedDevices) return null;
 
     return <TrustedDevicesManager />;
 }

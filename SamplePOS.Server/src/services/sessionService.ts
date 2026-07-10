@@ -5,6 +5,7 @@ import { pool as globalPool } from '../db/pool.js';
 import type pg from 'pg';
 import crypto from 'crypto';
 import { User } from '../../../shared/types/user.js';
+import { RbacService } from '../rbac/service.js';
 
 export interface UserSession {
   id: string;
@@ -133,8 +134,15 @@ export class SessionService {
       updatedAt: row.updated_at,
     };
 
-    // Get user permissions based on role
-    const permissions = this.getUserPermissions(user.role);
+    // Load effective RBAC permissions (empty set if RBAC unavailable)
+    let permissions: string[] = [];
+    try {
+      const rbac = new RbacService(pool);
+      const ctx = await rbac.buildAuthorizationContext(user.id);
+      permissions = Array.from(ctx.permissions);
+    } catch {
+      permissions = [];
+    }
 
     return {
       user,
@@ -282,52 +290,6 @@ export class SessionService {
    */
   private generateSessionToken(): string {
     return crypto.randomBytes(32).toString('hex');
-  }
-
-  /**
-   * Get user permissions based on role
-   */
-  private getUserPermissions(role: string): string[] {
-    // Define actions for each module to avoid repetition
-    const fullAccess = (module: string) => [`${module}:read`, `${module}:write`, `${module}:delete`];
-    const writeAccess = (module: string) => [`${module}:read`, `${module}:write`];
-    const readAccess = (module: string) => `${module}:read`;
-
-    const rolePermissions: Record<string, string[]> = {
-      ADMIN: [
-        ...fullAccess('users'),
-        ...fullAccess('products'),
-        ...fullAccess('sales'),
-        ...writeAccess('inventory'),
-        ...fullAccess('purchase_orders'),
-        ...fullAccess('customers'),
-        ...writeAccess('reports'),
-        readAccess('audit'),
-        ...writeAccess('settings')
-      ],
-      MANAGER: [
-        ...writeAccess('products'),
-        ...writeAccess('sales'),
-        ...writeAccess('inventory'),
-        ...writeAccess('purchase_orders'),
-        ...writeAccess('customers'),
-        readAccess('reports'),
-        readAccess('audit')
-      ],
-      CASHIER: [
-        readAccess('products'),
-        ...writeAccess('sales'),
-        readAccess('inventory'),
-        readAccess('customers'),
-        'customers.create'
-      ],
-      STAFF: [
-        readAccess('products'),
-        readAccess('inventory')
-      ]
-    };
-
-    return rolePermissions[role] || [];
   }
 
   /**

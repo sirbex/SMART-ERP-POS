@@ -6,7 +6,8 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
-import { authenticate, authorize } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { authRateLimit } from '../../middleware/security.js';
 import { asyncHandler, ValidationError, NotFoundError, ForbiddenError } from '../../middleware/errorHandler.js';
 import * as quickLoginService from './quickLoginService.js';
@@ -356,7 +357,7 @@ router.delete('/biometric', authenticate, asyncHandler(async (req: Request, res:
  * GET /api/auth/quick-login/devices
  * List all trusted devices (admin/manager only)
  */
-router.get('/devices', authenticate, authorize('ADMIN', 'MANAGER'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/devices', authenticate, requirePermission('system.update'), asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const devices = await quickLoginService.listTrustedDevices(pool);
     res.json({ success: true, data: devices });
@@ -366,7 +367,7 @@ router.get('/devices', authenticate, authorize('ADMIN', 'MANAGER'), asyncHandler
  * POST /api/auth/quick-login/devices
  * Register a new trusted device (admin/manager only)
  */
-router.post('/devices', authenticate, authorize('ADMIN', 'MANAGER'), asyncHandler(async (req: Request, res: Response) => {
+router.post('/devices', authenticate, requirePermission('system.update'), asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const data = RegisterDeviceSchema.parse(req.body);
     const device = await quickLoginService.registerDevice(pool, data, req.user!.id);
@@ -377,7 +378,7 @@ router.post('/devices', authenticate, authorize('ADMIN', 'MANAGER'), asyncHandle
  * PATCH /api/auth/quick-login/devices/:id/deactivate
  * Deactivate a trusted device (admin/manager only)
  */
-router.patch('/devices/:id/deactivate', authenticate, authorize('ADMIN', 'MANAGER'), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/devices/:id/deactivate', authenticate, requirePermission('system.update'), asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const success = await quickLoginService.deactivateDevice(pool, req.params.id);
     if (!success) throw new NotFoundError('Device not found');
@@ -388,7 +389,7 @@ router.patch('/devices/:id/deactivate', authenticate, authorize('ADMIN', 'MANAGE
  * PATCH /api/auth/quick-login/devices/:id/activate
  * Re-activate a trusted device (admin/manager only)
  */
-router.patch('/devices/:id/activate', authenticate, authorize('ADMIN', 'MANAGER'), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/devices/:id/activate', authenticate, requirePermission('system.update'), asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const success = await quickLoginService.activateDevice(pool, req.params.id);
     if (!success) throw new NotFoundError('Device not found');
@@ -403,7 +404,7 @@ router.patch('/devices/:id/activate', authenticate, authorize('ADMIN', 'MANAGER'
  * GET /api/auth/quick-login/audit
  * View quick login audit log (admin/manager only)
  */
-router.get('/audit', authenticate, authorize('ADMIN', 'MANAGER'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/audit', authenticate, requirePermission('system.update'), asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const limit = Math.min(Number(req.query.limit) || 50, 200);
     const userId = typeof req.query.userId === 'string' ? req.query.userId : undefined;

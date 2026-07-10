@@ -1,24 +1,8 @@
-import { useEffect } from 'react';
 import Layout from '../components/Layout';
-import { useAuth } from '../hooks/useAuth';
-import { useNavigate } from 'react-router-dom';
 import DataManagementTab from './settings/tabs/DataManagementTab';
 import { Database } from 'lucide-react';
 
 export default function AdminDataManagementPage() {
-  const { user } = useAuth();
-  const navigate = useNavigate();
-
-  // Redirect non-admin users
-  useEffect(() => {
-    if (user && user.role !== 'ADMIN') {
-      navigate('/dashboard');
-    }
-  }, [user, navigate]);
-
-  if (!user) return null;
-  if (user.role !== 'ADMIN') return null;
-
   return (
     <Layout>
       <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">

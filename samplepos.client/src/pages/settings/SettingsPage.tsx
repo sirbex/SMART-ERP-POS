@@ -9,18 +9,19 @@ import DataManagementTab from './tabs/DataManagementTab';
 import BrandingSettingsTab from './tabs/BrandingSettingsTab';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
 import GLIntegrityPanel from '../../components/GLIntegrityPanel';
-import { useAuth } from '../../hooks/useAuth';
+import { useHasPermission } from '../../authorization/useAuthorization';
 
 const VALID_TABS = ['invoice', 'company', 'users', 'system', 'branding', 'data', 'offline', 'gl-integrity'] as const;
 
 export default function SettingsPage() {
-  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get('tab');
   const initialTab = tabParam && (VALID_TABS as readonly string[]).includes(tabParam) ? tabParam : 'invoice';
   const [activeTab, setActiveTab] = useState(initialTab);
 
-  const canViewGLIntegrity = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+  const canReadAccounting = useHasPermission('accounting.read');
+  const canReconcileAccounting = useHasPermission('accounting.reconcile');
+  const canViewGLIntegrity = canReadAccounting || canReconcileAccounting;
 
   // Update tab if the URL search param changes (e.g. navigating from POS badge)
   useEffect(() => {

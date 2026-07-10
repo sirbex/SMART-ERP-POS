@@ -1377,19 +1377,6 @@ export const salesRepository = {
     return result.rows;
   },
 
-  /**
-   * Check if user has manager role (required for void approval)
-   */
-  async isManager(pool: Pool | PoolClient, userId: string): Promise<boolean> {
-    const result = await pool.query(`SELECT role FROM users WHERE id = $1`, [userId]);
-
-    if (result.rows.length === 0) {
-      return false;
-    }
-
-    const role = result.rows[0].role;
-    return role === 'ADMIN' || role === 'MANAGER';
-  },
 
   // ============================================================
   // REFUND OPERATIONS

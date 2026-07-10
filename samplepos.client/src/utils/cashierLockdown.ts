@@ -16,6 +16,7 @@ export function isCashierAllowedPath(pathname: string): boolean {
   if (pathname === '/pos' || pathname.startsWith('/pos/')) return true;
   if (pathname === '/customers' || pathname.startsWith('/customers/')) return true;
   if (pathname === '/sales' || pathname.startsWith('/sales/')) return true;
+  if (pathname === '/orders-queue') return true;
   if (/^\/orders\/[^/]+\/pay$/.test(pathname)) return true;
   if (pathname === '/my/quick-login') return true;
   return false;
@@ -40,6 +41,7 @@ export interface CashierNavItem {
 /** Minimal navigation for cashiers — POS workflow only. */
 export const CASHIER_NAV_ITEMS: CashierNavItem[] = [
   { name: 'Point of Sale', path: '/pos', icon: '🛒' },
+  { name: 'Orders Queue', path: '/orders-queue', icon: '📋' },
   { name: 'My Sales', path: '/sales', icon: '💰' },
   { name: 'Customers', path: '/customers', icon: '👥' },
 ];

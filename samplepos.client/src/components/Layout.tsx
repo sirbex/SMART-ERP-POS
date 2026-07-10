@@ -6,6 +6,7 @@ import { useTenant } from '../contexts/TenantContext';
 import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
 import ServerClock from './ServerClock';
 import { CASHIER_NAV_ITEMS, isCashierRole } from '../utils/cashierLockdown';
+import { legacyRoleGrantsPermission } from '@shared/authorization/legacyRoleFallback';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -32,7 +33,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems: NavItem[] = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊', color: 'text-blue-600' },
     { name: 'Point of Sale', path: '/pos', icon: '🛒', color: 'text-green-600', permissions: ['pos.read', 'pos.create'], feature: 'pos' },
-    { name: 'Orders Queue', path: '/orders-queue', icon: '📋', color: 'text-orange-600', permissions: ['orders.read'], feature: 'pos' },
+    { name: 'Orders Queue', path: '/orders-queue', icon: '📋', color: 'text-orange-600', permissions: ['orders.read', 'orders.pay'], feature: 'pos' },
     { name: 'Inventory', path: '/inventory', icon: '📦', color: 'text-purple-600', permissions: ['inventory.read'], feature: 'inventory' },
     { name: 'Customers', path: '/customers', icon: '👥', color: 'text-yellow-600', permissions: ['customers.read'], feature: 'customers' },
     { name: 'Suppliers', path: '/suppliers', icon: '🏢', color: 'text-indigo-600', permissions: ['suppliers.read'], feature: 'purchase_orders' },
@@ -54,9 +55,6 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Roles', path: '/admin/roles', icon: '🔐', color: 'text-pink-600', permissions: ['admin.update'] },
   ];
 
-  // Filter items: show if user has legacy role access OR RBAC permission
-  const isAdminOrManager = user?.role === 'ADMIN' || user?.role === 'MANAGER';
-
   const planFeatures = config.planFeatures ?? [];
 
   const allNavItems = useMemo(() => {
@@ -70,23 +68,20 @@ export default function Layout({ children }: LayoutProps) {
     }
 
     const items = [...navItems, ...adminNavItems];
+    const useLegacy = permissions.size === 0;
     return items.filter(item => {
-      // Plan feature gate — hide if plan doesn't include the feature
-      // While tenant config is loading, hide gated items to prevent flash
       if (item.feature) {
         if (tenantLoading) return false;
         if (planFeatures.length > 0 && !planFeatures.includes(item.feature)) return false;
       }
-      // Dashboard always visible
       if (!item.permissions) return true;
-      // Legacy role: ADMIN sees everything, MANAGER sees non-admin items
-      if (user?.role === 'ADMIN') return true;
-      if (isAdminOrManager && !adminNavItems.includes(item)) return true;
-      // RBAC check (synchronous from AuthContext)
       if (item.permissions.some(p => permissions.has(p))) return true;
+      if (useLegacy && item.permissions.some(p => legacyRoleGrantsPermission(user?.role, p))) {
+        return true;
+      }
       return false;
     });
-  }, [user?.role, permissions, isAdminOrManager, planFeatures, tenantLoading]);
+  }, [user?.role, permissions, planFeatures, tenantLoading]);
 
   const handleLogout = () => {
     logout();

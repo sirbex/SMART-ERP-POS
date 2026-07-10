@@ -1,7 +1,7 @@
 /**
  * @module InventoryAdjustmentsPage
  * @description Manual inventory adjustment interface - creates ADJUSTMENT_IN/ADJUSTMENT_OUT movements
- * @requires ADMIN or MANAGER role
+ * @requires inventory.adjust permission
  * @architecture Uses unified StockMovementHandler on backend
  * @note Audit trail view is in StockMovementsPage to avoid duplication
  *
@@ -23,6 +23,7 @@ import { useStockMovements } from '../../hooks/useStockMovements';
 import { BatchAdjustmentSchema } from '@shared/zod/inventory';
 import apiClient from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
+import { useHasPermission } from '../../authorization/useAuthorization';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
 import { getBusinessDate } from '../../utils/businessDate';
@@ -63,6 +64,8 @@ const formatDisplayDate = (dateString: string | null | undefined): string => {
 // Batch type from backend response
 interface Batch {
   id: string;
+  batch_id?: string;
+  product_lot_id?: string;
   product_id: string;
   product_name: string;
   batch_number: string;
@@ -236,10 +239,7 @@ export default function InventoryAdjustmentsPage() {
     }
   }, [showAdjustModal]);
 
-  // Check if user has ADMIN or MANAGER role
-  const canAdjust = useMemo(() => {
-    return currentUser && (currentUser.role === 'ADMIN' || currentUser.role === 'MANAGER');
-  }, [currentUser]);
+  const canAdjust = useHasPermission('inventory.adjust');
 
   const adjustmentStores = useMemo(
     () => stores.filter((s) => s.isActive && ['MAIN', 'SELLING', 'DAMAGE', 'EXPIRED', 'RETURN'].includes(s.storeType)),
@@ -251,6 +251,8 @@ export default function InventoryAdjustmentsPage() {
     if (isMultistoreEnabled && storeLots.length > 0) {
       return storeLots.map((lot) => ({
         id: lot.productLotId,
+        product_lot_id: lot.productLotId,
+        batch_id: undefined,
         product_id: lot.productId,
         product_name: lot.productName,
         batch_number: lot.lotNumber,
@@ -282,6 +284,8 @@ export default function InventoryAdjustmentsPage() {
         return [
           {
             id: level.product_id, // Placeholder — stock level rows have no real batch ID; real batches fetched on demand
+            batch_id: undefined,
+            product_lot_id: undefined,
             product_id: level.product_id,
             product_name: level.product_name,
             batch_number: level.sku || 'MAIN',
@@ -554,7 +558,7 @@ export default function InventoryAdjustmentsPage() {
   // Handle adjustment modal open — resolve a real inventory_batches row (FEFO) for GL/batch coupling
   const handleOpenAdjustModal = async (batch: Batch) => {
     if (!canAdjust) {
-      alert('You do not have permission to adjust inventory. ADMIN or MANAGER role required.');
+      alert('You do not have permission to adjust inventory. inventory.adjust permission required.');
       return;
     }
 
@@ -576,7 +580,7 @@ export default function InventoryAdjustmentsPage() {
       if (pick?.id) {
         resolved = {
           ...batch,
-          id: pick.id,
+          batch_id: pick.id,
           batch_number: pick.batch_number ?? batch.batch_number,
           remaining_quantity: Number(pick.remaining_quantity),
           cost_price: parseFloat(String(pick.cost_price ?? batch.cost_price ?? 0)),
@@ -630,9 +634,11 @@ export default function InventoryAdjustmentsPage() {
     try {
       const validatedData = BatchAdjustmentSchema.parse({
         batchId:
-          selectedBatch.id && selectedBatch.id !== selectedBatch.product_id
+          selectedBatch.batch_id
+          ?? (selectedBatch.id && selectedBatch.id !== selectedBatch.product_id && !selectedBatch.product_lot_id
             ? selectedBatch.id
-            : undefined,
+            : undefined),
+        productLotId: selectedBatch.product_lot_id,
         productId: selectedBatch.product_id,
         storeLocationId: isMultistoreEnabled ? adjustmentStoreId || undefined : undefined,
         quantity: qty,
@@ -797,7 +803,7 @@ export default function InventoryAdjustmentsPage() {
           <p className="text-yellow-800">
             You do not have permission to access inventory adjustments.
             <br />
-            Required role: <strong>ADMIN</strong> or <strong>MANAGER</strong>
+            Required permission: <strong>inventory.adjust</strong>
           </p>
         </div>
       </div>
@@ -819,7 +825,7 @@ export default function InventoryAdjustmentsPage() {
                 <li>• <strong>Physical Count:</strong> Compare physical stock vs system, auto-create adjustments for discrepancies</li>
                 <li>• All records create immutable stock movement entries for full audit trail</li>
                 <li>• View <strong>Movement History</strong> for the complete audit trail</li>
-                <li>• <strong>Role Required:</strong> ADMIN or MANAGER</li>
+                <li>• <strong>Permission Required:</strong> inventory.adjust</li>
               </ul>
             </WorkflowHelpTrigger>
           </div>

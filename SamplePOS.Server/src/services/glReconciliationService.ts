@@ -28,6 +28,7 @@ import { AccountingCore, AccountingError } from './accountingCore.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../utils/logger.js';
 import { getBusinessDate } from '../utils/dateRange.js';
+import { userHasPermission } from '../authorization/serviceAuth.js';
 
 // =============================================================================
 // TYPES
@@ -523,20 +524,20 @@ export class GLReconciliationService {
   }
 
   /**
-   * Validate that a posting date is allowed given lock dates and user role.
+   * Validate that a posting date is allowed given lock dates and user permissions.
    *
    * Odoo logic:
    * - Hard lock date: nobody can post (not even admin)
-   * - Advisor lock date: only users with advisor role can post
+   * - Advisor lock date: only users with accounting.period_manage can post
    */
   static async validatePostingDate(
     postingDate: string,
-    userRole: string,
-    dbPool?: pg.Pool
+    userId: string,
+    dbPool?: pg.Pool,
+    legacyRole?: string | null
   ): Promise<{ allowed: boolean; reason?: string }> {
     const config = await this.getLockDates(dbPool);
 
-    // Hard lock — blocks everyone
     if (config.hardLockDate && postingDate <= config.hardLockDate) {
       return {
         allowed: false,
@@ -544,13 +545,18 @@ export class GLReconciliationService {
       };
     }
 
-    // Advisor lock — blocks non-advisors
     if (config.advisorLockDate && postingDate <= config.advisorLockDate) {
-      const isAdvisor = ['ADMIN', 'ACCOUNTANT', 'ADVISOR'].includes(userRole.toUpperCase());
-      if (!isAdvisor) {
+      const pool = dbPool ?? globalPool;
+      const canPostInAdvisorPeriod = await userHasPermission(
+        pool,
+        userId,
+        'accounting.period_manage',
+        legacyRole
+      );
+      if (!canPostInAdvisorPeriod) {
         return {
           allowed: false,
-          reason: `Posting date ${postingDate} is before the advisor lock date (${config.advisorLockDate}). Only advisors can post.`,
+          reason: `Posting date ${postingDate} is before the advisor lock date (${config.advisorLockDate}). Requires accounting.period_manage permission.`,
         };
       }
     }

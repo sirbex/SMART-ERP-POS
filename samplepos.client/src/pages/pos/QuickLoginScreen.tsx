@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuickLogin, useTrustedDevices } from '../../hooks/useQuickLogin';
-import { useAuth } from '../../hooks/useAuth';
+import { useHasPermission } from '../../authorization/useAuthorization';
 import { toast } from 'react-hot-toast';
 
 // ============================================================
@@ -126,8 +126,7 @@ function PinInput({ length, onComplete, error, isLoading }: {
 // ============================================================
 
 function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLogin: () => void; onRegistered: () => void }) {
-    const { user } = useAuth();
-    const isAdmin = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+    const canManageTrustedDevices = useHasPermission('system.update');
     const { registerThisDevice, isLoading } = useTrustedDevices();
 
     const [showForm, setShowForm] = useState(false);
@@ -160,13 +159,13 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
                 </h2>
                 <p className="text-gray-600 dark:text-gray-400 mb-6">
                     Quick login is only available on trusted POS terminals.
-                    {isAdmin
+                    {canManageTrustedDevices
                         ? ' You can register this device below.'
                         : ' Ask an administrator to register this device.'}
                 </p>
 
                 {/* Admin self-registration */}
-                {isAdmin && !showForm && (
+                {canManageTrustedDevices && !showForm && (
                     <button
                         onClick={() => setShowForm(true)}
                         className="w-full px-6 py-3 bg-green-600 text-white rounded-xl font-medium
@@ -176,7 +175,7 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
                     </button>
                 )}
 
-                {isAdmin && showForm && (
+                {canManageTrustedDevices && showForm && (
                     <div className="text-left mb-4 space-y-3">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

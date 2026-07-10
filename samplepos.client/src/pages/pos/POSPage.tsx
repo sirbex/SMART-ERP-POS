@@ -86,6 +86,8 @@ import type { OfflineSaleData } from '../../hooks/useOfflineMode';
 import type { CreateSaleInput } from '../../types/inputs';
 import { syncOfflineCustomers } from '../../services/offlineSyncEngine';
 import { useAuth } from '../../hooks/useAuth';
+import { useDiscountLimitPercent } from '../../authorization/useDiscountLimitPercent';
+import { useHasPermission } from '../../authorization/useAuthorization';
 import { getBusinessDate, formatTimestampDate, formatTimestampTime } from '../../utils/businessDate';
 import { CASHIER_NAV_ITEMS, isCashierRole } from '../../utils/cashierLockdown';
 import { usePosAssignedStore } from '../../hooks/usePosAssignedStore';
@@ -352,6 +354,10 @@ export default function POSPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const discountLimitPercent = useDiscountLimitPercent();
+  const canAccessImport = useHasPermission('admin.create');
+  const canAccessSettings = useHasPermission('system.read');
+  const canAccessRoles = useHasPermission('admin.update');
   const { data: assignedStore } = usePosAssignedStore();
   const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [items, setItems] = useState<LineItem[]>([]);
@@ -1517,14 +1523,7 @@ export default function POSPage() {
     reason: string;
     lineItemIndex?: number;
   }) => {
-    const ROLE_LIMITS: Record<string, number> = {
-      ADMIN: 100,
-      MANAGER: 50,
-      CASHIER: 10,
-      STAFF: 5,
-    };
-
-    const userLimit = ROLE_LIMITS[currentUser?.role || 'STAFF'] || 0;
+    const userLimit = discountLimitPercent;
 
     // Calculate discount amount and percentage
     let originalAmount = 0;
@@ -3341,15 +3340,15 @@ export default function POSPage() {
       { name: 'Delivery', path: '/delivery', icon: '🚚' },
       { name: 'Accounting', path: '/accounting', icon: '🧾' },
       { name: 'Reports', path: '/reports', icon: '📈' },
-      ...(user?.role === 'ADMIN'
+      ...(canAccessImport || canAccessSettings || canAccessRoles
         ? [
-            { name: 'Import', path: '/import', icon: '📥' },
-            { name: 'Settings', path: '/settings', icon: '⚙️' },
-            { name: 'Roles', path: '/admin/roles', icon: '🔐' },
+            ...(canAccessImport ? [{ name: 'Import', path: '/import', icon: '📥' }] : []),
+            ...(canAccessSettings ? [{ name: 'Settings', path: '/settings', icon: '⚙️' }] : []),
+            ...(canAccessRoles ? [{ name: 'Roles', path: '/admin/roles', icon: '🔐' }] : []),
           ]
         : []),
     ];
-  }, [user?.role]);
+  }, [canAccessImport, canAccessSettings, canAccessRoles]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -4937,7 +4936,7 @@ export default function POSPage() {
               : 0
         }
         lineItemIndex={discountTarget?.itemIndex}
-        userRole={currentUser?.role || 'STAFF'}
+        maxDiscountPercent={discountLimitPercent}
       />
 
       {/* Manager Approval Dialog */}

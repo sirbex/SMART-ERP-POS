@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { Pool } from 'pg';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requireDocumentPdfPermission } from '../../authorization/documentPermissionMiddleware.js';
 import { render, type DocumentType } from './documentRenderer.js';
 
 const SUPPORTED_TYPES = [
@@ -113,6 +114,7 @@ export function createDocumentRoutes(globalPool: Pool): Router {
     router.get(
         '/:type/:id/preview',
         authenticate,
+        requireDocumentPdfPermission(),
         asyncHandler(async (req, res) => {
             await streamDocument(req, res, 'inline');
         }),
@@ -121,6 +123,7 @@ export function createDocumentRoutes(globalPool: Pool): Router {
     router.get(
         '/:type/:id',
         authenticate,
+        requireDocumentPdfPermission(),
         asyncHandler(async (req, res) => {
             await streamDocument(req, res, 'attachment');
         }),

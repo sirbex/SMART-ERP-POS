@@ -3,6 +3,8 @@ import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useHasPermission } from '../authorization/useAuthorization';
+import { shouldRestrictSalesToOwnUser } from '@shared/authorization/salesPolicy';
 import { formatCurrency } from '../utils/currency';
 import { BUSINESS_TIMEZONE, getBusinessDate, addDaysToDateString } from '../utils/businessDate';
 import {
@@ -179,7 +181,13 @@ export default function Dashboard() {
 
 function DashboardContent() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, permissions } = useAuth();
+  const isScopedSalesUser = useMemo(
+    () => shouldRestrictSalesToOwnUser(permissions, user?.role),
+    [permissions, user?.role],
+  );
+  const canAccessDataManagement = useHasPermission('admin.delete');
+  const canAccessAuditTrail = useHasPermission('admin.read');
   const today = todayStr();
   const weekAgo = weekAgoStr();
 
@@ -237,9 +245,7 @@ function DashboardContent() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   // ─── Quick‑access modules ────────────────────────────────────────
-  const isCashier = user?.role === 'CASHIER';
-
-  const modules = isCashier
+  const modules = isScopedSalesUser
     ? [
       { name: 'Point of Sale', path: '/pos', icon: ShoppingCart, color: 'bg-blue-500', hoverColor: 'hover:bg-blue-600' },
       { name: 'My Sales', path: '/sales', icon: DollarSign, color: 'bg-orange-500', hoverColor: 'hover:bg-orange-600' },
@@ -258,13 +264,14 @@ function DashboardContent() {
       { name: 'Reports', path: '/reports', icon: FileText, color: 'bg-cyan-500', hoverColor: 'hover:bg-cyan-600' },
     ];
 
-  const adminModules =
-    user?.role === 'ADMIN'
-      ? [
-        { name: 'Data Management', path: '/admin/data-management', icon: ShieldCheck, color: 'bg-gray-700', hoverColor: 'hover:bg-gray-800' },
-        { name: 'Audit Trail', path: '/admin/audit-trail', icon: ScrollText, color: 'bg-slate-600', hoverColor: 'hover:bg-slate-700' },
-      ]
-      : [];
+  const adminModules = [
+    ...(canAccessDataManagement
+      ? [{ name: 'Data Management', path: '/admin/data-management', icon: ShieldCheck, color: 'bg-gray-700', hoverColor: 'hover:bg-gray-800' }]
+      : []),
+    ...(canAccessAuditTrail
+      ? [{ name: 'Audit Trail', path: '/admin/audit-trail', icon: ScrollText, color: 'bg-slate-600', hoverColor: 'hover:bg-slate-700' }]
+      : []),
+  ];
 
   const allModules = [...modules, ...adminModules];
 
@@ -278,7 +285,7 @@ function DashboardContent() {
               {greeting}, {user?.fullName?.split(' ')[0] || 'there'}
             </h1>
             <p className="text-sm text-gray-500 mt-1">
-              {isCashier
+              {isScopedSalesUser
                 ? "Here\u0027s your activity today"
                 : "Here\u0027s what\u0027s happening with your business today"}
             </p>
@@ -321,7 +328,7 @@ function DashboardContent() {
           </div>
 
           {/* Today's Profit — hidden for cashiers */}
-          {!isCashier && (
+          {!isScopedSalesUser && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-medium text-gray-500">Today&apos;s Profit</p>
@@ -584,7 +591,7 @@ function DashboardContent() {
                       <th className="pb-2 font-medium">Date</th>
                       <th className="pb-2 font-medium text-right">Sales</th>
                       <th className="pb-2 font-medium text-right">Revenue</th>
-                      {!isCashier && <th className="pb-2 font-medium text-right">Profit</th>}
+                      {!isScopedSalesUser && <th className="pb-2 font-medium text-right">Profit</th>}
                       <th className="pb-2 font-medium text-right hidden sm:table-cell">Avg</th>
                     </tr>
                   </thead>
@@ -602,7 +609,7 @@ function DashboardContent() {
                             0
                           )}
                         </td>
-                        {!isCashier && (
+                        {!isScopedSalesUser && (
                           <td
                             className={`py-2 text-right font-medium ${safeNum(day.total_profit ?? day.totalProfit) >= 0 ? 'text-green-600' : 'text-red-600'}`}
                           >
@@ -638,9 +645,9 @@ function DashboardContent() {
         {allTimeData && (
           <div className="bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200 p-5">
             <h2 className="text-base font-semibold text-gray-700 mb-3">
-              {isCashier ? 'My All-Time Summary' : 'All-Time Summary'}
+              {isScopedSalesUser ? 'My All-Time Summary' : 'All-Time Summary'}
             </h2>
-            <div className={`grid grid-cols-2 ${isCashier ? '' : 'sm:grid-cols-4'} gap-4`}>
+            <div className={`grid grid-cols-2 ${isScopedSalesUser ? '' : 'sm:grid-cols-4'} gap-4`}>
               <div>
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total Sales</p>
                 <p className="text-lg font-bold text-gray-900">
@@ -653,7 +660,7 @@ function DashboardContent() {
                   {formatCurrency(allTimeData?.totalAmount || 0, true, 0)}
                 </p>
               </div>
-              {!isCashier && (
+              {!isScopedSalesUser && (
                 <>
                   <div>
                     <p className="text-xs text-gray-500 uppercase tracking-wide">Total Profit</p>

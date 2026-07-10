@@ -1,5 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import type { Pool } from 'pg';
+import { legacyRoleGrantsPermission } from '@shared/authorization/legacyRoleFallback.js';
+import { AuthorizationService } from '../authorization/authorizationService.js';
 import { RbacService, RbacError } from './service.js';
 import type { AuthorizationContext } from './types.js';
 import logger from '../utils/logger.js';
@@ -10,6 +12,7 @@ declare global {
     interface Request {
       authContext?: AuthorizationContext;
       rbacService?: RbacService;
+      authorizationService?: AuthorizationService;
     }
   }
 }
@@ -60,6 +63,12 @@ export function getRbacService(req?: Request): RbacService {
   throw new Error('RBAC middleware not initialized. Call initializeRbacMiddleware first.');
 }
 
+export function getAuthorizationService(req: Request): AuthorizationService {
+  if (req.authorizationService) return req.authorizationService;
+  const rbac = getRbacService(req);
+  return new AuthorizationService(rbac);
+}
+
 export function attachRbacService(req: Request, res: Response, next: NextFunction): void {
   const service = resolveRbacService(req);
   if (!service) {
@@ -93,6 +102,7 @@ export async function loadAuthorizationContext(
 
   try {
     req.authContext = await service.buildAuthorizationContext(req.user.id);
+    req.authorizationService = new AuthorizationService(service);
     next();
   } catch (error) {
     // If RBAC tables don't exist, skip gracefully rather than blocking all routes
@@ -108,75 +118,6 @@ interface RequirePermissionOptions {
   scopeIdParam?: string;
   scopeIdBody?: string;
   scopeIdQuery?: string;
-}
-
-/**
- * Legacy role → permission mapping for backward compatibility.
- * Used when users have no RBAC role assignments (transition period).
- * Maps the legacy users.role column to permission patterns.
- */
-const LEGACY_ROLE_PERMISSIONS: Record<string, (key: string) => boolean> = {
-  ADMIN: () => true, // ADMIN has all permissions
-  MANAGER: (key) => {
-    const module = key.split('.')[0];
-    return [
-      'sales',
-      'inventory',
-      'purchasing',
-      'customers',
-      'suppliers',
-      'reports',
-      'pos',
-      'accounting',
-      'banking',
-      'delivery',
-      'settings',
-      'hr',
-      'expenses',
-      'quotations',
-      'crm',
-      'orders',
-      'distribution',
-    ].includes(module);
-  },
-  CASHIER: (key) => {
-    return [
-      'pos.read',
-      'pos.create',
-      'sales.read',
-      'sales.create',
-      'customers.read',
-      'customers.create',
-      'inventory.read',
-      'suppliers.read',
-      'delivery.read',
-      'settings.read',
-      'quotations.read',
-      'quotations.create',
-      'orders.read',
-      'orders.create',
-      'orders.pay',
-      'orders.cancel',
-      'sales.reprint',
-      'distribution.read',
-      'distribution.create',
-    ].includes(key);
-  },
-  STAFF: (key) => {
-    // STAFF can read anything + create orders + use POS in order mode (dispenser workflow)
-    if (key.endsWith('.read')) return true;
-    return ['orders.create', 'pos.create'].includes(key);
-  },
-};
-
-/**
- * Check if a legacy role (from users.role column) grants the given permission.
- * Used during the transition period before all users have RBAC role assignments.
- */
-function legacyRoleGrantsPermission(role: string | undefined, permissionKey: string): boolean {
-  if (!role) return false;
-  const checker = LEGACY_ROLE_PERMISSIONS[role.toUpperCase()];
-  return checker ? checker(permissionKey) : false;
 }
 
 export function requirePermission(permissionKey: string, options?: RequirePermissionOptions) {

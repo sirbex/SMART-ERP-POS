@@ -18,10 +18,14 @@
 
 import { Router } from 'express';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 import * as grirService from './grirClearingService.js';
 
 const router = Router();
+
+const requireGrirRead = requireAnyPermission(['accounting.reconcile', 'purchasing.read', 'accounting.read']);
+const requireGrirWrite = requirePermission('accounting.reconcile');
 
 // ─── MR11 WORK LIST ─────────────────────────────────────────────────
 
@@ -30,7 +34,7 @@ const router = Router();
  * Open GR/IR clearing items with full filtering and pagination.
  * Query params: supplierId, poNumber, grNumber, status, dateFrom, dateTo, page, limit
  */
-router.get('/open', authenticate, asyncHandler(async (req, res) => {
+router.get('/open', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
   const result = await grirService.getOpenClearingItems({
     supplierId: req.query.supplierId as string | undefined,
     poNumber: req.query.poNumber as string | undefined,
@@ -50,7 +54,7 @@ router.get('/open', authenticate, asyncHandler(async (req, res) => {
  * GET /api/grir-clearing/search?q=PO-2026
  * Search across PO numbers, GR numbers, supplier names, invoice numbers.
  */
-router.get('/search', authenticate, asyncHandler(async (req, res) => {
+router.get('/search', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
   const q = req.query.q as string;
   if (!q || q.trim().length < 2) {
     return res.json({ success: true, data: [] });
@@ -65,7 +69,7 @@ router.get('/search', authenticate, asyncHandler(async (req, res) => {
  * GET /api/grir-clearing/balance
  * Clearing account balance with breakdown of unmatched/matched/variance items.
  */
-router.get('/balance', authenticate, asyncHandler(async (req, res) => {
+router.get('/balance', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
   const balance = await grirService.getClearingBalance(req.tenantPool);
   res.json({ success: true, data: balance });
 }));
@@ -78,7 +82,7 @@ router.get('/balance', authenticate, asyncHandler(async (req, res) => {
  * A non-zero pollutedBalance means historical entries should be migrated to
  * account 2160 (Supplier Return Clearing).
  */
-router.get('/purity', authenticate, asyncHandler(async (req, res) => {
+router.get('/purity', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
   const diagnostic = await grirService.getGrirPurityDiagnostic(req.tenantPool);
   res.json({ success: true, data: diagnostic });
 }));
@@ -89,7 +93,7 @@ router.get('/purity', authenticate, asyncHandler(async (req, res) => {
  * GET /api/grir-clearing/match-candidates?supplierId=xxx
  * Preview which GR-Invoice pairs would be matched by auto-match.
  */
-router.get('/match-candidates', authenticate, asyncHandler(async (req, res) => {
+router.get('/match-candidates', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
   const candidates = await grirService.getMatchCandidates(
     { supplierId: req.query.supplierId as string | undefined },
     req.tenantPool
@@ -103,7 +107,7 @@ router.get('/match-candidates', authenticate, asyncHandler(async (req, res) => {
  * GET /api/grir-clearing/gr/:grId/items
  * 3-way match: GR line items vs PO line items with variance per line.
  */
-router.get('/gr/:grId/items', authenticate, asyncHandler(async (req, res) => {
+router.get('/gr/:grId/items', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
   const items = await grirService.getGrItemDetails(req.params.grId, req.tenantPool);
   res.json({ success: true, data: items });
 }));
@@ -114,7 +118,7 @@ router.get('/gr/:grId/items', authenticate, asyncHandler(async (req, res) => {
  * GET /api/grir-clearing/history/:poId
  * Get all clearing records for a specific PO.
  */
-router.get('/history/:poId', authenticate, asyncHandler(async (req, res) => {
+router.get('/history/:poId', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
   const history = await grirService.getClearingHistory(req.params.poId, req.tenantPool);
   res.json({ success: true, data: history });
 }));
@@ -125,7 +129,7 @@ router.get('/history/:poId', authenticate, asyncHandler(async (req, res) => {
  * GET /api/grir-clearing/:poId
  * Backward-compatible: clearing status for a specific PO.
  */
-router.get('/:poId', authenticate, asyncHandler(async (req, res) => {
+router.get('/:poId', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
   const record = await grirService.getGrirStatus(req.params.poId, req.tenantPool);
   res.json({ success: true, data: record });
 }));
@@ -139,7 +143,7 @@ router.get('/:poId', authenticate, asyncHandler(async (req, res) => {
  *
  * GL: DR GR/IR Clearing 2150, CR AP 2100, +/- Price Variance 5020
  */
-router.post('/clear', authenticate, asyncHandler(async (req, res) => {
+router.post('/clear', authenticate, requireGrirWrite, asyncHandler(async (req, res) => {
   const { grId, invoiceId, date } = req.body;
   if (!grId || !invoiceId) {
     throw new ValidationError('grId and invoiceId are required');
@@ -164,7 +168,7 @@ router.post('/clear', authenticate, asyncHandler(async (req, res) => {
  *
  * SAP F.13: exact matches first, then within tolerance (default 5%).
  */
-router.post('/auto-match', authenticate, asyncHandler(async (req, res) => {
+router.post('/auto-match', authenticate, requireGrirWrite, asyncHandler(async (req, res) => {
   const { supplierId, tolerancePercent } = req.body || {};
 
   const result = await grirService.autoMatch({

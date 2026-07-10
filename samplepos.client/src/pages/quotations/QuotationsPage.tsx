@@ -15,13 +15,14 @@ import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
 import { formatTimestampDate } from '../../utils/businessDate';
 import { useAuth } from '../../hooks/useAuth';
+import { useHasPermission } from '../../authorization/useAuthorization';
 import { isAuthQueryEnabled } from '../../lib/authQuery';
 
 export default function QuotationsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { isAuthenticated, user } = useAuth();
-  const isAdmin = user?.role === 'ADMIN';
+  const { isAuthenticated } = useAuth();
+  const canReopenCancelled = useHasPermission('quotations.update');
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   // Default to showing active quotations (exclude CONVERTED and CANCELLED)
@@ -435,7 +436,7 @@ export default function QuotationsPage() {
                             Open in POS
                           </button>
                         )}
-                        {normalizeStatus(quote.status) === 'CANCELLED' && isAdmin && (
+                        {normalizeStatus(quote.status) === 'CANCELLED' && canReopenCancelled && (
                           deleteConfirmId === quote.id ? (
                             <span className="inline-flex items-center gap-1">
                               <button

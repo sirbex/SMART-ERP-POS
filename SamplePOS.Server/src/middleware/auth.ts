@@ -8,9 +8,10 @@
 import '../types/express.js';
 import type { Request, Response, NextFunction } from 'express';
 import jwt, { type SignOptions } from 'jsonwebtoken';
-import { User, UserRole, hasPermission, UserPermissions } from '../../../shared/types/user.js';
+import { UserRole } from '../../../shared/types/user.js';
 import { pool } from '../db/pool.js';
 import logger from '../utils/logger.js';
+import { loadAuthorizationContext } from '../rbac/middleware.js';
 
 // JWT Payload interface — must match the shape produced by generateToken()
 interface JwtPayload {
@@ -110,7 +111,9 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
       tenantSlug: payload.tenantSlug,
     };
 
-    next();
+    // Load RBAC authorization context (permissions + AuthorizationService) for every authenticated request
+    await loadAuthorizationContext(req, res, next);
+    return;
 
   } catch (error) {
     logger.error('Authentication error', { error });
@@ -122,8 +125,8 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
 }
 
 /**
- * Middleware to authorize based on user roles
- * @param allowedRoles - Array of roles that can access the route
+ * @deprecated Use requirePermission() from rbac/middleware.ts instead.
+ * Role-name checks must not gate business capabilities — permissions + policies only.
  */
 export function authorize(...allowedRoles: UserRole[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
@@ -210,36 +213,4 @@ export function generateToken(user: {
 
   // @ts-expect-error JWT types are overly strict; expiresIn accepts string duration
   return jwt.sign(payload, jwtSecret, { expiresIn: process.env.JWT_EXPIRES_IN || '24h' });
-}
-
-/**
- * @deprecated Use requirePermission from rbac/middleware.ts instead.
- * This legacy stub is kept only for backward compatibility — it grants
- * blanket access to ADMIN/MANAGER/CASHIER regardless of the permission key.
- * Remove once all routes use RBAC requirePermission().
- */
-export function requirePermission(permission: string) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        error: 'Authentication required'
-      });
-    }
-
-    // Admin has all permissions
-    if (req.user.role === 'ADMIN') {
-      return next();
-    }
-
-    // Manager has most permissions
-    if (req.user.role === 'MANAGER') {
-      return next();
-    }
-
-    return res.status(403).json({
-      success: false,
-      error: 'Insufficient permissions'
-    });
-  };
 }

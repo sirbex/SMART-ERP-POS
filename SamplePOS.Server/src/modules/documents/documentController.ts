@@ -3,11 +3,27 @@ import multer from 'multer';
 import { z } from 'zod';
 import { DocumentService } from './documentService.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requireAnyPermission, requirePermission } from '../../rbac/middleware.js';
 import logger from '../../utils/logger.js';
 import { pool as globalPool } from '../../db/pool.js';
 import { asyncHandler, NotFoundError, ValidationError, UnauthorizedError } from '../../middleware/errorHandler.js';
 
 const router = express.Router();
+
+const requireDocumentRead = requireAnyPermission([
+  'reports.read',
+  'sales.read',
+  'purchasing.read',
+  'accounting.read',
+  'customers.read',
+]);
+const requireDocumentUpload = requireAnyPermission([
+  'sales.update',
+  'purchasing.update',
+  'expenses.create',
+  'accounting.create',
+]);
+const requireDocumentDelete = requirePermission('admin.delete');
 
 // Document service options (shared across all instances)
 const documentServiceOptions = {
@@ -72,7 +88,7 @@ const AssociateDocumentSchema = z.object({
  * Upload document
  * POST /api/documents/upload
  */
-router.post('/upload', authenticate, upload.single('file'), asyncHandler(async (req, res) => {
+router.post('/upload', authenticate, requireDocumentUpload, upload.single('file'), asyncHandler(async (req, res) => {
   if (!req.file) throw new ValidationError('No file provided');
   if (!req.user?.id) throw new UnauthorizedError('User not authenticated');
 
@@ -111,7 +127,7 @@ router.post('/upload', authenticate, upload.single('file'), asyncHandler(async (
  * Get document file
  * GET /api/documents/:id/file
  */
-router.get('/:id/file', authenticate, asyncHandler(async (req, res) => {
+router.get('/:id/file', authenticate, requireDocumentRead, asyncHandler(async (req, res) => {
   const { id } = req.params;
   if (!id || typeof id !== 'string') throw new ValidationError('Invalid document ID');
 
@@ -128,7 +144,7 @@ router.get('/:id/file', authenticate, asyncHandler(async (req, res) => {
  * Get document metadata
  * GET /api/documents/:id
  */
-router.get('/:id', authenticate, asyncHandler(async (req, res) => {
+router.get('/:id', authenticate, requireDocumentRead, asyncHandler(async (req, res) => {
   const { id } = req.params;
   if (!id || typeof id !== 'string') throw new ValidationError('Invalid document ID');
 
@@ -145,7 +161,7 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
  * Search documents
  * GET /api/documents
  */
-router.get('/', authenticate, asyncHandler(async (req, res) => {
+router.get('/', authenticate, requireDocumentRead, asyncHandler(async (req, res) => {
   const validatedQuery = SearchDocumentsSchema.parse(req.query);
 
   const filters = {
@@ -167,7 +183,7 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
  * Associate document with entity
  * PUT /api/documents/:id/associate
  */
-router.put('/:id/associate', authenticate, asyncHandler(async (req, res) => {
+router.put('/:id/associate', authenticate, requireDocumentUpload, asyncHandler(async (req, res) => {
   const { id } = req.params;
   if (!id || typeof id !== 'string') throw new ValidationError('Invalid document ID');
 
@@ -197,7 +213,7 @@ router.put('/:id/associate', authenticate, asyncHandler(async (req, res) => {
  * Get entity documents
  * GET /api/documents/entity/:entityType/:entityId
  */
-router.get('/entity/:entityType/:entityId', authenticate, asyncHandler(async (req, res) => {
+router.get('/entity/:entityType/:entityId', authenticate, requireDocumentRead, asyncHandler(async (req, res) => {
   const { entityType, entityId } = req.params;
 
   const validEntityTypes = ['EXPENSE', 'INVOICE', 'JOURNAL', 'PURCHASE_ORDER', 'SALE'];
@@ -216,7 +232,7 @@ router.get('/entity/:entityType/:entityId', authenticate, asyncHandler(async (re
  * Delete document
  * DELETE /api/documents/:id
  */
-router.delete('/:id', authenticate, asyncHandler(async (req, res) => {
+router.delete('/:id', authenticate, requireDocumentDelete, asyncHandler(async (req, res) => {
   const { id } = req.params;
   if (!id || typeof id !== 'string') throw new ValidationError('Invalid document ID');
 
@@ -235,7 +251,7 @@ router.delete('/:id', authenticate, asyncHandler(async (req, res) => {
  * Get storage statistics
  * GET /api/documents/stats/storage
  */
-router.get('/stats/storage', authenticate, asyncHandler(async (_req, res) => {
+router.get('/stats/storage', authenticate, requireDocumentRead, asyncHandler(async (_req, res) => {
   const stats = await getDocumentService(_req).getStorageStats();
 
   res.json({

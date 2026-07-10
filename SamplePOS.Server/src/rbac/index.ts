@@ -5,6 +5,7 @@ export { createRbacRoutes } from './routes.js';
 export {
   initializeRbacMiddleware,
   getRbacService,
+  getAuthorizationService,
   attachRbacService,
   loadAuthorizationContext,
   requirePermission,

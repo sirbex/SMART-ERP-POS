@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useSales, useSalesSummary, useSalesSummaryByDate, useSalesByCashier } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
+import { shouldRestrictSalesToOwnUser } from '@shared/authorization/salesPolicy';
 import { formatCurrency } from '../utils/currency';
 import { BUSINESS_TIMEZONE, getBusinessDate, formatTimestamp, formatTimestampDate } from '../utils/businessDate';
 import Decimal from 'decimal.js';
@@ -362,9 +363,12 @@ function getDateRange(filterType: DateFilterType): { start: string; end: string 
 const VOID_STATUSES = ['VOID', 'REFUNDED', 'VOIDED_BY_RETURN'];
 
 export default function SalesPage() {
-  const { user } = useAuth();
-  const isCashier = user?.role === 'CASHIER';
-  const [activeTab, setActiveTab] = useState<TabType>(isCashier ? 'all-sales' : 'overview');
+  const { user, permissions } = useAuth();
+  const isScopedSalesUser = useMemo(
+    () => shouldRestrictSalesToOwnUser(permissions, user?.role),
+    [permissions, user?.role],
+  );
+  const [activeTab, setActiveTab] = useState<TabType>(isScopedSalesUser ? 'all-sales' : 'overview');
   const [dateFilter, setDateFilter] = useState<DateFilterType>('this-month');
 
   // Initialize with this month's date range
@@ -415,7 +419,7 @@ export default function SalesPage() {
   const { data: salesData, isLoading: salesLoading, refetch: refetchSales } = useSales(currentPage, limit, {
     startDate: startDate ? startDate : undefined,
     endDate: endDate ? endDate : undefined,
-    cashierId: isCashier ? user?.id : undefined,
+    cashierId: isScopedSalesUser ? user?.id : undefined,
     status: statusFilter !== 'ALL' ? statusFilter : undefined,
     paymentMethod: paymentMethodFilter !== 'ALL' ? paymentMethodFilter : undefined,
     search: debouncedSearch || undefined,
@@ -716,7 +720,7 @@ export default function SalesPage() {
     { id: 'overview' as TabType, label: 'Overview', icon: '📊', adminOnly: true },
     {
       id: 'all-sales' as TabType,
-      label: isCashier ? 'My Sales' : 'All Sales',
+      label: isScopedSalesUser ? 'My Sales' : 'All Sales',
       icon: '📝',
       adminOnly: false,
     },
@@ -725,7 +729,7 @@ export default function SalesPage() {
     { id: 'ordered-by' as TabType, label: 'Ordered By', icon: '📋', adminOnly: true },
     { id: 'invoices' as TabType, label: 'Credit Sales', icon: '📄', adminOnly: false },
     { id: 'payments' as TabType, label: 'Partial Payments', icon: '💰', adminOnly: false },
-  ].filter((tab) => !isCashier || !tab.adminOnly);
+  ].filter((tab) => !isScopedSalesUser || !tab.adminOnly);
 
   return (
     <Layout>
@@ -734,10 +738,10 @@ export default function SalesPage() {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-bold text-gray-900">
-              {isCashier ? 'My Sales' : 'Sales Analytics'}
+              {isScopedSalesUser ? 'My Sales' : 'Sales Analytics'}
             </h1>
             <p className="text-gray-600 mt-1">
-              {isCashier
+              {isScopedSalesUser
                 ? 'View your sales transactions'
                 : 'Comprehensive sales reporting and insights'}
             </p>

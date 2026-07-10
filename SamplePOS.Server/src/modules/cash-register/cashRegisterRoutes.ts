@@ -8,7 +8,7 @@
 import express from 'express';
 import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
-import { requirePermission } from '../../rbac/middleware.js';
+import { requirePermission, getAuthorizationService } from '../../rbac/middleware.js';
 import { cashRegisterService } from './cashRegisterService.js';
 import logger from '../../utils/logger.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -122,18 +122,21 @@ router.get(
     authenticate,
     asyncHandler(async (req, res) => {
         const pool = req.tenantPool || globalPool;
-        const user = req.user as { role: string };
-        const isManager = ['ADMIN', 'MANAGER'].includes(user.role);
+        const authz = getAuthorizationService(req);
+        const subject = authz.subjectFromUser(req.user);
+        const canViewAllRegisters = subject
+            ? await authz.hasPermission(subject, 'pos.approve')
+            : false;
 
         // Always include session status so the Open Register dialog knows availability
         const registersWithStatus = await cashRegisterService.getRegistersWithStatus(pool);
 
         // Staff only see active registers (already filtered in query)
-        // Managers see all (need to include inactive too)
-        const registers = isManager ? await cashRegisterService.getAllRegisters(pool) : [];
+        // Users with pos.approve see all (need to include inactive too)
+        const registers = canViewAllRegisters ? await cashRegisterService.getAllRegisters(pool) : [];
 
-        // Merge: for managers, enrich all registers with session info
-        if (isManager && registers.length > 0) {
+        // Merge: for privileged users, enrich all registers with session info
+        if (canViewAllRegisters && registers.length > 0) {
             const statusMap = new Map(registersWithStatus.map((r) => [r.id, r]));
             const enriched = registers.map((reg) => {
                 const status = statusMap.get(reg.id);

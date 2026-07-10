@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requireEntityFlowPermission } from '../../authorization/documentPermissionMiddleware.js';
 import * as documentFlowService from './documentFlowService.js';
 import type { EntityType } from './documentFlowRepository.js';
 
@@ -24,6 +25,7 @@ const router = Router();
 router.get(
   '/:entityType/:entityId',
   authenticate,
+  requireEntityFlowPermission(),
   asyncHandler(async (req, res) => {
     const { entityType, entityId } = req.params;
 

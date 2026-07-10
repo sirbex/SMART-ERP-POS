@@ -43,11 +43,13 @@ import { recordSaleLinePriceEvent } from './salePriceAuditService.js';
 import {
   previewFefoIssueCostForBaseQty,
   previewFefoIssueLayers,
-  loadSaleFefoBatchesForIssue,
   type ProductValuationForAtCost,
 } from '../pricing/atCostIssuePrice.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { warehouseSaleDeductionService } from '../inventory/warehouse/warehouseSaleDeductionService.js';
+import { lotService } from '../inventory-lot/lotService.js';
+import { loadGlobalSelectableLots } from '../inventory-lot/postgresLotSelector.js';
+import { selectLots } from '@shared/inventory-lot/index.js';
 import { warehouseReturnInventoryService } from '../inventory/warehouse/warehouseReturnInventoryService.js';
 import { warehouseSaleVoidRestoreService } from '../inventory/warehouse/warehouseSaleVoidRestoreService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
@@ -64,6 +66,7 @@ import {
   INVENTORY_COUPLING_TOLERANCE,
   resolveGl1300FromBatchSubledgerDelta,
 } from '../../services/inventorySubledgerCoupling.js';
+import { userHasPermission, assertUserPermission } from '../../authorization/serviceAuth.js';
 
 export interface SaleItemInput {
   productId: string;
@@ -1193,22 +1196,13 @@ export const salesService = {
           });
         }
 
-        // 2. PHYSICAL: Deduct from inventory batches using FEFO (First Expiry First Out)
-        // This is critical for products with expiry dates and physical stock tracking
-        let remainingQty = new Decimal(baseQty.toNumber());
-
+        // 2. PHYSICAL: Deduct from inventory batches using FEFO (LotService.consumeLot)
         const expiryRuleRes = await client.query(
           `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days
            FROM products WHERE id = $1`,
           [item.productId],
         );
         const minDaysBeforeExpiry = parseInt(expiryRuleRes.rows[0]?.min_days ?? '0', 10);
-
-        const costRow = await client.query(
-          'SELECT cost_price FROM product_valuation WHERE product_id = $1',
-          [item.productId],
-        );
-        const masterCostPerBase = Money.parseDb(costRow.rows[0]?.cost_price ?? 0);
 
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
         const movNumRes = await client.query(
@@ -1253,93 +1247,25 @@ export const salesService = {
           continue;
         }
 
-        const batchRows = await loadSaleFefoBatchesForIssue(
-          client,
-          item.productId,
-          baseQty,
-          masterCostPerBase,
-          { minDaysBeforeExpiry, forUpdate: true },
-        );
+        const selectableLots = await loadGlobalSelectableLots(client, item.productId, {
+          forUpdate: true,
+          minDaysBeforeExpiry,
+        });
+        const consumptionPlan = selectLots({
+          policy: 'FEFO',
+          lots: selectableLots,
+          quantity: baseQty.toNumber(),
+          businessDate: getBusinessDate(),
+          minDaysBeforeExpirySale: minDaysBeforeExpiry,
+        });
 
-        for (const batch of batchRows) {
-          if (remainingQty.lessThanOrEqualTo(0)) break;
-
-          const batchQty = new Decimal(batch.remaining_quantity || 0);
-          const qtyToDeduct = Decimal.min(remainingQty, batchQty);
-          const qtyToDeductStr = qtyToDeduct.toFixed(4); // String for PostgreSQL NUMERIC
-          const batchCostDec = Money.parseDb(batch.cost_price ?? 0);
-
-          // Update batch quantity
-          await client.query(
-            `UPDATE inventory_batches
-             SET remaining_quantity = remaining_quantity - $1,
-                 status = CASE 
-                   WHEN remaining_quantity - $1 <= 0 THEN 'DEPLETED'::batch_status
-                   ELSE status
-                 END,
-                 updated_at = NOW()
-             WHERE id = $2`,
-            [qtyToDeductStr, batch.id]
-          );
-
-          // Use pre-generated movement number and increment
-          const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
-          movementSeq++;
-
-          const batchUnitCost = Money.toNumber(Money.round(batchCostDec));
-
-          // Record stock movement with batch reference and unit cost
-          await client.query(
-            `INSERT INTO stock_movements (
-              movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
-              reference_type, reference_id, notes, created_by_id,
-              entered_qty, base_uom_id, conversion_factor
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-            [
-              movementNumber,
-              item.productId,
-              batch.id,
-              'SALE',
-              qtyToDeduct.abs().toFixed(4), // string for PostgreSQL NUMERIC — bank-grade precision
-              batchUnitCost,
-              'SALE',
-              sale.id,
-              `Sale ${sale.saleNumber} - FEFO batch deduction`,
-              input.soldBy || null,
-              item.quantity, // SAP UoM snapshot: original entered quantity
-              deductBaseUomId, // SAP UoM snapshot: base UoM at posting time
-              deductConversionFactor.toFixed(6), // SAP UoM snapshot: conversion factor at posting time
-            ]
-          );
-
-          remainingQty = remainingQty.minus(qtyToDeduct);
-
-          // Drift guard: accumulate actual batch cost (same cost walk as COGS preview)
-          const _prevActual = actualBatchCostMap.get(item.productId) ?? new Decimal(0);
-          actualBatchCostMap.set(
-            item.productId,
-            _prevActual.plus(Money.multiply(batchCostDec, qtyToDeduct)),
-          );
-
-          logger.info(`Inventory batch deducted for product ${item.productId}`, {
-            batchId: batch.id,
-            quantity: qtyToDeduct.toFixed(4),
-            remaining: remainingQty.toFixed(4),
-            expiryDate: batch.expiry_date,
-          });
-        }
-
-        if (remainingQty.greaterThan(0)) {
-          const nearestExpiry =
-            batchRows.length > 0 ? batchRows[0].expiry_date : null;
-          const totalAvailable = batchRows.reduce(
-            (sum: Decimal, b: { remaining_quantity: string | number }) =>
-              sum.plus(new Decimal(String(b.remaining_quantity || 0))),
-            new Decimal(0)
-          );
+        if (consumptionPlan.shortfall > 0.001) {
+          const remainingQty = new Decimal(consumptionPlan.shortfall);
+          const nearestExpiry = selectableLots[0]?.expiryDate ?? null;
+          const totalAvailable = new Decimal(consumptionPlan.totalAllocated);
           const isExpiryBlock = minDaysBeforeExpiry > 0 && nearestExpiry;
           const errorCode =
-            batchRows.length === 0
+            selectableLots.length === 0
               ? 'ERR_STOCK_001'
               : isExpiryBlock
                 ? 'ERR_EXPIRY_001'
@@ -1358,12 +1284,76 @@ export const salesService = {
               shortBy: Money.toNumber(remainingQty),
               expiryDate: nearestExpiry,
               minDaysBeforeExpiry: minDaysBeforeExpiry > 0 ? minDaysBeforeExpiry : undefined,
-              batchCount: batchRows.length,
-            }
+              batchCount: selectableLots.length,
+            },
           );
         }
 
-        // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
+        const consumeResult = await lotService.consumeLot(client, {
+          productId: item.productId,
+          quantity: baseQty.toNumber(),
+          selectionPolicy: 'FEFO',
+          minDaysBeforeExpiry,
+          referenceType: 'SALE',
+          referenceId: sale.id,
+          userId: input.soldBy ?? 'system',
+          productName: item.productName,
+          recordMovement: false,
+          syncProduct: false,
+        });
+
+        for (const layer of consumeResult.layers) {
+          const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
+          movementSeq++;
+
+          const batchCostDec = Money.parseDb(layer.costPrice);
+          const qtyToDeduct = new Decimal(layer.quantity);
+          const batchUnitCost = Money.toNumber(Money.round(batchCostDec));
+
+          await client.query(
+            `INSERT INTO stock_movements (
+              movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
+              reference_type, reference_id, notes, created_by_id,
+              entered_qty, base_uom_id, conversion_factor
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [
+              movementNumber,
+              item.productId,
+              layer.lotId,
+              'SALE',
+              qtyToDeduct.abs().toFixed(4),
+              batchUnitCost,
+              'SALE',
+              sale.id,
+              `Sale ${sale.saleNumber} - FEFO batch deduction`,
+              input.soldBy || null,
+              item.quantity,
+              deductBaseUomId,
+              deductConversionFactor.toFixed(6),
+            ],
+          );
+
+          logger.info(`Inventory batch deducted for product ${item.productId}`, {
+            batchId: layer.lotId,
+            quantity: qtyToDeduct.toFixed(4),
+            expiryDate: layer.expiryDate,
+          });
+        }
+
+        const prevActual = actualBatchCostMap.get(item.productId) ?? new Decimal(0);
+        actualBatchCostMap.set(
+          item.productId,
+          prevActual.plus(Money.parseDb(consumeResult.totalCost)),
+        );
+
+        if (consumeResult.layers[0]) {
+          warehouseTraces.set(lineIdx, {
+            storeLocationId: null,
+            productLotId: null,
+            batchId: consumeResult.layers[0].lotId,
+          });
+        }
+
         await syncProductQuantity(client, item.productId);
       }
 
@@ -2563,19 +2553,12 @@ export const salesService = {
             { saleId, currentStatus: sale.status }
           );
         }
-        // forceAdminVoid path: verify voider is ADMIN (not just MANAGER)
-        const voiderRole = await client.query(
-          `SELECT role FROM users WHERE id = $1`,
-          [voidedById]
-        );
-        if (voiderRole.rows[0]?.role !== 'ADMIN') {
-          throw new BusinessError(
-            'Only an ADMIN can force-void a completed sale. Contact your system administrator.',
-            'ERR_SALE_FORCE_VOID_ADMIN_ONLY',
-            { saleId, voidedById }
-          );
-        }
-        logger.warn('ADMIN force-void of completed sale authorised', {
+        // forceAdminVoid path: requires admin.delete (destructive reversal of posted sale)
+        await assertUserPermission(pool, voidedById, 'admin.delete', {
+          errorCode: 'ERR_SALE_FORCE_VOID_ADMIN_ONLY',
+          message: 'Only users with admin.delete permission can force-void a completed sale. Contact your system administrator.',
+        });
+        logger.warn('Force-void of completed sale authorised', {
           saleId,
           saleNumber: sale.sale_number,
           voidedById,
@@ -2604,10 +2587,10 @@ export const salesService = {
       const totalAmount = Money.toNumber(Money.parseDb(sale.total_amount ?? 0));
       const requiresApproval = totalAmount > amountThreshold;
 
-      // ADMIN and MANAGER can self-approve high-value voids
-      const voiderIsPrivileged = await salesRepository.isManager(client, voidedById);
+      // Users with sales.approve can self-approve high-value voids
+      const voiderCanApprove = await userHasPermission(pool, voidedById, 'sales.approve');
 
-      if (requiresApproval && !approvedById && !voiderIsPrivileged) {
+      if (requiresApproval && !approvedById && !voiderCanApprove) {
         throw new BusinessError(
           `Manager approval required for sales over ${amountThreshold}. Total amount: ${totalAmount}`,
           'ERR_SALE_010',
@@ -2615,14 +2598,12 @@ export const salesService = {
         );
       }
 
-      // If approval provided by someone else, verify approver is manager/admin
+      // If approval provided by someone else, verify approver has sales.approve
       if (approvedById && approvedById !== voidedById) {
-        const isManager = await salesRepository.isManager(client, approvedById);
-        if (!isManager) {
-          throw new BusinessError('Approver must have MANAGER or ADMIN role', 'ERR_SALE_011', {
-            approvedById,
-          });
-        }
+        await assertUserPermission(pool, approvedById, 'sales.approve', {
+          errorCode: 'ERR_SALE_011',
+          message: 'Approver must have sales.approve permission',
+        });
       }
 
       // Get sale items for inventory restoration
@@ -2706,54 +2687,24 @@ export const salesService = {
             productLotId: item.productLotId,
             saleNumber: sale.sale_number,
           });
-        } else if (batchId) {
-          // Restore to specific batch
-          await client.query(
-            `UPDATE inventory_batches
-             SET remaining_quantity = remaining_quantity + $1,
-                 status = CASE 
-                   WHEN remaining_quantity + $1 > 0 THEN 'ACTIVE'::batch_status
-                   ELSE status
-                 END,
-                 updated_at = NOW()
-             WHERE id = $2`,
-            [quantity, batchId]
-          );
-
-          logger.info('Inventory batch restored for voided sale', {
+        } else {
+          const unitCost = Money.toNumber(Money.parseDb(item.unitCost ?? 0));
+          const restoredLot = await lotService.returnLot(client, {
+            productId,
             batchId,
             quantity,
-            productId,
+            costPrice: unitCost,
+            lotNumber: `VOID-RESTORE-${sale.sale_number}`,
+            referenceType: 'SALE_VOID',
+            referenceId: sale.id,
+            notes: `Restored from voided sale ${sale.sale_number}`,
+            userId: voidedById,
           });
-        } else {
-          // No batch tracked on the original sale item.
-          // MUST create a new batch at the original unit_cost — NOT add to an existing
-          // batch that may have a different cost_price. The GL reversal uses the original
-          // sale COGS exactly; the Sub must match or GL 1300 > subledger drift results.
-          await client.query(
-            `INSERT INTO inventory_batches (
-              product_id, batch_number, quantity, remaining_quantity,
-              cost_price, received_date, status, notes
-            ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, 'ACTIVE', $6)
-            ON CONFLICT (product_id, batch_number) DO UPDATE SET
-              quantity           = inventory_batches.quantity           + EXCLUDED.quantity,
-              remaining_quantity = inventory_batches.remaining_quantity + EXCLUDED.remaining_quantity,
-              updated_at         = NOW()`,
-            [
-              productId,
-              `VOID-RESTORE-${sale.sale_number}`,
-              quantity,
-              quantity,
-              Money.toNumber(Money.parseDb(item.unitCost ?? 0)),
-              `Restored from voided sale ${sale.sale_number}`,
-            ]
-          );
 
-          logger.info('New inventory batch created for void restoration (no original batch tracked)', {
-            productId,
+          logger.info('Inventory batch restored for voided sale', {
+            batchId: restoredLot.id,
             quantity,
-            unitCost: Money.toNumber(Money.parseDb(item.unitCost ?? 0)),
-            saleNumber: sale.sale_number,
+            productId,
           });
         }
 
@@ -3125,14 +3076,12 @@ export const salesService = {
         }
       }
 
-      // If approval provided, verify approver is manager
+      // If approval provided, verify approver has sales.approve
       if (input.approvedById) {
-        const isManager = await salesRepository.isManager(client, input.approvedById);
-        if (!isManager) {
-          throw new BusinessError('Approver must have MANAGER or ADMIN role', 'ERR_REFUND_005', {
-            approvedById: input.approvedById,
-          });
-        }
+        await assertUserPermission(pool, input.approvedById, 'sales.approve', {
+          errorCode: 'ERR_REFUND_005',
+          message: 'Approver must have sales.approve permission',
+        });
       }
 
       // ── 2. Load sale items & validate refund quantities ──────────
@@ -3314,54 +3263,19 @@ export const salesService = {
           continue;
         }
 
-        // 5b. Restore inventory batch (legacy single-store)
-        if (batchId) {
-          await client.query(
-            `UPDATE inventory_batches
-             SET remaining_quantity = remaining_quantity + $1,
-                 status = CASE
-                   WHEN remaining_quantity + $1 > 0 THEN 'ACTIVE'::batch_status
-                   ELSE status
-                 END,
-                 updated_at = NOW()
-             WHERE id = $2`,
-            [quantity, batchId]
-          );
-        } else {
-          // No specific batch — restore to newest active batch
-          const batchResult = await client.query(
-            `SELECT id FROM inventory_batches
-             WHERE product_id = $1 AND status = 'ACTIVE'
-             ORDER BY received_date DESC, created_at DESC
-             LIMIT 1`,
-            [productId]
-          );
-
-          if (batchResult.rows.length > 0) {
-            await client.query(
-              `UPDATE inventory_batches
-               SET remaining_quantity = remaining_quantity + $1, updated_at = NOW()
-               WHERE id = $2`,
-              [quantity, batchResult.rows[0].id]
-            );
-          } else {
-            // Create new batch with REFUND reference
-            await client.query(
-              `INSERT INTO inventory_batches (
-                product_id, batch_number, quantity, remaining_quantity,
-                cost_price, received_date, status, notes
-              ) VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, 'ACTIVE', $6)`,
-              [
-                productId,
-                `REFUND-RESTORE-${refund.refundNumber}`,
-                quantity,
-                quantity,
-                unitCost,
-                `Restored from refund ${refund.refundNumber} on sale ${sale.sale_number}`,
-              ]
-            );
-          }
-        }
+        // 5b. Restore inventory batch (legacy single-store via LotService)
+        const restoredLot = await lotService.returnLot(client, {
+          productId,
+          batchId,
+          quantity,
+          costPrice: unitCost,
+          lotNumber: `REFUND-RESTORE-${refund.refundNumber}`,
+          referenceType: 'SALE_REFUND',
+          referenceId: refund.id,
+          notes: `Restored from refund ${refund.refundNumber} on sale ${sale.sale_number}`,
+          userId: refundedById,
+        });
+        const restoredBatchId = restoredLot.id;
 
         // 5c. Sync product_inventory and products.quantity_on_hand
         await syncProductQuantity(client, productId);
@@ -3389,7 +3303,7 @@ export const salesService = {
           [
             movementNumber,
             productId,
-            batchId || null,
+            restoredBatchId,
             'RETURN',
             quantity,
             unitCost,

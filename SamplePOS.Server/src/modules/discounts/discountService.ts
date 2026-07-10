@@ -5,16 +5,14 @@ import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
 import * as discountRepo from './discountRepository.js';
 import * as auditService from '../audit/auditService.js';
-import { calculateDiscountAmount, isDiscountAllowed, RoleDiscountLimits } from '../../../../shared/zod/discount.js';
+import { calculateDiscountAmount } from '../../../../shared/zod/discount.js';
+import {
+  isDiscountWithinLimit,
+  resolveDiscountLimitPercent,
+} from '@shared/authorization/discountPolicy.js';
 import type { Discount, ApplyDiscount } from '../../../../shared/zod/discount.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
-
-const ROLE_LIMITS: RoleDiscountLimits = {
-  ADMIN: 100,
-  MANAGER: 50,
-  CASHIER: 10,
-  STAFF: 5,
-};
+import { userHasPermission, assertUserPermission } from '../../authorization/serviceAuth.js';
 
 /**
  * Get all active discounts
@@ -33,58 +31,47 @@ export async function getDiscountById(pool: Pool, id: string): Promise<Discount 
 }
 
 /**
- * Create new discount rule (ADMIN only)
+ * Create new discount rule.
+ * Authorization enforced at route via requirePermission('admin.create').
  */
 export async function createDiscount(
   pool: Pool,
-  discount: Omit<Discount, 'id' | 'createdAt' | 'updatedAt'>,
-  userRole: string
+  discount: Omit<Discount, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<Discount> {
-  if (userRole !== 'ADMIN') {
-    throw new Error('Only ADMIN can create discount rules');
-  }
-
   const row = await discountRepo.createDiscount(pool, discount);
   return normalizeDiscount(row);
 }
 
 /**
- * Update discount
+ * Update discount rule.
+ * Authorization enforced at route via requirePermission('admin.update').
  */
 export async function updateDiscount(
   pool: Pool,
   id: string,
-  updates: Partial<Discount>,
-  userRole: string
+  updates: Partial<Discount>
 ): Promise<Discount | null> {
-  if (userRole !== 'ADMIN') {
-    throw new Error('Only ADMIN can update discount rules');
-  }
-
   const row = await discountRepo.updateDiscount(pool, id, updates);
   return row ? normalizeDiscount(row) : null;
 }
 
 /**
- * Delete (deactivate) discount
+ * Delete (deactivate) discount.
+ * Authorization enforced at route via requirePermission('admin.delete').
  */
-export async function deleteDiscount(pool: Pool, id: string, userRole: string): Promise<boolean> {
-  if (userRole !== 'ADMIN') {
-    throw new Error('Only ADMIN can delete discount rules');
-  }
-
+export async function deleteDiscount(pool: Pool, id: string): Promise<boolean> {
   return discountRepo.deleteDiscount(pool, id);
 }
 
 /**
- * Validate discount application
- * Checks role limits and approval requirements
+ * Validate discount application using permission-based limits.
  */
 export async function validateDiscountApplication(
   pool: Pool,
   discountData: ApplyDiscount,
-  userRole: string,
-  originalAmount: number
+  userId: string,
+  originalAmount: number,
+  legacyRole?: string | null
 ): Promise<{
   valid: boolean;
   requiresApproval: boolean;
@@ -93,33 +80,31 @@ export async function validateDiscountApplication(
 }> {
   const errors: string[] = [];
 
-  // Calculate discount percentage if fixed amount
   let discountPercentage = discountData.value;
   if (discountData.type === 'FIXED_AMOUNT') {
     discountPercentage = new Decimal(discountData.value).dividedBy(originalAmount).times(100).toNumber();
   }
 
-  // Check role limits
-  const allowed = isDiscountAllowed(userRole, discountPercentage, ROLE_LIMITS);
+  const maxAllowed = await resolveDiscountLimitPercent((key) =>
+    userHasPermission(pool, userId, key, legacyRole)
+  );
+  const allowed = isDiscountWithinLimit(discountPercentage, maxAllowed);
   const requiresApproval = !allowed;
 
   if (!allowed && !discountData.managerPin) {
-    errors.push(`Discount exceeds your limit. Manager approval required.`);
+    errors.push('Discount exceeds your limit. Manager approval required.');
   }
 
-  // Calculate discount amount
   const discountAmount = calculateDiscountAmount(
     originalAmount,
     discountData.type,
     discountData.value
   );
 
-  // Validate discount doesn't exceed original amount
   if (discountAmount > originalAmount) {
     errors.push('Discount cannot exceed original amount');
   }
 
-  // Validate reason provided
   if (!discountData.reason || discountData.reason.trim().length < 5) {
     errors.push('Discount reason required (minimum 5 characters)');
   }
@@ -134,7 +119,6 @@ export async function validateDiscountApplication(
 
 /**
  * Apply discount to sale
- * Creates authorization record if needed
  */
 export async function applyDiscount(
   pool: Pool,
@@ -143,7 +127,7 @@ export async function applyDiscount(
   originalAmount: number,
   userId: string,
   userName: string,
-  userRole: string,
+  legacyRole: string | null | undefined,
   auditContext?: AuditContext,
   saleNumber?: string
 ): Promise<{
@@ -153,12 +137,12 @@ export async function applyDiscount(
   authorizationId?: string;
   requiresApproval: boolean;
 }> {
-  // Validate discount
   const validation = await validateDiscountApplication(
     pool,
     discountData,
-    userRole,
-    originalAmount
+    userId,
+    originalAmount,
+    legacyRole
   );
 
   if (!validation.valid) {
@@ -167,11 +151,8 @@ export async function applyDiscount(
 
   const discountAmount = validation.discountAmount;
   const finalAmount = new Decimal(originalAmount).minus(discountAmount).toNumber();
-
-  // Calculate percentage for audit
   const discountPercentage = new Decimal(discountAmount).dividedBy(originalAmount).times(100).toNumber();
 
-  // Create authorization record
   const auth = await discountRepo.createDiscountAuthorization(pool, {
     saleId,
     discountId: discountData.discountId,
@@ -185,12 +166,10 @@ export async function applyDiscount(
     requestedByName: userName,
   });
 
-  // If no approval required, auto-approve
   if (!validation.requiresApproval) {
     await discountRepo.approveDiscountAuthorization(pool, auth.id, userId, userName);
   }
 
-  // Log discount application to audit trail
   if (auditContext) {
     try {
       await auditService.logDiscountApplied(
@@ -223,7 +202,8 @@ export async function applyDiscount(
 }
 
 /**
- * Approve discount with manager PIN
+ * Approve discount with manager PIN.
+ * Requires sales.approve permission (enforced at route + service defense-in-depth).
  */
 export async function approveDiscount(
   pool: Pool,
@@ -231,17 +211,17 @@ export async function approveDiscount(
   managerPin: string,
   managerId: string,
   managerName: string,
-  managerRole: string,
+  legacyRole: string | null | undefined,
   auditContext?: AuditContext
 ): Promise<boolean> {
-  // Verify manager role
-  if (managerRole !== 'MANAGER' && managerRole !== 'ADMIN') {
-    throw new Error('Only MANAGER or ADMIN can approve discounts');
-  }
+  await assertUserPermission(pool, managerId, 'sales.approve', {
+    legacyRole,
+    errorCode: 'ERR_DISCOUNT_APPROVE_DENIED',
+    message: 'Approver must have sales.approve permission',
+  });
 
   // TODO: Verify PIN against user record (bcrypt compare)
-  // For now, we'll skip PIN verification in this implementation
-  // In production, add: await verifyUserPin(pool, managerId, managerPin)
+  void managerPin;
 
   const result = await discountRepo.approveDiscountAuthorization(
     pool,
@@ -250,10 +230,8 @@ export async function approveDiscount(
     managerName
   );
 
-  // Log approval to audit trail
   if (result && auditContext) {
     try {
-      // Get authorization details for logging
       const auth = await discountRepo.findAuthorizationById(pool, authorizationId);
       if (auth) {
         await auditService.logDiscountApproved(
@@ -261,7 +239,7 @@ export async function approveDiscount(
           authorizationId,
           {
             saleId: auth.sale_id,
-            saleNumber: auth.sale_id, // TODO: Fetch actual sale number if needed
+            saleNumber: auth.sale_id,
             discountAmount: Money.toNumber(Money.parseDb(auth.discount_amount)),
             requestedBy: auth.requested_by_name,
             approvedBy: managerName,
@@ -297,9 +275,6 @@ export async function getPendingAuthorizations(pool: Pool): Promise<Record<strin
   }));
 }
 
-/**
- * Normalize database row to Discount type
- */
 function normalizeDiscount(row: discountRepo.DiscountDbRow): Discount {
   return {
     id: row.id,

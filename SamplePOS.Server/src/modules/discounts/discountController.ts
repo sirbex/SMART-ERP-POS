@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import * as discountService from './discountService.js';
 import { DiscountSchema, ApplyDiscountSchema } from '../../../../shared/zod/discount.js';
-import { asyncHandler, NotFoundError, ValidationError, ForbiddenError } from '../../middleware/errorHandler.js';
+import { asyncHandler, NotFoundError, ValidationError, ForbiddenError, BusinessError } from '../../middleware/errorHandler.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const UpdateDiscountSchema = DiscountSchema.omit({ id: true, createdAt: true, updatedAt: true }).partial();
@@ -14,18 +14,12 @@ const ApproveDiscountSchema = z.object({
   managerPin: z.string().min(1, 'Manager PIN is required'),
 });
 
-/**
- * GET /api/discounts - Get all active discounts
- */
 export const listDiscounts = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const discounts = await discountService.getActiveDiscounts(pool);
   res.json({ success: true, data: discounts });
 });
 
-/**
- * GET /api/discounts/:id - Get discount by ID
- */
 export const getDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
@@ -38,73 +32,34 @@ export const getDiscount = asyncHandler(async (req: Request, res: Response) => {
   res.json({ success: true, data: discount });
 });
 
-/**
- * POST /api/discounts - Create new discount (ADMIN only)
- */
 export const createDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const validatedData = DiscountSchema.omit({ id: true, createdAt: true, updatedAt: true }).parse(req.body);
-  const user = req.user!;
-
-  try {
-    const discount = await discountService.createDiscount(pool, validatedData, user.role);
-    res.status(201).json({ success: true, data: discount, message: 'Discount created successfully' });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('Only ADMIN')) {
-      throw new ForbiddenError(error.message);
-    }
-    throw error;
-  }
+  const discount = await discountService.createDiscount(pool, validatedData);
+  res.status(201).json({ success: true, data: discount, message: 'Discount created successfully' });
 });
 
-/**
- * PUT /api/discounts/:id - Update discount (ADMIN only)
- */
 export const updateDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
   const updates = UpdateDiscountSchema.parse(req.body);
-  const user = req.user!;
-
-  try {
-    const discount = await discountService.updateDiscount(pool, id, updates, user.role);
-    if (!discount) {
-      throw new NotFoundError('Discount');
-    }
-    res.json({ success: true, data: discount, message: 'Discount updated successfully' });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('Only ADMIN')) {
-      throw new ForbiddenError(error.message);
-    }
-    throw error;
+  const discount = await discountService.updateDiscount(pool, id, updates);
+  if (!discount) {
+    throw new NotFoundError('Discount');
   }
+  res.json({ success: true, data: discount, message: 'Discount updated successfully' });
 });
 
-/**
- * DELETE /api/discounts/:id - Delete (deactivate) discount (ADMIN only)
- */
 export const deleteDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);
-  const user = req.user!;
-
-  try {
-    const success = await discountService.deleteDiscount(pool, id, user.role);
-    if (!success) {
-      throw new NotFoundError('Discount');
-    }
-    res.json({ success: true, message: 'Discount deactivated successfully' });
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('Only ADMIN')) {
-      throw new ForbiddenError(error.message);
-    }
-    throw error;
+  const success = await discountService.deleteDiscount(pool, id);
+  if (!success) {
+    throw new NotFoundError('Discount');
   }
+  res.json({ success: true, message: 'Discount deactivated successfully' });
 });
 
-/**
- * POST /api/discounts/apply - Apply discount to current sale
- */
 export const applyDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const discountData = ApplyDiscountSchema.parse(req.body);
@@ -138,9 +93,6 @@ export const applyDiscount = asyncHandler(async (req: Request, res: Response) =>
   });
 });
 
-/**
- * POST /api/discounts/approve - Approve discount with manager PIN
- */
 export const approveDiscount = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const { authorizationId, managerPin } = ApproveDiscountSchema.parse(req.body);
@@ -167,16 +119,13 @@ export const approveDiscount = asyncHandler(async (req: Request, res: Response) 
 
     res.json({ success: true, message: 'Discount approved successfully' });
   } catch (error) {
-    if (error instanceof Error && error.message.includes('Only MANAGER')) {
+    if (error instanceof BusinessError && error.errorCode === 'ERR_DISCOUNT_APPROVE_DENIED') {
       throw new ForbiddenError(error.message);
     }
     throw error;
   }
 });
 
-/**
- * GET /api/discounts/pending - Get pending discount authorizations
- */
 export const getPendingAuthorizations = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const authorizations = await discountService.getPendingAuthorizations(pool);

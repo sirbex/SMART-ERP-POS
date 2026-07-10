@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   BarChart3, Calculator, TrendingUp, BookOpen, CreditCard, DollarSign,
@@ -8,6 +8,7 @@ import {
   CalendarCheck, Percent, RefreshCw, Clock, ArrowRightLeft
 } from 'lucide-react';
 import ServerClock from './ServerClock';
+import { useBackendPermission } from '../hooks/useBackendPermission';
 
 interface AccountingLayoutProps {
   children: React.ReactNode;
@@ -26,11 +27,15 @@ interface NavGroup {
 export default function AccountingLayout({ children }: AccountingLayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const canManageAccounting = useBackendPermission('accounting.manage');
+  const canReadAccounting = useBackendPermission('accounting.read');
+  const showDiagnosticsNav = canManageAccounting || canReadAccounting;
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Overview', 'ERP Controls', 'Advanced Accounting']));
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Grouped navigation items
-  const navGroups: NavGroup[] = [
+  const navGroups: NavGroup[] = useMemo(() => {
+    const groups: NavGroup[] = [
     {
       name: 'Overview',
       items: [
@@ -133,10 +138,10 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           description: 'Bank accounts and transactions'
         },
         {
-          name: 'Reconciliation',
+          name: 'Financial Control Tower',
           path: '/accounting/reconciliation',
           icon: <Scale className="h-4 w-4" />,
-          description: 'Cash, AR, Inventory, AP'
+          description: 'Month-end close, exceptions, and work queue'
         },
         {
           name: 'Journal Entries',
@@ -239,6 +244,12 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           description: 'Period-end FX revaluation (see Multi-Currency for rates)'
         },
         {
+          name: 'Financial Diagnostics',
+          path: '/accounting/financial-diagnostics',
+          icon: <ShieldCheck className="h-4 w-4" />,
+          description: 'Reconciliation engine & system health (admin)'
+        },
+        {
           name: 'GL Integrity Audit',
           path: '/accounting/gl-integrity',
           icon: <ShieldCheck className="h-4 w-4" />,
@@ -252,7 +263,16 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
         }
       ]
     }
-  ];
+    ];
+
+    if (!showDiagnosticsNav) {
+      return groups.map((g) => ({
+        ...g,
+        items: g.items.filter((item) => item.path !== '/accounting/financial-diagnostics'),
+      }));
+    }
+    return groups;
+  }, [showDiagnosticsNav]);
 
   const isActive = (path: string) => {
     return location.pathname === path ||

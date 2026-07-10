@@ -35,7 +35,7 @@ interface PendingOrder {
 export default function OrdersQueuePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { user, permissions } = useAuth();
+  const { permissions } = useAuth();
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
 
@@ -110,8 +110,8 @@ export default function OrdersQueuePage() {
     }
   };
 
-  // Check if current user can pay (legacy roles OR RBAC permission)
-  const canPay = user?.role === 'ADMIN' || user?.role === 'MANAGER' || user?.role === 'CASHIER' || permissions.has('orders.pay');
+  const canPay = permissions.has('orders.pay');
+  const canCancel = permissions.has('orders.cancel');
 
   return (
     <Layout>
@@ -226,15 +226,17 @@ export default function OrdersQueuePage() {
                     {formatCurrency(parseFloat(order.totalAmount))}
                   </span>
                   <div className="flex gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setCancelOrderId(order.id);
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
-                    >
-                      Cancel
-                    </button>
+                    {canCancel && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCancelOrderId(order.id);
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    )}
                     {canPay && (
                       <button
                         onClick={(e) => {

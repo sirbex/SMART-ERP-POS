@@ -175,12 +175,11 @@ export default function ProductsPage() {
   // Offline-awareness
   const { isOnline } = useOfflineContext();
   const { isMultistoreEnabled } = useMultistoreEnabled();
-  const { permissions, user } = useAuth();
+  const { permissions } = useAuth();
   const canUseStoreFilter = useMemo(() => {
     if (!isMultistoreEnabled) return false;
-    if (user?.role === 'ADMIN' || user?.role === 'MANAGER') return true;
     return hasWarehouseNetworkAccess(permissions);
-  }, [isMultistoreEnabled, permissions, user?.role]);
+  }, [isMultistoreEnabled, permissions]);
   const [stockViewMode, setStockViewMode] = useState<StockViewMode>(() => readStockViewMode());
   const byStoreView = canUseStoreFilter && stockViewMode === 'store';
   const { data: storeLocations = [] } = useStoreLocations(byStoreView && isOnline);

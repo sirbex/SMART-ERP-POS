@@ -4,27 +4,34 @@ import { EnterpriseListQueryFields } from '../../../../shared/zod/enterpriseList
 import { pool as globalPool } from '../../db/pool.js';
 import { salesService, CreateSaleInput, RefundSaleInput } from './salesService.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
+import { requirePermission, requireAnyPermission, getRbacService } from '../../rbac/middleware.js';
 import { normalizeResponse, normalizePaginatedResponse } from '../../utils/caseConverter.js';
 import { POSSaleSchema, POSSaleLineItemSchema } from '../../../../shared/zod/pos-sale.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
+import {
+  shouldRestrictSalesToOwnUser,
+  canProcessRefundType,
+  sanitizeSaleFinancialFields,
+} from '@shared/authorization/salesPolicy.js';
 
-// ─── SECURITY: Role-based response sanitization (SECURITY LAW) ───────────────
-// No API route may return raw entities. CASHIER must never see cost or margin
-// intelligence. Applied to every sales response after normalizeResponse.
-const CASHIER_RESTRICTED_FIELDS = ['totalCost', 'profit', 'profitMargin', 'totalProfit'] as const;
-function sanitizeSaleForRole<T extends Record<string, unknown>>(
-  data: T,
-  role: string | undefined
-): Record<string, unknown> {
-  if (role === 'CASHIER') {
-    const sanitized: Record<string, unknown> = { ...data };
-    for (const field of CASHIER_RESTRICTED_FIELDS) {
-      delete sanitized[field];
-    }
-    return sanitized;
+export { shouldRestrictSalesToOwnUser, canProcessRefundType, sanitizeSaleFinancialFields };
+
+async function getEffectivePermissionKeys(req: Request): Promise<Set<string>> {
+  if (req.authContext?.permissions) {
+    return req.authContext.permissions;
   }
-  return data;
+
+  if (!req.user?.id) {
+    return new Set<string>();
+  }
+
+  try {
+    const service = getRbacService(req);
+    const permissions = await service.getUserEffectivePermissions(req.user.id);
+    return new Set(permissions.map((permission) => permission.permissionKey));
+  } catch {
+    return new Set<string>();
+  }
 }
 
 // Internal validation for legacy format compatibility
@@ -288,10 +295,12 @@ export const salesController = {
         auditContext
       );
 
+      const permissionKeys = await getEffectivePermissionKeys(req);
       const normalizedCreateResult = normalizeResponse(result) as Record<string, unknown>;
       if (normalizedCreateResult.sale && typeof normalizedCreateResult.sale === 'object') {
-        normalizedCreateResult.sale = sanitizeSaleForRole(
+        normalizedCreateResult.sale = sanitizeSaleFinancialFields(
           normalizedCreateResult.sale as Record<string, unknown>,
+          permissionKeys,
           req.user?.role
         );
       }
@@ -327,16 +336,17 @@ export const salesController = {
     const { id } = UuidParamSchema.parse(req.params);
     const result = await salesService.getSaleById(pool, id);
 
-    // SECURITY LAW: CASHIER can only view their own sales
-    if (req.user?.role === 'CASHIER' && result.sale.soldBy !== req.user.id) {
+    const permissionKeys = await getEffectivePermissionKeys(req);
+    if (shouldRestrictSalesToOwnUser(permissionKeys, req.user?.role) && result.sale.soldBy !== req.user?.id) {
       res.status(403).json({ success: false, error: 'Forbidden' });
       return;
     }
 
     const normalizedGetById = normalizeResponse(result) as Record<string, unknown>;
     if (normalizedGetById.sale && typeof normalizedGetById.sale === 'object') {
-      normalizedGetById.sale = sanitizeSaleForRole(
+      normalizedGetById.sale = sanitizeSaleFinancialFields(
         normalizedGetById.sale as Record<string, unknown>,
+        permissionKeys,
         req.user?.role
       );
     }
@@ -348,14 +358,16 @@ export const salesController = {
 
   /**
    * List sales with pagination and filters
-   * CASHIER role is always restricted to their own sales (server-enforced)
+   * Users without sales.read are scoped to their own sales (permission policy).
    */
   async listSales(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
     const query = ListSalesQuerySchema.parse(req.query);
+    const permissionKeys = await getEffectivePermissionKeys(req);
 
-    // Server-enforced: cashiers can ONLY see their own sales
-    const effectiveCashierId = req.user?.role === 'CASHIER' ? req.user.id : query.cashierId;
+    const effectiveCashierId = shouldRestrictSalesToOwnUser(permissionKeys, req.user?.role)
+      ? req.user?.id
+      : query.cashierId;
 
     const result = await salesService.listSales(pool, query.page, query.limit, {
       status: query.status,
@@ -374,7 +386,11 @@ export const salesController = {
     res.json({
       success: true,
       data: result.sales.map((sale) =>
-        sanitizeSaleForRole(normalizeResponse(sale) as Record<string, unknown>, req.user?.role)
+        sanitizeSaleFinancialFields(
+          normalizeResponse(sale) as Record<string, unknown>,
+          permissionKeys,
+          req.user?.role
+        )
       ),
       pagination: {
         page: query.page,
@@ -389,19 +405,19 @@ export const salesController = {
   async getSalesSummary(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
     const { startDate, endDate, groupBy } = SalesSummaryQuerySchema.parse(req.query);
+    const permissionKeys = await getEffectivePermissionKeys(req);
 
     const filters: { startDate?: string; endDate?: string; groupBy?: string; cashierId?: string } = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
     if (groupBy) filters.groupBy = groupBy;
-    // SECURITY LAW: CASHIER can only see summary of their own sales
-    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
+    if (shouldRestrictSalesToOwnUser(permissionKeys, req.user?.role)) filters.cashierId = req.user!.id;
 
     const result = await salesService.getSalesSummary(pool, filters);
 
     res.json({
       success: true,
-      data: sanitizeSaleForRole(result as Record<string, unknown>, req.user?.role),
+      data: sanitizeSaleFinancialFields(result as Record<string, unknown>, permissionKeys, req.user?.role),
     });
   },
 
@@ -413,6 +429,7 @@ export const salesController = {
     const { startDate, endDate, productId, customerId } = ProductSalesSummaryQuerySchema.parse(
       req.query
     );
+    const permissionKeys = await getEffectivePermissionKeys(req);
 
     const filters: {
       startDate?: string;
@@ -425,7 +442,7 @@ export const salesController = {
     if (endDate) filters.endDate = endDate;
     if (productId) filters.productId = productId;
     if (customerId) filters.customerId = customerId;
-    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
+    if (shouldRestrictSalesToOwnUser(permissionKeys, req.user?.role)) filters.cashierId = req.user!.id;
 
     const result = await salesService.getProductSalesSummary(pool, filters);
 
@@ -442,11 +459,12 @@ export const salesController = {
   async getTopSellingProducts(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
     const query = TopSellingQuerySchema.parse(req.query);
+    const permissionKeys = await getEffectivePermissionKeys(req);
 
     const filters: { startDate?: string; endDate?: string; cashierId?: string } = {};
     if (query.startDate) filters.startDate = query.startDate;
     if (query.endDate) filters.endDate = query.endDate;
-    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
+    if (shouldRestrictSalesToOwnUser(permissionKeys, req.user?.role)) filters.cashierId = req.user!.id;
 
     const result = await salesService.getTopSellingProducts(pool, query.limit ?? 10, filters);
 
@@ -462,11 +480,12 @@ export const salesController = {
   async getSalesSummaryByDate(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
     const { groupBy, startDate, endDate } = SalesByDateQuerySchema.parse(req.query);
+    const permissionKeys = await getEffectivePermissionKeys(req);
 
     const filters: { startDate?: string; endDate?: string; cashierId?: string } = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
-    if (req.user?.role === 'CASHIER') filters.cashierId = req.user.id;
+    if (shouldRestrictSalesToOwnUser(permissionKeys, req.user?.role)) filters.cashierId = req.user!.id;
 
     const result = await salesService.getSalesSummaryByDate(pool, groupBy, filters);
 
@@ -482,11 +501,12 @@ export const salesController = {
   async getSalesByCashier(req: Request, res: Response): Promise<void> {
     const pool = req.tenantPool || globalPool;
     const { startDate, endDate } = SalesSummaryQuerySchema.parse(req.query);
+    const permissionKeys = await getEffectivePermissionKeys(req);
 
     const filters: { startDate?: string; endDate?: string; userId?: string } = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
-    if (req.user?.role === 'CASHIER') filters.userId = req.user.id;
+    if (shouldRestrictSalesToOwnUser(permissionKeys, req.user?.role)) filters.userId = req.user!.id;
 
     const result = await salesService.getSalesByCashier(pool, filters);
 
@@ -573,20 +593,8 @@ export const salesController = {
     const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
 
     const refundType = body.refundType ?? 'REFUND';
-    const requiredPermission = refundType === 'EXCHANGE' ? 'sales.exchange' : 'sales.refund';
-    const { getRbacService } = await import('../../rbac/middleware.js');
-    let permitted = false;
-    try {
-      const rbac = getRbacService(req);
-      permitted = await rbac.checkPermission(userId, requiredPermission, null, null);
-      if (!permitted && refundType === 'EXCHANGE') {
-        permitted = await rbac.checkPermission(userId, 'sales.refund', null, null);
-      }
-    } catch {
-      if (req.user?.role && ['ADMIN', 'MANAGER', 'CASHIER'].includes(req.user.role.toUpperCase())) {
-        permitted = true;
-      }
-    }
+    const permissionKeys = await getEffectivePermissionKeys(req);
+    const permitted = canProcessRefundType(refundType, permissionKeys, req.user?.role);
     if (!permitted) {
       res.status(403).json({ success: false, error: 'Insufficient permissions', code: 'PERMISSION_DENIED' });
       return;

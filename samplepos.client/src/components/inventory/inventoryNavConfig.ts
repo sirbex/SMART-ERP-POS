@@ -10,6 +10,7 @@ import {
   WAREHOUSE_NETWORK_READ_PERMISSIONS,
 } from '@shared/utils/warehouseRbac';
 import { TRANSFER_PERMISSION_KEYS } from '@shared/types/transferWorkflow';
+import { legacyRoleGrantsPermission } from '@shared/authorization/legacyRoleFallback';
 
 export type InventoryMoreNavGroup = 'master' | 'procurement' | 'operations' | 'audit';
 
@@ -225,23 +226,15 @@ export function groupInventoryMoreNav(tabs: InventoryNavItem[]): Array<{
     .filter((section) => section.items.length > 0);
 }
 
-function legacyGrantsNavPermission(role: string | undefined, permissionKey: string): boolean {
-  if (role === 'ADMIN') return true;
-  if (role === 'MANAGER') {
-    const module = permissionKey.split('.')[0];
-    return ['inventory', 'settings'].includes(module);
-  }
-  return false;
-}
-
 function canSeeNavItem(
   tab: InventoryNavItem,
   permissions: Set<string>,
   userRole?: string,
 ): boolean {
   if (!tab.requiredPermissions?.length) return true;
+  const useLegacy = permissions.size === 0;
   return tab.requiredPermissions.some(
-    (key) => permissions.has(key) || legacyGrantsNavPermission(userRole, key),
+    (key) => permissions.has(key) || (useLegacy && legacyRoleGrantsPermission(userRole, key)),
   );
 }
 

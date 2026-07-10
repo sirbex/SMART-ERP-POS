@@ -54,20 +54,13 @@ function makeRes(): Response & { _status: number; _body: unknown } {
 
 // ─── Module under test ────────────────────────────────────────────────────────
 
-// We test sanitizeSaleForRole as a black-box by re-implementing the exact logic
-// in the test (mirrors the production function) so we do NOT import the private
-// function directly, keeping tests decoupled from internals.
-const CASHIER_RESTRICTED_FIELDS = ['totalCost', 'profit', 'profitMargin', 'totalProfit'] as const;
+// Tests permission-based financial field sanitization (shared policy module).
+import { sanitizeSaleFinancialFields } from '@shared/authorization/salesPolicy.js';
 
+/** Test adapter: maps legacy role scenarios to permission policy */
 function sanitizeSaleForRole(data: Record<string, unknown>, role: string | undefined): Record<string, unknown> {
-  if (role === 'CASHIER') {
-    const sanitized: Record<string, unknown> = { ...data };
-    for (const field of CASHIER_RESTRICTED_FIELDS) {
-      delete sanitized[field];
-    }
-    return sanitized;
-  }
-  return data;
+  const permissions = role === 'CASHIER' ? ['sales.read'] : [];
+  return sanitizeSaleFinancialFields(data, permissions, role);
 }
 
 // ─── VIOLATION #2: sanitizeSaleForRole ────────────────────────────────────────
@@ -116,16 +109,16 @@ describe('sanitizeSaleForRole — SECURITY SANITIZATION RULE (#2)', () => {
     expect(result.profit).toBe(20000);
   });
 
-  it('returns full data unchanged for STAFF', () => {
+  it('strips financial fields for STAFF without financial view permission', () => {
     const result = sanitizeSaleForRole(saleWithFinancials, 'STAFF');
-    expect(result.totalCost).toBe(30000);
-    expect(result.profit).toBe(20000);
+    expect(result.totalCost).toBeUndefined();
+    expect(result.profit).toBeUndefined();
   });
 
-  it('returns full data unchanged for undefined role', () => {
+  it('strips financial fields when role is undefined and no permissions', () => {
     const result = sanitizeSaleForRole(saleWithFinancials, undefined);
-    expect(result.totalCost).toBe(30000);
-    expect(result.profit).toBe(20000);
+    expect(result.totalCost).toBeUndefined();
+    expect(result.profit).toBeUndefined();
   });
 
   it('does not mutate the original object', () => {

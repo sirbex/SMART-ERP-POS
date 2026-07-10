@@ -16,6 +16,8 @@ import {
 import { quotationService } from './quotationService.js';
 import { asyncHandler, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
 import { getBusinessDate, addDaysToDateString } from '../../utils/dateRange.js';
+import { getAuthorizationService } from '../../rbac/middleware.js';
+import { AuthorizationDeniedError } from '../../authorization/authorizationService.js';
 
 const UuidParamSchema = z.object({ id: z.string().uuid('ID must be a valid UUID') });
 const UpdateStatusSchema = z.object({
@@ -203,11 +205,20 @@ export const quotationController = {
     const permanent = req.query.permanent === 'true';
 
     if (permanent) {
-      // Only ADMIN can permanently delete
-      const user = (req as unknown as { user?: { role?: string } }).user;
-      if (!user || user.role !== 'ADMIN') {
-        res.status(403).json({ success: false, error: 'Only admins can permanently delete quotations' });
+      const authz = getAuthorizationService(req);
+      const subject = authz.subjectFromUser(req.user);
+      if (!subject) {
+        res.status(401).json({ success: false, error: 'Authentication required' });
         return;
+      }
+      try {
+        await authz.authorize(subject, { permission: 'admin.delete' });
+      } catch (err) {
+        if (err instanceof AuthorizationDeniedError) {
+          res.status(403).json({ success: false, error: authz.getDeniedReason(err.result) });
+          return;
+        }
+        throw err;
       }
     }
 

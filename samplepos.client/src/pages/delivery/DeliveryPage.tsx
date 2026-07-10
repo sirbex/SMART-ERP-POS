@@ -1012,7 +1012,7 @@ function DriverAssignModal({ order, onClose, onSuccess }: { order: DeliveryOrder
     },
   });
 
-  const staffUsers = (usersData || []).filter((u) => u.role === 'STAFF' || u.role === 'ADMIN' || u.role === 'MANAGER');
+  const driverCandidates = usersData || [];
 
   const mutation = useMutation({
     mutationFn: () => deliveryApi.assignDriver(order.id, driverId),
@@ -1034,7 +1034,7 @@ function DriverAssignModal({ order, onClose, onSuccess }: { order: DeliveryOrder
             <label className="block text-sm font-medium text-gray-700 mb-1">Select Driver</label>
             <select value={driverId} onChange={(e) => setDriverId(e.target.value)} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500">
               <option value="">Select a driver...</option>
-              {staffUsers.map((user) => (
+              {driverCandidates.map((user) => (
                 <option key={user.id} value={user.id}>{user.full_name} ({user.role})</option>
               ))}
             </select>

@@ -31,6 +31,7 @@ import {
 } from '../ui/select';
 import { useRegisters, useOpenSession, useForceCloseSession } from '../../hooks/useCashRegister';
 import { useAuth } from '../../hooks/useAuth';
+import { useHasPermission } from '../../authorization/useAuthorization';
 import { Loader2, DollarSign, AlertTriangle, User } from 'lucide-react';
 import { formatTimestamp } from '../../utils/businessDate';
 
@@ -79,7 +80,7 @@ export function OpenRegisterDialog({
     const isOccupiedByMe = selectedRegister?.currentSessionId != null
         && selectedRegister.currentSessionUserId === user?.id;
     const isAvailable = selectedRegister != null && selectedRegister.currentSessionId == null;
-    const isManager = user?.role === 'ADMIN' || user?.role === 'MANAGER';
+    const canForceCloseRegister = useHasPermission('pos.approve');
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -212,11 +213,11 @@ export function OpenRegisterDialog({
                             <p className="mt-1 text-xs">
                                 Session {selectedRegister?.currentSessionNumber} — opened{' '}
                                 {formatSessionTime(selectedRegister?.currentSessionOpenedAt)}.
-                                {isManager
+                                {canForceCloseRegister
                                     ? ' You can force-close this session as a manager.'
                                     : ' Please select a different register or ask a manager to close this session.'}
                             </p>
-                            {isManager && !showForceCloseConfirm && (
+                            {canForceCloseRegister && !showForceCloseConfirm && (
                                 <Button
                                     type="button"
                                     variant="outline"
@@ -227,7 +228,7 @@ export function OpenRegisterDialog({
                                     Force Close Session
                                 </Button>
                             )}
-                            {isManager && showForceCloseConfirm && (
+                            {canForceCloseRegister && showForceCloseConfirm && (
                                 <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
                                     <p className="font-medium">
                                         Are you sure? This will close {selectedRegister?.currentSessionUserName}&apos;s

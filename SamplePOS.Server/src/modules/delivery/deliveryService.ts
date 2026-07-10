@@ -14,6 +14,7 @@ import logger from '../../utils/logger.js';
 import * as auditService from '../audit/auditService.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
+import { userHasPermission } from '../../authorization/serviceAuth.js';
 import type {
   DeliveryOrder,
   DeliveryItem,
@@ -366,15 +367,20 @@ export async function assignDriver(
     const dbPool = pool || globalPool;
     const { updatedRow, driverFullName } = await UnitOfWork.run(dbPool, async (client) => {
       // Validate driver exists and has delivery permissions
-      const driverCheck = await client.query(`
+      const driverCheck = await client.query<{ id: string; full_name: string; role: string }>(`
         SELECT u.id, u.full_name, u.role
         FROM users u
         WHERE u.id = $1 AND u.is_active = true
-          AND u.role IN ('ADMIN', 'MANAGER', 'STAFF')
       `, [driverId]);
 
       if (driverCheck.rows.length === 0) {
-        throw new Error('Driver not found or does not have delivery permissions');
+        throw new Error('Driver not found');
+      }
+
+      const driver = driverCheck.rows[0];
+      const canDeliver = await userHasPermission(dbPool, driverId, 'delivery.create', driver.role);
+      if (!canDeliver) {
+        throw new Error('Driver does not have delivery.create permission');
       }
 
       // Assign driver

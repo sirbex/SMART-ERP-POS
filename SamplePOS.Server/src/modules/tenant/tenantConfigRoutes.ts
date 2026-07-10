@@ -22,6 +22,7 @@ import type { Request, Response } from 'express';
 import { PLAN_LIMITS, type TenantPlan } from '../../../../shared/types/tenant.js';
 import logger from '../../utils/logger.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../rbac/middleware.js';
 import { connectionManager } from '../../db/connectionManager.js';
 import { invalidateTenantCache } from '../../middleware/tenantMiddleware.js';
 
@@ -357,14 +358,8 @@ const brandingUpload = multer({
 // PUT /api/tenant/branding — Update PWA branding settings
 // Auth required — ADMIN only
 // ============================================================
-router.put('/branding', authenticate, async (req: Request, res: Response) => {
+router.put('/branding', authenticate, requirePermission('settings.update'), async (req: Request, res: Response) => {
   try {
-    const user = req.user as { role: string } | undefined;
-    if (!user || user.role !== 'ADMIN') {
-      res.status(403).json({ success: false, error: 'Only admins can update branding' });
-      return;
-    }
-
     const tenant = req.tenant as { id: string } | undefined;
     if (!tenant) {
       res.status(404).json({ success: false, error: 'Tenant not resolved' });
@@ -433,14 +428,8 @@ router.put('/branding', authenticate, async (req: Request, res: Response) => {
 // Auth required — ADMIN only
 // Accepts a single PNG file, stores as icon-192.png and icon-512.png
 // ============================================================
-router.post('/branding/icon', authenticate, brandingUpload.single('icon'), async (req: Request, res: Response) => {
+router.post('/branding/icon', authenticate, requirePermission('settings.update'), brandingUpload.single('icon'), async (req: Request, res: Response) => {
   try {
-    const user = req.user as { role: string } | undefined;
-    if (!user || user.role !== 'ADMIN') {
-      res.status(403).json({ success: false, error: 'Only admins can upload icons' });
-      return;
-    }
-
     const tenant = req.tenant as { id: string } | undefined;
     if (!tenant) {
       res.status(404).json({ success: false, error: 'Tenant not resolved' });

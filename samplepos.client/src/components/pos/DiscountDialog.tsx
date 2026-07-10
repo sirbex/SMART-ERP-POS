@@ -17,16 +17,9 @@ interface DiscountDialogProps {
     lineItemIndex?: number;
   }) => void;
   originalAmount: number;
-  lineItemIndex?: number; // If provided, applies to line item
-  userRole: 'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF';
+  lineItemIndex?: number;
+  maxDiscountPercent: number;
 }
-
-const ROLE_LIMITS: Record<'ADMIN' | 'MANAGER' | 'CASHIER' | 'STAFF', number> = {
-  ADMIN: 100,
-  MANAGER: 50,
-  CASHIER: 10,
-  STAFF: 5,
-};
 
 export default function DiscountDialog({
   isOpen,
@@ -34,7 +27,7 @@ export default function DiscountDialog({
   onApply,
   originalAmount,
   lineItemIndex,
-  userRole,
+  maxDiscountPercent,
 }: DiscountDialogProps) {
   const [discountType, setDiscountType] = useState<DiscountType>('PERCENTAGE');
   const [discountValue, setDiscountValue] = useState('');
@@ -44,7 +37,7 @@ export default function DiscountDialog({
   const valueInputRef = useRef<HTMLInputElement>(null);
   const reasonInputRef = useRef<HTMLInputElement>(null);
 
-  const userLimit = ROLE_LIMITS[userRole] || 0;
+  const userLimit = maxDiscountPercent;
 
   // Calculate discount preview
   const discountAmount = discountValue

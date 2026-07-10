@@ -224,6 +224,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       'delivery.read',
       'settings.read',
       'quotations.read', 'quotations.create',
+      'orders.read', 'orders.pay', 'orders.cancel',
       'reports.sales_view',
       'expenses.read', 'expenses.create',
     ];
