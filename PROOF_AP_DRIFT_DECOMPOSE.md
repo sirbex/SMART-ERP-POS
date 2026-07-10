@@ -1,6 +1,6 @@
 # AP Drift Decomposition — Verified Proof (Henber)
 
-**Generated:** 2026-07-05T10:34:39.164Z
+**Generated:** 2026-07-05T11:25:40.539Z
 
 ## Headline (matches UI reconciliation report)
 

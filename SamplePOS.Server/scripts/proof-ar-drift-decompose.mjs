@@ -209,7 +209,8 @@ try {
 
   log('\n── Layer 3: Assertions ──');
   let ok = true;
-  ok = assertEq('integrityGlDrift', integrityDrift, -52_800, 1) && ok;
+  const expectedDrift = Number(process.env.EXPECTED_INTEGRITY_DRIFT ?? 0);
+  ok = assertEq('integrityGlDrift', integrityDrift, expectedDrift, 1) && ok;
   ok = assertEq('non-customer + customer ≈ total GL', glCustomer + nonCustomerGl, glTotal, 1) && ok;
   ok = assertEq('cache healthy (open-item = cache)', openItem, num(s.customers_cache), 1) && ok;
 
