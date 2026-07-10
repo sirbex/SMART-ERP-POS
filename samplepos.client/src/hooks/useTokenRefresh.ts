@@ -162,10 +162,22 @@ function notifySessionDeferred(reason: string): void {
 function forceLogoutRedirect(): void {
     clearTokens();
     broadcastAuthEvent({ type: 'LOGOUT' });
-    sessionStorage.setItem('session_expired', '1');
-    if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+    const onLogin = window.location.pathname === '/login' || window.location.pathname.endsWith('/login');
+    if (onLogin) {
+      // Already on login — set banner flag once; do not reload (mobile loop)
+      try {
+        sessionStorage.setItem('session_expired', '1');
+      } catch {
+        /* ignore */
+      }
+      return;
     }
+    try {
+      sessionStorage.setItem('session_expired', '1');
+    } catch {
+      /* ignore */
+    }
+    window.location.href = '/login';
 }
 
 function mayAutoLogout(refreshError: unknown): boolean {

@@ -55,8 +55,9 @@ function resolveRbacService(req: Request): RbacService | null {
 }
 
 /**
- * Legacy users.role fallback — ONLY when the user has no rbac_user_roles assignments.
- * Matches AuthorizationService.hasRbacAssignments / evaluatePermission.
+ * Legacy users.role fallback — ONLY when the user has no rbac_user_roles assignments,
+ * OR when legacy role is ADMIN (absolute admin must never be blocked by a narrower RBAC role).
+ * Matches AuthorizationService.evaluatePermission.
  */
 async function legacyFallbackAllowed(
   service: RbacService,
@@ -65,6 +66,9 @@ async function legacyFallbackAllowed(
   permissionKeys: string[],
   mode: 'any' | 'all'
 ): Promise<boolean> {
+  if (role?.toUpperCase() === 'ADMIN') {
+    return true;
+  }
   const roles = await service.getUserRoles(userId);
   if (roles.length > 0) return false;
   if (mode === 'all') {

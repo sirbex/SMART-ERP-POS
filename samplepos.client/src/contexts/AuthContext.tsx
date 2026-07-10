@@ -203,7 +203,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null);
         setIsAuthenticated(false);
         setPermissionKeys([]);
-        if (window.location.pathname !== '/login') {
+        const onLogin =
+          window.location.pathname === '/login' || window.location.pathname.endsWith('/login');
+        if (!onLogin) {
           window.location.href = '/login';
         }
         return;
@@ -216,8 +218,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null);
         setIsAuthenticated(false);
         setPermissionKeys([]);
-        if (window.location.pathname !== '/login') {
+        const onLogin =
+          window.location.pathname === '/login' || window.location.pathname.endsWith('/login');
+        try {
           sessionStorage.setItem('session_expired', '1');
+        } catch {
+          /* ignore */
+        }
+        if (!onLogin) {
           window.location.href = '/login';
         }
       }

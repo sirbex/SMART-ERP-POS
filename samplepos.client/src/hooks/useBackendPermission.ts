@@ -125,6 +125,9 @@ const BACKEND_TO_LEGACY: Record<string, Permission> = {
 export function useBackendPermission(permissionKey: string): boolean {
     const { user, permissions } = useAuth();
 
+    // Absolute admin — never block UI actions on partial RBAC grant sets
+    if (user?.role === 'ADMIN') return true;
+
     // Session-embedded permissions available — use as source of truth
     if (permissions.size > 0) {
         return permissions.has(permissionKey);

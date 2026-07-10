@@ -202,7 +202,8 @@ function App() {
   useEffect(() => {
     const handler = (e: Event) => {
       const msg = (e as CustomEvent).detail || 'You do not have permission to perform this action';
-      toast.error(msg, { duration: 6000, icon: '🔒' });
+      // Stable id collapses rapid duplicate 403s (common on dashboard multi-fetch)
+      toast.error(msg, { duration: 6000, icon: '🔒', id: 'app-forbidden' });
     };
     window.addEventListener('app:forbidden', handler);
     return () => window.removeEventListener('app:forbidden', handler);

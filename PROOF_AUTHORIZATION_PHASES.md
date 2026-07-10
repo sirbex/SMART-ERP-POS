@@ -1,6 +1,6 @@
 # Authorization Phases — Proof Run
 
-**Generated:** 2026-07-10T09:22:04.587Z
+**Generated:** 2026-07-10T10:19:44.915Z
 
 ## Summary
 
@@ -9,7 +9,7 @@
 | Static checks passed | 25 / 31 |
 | Test suites executed | 6 |
 | Test suites passed | 6 |
-| Individual tests passed | 90 |
+| Individual tests passed | 91 |
 | Overall | **PASS** |
 
 ## Phase map
@@ -48,7 +48,7 @@
 - **PASS** Phase 3 — sessionService loads RBAC permissions
 - **PASS** Phase 3 — deprecated authStore.ts deleted
 - **PASS** Phase 3 — no ADMIN/MANAGER/CASHIER business checks in migrated client pages
-- **PASS** Phase 0 tests — authorizationService + shared policies — 22 tests passed
+- **PASS** Phase 0 tests — authorizationService + shared policies — 23 tests passed
 - **PASS** Phase 2 tests — salesRoutes.rbacPolicy — 12 tests passed
 - **PASS** Phase 2 tests — salesRoutes.security — 47 tests passed
 - **PASS** Phase 2 tests — glReconciliationService.auth — 1 tests passed
@@ -57,7 +57,7 @@
 
 ## Test runs
 
-- **PASS** `Phase 0 tests — authorizationService + shared policies` — pattern: `authorization discountPolicy documentPolicy serviceAuth` (22 tests)
+- **PASS** `Phase 0 tests — authorizationService + shared policies` — pattern: `authorization discountPolicy documentPolicy serviceAuth` (23 tests)
 - **PASS** `Phase 2 tests — salesRoutes.rbacPolicy` — pattern: `salesRoutes.rbacPolicy` (12 tests)
 - **PASS** `Phase 2 tests — salesRoutes.security` — pattern: `salesRoutes.security` (47 tests)
 - **PASS** `Phase 2 tests — glReconciliationService.auth` — pattern: `glReconciliationService.auth` (1 tests)

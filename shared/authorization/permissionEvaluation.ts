@@ -15,7 +15,10 @@ export function hasPermissionInSet(
 
 /**
  * Evaluate permission from an in-memory set, with optional legacy role fallback.
- * @param useLegacyFallback — only true when subject has no RBAC role assignments
+ * @param useLegacyFallback — true when subject has no RBAC role assignments
+ *
+ * Legacy ADMIN always allows (product absolute admin), even when a narrower
+ * RBAC role like "Administrator" is also assigned.
  */
 export function evaluatePermission(
   subject: AuthorizationSubject,
@@ -24,6 +27,11 @@ export function evaluatePermission(
   options?: { useLegacyFallback?: boolean }
 ): AuthorizationResult {
   if (hasPermissionInSet(permissions, permissionKey)) {
+    return { allowed: true, permission: permissionKey };
+  }
+
+  const legacyRole = subject.legacyRole?.toUpperCase();
+  if (legacyRole === 'ADMIN') {
     return { allowed: true, permission: permissionKey };
   }
 

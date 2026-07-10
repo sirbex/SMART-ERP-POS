@@ -927,9 +927,8 @@ export const tenantService = {
         },
         {
           name: 'Administrator',
-          desc: 'Administrative access - user and role management',
-          filter: (p) =>
-            ['system', 'admin', 'reports', 'settings'].includes(p.module) || p.action === 'read',
+          desc: 'Administrative access — full permissions (aligned with legacy ADMIN)',
+          filter: () => true,
         },
         {
           name: 'Manager',

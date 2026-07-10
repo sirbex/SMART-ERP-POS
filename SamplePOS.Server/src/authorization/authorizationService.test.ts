@@ -42,6 +42,13 @@ describe('shared authorization — permissionEvaluation', () => {
     expect(result.reason).toBe('PERMISSION_DENIED');
   });
 
+  it('ADMIN legacy role always allows even without useLegacyFallback', () => {
+    const admin = { id: 'admin-1', legacyRole: 'ADMIN' };
+    const partial = new Set(['settings.read']);
+    expect(evaluatePermission(admin, 'sales.void', partial).allowed).toBe(true);
+    expect(evaluatePermission(admin, 'accounting.post', new Set()).allowed).toBe(true);
+  });
+
   it('uses legacy fallback only when explicitly enabled', () => {
     const perms = new Set<string>();
     expect(

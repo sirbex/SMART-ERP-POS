@@ -172,16 +172,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     );
     const adminRoleId = adminResult.rows[0].id;
 
-    const adminPermissions = permissions.filter(p =>
-      p.module === 'system' ||
-      p.module === 'admin' ||
-      p.module === 'reports' ||
-      p.module === 'settings' ||
-      p.action === 'read' ||
-      // Invoice adjustment (credit notes) — admins must correct AR like accountants
-      p.key === 'customers.adjust' ||
-      p.module === 'corrections'
-    );
+    const adminPermissions = permissions; // full catalog — matches legacy ADMIN expectation
     for (const permission of adminPermissions) {
       await client.query(
         `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)

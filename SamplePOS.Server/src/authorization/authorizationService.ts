@@ -104,6 +104,11 @@ export class AuthorizationService {
       };
     }
 
+    // Absolute admin (users.role = ADMIN) — never block on partial RBAC role grants
+    if (subject.legacyRole?.toUpperCase() === 'ADMIN') {
+      return { allowed: true, permission: permissionKey };
+    }
+
     const rbacGranted = await this.rbacService.checkPermission(
       subject.id,
       permissionKey,

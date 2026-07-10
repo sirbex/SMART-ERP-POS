@@ -201,21 +201,25 @@ export default function LoginPage() {
   // Where to go after login — honours ProtectedRoute's "from" state
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname;
 
+  // Capture once on mount — reading/removing sessionStorage during render caused the
+  // banner to vanish on the next re-render (common on mobile after focus/resize).
+  const [sessionExpiredBanner] = useState(() => {
+    try {
+      const flag = sessionStorage.getItem('session_expired');
+      if (flag) {
+        sessionStorage.removeItem('session_expired');
+        return true;
+      }
+    } catch {
+      /* private mode / blocked storage */
+    }
+    return (location.state as { sessionExpired?: boolean } | null)?.sessionExpired === true;
+  });
+
   // Redirect if already authenticated
   if (isAuthenticated) {
     return <Navigate to={resolvePostLoginPath(user?.role, from)} replace />;
   }
-
-  // Show idle-logout message if redirected from session timeout
-  const sessionExpired = (() => {
-    const flag = sessionStorage.getItem('session_expired');
-    if (flag) {
-      sessionStorage.removeItem('session_expired'); // one-time display
-      return true;
-    }
-    return (location.state as { sessionExpired?: boolean })?.sessionExpired === true;
-  })();
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -398,7 +402,7 @@ export default function LoginPage() {
           </h2>
 
           {/* Session-expired banner */}
-          {sessionExpired && !error && (
+          {sessionExpiredBanner && !error && (
             <div className="mb-4 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <span>Your session expired due to inactivity. Please sign in again.</span>
