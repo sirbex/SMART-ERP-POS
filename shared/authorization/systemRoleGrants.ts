@@ -1,0 +1,72 @@
+/**
+ * Single source of truth for system RBAC role → permission grants.
+ *
+ * Used by:
+ * - SamplePOS.Server/src/rbac/seed.ts
+ * - SamplePOS.Server/src/modules/platform/tenantService.ts (seedDefaultRbac)
+ * - SQL migrations that re-grant Manager / Accountant (must mirror these lists)
+ *
+ * Manager modules intentionally match LEGACY_MANAGER_MODULES so product
+ * expectations stay aligned after the permission-based auth refactor.
+ */
+
+import { LEGACY_MANAGER_MODULES } from './legacyRoleFallback.js';
+
+/** Modules granted to the system Manager role (full module prefix). */
+export const SYSTEM_MANAGER_MODULES = LEGACY_MANAGER_MODULES;
+
+/** Modules granted in full to the system Accountant role. */
+export const SYSTEM_ACCOUNTANT_MODULES = [
+  'accounting',
+  'banking',
+  'reports',
+  'expenses',
+  'orders',
+] as const;
+
+/**
+ * Extra permission keys for Accountant (beyond full modules).
+ * Includes customers.update — required by AR payment routes/UI.
+ * Includes distribution.read — dist APIs when orders UI is visible.
+ */
+export const SYSTEM_ACCOUNTANT_EXTRA_KEYS = [
+  'pos.read',
+  'pos.create',
+  'pos.void',
+  'sales.read',
+  'sales.create',
+  'sales.update',
+  'sales.void',
+  'sales.refund',
+  'sales.approve',
+  'sales.export',
+  'purchasing.read',
+  'purchasing.create',
+  'customers.read',
+  'customers.create',
+  'customers.export',
+  'customers.update',
+  'customers.adjust',
+  'suppliers.read',
+  'suppliers.create',
+  'suppliers.update',
+  'corrections.read',
+  'corrections.execute',
+  'inventory.read',
+  'settings.read',
+  'quotations.read',
+  'distribution.read',
+] as const;
+
+export type CatalogPermission = { key: string; module: string; action?: string };
+
+export function isSystemManagerPermission(permission: CatalogPermission): boolean {
+  return (SYSTEM_MANAGER_MODULES as readonly string[]).includes(permission.module);
+}
+
+export function isSystemAccountantPermission(permission: CatalogPermission): boolean {
+  return (
+    (SYSTEM_ACCOUNTANT_MODULES as readonly string[]).includes(permission.module) ||
+    (SYSTEM_ACCOUNTANT_EXTRA_KEYS as readonly string[]).includes(permission.key)
+  );
+}

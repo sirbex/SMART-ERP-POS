@@ -1,5 +1,9 @@
 import { Pool } from 'pg';
-import { getAllPermissions, SYSTEM_ROLES } from './permissions.js';
+import { getAllPermissions } from './permissions.js';
+import {
+  isSystemAccountantPermission,
+  isSystemManagerPermission,
+} from '@shared/authorization/systemRoleGrants.js';
 
 export async function seedRbacTables(pool: Pool): Promise<void> {
   const client = await pool.connect();
@@ -192,13 +196,11 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
        VALUES ($1, $2, true, $3, $3)
        ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
        RETURNING id`,
-      ['Manager', 'Operational management - sales, inventory, purchasing', systemUserId]
+      ['Manager', 'Operational management - sales, inventory, purchasing, accounting', systemUserId]
     );
     const managerRoleId = managerResult.rows[0].id;
 
-    const managerPermissions = permissions.filter(p =>
-      ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'banking', 'delivery', 'settings', 'crm', 'expenses', 'quotations'].includes(p.module)
-    );
+    const managerPermissions = permissions.filter((p) => isSystemManagerPermission(p));
     for (const permission of managerPermissions) {
       await client.query(
         `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
@@ -265,14 +267,7 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       ['Accountant', 'Financial operations - accounting, banking, and reporting', systemUserId]
     );
     const accountantRoleId = accountantResult.rows[0].id;
-    const accountantPerms = permissions.filter(p =>
-      ['accounting', 'banking', 'reports', 'expenses'].includes(p.module) ||
-      ['sales.read', 'sales.export', 'purchasing.read', 'purchasing.create',
-        'customers.read', 'customers.export', 'customers.adjust',
-        'suppliers.read', 'suppliers.create', 'suppliers.update',
-        'corrections.read', 'corrections.execute',
-        'inventory.read', 'settings.read', 'quotations.read'].includes(p.key)
-    );
+    const accountantPerms = permissions.filter((p) => isSystemAccountantPermission(p));
     for (const permission of accountantPerms) {
       await client.query(
         `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)

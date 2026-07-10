@@ -30,15 +30,17 @@ BEGIN
        'sales.refund', 'sales.approve', 'sales.export',
        -- Purchasing: read + create for invoice matching
        'purchasing.read', 'purchasing.create',
-       -- Customers: read + create for customer payments
-       'customers.read', 'customers.create', 'customers.export',
-       -- Suppliers: read + create + update for supplier payments
-       'suppliers.read', 'suppliers.create', 'suppliers.update',
-       -- Inventory: read-only for stock reference
-       'inventory.read',
-       -- Settings & quotations: read-only
-       'settings.read',
-       'quotations.read'
+      -- Customers: read + create + update + adjust for customer payments / AR
+      'customers.read', 'customers.create', 'customers.export',
+      'customers.update', 'customers.adjust',
+      -- Suppliers: read + create + update for supplier payments
+      'suppliers.read', 'suppliers.create', 'suppliers.update',
+      -- Inventory: read-only for stock reference
+      'inventory.read',
+      -- Settings & quotations: read-only
+      'settings.read',
+      'quotations.read',
+      'distribution.read'
      );
 
   RAISE NOTICE 'Accountant permissions updated: % permissions', (SELECT count(*) FROM rbac_role_permissions WHERE role_id = rid);

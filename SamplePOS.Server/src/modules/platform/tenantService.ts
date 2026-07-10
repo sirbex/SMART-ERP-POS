@@ -11,6 +11,10 @@ import { execSync, type ExecSyncOptions } from 'child_process';
 import { connectionManager } from '../../db/connectionManager.js';
 import { tenantRepository } from './tenantRepository.js';
 import { getAllPermissions } from '../../rbac/permissions.js';
+import {
+  isSystemAccountantPermission,
+  isSystemManagerPermission,
+} from '@shared/authorization/systemRoleGrants.js';
 import { normalizeTenant, PLAN_LIMITS } from '../../../../shared/types/tenant.js';
 import type {
   Tenant,
@@ -929,13 +933,8 @@ export const tenantService = {
         },
         {
           name: 'Manager',
-          desc: 'Operational management - sales, inventory, purchasing',
-          filter: (p) =>
-            [
-              'sales', 'inventory', 'purchasing', 'customers', 'suppliers',
-              'reports', 'pos', 'banking', 'delivery', 'settings', 'crm',
-              'expenses', 'quotations',
-            ].includes(p.module),
+          desc: 'Operational management - sales, inventory, purchasing, accounting',
+          filter: (p) => isSystemManagerPermission(p),
         },
         {
           name: 'Cashier',
@@ -960,15 +959,7 @@ export const tenantService = {
         {
           name: 'Accountant',
           desc: 'Financial operations - accounting, banking, payments, and reporting',
-          filter: (p) =>
-            ['accounting', 'banking', 'reports', 'expenses'].includes(p.module) ||
-            [
-              'sales.read', 'sales.export',
-              'purchasing.read', 'purchasing.create',
-              'customers.read', 'customers.export',
-              'suppliers.read', 'suppliers.create', 'suppliers.update',
-              'inventory.read', 'settings.read', 'quotations.read',
-            ].includes(p.key),
+          filter: (p) => isSystemAccountantPermission(p),
         },
         {
           name: 'Warehouse Clerk',

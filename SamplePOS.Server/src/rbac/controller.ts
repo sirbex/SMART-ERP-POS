@@ -12,6 +12,7 @@ import {
 } from './validation.js';
 import { UnauthorizedError, ValidationError } from '../middleware/errorHandler.js';
 import { getAllPermissions } from './permissions.js';
+import { legacyRoleGrantsPermission } from '@shared/authorization/legacyRoleFallback.js';
 
 const AuditLogsQuerySchema = z.object({
   actorUserId: z.string().uuid().optional(),
@@ -127,39 +128,20 @@ export class RbacController {
     }
 
     // Fallback: derive permissions from the user's legacy role column
-    // This keeps GET /rbac/me/permissions consistent with requirePermission middleware
-    const legacyRole = req.user?.role?.toUpperCase();
+    // Uses shared legacyRoleFallback SSOT (same as AuthorizationService / middleware)
+    const legacyRole = req.user?.role;
     if (!legacyRole) {
-      res.json({ success: true, data: [] });
-      return;
-    }
-
-    const LEGACY_ROLE_FILTERS: Record<string, (key: string) => boolean> = {
-      ADMIN: () => true,
-      MANAGER: (key) => {
-        const mod = key.split('.')[0];
-        return ['sales', 'inventory', 'purchasing', 'customers', 'suppliers', 'reports', 'pos', 'accounting', 'banking', 'delivery', 'settings', 'hr', 'expenses', 'quotations', 'crm', 'orders'].includes(mod);
-      },
-      CASHIER: (key) => ['pos.read', 'pos.create', 'sales.read', 'sales.create', 'customers.read', 'customers.create', 'inventory.read', 'suppliers.read', 'delivery.read', 'settings.read', 'quotations.read', 'quotations.create', 'orders.read', 'orders.create', 'orders.pay', 'orders.cancel'].includes(key),
-      STAFF: (key) => {
-        if (key.endsWith('.read')) return true;
-        return ['orders.create', 'pos.create'].includes(key);
-      },
-    };
-
-    const filter = LEGACY_ROLE_FILTERS[legacyRole];
-    if (!filter) {
       res.json({ success: true, data: [] });
       return;
     }
 
     const allPerms = getAllPermissions();
     const legacyPermissions: EffectivePermission[] = allPerms
-      .filter((p) => filter(p.key))
+      .filter((p) => legacyRoleGrantsPermission(legacyRole, p.key))
       .map((p) => ({
         permissionKey: p.key,
         roleId: '',
-        roleName: `Legacy:${legacyRole}`,
+        roleName: `Legacy:${legacyRole.toUpperCase()}`,
         scopeType: null as EffectivePermission['scopeType'],
         scopeId: null,
       }));

@@ -98,9 +98,8 @@ BEGIN
   END IF;
 
   -- -------------------------------------------------------
-  -- 2c. MANAGER  — operational modules (everything except system, admin, hr)
-  --     sales(8) + inventory(8) + pos(4) + purchasing(6) + customers(5) +
-  --     suppliers(4) + reports(3) + banking(7) + delivery(4) + settings(2) + crm(5)
+  -- 2c. MANAGER  — operational modules (aligned with SYSTEM_MANAGER_MODULES / LEGACY_MANAGER_MODULES)
+  --     Includes accounting, quotations, distribution, orders, hr, expenses
   -- -------------------------------------------------------
   SELECT id INTO rid FROM rbac_roles WHERE name = 'Manager' AND is_system_role = true;
   IF rid IS NOT NULL THEN
@@ -109,7 +108,8 @@ BEGIN
     SELECT rid, key, sys FROM rbac_permissions_catalog
     WHERE module IN (
       'sales', 'inventory', 'purchasing', 'customers', 'suppliers',
-      'reports', 'pos', 'banking', 'delivery', 'settings', 'crm'
+      'reports', 'pos', 'accounting', 'banking', 'delivery', 'settings',
+      'hr', 'expenses', 'quotations', 'crm', 'orders', 'distribution'
     );
   END IF;
 
@@ -150,13 +150,10 @@ BEGIN
   -- -------------------------------------------------------
 
   -- 3a. ACCOUNTANT
-  --     Full accounting + banking + reports + expenses
-  --     POS & sales (create, void, refund) so accountant can complete sales & receive payments
-  --     Orders (read, create, pay, cancel) for order-to-payment workflow
-  --     Customers (read, create, export) for customer payments
-  --     Suppliers (read, create, update) for supplier payments
-  --     Purchasing (read, create) for invoice matching
-  --     Quotations (read) for reference
+  --     Full accounting + banking + reports + expenses + orders
+  --     Customers include update (AR payments) + adjust
+  --     distribution.read for dist SO visibility
+  --     Mirrors shared/authorization/systemRoleGrants.ts SYSTEM_ACCOUNTANT_*
   INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
   VALUES ('Accountant', 'Financial operations - accounting, banking, payments, and reporting', true, sys, sys)
   ON CONFLICT (name) DO UPDATE SET
@@ -171,22 +168,18 @@ BEGIN
   SELECT rid, key, sys FROM rbac_permissions_catalog
   WHERE module IN ('accounting', 'banking', 'reports', 'expenses', 'orders')
      OR key IN (
-       -- POS: process transactions & void
        'pos.read', 'pos.create', 'pos.void',
-       -- Sales: full lifecycle for payment completion
        'sales.read', 'sales.create', 'sales.update', 'sales.void',
        'sales.refund', 'sales.approve', 'sales.export',
-       -- Purchasing: read + create for invoice matching
        'purchasing.read', 'purchasing.create',
-       -- Customers: read + create for customer payments
        'customers.read', 'customers.create', 'customers.export',
-       -- Suppliers: read + create + update for supplier payments
+       'customers.update', 'customers.adjust',
        'suppliers.read', 'suppliers.create', 'suppliers.update',
-       -- Inventory: read-only for stock reference
+       'corrections.read', 'corrections.execute',
        'inventory.read',
-       -- Settings & quotations: read-only
        'settings.read',
-       'quotations.read'
+       'quotations.read',
+       'distribution.read'
      );
 
   -- 3b. WAREHOUSE CLERK

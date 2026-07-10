@@ -54,6 +54,25 @@ function resolveRbacService(req: Request): RbacService | null {
   return getOrCreateService(pool);
 }
 
+/**
+ * Legacy users.role fallback — ONLY when the user has no rbac_user_roles assignments.
+ * Matches AuthorizationService.hasRbacAssignments / evaluatePermission.
+ */
+async function legacyFallbackAllowed(
+  service: RbacService,
+  userId: string,
+  role: string | undefined,
+  permissionKeys: string[],
+  mode: 'any' | 'all'
+): Promise<boolean> {
+  const roles = await service.getUserRoles(userId);
+  if (roles.length > 0) return false;
+  if (mode === 'all') {
+    return permissionKeys.every((key) => legacyRoleGrantsPermission(role, key));
+  }
+  return permissionKeys.some((key) => legacyRoleGrantsPermission(role, key));
+}
+
 export function getRbacService(req?: Request): RbacService {
   if (req) {
     const service = resolveRbacService(req);
@@ -169,9 +188,8 @@ export function requirePermission(permissionKey: string, options?: RequirePermis
         return;
       }
 
-      // RBAC denied — check if user has ANY RBAC roles assigned.
-      // If they don't, fall back to legacy role checking (transition period).
-      if (legacyRoleGrantsPermission(req.user.role, permissionKey)) {
+      // RBAC denied — legacy only when user has NO rbac_user_roles (match AuthorizationService)
+      if (await legacyFallbackAllowed(service, req.user.id, req.user.role, [permissionKey], 'any')) {
         logger.debug(
           `RBAC: no RBAC roles for user=${req.user.id}, legacy role ${req.user.role} grants ${permissionKey}`
         );
@@ -271,7 +289,7 @@ export function requireAnyPermission(permissionKeys: string[], options?: Require
       }
 
       // RBAC denied — legacy fallback for users without RBAC roles
-      if (permissionKeys.some((key) => legacyRoleGrantsPermission(req.user!.role, key))) {
+      if (await legacyFallbackAllowed(service, req.user.id, req.user!.role, permissionKeys, 'any')) {
         next();
         return;
       }
@@ -359,8 +377,8 @@ export function requireAllPermissions(
         );
 
         if (!hasPermission) {
-          // Legacy fallback — check if all perms granted by legacy role
-          if (permissionKeys.every((key) => legacyRoleGrantsPermission(req.user!.role, key))) {
+          // Legacy fallback — only when user has no RBAC assignments
+          if (await legacyFallbackAllowed(service, req.user.id, req.user!.role, permissionKeys, 'all')) {
             next();
             return;
           }
