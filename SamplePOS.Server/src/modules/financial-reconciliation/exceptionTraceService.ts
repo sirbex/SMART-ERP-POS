@@ -12,7 +12,7 @@ import { tableHasColumn } from '../../db/schemaColumnCache.js';
 
 type Db = Pool | PoolClient;
 
-export type TraceDomain = 'ap' | 'ar' | 'inventory' | 'cash';
+export type TraceDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht';
 export type TraceLane = 'integrity' | 'cache' | 'warning';
 
 export interface TraceAction {
@@ -109,6 +109,7 @@ const DOMAIN_TITLES: Record<TraceDomain, string> = {
     ar: 'Customers',
     inventory: 'Inventory',
     cash: 'Cash',
+    wht: 'Withholding Tax',
 };
 
 const DOMAIN_ACCOUNT: Record<TraceDomain, string> = {
@@ -116,6 +117,7 @@ const DOMAIN_ACCOUNT: Record<TraceDomain, string> = {
     ar: '1200',
     inventory: '1300',
     cash: '1010',
+    wht: '2350',
 };
 
 export function formatGrLabel(receiptNumber: string | null): string | null {
@@ -133,6 +135,8 @@ function domainWorkspacePath(domain: TraceDomain): string {
             return '/reports/inventory/reconciliation';
         case 'cash':
             return '/accounting/banking';
+        case 'wht':
+            return '/accounting/withholding-tax';
     }
 }
 
@@ -144,6 +148,8 @@ function entityExceptionPath(domain: TraceDomain, entityId: string): string | nu
             return `/accounting/customer-payments?customer=${entityId}`;
         case 'inventory':
             return `/inventory/products?highlight=${entityId}`;
+        case 'wht':
+            return '/accounting/withholding-tax';
         default:
             return null;
     }
