@@ -31,6 +31,10 @@ export const accountingKeys = {
     types: () => ['wht', 'types'] as const,
     balance: () => ['wht', 'balance'] as const,
     certificates: () => ['wht', 'certificates'] as const,
+    taxSummary: (start?: string, end?: string) => ['wht', 'tax-summary', start, end] as const,
+    register: (start?: string, end?: string, side?: string) =>
+      ['wht', 'register', start, end, side] as const,
+    liability: (start?: string, end?: string) => ['wht', 'liability', start, end] as const,
   },
   assets: {
     all: ['assets'] as const,
@@ -417,6 +421,44 @@ export function useWhtCertificates(params?: {
       const res = await api.wht.getCertificates(params);
       return res.data?.data;
     },
+  });
+}
+
+export function useTaxComplianceSummary(startDate: string, endDate: string, enabled = true) {
+  return useQuery({
+    queryKey: accountingKeys.wht.taxSummary(startDate, endDate),
+    queryFn: async () => {
+      const res = await api.reports.getTaxComplianceSummary({ startDate, endDate });
+      return res.data?.data;
+    },
+    enabled: enabled && !!startDate && !!endDate,
+  });
+}
+
+export function useWhtRegisterReport(
+  startDate: string,
+  endDate: string,
+  side?: 'SUPPLIER' | 'CUSTOMER',
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: accountingKeys.wht.register(startDate, endDate, side),
+    queryFn: async () => {
+      const res = await api.reports.getWhtRegister({ startDate, endDate, side });
+      return res.data?.data;
+    },
+    enabled: enabled && !!startDate && !!endDate,
+  });
+}
+
+export function useTaxLiabilityReport(startDate: string, endDate: string, enabled = true) {
+  return useQuery({
+    queryKey: accountingKeys.wht.liability(startDate, endDate),
+    queryFn: async () => {
+      const res = await api.reports.getTaxLiability({ startDate, endDate });
+      return res.data?.data;
+    },
+    enabled: enabled && !!startDate && !!endDate,
   });
 }
 

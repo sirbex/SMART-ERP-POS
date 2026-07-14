@@ -846,6 +846,12 @@ export const api = {
       include_expenses?: string;
     }) =>
       apiClient.get<ApiResponse>('reports/business-performance', { params }),
+    getTaxComplianceSummary: (params: { startDate: string; endDate: string }) =>
+      apiClient.get<ApiResponse>('reports/tax-compliance/summary', { params }),
+    getWhtRegister: (params: { startDate: string; endDate: string; side?: string }) =>
+      apiClient.get<ApiResponse>('reports/tax-compliance/register', { params }),
+    getTaxLiability: (params: { startDate: string; endDate: string }) =>
+      apiClient.get<ApiResponse>('reports/tax-compliance/liability', { params }),
   },
 
   // Advanced Accounting Modules
