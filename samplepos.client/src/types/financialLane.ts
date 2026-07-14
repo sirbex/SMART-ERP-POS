@@ -1,5 +1,5 @@
 /** Shared financial lane contract (mirrors server FinancialLaneResult). */
-export type FinancialDomain = 'ap' | 'ar' | 'inventory' | 'cash';
+export type FinancialDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht';
 export type LaneKind = 'integrity' | 'cache' | 'history';
 export type LaneSeverity = 'critical' | 'maintenance' | 'informational';
 export type LaneStatus =

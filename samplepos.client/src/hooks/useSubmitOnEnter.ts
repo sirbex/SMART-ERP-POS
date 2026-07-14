@@ -27,7 +27,7 @@ export function useSubmitOnEnter(
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key !== 'Enter' || e.shiftKey) return;
             const tag = (e.target as HTMLElement).tagName;
-            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
             if (!canSubmit) return;
             e.preventDefault();
             onSubmitRef.current();

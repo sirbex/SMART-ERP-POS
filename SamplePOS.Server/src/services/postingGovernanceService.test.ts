@@ -387,6 +387,56 @@ describe('PostingGovernanceService', () => {
             );
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
+
+        it('allows WHT_REMITTANCE to credit Cash', () => {
+            const whtPayable = makeAccount({
+                accountCode: '2350',
+                accountName: 'WHT Payable',
+                accountType: 'LIABILITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: false,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const req = makeRequest(
+                'WHT_REMITTANCE',
+                [
+                    { accountCode: '2350', debitAmount: 60_000, creditAmount: 0 },
+                    { accountCode: '1010', debitAmount: 0, creditAmount: 60_000 },
+                ],
+                [whtPayable, cashAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('allows WHT_RECEIVABLE_RECOVERY to debit Cash', () => {
+            const taxReceivable = makeAccount({
+                accountCode: '1250',
+                accountName: 'Tax Receivable',
+                accountType: 'ASSET',
+                normalBalance: 'DEBIT',
+                allowManualPosting: false,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const cashWithWht = makeAccount({
+                ...cashAccount,
+                allowedSources: [
+                    ...cashAccount.allowedSources,
+                    'WHT_REMITTANCE',
+                    'WHT_RECEIVABLE_RECOVERY',
+                ],
+            });
+            const req = makeRequest(
+                'WHT_RECEIVABLE_RECOVERY',
+                [
+                    { accountCode: '1010', debitAmount: 60_000, creditAmount: 0 },
+                    { accountCode: '1250', debitAmount: 0, creditAmount: 60_000 },
+                ],
+                [cashWithWht, taxReceivable],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
     });
 
     // --------------------------------------------------------------------------

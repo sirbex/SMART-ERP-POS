@@ -2,11 +2,13 @@ import type { FinancialLaneProvider, FinancialDomain } from './types.js';
 import { apReconciliationProvider } from './providers/apReconciliationProvider.js';
 import { arReconciliationProvider } from './providers/arReconciliationProvider.js';
 import { inventoryReconciliationProvider } from './providers/inventoryReconciliationProvider.js';
+import { whtReconciliationProvider } from './providers/whtReconciliationProvider.js';
 
 const PROVIDERS: Partial<Record<FinancialDomain, FinancialLaneProvider>> = {
   ap: apReconciliationProvider,
   ar: arReconciliationProvider,
   inventory: inventoryReconciliationProvider,
+  wht: whtReconciliationProvider,
 };
 
 export function getFinancialLaneProvider(domain: FinancialDomain): FinancialLaneProvider {

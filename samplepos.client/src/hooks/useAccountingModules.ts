@@ -342,8 +342,15 @@ export function useWhtTypes() {
 export function useCreateWhtType() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { code: string; name: string; rate: number; appliesToSuppliers?: boolean; appliesToCustomers?: boolean }) =>
-      api.wht.createType(data),
+    mutationFn: (data: {
+      code: string;
+      name: string;
+      rate: number;
+      appliesTo?: string;
+      appliesToSuppliers?: boolean;
+      appliesToCustomers?: boolean;
+      accountCode?: string;
+    }) => api.wht.createType(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
       toast.success('WHT type created');
@@ -357,6 +364,57 @@ export function useWhtBalance(params?: { startDate?: string; endDate?: string })
     queryKey: accountingKeys.wht.balance(),
     queryFn: async () => {
       const res = await api.wht.getBalance(params);
+      return res.data?.data;
+    },
+  });
+}
+
+export function useRemitWht() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      amount: number;
+      date: string;
+      reference: string;
+      paymentAccountCode: string;
+      payableAccountCode?: string;
+    }) => api.wht.remit(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
+      toast.success('WHT remittance posted');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+}
+
+export function useRecoverWhtReceivable() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      amount: number;
+      date: string;
+      reference: string;
+      paymentAccountCode: string;
+      receivableAccountCode?: string;
+    }) => api.wht.recover(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
+      toast.success('Tax Receivable recovery posted');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+}
+
+export function useWhtCertificates(params?: {
+  startDate?: string;
+  endDate?: string;
+  supplierId?: string;
+  customerId?: string;
+}) {
+  return useQuery({
+    queryKey: [...accountingKeys.wht.certificates(), params],
+    queryFn: async () => {
+      const res = await api.wht.getCertificates(params);
       return res.data?.data;
     },
   });

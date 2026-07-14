@@ -554,6 +554,24 @@ router.get(
 
     const summary = summaryResult.rows[0] || {};
 
+    const accounts = detailResult.rows.map((row) => ({
+      section: row.section,
+      accountCode: row.account_code,
+      accountName: row.account_name,
+      debitTotal: Money.parseDb(row.debit_total).toNumber(),
+      creditTotal: Money.parseDb(row.credit_total).toNumber(),
+      netAmount: Money.parseDb(row.net_amount).toNumber(),
+      displayAmount: Money.parseDb(row.display_amount).toNumber(),
+      amount: Money.parseDb(row.display_amount).toNumber(),
+    }));
+
+    const totalRevenue = Money.parseDb(summary.total_revenue).toNumber();
+    const totalCOGS = Money.parseDb(summary.total_cogs).toNumber();
+    const grossProfit = Money.parseDb(summary.gross_profit).toNumber();
+    const totalOperatingExpenses = Money.parseDb(summary.total_operating_expenses).toNumber();
+    const operatingIncome = Money.parseDb(summary.operating_income).toNumber();
+    const netIncome = Money.parseDb(summary.net_income).toNumber();
+
     return res.json({
       success: true,
       data: {
@@ -561,24 +579,23 @@ router.get(
         dateFrom: startDate,
         dateTo: endDate,
         generatedAt: new Date().toISOString(),
-        accounts: detailResult.rows.map((row) => ({
-          section: row.section,
-          accountCode: row.account_code,
-          accountName: row.account_name,
-          debitTotal: Money.parseDb(row.debit_total).toNumber(),
-          creditTotal: Money.parseDb(row.credit_total).toNumber(),
-          netAmount: Money.parseDb(row.net_amount).toNumber(),
-          displayAmount: Money.parseDb(row.display_amount).toNumber(),
-        })),
+        accounts,
+        sections: {
+          revenue: accounts.filter((a) => a.section === 'REVENUE'),
+          cogs: accounts.filter((a) => a.section === 'COST_OF_GOODS_SOLD'),
+          expenses: accounts.filter((a) => a.section === 'OPERATING_EXPENSES'),
+        },
         summary: {
-          totalRevenue: Money.parseDb(summary.total_revenue).toNumber(),
-          totalCOGS: Money.parseDb(summary.total_cogs).toNumber(),
-          grossProfit: Money.parseDb(summary.gross_profit).toNumber(),
+          totalRevenue,
+          totalCOGS,
+          grossProfit,
           grossMarginPercent: Money.parseDb(summary.gross_margin_percent).toNumber(),
-          totalOperatingExpenses: Money.parseDb(summary.total_operating_expenses).toNumber(),
-          operatingIncome: Money.parseDb(summary.operating_income).toNumber(),
+          totalOperatingExpenses,
+          totalExpenses: totalOperatingExpenses,
+          operatingIncome,
           operatingMarginPercent: Money.parseDb(summary.operating_margin_percent).toNumber(),
-          netIncome: Money.parseDb(summary.net_income).toNumber(),
+          netIncome,
+          netProfit: netIncome,
           netMarginPercent: Money.parseDb(summary.net_margin_percent).toNumber(),
         },
       },
@@ -621,9 +638,12 @@ router.get(
           customerId: row.customer_id,
           customerName: row.customer_name,
           totalRevenue: Money.parseDb(row.total_revenue).toNumber(),
+          revenue: Money.parseDb(row.total_revenue).toNumber(),
           totalCOGS: Money.parseDb(row.total_cogs).toNumber(),
+          cogs: Money.parseDb(row.total_cogs).toNumber(),
           grossProfit: Money.parseDb(row.gross_profit).toNumber(),
           grossMarginPercent: Money.parseDb(row.gross_margin_percent).toNumber(),
+          marginPercent: Money.parseDb(row.gross_margin_percent).toNumber(),
           transactionCount: parseInt(row.transaction_count || '0'),
         })),
         recordCount: result.rows.length,
@@ -634,7 +654,7 @@ router.get(
 
 /**
  * GET /api/erp-accounting/reports/profit-loss/by-product
- * GL-based P&L by product using fn_get_profit_loss_by_product
+ * Sales analytics by product (legacy flat list)
  */
 router.get(
   '/reports/profit-loss/by-product',
@@ -668,12 +688,138 @@ router.get(
           productName: row.product_name,
           productSku: row.product_sku,
           totalRevenue: Money.parseDb(row.total_revenue).toNumber(),
+          revenue: Money.parseDb(row.total_revenue).toNumber(),
           totalCOGS: Money.parseDb(row.total_cogs).toNumber(),
+          cogs: Money.parseDb(row.total_cogs).toNumber(),
           grossProfit: Money.parseDb(row.gross_profit).toNumber(),
           grossMarginPercent: Money.parseDb(row.gross_margin_percent).toNumber(),
+          marginPercent: Money.parseDb(row.gross_margin_percent).toNumber(),
           quantitySold: Money.parseDb(row.quantity_sold).toNumber(),
         })),
         recordCount: result.rows.length,
+      },
+    });
+  })
+);
+
+/**
+ * GET /api/erp-accounting/reports/profit-loss/by-category
+ * Category rollup with nested products (expand in UI)
+ */
+router.get(
+  '/reports/profit-loss/by-category',
+  requirePermission('accounting.read'),
+  asyncHandler(async (req, res) => {
+    const { dateFrom, dateTo } = req.query;
+
+    const bizToday = getBusinessDate();
+    const defaultFrom = bizToday.slice(0, 7) + '-01';
+    const defaultTo = bizToday;
+
+    const startDate = (dateFrom as string) || defaultFrom;
+    const endDate = (dateTo as string) || defaultTo;
+
+    const pool = req.tenantPool || globalPool;
+
+    // Prefer category function (540); fall back to product fn + Uncategorized
+    let rows: Array<Record<string, unknown>>;
+    try {
+      const result = await pool.query(
+        'SELECT * FROM fn_get_profit_loss_by_category($1::DATE, $2::DATE)',
+        [startDate, endDate]
+      );
+      rows = result.rows;
+    } catch {
+      const result = await pool.query(
+        'SELECT * FROM fn_get_profit_loss_by_product($1::DATE, $2::DATE)',
+        [startDate, endDate]
+      );
+      rows = result.rows.map((row) => ({ ...row, category_name: 'Uncategorized' }));
+    }
+
+    type ProductRow = {
+      productId: string;
+      productName: string;
+      productSku: string;
+      revenue: number;
+      cogs: number;
+      totalRevenue: number;
+      totalCOGS: number;
+      grossProfit: number;
+      marginPercent: number;
+      grossMarginPercent: number;
+      quantitySold: number;
+    };
+
+    const byCategory = new Map<
+      string,
+      {
+        categoryName: string;
+        revenue: number;
+        cogs: number;
+        grossProfit: number;
+        products: ProductRow[];
+      }
+    >();
+
+    for (const row of rows) {
+      const categoryName = String(row.category_name || 'Uncategorized');
+      const revenue = Money.parseDb(row.total_revenue).toNumber();
+      const cogs = Money.parseDb(row.total_cogs).toNumber();
+      const grossProfit = Money.parseDb(row.gross_profit).toNumber();
+      const marginPercent = Money.parseDb(row.gross_margin_percent).toNumber();
+      const product: ProductRow = {
+        productId: String(row.product_id),
+        productName: String(row.product_name || ''),
+        productSku: String(row.product_sku || ''),
+        revenue,
+        cogs,
+        totalRevenue: revenue,
+        totalCOGS: cogs,
+        grossProfit,
+        marginPercent,
+        grossMarginPercent: marginPercent,
+        quantitySold: Money.parseDb(row.quantity_sold).toNumber(),
+      };
+
+      const bucket = byCategory.get(categoryName) ?? {
+        categoryName,
+        revenue: 0,
+        cogs: 0,
+        grossProfit: 0,
+        products: [],
+      };
+      bucket.revenue += revenue;
+      bucket.cogs += cogs;
+      bucket.grossProfit += grossProfit;
+      bucket.products.push(product);
+      byCategory.set(categoryName, bucket);
+    }
+
+    const categories = Array.from(byCategory.values())
+      .map((cat) => ({
+        categoryName: cat.categoryName,
+        revenue: cat.revenue,
+        totalRevenue: cat.revenue,
+        cogs: cat.cogs,
+        totalCOGS: cat.cogs,
+        grossProfit: cat.grossProfit,
+        marginPercent: cat.revenue > 0 ? (cat.grossProfit / cat.revenue) * 100 : 0,
+        grossMarginPercent: cat.revenue > 0 ? (cat.grossProfit / cat.revenue) * 100 : 0,
+        productCount: cat.products.length,
+        products: cat.products,
+      }))
+      .sort((a, b) => b.grossProfit - a.grossProfit);
+
+    return res.json({
+      success: true,
+      data: {
+        reportType: 'PROFIT_LOSS_BY_CATEGORY',
+        dateFrom: startDate,
+        dateTo: endDate,
+        generatedAt: new Date().toISOString(),
+        categories,
+        recordCount: categories.length,
       },
     });
   })
@@ -744,14 +890,19 @@ router.get(
 
       comparisons.push({
         period: `${periodStart.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${periodStart.getUTCFullYear()}`,
+        periodLabel: `${periodStart.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${periodStart.getUTCFullYear()}`,
         startDate,
         endDate,
         totalRevenue: Money.parseDb(summary.total_revenue).toNumber(),
+        revenue: Money.parseDb(summary.total_revenue).toNumber(),
         totalCOGS: Money.parseDb(summary.total_cogs).toNumber(),
+        cogs: Money.parseDb(summary.total_cogs).toNumber(),
         grossProfit: Money.parseDb(summary.gross_profit).toNumber(),
         grossMarginPercent: Money.parseDb(summary.gross_margin_percent).toNumber(),
         operatingExpenses: Money.parseDb(summary.total_operating_expenses).toNumber(),
+        expenses: Money.parseDb(summary.total_operating_expenses).toNumber(),
         netIncome: Money.parseDb(summary.net_income).toNumber(),
+        netProfit: Money.parseDb(summary.net_income).toNumber(),
         netMarginPercent: Money.parseDb(summary.net_margin_percent).toNumber(),
       });
     }
@@ -766,6 +917,7 @@ router.get(
         generatedAt: new Date().toISOString(),
         periodsCompared: numPeriods,
         comparisons,
+        periods: comparisons,
       },
     });
   })

@@ -127,7 +127,8 @@ INSERT INTO tax_definitions (code, name, type, rate, is_inclusive, is_compound, 
 VALUES
   ('VAT18', 'VAT 18%', 'PERCENTAGE', 18.0000, false, false, 10, 'BOTH'),
   ('VAT18_INC', 'VAT 18% (Inclusive)', 'PERCENTAGE', 18.0000, true, false, 10, 'BOTH'),
-  ('WHT6', 'Withholding Tax 6%', 'PERCENTAGE', 6.0000, false, false, 20, 'PURCHASE'),
+  -- WHT6 removed from seed: payment withholding uses withholding_tax_types
+  -- (see /accounting/withholding-tax). Soft-deactivated on existing tenants by 537.
   ('EXEMPT', 'Tax Exempt', 'PERCENTAGE', 0.0000, false, false, 0, 'BOTH')
 ON CONFLICT (code) DO NOTHING;
 

@@ -28,6 +28,8 @@ const CreatePaymentSchema = z.object({
       }),
     )
     .optional(),
+  whtTypeId: z.string().uuid().nullable().optional(),
+  certificateNumber: z.string().max(100).optional(),
 });
 
 const AllocateSchema = z.object({
@@ -61,6 +63,8 @@ router.post(
         invoiceId: a.invoiceId,
         amount: Number(a.amount),
       })),
+      whtTypeId: body.whtTypeId ?? undefined,
+      certificateNumber: body.certificateNumber,
     });
     res.status(201).json({ success: true, data: result });
   }),

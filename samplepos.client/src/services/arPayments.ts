@@ -71,6 +71,8 @@ export const arPaymentService = {
     autoAllocate?: boolean;
     allocationType?: 'MANUAL' | 'FIFO' | 'EXACT' | 'DUE_DATE';
     allocations?: { invoiceId: string; amount: number }[];
+    whtTypeId?: string;
+    certificateNumber?: string;
   }) {
     const { data } = await api.post<{ success: boolean; data: unknown }>('/ar-payments', body);
     return data;

@@ -700,7 +700,7 @@ export class ReconciliationService {
 
     /** Generic financial lane (framework entry point). */
     async getFinancialLane(
-        domain: 'ap' | 'ar' | 'inventory' | 'cash',
+        domain: 'ap' | 'ar' | 'inventory' | 'cash' | 'wht',
         lane: 'integrity' | 'cache' | 'history',
         asOfDate?: string,
     ): Promise<FinancialLaneResult> {
