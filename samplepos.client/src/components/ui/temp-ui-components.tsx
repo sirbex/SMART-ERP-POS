@@ -66,7 +66,7 @@ export const Select: React.FC<{
 };
 
 // These components are for API compatibility but don't render in the final HTML
-export const SelectTrigger: React.FC<{ className?: string; children: React.ReactNode }> = () => null;
+export const SelectTrigger: React.FC<{ id?: string; className?: string; children: React.ReactNode }> = () => null;
 export const SelectValue: React.FC<{ placeholder?: string }> = () => null;
 export const SelectContent: React.FC<{ children: React.ReactNode }> = ({ children }) => <>{children}</>;
 export const SelectItem: React.FC<{ value: string; children: React.ReactNode }> = ({ value, children }) => (
@@ -281,8 +281,14 @@ export const TableHead: React.FC<{ className?: string; children: React.ReactNode
   </th>
 );
 
-export const TableCell: React.FC<{ className?: string; children: React.ReactNode }> = ({ className = '', children }) => (
-  <td className={`px-6 py-4 whitespace-nowrap text-sm text-gray-900 ${className}`}>{children}</td>
+export const TableCell: React.FC<{ className?: string; colSpan?: number; children: React.ReactNode }> = ({
+  className = '',
+  colSpan,
+  children,
+}) => (
+  <td colSpan={colSpan} className={`px-6 py-4 whitespace-nowrap text-sm text-gray-900 ${className}`}>
+    {children}
+  </td>
 );
 
 // Dropdown Menu components (simplified)
