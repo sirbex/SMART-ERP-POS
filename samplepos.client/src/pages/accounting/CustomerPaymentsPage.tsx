@@ -33,7 +33,6 @@ import {
 import { DatePicker } from '../../components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
 import { toast } from 'react-hot-toast';
-import { ERROR_MESSAGES } from '../../constants/errorMessages';
 import { CUSTOMER_PAYMENT_METHODS as PAYMENT_METHODS } from '../../constants/paymentMethods';
 import { api } from '../../utils/api';
 import {
@@ -45,6 +44,7 @@ import type { Customer } from '../../types/business';
 import { formatTimestampDate } from '../../utils/businessDate';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
+import { useWhtTypes } from '../../hooks/useAccountingModules';
 
 interface AllocationRow {
   invoiceId: string;
@@ -65,6 +65,22 @@ const todayIso = () => new Date().toLocaleDateString('en-CA');
 const CustomerPaymentsPage: React.FC = () => {
   const canCreate = useCanAccess([], ['customers.update']);
   const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
+  const { data: whtTypesRaw } = useWhtTypes();
+  const customerWhtTypes = useMemo(() => {
+    const items = (Array.isArray(whtTypesRaw) ? whtTypesRaw : []) as Array<{
+      id: string;
+      code: string;
+      name: string;
+      rate: number;
+      appliesTo: string;
+      isActive: boolean;
+    }>;
+    return items.filter(
+      (t) =>
+        t.isActive !== false &&
+        (t.appliesTo === 'CUSTOMER' || t.appliesTo === 'BOTH'),
+    );
+  }, [whtTypesRaw]);
 
   const [payments, setPayments] = useState<ArCustomerPayment[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -116,6 +132,8 @@ const CustomerPaymentsPage: React.FC = () => {
     paymentDate: todayIso(),
     notes: '',
     autoAllocateFifo: true,
+    whtTypeId: '' as string,
+    certificateNumber: '',
   });
   const [createAllocations, setCreateAllocations] = useState<AllocationRow[]>([]);
 
@@ -189,9 +207,22 @@ const CustomerPaymentsPage: React.FC = () => {
   }, [formData.customerId, isCreateModalOpen]);
 
   const handleCreatePayment = async () => {
-    const amount = parseFloat(formData.amount);
-    if (!formData.customerId || !amount || amount <= 0) {
-      toast.error(ERROR_MESSAGES.REQUIRED_FIELDS_MISSING);
+    const customerId = formData.customerId?.trim() || '';
+    const amount = Number(formData.amount);
+    if (!customerId || customerId === '__none__') {
+      toast.error('Please select a customer');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Please enter a valid payment amount greater than zero');
+      return;
+    }
+    if (!formData.paymentMethod) {
+      toast.error('Please select a payment method');
+      return;
+    }
+    if (!formData.paymentDate) {
+      toast.error('Please select a payment date');
       return;
     }
 
@@ -202,7 +233,7 @@ const CustomerPaymentsPage: React.FC = () => {
     try {
       setSubmitting(true);
       await arPaymentService.createPayment({
-        customerId: formData.customerId,
+        customerId,
         amount,
         paymentDate: formData.paymentDate,
         paymentMethod: formData.paymentMethod,
@@ -211,6 +242,8 @@ const CustomerPaymentsPage: React.FC = () => {
         autoAllocate: formData.autoAllocateFifo && manualLines.length === 0,
         allocationType: formData.autoAllocateFifo ? 'FIFO' : 'MANUAL',
         allocations: manualLines.length > 0 ? manualLines : undefined,
+        whtTypeId: formData.whtTypeId || undefined,
+        certificateNumber: formData.certificateNumber.trim() || undefined,
       });
       toast.success('Customer payment posted');
       setIsCreateModalOpen(false);
@@ -319,13 +352,24 @@ const CustomerPaymentsPage: React.FC = () => {
       paymentDate: todayIso(),
       notes: '',
       autoAllocateFifo: true,
+      whtTypeId: '',
+      certificateNumber: '',
     });
     setCreateAllocations([]);
   };
 
   const unappliedTotal = payments.reduce((s, p) => s + (p.unallocatedAmount ?? 0), 0);
 
-  useSubmitOnEnter(isCreateModalOpen, !submitting, handleCreatePayment);
+  useSubmitOnEnter(
+    isCreateModalOpen && !showObPanel,
+    Boolean(
+      formData.customerId &&
+        formData.customerId !== '__none__' &&
+        Number(formData.amount) > 0 &&
+        !submitting,
+    ),
+    handleCreatePayment,
+  );
   useSubmitOnEnter(isAllocationModalOpen, !allocatingPayment, () => handleAllocate(false));
 
   if (loading && payments.length === 0) {
@@ -524,13 +568,16 @@ const CustomerPaymentsPage: React.FC = () => {
             <div>
               <Label>Customer</Label>
               <Select
-                value={formData.customerId}
-                onValueChange={(v) => setFormData((p) => ({ ...p, customerId: v }))}
+                value={formData.customerId || '__none__'}
+                onValueChange={(v) =>
+                  setFormData((p) => ({ ...p, customerId: v === '__none__' ? '' : v }))
+                }
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="__none__">Select customer…</SelectItem>
                   {customers.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.name}
@@ -566,7 +613,7 @@ const CustomerPaymentsPage: React.FC = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label>Amount</Label>
+                <Label>Amount (invoice settlement)</Label>
                 <Input
                   type="number"
                   step="0.01"
@@ -593,6 +640,71 @@ const CustomerPaymentsPage: React.FC = () => {
                 </Select>
               </div>
             </div>
+            {customerWhtTypes.length > 0 && (
+              <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/60 p-3">
+                <div>
+                  <Label>Customer withholding tax (optional)</Label>
+                  <Select
+                    value={formData.whtTypeId || '__none__'}
+                    onValueChange={(v) =>
+                      setFormData((p) => ({
+                        ...p,
+                        whtTypeId: v === '__none__' ? '' : v,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="No withholding" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">No withholding</SelectItem>
+                      {customerWhtTypes.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>
+                          {t.code} — {t.name} ({(t.rate * 100).toFixed(1)}%)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Use when the customer deducts WHT from what they pay you.
+                  </p>
+                </div>
+                {formData.whtTypeId && (() => {
+                  const selected = customerWhtTypes.find((t) => t.id === formData.whtTypeId);
+                  const gross = parseFloat(formData.amount) || 0;
+                  const whtAmt = selected ? Math.round(gross * selected.rate * 100) / 100 : 0;
+                  const netCash = Math.round((gross - whtAmt) * 100) / 100;
+                  return (
+                    <div className="grid grid-cols-3 gap-2 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500">Gross (AR)</p>
+                        <p className="font-semibold">{formatCurrency(gross)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">WHT withheld</p>
+                        <p className="font-semibold text-sky-800">{formatCurrency(whtAmt)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Cash received</p>
+                        <p className="font-semibold text-green-700">{formatCurrency(netCash)}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+                {formData.whtTypeId && (
+                  <div>
+                    <Label>WHT certificate #</Label>
+                    <Input
+                      value={formData.certificateNumber}
+                      onChange={(e) =>
+                        setFormData((p) => ({ ...p, certificateNumber: e.target.value }))
+                      }
+                      placeholder="Certificate from customer"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
             <div>
               <Label>Payment date</Label>
               <DatePicker

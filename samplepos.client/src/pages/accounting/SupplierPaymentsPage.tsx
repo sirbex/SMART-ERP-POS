@@ -52,11 +52,11 @@ import { DatePicker } from '../../components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
 import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import { toast } from 'react-hot-toast';
-import { ERROR_MESSAGES } from '../../constants/errorMessages';
 import { SUPPLIER_PAYMENT_METHODS as PAYMENT_METHODS } from '../../constants/paymentMethods';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 // SINGLE SOURCE OF TRUTH: Use the same useSuppliers hook as SuppliersPage
 import { useSuppliers } from '../../hooks/useSuppliers';
+import { useWhtTypes } from '../../hooks/useAccountingModules';
 import {
     supplierPaymentService,
     supplierInvoiceService,
@@ -107,6 +107,22 @@ const SupplierPaymentsPage: React.FC = () => {
     const navigate = useNavigate();
     // Permission checks (hide actions user cannot perform)
     const canCreatePayment = useCanAccess([], ['suppliers.create']);
+    const { data: whtTypesRaw } = useWhtTypes();
+    const supplierWhtTypes = useMemo(() => {
+        const items = (Array.isArray(whtTypesRaw) ? whtTypesRaw : []) as Array<{
+            id: string;
+            code: string;
+            name: string;
+            rate: number;
+            appliesTo: string;
+            isActive: boolean;
+        }>;
+        return items.filter(
+            (t) =>
+                t.isActive !== false &&
+                (t.appliesTo === 'SUPPLIER' || t.appliesTo === 'BOTH'),
+        );
+    }, [whtTypesRaw]);
     const canCreateBill = useCanAccess([], ['purchasing.create']);
     const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
     const [showObPanel, setShowObPanel] = useState(false);
@@ -307,7 +323,9 @@ const SupplierPaymentsPage: React.FC = () => {
         paymentMethod: 'BANK_TRANSFER',
         reference: '',
         paymentDate: new Date().toLocaleDateString('en-CA'),
-        notes: ''
+        notes: '',
+        whtTypeId: undefined,
+        certificateNumber: '',
     });
 
     const [billFormData, setBillFormData] = useState<CreateSupplierInvoiceRequest>({
@@ -524,8 +542,22 @@ const SupplierPaymentsPage: React.FC = () => {
 
     const handleCreatePayment = async () => {
         try {
-            if (!paymentFormData.supplierId || !paymentFormData.amount || parseFloat(paymentFormData.amount.toString()) <= 0) {
-                toast.error(ERROR_MESSAGES.REQUIRED_FIELDS_MISSING);
+            const supplierId = paymentFormData.supplierId?.trim() || '';
+            const amount = Number(paymentFormData.amount);
+            if (!supplierId || supplierId === '__none__') {
+                toast.error('Please select a supplier');
+                return;
+            }
+            if (!Number.isFinite(amount) || amount <= 0) {
+                toast.error('Please enter a valid payment amount greater than zero');
+                return;
+            }
+            if (!paymentFormData.paymentMethod) {
+                toast.error('Please select a payment method');
+                return;
+            }
+            if (!paymentFormData.paymentDate) {
+                toast.error('Please select a payment date');
                 return;
             }
 
@@ -533,7 +565,10 @@ const SupplierPaymentsPage: React.FC = () => {
 
             const response = await supplierPaymentService.createSupplierPayment({
                 ...paymentFormData,
-                amount: parseFloat(paymentFormData.amount.toString())
+                supplierId,
+                amount,
+                whtTypeId: paymentFormData.whtTypeId || undefined,
+                certificateNumber: paymentFormData.certificateNumber?.trim() || undefined,
             });
 
             if (response.success && response.data) {
@@ -706,8 +741,16 @@ const SupplierPaymentsPage: React.FC = () => {
 
     const handleCreateBill = async () => {
         try {
-            if (!billFormData.supplierId || !billFormData.supplierInvoiceNumber || billFormData.lineItems.length === 0) {
-                toast.error(ERROR_MESSAGES.REQUIRED_FIELDS_MISSING);
+            if (!billFormData.supplierId || billFormData.supplierId === '__none__') {
+                toast.error('Please select a supplier');
+                return;
+            }
+            if (!billFormData.supplierInvoiceNumber?.trim()) {
+                toast.error('Please enter the supplier invoice / bill number');
+                return;
+            }
+            if (billFormData.lineItems.length === 0) {
+                toast.error('Please add at least one line item');
                 return;
             }
 
@@ -716,7 +759,7 @@ const SupplierPaymentsPage: React.FC = () => {
             );
 
             if (validLineItems.length === 0) {
-                toast.error('Please add at least one line item');
+                toast.error('Each line needs a product name, quantity, and unit price');
                 return;
             }
 
@@ -891,7 +934,9 @@ const SupplierPaymentsPage: React.FC = () => {
             paymentMethod: 'BANK_TRANSFER',
             reference: '',
             paymentDate: new Date().toLocaleDateString('en-CA'),
-            notes: ''
+            notes: '',
+            whtTypeId: undefined,
+            certificateNumber: '',
         });
         setSupplierSearchFilter('');
         setSelectedSupplierOutstanding(null);
@@ -927,8 +972,28 @@ const SupplierPaymentsPage: React.FC = () => {
     // Combined loading state
     const isPageLoading = suppliersLoading || loading;
 
-    useSubmitOnEnter(isPaymentModalOpen, true, handleCreatePayment);
-    useSubmitOnEnter(isBillModalOpen, true, handleCreateBill);
+    useSubmitOnEnter(
+        isPaymentModalOpen && !showObPanel,
+        Boolean(
+            paymentFormData.supplierId &&
+                paymentFormData.supplierId !== '__none__' &&
+                Number(paymentFormData.amount) > 0 &&
+                !isRecordingPayment,
+        ),
+        handleCreatePayment,
+    );
+    useSubmitOnEnter(
+        isBillModalOpen,
+        Boolean(
+            billFormData.supplierId &&
+                billFormData.supplierId !== '__none__' &&
+                billFormData.supplierInvoiceNumber?.trim() &&
+                billFormData.lineItems.some(
+                    (item) => item.productName && item.quantity && item.unitPrice,
+                ),
+        ),
+        handleCreateBill,
+    );
     useSubmitOnEnter(isAllocationModalOpen, !allocatingPayment, handleManualAllocate);
 
     if (isPageLoading && suppliers.length === 0) {
@@ -1604,13 +1669,16 @@ const SupplierPaymentsPage: React.FC = () => {
                                         onChange={(e) => setSupplierSearchFilter(e.target.value)}
                                     />
                                     <Select
-                                        value={paymentFormData.supplierId}
-                                        onValueChange={handlePaymentSupplierChange}
+                                        value={paymentFormData.supplierId || '__none__'}
+                                        onValueChange={(v) =>
+                                            handlePaymentSupplierChange(v === '__none__' ? '' : v)
+                                        }
                                     >
                                         <SelectTrigger>
                                             <SelectValue placeholder="Select supplier" />
                                         </SelectTrigger>
                                         <SelectContent>
+                                            <SelectItem value="__none__">Select supplier…</SelectItem>
                                             {filteredSuppliers.length === 0 ? (
                                                 <div className="px-2 py-3 text-sm text-gray-500 text-center">
                                                     No suppliers found
@@ -1618,15 +1686,10 @@ const SupplierPaymentsPage: React.FC = () => {
                                             ) : (
                                                 filteredSuppliers.map((supplier) => (
                                                     <SelectItem key={supplier.id} value={supplier.id}>
-                                                        <div className="flex items-center justify-between w-full gap-2">
-                                                            <span>{supplier.name}</span>
-                                                            {safeParseFloat(supplier.outstandingBalance) > 0 && (
-                                                                <span className="text-xs text-amber-600 font-medium">
-                                                                    {formatCurrency(safeParseFloat(supplier.outstandingBalance))}{' '}
-                                                                    due
-                                                                </span>
-                                                            )}
-                                                        </div>
+                                                        {supplier.name}
+                                                        {safeParseFloat(supplier.outstandingBalance) > 0
+                                                            ? ` — ${formatCurrency(safeParseFloat(supplier.outstandingBalance))} due`
+                                                            : ''}
                                                     </SelectItem>
                                                 ))
                                             )}
@@ -1695,17 +1758,23 @@ const SupplierPaymentsPage: React.FC = () => {
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label htmlFor="payment-amount">Amount</Label>
+                                        <Label htmlFor="payment-amount">Amount (bill settlement)</Label>
                                         <Input
                                             id="payment-amount"
                                             type="number"
                                             step="0.01"
                                             min="0"
-                                            value={paymentFormData.amount.toString()}
+                                            value={
+                                                paymentFormData.amount === '' || paymentFormData.amount === 0
+                                                    ? paymentFormData.amount === 0
+                                                        ? '0'
+                                                        : ''
+                                                    : String(paymentFormData.amount)
+                                            }
                                             onChange={(e) =>
                                                 setPaymentFormData((prev) => ({
                                                     ...prev,
-                                                    amount: parseFloat(e.target.value) || 0,
+                                                    amount: e.target.value === '' ? '' : e.target.value,
                                                 }))
                                             }
                                             placeholder="0.00"
@@ -1762,6 +1831,81 @@ const SupplierPaymentsPage: React.FC = () => {
                                         </Select>
                                     </div>
                                 </div>
+
+                                {supplierWhtTypes.length > 0 && (
+                                    <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="payment-wht">Withholding tax (optional)</Label>
+                                            <Select
+                                                value={paymentFormData.whtTypeId || '__none__'}
+                                                onValueChange={(value: string) =>
+                                                    setPaymentFormData((prev) => ({
+                                                        ...prev,
+                                                        whtTypeId: value === '__none__' ? undefined : value,
+                                                    }))
+                                                }
+                                            >
+                                                <SelectTrigger id="payment-wht">
+                                                    <SelectValue placeholder="No withholding" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="__none__">No withholding</SelectItem>
+                                                    {supplierWhtTypes.map((t) => (
+                                                        <SelectItem key={t.id} value={t.id}>
+                                                            {t.code} — {t.name} ({(t.rate * 100).toFixed(1)}%)
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        {paymentFormData.whtTypeId && (() => {
+                                            const selected = supplierWhtTypes.find(
+                                                (t) => t.id === paymentFormData.whtTypeId,
+                                            );
+                                            const gross = safeParseFloat(paymentFormData.amount);
+                                            const whtAmt = selected
+                                                ? Math.round(gross * selected.rate * 100) / 100
+                                                : 0;
+                                            const netCash = Math.round((gross - whtAmt) * 100) / 100;
+                                            return (
+                                                <div className="grid grid-cols-3 gap-2 text-sm">
+                                                    <div>
+                                                        <p className="text-xs text-gray-500">Gross (AP)</p>
+                                                        <p className="font-semibold">{formatCurrency(gross)}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-gray-500">WHT withheld</p>
+                                                        <p className="font-semibold text-amber-800">
+                                                            {formatCurrency(whtAmt)}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-xs text-gray-500">Cash to pay</p>
+                                                        <p className="font-semibold text-green-700">
+                                                            {formatCurrency(netCash)}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
+                                        {paymentFormData.whtTypeId && (
+                                            <div className="space-y-2">
+                                                <Label htmlFor="wht-certificate">WHT certificate #</Label>
+                                                <Input
+                                                    id="wht-certificate"
+                                                    value={paymentFormData.certificateNumber || ''}
+                                                    onChange={(e) =>
+                                                        setPaymentFormData((prev) => ({
+                                                            ...prev,
+                                                            certificateNumber: e.target.value,
+                                                        }))
+                                                    }
+                                                    placeholder="Optional certificate number"
+                                                />
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
 
                                 <div className="space-y-2">
                                     <Label htmlFor="payment-date">Payment date</Label>
@@ -1850,13 +1994,19 @@ const SupplierPaymentsPage: React.FC = () => {
                             <Label htmlFor="supplier" className="text-right">Supplier</Label>
                             <div className="col-span-3">
                                 <Select
-                                    value={billFormData.supplierId}
-                                    onValueChange={(value) => setBillFormData(prev => ({ ...prev, supplierId: value }))}
+                                    value={billFormData.supplierId || '__none__'}
+                                    onValueChange={(value) =>
+                                        setBillFormData((prev) => ({
+                                            ...prev,
+                                            supplierId: value === '__none__' ? '' : value,
+                                        }))
+                                    }
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select supplier" />
                                     </SelectTrigger>
                                     <SelectContent>
+                                        <SelectItem value="__none__">Select supplier…</SelectItem>
                                         {suppliers.map(supplier => (
                                             <SelectItem key={supplier.id} value={supplier.id}>
                                                 {supplier.name}
@@ -2238,9 +2388,38 @@ const SupplierPaymentsPage: React.FC = () => {
                             {/* Summary Box */}
                             <div className="summary-box bg-gray-100 p-4 rounded-lg mt-4">
                                 <div className="flex justify-between py-1 text-sm">
-                                    <span>Total Payment Amount</span>
+                                    <span>Bill settlement (AP)</span>
                                     <span className="font-mono font-semibold">{formatCurrency(paymentReceipt.summary.totalPayment)}</span>
                                 </div>
+                                {(paymentReceipt.summary.whtAmount ?? paymentReceipt.payment.whtAmount ?? 0) > 0 && (
+                                    <>
+                                        <div className="flex justify-between py-1 text-sm">
+                                            <span>
+                                                WHT withheld
+                                                {paymentReceipt.payment.whtTypeName
+                                                    ? ` — ${paymentReceipt.payment.whtTypeName}`
+                                                    : ''}
+                                            </span>
+                                            <span className="font-mono text-amber-800">
+                                                {formatCurrency(
+                                                    paymentReceipt.summary.whtAmount
+                                                        ?? paymentReceipt.payment.whtAmount
+                                                        ?? 0,
+                                                )}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between py-1 text-sm">
+                                            <span>Cash / bank paid</span>
+                                            <span className="font-mono text-green-700">
+                                                {formatCurrency(
+                                                    paymentReceipt.summary.netCashAmount
+                                                        ?? paymentReceipt.payment.netCashAmount
+                                                        ?? paymentReceipt.summary.totalPayment,
+                                                )}
+                                            </span>
+                                        </div>
+                                    </>
+                                )}
                                 <div className="flex justify-between py-1 text-sm">
                                     <span>Allocated to Invoices</span>
                                     <span className="font-mono text-green-600">{formatCurrency(paymentReceipt.summary.totalAllocated)}</span>
@@ -2252,8 +2431,19 @@ const SupplierPaymentsPage: React.FC = () => {
                                     </div>
                                 )}
                                 <div className="flex justify-between py-2 text-lg font-bold border-t-2 border-gray-800 mt-2 pt-2">
-                                    <span>TOTAL PAID</span>
-                                    <span className="font-mono text-green-700">{formatCurrency(paymentReceipt.summary.totalPayment)}</span>
+                                    <span>
+                                        {(paymentReceipt.summary.whtAmount ?? 0) > 0
+                                            ? 'CASH PAID'
+                                            : 'TOTAL PAID'}
+                                    </span>
+                                    <span className="font-mono text-green-700">
+                                        {formatCurrency(
+                                            (paymentReceipt.summary.whtAmount ?? 0) > 0
+                                                ? (paymentReceipt.summary.netCashAmount
+                                                    ?? paymentReceipt.summary.totalPayment)
+                                                : paymentReceipt.summary.totalPayment,
+                                        )}
+                                    </span>
                                 </div>
                             </div>
 

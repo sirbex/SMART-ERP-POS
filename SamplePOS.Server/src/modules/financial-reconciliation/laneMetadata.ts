@@ -12,6 +12,7 @@ const DOMAIN_TITLES: Record<FinancialDomain, string> = {
   ar: 'Accounts Receivable',
   inventory: 'Inventory',
   cash: 'Cash',
+  wht: 'Withholding Tax',
 };
 
 const LANE_TITLES: Record<LaneKind, string> = {

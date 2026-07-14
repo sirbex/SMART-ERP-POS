@@ -910,12 +910,37 @@ export const api = {
 
   wht: {
     getTypes: () => apiClient.get<ApiResponse>('withholding-tax/types'),
-    createType: (data: { code: string; name: string; rate: number; appliesToSuppliers?: boolean; appliesToCustomers?: boolean }) =>
-      apiClient.post<ApiResponse>('withholding-tax/types', data),
+    createType: (data: {
+      code: string;
+      name: string;
+      rate: number;
+      appliesTo?: string;
+      appliesToSuppliers?: boolean;
+      appliesToCustomers?: boolean;
+      accountCode?: string;
+    }) => apiClient.post<ApiResponse>('withholding-tax/types', data),
     getBalance: (params?: { startDate?: string; endDate?: string }) =>
       apiClient.get<ApiResponse>('withholding-tax/balance', { params }),
-    getCertificates: (params?: { supplierId?: string; startDate?: string; endDate?: string }) =>
-      apiClient.get<ApiResponse>('withholding-tax/certificates', { params }),
+    remit: (data: {
+      amount: number;
+      date: string;
+      reference: string;
+      paymentAccountCode: string;
+      payableAccountCode?: string;
+    }) => apiClient.post<ApiResponse>('withholding-tax/remit', data),
+    recover: (data: {
+      amount: number;
+      date: string;
+      reference: string;
+      paymentAccountCode: string;
+      receivableAccountCode?: string;
+    }) => apiClient.post<ApiResponse>('withholding-tax/recover', data),
+    getCertificates: (params?: {
+      supplierId?: string;
+      customerId?: string;
+      startDate?: string;
+      endDate?: string;
+    }) => apiClient.get<ApiResponse>('withholding-tax/certificates', { params }),
   },
 
   assets: {

@@ -34,6 +34,7 @@ import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
 import { customerArLine, requireCustomerIdForAr } from '../modules/accounting-governance/arPostingHelpers.js';
+import { splitSupplierPaymentCredits, splitCustomerPaymentDebits } from '../modules/supplier-payments/supplierPaymentWht.js';
 
 // =============================================================================
 // ACCOUNT CODE CONSTANTS
@@ -104,6 +105,8 @@ export const AccountCodes = {
 
   // Withholding Tax
   WHT_PAYABLE: '2350',
+  /** Customer withheld tax recoverable from URA (asset). */
+  WHT_RECEIVABLE: '1250',
 
   // Fixed Assets
   FIXED_ASSETS: '1500',
@@ -574,6 +577,7 @@ export interface CustomerPaymentData {
   paymentId: string;
   paymentNumber: string;
   paymentDate: string;
+  /** Gross AR settlement (invoice reduction). */
   amount: number;
   paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER';
   customerId: string;
@@ -591,19 +595,30 @@ export interface CustomerPaymentData {
    * Optional invoice reference for allocated payments
    */
   invoiceNumber?: string;
+  /** Optional WHT withheld by customer; cash debit = amount − whtAmount. */
+  whtAmount?: number;
+  whtTypeName?: string;
+  whtEntryId?: string;
+  /** GL account for customer WHT receivable leg (defaults to 1250). */
+  whtAccountCode?: string;
 }
 
 /**
  * Record a customer payment in the general ledger (clearing step 1).
  *
  * Journal entry — PAYMENT_RECEIPT (matches invoice payment flow):
- *   DR Undeposited Funds (1015)    amount
+ *   DR Undeposited Funds (1015)    amount − WHT (or full amount)
+ *   DR WHT Receivable (1250+)      WHT (when customer withheld)
  *   CR Accounts Receivable (1200)  amount   when reducesAR = true
  *   CR Customer Deposits (2200)    amount   when reducesAR = false (on-account prepayment)
  *
  * Bank/cash recognition is step 2 — PAYMENT_DEPOSIT (separate process).
  */
-export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
+export async function recordCustomerPaymentToGL(
+  payment: CustomerPaymentData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<{ transactionId: string }> {
   try {
     const reducesAR = payment.reducesAR !== false;
     const creditAccountCode = reducesAR
@@ -614,30 +629,71 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
       ? `Reduce A/R for ${payment.customerName}${payment.invoiceNumber ? ` - ${payment.invoiceNumber}` : ''}`
       : `Customer prepayment from ${payment.customerName}`;
 
-    await AccountingCore.createJournalEntry({
+    const gross = payment.amount;
+    const whtAmount = payment.whtAmount && payment.whtAmount > 0.009 ? payment.whtAmount : 0;
+    if (whtAmount > 0.009 && !reducesAR) {
+      throw new Error('Customer WHT can only be applied when the payment reduces Accounts Receivable');
+    }
+    const { cashDebit, whtDebit, arCredit } = splitCustomerPaymentDebits(gross, whtAmount);
+    const whtLabel = payment.whtTypeName ? ` (${payment.whtTypeName})` : '';
+    let whtAccountCode = payment.whtAccountCode?.trim() || AccountCodes.WHT_RECEIVABLE;
+
+    if (whtDebit > 0.009 && txClient) {
+      const { ensureWhtGlAccountForCode } = await import(
+        '../modules/withholding-tax/ensureWhtAccounts.js'
+      );
+      whtAccountCode = await ensureWhtGlAccountForCode(txClient, whtAccountCode, 'CUSTOMER');
+    }
+
+    const lines: Array<{
+      accountCode: string;
+      description: string;
+      debitAmount: number;
+      creditAmount: number;
+      entityType?: string;
+      entityId?: string;
+    }> = [
+      {
+        accountCode: AccountCodes.UNDEPOSITED_FUNDS,
+        description: whtDebit > 0
+          ? `Net payment after customer WHT — ${payment.paymentNumber}`
+          : `Payment received — ${payment.paymentNumber}`,
+        debitAmount: cashDebit,
+        creditAmount: 0,
+        entityType: 'customer',
+        entityId: payment.customerId,
+      },
+    ];
+
+    if (whtDebit > 0.009) {
+      lines.push({
+        accountCode: whtAccountCode,
+        description: `WHT withheld by customer${whtLabel} — ${payment.paymentNumber}`,
+        debitAmount: whtDebit,
+        creditAmount: 0,
+        entityType: 'WHT',
+        entityId: payment.whtEntryId,
+      });
+    }
+
+    lines.push({
+      accountCode: creditAccountCode,
+      description: creditDescription,
+      debitAmount: 0,
+      creditAmount: arCredit,
+      entityType: 'customer',
+      entityId: payment.customerId,
+    });
+
+    const glResult = await AccountingCore.createJournalEntry({
       entryDate: payment.paymentDate,
-      description: `Customer payment from ${payment.customerName}: ${payment.paymentNumber}`,
+      description: whtDebit > 0
+        ? `Customer payment with WHT from ${payment.customerName}: ${payment.paymentNumber}`
+        : `Customer payment from ${payment.customerName}: ${payment.paymentNumber}`,
       referenceType: 'CUSTOMER_PAYMENT',
       referenceId: payment.paymentId,
       referenceNumber: payment.paymentNumber,
-      lines: [
-        {
-          accountCode: AccountCodes.UNDEPOSITED_FUNDS,
-          description: `Payment received — ${payment.paymentNumber}`,
-          debitAmount: payment.amount,
-          creditAmount: 0,
-          entityType: 'customer',
-          entityId: payment.customerId,
-        },
-        {
-          accountCode: creditAccountCode,
-          description: creditDescription,
-          debitAmount: 0,
-          creditAmount: payment.amount,
-          entityType: 'customer',
-          entityId: payment.customerId,
-        },
-      ],
+      lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `CUSTOMER_PAYMENT-${payment.paymentId}`,
       source: 'PAYMENT_RECEIPT' as const,
@@ -648,13 +704,19 @@ export async function recordCustomerPaymentToGL(payment: CustomerPaymentData, po
       amount: payment.amount,
       customerId: payment.customerId,
       reducesAR,
-      creditAccount: creditAccountCode
+      creditAccount: creditAccountCode,
+      whtAmount: whtDebit,
+      whtAccountCode: whtDebit > 0.009 ? whtAccountCode : undefined,
+      transactionId: glResult.transactionId,
     });
+    return { transactionId: glResult.transactionId };
   } catch (error: unknown) {
     if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record customer payment to GL', { error, payment });
-    // CRITICAL: GL failure MUST throw to prevent payments without AR adjustment
-    throw new Error(`GL posting failed for customer payment ${payment.paymentNumber}: ${(error instanceof Error ? error.message : String(error))}`);
+    // CRITICAL: GL failure MUST throw to prevent payments without AR adjustment.
+    // Use [GL_ERROR] prefix so nested 'not found' is not misclassified as HTTP 404.
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`[GL_ERROR] GL posting failed for customer payment ${payment.paymentNumber}: ${detail}`);
   }
 }
 
@@ -1174,20 +1236,32 @@ export interface SupplierPaymentData {
   paymentId: string;
   paymentNumber: string;
   paymentDate: string;
+  /** Gross AP settlement amount (invoice reduction). */
   amount: number;
   paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY';
   supplierId: string;
   supplierName: string;
+  /** Optional WHT withheld from cash; cash credit = amount − whtAmount. */
+  whtAmount?: number;
+  whtTypeName?: string;
+  whtEntryId?: string;
+  /** GL account for supplier WHT payable leg (defaults to 2350). */
+  whtAccountCode?: string;
 }
 
 /**
  * Record supplier payment in the general ledger
- * 
+ *
  * Journal entry for paying supplier:
  *   DR Accounts Payable (2100) amount
- *   CR Cash/Bank (1010/1030)   amount
+ *   CR Cash/Bank (1010/1030)   amount − WHT (or full amount if no WHT)
+ *   CR WHT Payable (2350+)     WHT amount (when withheld)
  */
-export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
+export async function recordSupplierPaymentToGL(
+  payment: SupplierPaymentData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<{ transactionId: string }> {
   try {
     // Determine credit account based on payment method
     let creditAccountCode: string;
@@ -1209,29 +1283,66 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, po
         creditAccountCode = AccountCodes.CASH;
     }
 
+    const gross = payment.amount;
+    const whtAmount = payment.whtAmount && payment.whtAmount > 0.009 ? payment.whtAmount : 0;
+    const { cashCredit: cashAmount, whtCredit } = splitSupplierPaymentCredits(gross, whtAmount);
+    const whtLabel = payment.whtTypeName ? ` (${payment.whtTypeName})` : '';
+    let whtAccountCode = payment.whtAccountCode?.trim() || AccountCodes.WHT_PAYABLE;
+
+    if (whtCredit > 0.009 && txClient) {
+      const { ensureWhtGlAccountForCode } = await import(
+        '../modules/withholding-tax/ensureWhtAccounts.js'
+      );
+      whtAccountCode = await ensureWhtGlAccountForCode(txClient, whtAccountCode, 'SUPPLIER');
+    }
+
+    const lines: Array<{
+      accountCode: string;
+      description: string;
+      debitAmount: number;
+      creditAmount: number;
+      entityType?: string;
+      entityId?: string;
+    }> = [
+      {
+        accountCode: AccountCodes.ACCOUNTS_PAYABLE,
+        description: `Reduce payable to ${payment.supplierName}`,
+        debitAmount: gross,
+        creditAmount: 0,
+        entityType: 'supplier',
+        entityId: payment.supplierId,
+      },
+      {
+        accountCode: creditAccountCode,
+        description: whtCredit > 0
+          ? `Net payment after WHT: ${payment.paymentNumber}`
+          : `Payment: ${payment.paymentNumber}`,
+        debitAmount: 0,
+        creditAmount: cashAmount,
+      },
+    ];
+
+    if (whtCredit > 0.009) {
+      lines.push({
+        accountCode: whtAccountCode,
+        description: `WHT withheld${whtLabel} — ${payment.paymentNumber}`,
+        debitAmount: 0,
+        creditAmount: whtCredit,
+        entityType: 'WHT',
+        entityId: payment.whtEntryId,
+      });
+    }
+
     // Use AccountingCore for audit-safe, idempotent journal entry creation
-    await AccountingCore.createJournalEntry({
+    const glResult = await AccountingCore.createJournalEntry({
       entryDate: payment.paymentDate,
-      description: `Payment to supplier: ${payment.supplierName}`,
+      description: whtCredit > 0
+        ? `Payment to supplier with WHT: ${payment.supplierName}`
+        : `Payment to supplier: ${payment.supplierName}`,
       referenceType: 'SUPPLIER_PAYMENT',
       referenceId: payment.paymentId,
       referenceNumber: payment.paymentNumber,
-      lines: [
-        {
-          accountCode: AccountCodes.ACCOUNTS_PAYABLE,
-          description: `Reduce payable to ${payment.supplierName}`,
-          debitAmount: payment.amount,
-          creditAmount: 0,
-          entityType: 'supplier',
-          entityId: payment.supplierId
-        },
-        {
-          accountCode: creditAccountCode,
-          description: `Payment: ${payment.paymentNumber}`,
-          debitAmount: 0,
-          creditAmount: payment.amount
-        }
-      ],
+      lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `SUPPLIER_PAYMENT-${payment.paymentId}`,
       source: 'SUPPLIER_PAYMENT' as const,
@@ -1240,8 +1351,11 @@ export async function recordSupplierPaymentToGL(payment: SupplierPaymentData, po
     logger.info('Recorded supplier payment to GL', {
       paymentId: payment.paymentId,
       amount: payment.amount,
-      supplierId: payment.supplierId
+      supplierId: payment.supplierId,
+      whtAccountCode: whtCredit > 0.009 ? whtAccountCode : undefined,
+      transactionId: glResult.transactionId,
     });
+    return { transactionId: glResult.transactionId };
   } catch (error: unknown) {
     if (error instanceof BusinessRuleException) throw error;
     logger.error('Failed to record supplier payment to GL', { error, payment });

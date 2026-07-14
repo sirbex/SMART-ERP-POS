@@ -188,7 +188,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           name: 'Withholding Tax',
           path: '/accounting/withholding-tax',
           icon: <Receipt className="h-4 w-4" />,
-          description: 'WHT types and compliance'
+          description: 'Types, remittance, recovery, certificates'
         },
         {
           name: 'Asset Accounting',

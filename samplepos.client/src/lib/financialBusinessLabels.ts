@@ -25,6 +25,7 @@ const DOMAIN_BUSINESS: Record<FinancialDomain, string> = {
     ar: 'Customers',
     inventory: 'Inventory',
     cash: 'Cash',
+    wht: 'Withholding Tax',
 };
 
 export type HealthTone = 'success' | 'warning' | 'danger' | 'neutral';
@@ -126,6 +127,8 @@ export function domainActionLabel(domain: FinancialDomain, tone: HealthTone): st
                 return 'Review inventory difference';
             case 'cash':
                 return 'Review cash accounts';
+            case 'wht':
+                return 'Review withholding tax';
         }
     }
     if (tone === 'warning') return 'Refresh balances';
@@ -219,6 +222,8 @@ function issueTitle(domain: FinancialDomain, integrity: FinancialLaneResult): st
             return 'Supplier balance does not match ledger';
         case 'cash':
             return 'Cash account difference';
+        case 'wht':
+            return 'Withholding tax ledger difference';
         default:
             return integrity.title.replace(/Accounting Integrity/i, 'Reconciliation');
     }

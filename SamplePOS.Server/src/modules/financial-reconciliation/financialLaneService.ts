@@ -11,7 +11,7 @@ import type {
 
 type Db = Pool | PoolClient;
 
-const VALID_DOMAINS = new Set<string>(['ap', 'ar', 'inventory', 'cash']);
+const VALID_DOMAINS = new Set<string>(['ap', 'ar', 'inventory', 'cash', 'wht']);
 const VALID_LANES = new Set<string>(['integrity', 'cache', 'history']);
 
 export function parseFinancialDomain(value: string): FinancialDomain {

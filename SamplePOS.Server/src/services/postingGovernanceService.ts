@@ -49,7 +49,9 @@ export type PostingSource =
     | 'PERIOD_CLOSE'            // Retained earnings close-out
     | 'FX_REVALUATION'          // Foreign currency revaluation
     | 'CUTOVER_OB'              // Cutover: supplier/customer opening balances (GL-only, no invoice)
-    | 'CUTOVER_CORRECTION';     // Cutover: reversal of wrongly posted pre-ERP asset credits
+    | 'CUTOVER_CORRECTION'      // Cutover: reversal of wrongly posted pre-ERP asset credits
+    | 'WHT_REMITTANCE'          // Remit supplier WHT payable to tax authority — Dr 2350 / Cr Cash
+    | 'WHT_RECEIVABLE_RECOVERY'; // Recover customer Tax Receivable from URA — Dr Cash / Cr 1250
 
 // =============================================================================
 // GOVERNANCE ACCOUNT SHAPE
@@ -247,7 +249,8 @@ export class PostingGovernanceService {
 
         // ------------------------------------------------------------------
         // Rule D: Crediting a CASH-tagged account is only allowed from PAYMENT_DEPOSIT,
-        //         SUPPLIER_PAYMENT (AP reduction → cash out), or SYSTEM_CORRECTION.
+        //         SUPPLIER_PAYMENT (AP reduction → cash out), WHT_REMITTANCE,
+        //         or SYSTEM_CORRECTION.
         // ------------------------------------------------------------------
         for (const line of lines) {
             if (line.creditAmount > 0) {
@@ -259,11 +262,12 @@ export class PostingGovernanceService {
                         source !== 'EXPENSE_PAYMENT' &&
                         source !== 'SALES_REFUND' &&
                         source !== 'SYSTEM_CORRECTION' &&
-                        source !== 'CUTOVER_CORRECTION'  // reversing a wrong pre-ERP cash credit
+                        source !== 'CUTOVER_CORRECTION' && // reversing a wrong pre-ERP cash credit
+                        source !== 'WHT_REMITTANCE'
                     ) {
                         throw new PostingGovernanceError(
                             `Cannot credit Cash account ${account.accountCode} (${account.accountName}) from source '${source}'. ` +
-                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), supplier payment (SUPPLIER_PAYMENT), sale refund (SALES_REFUND), or system correction.`,
+                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), supplier payment (SUPPLIER_PAYMENT), WHT remittance (WHT_REMITTANCE), sale refund (SALES_REFUND), or system correction.`,
                             'GOV_RULE_D_CASH_CREDIT',
                             { accountCode: account.accountCode, source }
                         );

@@ -223,7 +223,7 @@ export function parseExceptionId(id: string): ParsedExceptionId {
         };
     }
 
-    const domainMatch = id.match(/^exc-(ap|ar|inventory|cash)-domain$/);
+    const domainMatch = id.match(/^exc-(ap|ar|inventory|cash|wht)-domain$/);
     if (domainMatch) {
         return {
             exceptionId: id,
@@ -234,7 +234,7 @@ export function parseExceptionId(id: string): ParsedExceptionId {
         };
     }
 
-    const entityMatch = id.match(/^exc-(ap|ar|inventory)-(.+)$/);
+    const entityMatch = id.match(/^exc-(ap|ar|inventory|wht)-(.+)$/);
     if (entityMatch) {
         const domain = entityMatch[1] as TraceDomain;
         const entityId = entityMatch[2];

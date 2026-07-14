@@ -22,6 +22,7 @@ import { ValidationError } from '../../middleware/errorHandler.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
 import { PricingEngine } from '../../utils/pricingEngine.js';
 import { assertSupplierCreditHeadroom } from '../suppliers/supplierCreditGuard.js';
+import * as whtService from '../withholding-tax/whtService.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -34,6 +35,9 @@ export interface CreateSupplierPaymentInput {
     reference?: string;
     notes?: string;
     targetInvoiceId?: string;
+    /** Optional WHT type — amount is gross AP settlement; cash paid = net after WHT. */
+    whtTypeId?: string;
+    certificateNumber?: string;
 }
 
 export interface CreateSupplierInvoiceInput {
@@ -319,6 +323,33 @@ export async function createSupplierPayment(
         // Calculate summary
         const unallocatedAmount = paymentAmount.minus(totalAllocated);
 
+        // Optional WHT: amount stays gross for open-item; cash GL is net
+        let whtCalc: Awaited<ReturnType<typeof whtService.calculateWht>> = null;
+        let whtEntryId: string | undefined;
+        if (data.whtTypeId) {
+            whtCalc = await whtService.calculateWht(
+                data.whtTypeId,
+                paymentAmount.toNumber(),
+                client,
+                'SUPPLIER',
+            );
+            if (!whtCalc) {
+                throw new ValidationError('Payment amount is below the WHT threshold for the selected type');
+            }
+            const whtEntry = await whtService.recordWhtEntryForPayment(
+                {
+                    whtTypeId: data.whtTypeId,
+                    paymentId: payment.id,
+                    baseAmount: whtCalc.baseAmount,
+                    whtAmount: whtCalc.whtAmount,
+                    netAmount: whtCalc.netAmount,
+                    certificateNumber: data.certificateNumber,
+                },
+                client,
+            );
+            whtEntryId = whtEntry.id;
+        }
+
         // Build receipt data
         const receiptData = {
             payment: {
@@ -331,6 +362,10 @@ export async function createSupplierPayment(
                 amount: paymentAmount.toNumber(),
                 allocatedAmount: totalAllocated.toNumber(),
                 unallocatedAmount: unallocatedAmount.toNumber(),
+                whtAmount: whtCalc?.whtAmount ?? 0,
+                netCashAmount: whtCalc?.netAmount ?? paymentAmount.toNumber(),
+                whtTypeName: whtCalc?.whtTypeName ?? null,
+                certificateNumber: data.certificateNumber || null,
             },
             supplier: {
                 id: data.supplierId,
@@ -347,6 +382,8 @@ export async function createSupplierPayment(
                 invoicesPaid: allocations.filter((a) => a.status === 'Paid').length,
                 invoicesPartiallyPaid: allocations.filter((a) => a.status === 'PartiallyPaid').length,
                 totalInvoicesAffected: allocations.length,
+                whtAmount: whtCalc?.whtAmount ?? 0,
+                netCashAmount: whtCalc?.netAmount ?? paymentAmount.toNumber(),
             },
             metadata: {
                 createdAt: new Date().toISOString(),
@@ -361,32 +398,37 @@ export async function createSupplierPayment(
             amount: paymentAmount.toNumber(),
             allocatedAmount: totalAllocated.toNumber(),
             invoicesAffected: allocations.length,
+            whtAmount: whtCalc?.whtAmount ?? 0,
         });
 
-        // GL POSTING: DR Accounts Payable (2100) / CR Cash or Bank
-        // Done inside UnitOfWork so the payment and its AP/Cash GL entry are atomic.
-        await glEntryService.recordSupplierPaymentToGL(
+        // GL: DR AP (gross) / CR Cash (net) / CR WHT Payable (when withheld)
+        const glResult = await glEntryService.recordSupplierPaymentToGL(
             {
                 paymentId: payment.id,
                 paymentNumber: payment.paymentNumber,
                 paymentDate: data.paymentDate,
                 amount: paymentAmount.toNumber(),
-                paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK',
+                paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY',
                 supplierId: data.supplierId,
                 supplierName: supplier?.CompanyName || 'Unknown',
+                whtAmount: whtCalc?.whtAmount,
+                whtTypeName: whtCalc?.whtTypeName,
+                whtEntryId,
+                whtAccountCode: whtCalc?.accountCode,
             },
             undefined,
             client
         );
+
+        if (whtEntryId) {
+            await whtService.linkWhtEntryToGlTransaction(whtEntryId, glResult.transactionId, client);
+        }
 
         // Recalculate supplier balance from source (replaces trg_sync_supplier_balance_on_payment)
         await recalcSupplierBalance(client, data.supplierId);
 
         return receiptData;
     });
-
-    // WHT (Withholding Tax) is available via the standalone WHT module API when needed.
-    // Odoo-style: simple direct payment without automatic WHT deduction.
 
     return receiptData;
 }

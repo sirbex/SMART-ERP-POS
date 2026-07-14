@@ -29,7 +29,7 @@ export interface CloseChecklistStep {
     substeps: CloseChecklistSubItem[];
 }
 
-const DOMAIN_ORDER = ['ap', 'ar', 'inventory', 'cash'] as const;
+const DOMAIN_ORDER = ['ap', 'ar', 'inventory', 'cash', 'wht'] as const;
 
 const DOMAIN_STEP_META: Record<
     (typeof DOMAIN_ORDER)[number],
@@ -58,6 +58,12 @@ const DOMAIN_STEP_META: Record<
         description: 'Confirm Cash (1010) matches bank activity and recorded receipts.',
         accountCode: '1010',
         minutes: 15,
+    },
+    wht: {
+        title: 'Reconcile withholding tax',
+        description: 'Confirm WHT Payable (2350) and Tax Receivable (1250) match WHT entries.',
+        accountCode: '2350',
+        minutes: 10,
     },
 };
 

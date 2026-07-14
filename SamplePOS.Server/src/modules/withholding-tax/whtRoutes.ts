@@ -34,21 +34,38 @@ router.put('/types/:id', authenticate, requirePermission('accounting.manage'), a
 // =========================================
 
 router.post('/calculate', authenticate, asyncHandler(async (req, res) => {
-  const { whtTypeId, baseAmount } = req.body;
+  const { whtTypeId, baseAmount, side } = req.body;
   if (!whtTypeId || baseAmount === undefined) throw new ValidationError('whtTypeId and baseAmount required');
-  const calc = await whtService.calculateWht(whtTypeId, baseAmount, req.tenantPool);
+  if (side != null && side !== 'SUPPLIER' && side !== 'CUSTOMER') {
+    throw new ValidationError('side must be SUPPLIER or CUSTOMER');
+  }
+  const calc = await whtService.calculateWht(whtTypeId, baseAmount, req.tenantPool, side);
   res.json({ success: true, data: calc });
 }));
 
 // =========================================
-// WHT REMITTANCE
+// WHT SETTLEMENT (remit payable / recover receivable)
 // =========================================
 
 router.post('/remit', authenticate, requirePermission('accounting.manage'), asyncHandler(async (req, res) => {
-  const { amount, date, reference } = req.body;
+  const { amount, date, reference, paymentAccountCode, payableAccountCode } = req.body;
   if (!amount || !date || !reference) throw new ValidationError('amount, date, and reference required');
   const userId = req.user!.id;
-  const result = await whtService.remitWht({ amount, date, reference, userId }, req.tenantPool);
+  const result = await whtService.remitWht(
+    { amount, date, reference, userId, paymentAccountCode, payableAccountCode },
+    req.tenantPool,
+  );
+  res.json({ success: true, data: result });
+}));
+
+router.post('/recover', authenticate, requirePermission('accounting.manage'), asyncHandler(async (req, res) => {
+  const { amount, date, reference, paymentAccountCode, receivableAccountCode } = req.body;
+  if (!amount || !date || !reference) throw new ValidationError('amount, date, and reference required');
+  const userId = req.user!.id;
+  const result = await whtService.recoverWhtReceivable(
+    { amount, date, reference, userId, paymentAccountCode, receivableAccountCode },
+    req.tenantPool,
+  );
   res.json({ success: true, data: result });
 }));
 
@@ -57,8 +74,31 @@ router.post('/remit', authenticate, requirePermission('accounting.manage'), asyn
 // =========================================
 
 router.get('/balance', authenticate, asyncHandler(async (req, res) => {
-  const balance = await whtService.getWhtPayableBalance(req.tenantPool);
-  res.json({ success: true, data: balance });
+  const balances = await whtService.getWhtBalances(req.tenantPool);
+  // Keep legacy payable fields at top level for existing clients.
+  res.json({
+    success: true,
+    data: {
+      balance: balances.payable.balance,
+      entries: balances.payable.entries,
+      payable: balances.payable,
+      receivable: balances.receivable,
+    },
+  });
+}));
+
+router.get('/certificates', authenticate, asyncHandler(async (req, res) => {
+  const { startDate, endDate, supplierId, customerId } = req.query;
+  const certificates = await whtService.listWhtCertificates(
+    {
+      startDate: startDate as string | undefined,
+      endDate: endDate as string | undefined,
+      supplierId: supplierId as string | undefined,
+      customerId: customerId as string | undefined,
+    },
+    req.tenantPool,
+  );
+  res.json({ success: true, data: certificates });
 }));
 
 router.get('/entries', authenticate, asyncHandler(async (req, res) => {
@@ -67,5 +107,8 @@ router.get('/entries', authenticate, asyncHandler(async (req, res) => {
   const entries = await whtService.getWhtEntries(startDate as string, endDate as string, req.tenantPool);
   res.json({ success: true, data: entries });
 }));
+
+// Tax compliance reports live under /api/reports/tax-compliance/*
+// (SSOT calculation: whtReportService). Ops (types/remit/recover/certs) stay here.
 
 export const whtRoutes = router;

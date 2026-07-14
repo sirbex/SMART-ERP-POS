@@ -53,6 +53,8 @@ const CreatePaymentSchema = z.object({
     reference: z.string().optional(),
     notes: z.string().optional(),
     targetInvoiceId: z.string().uuid().nullable().optional(),
+    whtTypeId: z.string().uuid().nullable().optional(),
+    certificateNumber: z.string().max(100).optional(),
 });
 const InvoicesQuerySchema = z.object({
     page: z
@@ -198,6 +200,8 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                     reference: validated.reference,
                     notes: validated.notes,
                     targetInvoiceId: validated.targetInvoiceId ?? undefined,
+                    whtTypeId: validated.whtTypeId ?? undefined,
+                    certificateNumber: validated.certificateNumber,
                 },
                 userId
             );

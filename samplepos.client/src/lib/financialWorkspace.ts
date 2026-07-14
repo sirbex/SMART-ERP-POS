@@ -193,6 +193,7 @@ export function buildDomainExceptionCounts(items: ExceptionInboxItem[]): DomainE
         { domain: 'ar', label: 'Customers' },
         { domain: 'ap', label: 'Suppliers' },
         { domain: 'cash', label: 'Cash' },
+        { domain: 'wht', label: 'Withholding Tax' },
         { domain: 'gl', label: 'General Ledger' },
     ];
 

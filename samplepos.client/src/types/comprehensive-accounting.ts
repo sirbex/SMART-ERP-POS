@@ -252,10 +252,14 @@ export interface CreateCustomerPaymentRequest {
 export interface CreateSupplierPaymentRequest {
     supplierId: string;
     amount: string | number;
-    paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'OTHER';
+    paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'OTHER' | 'MOBILE_MONEY';
     reference?: string;
     paymentDate: string;
     notes?: string;
+    targetInvoiceId?: string;
+    /** Optional WHT type — amount is gross bill settlement; bank pays net. */
+    whtTypeId?: string;
+    certificateNumber?: string;
     // Optional: specify invoice allocations
     allocations?: {
         supplierInvoiceId: string;
@@ -347,6 +351,10 @@ export interface SupplierPaymentReceipt {
         amount: number;
         allocatedAmount: number;
         unallocatedAmount: number;
+        whtAmount?: number;
+        netCashAmount?: number;
+        whtTypeName?: string | null;
+        certificateNumber?: string | null;
     };
     supplier: {
         id: string;
@@ -382,6 +390,8 @@ export interface SupplierPaymentReceipt {
         invoicesPaid: number;
         invoicesPartiallyPaid: number;
         totalInvoicesAffected: number;
+        whtAmount?: number;
+        netCashAmount?: number;
     };
     metadata: {
         createdAt: string;

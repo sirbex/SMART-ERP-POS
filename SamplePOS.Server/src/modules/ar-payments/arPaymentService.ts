@@ -13,6 +13,7 @@ import { getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 import { Money } from '../../utils/money.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import type { InvoicePaymentRecord } from '../invoices/invoiceRepository.js';
+import * as whtService from '../withholding-tax/whtService.js';
 
 const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -44,6 +45,9 @@ export interface CreateArPaymentInput {
   autoAllocate?: boolean;
   allocationType?: AllocationType;
   allocations?: AllocationLineInput[];
+  /** Optional WHT type — amount is gross AR settlement; cash received = net after customer WHT. */
+  whtTypeId?: string;
+  certificateNumber?: string;
 }
 
 export async function createCustomerPayment(handle: DbConnection, input: CreateArPaymentInput) {
@@ -74,7 +78,34 @@ export async function createCustomerPayment(handle: DbConnection, input: CreateA
       createdById: input.createdById,
     });
 
-    await glEntryService.recordCustomerPaymentToGL(
+    let whtCalc: Awaited<ReturnType<typeof whtService.calculateWht>> = null;
+    let whtEntryId: string | undefined;
+    if (input.whtTypeId) {
+      whtCalc = await whtService.calculateWht(
+        input.whtTypeId,
+        paymentAmount.toNumber(),
+        client,
+        'CUSTOMER',
+      );
+      if (!whtCalc) {
+        throw new ValidationError('Payment amount is below the WHT threshold for the selected type');
+      }
+      const whtEntry = await whtService.recordWhtEntryForPayment(
+        {
+          whtTypeId: input.whtTypeId,
+          paymentId: payment.id,
+          baseAmount: whtCalc.baseAmount,
+          whtAmount: whtCalc.whtAmount,
+          netAmount: whtCalc.netAmount,
+          certificateNumber: input.certificateNumber,
+          transactionType: 'CUSTOMER_PAYMENT',
+        },
+        client,
+      );
+      whtEntryId = whtEntry.id;
+    }
+
+    const glResult = await glEntryService.recordCustomerPaymentToGL(
       {
         paymentId: payment.id,
         paymentNumber: payment.paymentNumber,
@@ -84,10 +115,18 @@ export async function createCustomerPayment(handle: DbConnection, input: CreateA
         paymentDate: input.paymentDate,
         paymentMethod: input.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
         reducesAR: true,
+        whtAmount: whtCalc?.whtAmount,
+        whtTypeName: whtCalc?.whtTypeName,
+        whtEntryId,
+        whtAccountCode: whtCalc?.accountCode,
       },
       UnitOfWork.isPool(handle) ? handle : undefined,
       client,
     );
+
+    if (whtEntryId) {
+      await whtService.linkWhtEntryToGlTransaction(whtEntryId, glResult.transactionId, client);
+    }
 
     let lines = input.allocations ?? [];
     if (input.autoAllocate && lines.length === 0) {

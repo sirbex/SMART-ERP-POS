@@ -4,7 +4,7 @@
  */
 import type { Pool, PoolClient } from 'pg';
 
-export type FinancialDomain = 'ap' | 'ar' | 'inventory' | 'cash';
+export type FinancialDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht';
 
 /** API lane slug (history = journal audit). */
 export type LaneKind = 'integrity' | 'cache' | 'history';

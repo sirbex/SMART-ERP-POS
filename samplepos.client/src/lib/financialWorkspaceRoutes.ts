@@ -60,6 +60,8 @@ export function domainReconciliationPath(
             return inventoryReconciliationPath(asOfDate, highlight);
         case 'cash':
             return bankReconciliationPath(asOfDate);
+        case 'wht':
+            return withQuery('/accounting/withholding-tax', { asOfDate });
         default:
             return FINANCIAL_CONTROL_TOWER;
     }
@@ -73,17 +75,17 @@ export function exceptionWorkspacePath(
         return bankReconciliationPath(asOfDate);
     }
 
-    const domainLevel = exceptionId.match(/^exc-(ap|ar|inventory|cash)-domain$/);
+    const domainLevel = exceptionId.match(/^exc-(ap|ar|inventory|cash|wht)-domain$/);
     if (domainLevel) {
         return domainReconciliationPath(domainLevel[1] as FinancialDomain, asOfDate);
     }
 
-    const cacheWarn = exceptionId.match(/^warn-cache-(ap|ar|inventory|cash)$/);
+    const cacheWarn = exceptionId.match(/^warn-cache-(ap|ar|inventory|cash|wht)$/);
     if (cacheWarn) {
         return domainReconciliationPath(cacheWarn[1] as FinancialDomain, asOfDate);
     }
 
-    const entityMatch = exceptionId.match(/^exc-(ap|ar|inventory)-(.+)$/);
+    const entityMatch = exceptionId.match(/^exc-(ap|ar|inventory|wht)-(.+)$/);
     if (entityMatch) {
         const [, domain, entityId] = entityMatch;
         return domainReconciliationPath(domain as FinancialDomain, asOfDate, entityId);
