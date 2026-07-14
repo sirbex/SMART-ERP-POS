@@ -325,47 +325,45 @@ export class ProfitLossReportService {
         plNetIncome: number;
         trialBalanceNetIncome: number;
         difference: number;
+        totalRevenue: number;
+        totalCOGS: number;
+        totalOperatingExpenses: number;
+        grossProfit: number;
     }> {
         try {
-            // Get P&L net income
+            // Same SSOT as the P&L page: live posted ledger via SQL functions
             const plResult = await this.pool.query(
-                `
-                SELECT * FROM fn_get_profit_loss_summary($1::DATE, $2::DATE)
-            `,
+                `SELECT * FROM fn_get_profit_loss_summary($1::DATE, $2::DATE)`,
                 [dateFrom, dateTo]
             );
 
-            const plNetIncome = Money.parseDb(plResult.rows[0]?.net_income).toNumber();
+            const row = plResult.rows[0] || {};
+            const plNetIncome = Money.parseDb(row.net_income).toNumber();
+            const totalRevenue = Money.parseDb(row.total_revenue).toNumber();
+            const totalCOGS = Money.parseDb(row.total_cogs).toNumber();
+            const totalOperatingExpenses = Money.parseDb(row.total_operating_expenses).toNumber();
+            const grossProfit = Money.parseDb(row.gross_profit).toNumber();
 
-            // Calculate net income from gl_period_balances (SAP totals table)
-            // Revenue (credits - debits) - Expenses (debits - credits)
-            const [startYear, startMonth] = dateFrom.split('-').map(Number);
-            const [endYear, endMonth] = dateTo.split('-').map(Number);
-            const tbResult = await this.pool.query(
-                `
-                SELECT 
-                    COALESCE(SUM(CASE 
-                        WHEN a."AccountCode" LIKE '4%' 
-                        THEN gpb.credit_total - gpb.debit_total 
-                        ELSE 0 
-                    END), 0) as revenue,
-                    COALESCE(SUM(CASE 
-                        WHEN a."AccountCode" LIKE '5%' OR a."AccountCode" LIKE '6%' OR a."AccountType" = 'EXPENSE'
-                        THEN gpb.debit_total - gpb.credit_total 
-                        ELSE 0 
-                    END), 0) as expenses
-                FROM gl_period_balances gpb
-                JOIN accounts a ON gpb.account_id = a."Id"
-                WHERE (gpb.fiscal_year > $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period >= $2))
-                  AND (gpb.fiscal_year < $3 OR (gpb.fiscal_year = $3 AND gpb.fiscal_period <= $4))
-                  AND gpb.fiscal_period > 0
-            `,
-                [startYear, startMonth, endYear, endMonth]
+            // Independent rollup from detail lines (same ledger + classification)
+            const detailResult = await this.pool.query(
+                `SELECT section, COALESCE(SUM(display_amount), 0) AS total
+                 FROM fn_get_profit_loss($1::DATE, $2::DATE)
+                 GROUP BY section`,
+                [dateFrom, dateTo]
             );
 
-            const revenueDec = Money.parseDb(tbResult.rows[0]?.revenue);
-            const expensesDec = Money.parseDb(tbResult.rows[0]?.expenses);
-            const trialBalanceNetIncome = Money.toNumber(revenueDec.minus(expensesDec));
+            let revenue = 0;
+            let cogs = 0;
+            let opex = 0;
+            for (const r of detailResult.rows) {
+                const amt = Money.parseDb(r.total).toNumber();
+                if (r.section === 'REVENUE') revenue = amt;
+                else if (r.section === 'COST_OF_GOODS_SOLD') cogs = amt;
+                else if (r.section === 'OPERATING_EXPENSES') opex = amt;
+            }
+            const trialBalanceNetIncome = Money.toNumber(
+                new Decimal(revenue).minus(cogs).minus(opex)
+            );
 
             const difference = Money.toNumber(new Decimal(plNetIncome).minus(trialBalanceNetIncome));
             const isConsistent = Math.abs(difference) < 0.01;
@@ -375,6 +373,8 @@ export class ProfitLossReportService {
                     plNetIncome,
                     trialBalanceNetIncome,
                     difference,
+                    dateFrom,
+                    dateTo,
                 });
             }
 
@@ -383,6 +383,10 @@ export class ProfitLossReportService {
                 plNetIncome,
                 trialBalanceNetIncome,
                 difference,
+                totalRevenue,
+                totalCOGS,
+                totalOperatingExpenses,
+                grossProfit,
             };
         } catch (error: unknown) {
             logger.error('Failed to verify P&L consistency', { dateFrom, dateTo, error });
