@@ -120,6 +120,9 @@ const TaxEnginePage = lazyWithRetry(() => import('./pages/accounting/TaxEnginePa
 const CurrencyRevaluationPage = lazyWithRetry(() => import('./pages/accounting/CurrencyRevaluationPage'));
 const GLIntegrityPage = lazyWithRetry(() => import('./pages/accounting/GLIntegrityPage'));
 const AgedBalancePage = lazyWithRetry(() => import('./pages/accounting/AgedBalancePage'));
+const TaxComplianceReportsPage = lazyWithRetry(
+  () => import('./pages/reports/TaxComplianceReportsPage'),
+);
 const DeliveryPage = lazyWithRetry(() => import('./pages/delivery/DeliveryPage'));
 const DeliveryNotesPage = lazyWithRetry(() => import('./pages/delivery-notes/DeliveryNotesPage'));
 const DistSalesOrderListPage = lazyWithRetry(() => import('./pages/distribution/DistSalesOrderListPage'));
@@ -974,6 +977,18 @@ function App() {
                     element={
                       <ProtectedRoute requiredPermissions={['expenses.read', 'reports.financial_view']} requiredFeature="reports">
                         <ExpenseReportsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Tax Compliance (accounting SSOT via /api/reports/tax-compliance) */}
+                  <Route
+                    path="/reports/tax-compliance"
+                    element={
+                      <ProtectedRoute requiredPermissions={['reports.read', 'reports.financial_view', 'accounting.read']} requiredFeature="reports">
+                        <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                          <TaxComplianceReportsPage />
+                        </Suspense>
                       </ProtectedRoute>
                     }
                   />

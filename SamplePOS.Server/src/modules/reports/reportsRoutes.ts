@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { Pool } from 'pg';
 import { reportsController } from './reportsController.js';
 import { cnDnReportsController } from './cnDnReportController.js';
+import { taxComplianceReportController } from './taxComplianceReportController.js';
 import { inventoryReportsController } from './inventory/inventoryReportsController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
@@ -402,6 +403,23 @@ export function createReportsRouter(pool: Pool) {
     '/tax-reversal',
     requirePermission('reports.read'),
     asyncHandler(async (req, res) => cnDnReportsController.getTaxReversal(req, res, p(req)))
+  );
+
+  // Tax compliance (SSOT: withholding-tax/whtReportService)
+  router.get(
+    '/tax-compliance/summary',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => taxComplianceReportController.getSummary(req, res, p(req)))
+  );
+  router.get(
+    '/tax-compliance/register',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => taxComplianceReportController.getRegister(req, res, p(req)))
+  );
+  router.get(
+    '/tax-compliance/liability',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => taxComplianceReportController.getLiability(req, res, p(req)))
   );
   router.get(
     '/invoice-adjustments/:invoiceId',
