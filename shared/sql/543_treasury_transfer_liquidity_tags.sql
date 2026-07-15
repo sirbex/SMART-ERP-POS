@@ -3,6 +3,33 @@
 -- Distinguish liquidity account roles for TD-INV-6 while keeping AllowedSources
 -- for TREASURY_TRANSFER. Undeposited Funds (1015) remains exclusive clearing.
 
+-- Expand SystemAccountTag allow-list before assigning liquidity role tags
+ALTER TABLE accounts DROP CONSTRAINT IF EXISTS chk_system_account_tag;
+ALTER TABLE accounts ADD CONSTRAINT chk_system_account_tag CHECK (
+  "SystemAccountTag" IS NULL OR "SystemAccountTag" IN (
+    'CASH',
+    'COGS',
+    'INVENTORY',
+    'OPENING_BALANCE_EQUITY',
+    'UNDEPOSITED_FUNDS',
+    'ACCOUNTS_RECEIVABLE',
+    'ACCOUNTS_PAYABLE',
+    'BANK',
+    'MOBILE_MONEY',
+    'CARD_CLEARING',
+    'PETTY_CASH',
+    'BAD_DEBT_EXPENSE',
+    'TAX_PAYABLE',
+    'TAX_RECEIVABLE',
+    'WHT_PAYABLE',
+    'WHT_RECEIVABLE',
+    'AP',
+    'PAYABLE',
+    'GRIR',
+    'SUPPLIER_RETURN_CLEARING'
+  )
+);
+
 UPDATE accounts SET "SystemAccountTag" = 'CASH'
 WHERE "AccountCode" = '1010';
 

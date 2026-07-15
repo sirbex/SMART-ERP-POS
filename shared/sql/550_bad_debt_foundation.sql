@@ -11,6 +11,33 @@ ALTER TABLE system_settings
 COMMENT ON COLUMN system_settings.bad_debt_writeoff_enabled IS
   'ADR-006 Phase 4A: when true, AR uncollectible clears must post via AR_WRITEOFF document';
 
+-- Expand SystemAccountTag allow-list before seeding BAD_DEBT_EXPENSE
+ALTER TABLE accounts DROP CONSTRAINT IF EXISTS chk_system_account_tag;
+ALTER TABLE accounts ADD CONSTRAINT chk_system_account_tag CHECK (
+  "SystemAccountTag" IS NULL OR "SystemAccountTag" IN (
+    'CASH',
+    'COGS',
+    'INVENTORY',
+    'OPENING_BALANCE_EQUITY',
+    'UNDEPOSITED_FUNDS',
+    'ACCOUNTS_RECEIVABLE',
+    'ACCOUNTS_PAYABLE',
+    'BANK',
+    'MOBILE_MONEY',
+    'CARD_CLEARING',
+    'PETTY_CASH',
+    'BAD_DEBT_EXPENSE',
+    'TAX_PAYABLE',
+    'TAX_RECEIVABLE',
+    'WHT_PAYABLE',
+    'WHT_RECEIVABLE',
+    'AP',
+    'PAYABLE',
+    'GRIR',
+    'SUPPLIER_RETURN_CLEARING'
+  )
+);
+
 -- Seed Bad Debt Expense (5210)
 INSERT INTO accounts (
   "Id", "AccountCode", "AccountName", "AccountType", "NormalBalance",
