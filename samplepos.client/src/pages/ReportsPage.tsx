@@ -1133,7 +1133,7 @@ export default function ReportsPage() {
       if (endDate) params.endDate = endDate;
 
       // Add specific filters based on report type
-      if (selectedReport === 'SALES_REPORT' || selectedReport === 'PROFIT_LOSS') {
+      if (selectedReport === 'PROFIT_LOSS') {
         params.groupBy = groupBy;
         if (sessionId) params.sessionId = sessionId;
       } else if (selectedReport === 'EXPIRING_ITEMS') {
