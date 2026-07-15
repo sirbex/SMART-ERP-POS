@@ -1,6 +1,8 @@
 // Temporary UI component replacements for missing Shadcn components
 
 import React from 'react';
+import { format, parse, isValid } from 'date-fns';
+import { DatePicker } from './date-picker';
 
 // Basic Card replacement
 export const Card: React.FC<{ className?: string; children: React.ReactNode }> = ({ className = '', children }) => (
@@ -353,21 +355,31 @@ export const PopoverContent: React.FC<{
   </div>
 );
 
-// Basic Calendar replacement (simplified date input)
+// Basic Calendar replacement (wraps shared DatePicker SSOT)
 export const Calendar: React.FC<{
   mode?: string;
   selected?: Date;
   onSelect: (date: Date | undefined) => void;
   className?: string;
-}> = ({ selected, onSelect, className = '' }) => (
-  <input
-    type="date"
-    value={selected ? selected.toLocaleDateString('en-CA') : ''}
-    onChange={(e) => onSelect(e.target.value ? new Date(e.target.value) : undefined)}
-    className={`block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${className}`}
-    aria-label="Select date"
-  />
-);
+}> = ({ selected, onSelect, className = '' }) => {
+  const value = selected && isValid(selected) ? format(selected, 'yyyy-MM-dd') : '';
+  return (
+    <DatePicker
+      value={value}
+      onChange={(dateStr) => {
+        if (!dateStr) {
+          onSelect(undefined);
+          return;
+        }
+        const parsed = parse(dateStr, 'yyyy-MM-dd', new Date());
+        onSelect(isValid(parsed) ? parsed : undefined);
+      }}
+      className={className}
+      placeholder="Select date"
+      aria-label="Select date"
+    />
+  );
+};
 
 // Basic Tabs replacement
 interface TabsContextType {

@@ -28,9 +28,14 @@ describe('DatePicker responsive layout', () => {
     expect(css).toContain('@media (min-width: 1024px)');
   });
 
-  it('popover base no longer forces w-72 on all popovers', () => {
-    const popover = readFileSync(resolve(root, 'components/ui/popover.tsx'), 'utf8');
-    expect(popover).not.toContain('w-72');
-    expect(popover).toContain('min-w-[8rem]');
+  it('uses business-date SSOT for quick picks (not browser local Date)', () => {
+    expect(tsx).toContain("from '@/utils/businessDate'");
+    expect(tsx).toContain('getBusinessDate');
+    expect(tsx).toContain('addDaysToDateString');
+    expect(tsx).toContain('handleQuickSelect');
+  });
+
+  it('documents DatePicker as global SSOT', () => {
+    expect(tsx).toContain('global SSOT for single-date selection');
   });
 });

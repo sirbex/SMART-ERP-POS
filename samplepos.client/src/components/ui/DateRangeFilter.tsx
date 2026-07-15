@@ -9,12 +9,14 @@
  *     onEndDateChange={setEndDate}
  *   />
  *
- * Preset selection lives in a dropdown. Date pickers only appear
- * when the "Custom Range" preset is active.
+ * Preset lives in a dropdown. With pickersMode="auto" (default for compact
+ * screens / modern reports), date pickers appear only for Custom Range —
+ * otherwise a readable period summary is shown.
  * The parent's date strings remain the single source of truth.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useId, useMemo } from 'react';
+import { format, parse, isValid } from 'date-fns';
 import { DatePicker } from '@/components/ui/date-picker';
 import {
     DatePresetKey,
@@ -40,6 +42,25 @@ interface DateRangeFilterProps {
     compact?: boolean;
     /** Default preset to apply on mount (default: 'THIS_MONTH') */
     defaultPreset?: DatePresetKey;
+    /**
+     * When to show From/To pickers:
+     * - always: always show (legacy reports)
+     * - custom: only when Custom Range is selected (modern / responsive)
+     */
+    pickersMode?: 'always' | 'custom';
+}
+
+function formatPeriodLabel(startDate: string, endDate: string): string {
+    const start = startDate ? parse(startDate, 'yyyy-MM-dd', new Date()) : null;
+    const end = endDate ? parse(endDate, 'yyyy-MM-dd', new Date()) : null;
+    if (!start || !end || !isValid(start) || !isValid(end)) {
+        return startDate && endDate ? `${startDate} → ${endDate}` : 'Select a period';
+    }
+    if (startDate === endDate) return format(start, 'MMM d, yyyy');
+    if (start.getFullYear() === end.getFullYear()) {
+        return `${format(start, 'MMM d')} – ${format(end, 'MMM d, yyyy')}`;
+    }
+    return `${format(start, 'MMM d, yyyy')} – ${format(end, 'MMM d, yyyy')}`;
 }
 
 export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
@@ -51,7 +72,9 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
     label = 'Date Range',
     compact = false,
     defaultPreset = 'THIS_MONTH',
+    pickersMode = 'always',
 }) => {
+    const presetId = useId();
     const [activePreset, setActivePreset] = useState<DatePresetKey>(defaultPreset);
 
     // Apply default preset on mount (only once)
@@ -96,64 +119,88 @@ export const DateRangeFilter: React.FC<DateRangeFilterProps> = ({
         [onEndDateChange],
     );
 
+    const showPickers = pickersMode === 'always' || activePreset === 'CUSTOM';
+    const periodSummary = useMemo(
+        () => formatPeriodLabel(startDate, endDate),
+        [startDate, endDate],
+    );
+
     return (
         <div className={cn('space-y-3', className)}>
-            {/* Label + Dropdown row */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <div className="flex flex-col gap-2">
                 {label && (
                     <label
-                        htmlFor="date-range-preset"
-                        className="text-sm font-semibold text-gray-700 whitespace-nowrap"
+                        htmlFor={presetId}
+                        className="text-xs font-semibold uppercase tracking-wide text-slate-500"
                     >
-                        📅 {label}
+                        {label}
                     </label>
                 )}
 
-                <select
-                    id="date-range-preset"
-                    value={activePreset}
-                    onChange={(e) => handlePresetChange(e.target.value as DatePresetKey)}
-                    className="w-full sm:w-64 px-3 py-2 border-2 border-gray-300 rounded-lg text-sm font-medium bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all cursor-pointer"
-                    aria-label="Select date range"
-                >
-                    {DATE_PRESET_OPTIONS.map((opt) => (
-                        <option key={opt.key} value={opt.key}>
-                            {opt.icon} {opt.label}
-                        </option>
-                    ))}
-                </select>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <select
+                        id={presetId}
+                        value={activePreset}
+                        onChange={(e) => handlePresetChange(e.target.value as DatePresetKey)}
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-800 shadow-sm focus:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100 sm:max-w-xs"
+                        aria-label="Select date range"
+                    >
+                        {DATE_PRESET_OPTIONS.map((opt) => (
+                            <option key={opt.key} value={opt.key}>
+                                {opt.label}
+                            </option>
+                        ))}
+                    </select>
 
-            </div>
-
-            {/* Date pickers — always visible so user can adjust dates */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                    {!compact && (
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                            From
-                        </label>
+                    {!showPickers && (
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 sm:h-10">
+                            <span className="text-sm font-medium tabular-nums text-slate-700">
+                                {periodSummary}
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setActivePreset('CUSTOM')}
+                                className="text-xs font-medium text-indigo-600 hover:text-indigo-800"
+                            >
+                                Custom dates
+                            </button>
+                        </div>
                     )}
-                    <DatePicker
-                        value={startDate}
-                        onChange={handleStartChange}
-                        placeholder="Start date"
-                        maxDate={endDate ? new Date(endDate) : undefined}
-                    />
-                </div>
-                <div>
-                    {!compact && (
-                        <label className="block text-xs font-medium text-gray-500 mb-1">
-                            To
-                        </label>
-                    )}
-                    <DatePicker
-                        value={endDate}
-                        onChange={handleEndChange}
-                        placeholder="End date"
-                        minDate={startDate ? new Date(startDate) : undefined}
-                    />
                 </div>
             </div>
+
+            {showPickers && (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="min-w-0">
+                        {!compact && (
+                            <label className="mb-1 block text-xs font-medium text-slate-500">
+                                From
+                            </label>
+                        )}
+                        <DatePicker
+                            value={startDate}
+                            onChange={handleStartChange}
+                            placeholder="Start date"
+                            maxDate={endDate ? new Date(endDate) : undefined}
+                            className="w-full"
+                        />
+                    </div>
+                    <div className="min-w-0">
+                        {!compact && (
+                            <label className="mb-1 block text-xs font-medium text-slate-500">
+                                To
+                            </label>
+                        )}
+                        <DatePicker
+                            value={endDate}
+                            onChange={handleEndChange}
+                            placeholder="End date"
+                            minDate={startDate ? new Date(startDate) : undefined}
+                            className="w-full"
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

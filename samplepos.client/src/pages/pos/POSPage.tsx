@@ -72,6 +72,7 @@ import { ServiceBadge } from '../../components/pos/ServiceBadge';
 import AddServiceItemDialog from '../../components/pos/AddServiceItemDialog';
 import { RegisterStatusIndicator, OpenRegisterDialog } from '../../components/cash-register';
 import ServerClock from '../../components/ServerClock';
+import { DatePicker } from '../../components/ui/date-picker';
 import { useCurrentSession } from '../../hooks/useCashRegister';
 import type { DiscountType, DiscountScope } from '@shared/zod/discount';
 import quotationApi from '../../api/quotations';
@@ -4712,12 +4713,11 @@ export default function POSPage() {
                   <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                     Sale Date
                   </label>
-                  <input
-                    type="date"
+                  <DatePicker
                     value={saleDate}
-                    onChange={(e) => setSaleDate(e.target.value)}
-                    max={new Date().toISOString().slice(0, 10)}
-                    className="w-full px-2 sm:px-3 py-2 text-sm sm:text-base border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                    onChange={setSaleDate}
+                    maxDate={new Date()}
+                    placeholder="Sale date"
                     aria-label="Sale date"
                   />
                   <p className="text-xs text-gray-500 mt-1">

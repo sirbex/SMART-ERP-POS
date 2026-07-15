@@ -47,8 +47,9 @@ export async function recordMovement(pool: Pool | PoolClient, data: RecordMoveme
   const result = await pool.query(
     `INSERT INTO stock_movements (
       movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
-      reference_type, reference_id, notes, created_by_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      reference_type, reference_id, notes, created_by_id,
+      economic_event, posts_gl
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
     RETURNING 
       id,
       movement_number as "movementNumber",
@@ -61,7 +62,9 @@ export async function recordMovement(pool: Pool | PoolClient, data: RecordMoveme
       reference_id as "referenceId",
       notes,
       created_by_id as "createdById",
-      created_at as "createdAt"`,
+      created_at as "createdAt",
+      economic_event as "economicEvent",
+      posts_gl as "postsGl"`,
     [
       movementNumber,
       data.productId,
@@ -73,6 +76,8 @@ export async function recordMovement(pool: Pool | PoolClient, data: RecordMoveme
       data.referenceId || null,
       data.notes || null,
       data.createdBy || null,
+      data.economicEvent ?? null,
+      data.postsGl ?? null,
     ]
   );
   return result.rows[0];

@@ -61,6 +61,8 @@ interface SystemSettings {
     transferPolicySpecialStoresRequireApproval?: boolean;
     transferAssortmentExpansionPolicy?: 'PROMPT' | 'ALWAYS_EXPAND' | 'TRANSFER_ONLY';
     expiryAutomationEnabled?: boolean;
+    /** ADR-003 — Treasury Document domain (cash/bank liquidity documents) */
+    treasuryDocumentEnabled?: boolean;
 }
 
 async function fetchSettings(): Promise<SystemSettings> {
@@ -121,6 +123,9 @@ export default function SystemSettingsTab() {
             } else {
                 queryClient.invalidateQueries({ queryKey: ['systemSettings'] });
                 setSaveMessage('Settings saved successfully!');
+            }
+            if (variables.treasuryDocumentEnabled !== undefined) {
+                void queryClient.invalidateQueries({ queryKey: ['treasury', 'enabled'] });
             }
             // Immediately write transaction mode to localStorage so that:
             // 1. Same-tab POS page picks it up on next render (via cache read)
@@ -406,6 +411,7 @@ function TaxSettings({
         defaultTaxRate: settings.defaultTaxRate,
         taxInclusive: settings.taxInclusive,
         taxRates: settings.taxRates || [],
+        treasuryDocumentEnabled: settings.treasuryDocumentEnabled ?? false,
     });
 
     const [newRate, setNewRate] = useState({ name: '', rate: 0, description: '' });
@@ -449,6 +455,36 @@ function TaxSettings({
                         <label htmlFor="taxEnabled" className="ml-2 block text-sm text-gray-900">
                             Enable Tax System
                         </label>
+                    </div>
+
+                    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-3">
+                        <div className="flex items-start">
+                            <input
+                                type="checkbox"
+                                id="treasuryDocumentEnabled"
+                                checked={formData.treasuryDocumentEnabled}
+                                onChange={(e) =>
+                                    setFormData({
+                                        ...formData,
+                                        treasuryDocumentEnabled: e.target.checked,
+                                    })
+                                }
+                                className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <div className="ml-2">
+                                <label
+                                    htmlFor="treasuryDocumentEnabled"
+                                    className="block text-sm font-medium text-gray-900"
+                                >
+                                    Enable Treasury Documents
+                                </label>
+                                <p className="mt-0.5 text-xs text-gray-600">
+                                    Authorize cash and bank liquidity movements through treasury
+                                    documents. Existing cash and banking workflows stay available
+                                    until you switch over.
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
                     {formData.taxEnabled && (

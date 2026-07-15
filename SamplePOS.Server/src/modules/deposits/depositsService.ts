@@ -137,7 +137,7 @@ export async function createDeposit(
 
         const normalized = normalizeDeposit(depositRow);
 
-        // GL POSTING: DR Cash/Bank  /  CR Customer Deposits (2200)
+        // GL POSTING: DR Undeposited Funds (1015) / CR Customer Deposits (2200)
         const depositDate = normalized.createdAt.includes('T')
             ? normalized.createdAt.split('T')[0]
             : normalized.createdAt.split(' ')[0];

@@ -170,6 +170,14 @@ export const systemSettingsRepository = {
             setClauses.push(`is_multistore_enabled = $${paramIndex++}`);
             values.push(updates.isMultistoreEnabled);
         }
+        if (updates.treasuryDocumentEnabled !== undefined) {
+            setClauses.push(`treasury_document_enabled = $${paramIndex++}`);
+            values.push(updates.treasuryDocumentEnabled);
+        }
+        if (updates.lossQuarantineDocumentEnabled !== undefined) {
+            setClauses.push(`loss_quarantine_document_enabled = $${paramIndex++}`);
+            values.push(updates.lossQuarantineDocumentEnabled);
+        }
         if (updates.transferPolicyRequireApprovalAll !== undefined) {
             setClauses.push(`transfer_policy_require_approval_all = $${paramIndex++}`);
             values.push(updates.transferPolicyRequireApprovalAll);

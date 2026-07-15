@@ -70,6 +70,10 @@ export interface StockMovementParams {
   // Optional: for UOM conversions (future)
   uomId?: string | null;
   conversionFactor?: number;
+  /** ADR-004: override expense account (5110/5120/5130) for LOSS_DISPOSAL */
+  expenseAccountCode?: string | null;
+  /** ADR-004 Phase 2C: allow QUARANTINED/EXPIRED batch consume */
+  allowDisposalStatuses?: boolean;
 }
 
 export interface StockMovementResult {
@@ -185,6 +189,7 @@ export class StockMovementHandler {
           referenceType: params.referenceType || params.movementType,
           referenceId: params.referenceId || batch.id,
           userId: params.userId,
+          allowDisposalStatuses: params.allowDisposalStatuses === true,
         });
       }
 
@@ -233,11 +238,20 @@ export class StockMovementHandler {
       const movementNumber = await this.generateMovementNumber(client);
 
       // Step 9: Record stock movement in audit trail
+      // ADR-004: GL-bearing adjustment types are LOSS_DISPOSAL (or OTHER for IN)
+      const economicEvent =
+        params.movementType === 'ADJUSTMENT_IN'
+          ? 'OTHER'
+          : GL_MOVEMENT_TYPES.has(params.movementType)
+            ? 'LOSS_DISPOSAL'
+            : 'OTHER';
+      const postsGl = GL_MOVEMENT_TYPES.has(params.movementType);
       const movementResult = await client.query(
         `INSERT INTO stock_movements (
           movement_number, product_id, batch_id, movement_type, quantity,
-          unit_cost, reference_type, reference_id, notes, created_by_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          unit_cost, reference_type, reference_id, notes, created_by_id,
+          economic_event, posts_gl
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING id, movement_number`,
         [
           movementNumber,
@@ -250,6 +264,8 @@ export class StockMovementHandler {
           params.referenceId || null,
           params.reason || params.notes || null,
           params.userId,
+          economicEvent,
+          postsGl,
         ]
       );
 
@@ -314,6 +330,7 @@ export class StockMovementHandler {
             movementType: params.movementType as 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY',
             movementValue,
             productName,
+            expenseAccountCode: params.expenseAccountCode ?? undefined,
           }, undefined, client);  // pass client → atomic with inventory
         } else if (
           !isInbound &&
@@ -434,10 +451,13 @@ export class StockMovementHandler {
   }> {
     if (params.batchId) {
       // Validate provided batch exists — lock row to prevent concurrent modification
+      const statusClause = params.allowDisposalStatuses
+        ? `status IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
+        : `status = 'ACTIVE'`;
       const result = await client.query(
         `SELECT id, product_id, batch_number, remaining_quantity, cost_price 
          FROM inventory_batches 
-         WHERE id = $1 AND status = 'ACTIVE'
+         WHERE id = $1 AND ${statusClause}
          FOR UPDATE`,
         [params.batchId]
       );

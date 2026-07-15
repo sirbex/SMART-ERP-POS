@@ -344,6 +344,8 @@ type ReportType =
   | 'AP_LEDGER'
   | 'NOTE_REGISTER'
   | 'TAX_REVERSAL'
+  | 'TAX_COMPLIANCE'
+  | 'LIQUIDITY_MOVEMENTS'
   | 'SUPPLIER_STATEMENT'
   | 'SUPPLIER_AGING'
   | 'VOID_SALES_REPORT'
@@ -715,6 +717,25 @@ const REPORT_OPTIONS: ReportOption[] = [
     icon: '🏛️',
   },
   {
+    value: 'TAX_COMPLIANCE',
+    label: 'Tax Compliance Reports',
+    description: 'VAT summary, WHT register, and tax liability rollforward (accounting SSOT)',
+    requiresDateRange: true,
+    supportsFilters: [],
+    category: 'Financial',
+    icon: '📋',
+  },
+  {
+    value: 'LIQUIDITY_MOVEMENTS',
+    label: 'Liquidity Movements',
+    description:
+      'Cash, bank, mobile money, and petty cash register — filter the period and choose what to show',
+    requiresDateRange: true,
+    supportsFilters: ['account'],
+    category: 'Financial',
+    icon: '🏦',
+  },
+  {
     value: 'SUPPLIER_STATEMENT',
     label: 'Supplier Statement',
     description: 'Account statement for a specific supplier with invoices, payments, CN/DN, and balance',
@@ -1073,6 +1094,16 @@ export default function ReportsPage() {
     // Redirect to dedicated dashboard for reorder intelligence
     if (selectedReport === 'REORDER_RECOMMENDATIONS') {
       navigate('/reports/reorder');
+      return;
+    }
+
+    if (selectedReport === 'TAX_COMPLIANCE') {
+      navigate('/reports/tax-compliance');
+      return;
+    }
+
+    if (selectedReport === 'LIQUIDITY_MOVEMENTS') {
+      navigate('/reports/liquidity-movements');
       return;
     }
 
@@ -3420,6 +3451,16 @@ export default function ReportsPage() {
                   💰 Expense Reports
                 </button>
               </Link>
+              <Link to="/reports/tax-compliance">
+                <button className="bg-slate-700 hover:bg-slate-800 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
+                  📋 Tax Compliance
+                </button>
+              </Link>
+              <Link to="/reports/liquidity-movements">
+                <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2">
+                  🏦 Liquidity Movements
+                </button>
+              </Link>
             </div>
           </div>
 
@@ -3439,7 +3480,21 @@ export default function ReportsPage() {
                     {reports.map((option) => (
                       <button
                         key={option.value}
-                        onClick={() => setSelectedReport(option.value)}
+                        onClick={() => {
+                          if (option.value === 'TAX_COMPLIANCE') {
+                            navigate('/reports/tax-compliance');
+                            return;
+                          }
+                          if (option.value === 'LIQUIDITY_MOVEMENTS') {
+                            navigate('/reports/liquidity-movements');
+                            return;
+                          }
+                          if (option.value === 'REORDER_RECOMMENDATIONS') {
+                            navigate('/reports/reorder');
+                            return;
+                          }
+                          setSelectedReport(option.value);
+                        }}
                         className="group relative bg-white p-4 sm:p-6 rounded-xl border-2 border-gray-200 hover:border-blue-400 hover:shadow-xl transition-all duration-200 text-left"
                       >
                         {/* Icon Badge */}

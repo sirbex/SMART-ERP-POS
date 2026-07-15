@@ -87,7 +87,12 @@ assertTrue('539 uses POSTED + net-active filter', mig.includes(`"Status" = 'POST
 assertTrue('539 section: 5xxx → COST_OF_GOODS_SOLD', mig.includes("'COST_OF_GOODS_SOLD'"));
 
 const schema = read('SamplePOS.Server/src/constants/schemaVersion.ts');
-assertTrue('Schema version bumped to 540', /CURRENT_SCHEMA_VERSION\s*=\s*540/.test(schema));
+const schemaMatch = schema.match(/CURRENT_SCHEMA_VERSION\s*=\s*(\d+)/);
+const schemaVer = schemaMatch ? Number(schemaMatch[1]) : 0;
+assertTrue(
+  'Schema version >= 540 (539 P&L SSOT applied; current may be higher)',
+  schemaVer >= 540,
+);
 
 const page = read('samplepos.client/src/pages/ProfitLossPage.tsx');
 assertTrue('UI pickNetProfit prefers netIncome', page.includes('netIncome ?? summary?.netProfit') || page.includes('summary?.netIncome ?? summary?.netProfit'));
@@ -169,7 +174,7 @@ writeFileSync(
     '| Net Profit not stuck at 0 when Gross > 0 | UI `pickNetProfit` + API `netProfit` alias; Jest + arithmetic |',
     '| OpEx does not double-count COGS 5xxx | Migration 539 `NOT LIKE \'5%\'`; Jest July scenario |',
     '| Discrepancy uses same-period ledger rollup | `verifyProfitLossConsistency` vs `fn_get_profit_loss` |',
-    '| Schema gate | `CURRENT_SCHEMA_VERSION = 540` |',
+    '| Schema gate | `CURRENT_SCHEMA_VERSION >= 540` (539 P&L SSOT retained) |',
     '',
     `**Verdict:** ${ok ? 'PASS' : 'FAIL'}`,
     '',

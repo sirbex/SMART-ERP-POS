@@ -175,6 +175,14 @@ export default function InventoryCommandCenterPage() {
             icon="⚖️"
             onClick={() => navigate('/inventory/adjustments')}
           />
+          <MultistoreGate>
+            <QuickAction
+              label="Quarantine queue"
+              description="DAMAGE / EXPIRED / RETURN stock still on balance sheet"
+              icon="🚧"
+              onClick={() => navigate('/inventory/quarantine')}
+            />
+          </MultistoreGate>
         </div>
       </section>
 

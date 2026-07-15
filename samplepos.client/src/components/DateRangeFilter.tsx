@@ -100,7 +100,7 @@ function getDateRange(preset: DateRangePreset): { startDate: string; endDate: st
 }
 
 /**
- * Format date to YYYY-MM-DD for input[type="date"]
+ * Format date to YYYY-MM-DD for DatePicker / API date-only values.
  */
 function formatDateForInput(date: Date): string {
   const year = date.getFullYear();

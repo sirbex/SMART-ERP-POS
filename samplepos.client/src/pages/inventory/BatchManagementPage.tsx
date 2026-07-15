@@ -17,6 +17,7 @@ import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useColumnSort } from '../../hooks/useColumnSort';
 import { applyTableSort } from '../../lib/tableSortUtils';
 import SlideDrawer from '../../components/ui/SlideDrawer';
+import { DatePicker } from '../../components/ui/date-picker';
 import { WorkflowHelpTrigger } from '../../components/inventory/shared';
 
 type BatchSortField =
@@ -708,7 +709,6 @@ function BatchDetailsModal({
 
   // Refs for keyboard focus management
   const modalRef = useRef<HTMLDivElement>(null);
-  const editExpiryInputRef = useRef<HTMLInputElement>(null);
   const editReasonRef = useRef<HTMLTextAreaElement>(null);
   const saveButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -779,7 +779,7 @@ function BatchDetailsModal({
   // Auto-focus date input when edit dialog opens
   useEffect(() => {
     if (showEditDialog) {
-      setTimeout(() => editExpiryInputRef.current?.focus(), 50);
+      setTimeout(() => document.getElementById('edit-expiry-date')?.focus(), 50);
     }
   }, [showEditDialog]);
 
@@ -1084,21 +1084,12 @@ function BatchDetailsModal({
                 <label htmlFor="edit-expiry-date" className="block text-sm font-medium text-gray-700 mb-1">
                   New Expiry Date <span className="text-red-500">*</span>
                 </label>
-                <input
+                <DatePicker
                   id="edit-expiry-date"
-                  ref={editExpiryInputRef}
-                  type="date"
                   value={editExpiry}
-                  onChange={(e) => { setEditExpiry(e.target.value); setEditError(null); }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Tab' && !e.shiftKey) {
-                      e.preventDefault();
-                      editReasonRef.current?.focus();
-                    }
-                    if (e.key === 'F8') { e.preventDefault(); handleSave(); }
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  aria-required="true"
+                  onChange={(v) => { setEditExpiry(v); setEditError(null); }}
+                  placeholder="New expiry date"
+                  required
                 />
                 {batch.expiry_date && (
                   <p className="text-xs text-gray-500 mt-1">
@@ -1124,7 +1115,7 @@ function BatchDetailsModal({
                     }
                     if (e.key === 'Tab' && e.shiftKey) {
                       e.preventDefault();
-                      editExpiryInputRef.current?.focus();
+                      document.getElementById('edit-expiry-date')?.focus();
                     }
                     if (e.key === 'F8') { e.preventDefault(); handleSave(); }
                   }}

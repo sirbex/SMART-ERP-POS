@@ -73,14 +73,14 @@ const cashOutSubTypes: { value: CashOutSubType; label: string; description: stri
     },
     {
         value: 'CASH_OUT_EXPENSE',
-        label: 'Petty Cash Expense',
-        description: 'Small business expense paid in cash',
+        label: 'Spend from petty float',
+        description: 'Pay from the petty cash float — not the till drawer. For bank-paid expense vouchers use Accounting → Expenses.',
         icon: Receipt
     },
     {
         value: 'CASH_OUT_OTHER',
-        label: 'Other Withdrawal',
-        description: 'Miscellaneous cash removed',
+        label: 'Drawer Withdrawal',
+        description: 'Cash removed from the till drawer (not the petty float)',
         icon: Wallet
     },
 ];
@@ -240,7 +240,7 @@ export function CashMovementDialog({
                                     subType === 'CASH_IN_PAYMENT' ? 'e.g., John Doe - INV-00123' :
                                         subType === 'CASH_IN_OTHER' ? 'e.g., Refund from supplier' :
                                             subType === 'CASH_OUT_BANK' ? 'e.g., Daily deposit to Bank X' :
-                                                subType === 'CASH_OUT_EXPENSE' ? 'e.g., Office supplies' :
+                                                subType === 'CASH_OUT_EXPENSE' ? 'e.g., Office supplies from float' :
                                                     subType === 'CASH_OUT_OTHER' ? 'e.g., Returned to owner' :
                                                         'Enter description'
                             }

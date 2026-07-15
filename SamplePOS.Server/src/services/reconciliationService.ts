@@ -277,7 +277,7 @@ export class ReconciliationService {
             if (hasDiscrepancy) {
                 if (Math.abs(m.customerCacheDrift) > 0.01) {
                     recommendations.push(
-                        'Cache drift — POST /api/system/gl/recalc-customer-balances',
+                        'Stored customer balances need refresh',
                     );
                 }
                 if (!arGlIntegrityOk) {
@@ -397,10 +397,10 @@ export class ReconciliationService {
                     recommendations.push('Run diag-inventory-gl-drift.mjs before any GL adjustment');
                 }
                 if (Math.abs(m.productCacheDrift) > 0.01) {
-                    recommendations.push('POST /api/system/gl/rebuild-inventory-balances');
+                    recommendations.push('Refresh stored product values from inventory lots');
                 }
                 if (Math.abs(m.storedBalanceDrift) > 0.01) {
-                    recommendations.push('POST /api/system/gl/rebase-account-balances with accountCodes=[1300]');
+                    recommendations.push('Refresh inventory control account stored balance');
                 }
                 if (integrityIssues?.some((i) => i.severity === 'CRITICAL')) {
                     recommendations.push('Resolve CRITICAL stock movements without GL posting');
@@ -545,7 +545,7 @@ export class ReconciliationService {
             if (hasDiscrepancy) {
                 if (Math.abs(m.storedBalanceDrift) > 0.01 || Math.abs(m.supplierCacheDrift) > 0.01) {
                     recommendations.push(
-                        'Cache drift persists — POST /api/system/gl/heal-ap-reconciliation-caches or retry after deploy',
+                        'Stored supplier balances still need refresh — retry after deploy if this persists',
                     );
                 }
                 if (!supplierGlIntegrityOk) {
@@ -680,6 +680,14 @@ export class ReconciliationService {
         return withLegacyArFields(await fetchFinancialLane(this.pool, 'ar', 'history', date)) as unknown as ArJournalAuditLane & FinancialLaneResult;
     }
 
+    /** Lane 4 — overdue open vs write-off YTD (ADR-006 Phase 4D, informational). */
+    async getArWriteoffExposureLane(asOfDate?: string): Promise<FinancialLaneResult> {
+        const date = asOfDate || getBusinessDate();
+        return withLegacyArFields(
+            await fetchFinancialLane(this.pool, 'ar', 'writeoff', date),
+        ) as FinancialLaneResult;
+    }
+
     /** Lane 1 — net-active GL vs batch subledger (period close). */
     async getInventoryIntegrityLane(asOfDate?: string): Promise<InventoryIntegrityLane & FinancialLaneResult> {
         const date = asOfDate || getBusinessDate();
@@ -698,10 +706,18 @@ export class ReconciliationService {
         return withLegacyInventoryFields(await fetchFinancialLane(this.pool, 'inventory', 'history', date)) as unknown as InventoryJournalAuditLane & FinancialLaneResult;
     }
 
+    /** Lane 4 — quarantine BS exposure still on GL 1300 (ADR-004 Phase 2D). */
+    async getInventoryQuarantineLane(asOfDate?: string): Promise<FinancialLaneResult> {
+        const date = asOfDate || getBusinessDate();
+        return withLegacyInventoryFields(
+            await fetchFinancialLane(this.pool, 'inventory', 'quarantine', date),
+        ) as FinancialLaneResult;
+    }
+
     /** Generic financial lane (framework entry point). */
     async getFinancialLane(
-        domain: 'ap' | 'ar' | 'inventory' | 'cash' | 'wht',
-        lane: 'integrity' | 'cache' | 'history',
+        domain: 'ap' | 'ar' | 'inventory' | 'cash' | 'wht' | 'vat',
+        lane: 'integrity' | 'cache' | 'history' | 'quarantine' | 'writeoff',
         asOfDate?: string,
     ): Promise<FinancialLaneResult> {
         const date = asOfDate || getBusinessDate();

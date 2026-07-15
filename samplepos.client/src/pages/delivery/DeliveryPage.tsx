@@ -8,6 +8,7 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import Layout from '../../components/Layout';
+import { DatePicker } from '../../components/ui/date-picker';
 import deliveryApi from '../../api/delivery';
 import type { DeliveryAnalytics, DeliverableSale } from '../../api/delivery';
 import { formatCurrency } from '../../utils/currency';
@@ -1200,7 +1201,7 @@ function CreateDeliveryModal({ onClose, onSuccess }: { onClose: () => void; onSu
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Date *</label>
-              <input type="date" value={form.deliveryDate} onChange={(e) => setForm({ ...form, deliveryDate: e.target.value })} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+              <DatePicker value={form.deliveryDate} onChange={(v) => setForm({ ...form, deliveryDate: v })} placeholder="Delivery date" />
             </div>
           </div>
 
@@ -1548,11 +1549,10 @@ function CreateFromSaleModal({ onClose, onSuccess }: { onClose: () => void; onSu
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Delivery Date <span className="text-red-500">*</span>
                   </label>
-                  <input
-                    type="date"
+                  <DatePicker
                     value={form.deliveryDate}
-                    onChange={(e) => updateField('deliveryDate', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                    onChange={(v) => updateField('deliveryDate', v)}
+                    placeholder="Delivery date"
                   />
                 </div>
                 <div>
@@ -1714,7 +1714,7 @@ function CreateRouteModal({ onClose, onSuccess }: { onClose: () => void; onSucce
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Route Date *</label>
-              <input type="date" value={routeDate} onChange={(e) => setRouteDate(e.target.value)} className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500" />
+              <DatePicker value={routeDate} onChange={setRouteDate} placeholder="Route date" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle Plate</label>

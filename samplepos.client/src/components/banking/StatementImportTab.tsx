@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -394,10 +395,10 @@ export const StatementImportTab: React.FC = () => {
 
                     <div className="space-y-2">
                         <Label>Statement Date *</Label>
-                        <Input
-                            type="date"
+                        <DatePicker
                             value={statementDate}
-                            onChange={e => setStatementDate(e.target.value)}
+                            onChange={setStatementDate}
+                            placeholder="Statement date"
                         />
                     </div>
                 </div>

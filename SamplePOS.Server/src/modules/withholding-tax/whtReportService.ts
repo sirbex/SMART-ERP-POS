@@ -15,6 +15,7 @@ import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 import { AccountCodes } from '../../services/glEntryService.js';
 import { getTaxReversalReport } from '../reports/cnDnReportService.js';
 import { listWhtCertificates, type WhtCertificateRow } from './whtService.js';
+import { sumPostedVatRemittances } from '../vat-remittance/vatRemittanceSettled.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
 
 export interface TaxLiabilityMovement {
@@ -302,16 +303,26 @@ export async function getTaxLiabilityReport(
   const period = requirePeriod(startDate, endDate);
   const openDate = dayBefore(period.startDate);
 
-  const [payableOpen, payableClose, receivableOpen, receivableClose, payablePeriod, receivablePeriod, vat] =
-    await Promise.all([
-      glBalanceAsOf(pool, AccountCodes.WHT_PAYABLE, openDate, 'LIABILITY'),
-      glBalanceAsOf(pool, AccountCodes.WHT_PAYABLE, period.endDate, 'LIABILITY'),
-      glBalanceAsOf(pool, AccountCodes.WHT_RECEIVABLE, openDate, 'ASSET'),
-      glBalanceAsOf(pool, AccountCodes.WHT_RECEIVABLE, period.endDate, 'ASSET'),
-      periodEntryAmounts(pool, period.startDate, period.endDate, 'PAYABLE'),
-      periodEntryAmounts(pool, period.startDate, period.endDate, 'RECEIVABLE'),
-      vatGlMovement(pool, period.startDate, period.endDate),
-    ]);
+  const [
+    payableOpen,
+    payableClose,
+    receivableOpen,
+    receivableClose,
+    payablePeriod,
+    receivablePeriod,
+    vat,
+    vatSettledFromTd,
+  ] = await Promise.all([
+    glBalanceAsOf(pool, AccountCodes.WHT_PAYABLE, openDate, 'LIABILITY'),
+    glBalanceAsOf(pool, AccountCodes.WHT_PAYABLE, period.endDate, 'LIABILITY'),
+    glBalanceAsOf(pool, AccountCodes.WHT_RECEIVABLE, openDate, 'ASSET'),
+    glBalanceAsOf(pool, AccountCodes.WHT_RECEIVABLE, period.endDate, 'ASSET'),
+    periodEntryAmounts(pool, period.startDate, period.endDate, 'PAYABLE'),
+    periodEntryAmounts(pool, period.startDate, period.endDate, 'RECEIVABLE'),
+    vatGlMovement(pool, period.startDate, period.endDate),
+    // VR-INV-10: settled = Σ posted VAT_REMITTANCE TDs (not GL plug)
+    sumPostedVatRemittances(pool, period.startDate, period.endDate),
+  ]);
 
   const payableRf = computeLiabilityRollforward({
     opening: payableOpen,
@@ -325,15 +336,13 @@ export async function getTaxLiabilityReport(
     settled: receivablePeriod.settled,
     closingActual: receivableClose,
   });
-  // VAT: accrued approximated by period net credit on 2300; settled = accrued − (closing − opening)
+  // VAT: accrued ≈ period net credit on 2300; settled = posted VAT_REMITTANCE TDs (VR-INV-10)
   const vatAccrued = Math.max(0, vat.periodNetCredit);
-  const vatSettled = Money.toNumber(
-    Money.round(Money.subtract(Money.add(vat.opening, vatAccrued), vat.closing)),
-  );
+  const vatSettled = vatSettledFromTd;
   const vatRf = computeLiabilityRollforward({
     opening: vat.opening,
     accrued: vatAccrued,
-    settled: Math.max(0, vatSettled),
+    settled: vatSettled,
     closingActual: vat.closing,
   });
 
@@ -364,7 +373,7 @@ export async function getTaxLiabilityReport(
       kind: 'LIABILITY',
       opening: vat.opening,
       accrued: vatAccrued,
-      settled: Math.max(0, vatSettled),
+      settled: vatSettled,
       closing: vat.closing,
       reconcilingDifference: vatRf.reconcilingDifference,
     },

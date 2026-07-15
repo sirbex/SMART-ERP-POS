@@ -89,6 +89,9 @@ export const AccountCodes = {
   DAMAGE: '5120',
   EXPIRY: '5130',
 
+  // Bad Debt (ADR-006) — uncollectible AR expense (not inventory loss, not CN 4010)
+  BAD_DEBT_EXPENSE: '5210',
+
   // Returns & Allowances
   SALES_RETURNS: '4010',
   PURCHASE_RETURNS: '5010',
@@ -1392,6 +1395,15 @@ export interface StockAdjustmentData {
  *   CR Inventory (1300)
  */
 export async function recordStockAdjustmentToGL(adjustment: StockAdjustmentData, pool?: pg.Pool): Promise<void> {
+  // ADR-004 Phase 2D: legacy 6900/4200 path retired — use StockMovementHandler / LossDisposalService.
+  if (process.env.ALLOW_LEGACY_STOCK_ADJUSTMENT_GL !== '1') {
+    throw new Error(
+      'Legacy recordStockAdjustmentToGL (6900 General Expense / 4200 Other Income) is retired (ADR-004 LQ-INV-7). ' +
+        'Use StockMovementHandler (5110/5120/5130/4110) or LossDisposalService.disposeFromQuarantine. ' +
+        'Set ALLOW_LEGACY_STOCK_ADJUSTMENT_GL=1 only for emergency remediation scripts.',
+    );
+  }
+
   try {
     let lines: JournalLine[];
     if (adjustment.adjustmentType === 'INCREASE') {
@@ -2111,29 +2123,17 @@ export interface CustomerDepositData {
 }
 
 /**
- * Record a customer deposit in the general ledger
+ * Record a customer deposit in the general ledger (clearing step 1).
  *
- * Journal entry:
- *   DR Cash / Bank (1010/1030)  amount
- *   CR Customer Deposits (2200) amount   (liability until applied to sale)
+ * Journal entry — PAYMENT_RECEIPT (same cash hygiene as AR receipts):
+ *   DR Undeposited Funds (1015)    amount
+ *   CR Customer Deposits (2200)    amount   (liability until applied to sale)
+ *
+ * Bank/cash recognition is step 2 — PAYMENT_DEPOSIT (separate process).
+ * paymentMethod is retained for operational reporting; it does not select the GL debit.
  */
 export async function recordCustomerDepositToGL(deposit: CustomerDepositData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
-    let debitAccountCode: string;
-    switch (deposit.paymentMethod) {
-      case 'BANK_TRANSFER':
-        debitAccountCode = AccountCodes.CHECKING_ACCOUNT;
-        break;
-      case 'CARD':
-        debitAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
-        break;
-      case 'MOBILE_MONEY':
-        debitAccountCode = AccountCodes.MOBILE_MONEY;
-        break;
-      default:
-        debitAccountCode = AccountCodes.CASH;
-    }
-
     await AccountingCore.createJournalEntry({
       entryDate: deposit.depositDate,
       description: `Customer Deposit: ${deposit.customerName} — ${deposit.depositNumber}`,
@@ -2142,7 +2142,7 @@ export async function recordCustomerDepositToGL(deposit: CustomerDepositData, po
       referenceNumber: deposit.depositNumber,
       lines: [
         {
-          accountCode: debitAccountCode,
+          accountCode: AccountCodes.UNDEPOSITED_FUNDS,
           description: `Deposit received — ${deposit.depositNumber}`,
           debitAmount: deposit.amount,
           creditAmount: 0,
@@ -2414,6 +2414,8 @@ export interface StockMovementData {
   movementType: 'ADJUSTMENT_IN' | 'ADJUSTMENT_OUT' | 'DAMAGE' | 'EXPIRY';
   movementValue: number;     // quantity * unit_cost
   productName?: string;
+  /** ADR-004 LQ-INV-7: explicit expense account (5110/5120/5130) */
+  expenseAccountCode?: string;
 }
 
 /**
@@ -2459,15 +2461,23 @@ export async function recordStockMovementToGL(movement: StockMovementData, pool?
     } else {
       // ADJUSTMENT_OUT, DAMAGE, EXPIRY — loss entries
       let expenseAccountCode: string;
-      switch (movement.movementType) {
-        case 'DAMAGE':
-          expenseAccountCode = AccountCodes.DAMAGE;
-          break;
-        case 'EXPIRY':
-          expenseAccountCode = AccountCodes.EXPIRY;
-          break;
-        default:
-          expenseAccountCode = AccountCodes.SHRINKAGE;
+      if (
+        movement.expenseAccountCode === AccountCodes.DAMAGE ||
+        movement.expenseAccountCode === AccountCodes.EXPIRY ||
+        movement.expenseAccountCode === AccountCodes.SHRINKAGE
+      ) {
+        expenseAccountCode = movement.expenseAccountCode;
+      } else {
+        switch (movement.movementType) {
+          case 'DAMAGE':
+            expenseAccountCode = AccountCodes.DAMAGE;
+            break;
+          case 'EXPIRY':
+            expenseAccountCode = AccountCodes.EXPIRY;
+            break;
+          default:
+            expenseAccountCode = AccountCodes.SHRINKAGE;
+        }
       }
 
       lines = [

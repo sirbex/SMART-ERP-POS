@@ -11,8 +11,8 @@ import type {
 
 type Db = Pool | PoolClient;
 
-const VALID_DOMAINS = new Set<string>(['ap', 'ar', 'inventory', 'cash', 'wht']);
-const VALID_LANES = new Set<string>(['integrity', 'cache', 'history']);
+const VALID_DOMAINS = new Set<string>(['ap', 'ar', 'inventory', 'cash', 'wht', 'vat']);
+const VALID_LANES = new Set<string>(['integrity', 'cache', 'history', 'quarantine', 'writeoff']);
 
 export function parseFinancialDomain(value: string): FinancialDomain {
   const normalized = value.toLowerCase();
@@ -52,6 +52,16 @@ export async function getFinancialLane(
       throw new Error(`Domain ${domain} does not implement cache lane`);
     }
     computation = await provider.computeCache(ctx);
+  } else if (lane === 'quarantine') {
+    if (!provider.computeQuarantine) {
+      throw new Error(`Domain ${domain} does not implement quarantine lane`);
+    }
+    computation = await provider.computeQuarantine(ctx);
+  } else if (lane === 'writeoff') {
+    if (!provider.computeWriteoff) {
+      throw new Error(`Domain ${domain} does not implement writeoff lane`);
+    }
+    computation = await provider.computeWriteoff(ctx);
   } else {
     computation = await provider.computeAudit(ctx);
   }
@@ -158,6 +168,17 @@ export function withLegacyArFields(result: FinancialLaneResult): FinancialLaneRe
       cacheDifference: result.difference,
     };
   }
+  if (result.lane === 'writeoff') {
+    return {
+      ...base,
+      overdueOpen: result.leftAmount,
+      writeoffYtd: result.rightAmount,
+      exposureDifference: result.difference,
+      overdueLines: result.details?.overdueLines,
+      writeoffDocs: result.details?.writeoffDocs,
+      minAgeDays: result.details?.minAgeDays,
+    };
+  }
   return {
     ...base,
     grossPosted: result.leftAmount,
@@ -206,6 +227,15 @@ export function withLegacyInventoryFields(
       cacheDifference: result.difference,
       storedBalance1300: result.details?.storedBalance1300,
       storedBalanceDrift: result.details?.storedBalanceDrift,
+    };
+  }
+  if (result.lane === 'quarantine') {
+    return {
+      ...base,
+      quarantineExposure: result.leftAmount,
+      totalLines: result.details?.totalLines,
+      totalQuantity: result.details?.totalQuantity,
+      byStoreType: result.details?.byStoreType,
     };
   }
   return {

@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import CustomerSelector from '../../components/pos/CustomerSelector';
+import { OpenRegisterDialog } from '../../components/cash-register';
+import { useCurrentSession } from '../../hooks/useCashRegister';
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
 import { toast } from 'react-hot-toast';
@@ -67,6 +69,16 @@ export default function OrderPaymentPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+
+  const {
+    data: currentSession,
+    posSessionPolicy,
+    isLoading: isLoadingSession,
+    isError: isSessionError,
+  } = useCurrentSession();
+  const sessionEnforced = posSessionPolicy !== 'DISABLED';
+  const hasOpenRegister = !!currentSession;
+  const [showOpenRegisterDialog, setShowOpenRegisterDialog] = useState(false);
 
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -270,6 +282,7 @@ export default function OrderPaymentPage() {
         customerId?: string | null;
         paymentLines?: { paymentMethod: string; amount: number; reference?: string }[];
         extraDiscountAmount?: number;
+        cashRegisterSessionId?: string;
       } = {
         paymentMethod: effectiveMethod,
         paymentReceived: totalPaidAmount,
@@ -280,6 +293,7 @@ export default function OrderPaymentPage() {
           reference: l.reference,
         })),
         ...(cashierDiscount > 0 ? { extraDiscountAmount: cashierDiscount } : {}),
+        ...(currentSession?.id ? { cashRegisterSessionId: currentSession.id } : {}),
       };
 
       const resp = await api.orders.complete(id!, payload);
@@ -302,14 +316,21 @@ export default function OrderPaymentPage() {
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       navigate('/orders-queue');
     },
-    onError: (err: Error & { response?: { data?: { error?: string } } }) => {
-      const msg = err.response?.data?.error || err.message || 'Payment failed';
-      toast.error(msg);
+    onError: (err: Error & { response?: { data?: { error?: string; error_code?: string; code?: string } } }) => {
+      const body = err.response?.data;
+      const code = body?.error_code || body?.code;
+      const msg = body?.error || err.message || 'Payment failed';
+      toast.error(code ? `${msg} (${code})` : msg);
     },
   });
-
   const handleSubmitPayment = () => {
     if (!canCompleteSale || isSubmitting) return;
+    // Same gate as Direct Sale POS — session policy requires an open register
+    if (sessionEnforced && !hasOpenRegister && !isSessionError) {
+      toast.error('Please open a cash register before completing this order');
+      setShowOpenRegisterDialog(true);
+      return;
+    }
     setIsSubmitting(true);
     completeMutation.mutate(undefined, {
       onSettled: () => setIsSubmitting(false),
@@ -757,10 +778,30 @@ export default function OrderPaymentPage() {
                   </div>
                 )}
 
+                {sessionEnforced && !isLoadingSession && !isSessionError && !hasOpenRegister && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-2">
+                    <p className="font-medium">Cash register required</p>
+                    <p className="text-xs text-amber-800">
+                      Open a register session before completing this queued order.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowOpenRegisterDialog(true)}
+                      className="w-full py-2 bg-amber-600 text-white rounded-lg text-sm font-semibold hover:bg-amber-700"
+                    >
+                      Open Register
+                    </button>
+                  </div>
+                )}
+
                 {/* Complete Sale Button */}
                 <button
                   onClick={handleSubmitPayment}
-                  disabled={!canCompleteSale || isSubmitting}
+                  disabled={
+                    !canCompleteSale ||
+                    isSubmitting ||
+                    (sessionEnforced && !hasOpenRegister && !isSessionError)
+                  }
                   className="w-full py-4 bg-green-600 text-white rounded-xl text-lg font-bold hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? 'Processing...' : (
@@ -780,6 +821,12 @@ export default function OrderPaymentPage() {
           </div>
         </div>
       </div>
+
+      <OpenRegisterDialog
+        open={showOpenRegisterDialog}
+        onOpenChange={setShowOpenRegisterDialog}
+        onSuccess={() => setShowOpenRegisterDialog(false)}
+      />
     </Layout>
   );
 }

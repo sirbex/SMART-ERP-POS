@@ -2,7 +2,7 @@
 
 ```
 ══ P&L SSOT PROOF ══
-Generated: 2026-07-12T07:54:52.586Z
+Generated: 2026-07-14T20:41:01.352Z
 
 ── Arithmetic (user-reported July figures) ──
 ✓ Gross Profit: 446,682.00 == 446,682.00
@@ -19,7 +19,7 @@ Generated: 2026-07-12T07:54:52.586Z
 ✓ 539 OpEx excludes 5xxx
 ✓ 539 uses POSTED + net-active filter
 ✓ 539 section: 5xxx → COST_OF_GOODS_SOLD
-✓ Schema version bumped to 539
+✓ Schema version >= 540 (539 P&L SSOT applied; current may be higher)
 ✓ UI pickNetProfit prefers netIncome
 ✓ UI pickExpenses prefers totalOperatingExpenses
 ✓ UI does not sole-read netProfit for cards
@@ -33,7 +33,7 @@ Generated: 2026-07-12T07:54:52.586Z
 
 ── Jest: profitLossSsot.test.ts ──
 console.log
-    [dotenv@17.2.3] injecting env (5) from .env.test -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+    [dotenv@17.2.3] injecting env (5) from .env.test -- tip: 🔄 add secrets lifecycle management: https://dotenvx.com/ops
 
       at _log (node_modules/dotenv/lib/main.js:142:11)
 
@@ -46,20 +46,20 @@ See more at https://kulshekhar.github.io/ts-jest/docs/getting-started/presets#ad
 ts-jest[config] (WARN) 
     The "ts-jest" config option "isolatedModules" is deprecated and will be removed in v30.0.0. Please use "isolatedModules: true" in C:/Users/Chase/source/repos/SamplePOS/SamplePOS.Server/tsconfig.json instead, see https://www.typescriptlang.org/tsconfig/#isolatedModules
   
-(node:18204) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
+(node:3388) ExperimentalWarning: VM Modules is an experimental feature and might change at any time
 (Use `node --trace-warnings ...` to show where the warning was created)
 PASS src/services/profitLossSsot.test.ts
   P&L SSOT classification (migration 539)
-    √ classifies 5000 EXPENSE as COGS not OpEx (4 ms)
-    √ reproduces the broken Net Profit / margin symptom (pre-fix OpEx + wrong UI field) (2 ms)
-    √ fixed OpEx + correct field pick yields Gross ≈ Net when OpEx is 0 (1 ms)
+    √ classifies 5000 EXPENSE as COGS not OpEx (6 ms)
+    √ reproduces the broken Net Profit / margin symptom (pre-fix OpEx + wrong UI field) (4 ms)
+    √ fixed OpEx + correct field pick yields Gross ≈ Net when OpEx is 0 (2 ms)
     √ summary and section rollup stay consistent (verify SSOT) (1 ms)
     √ API alias contract: netProfit mirrors netIncome (1 ms)
 
 Test Suites: 1 passed, 1 total
 Tests:       5 passed, 5 total
 Snapshots:   0 total
-Time:        0.774 s
+Time:        1.149 s, estimated 2 s
 Ran all test suites matching src/services/profitLossSsot.test.ts.
 Force exiting Jest: Have you considered using `--detectOpenHandles` to detect async operations that kept running after all tests finished?
 ✓ Jest suite PASS
@@ -82,6 +82,6 @@ PROOF OK — P&L SSOT accepted with evidence
 | Net Profit not stuck at 0 when Gross > 0 | UI `pickNetProfit` + API `netProfit` alias; Jest + arithmetic |
 | OpEx does not double-count COGS 5xxx | Migration 539 `NOT LIKE '5%'`; Jest July scenario |
 | Discrepancy uses same-period ledger rollup | `verifyProfitLossConsistency` vs `fn_get_profit_loss` |
-| Schema gate | `CURRENT_SCHEMA_VERSION = 539` |
+| Schema gate | `CURRENT_SCHEMA_VERSION >= 540` (539 P&L SSOT retained) |
 
 **Verdict:** PASS

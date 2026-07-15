@@ -178,6 +178,66 @@ export function buildCloseChecklist(params: {
         })),
     });
 
+    // E-05 / ADR-004: quarantine BS exposure attachable to period close (informational; does not block)
+    const inventorySummary = summaries.find((s) => s.domain === 'inventory');
+    const quarantineLane = inventorySummary?.lanes.find((l) => l.lane === 'quarantine');
+    const quarantineExposure = quarantineLane?.leftAmount ?? 0;
+    steps.push({
+        id: 'step-quarantine-aging',
+        order: order++,
+        title: 'Review quarantine aging',
+        description:
+            'Quarantine stock remains on Inventory (1300) until disposal — review aging before close; does not block close.',
+        accountCode: '1300',
+        status: Math.abs(quarantineExposure) > 0.01 ? 'warning' : readyToClose ? 'complete' : 'pending',
+        blocksClose: false,
+        difference: Math.abs(quarantineExposure) > 0.01 ? quarantineExposure : null,
+        exceptionCount: Math.abs(quarantineExposure) > 0.01 ? 1 : 0,
+        estimatedMinutes: 10,
+        path: '/inventory/quarantine',
+        substeps: [],
+    });
+
+    // E-05 / ADR-005 Phase 3D: VAT payable / remittance review (informational; Decision B does not block)
+    const vatSummary = summaries.find((s) => s.domain === 'vat');
+    const vatIntegrity = vatSummary ? integrityLane(vatSummary) : undefined;
+    const vatDrift = vatIntegrity?.difference ?? 0;
+    steps.push({
+        id: 'step-vat-remittance',
+        order: order++,
+        title: 'Review VAT payable & remittance',
+        description:
+            'Confirm Tax Payable (2300) vs document return and that settled amounts match posted VAT remittance documents; does not block close (Decision B).',
+        accountCode: '2300',
+        status: Math.abs(vatDrift) > 0.01 ? 'warning' : readyToClose ? 'complete' : 'pending',
+        blocksClose: false,
+        difference: Math.abs(vatDrift) > 0.01 ? vatDrift : null,
+        exceptionCount: Math.abs(vatDrift) > 0.01 ? 1 : 0,
+        estimatedMinutes: 10,
+        path: `/accounting/vat-remittance?asOfDate=${encodeURIComponent(asOfDate)}`,
+        substeps: [],
+    });
+
+    // E-05 / ADR-006 Phase 4D: overdue AR / bad debt write-off policy (informational; does not block)
+    const arSummary = summaries.find((s) => s.domain === 'ar');
+    const writeoffLane = arSummary?.lanes.find((l) => l.lane === 'writeoff');
+    const overdueExposure = writeoffLane?.leftAmount ?? 0;
+    steps.push({
+        id: 'step-bad-debt-writeoff',
+        order: order++,
+        title: 'Review overdue AR & write-off policy',
+        description:
+            'Review overdue open receivables and post Bad Debt Write-offs (5210) where collection is exhausted — never use credit notes for uncollectibles; does not block close.',
+        accountCode: '1200',
+        status: Math.abs(overdueExposure) > 0.01 ? 'warning' : readyToClose ? 'complete' : 'pending',
+        blocksClose: false,
+        difference: Math.abs(overdueExposure) > 0.01 ? overdueExposure : null,
+        exceptionCount: Math.abs(overdueExposure) > 0.01 ? 1 : 0,
+        estimatedMinutes: 15,
+        path: '/accounting/bad-debt',
+        substeps: [],
+    });
+
     const pendingApprovals = governance?.pendingSignoffs?.length ?? 0;
     steps.push({
         id: 'step-review-journals',

@@ -310,3 +310,61 @@ export async function getArJournalAuditLane(conn: ArDb, asOfDate?: string) {
     })),
   };
 }
+
+/**
+ * ADR-006 Phase 4D — informational aging / write-off exposure.
+ * left: overdue open invoices (default ≥ 30 days)
+ * right: YTD posted write-offs (net of reversed)
+ */
+export async function getArWriteoffExposureLane(
+  conn: ArDb,
+  asOfDate?: string,
+  opts?: { minAgeDays?: number },
+) {
+  const date = asOfDate ?? getBusinessDate();
+  const minAgeDays = opts?.minAgeDays ?? 30;
+
+  const overdueRes = await conn.query<{ amount: string; line_count: string }>(
+    `
+    SELECT COALESCE(SUM(GREATEST(i.amount_due, 0)), 0)::numeric AS amount,
+           COUNT(*)::text AS line_count
+    FROM invoices i
+    WHERE COALESCE(i.document_type, 'INVOICE') = 'INVOICE'
+      AND COALESCE(i.amount_due, 0) > 0.009
+      AND UPPER(COALESCE(i.status::text, 'UNPAID')) IN ('UNPAID', 'PARTIALLY_PAID')
+      AND i.due_date IS NOT NULL
+      AND i.due_date::date <= ($1::date - ($2::int || ' days')::interval)
+    `,
+    [date, minAgeDays],
+  );
+
+  const writeoffRes = await conn.query<{ amount: string; doc_count: string }>(
+    `
+    SELECT COALESCE(SUM(d.total_amount), 0)::numeric AS amount,
+           COUNT(*)::text AS doc_count
+    FROM ar_writeoff_documents d
+    WHERE d.status = 'POSTED'
+      AND d.reversed_by_document_id IS NULL
+      AND d.reverses_document_id IS NULL
+      AND d.writeoff_date <= $1::date
+      AND d.writeoff_date >= date_trunc('year', $1::date)::date
+    `,
+    [date],
+  );
+
+  const overdueOpen = Money.toNumber(Money.parseDb(overdueRes.rows[0]?.amount ?? 0));
+  const writeoffYtd = Money.toNumber(Money.parseDb(writeoffRes.rows[0]?.amount ?? 0));
+  const overdueLines = Number(overdueRes.rows[0]?.line_count ?? 0);
+  const writeoffDocs = Number(writeoffRes.rows[0]?.doc_count ?? 0);
+
+  return {
+    asOfDate: date,
+    overdueOpen,
+    writeoffYtd,
+    exposureDifference: overdueOpen - writeoffYtd,
+    overdueLines,
+    writeoffDocs,
+    minAgeDays,
+    status: 'INFORMATIONAL' as const,
+  };
+}

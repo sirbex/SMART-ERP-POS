@@ -5,7 +5,7 @@ import {
   Building, Truck, FileText, Calendar, Scale, ClipboardCheck,
   ChevronDown, ChevronRight, Home, ArrowLeft, Menu, X, Building2, FileMinus,
   Landmark, FileCheck, AlertTriangle, Receipt, Package, ShieldCheck, Banknote, Globe,
-  CalendarCheck, Percent, RefreshCw, Clock, ArrowRightLeft
+  CalendarCheck, Percent, RefreshCw, Clock, ArrowRightLeft, FileWarning
 } from 'lucide-react';
 import ServerClock from './ServerClock';
 import { useBackendPermission } from '../hooks/useBackendPermission';
@@ -77,7 +77,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           name: 'Expenses',
           path: '/accounting/expenses',
           icon: <DollarSign className="h-4 w-4" />,
-          description: 'Track company expenses'
+          description: 'Expense vouchers — approve, then pay from bank'
         },
         {
           name: 'Expense Categories',
@@ -124,7 +124,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           name: 'P&L Reports',
           path: '/accounting/profit-loss',
           icon: <FileText className="h-4 w-4" />,
-          description: 'By period, customer, product'
+          description: 'By period, customer, category'
         }
       ]
     },
@@ -132,10 +132,10 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
       name: 'ERP Controls',
       items: [
         {
-          name: 'Banking',
+          name: 'Banking & Liquidity',
           path: '/accounting/banking',
           icon: <Building2 className="h-4 w-4" />,
-          description: 'Bank accounts and transactions'
+          description: 'Accounts, undeposited receipts, move money, reconcile'
         },
         {
           name: 'Financial Control Tower',
@@ -188,7 +188,19 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
           name: 'Withholding Tax',
           path: '/accounting/withholding-tax',
           icon: <Receipt className="h-4 w-4" />,
-          description: 'Types, remittance, recovery, certificates'
+          description: 'Types, remit, recover, certificates'
+        },
+        {
+          name: 'VAT Remittance',
+          path: '/accounting/vat-remittance',
+          icon: <Landmark className="h-4 w-4" />,
+          description: 'Clear tax payable to the authority'
+        },
+        {
+          name: 'Bad Debt Write-off',
+          path: '/accounting/bad-debt',
+          icon: <FileWarning className="h-4 w-4" />,
+          description: 'Uncollectible AR → expense 5210 (not credit notes)'
         },
         {
           name: 'Asset Accounting',

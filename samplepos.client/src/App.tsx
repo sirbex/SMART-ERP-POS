@@ -74,6 +74,7 @@ const GoodsReceiptsPage = lazyWithRetry(() => import('./pages/inventory/GoodsRec
 const UomManagementPage = lazyWithRetry(() => import('./pages/inventory/UomManagementPage'));
 const BatchManagementPage = lazyWithRetry(() => import('./pages/inventory/BatchManagementPage'));
 const InventoryAdjustmentsPage = lazyWithRetry(() => import('./pages/inventory/InventoryAdjustmentsPage'));
+const QuarantineWorkqueuePage = lazyWithRetry(() => import('./pages/inventory/QuarantineWorkqueuePage'));
 const AuditLogPage = lazyWithRetry(() => import('./pages/AuditLogPage'));
 const RoleManagementPage = lazyWithRetry(() => import('./pages/admin/RoleManagementPage'));
 const QuotationsPage = lazyWithRetry(() => import('./pages/quotations/QuotationsPage'));
@@ -108,6 +109,8 @@ const CostCentersPage = lazyWithRetry(() => import('./pages/accounting/CostCente
 const GrirClearingPage = lazyWithRetry(() => import('./pages/accounting/GrirClearingPage'));
 const DunningPage = lazyWithRetry(() => import('./pages/accounting/DunningPage'));
 const WithholdingTaxPage = lazyWithRetry(() => import('./pages/accounting/WithholdingTaxPage'));
+const VatRemittancePage = lazyWithRetry(() => import('./pages/accounting/VatRemittancePage'));
+const BadDebtWriteoffPage = lazyWithRetry(() => import('./pages/accounting/BadDebtWriteoffPage'));
 const AssetAccountingPage = lazyWithRetry(() => import('./pages/accounting/AssetAccountingPage'));
 const OrdersQueuePage = lazyWithRetry(() => import('./pages/orders/OrdersQueuePage'));
 const OrderPaymentPage = lazyWithRetry(() => import('./pages/orders/OrderPaymentPage'));
@@ -122,6 +125,9 @@ const GLIntegrityPage = lazyWithRetry(() => import('./pages/accounting/GLIntegri
 const AgedBalancePage = lazyWithRetry(() => import('./pages/accounting/AgedBalancePage'));
 const TaxComplianceReportsPage = lazyWithRetry(
   () => import('./pages/reports/TaxComplianceReportsPage'),
+);
+const LiquidityMovementsReportPage = lazyWithRetry(
+  () => import('./pages/reports/LiquidityMovementsReportPage'),
 );
 const DeliveryPage = lazyWithRetry(() => import('./pages/delivery/DeliveryPage'));
 const DeliveryNotesPage = lazyWithRetry(() => import('./pages/delivery-notes/DeliveryNotesPage'));
@@ -799,6 +805,66 @@ function App() {
                     }
                   />
                   <Route
+                    path="/accounting/vat-remittance"
+                    element={
+                      <ProtectedRoute requiredPermissions={['accounting.read']} requiredFeature="accounting">
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <VatRemittancePage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/bad-debt"
+                    element={
+                      <ProtectedRoute requiredPermissions={['accounting.read']} requiredFeature="accounting">
+                        <AccountingLayout>
+                          <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                            <BadDebtWriteoffPage />
+                          </Suspense>
+                        </AccountingLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/treasury"
+                    element={
+                      <ProtectedRoute requiredPermissions={['accounting.read']} requiredFeature="accounting">
+                        <Navigate to="/accounting/banking?tab=documents" replace />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/deposit-worksheet"
+                    element={
+                      <ProtectedRoute requiredPermissions={['accounting.read']} requiredFeature="accounting">
+                        <Navigate to="/accounting/banking?tab=undeposited" replace />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/treasury-transfer"
+                    element={
+                      <ProtectedRoute requiredPermissions={['accounting.read']} requiredFeature="accounting">
+                        <Navigate to="/accounting/banking?tab=move-money" replace />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/petty-cash"
+                    element={
+                      <ProtectedRoute requiredPermissions={['accounting.read']} requiredFeature="accounting">
+                        <Navigate to="/accounting/banking?tab=petty-cash" replace />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/accounting/tax-compliance-reports"
+                    element={<Navigate to="/reports/tax-compliance" replace />}
+                  />
+                  <Route
                     path="/accounting/assets"
                     element={
                       <ProtectedRoute requiredPermissions={['accounting.read']} requiredFeature="accounting">
@@ -988,6 +1054,17 @@ function App() {
                       <ProtectedRoute requiredPermissions={['reports.read', 'reports.financial_view', 'accounting.read']} requiredFeature="reports">
                         <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
                           <TaxComplianceReportsPage />
+                        </Suspense>
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/reports/liquidity-movements"
+                    element={
+                      <ProtectedRoute requiredPermissions={['reports.read', 'reports.financial_view', 'accounting.read']} requiredFeature="reports">
+                        <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                          <LiquidityMovementsReportPage />
                         </Suspense>
                       </ProtectedRoute>
                     }
@@ -1360,6 +1437,16 @@ function App() {
                       <ProtectedRoute requiredPermissions={['inventory.adjust']} requiredFeature="inventory">
                         <InventoryLayout>
                           <InventoryAdjustmentsPage />
+                        </InventoryLayout>
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/inventory/quarantine"
+                    element={
+                      <ProtectedRoute requiredPermissions={['inventory.read']} requiredFeature="inventory">
+                        <InventoryLayout>
+                          <QuarantineWorkqueuePage />
                         </InventoryLayout>
                       </ProtectedRoute>
                     }

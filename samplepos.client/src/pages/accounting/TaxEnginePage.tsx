@@ -16,23 +16,55 @@ interface TaxDef {
   scope: string;
 }
 
+interface TaxLineResult {
+  taxCode: string;
+  taxName: string;
+  baseAmount?: number;
+  taxAmount?: number;
+  /** Legacy aliases — prefer baseAmount / taxAmount */
+  base?: number;
+  amount?: number;
+  accountCode: string;
+}
+
 interface TaxResult {
-  untaxedAmount: number;
-  totalTax: number;
-  totalAmount: number;
-  taxLines: Array<{
-    taxCode: string;
-    taxName: string;
-    base: number;
-    amount: number;
-    accountCode: string;
-  }>;
+  untaxedAmount?: number;
+  totalTax?: number;
+  totalAmount?: number;
+  taxLines?: TaxLineResult[];
+}
+
+function fmt(n: number | undefined | null): string {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  return Number(n).toLocaleString(undefined, { minimumFractionDigits: 2 });
+}
+
+function normalizeTaxList(data: unknown): TaxDef[] {
+  const rows = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object' && Array.isArray((data as { taxes?: unknown }).taxes)
+      ? (data as { taxes: unknown[] }).taxes
+      : [];
+  return rows.map((row) => {
+    const r = row as Record<string, unknown>;
+    return {
+      id: String(r.id ?? ''),
+      code: String(r.code ?? ''),
+      name: String(r.name ?? ''),
+      type: String(r.type ?? ''),
+      rate: Number(r.rate ?? 0),
+      isInclusive: Boolean(r.isInclusive ?? r.is_inclusive),
+      isCompound: Boolean(r.isCompound ?? r.is_compound),
+      sequence: Number(r.sequence ?? 0),
+      scope: String(r.scope ?? ''),
+    };
+  });
 }
 
 export default function TaxEnginePage() {
   const [tab, setTab] = useState<'definitions' | 'calculator'>('definitions');
   const { data, isLoading } = useTaxDefinitions();
-  const taxList: TaxDef[] = Array.isArray(data) ? data : [];
+  const taxList = normalizeTaxList(data);
 
   // Calculator state
   const [unitPrice, setUnitPrice] = useState('1000');
@@ -42,9 +74,10 @@ export default function TaxEnginePage() {
   const [computing, setComputing] = useState(false);
 
   const toggleTax = (id: string) => {
-    setSelectedTaxIds(prev => {
+    setSelectedTaxIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -61,13 +94,15 @@ export default function TaxEnginePage() {
         quantity: parseFloat(quantity),
         taxIds: Array.from(selectedTaxIds),
       });
-      setComputeResult(res.data?.data as TaxResult);
+      setComputeResult((res.data?.data as TaxResult) ?? null);
     } catch (err) {
       toast.error(getErrorMessage(err));
     } finally {
       setComputing(false);
     }
   };
+
+  const taxLines = Array.isArray(computeResult?.taxLines) ? computeResult.taxLines : [];
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -79,17 +114,19 @@ export default function TaxEnginePage() {
         <p className="text-gray-500 mt-1">Manage tax definitions and compute taxes on transactions</p>
       </div>
 
-      {/* Tabs */}
       <div className="border-b flex gap-1">
         {[
           { key: 'definitions' as const, label: 'Tax Definitions', icon: Receipt },
           { key: 'calculator' as const, label: 'Tax Calculator', icon: Calculator },
-        ].map(t => (
+        ].map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px ${tab === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+              tab === t.key
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
+            }`}
           >
             <t.icon className="h-4 w-4" />
             {t.label}
@@ -97,7 +134,6 @@ export default function TaxEnginePage() {
         ))}
       </div>
 
-      {/* Definitions Tab */}
       {tab === 'definitions' && (
         <div className="bg-white rounded-lg shadow overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
@@ -115,36 +151,46 @@ export default function TaxEnginePage() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {isLoading ? (
-                <tr><td colSpan={8} className="px-6 py-8 text-center">
-                  <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-500" />
-                </td></tr>
-              ) : taxList.length === 0 ? (
-                <tr><td colSpan={8} className="px-6 py-8 text-center text-gray-500">
-                  No tax definitions found. Run the migration to seed defaults.
-                </td></tr>
-              ) : taxList.map(t => (
-                <tr key={t.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-mono font-medium text-gray-900">{t.code}</td>
-                  <td className="px-6 py-4 text-sm text-gray-700">{t.name}</td>
-                  <td className="px-6 py-4 text-sm">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.type === 'PERCENTAGE' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
-                      }`}>
-                      {t.type}
-                    </span>
+                <tr>
+                  <td colSpan={8} className="px-6 py-8 text-center">
+                    <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-500" />
                   </td>
-                  <td className="px-6 py-4 text-sm text-right tabular-nums">{t.rate}%</td>
-                  <td className="px-6 py-4 text-center">{t.isInclusive ? '✓' : ''}</td>
-                  <td className="px-6 py-4 text-center">{t.isCompound ? '✓' : ''}</td>
-                  <td className="px-6 py-4 text-sm text-gray-700">{t.scope}</td>
-                  <td className="px-6 py-4 text-sm text-right text-gray-500">{t.sequence}</td>
                 </tr>
-              ))}
+              ) : taxList.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                    No tax definitions found. Run the migration to seed defaults.
+                  </td>
+                </tr>
+              ) : (
+                taxList.map((t) => (
+                  <tr key={t.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm font-mono font-medium text-gray-900">{t.code}</td>
+                    <td className="px-6 py-4 text-sm text-gray-700">{t.name}</td>
+                    <td className="px-6 py-4 text-sm">
+                      <span
+                        className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          t.type === 'PERCENTAGE'
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-purple-100 text-purple-800'
+                        }`}
+                      >
+                        {t.type}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right tabular-nums">{t.rate}%</td>
+                    <td className="px-6 py-4 text-center">{t.isInclusive ? '✓' : ''}</td>
+                    <td className="px-6 py-4 text-center">{t.isCompound ? '✓' : ''}</td>
+                    <td className="px-6 py-4 text-sm text-gray-700">{t.scope}</td>
+                    <td className="px-6 py-4 text-sm text-right text-gray-500">{t.sequence}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
       )}
 
-      {/* Calculator Tab */}
       {tab === 'calculator' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-white rounded-lg shadow p-6 space-y-4">
@@ -170,7 +216,7 @@ export default function TaxEnginePage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Applicable Taxes</label>
               <div className="space-y-2">
-                {taxList.map(t => (
+                {taxList.map((t) => (
                   <label key={t.id} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
@@ -201,18 +247,18 @@ export default function TaxEnginePage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="p-3 bg-gray-50 rounded">
                     <p className="text-xs text-gray-500 uppercase">Untaxed Amount</p>
-                    <p className="text-lg font-semibold">{computeResult.untaxedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-lg font-semibold">{fmt(computeResult.untaxedAmount)}</p>
                   </div>
                   <div className="p-3 bg-gray-50 rounded">
                     <p className="text-xs text-gray-500 uppercase">Total Tax</p>
-                    <p className="text-lg font-semibold text-red-600">{computeResult.totalTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-lg font-semibold text-red-600">{fmt(computeResult.totalTax)}</p>
                   </div>
                   <div className="col-span-2 p-3 bg-blue-50 rounded">
                     <p className="text-xs text-blue-600 uppercase">Total Amount (incl. tax)</p>
-                    <p className="text-2xl font-bold text-blue-900">{computeResult.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                    <p className="text-2xl font-bold text-blue-900">{fmt(computeResult.totalAmount)}</p>
                   </div>
                 </div>
-                {computeResult.taxLines.length > 0 && (
+                {taxLines.length > 0 && (
                   <div>
                     <p className="text-sm font-medium text-gray-700 mb-2">Tax Breakdown</p>
                     <table className="w-full text-sm">
@@ -224,11 +270,17 @@ export default function TaxEnginePage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {computeResult.taxLines.map((tl, i) => (
+                        {taxLines.map((tl, i) => (
                           <tr key={i} className="border-t">
-                            <td className="py-1">{tl.taxName} ({tl.taxCode})</td>
-                            <td className="py-1 text-right tabular-nums">{tl.base.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                            <td className="py-1 text-right tabular-nums font-medium">{tl.amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td className="py-1">
+                              {tl.taxName} ({tl.taxCode})
+                            </td>
+                            <td className="py-1 text-right tabular-nums">
+                              {fmt(tl.baseAmount ?? tl.base)}
+                            </td>
+                            <td className="py-1 text-right tabular-nums font-medium">
+                              {fmt(tl.taxAmount ?? tl.amount)}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

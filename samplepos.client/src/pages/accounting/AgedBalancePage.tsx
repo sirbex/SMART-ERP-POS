@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgedReceivables, useAgedPayables } from '../../hooks/useAccountingModules';
-import { Clock, Users, Truck, Loader2, AlertTriangle } from 'lucide-react';
 import { getBusinessDate } from '../../utils/businessDate';
+import { DatePicker } from '../../components/ui/date-picker';
+import { Clock, Users, Truck, Loader2, AlertTriangle } from 'lucide-react';
 
 interface AgedBucket {
   entityId: string;
@@ -68,11 +69,10 @@ export default function AgedBalancePage() {
             <AlertTriangle className="h-3 w-3" /> Manage dunning actions for overdue balances
           </Link>
         </div>
-        <input
-          type="date"
+        <DatePicker
           value={asOfDate}
-          onChange={(e) => setAsOfDate(e.target.value)}
-          className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+          onChange={setAsOfDate}
+          placeholder="As of date"
           aria-label="As of date"
         />
       </div>

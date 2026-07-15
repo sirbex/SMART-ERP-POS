@@ -45,7 +45,7 @@ export interface TaxDefinition {
   sequence: number;            // evaluation order (lower = first)
   scope: TaxScope;
   taxPayableAccountCode: string;    // e.g. '2300' (Tax Payable)
-  taxReceivableAccountCode: string; // e.g. '1400' (Input Tax)
+  taxReceivableAccountCode: string; // e.g. '2300' (net Tax Payable — ADR-005; never 1250 WHT)
   isActive: boolean;
 }
 
@@ -330,7 +330,7 @@ export class TaxEngine {
       sequence: row.sequence,
       scope: row.scope,
       taxPayableAccountCode: row.tax_payable_account || '2300',
-      taxReceivableAccountCode: row.tax_receivable_account || '1400',
+      taxReceivableAccountCode: row.tax_receivable_account || '2300',
       isActive: row.is_active,
     }));
   }
@@ -393,7 +393,7 @@ export class TaxEngine {
       sequence: row.sequence as number,
       scope: row.scope as TaxScope,
       taxPayableAccountCode: (row.tax_payable_account as string) || '2300',
-      taxReceivableAccountCode: (row.tax_receivable_account as string) || '1400',
+      taxReceivableAccountCode: (row.tax_receivable_account as string) || '2300',
       isActive: row.is_active as boolean,
     };
   }

@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../../components/ui/temp-ui-components';
 import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
@@ -26,6 +27,7 @@ import {
     useReverseBankTransaction,
     BankTransaction
 } from '../../hooks/useBanking';
+import { useTreasuryEnabled } from '../../hooks/useTreasuryEnabled';
 import { formatCurrency } from '../../utils/currency';
 
 type TransactionFormData = {
@@ -112,6 +114,7 @@ export const BankTransactionsTab: React.FC = () => {
 
     const { data: accounts = [] } = useBankAccounts();
     const { data: categories = [] } = useBankCategories();
+    const { data: treasuryOn = false } = useTreasuryEnabled();
     const { data: transactionsData, isLoading, refetch } = useBankTransactions({
         bankAccountId: filterAccountId || undefined,
         type: filterType || undefined,
@@ -407,12 +410,12 @@ export const BankTransactionsTab: React.FC = () => {
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="txn-date">Date *</Label>
-                                <Input
+                                <DatePicker
                                     id="txn-date"
-                                    type="date"
                                     value={transactionForm.transactionDate}
-                                    onChange={e => setTransactionForm(prev => ({ ...prev, transactionDate: e.target.value }))}
+                                    onChange={(v) => setTransactionForm(prev => ({ ...prev, transactionDate: v }))}
                                     required
+                                    placeholder="Transaction date"
                                 />
                             </div>
                             <div className="space-y-2">
@@ -504,9 +507,11 @@ export const BankTransactionsTab: React.FC = () => {
             <Dialog open={isTransferModalOpen} onOpenChange={setIsTransferModalOpen} zIndex={transferGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="sm:max-w-md">
                     <DialogHeader>
-                        <DialogTitle>Bank Transfer</DialogTitle>
+                        <DialogTitle>Bank account transfer</DialogTitle>
                         <DialogDescription>
-                            Transfer funds between bank accounts
+                            {treasuryOn
+                                ? 'Moves money between bank accounts and posts a liquidity document (same engine as Banking → Move money). Use Move money for cash or mobile money.'
+                                : 'Transfer funds between bank accounts. Cross-account cash / mobile money moves become available when Treasury Documents are enabled in Settings → Tax.'}
                         </DialogDescription>
                     </DialogHeader>
                     <form onSubmit={handleSubmitTransfer} className="space-y-4">
@@ -553,12 +558,12 @@ export const BankTransactionsTab: React.FC = () => {
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="transfer-date">Date *</Label>
-                                <Input
+                                <DatePicker
                                     id="transfer-date"
-                                    type="date"
                                     value={transferForm.transactionDate}
-                                    onChange={e => setTransferForm(prev => ({ ...prev, transactionDate: e.target.value }))}
+                                    onChange={(v) => setTransferForm(prev => ({ ...prev, transactionDate: v }))}
                                     required
+                                    placeholder="Transfer date"
                                 />
                             </div>
                             <div className="space-y-2">

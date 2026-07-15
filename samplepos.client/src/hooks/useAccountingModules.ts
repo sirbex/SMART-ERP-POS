@@ -36,6 +36,18 @@ export const accountingKeys = {
       ['wht', 'register', start, end, side] as const,
     liability: (start?: string, end?: string) => ['wht', 'liability', start, end] as const,
   },
+  vatRemittance: {
+    all: ['vat-remittance'] as const,
+    enabled: () => ['vat-remittance', 'enabled'] as const,
+    worksheet: (from?: string, to?: string) => ['vat-remittance', 'worksheet', from, to] as const,
+  },
+  badDebt: {
+    all: ['bad-debt'] as const,
+    enabled: () => ['bad-debt', 'enabled'] as const,
+    workqueue: (params?: { minAgeDays?: number; customerId?: string }) =>
+      ['bad-debt', 'workqueue', params] as const,
+    documents: (params?: { limit?: number }) => ['bad-debt', 'documents', params] as const,
+  },
   assets: {
     all: ['assets'] as const,
     categories: () => ['assets', 'categories'] as const,
@@ -353,7 +365,6 @@ export function useCreateWhtType() {
       appliesTo?: string;
       appliesToSuppliers?: boolean;
       appliesToCustomers?: boolean;
-      accountCode?: string;
     }) => api.wht.createType(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
@@ -386,6 +397,163 @@ export function useRemitWht() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
       toast.success('WHT remittance posted');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+}
+
+export function useVatRemittanceEnabled() {
+  return useQuery({
+    queryKey: accountingKeys.vatRemittance.enabled(),
+    queryFn: async () => {
+      const res = await api.vatRemittance.getEnabled();
+      return res.data?.data as {
+        enabled: boolean;
+        vatRemittanceDocumentEnabled: boolean;
+        treasuryDocumentEnabled: boolean;
+      };
+    },
+  });
+}
+
+export function useVatRemittanceWorksheet(periodFrom: string, periodTo: string, enabled = true) {
+  return useQuery({
+    queryKey: accountingKeys.vatRemittance.worksheet(periodFrom, periodTo),
+    enabled: enabled && !!periodFrom && !!periodTo && periodFrom <= periodTo,
+    queryFn: async () => {
+      const res = await api.vatRemittance.getWorksheet({ periodFrom, periodTo });
+      return res.data?.data as {
+        enabled: boolean;
+        periodFrom: string;
+        periodTo: string;
+        documentNetVatPayable: number;
+        netOutputTax: number;
+        netInputTax: number;
+        alreadyRemitted: number;
+        availableVatPayable: number;
+        glTaxPayable2300: number;
+        defaultPaymentAccountCode: string;
+        decision: 'B';
+        note: string;
+      };
+    },
+  });
+}
+
+export function useRemitVat() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      periodFrom: string;
+      periodTo: string;
+      amount: number;
+      transactionDate: string;
+      paymentAccountCode: string;
+      authorityReference: string;
+      memo?: string;
+      postImmediately?: boolean;
+    }) => api.vatRemittance.remit(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: accountingKeys.vatRemittance.all });
+      qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
+      toast.success('VAT remittance posted');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+}
+
+export function useBadDebtEnabled() {
+  return useQuery({
+    queryKey: accountingKeys.badDebt.enabled(),
+    queryFn: async () => {
+      const res = await api.badDebt.getEnabled();
+      return res.data?.data as { enabled: boolean; badDebtWriteoffEnabled: boolean };
+    },
+  });
+}
+
+export function useBadDebtWorkqueue(params?: { minAgeDays?: number; customerId?: string; limit?: number }) {
+  return useQuery({
+    queryKey: accountingKeys.badDebt.workqueue(params),
+    queryFn: async () => {
+      const res = await api.badDebt.getWorkqueue(params);
+      return res.data?.data as {
+        asOf: string;
+        lines: Array<{
+          invoiceId: string;
+          invoiceNumber: string;
+          customerId: string;
+          customerName: string;
+          dueDate: string | null;
+          amountDue: number;
+          ageDays: number;
+          status: string;
+        }>;
+        summary: { totalLines: number; totalDue: number };
+      };
+    },
+  });
+}
+
+export function useBadDebtDocuments(params?: { limit?: number; includeReversed?: boolean }) {
+  return useQuery({
+    queryKey: accountingKeys.badDebt.documents(params),
+    queryFn: async () => {
+      const res = await api.badDebt.listDocuments(params);
+      return res.data?.data as Array<{
+        id: string;
+        documentNumber: string;
+        customerId: string;
+        totalAmount: number;
+        reasonCode: string;
+        writeoffDate: string;
+        postedAt: string | null;
+        reversedByDocumentId: string | null;
+        lines: Array<{ invoiceId: string; writeoffAmount: number }>;
+      }>;
+    },
+  });
+}
+
+export function usePostBadDebtWriteoff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      customerId: string;
+      writeoffDate?: string;
+      reasonCode: string;
+      expenseAccountCode?: string;
+      memo?: string;
+      lines: Array<{ invoiceId: string; writeoffAmount: number; memo?: string }>;
+    }) => {
+      const res = await api.badDebt.writeoff(data);
+      return res.data?.data as {
+        id: string;
+        documentNumber: string;
+        totalAmount: number;
+      };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: accountingKeys.badDebt.all });
+      toast.success('Bad debt write-off posted');
+    },
+    onError: (err) => toast.error(getErrorMessage(err)),
+  });
+}
+
+export function useReverseBadDebtWriteoff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: { id: string; reason?: string }) => {
+      const res = await api.badDebt.reverse(data.id, { reason: data.reason });
+      return res.data?.data as {
+        original: { documentNumber: string };
+        reversal: { documentNumber: string };
+      };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: accountingKeys.badDebt.all });
+      toast.success('Write-off reversed');
     },
     onError: (err) => toast.error(getErrorMessage(err)),
   });

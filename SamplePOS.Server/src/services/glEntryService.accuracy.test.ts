@@ -7,7 +7,7 @@
  * Strategy: Mock AccountingCore.createJournalEntry to capture the journal
  * lines it receives, then validate DR=CR, correct account codes, and amounts.
  */
-import { jest, describe, it, expect, beforeEach } from '@jest/globals';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import type { JournalEntryRequest, JournalLine } from './accountingCore.js';
 
 type MockFn = (...args: unknown[]) => Promise<unknown>;
@@ -494,7 +494,7 @@ describe('glEntryService — GL Posting Accuracy', () => {
     // recordCustomerDepositToGL / recordDepositApplicationToGL
     // ========================================================================
     describe('deposit lifecycle GL postings', () => {
-        it('should post customer deposit as DR Cash / CR Customer Deposits', async () => {
+        it('should post customer deposit as DR Undeposited Funds / CR Customer Deposits', async () => {
             await recordCustomerDepositToGL({
                 depositId: 'dep-1',
                 depositNumber: 'DEP-2026-0001',
@@ -506,8 +506,9 @@ describe('glEntryService — GL Posting Accuracy', () => {
             });
 
             const lines = capturedEntries[0].lines;
-            expect(findLine(lines, AccountCodes.CASH)!.debitAmount).toBe(8000);
+            expect(findLine(lines, AccountCodes.UNDEPOSITED_FUNDS)!.debitAmount).toBe(8000);
             expect(findLine(lines, AccountCodes.CUSTOMER_DEPOSITS)!.creditAmount).toBe(8000);
+            expect(capturedEntries[0].source).toBe('PAYMENT_RECEIPT');
             expect(capturedEntries[0].idempotencyKey).toBe('CUSTOMER_DEPOSIT-dep-1');
             assertBalanced(lines);
         });
@@ -639,6 +640,31 @@ describe('glEntryService — GL Posting Accuracy', () => {
     // recordStockAdjustmentToGL
     // ========================================================================
     describe('recordStockAdjustmentToGL', () => {
+        const prevLegacy = process.env.ALLOW_LEGACY_STOCK_ADJUSTMENT_GL;
+
+        beforeEach(() => {
+            process.env.ALLOW_LEGACY_STOCK_ADJUSTMENT_GL = '1';
+        });
+
+        afterEach(() => {
+            if (prevLegacy === undefined) delete process.env.ALLOW_LEGACY_STOCK_ADJUSTMENT_GL;
+            else process.env.ALLOW_LEGACY_STOCK_ADJUSTMENT_GL = prevLegacy;
+        });
+
+        it('is blocked by default (ADR-004 Phase 2D)', async () => {
+            delete process.env.ALLOW_LEGACY_STOCK_ADJUSTMENT_GL;
+            await expect(
+                recordStockAdjustmentToGL({
+                    adjustmentId: 'adj-blocked',
+                    adjustmentNumber: 'ADJ-BLOCK',
+                    adjustmentDate: '2026-03-15',
+                    adjustmentType: 'DECREASE',
+                    totalValue: 100,
+                    reason: 'should fail',
+                }),
+            ).rejects.toThrow(/retired \(ADR-004/);
+        });
+
         it('INCREASE: should DR Inventory / CR Other Income', async () => {
             await recordStockAdjustmentToGL({
                 adjustmentId: 'adj-1',

@@ -15,7 +15,15 @@ const LABEL_MAP: Record<string, string> = {
     'Net Active': 'Active Balance',
     'Net Active (Customer Scope)': 'Active Customer Balance',
     'Integrity Difference': 'Difference',
-    'Cache drift': 'Balances need refresh',
+    'Cache drift': 'Needs refresh',
+    'Cache Health': 'Stored Balances',
+    'Inventory Cache Health': 'Inventory Stored Balances',
+    'Accounts Payable Cache Health': 'Suppliers Stored Balances',
+    'Accounts Receivable Cache Health': 'Customers Stored Balances',
+    'Maintenance — open-item vs denormalized cache (does not gate period close)':
+        'Stored values may need refresh — does not block period close',
+    'Period close — net-active GL vs open-item subledger':
+        'Period close — general ledger vs outstanding balances',
     Healthy: 'Up to date',
     Investigate: 'Needs review',
 };
@@ -26,6 +34,7 @@ const DOMAIN_BUSINESS: Record<FinancialDomain, string> = {
     inventory: 'Inventory',
     cash: 'Cash',
     wht: 'Withholding Tax',
+    vat: 'VAT',
 };
 
 export type HealthTone = 'success' | 'warning' | 'danger' | 'neutral';
@@ -77,13 +86,13 @@ export function domainBusinessName(domain: FinancialDomain): string {
 
 export function translateRecommendedAction(action: string | null): string | null {
     if (!action) return null;
-    if (action.includes('POST /api/') || action.includes('recalc-') || action.includes('rebuild-')) {
+    if (action.includes('POST /api/') || action.includes('recalc-') || action.includes('rebuild-') || action.includes('rebase')) {
         return 'Refresh stored balances from source documents';
     }
-    if (action.includes('open-item vs GL') || action.includes('integrity')) {
+    if (action.includes('open-item vs GL') || action.includes('integrity') || action.includes('missing journal')) {
         return 'Review source documents and post missing journal entries';
     }
-    if (action.includes('cache heal')) {
+    if (action.includes('cache heal') || action.includes('do not refresh')) {
         return 'Correct the underlying documents — do not refresh balances until resolved';
     }
     return action.replace(/\bopen-item\b/gi, 'outstanding balance').replace(/\bGL\b/g, 'general ledger');
@@ -99,6 +108,11 @@ export function cacheLane(summary: DomainLaneSummary): FinancialLaneResult | und
 
 function domainHealthTone(summary: DomainLaneSummary): HealthTone {
     if (summary.periodCloseBlocked) return 'danger';
+    if (summary.domain === 'vat') {
+        const vatIntegrity = integrityLane(summary);
+        if (vatIntegrity && Math.abs(vatIntegrity.difference) > 0.01) return 'warning';
+        return 'success';
+    }
     const cache = cacheLane(summary);
     if (cache && cache.status !== 'HEALTHY' && Math.abs(cache.difference) > 0.01) return 'warning';
     const integrity = integrityLane(summary);
@@ -129,6 +143,8 @@ export function domainActionLabel(domain: FinancialDomain, tone: HealthTone): st
                 return 'Review cash accounts';
             case 'wht':
                 return 'Review withholding tax';
+            case 'vat':
+                return 'Review VAT boxes vs GL';
         }
     }
     if (tone === 'warning') return 'Refresh balances';
@@ -203,9 +219,9 @@ export function buildHealthCards(
             title: 'Tax',
             tone: 'neutral',
             difference: 0,
-            summary: 'Review tax postings and compliance',
-            navigateTo: '/accounting/tax-engine',
-            actionLabel: 'Review tax',
+            summary: 'Review VAT tax engine and withholding tax compliance',
+            navigateTo: '/accounting/withholding-tax',
+            actionLabel: 'Review WHT',
         },
     ];
 
@@ -224,6 +240,8 @@ function issueTitle(domain: FinancialDomain, integrity: FinancialLaneResult): st
             return 'Cash account difference';
         case 'wht':
             return 'Withholding tax ledger difference';
+        case 'vat':
+            return 'VAT document boxes vs Tax Payable (2300)';
         default:
             return integrity.title.replace(/Accounting Integrity/i, 'Reconciliation');
     }

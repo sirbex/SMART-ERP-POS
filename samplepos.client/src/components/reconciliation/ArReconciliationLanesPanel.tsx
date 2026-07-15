@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Database, History, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Database, History, FileWarning, RefreshCw, ShieldCheck } from 'lucide-react';
 import { apiClient, type ApiResponse } from '../../utils/api';
 import type { FinancialLaneResult } from '../../types/financialLane';
 import { isPeriodCloseClear } from '../../types/financialLane';
 import { FinancialLaneCard } from './FinancialLaneCard';
 
-type ExpandedLane = 'integrity' | 'cache' | 'history' | null;
+type ExpandedLane = 'integrity' | 'cache' | 'history' | 'writeoff' | null;
 
 async function fetchLane(path: string, asOfDate: string): Promise<FinancialLaneResult> {
     const res = await apiClient.get<ApiResponse<FinancialLaneResult>>(path, {
@@ -42,9 +42,16 @@ export function ArReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
         staleTime: 30_000,
     });
 
+    const writeoffQuery = useQuery({
+        queryKey: ['ar-lane-writeoff', asOfDate],
+        queryFn: () => fetchLane('/erp-accounting/reconciliation/ar/writeoff', asOfDate),
+        staleTime: 30_000,
+    });
+
     const integrity = integrityQuery.data;
     const cache = cacheQuery.data;
     const history = historyQuery.data;
+    const writeoff = writeoffQuery.data;
 
     useEffect(() => {
         if (integrity && onPeriodCloseStatus) {
@@ -58,11 +65,16 @@ export function ArReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
         },
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ['ar-lane-cache', asOfDate] });
+            await queryClient.invalidateQueries({ queryKey: ['ar-lane-writeoff', asOfDate] });
             await queryClient.invalidateQueries({ queryKey: ['reconciliation-summary', asOfDate] });
         },
     });
 
-    const isLoading = integrityQuery.isLoading || cacheQuery.isLoading || historyQuery.isLoading;
+    const isLoading =
+        integrityQuery.isLoading
+        || cacheQuery.isLoading
+        || historyQuery.isLoading
+        || writeoffQuery.isLoading;
 
     const toggleLane = (lane: ExpandedLane) => {
         setExpandedLane((prev) => (prev === lane ? null : lane));
@@ -81,8 +93,8 @@ export function ArReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
             <div className="px-1">
                 <h2 className="text-lg font-semibold text-gray-900">Accounts Receivable Reconciliation</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                    Three independent checks — only lanes marked <strong>Period-close gate</strong> block close when
-                    unreconciled. Maintenance and audit lanes are informational.
+                    Independent checks — only lanes marked <strong>Period-close gate</strong> block close when
+                    unreconciled. Maintenance, audit, and write-off exposure lanes are informational.
                 </p>
             </div>
 
@@ -126,6 +138,24 @@ export function ArReconciliationLanesPanel({ asOfDate, onPeriodCloseStatus }: Pr
                     expanded={expandedLane === 'history'}
                     onToggleExpand={() => toggleLane('history')}
                     entityColumnLabel="Customer"
+                />
+            )}
+
+            {writeoff && (
+                <FinancialLaneCard
+                    lane={writeoff}
+                    icon={<FileWarning className="h-5 w-5" />}
+                    expanded={expandedLane === 'writeoff'}
+                    onToggleExpand={() => toggleLane('writeoff')}
+                    entityColumnLabel="Customer"
+                    action={
+                        <a
+                            href="/accounting/bad-debt"
+                            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded font-medium"
+                        >
+                            Open write-off workqueue
+                        </a>
+                    }
                 />
             )}
         </div>

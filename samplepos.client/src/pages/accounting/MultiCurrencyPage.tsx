@@ -4,6 +4,7 @@ import { api, getErrorMessage } from '../../utils/api';
 import { Globe, Plus, X, ArrowRightLeft, Settings } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getBusinessDate } from '../../utils/businessDate';
+import { DatePicker } from '../../components/ui/date-picker';
 
 interface Currency {
   id: string;
@@ -137,7 +138,7 @@ export default function MultiCurrencyPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Effective Date</label>
-              <input type="date" value={rateForm.effectiveDate} onChange={(e) => setRateForm({ ...rateForm, effectiveDate: e.target.value })} required className="w-full px-3 py-2 border rounded-lg text-sm" />
+              <DatePicker value={rateForm.effectiveDate} onChange={(v) => setRateForm({ ...rateForm, effectiveDate: v })} required placeholder="Effective date" />
             </div>
             <div className="md:col-span-4 flex justify-end gap-2">
               <button type="button" onClick={() => setShowRateForm(false)} className="px-4 py-2 border rounded-lg text-sm hover:bg-gray-50">Cancel</button>

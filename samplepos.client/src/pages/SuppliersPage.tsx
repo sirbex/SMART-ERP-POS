@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, Fragment } from 'react';
 import { Link } from 'react-router-dom';
 import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
+import { DatePicker } from '../components/ui/date-picker';
 import {
   useSuppliers,
   useCreateSupplier,
@@ -2338,11 +2339,10 @@ function SupplierDetailModal({
                       <div className="grid grid-cols-2 gap-3 mb-3">
                         <div>
                           <label className="block text-xs font-medium text-purple-800 mb-1">Payment Date *</label>
-                          <input
-                            type="date"
+                          <DatePicker
                             value={multiPayDate}
-                            onChange={(e) => setMultiPayDate(e.target.value)}
-                            className="w-full border border-purple-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                            onChange={setMultiPayDate}
+                            placeholder="Payment date"
                             disabled={multiPosting}
                           />
                         </div>
@@ -2427,20 +2427,18 @@ function SupplierDetailModal({
                 <div className="flex flex-wrap gap-2 items-end">
                   <div className="flex-1 min-w-[130px]">
                     <label className="block text-xs font-medium text-gray-500 mb-1">From</label>
-                    <input
-                      type="date"
+                    <DatePicker
                       value={ledgerStartDate}
-                      onChange={(e) => setLedgerStartDate(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                      onChange={setLedgerStartDate}
+                      placeholder="From"
                     />
                   </div>
                   <div className="flex-1 min-w-[130px]">
                     <label className="block text-xs font-medium text-gray-500 mb-1">To</label>
-                    <input
-                      type="date"
+                    <DatePicker
                       value={ledgerEndDate}
-                      onChange={(e) => setLedgerEndDate(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500"
+                      onChange={setLedgerEndDate}
+                      placeholder="To"
                     />
                   </div>
                   <button

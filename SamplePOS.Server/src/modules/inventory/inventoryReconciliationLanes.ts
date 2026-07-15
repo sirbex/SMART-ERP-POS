@@ -217,3 +217,57 @@ export async function getInventoryJournalAuditLane(conn: InventoryDb, asOfDate?:
     })),
   };
 }
+
+/**
+ * ADR-004 Phase 2D — quarantine BS exposure still on 1300 until disposal.
+ * Informational only; never blocks period close and is not integrity drift.
+ */
+export async function getInventoryQuarantineLane(conn: InventoryDb, asOfDate?: string) {
+  const date = asOfDate ?? getBusinessDate();
+  try {
+    const { getQuarantineAging } = await import(
+      '../loss-quarantine/quarantineAgingService.js'
+    );
+    const aging = await getQuarantineAging(conn, { limit: 50 });
+    const exposure = aging.summary.totalValue;
+    return {
+      quarantineExposure: exposure,
+      totalLines: aging.summary.totalLines,
+      totalQuantity: aging.summary.totalQuantity,
+      byStoreType: aging.summary.byStoreType,
+      status: 'INFORMATIONAL' as const,
+      exceptions: aging.lines.map((line) => ({
+        productId: line.productId,
+        productName: `${line.productName} · ${line.storeCode} (${line.storeType})`,
+        leftAmount: line.inventoryValue,
+        rightAmount: 0,
+        difference: line.inventoryValue,
+      })),
+      details: {
+        asOf: aging.asOf || date,
+        totalLines: aging.summary.totalLines,
+        totalQuantity: aging.summary.totalQuantity,
+        byStoreType: aging.summary.byStoreType,
+        note: 'Quarantine value remains on GL 1300 until disposal — do not heal as shrinkage',
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      quarantineExposure: 0,
+      totalLines: 0,
+      totalQuantity: 0,
+      byStoreType: {} as Record<string, { lines: number; quantity: number; value: number }>,
+      status: 'INFORMATIONAL' as const,
+      exceptions: [] as InventoryProductLaneRow[],
+      details: {
+        asOf: date,
+        totalLines: 0,
+        totalQuantity: 0,
+        byStoreType: {},
+        unavailableReason: message,
+        note: 'Quarantine aging unavailable (multi-store required)',
+      },
+    };
+  }
+}

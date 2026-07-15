@@ -39,7 +39,6 @@ import {
 import { DatePicker } from '../../components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
 import { toast } from 'react-hot-toast';
-import { ERROR_MESSAGES } from '../../constants/errorMessages';
 import {
     comprehensiveInvoiceService,
     customerPaymentService
@@ -56,7 +55,7 @@ import { formatTimestampDate } from '../../utils/businessDate';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 const INVOICE_STATUSES = [
-    { value: '', label: 'All Statuses' },
+    { value: '__all__', label: 'All Statuses' },
     { value: 'DRAFT', label: 'Draft', color: 'bg-gray-100 text-gray-800' },
     { value: 'ISSUED', label: 'Issued', color: 'bg-blue-100 text-blue-800' },
     { value: 'PARTIALLY_PAID', label: 'Partially Paid', color: 'bg-yellow-100 text-yellow-800' },
@@ -73,7 +72,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
-    const [selectedStatus, setSelectedStatus] = useState<string>('');
+    const [selectedStatus, setSelectedStatus] = useState<string>('__all__');
 
     // Modal states
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -141,7 +140,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
     }, [activeTab]);
 
     useEffect(() => {
-        if (searchTerm || selectedCustomerId || selectedStatus) {
+        if (searchTerm || selectedCustomerId || (selectedStatus && selectedStatus !== '__all__')) {
             filterData();
         } else {
             loadData();
@@ -181,7 +180,7 @@ const ComprehensiveInvoicesPage: React.FC = () => {
         try {
             const response = await comprehensiveInvoiceService.getCustomerInvoices({
                 customerId: selectedCustomerId || undefined,
-                status: selectedStatus || undefined,
+                status: selectedStatus && selectedStatus !== '__all__' ? selectedStatus : undefined,
                 search: searchTerm || undefined
             });
 
@@ -215,17 +214,21 @@ const ComprehensiveInvoicesPage: React.FC = () => {
 
     const handleCreateInvoice = async () => {
         try {
-            if (!invoiceFormData.customerId || invoiceFormData.lineItems.length === 0) {
-                toast.error(ERROR_MESSAGES.REQUIRED_FIELDS_MISSING);
+            if (!invoiceFormData.customerId || invoiceFormData.customerId === '__none__') {
+                toast.error('Please select a customer');
+                return;
+            }
+            if (invoiceFormData.lineItems.length === 0) {
+                toast.error('Please add at least one line item');
                 return;
             }
 
             const validLineItems = invoiceFormData.lineItems.filter(item =>
-                item.productId && item.quantity && item.unitPrice
+                item.productId && item.productId !== '__none__' && item.quantity && item.unitPrice
             );
 
             if (validLineItems.length === 0) {
-                toast.error('Please add at least one line item');
+                toast.error('Each line needs a product, quantity, and unit price');
                 return;
             }
 
@@ -255,14 +258,19 @@ const ComprehensiveInvoicesPage: React.FC = () => {
 
     const handleRecordPayment = async () => {
         try {
-            if (!paymentFormData.customerId || !paymentFormData.amount || parseFloat(paymentFormData.amount.toString()) <= 0) {
-                toast.error(ERROR_MESSAGES.REQUIRED_FIELDS_MISSING);
+            if (!paymentFormData.customerId) {
+                toast.error('Please select a customer');
+                return;
+            }
+            const amount = parseFloat(paymentFormData.amount.toString());
+            if (!Number.isFinite(amount) || amount <= 0) {
+                toast.error('Please enter a valid payment amount greater than zero');
                 return;
             }
 
             const response = await customerPaymentService.createCustomerPayment({
                 ...paymentFormData,
-                amount: parseFloat(paymentFormData.amount.toString())
+                amount
             });
 
             if (response.success) {
@@ -454,12 +462,15 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                 </div>
 
                 <div className="w-full sm:w-48">
-                    <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+                    <Select
+                        value={selectedCustomerId || '__all__'}
+                        onValueChange={(v) => setSelectedCustomerId(v === '__all__' ? '' : v)}
+                    >
                         <SelectTrigger>
                             <SelectValue placeholder="All customers" />
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="">All customers</SelectItem>
+                            <SelectItem value="__all__">All customers</SelectItem>
                             {customers.map(customer => (
                                 <SelectItem key={customer.id} value={customer.id}>
                                     {customer.name}
@@ -703,13 +714,19 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                             <Label htmlFor="customer" className="text-right">Customer</Label>
                             <div className="col-span-3">
                                 <Select
-                                    value={invoiceFormData.customerId}
-                                    onValueChange={(value) => setInvoiceFormData(prev => ({ ...prev, customerId: value }))}
+                                    value={invoiceFormData.customerId || '__none__'}
+                                    onValueChange={(value) =>
+                                        setInvoiceFormData((prev) => ({
+                                            ...prev,
+                                            customerId: value === '__none__' ? '' : value,
+                                        }))
+                                    }
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Select customer" />
                                     </SelectTrigger>
                                     <SelectContent>
+                                        <SelectItem value="__none__">Select customer…</SelectItem>
                                         {customers.map(customer => (
                                             <SelectItem key={customer.id} value={customer.id}>
                                                 {customer.name}
@@ -740,13 +757,20 @@ const ComprehensiveInvoicesPage: React.FC = () => {
                                     <div key={index} className="grid grid-cols-12 gap-2 items-end">
                                         <div className="col-span-4">
                                             <Select
-                                                value={item.productId}
-                                                onValueChange={(value) => updateLineItem(index, 'productId', value)}
+                                                value={item.productId || '__none__'}
+                                                onValueChange={(value) =>
+                                                    updateLineItem(
+                                                        index,
+                                                        'productId',
+                                                        value === '__none__' ? '' : value,
+                                                    )
+                                                }
                                             >
                                                 <SelectTrigger>
                                                     <SelectValue placeholder="Select product" />
                                                 </SelectTrigger>
                                                 <SelectContent>
+                                                    <SelectItem value="__none__">Select product…</SelectItem>
                                                     {products.map(product => (
                                                         <SelectItem key={product.id} value={product.id}>
                                                             {product.name}

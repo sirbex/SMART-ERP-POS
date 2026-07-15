@@ -36,10 +36,11 @@ export class ReportPDFGenerator {
   private contentWidth: number;
   private companyName: string = 'SMART ERP';
 
-  constructor(companyName?: string) {
+  constructor(companyName?: string, options?: { layout?: 'portrait' | 'landscape' }) {
     this.doc = new PDFDocument({
       margin: this.margin,
       size: 'A4',
+      layout: options?.layout ?? 'portrait',
       bufferPages: true,
       autoFirstPage: true
     });

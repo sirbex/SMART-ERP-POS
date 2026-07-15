@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
 import { AxiosError } from 'axios';
 import SlideDrawer from '../ui/SlideDrawer';
+import { DatePicker } from '../ui/date-picker';
 import deliveryNotesApi from '../../api/deliveryNotes';
 import type { CreateDeliveryNoteLine } from '../../api/deliveryNotes';
 import { formatCurrency } from '../../utils/currency';
@@ -165,11 +166,10 @@ export default function CreateDeliveryNoteDrawer({
                 <div className="grid grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Date</label>
-                        <input
-                            type="date"
+                        <DatePicker
                             value={deliveryDate}
-                            onChange={(e) => setDeliveryDate(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                            onChange={setDeliveryDate}
+                            placeholder="Delivery date"
                         />
                     </div>
                     <div>

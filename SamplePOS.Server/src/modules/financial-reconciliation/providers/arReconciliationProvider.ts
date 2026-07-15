@@ -2,6 +2,7 @@ import {
   getArCacheLane,
   getArIntegrityLane,
   getArJournalAuditLane,
+  getArWriteoffExposureLane,
 } from '../../customer-payments/arReconciliationLanes.js';
 import type {
   FinancialLaneProvider,
@@ -59,7 +60,7 @@ function mapAuditJournals(
 
 export class ARReconciliationProvider implements FinancialLaneProvider {
   readonly domain = 'ar' as const;
-  readonly supportedLanes = ['integrity', 'cache', 'history'] as const;
+  readonly supportedLanes = ['integrity', 'cache', 'history', 'writeoff'] as const;
 
   async computeIntegrity(ctx: LaneContext): Promise<LaneComputation> {
     const legacy = await getArIntegrityLane(ctx.pool as Db, ctx.asOfDate);
@@ -113,6 +114,26 @@ export class ARReconciliationProvider implements FinancialLaneProvider {
         grossPosted: legacy.grossPosted,
         netActive: legacy.netActive,
         reversalImpact: legacy.reversalImpact,
+      },
+    };
+  }
+
+  async computeWriteoff(ctx: LaneContext): Promise<LaneComputation> {
+    const legacy = await getArWriteoffExposureLane(ctx.pool as Db, ctx.asOfDate);
+    return {
+      leftLabel: `Overdue open (≥${legacy.minAgeDays}d)`,
+      leftAmount: legacy.overdueOpen,
+      rightLabel: 'Write-offs YTD',
+      rightAmount: legacy.writeoffYtd,
+      difference: legacy.exposureDifference,
+      status: legacy.status,
+      details: {
+        overdueOpen: legacy.overdueOpen,
+        writeoffYtd: legacy.writeoffYtd,
+        exposureDifference: legacy.exposureDifference,
+        overdueLines: legacy.overdueLines,
+        writeoffDocs: legacy.writeoffDocs,
+        minAgeDays: legacy.minAgeDays,
       },
     };
   }

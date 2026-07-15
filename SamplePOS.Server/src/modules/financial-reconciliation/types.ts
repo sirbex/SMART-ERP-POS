@@ -4,10 +4,10 @@
  */
 import type { Pool, PoolClient } from 'pg';
 
-export type FinancialDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht';
+export type FinancialDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht' | 'vat';
 
 /** API lane slug (history = journal audit). */
-export type LaneKind = 'integrity' | 'cache' | 'history';
+export type LaneKind = 'integrity' | 'cache' | 'history' | 'quarantine' | 'writeoff';
 
 export type LaneSeverity = 'critical' | 'maintenance' | 'informational';
 
@@ -86,6 +86,10 @@ export interface FinancialLaneProvider {
   computeIntegrity(ctx: LaneContext): Promise<LaneComputation>;
   computeCache?(ctx: LaneContext): Promise<LaneComputation>;
   computeAudit(ctx: LaneContext): Promise<LaneComputation>;
+  /** Inventory quarantine BS exposure (ADR-004 Phase 2D). */
+  computeQuarantine?(ctx: LaneContext): Promise<LaneComputation>;
+  /** AR overdue vs write-off YTD exposure (ADR-006 Phase 4D). */
+  computeWriteoff?(ctx: LaneContext): Promise<LaneComputation>;
 }
 
 export interface DomainLaneSummary {

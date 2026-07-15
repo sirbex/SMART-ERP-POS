@@ -112,6 +112,7 @@ export function buildTowerDomainStatuses(
         { domain: 'inventory', accountCode: '1300' },
         { domain: 'cash', accountCode: '1010' },
         { domain: 'wht', accountCode: '2350' },
+        { domain: 'vat', accountCode: '2300' },
     ];
 
     return domains.map(({ domain, accountCode }) => {

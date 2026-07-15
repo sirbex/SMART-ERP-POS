@@ -15,6 +15,7 @@ import { formatCurrency } from '../../../utils/currency';
 import apiClient from '../../../utils/api';
 import { downloadFile } from '../../../utils/download';
 import { getBusinessDate } from '../../../utils/businessDate';
+import { DatePicker } from '../../../components/ui/date-picker';
 
 interface DriftRow {
   productId: string;
@@ -71,11 +72,10 @@ export default function InventoryReconciliationReportPage() {
 
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-sm text-gray-600">As of</label>
-          <input
-            type="date"
+          <DatePicker
             value={asOfDate}
-            onChange={(e) => setAsOfDate(e.target.value)}
-            className="border rounded px-2 py-1 text-sm"
+            onChange={setAsOfDate}
+            placeholder="As of"
           />
           {data && (
             <button

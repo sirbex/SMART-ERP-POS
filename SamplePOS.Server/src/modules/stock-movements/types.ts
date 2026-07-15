@@ -69,6 +69,9 @@ export interface StockMovement {
   notes: string | null;
   createdById: string | null;
   createdAt: Date;
+  /** ADR-004 classifier (nullable until backfill) */
+  economicEvent?: string | null;
+  postsGl?: boolean | null;
 }
 
 /**
@@ -111,4 +114,7 @@ export interface RecordMovementData {
   referenceId?: string | null;
   notes?: string | null;
   createdBy?: string | null;
+  /** ADR-004 Phase 2A */
+  economicEvent?: string | null;
+  postsGl?: boolean | null;
 }

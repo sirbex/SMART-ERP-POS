@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatTimestampDate } from '../../utils/businessDate';
 import Layout from '../../components/Layout';
+import { DatePicker } from '../../components/ui/date-picker';
 import { apiClient } from '../../utils/api';
 import type { ApiResponse } from '../../utils/api';
 
@@ -401,7 +402,7 @@ function EmployeesTab() {
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-600 mb-1">Hire Date *</label>
-                            <input type="date" value={form.hireDate} onChange={(e) => setForm(f => ({ ...f, hireDate: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                            <DatePicker value={form.hireDate} onChange={(v) => setForm(f => ({ ...f, hireDate: v }))} placeholder="Hire date" />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
@@ -552,11 +553,11 @@ function PayrollTab() {
                     <div className="flex gap-3 items-end">
                         <div>
                             <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
-                            <input type="date" value={periodForm.startDate} onChange={(e) => setPeriodForm(f => ({ ...f, startDate: e.target.value }))} className="border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                            <DatePicker value={periodForm.startDate} onChange={(v) => setPeriodForm(f => ({ ...f, startDate: v }))} placeholder="Start date" />
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
-                            <input type="date" value={periodForm.endDate} onChange={(e) => setPeriodForm(f => ({ ...f, endDate: e.target.value }))} className="border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                            <DatePicker value={periodForm.endDate} onChange={(v) => setPeriodForm(f => ({ ...f, endDate: v }))} placeholder="End date" />
                         </div>
                         <button onClick={() => createPeriodMut.mutate()} disabled={!periodForm.startDate || !periodForm.endDate || createPeriodMut.isPending} className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
                             {createPeriodMut.isPending ? 'Creating...' : 'Create'}

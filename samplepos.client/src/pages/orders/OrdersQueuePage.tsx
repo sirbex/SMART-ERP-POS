@@ -4,10 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
-import { useAuth } from '../../hooks/useAuth';
+import { useHasPermission } from '../../authorization/useAuthorization';
 import { BUSINESS_TIMEZONE } from '../../utils/businessDate';
 import { toast } from 'react-hot-toast';
-
 // ── Types ────────────────────────────────────────────────────────────
 
 interface PendingOrder {
@@ -35,7 +34,8 @@ interface PendingOrder {
 export default function OrdersQueuePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { permissions } = useAuth();
+  const canPay = useHasPermission('orders.pay');
+  const canCancel = useHasPermission('orders.cancel');
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
 
@@ -109,9 +109,6 @@ export default function OrdersQueuePage() {
       return '';
     }
   };
-
-  const canPay = permissions.has('orders.pay');
-  const canCancel = permissions.has('orders.cancel');
 
   return (
     <Layout>

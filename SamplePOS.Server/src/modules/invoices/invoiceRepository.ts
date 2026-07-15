@@ -323,7 +323,7 @@ export const invoiceRepository = {
   },
 
   /**
-   * Settlement on an invoice: cash payments plus posted credit/debit notes on the same invoice.
+   * Settlement on an invoice: cash payments + posted credit/debit notes + posted AR write-offs.
    */
   async getInvoiceSettlement(
     pool: Pool | PoolClient,
@@ -334,7 +334,8 @@ export const invoiceRepository = {
          i.total_amount,
          COALESCE(pay.cash_paid, 0) AS cash_paid,
          COALESCE(cn.cn_amount, 0) AS cn_amount,
-         COALESCE(dn.dn_amount, 0) AS dn_amount
+         COALESCE(dn.dn_amount, 0) AS dn_amount,
+         COALESCE(wo.writeoff_amount, 0) AS writeoff_amount
        FROM invoices i
        LEFT JOIN (
          SELECT ip.invoice_id, SUM(ip.amount) AS cash_paid
@@ -369,6 +370,16 @@ export const invoiceRepository = {
            AND status = 'POSTED'
          GROUP BY reference_invoice_id
        ) dn ON dn.reference_invoice_id = i.id
+       LEFT JOIN (
+         SELECT l.invoice_id, SUM(l.writeoff_amount) AS writeoff_amount
+         FROM ar_writeoff_lines l
+         JOIN ar_writeoff_documents d ON d.id = l.writeoff_document_id
+         WHERE l.invoice_id = $1
+           AND d.status = 'POSTED'
+           AND d.reversed_by_document_id IS NULL
+           AND d.reverses_document_id IS NULL
+         GROUP BY l.invoice_id
+       ) wo ON wo.invoice_id = i.id
        WHERE i.id = $1`,
       [invoiceId],
     );
@@ -377,7 +388,8 @@ export const invoiceRepository = {
     const total = Money.parseDb(res.rows[0].total_amount);
     const settled = Money.parseDb(res.rows[0].cash_paid)
       .plus(Money.parseDb(res.rows[0].cn_amount))
-      .minus(Money.parseDb(res.rows[0].dn_amount));
+      .minus(Money.parseDb(res.rows[0].dn_amount))
+      .plus(Money.parseDb(res.rows[0].writeoff_amount));
     const amountPaid = Money.min(total, Money.max(settled, Money.zero()));
     const amountDue = Money.max(Money.zero(), Money.subtract(total, amountPaid));
 

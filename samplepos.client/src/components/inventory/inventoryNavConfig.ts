@@ -41,6 +41,7 @@ export const STORE_NETWORK_ROUTE_PREFIXES = [
   '/inventory/store-transfers',
   '/inventory/stock-counts',
   '/inventory/transfer-approvals',
+  '/inventory/quarantine',
 ] as const;
 
 /** Core operational tabs — single-store and multistore. */
@@ -83,6 +84,15 @@ export const INVENTORY_MORE_NAV: InventoryNavItem[] = [
     icon: '🧪',
     group: 'operations',
     description: 'Lot numbers, expiry dates, and FEFO batch traceability',
+  },
+  {
+    id: 'quarantine',
+    label: 'Quarantine',
+    path: '/inventory/quarantine',
+    icon: '🚧',
+    group: 'operations',
+    multistoreOnly: true,
+    description: 'DAMAGE / EXPIRED / RETURN stock aging — still on inventory until dispose',
   },
   {
     id: 'stock-movements',
@@ -144,6 +154,13 @@ export const STORE_NETWORK_NAV: InventoryNavItem[] = [
     label: 'Stock Counts',
     path: '/inventory/stock-counts',
     icon: '🔢',
+    requiredPermissions: WAREHOUSE_NETWORK_READ_PERMISSIONS,
+  },
+  {
+    id: 'quarantine',
+    label: 'Quarantine',
+    path: '/inventory/quarantine',
+    icon: '🚧',
     requiredPermissions: WAREHOUSE_NETWORK_READ_PERMISSIONS,
   },
   {

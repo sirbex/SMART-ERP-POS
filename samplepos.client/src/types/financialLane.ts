@@ -1,6 +1,6 @@
 /** Shared financial lane contract (mirrors server FinancialLaneResult). */
-export type FinancialDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht';
-export type LaneKind = 'integrity' | 'cache' | 'history';
+export type FinancialDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht' | 'vat';
+export type LaneKind = 'integrity' | 'cache' | 'history' | 'quarantine' | 'writeoff';
 export type LaneSeverity = 'critical' | 'maintenance' | 'informational';
 export type LaneStatus =
     | 'RECONCILED'
@@ -59,12 +59,14 @@ export interface DomainLaneSummary {
 }
 
 export function laneStatusLabel(lane: FinancialLaneResult): string {
-    if (lane.lane === 'history') return 'Informational';
+    if (lane.lane === 'history' || lane.lane === 'quarantine' || lane.lane === 'writeoff') {
+        return 'Informational';
+    }
     if (lane.lane === 'integrity') {
         return lane.status === 'RECONCILED' ? 'Reconciled' : 'Investigate';
     }
     if (lane.lane === 'cache') {
-        return lane.status === 'HEALTHY' ? 'Healthy' : 'Cache drift';
+        return lane.status === 'HEALTHY' ? 'Up to date' : 'Needs refresh';
     }
     return lane.status;
 }

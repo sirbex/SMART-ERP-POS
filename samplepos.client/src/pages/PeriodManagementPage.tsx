@@ -4,6 +4,7 @@ import type { GuardHandle } from '../hooks/useTransactionGuard';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Calendar, Lock, Unlock, RefreshCw, CheckCircle, AlertTriangle, History, X, Plus } from 'lucide-react';
 import { formatTimestamp } from '../utils/businessDate';
+import { DatePicker } from '../components/ui/date-picker';
 
 // Auth helper for fetch calls
 const authHeaders = (): HeadersInit => {
@@ -318,22 +319,20 @@ export default function PeriodManagementPage() {
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-                            <input
-                                type="date"
+                            <DatePicker
                                 value={specialForm.startDate}
-                                onChange={(e) => setSpecialForm({ ...specialForm, startDate: e.target.value })}
+                                onChange={(v) => setSpecialForm({ ...specialForm, startDate: v })}
                                 required
-                                className="w-full px-3 py-2 border rounded-lg text-sm"
+                                placeholder="Start date"
                             />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-                            <input
-                                type="date"
+                            <DatePicker
                                 value={specialForm.endDate}
-                                onChange={(e) => setSpecialForm({ ...specialForm, endDate: e.target.value })}
+                                onChange={(v) => setSpecialForm({ ...specialForm, endDate: v })}
                                 required
-                                className="w-full px-3 py-2 border rounded-lg text-sm"
+                                placeholder="End date"
                             />
                         </div>
                         <div className="md:col-span-3 flex justify-end gap-2">

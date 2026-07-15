@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useDunningLevels, useCreateDunningLevel, useDunningAnalysis } from '../../hooks/useAccountingModules';
-import { AlertTriangle, Plus, Search, X } from 'lucide-react';
 import { getBusinessDate } from '../../utils/businessDate';
+import { DatePicker } from '../../components/ui/date-picker';
+import { AlertTriangle, Plus, Search, X } from 'lucide-react';
 
 interface DunningLevel {
   id: string;
@@ -224,11 +225,10 @@ export default function DunningPage() {
         <div className="flex items-end gap-4 mb-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">As of Date</label>
-            <input
-              type="date"
+            <DatePicker
               value={analysisDate}
-              onChange={(e) => setAnalysisDate(e.target.value)}
-              className="px-3 py-2 border rounded-lg text-sm"
+              onChange={setAnalysisDate}
+              placeholder="As of date"
             />
           </div>
           <button

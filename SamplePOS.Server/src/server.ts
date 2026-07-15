@@ -70,6 +70,9 @@ import { grirClearingRoutes } from './modules/grir-clearing/grirClearingRoutes.j
 import { downPaymentClearingRoutes } from './modules/down-payment-clearing/clearingRoutes.js';
 import { dunningRoutes } from './modules/dunning/dunningRoutes.js';
 import { whtRoutes } from './modules/withholding-tax/whtRoutes.js';
+import { vatRemittanceRoutes } from './modules/vat-remittance/vatRemittanceRoutes.js';
+import { badDebtRoutes } from './modules/bad-debt/badDebtRoutes.js';
+import { treasuryRoutes } from './modules/treasury/treasuryRoutes.js';
 import { assetRoutes } from './modules/asset-accounting/assetRoutes.js';
 import { jeApprovalRoutes } from './modules/je-approval/jeApprovalRoutes.js';
 import { paymentProgramRoutes } from './modules/payment-program/paymentProgramRoutes.js';
@@ -427,6 +430,9 @@ app.use('/api/period-control', requireFeature('accounting'), periodControlRoutes
 app.use('/api/grir-clearing', requireFeature('accounting'), grirClearingRoutes);
 app.use('/api/dunning', requireFeature('accounting'), dunningRoutes);
 app.use('/api/withholding-tax', requireFeature('accounting'), whtRoutes);
+app.use('/api/vat-remittance', requireFeature('accounting'), vatRemittanceRoutes);
+app.use('/api/bad-debt', requireFeature('accounting'), badDebtRoutes);
+app.use('/api/treasury', requireFeature('accounting'), treasuryRoutes);
 app.use('/api/assets', requireFeature('accounting'), assetRoutes);
 app.use('/api/je-approval', requireFeature('accounting'), jeApprovalRoutes);
 app.use('/api/payment-program', requireFeature('accounting'), paymentProgramRoutes);

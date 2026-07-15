@@ -6,8 +6,7 @@ import { useTenant } from '../contexts/TenantContext';
 import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
 import ServerClock from './ServerClock';
 import { CASHIER_NAV_ITEMS, isCashierRole } from '../utils/cashierLockdown';
-import { legacyRoleGrantsPermission } from '@shared/authorization/legacyRoleFallback';
-
+import { createClientAuthorization } from '../authorization/authorizationService';
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -68,21 +67,19 @@ export default function Layout({ children }: LayoutProps) {
     }
 
     const items = [...navItems, ...adminNavItems];
-    const useLegacy = permissions.size === 0;
-    return items.filter(item => {
+    // Same engine as ProtectedRoute: ADMIN always allowed; RBAC set otherwise;
+    // legacy role fallback only when the permission set is empty.
+    const authz = createClientAuthorization(user, permissions);
+    return items.filter((item) => {
       if (item.feature) {
         if (tenantLoading) return false;
         if (planFeatures.length > 0 && !planFeatures.includes(item.feature)) return false;
       }
       if (!item.permissions) return true;
-      if (item.permissions.some(p => permissions.has(p))) return true;
-      if (useLegacy && item.permissions.some(p => legacyRoleGrantsPermission(user?.role, p))) {
-        return true;
-      }
-      return false;
+      if (!authz) return false;
+      return item.permissions.some((p) => authz.hasPermission(p));
     });
-  }, [user?.role, permissions, planFeatures, tenantLoading]);
-
+  }, [user, permissions, planFeatures, tenantLoading]);
   const handleLogout = () => {
     logout();
     navigate('/login');

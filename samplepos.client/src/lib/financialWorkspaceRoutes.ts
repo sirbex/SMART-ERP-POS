@@ -62,6 +62,8 @@ export function domainReconciliationPath(
             return bankReconciliationPath(asOfDate);
         case 'wht':
             return withQuery('/accounting/withholding-tax', { asOfDate });
+        case 'vat':
+            return withQuery('/reports/tax-compliance', { asOfDate });
         default:
             return FINANCIAL_CONTROL_TOWER;
     }

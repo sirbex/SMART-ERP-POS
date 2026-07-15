@@ -2821,11 +2821,10 @@ export default function GoodsReceiptsPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Invoice Date
                   </label>
-                  <input
-                    type="date"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  <DatePicker
                     value={billPrompt.invoiceDate}
-                    onChange={(e) => setBillPrompt(prev => prev ? { ...prev, invoiceDate: e.target.value } : prev)}
+                    onChange={(v) => setBillPrompt(prev => prev ? { ...prev, invoiceDate: v } : prev)}
+                    placeholder="Invoice date"
                   />
                 </div>
 
@@ -3337,8 +3336,12 @@ function AddGRItemForm({
           {selectedProduct?.trackExpiry ? (
             <>
               <label className="block text-xs font-medium text-gray-700 mb-1">Expiry Date</label>
-              <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} min={getBusinessDate()}
-                className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-green-500" />
+              <DatePicker
+                value={expiryDate}
+                onChange={setExpiryDate}
+                minDate={new Date(getBusinessDate())}
+                placeholder="Expiry date"
+              />
             </>
           ) : (
             <>
@@ -3603,7 +3606,7 @@ function GRItemRow({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  const expiryInput = document.querySelector(`[data-gr-expiry-idx="${itemIndex}"]`) as HTMLInputElement;
+                  const expiryInput = document.getElementById(`gr-expiry-${itemIndex}`);
                   expiryInput?.focus();
                 }
               }}
@@ -3614,23 +3617,14 @@ function GRItemRow({
             )}
           </div>
           <div className={trackExpiry ? 'flex-1' : 'hidden'}>
-            <input
-              type="date"
-              data-gr-expiry-idx={itemIndex}
-              className={`w-full border rounded px-2 py-1 text-sm ${expiryError ? 'border-red-500' : 'focus:ring-2 focus:ring-blue-400 focus:border-blue-400'}`}
+            <DatePicker
+              id={`gr-expiry-${itemIndex}`}
+              className={expiryError ? 'border-red-500' : undefined}
               value={es.expiryDate ?? (item.expiryDate ? String(item.expiryDate).slice(0, 10) : '') ?? ''}
               disabled={disabled}
-              min={getBusinessDate()}
-              onChange={(e) => onFieldChange(item.id, 'expiryDate', e.target.value || undefined)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  if (itemIndex + 1 < totalItems) {
-                    const nextReceived = document.querySelector(`[data-gr-received-idx="${itemIndex + 1}"]`) as HTMLInputElement;
-                    nextReceived?.focus();
-                  }
-                }
-              }}
+              minDate={new Date(getBusinessDate())}
+              onChange={(v) => onFieldChange(item.id, 'expiryDate', v || undefined)}
+              placeholder="Expiry date"
             />
             {expiryError && <div className="text-xs text-red-600 mt-0.5">{expiryError}</div>}
           </div>

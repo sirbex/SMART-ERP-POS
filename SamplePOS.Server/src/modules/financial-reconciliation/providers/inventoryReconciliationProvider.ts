@@ -2,6 +2,7 @@ import {
   getInventoryCacheLane,
   getInventoryIntegrityLane,
   getInventoryJournalAuditLane,
+  getInventoryQuarantineLane,
 } from '../../inventory/inventoryReconciliationLanes.js';
 import type {
   FinancialLaneProvider,
@@ -58,14 +59,14 @@ function mapAuditJournals(
 
 export class InventoryReconciliationProvider implements FinancialLaneProvider {
   readonly domain = 'inventory' as const;
-  readonly supportedLanes = ['integrity', 'cache', 'history'] as const;
+  readonly supportedLanes = ['integrity', 'cache', 'history', 'quarantine'] as const;
 
   async computeIntegrity(ctx: LaneContext): Promise<LaneComputation> {
     const legacy = await getInventoryIntegrityLane(ctx.pool as Db, ctx.asOfDate);
     return {
-      leftLabel: 'GL (Net Active)',
+      leftLabel: 'General Ledger Balance',
       leftAmount: legacy.glNetActive,
-      rightLabel: 'Batch Subledger',
+      rightLabel: 'Inventory Valuation',
       rightAmount: legacy.batchSubledger,
       difference: legacy.integrityDifference,
       status: legacy.status,
@@ -77,9 +78,9 @@ export class InventoryReconciliationProvider implements FinancialLaneProvider {
   async computeCache(ctx: LaneContext): Promise<LaneComputation> {
     const legacy = await getInventoryCacheLane(ctx.pool as Db, ctx.asOfDate);
     return {
-      leftLabel: 'Batch Subledger',
+      leftLabel: 'Inventory Valuation',
       leftAmount: legacy.batchSubledger,
-      rightLabel: 'Product Cache',
+      rightLabel: 'Stored Product Values',
       rightAmount: legacy.productCacheBalance,
       difference: legacy.cacheDifference,
       status: legacy.status,
@@ -95,9 +96,9 @@ export class InventoryReconciliationProvider implements FinancialLaneProvider {
   async computeAudit(ctx: LaneContext): Promise<LaneComputation> {
     const legacy = await getInventoryJournalAuditLane(ctx.pool as Db, ctx.asOfDate);
     return {
-      leftLabel: 'Gross Posted',
+      leftLabel: 'Total Posted Amount',
       leftAmount: legacy.grossPosted,
-      rightLabel: 'Net Active',
+      rightLabel: 'Active Balance',
       rightAmount: legacy.netActive,
       difference: legacy.reversalImpact,
       status: legacy.status,
@@ -107,6 +108,20 @@ export class InventoryReconciliationProvider implements FinancialLaneProvider {
         netActive: legacy.netActive,
         reversalImpact: legacy.reversalImpact,
       },
+    };
+  }
+
+  async computeQuarantine(ctx: LaneContext): Promise<LaneComputation> {
+    const legacy = await getInventoryQuarantineLane(ctx.pool as Db, ctx.asOfDate);
+    return {
+      leftLabel: 'Quarantine stock value (still on GL 1300)',
+      leftAmount: legacy.quarantineExposure,
+      rightLabel: 'Recognized via disposal',
+      rightAmount: 0,
+      difference: legacy.quarantineExposure,
+      status: legacy.status,
+      exceptions: mapProductExceptions(legacy.exceptions),
+      details: legacy.details,
     };
   }
 }

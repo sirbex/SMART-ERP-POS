@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
+import { DatePicker } from '../../components/ui/date-picker';
 import { formatCurrency } from '../../utils/currency';
 import apiClient from '../../utils/api';
 import { downloadFile } from '../../utils/download';
@@ -369,20 +370,18 @@ export default function CategoryIntelligencePage() {
                         <div className="flex flex-wrap items-center gap-3">
                             <div className="flex items-center gap-2">
                                 <label className="text-sm text-gray-600">From</label>
-                                <input
-                                    type="date"
+                                <DatePicker
                                     value={startDate}
-                                    onChange={(e) => setStartDate(e.target.value)}
-                                    className="border rounded px-2 py-1 text-sm"
+                                    onChange={setStartDate}
+                                    placeholder="From"
                                 />
                             </div>
                             <div className="flex items-center gap-2">
                                 <label className="text-sm text-gray-600">To</label>
-                                <input
-                                    type="date"
+                                <DatePicker
                                     value={endDate}
-                                    onChange={(e) => setEndDate(e.target.value)}
-                                    className="border rounded px-2 py-1 text-sm"
+                                    onChange={setEndDate}
+                                    placeholder="To"
                                 />
                             </div>
                         </div>

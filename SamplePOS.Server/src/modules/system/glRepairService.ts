@@ -389,6 +389,7 @@ async function repairSupplierPayments(pool: pg.Pool): Promise<RepairTypeResult> 
 async function repairStockMovements(pool: pg.Pool): Promise<RepairTypeResult> {
     const result: RepairTypeResult = { found: 0, reposted: 0, skipped: 0, errors: [] };
 
+    // LQ-INV-8: never invent GL for quarantine-only audits (posts_gl=false / QUARANTINE_TRANSFER)
     const rows = await pool.query(`
     SELECT
       sm.id,
@@ -398,11 +399,21 @@ async function repairStockMovements(pool: pg.Pool): Promise<RepairTypeResult> {
       sm.quantity,
       sm.unit_cost,
       sm.created_at,
+      sm.reference_type,
+      sm.notes,
+      sm.economic_event,
+      sm.posts_gl,
       p.name AS product_name
     FROM stock_movements sm
     LEFT JOIN products p ON p.id = sm.product_id
     WHERE sm.movement_type IN ('ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY')
       AND sm.unit_cost > 0
+      AND NOT (
+        sm.posts_gl IS FALSE
+        OR sm.economic_event = 'QUARANTINE_TRANSFER'
+        OR UPPER(COALESCE(sm.reference_type, '')) = 'EXPIRY_AUTOMATION'
+        OR LOWER(COALESCE(sm.notes, '')) LIKE '%internal quarantine transfer%'
+      )
       AND NOT EXISTS (
         SELECT 1 FROM ledger_transactions lt
         WHERE lt."ReferenceType" = 'STOCK_MOVEMENT'
@@ -415,6 +426,22 @@ async function repairStockMovements(pool: pg.Pool): Promise<RepairTypeResult> {
     result.found = rows.rows.length;
 
     for (const sm of rows.rows) {
+        const { shouldSkipGlRepairForMovement } = await import(
+            '@shared/loss-quarantine/index.js'
+        );
+        if (
+            shouldSkipGlRepairForMovement({
+                movementType: sm.movement_type,
+                referenceType: sm.reference_type,
+                notes: sm.notes,
+                economicEvent: sm.economic_event,
+                postsGl: sm.posts_gl,
+            })
+        ) {
+            result.skipped++;
+            continue;
+        }
+
         const movementValue = new Decimal(sm.quantity).abs().times(new Decimal(sm.unit_cost)).toNumber();
         if (movementValue <= 0) {
             result.skipped++;
@@ -704,6 +731,12 @@ export async function runGLIntegrityCheck(dbPool?: pg.Pool): Promise<GLIntegrity
       (SELECT COUNT(*) FROM stock_movements sm
        WHERE sm.movement_type IN ('ADJUSTMENT_IN','ADJUSTMENT_OUT','DAMAGE','EXPIRY')
          AND sm.unit_cost > 0
+         AND NOT (
+           sm.posts_gl IS FALSE
+           OR sm.economic_event = 'QUARANTINE_TRANSFER'
+           OR UPPER(COALESCE(sm.reference_type, '')) = 'EXPIRY_AUTOMATION'
+           OR LOWER(COALESCE(sm.notes, '')) LIKE '%internal quarantine transfer%'
+         )
          AND NOT EXISTS (
            SELECT 1 FROM ledger_transactions lt
            WHERE lt."ReferenceType" = 'STOCK_MOVEMENT' AND lt."ReferenceId" = sm.id
@@ -1059,6 +1092,12 @@ export interface RecalcCustomerBalancesResult {
     durationMs: number;
 }
 
+/**
+ * Recalc all customer.balance caches from open-item SSOT (includes posted AR write-offs).
+ *
+ * ADR-006 / BD-INV-3/6: never invents AR_WRITEOFF journals; never reopens invoices that
+ * were written off — settlement already counts ar_writeoff_lines as paid.
+ */
 export async function recalcAllCustomerBalances(
     dbPool?: pg.Pool,
 ): Promise<RecalcCustomerBalancesResult> {

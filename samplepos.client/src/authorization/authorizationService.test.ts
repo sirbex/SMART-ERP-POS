@@ -21,6 +21,15 @@ describe('ClientAuthorizationService', () => {
     expect(authz.hasPermission('inventory.adjust')).toBe(false);
   });
 
+  it('ADMIN is allowed even when RBAC set is incomplete (missing orders.*)', () => {
+    const authz = createClientAuthorization(
+      { id: 'u1', role: 'ADMIN' },
+      new Set(['pos.read', 'sales.read', 'admin.update'])
+    )!;
+    expect(authz.hasPermission('orders.read')).toBe(true);
+    expect(authz.hasPermission('orders.pay')).toBe(true);
+  });
+
   it('renamed role with permissions does not need role name match', () => {
     // "Front Desk" is not a legacy role — but permissions drive access
     const authz = createClientAuthorization(

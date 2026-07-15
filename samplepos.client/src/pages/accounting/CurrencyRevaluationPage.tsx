@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useRevaluationPreview, useExecuteRevaluation } from '../../hooks/useAccountingModules';
 import { ArrowRightLeft, Loader2, TrendingUp, TrendingDown, Globe } from 'lucide-react';
 import { getBusinessDate } from '../../utils/businessDate';
+import { DatePicker } from '../../components/ui/date-picker';
 
 interface CurrencyBalance {
   accountCode: string;
@@ -52,11 +53,10 @@ export default function CurrencyRevaluationPage() {
       <div className="bg-white rounded-lg shadow p-4 flex items-center gap-6">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Revaluation Date</label>
-          <input
-            type="date"
+          <DatePicker
             value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="border rounded-md px-3 py-2 text-sm"
+            onChange={setDate}
+            placeholder="Revaluation date"
           />
         </div>
         <label className="flex items-center gap-2 text-sm">

@@ -514,8 +514,8 @@ export class GLReconciliationService {
       }
 
       await client.query(
-        `INSERT INTO audit_log (id, action, entity_type, entity_id, user_id, action_details)
-         VALUES ($1, 'UPDATE', 'SETTINGS', 'lock_dates', $2, $3)`,
+        `INSERT INTO audit_log (id, action, entity_type, entity_id, entity_number, user_id, action_details)
+         VALUES ($1, 'UPDATE', 'SETTINGS', NULL, 'lock_dates', $2, $3)`,
         [uuidv4(), userId, JSON.stringify(config)]
       );
 

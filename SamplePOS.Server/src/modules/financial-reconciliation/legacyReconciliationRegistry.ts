@@ -53,7 +53,7 @@ export const LEGACY_RECONCILIATION_SURFACES: LegacyReconciliationSurface[] = [
     kind: 'endpoint',
     pathOrSymbol: 'GET /api/erp-accounting/reconciliation/inventory',
     description: 'Detailed inventory reconciliation report (legacy response shape)',
-    successor: 'GET /api/erp-accounting/reconciliation/inventory/{integrity,cache,history}',
+    successor: 'GET /api/erp-accounting/reconciliation/inventory/{integrity,cache,history,quarantine}',
     implementation: 'legacy-shape-ssot',
     sunsetPhase: 'F',
   },

@@ -6,6 +6,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import toast from 'react-hot-toast';
 import Layout from '../../components/Layout';
+import { DatePicker } from '../../components/ui/date-picker';
 import {
   usePriceRules,
   useCreatePriceRule,
@@ -763,20 +764,19 @@ export default function PriceRulesPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Valid From</label>
-                  <input
-                    type="date"
+                  <DatePicker
                     value={formData.validFrom ?? ''}
-                    onChange={e => setFormData(f => ({ ...f, validFrom: e.target.value || undefined }))}
-                    className="w-full border rounded-md px-3 py-2 text-sm"
+                    onChange={(v) => setFormData(f => ({ ...f, validFrom: v || undefined }))}
+                    placeholder="Valid from"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Valid Until</label>
-                  <input
-                    type="date"
+                  <DatePicker
                     value={formData.validUntil ?? ''}
-                    onChange={e => setFormData(f => ({ ...f, validUntil: e.target.value || undefined }))}
-                    className={`w-full border rounded-md px-3 py-2 text-sm ${formErrors.validUntil ? 'border-red-500' : ''}`}
+                    onChange={(v) => setFormData(f => ({ ...f, validUntil: v || undefined }))}
+                    placeholder="Valid until"
+                    className={formErrors.validUntil ? 'border-red-500' : undefined}
                   />
                   {formErrors.validUntil && (
                     <p className="text-red-500 text-xs mt-1">{formErrors.validUntil}</p>

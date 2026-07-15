@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { usePeriodsByYear, useOpenPeriod, useClosePeriod, useCreateSpecialPeriod } from '../../hooks/useAccountingModules';
 import { Calendar, Lock, Unlock, Plus, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { DatePicker } from '../../components/ui/date-picker';
 
 interface Period {
   id: string;
@@ -98,22 +99,20 @@ export default function PeriodControlPage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-              <input
-                type="date"
+              <DatePicker
                 value={form.startDate}
-                onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+                onChange={(v) => setForm({ ...form, startDate: v })}
                 required
-                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="Start date"
               />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">End Date</label>
-              <input
-                type="date"
+              <DatePicker
                 value={form.endDate}
-                onChange={(e) => setForm({ ...form, endDate: e.target.value })}
+                onChange={(v) => setForm({ ...form, endDate: v })}
                 required
-                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder="End date"
               />
             </div>
             <div className="md:col-span-3 flex justify-end gap-2">

@@ -60,6 +60,12 @@ export interface SystemSettings {
     // Multi-Store Warehouse Network (default false — legacy single-store behaviour)
     isMultistoreEnabled: boolean;
 
+    /** ADR-003 Phase 1A — Treasury Document domain (default false) */
+    treasuryDocumentEnabled: boolean;
+
+    /** ADR-004 Phase 2A — Loss & Quarantine disposal documents (default false) */
+    lossQuarantineDocumentEnabled: boolean;
+
     // Transfer workflow policy (Phase E)
     transferPolicyRequireApprovalAll: boolean;
     transferPolicyAllowDirect: boolean;
@@ -115,6 +121,8 @@ export interface SystemSettingsDbRow {
     low_stock_alerts_enabled: boolean;
     low_stock_threshold: number;
     is_multistore_enabled: boolean;
+    treasury_document_enabled?: boolean;
+    loss_quarantine_document_enabled?: boolean;
     transfer_policy_require_approval_all: boolean;
     transfer_policy_allow_direct: boolean;
     transfer_policy_value_threshold: string | null;
@@ -162,6 +170,8 @@ export interface UpdateSystemSettingsDto {
     lowStockAlertsEnabled?: boolean;
     lowStockThreshold?: number;
     isMultistoreEnabled?: boolean;
+    treasuryDocumentEnabled?: boolean;
+    lossQuarantineDocumentEnabled?: boolean;
     transferPolicyRequireApprovalAll?: boolean;
     transferPolicyAllowDirect?: boolean;
     transferPolicyValueThreshold?: number | null;
@@ -209,6 +219,8 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
         lowStockAlertsEnabled: dbRow.low_stock_alerts_enabled,
         lowStockThreshold: dbRow.low_stock_threshold,
         isMultistoreEnabled: dbRow.is_multistore_enabled ?? false,
+        treasuryDocumentEnabled: dbRow.treasury_document_enabled ?? false,
+        lossQuarantineDocumentEnabled: dbRow.loss_quarantine_document_enabled ?? false,
         transferPolicyRequireApprovalAll: dbRow.transfer_policy_require_approval_all ?? true,
         transferPolicyAllowDirect: dbRow.transfer_policy_allow_direct ?? true,
         transferPolicyValueThreshold:

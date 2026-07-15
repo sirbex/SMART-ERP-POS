@@ -1138,6 +1138,21 @@ router.get(
 );
 
 /**
+ * GET /api/erp-accounting/reconciliation/ar/writeoff
+ * Lane 4 — overdue open vs YTD write-offs (ADR-006 Phase 4D, informational).
+ */
+router.get(
+  '/reconciliation/ar/writeoff',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getArWriteoffExposureLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
  * GET /api/erp-accounting/reconciliation/inventory/integrity
  * Lane 1 — net-active GL vs batch subledger (period close gate).
  */
@@ -1183,8 +1198,42 @@ router.get(
 );
 
 /**
+ * GET /api/erp-accounting/reconciliation/inventory/quarantine
+ * Lane 4 — quarantine BS exposure still on GL 1300 (ADR-004 Phase 2D, informational).
+ */
+router.get(
+  '/reconciliation/inventory/quarantine',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getInventoryQuarantineLane(asOfDate as string);
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
+ * GET /api/erp-accounting/reconciliation/vat/integrity
+ * ADR-005 Phase 3B — document VAT boxes vs GL 2300 (informational; Decision B).
+ */
+router.get(
+  '/reconciliation/vat/integrity',
+  requirePermission('accounting.reconcile'),
+  asyncHandler(async (req, res) => {
+    const { asOfDate } = req.query;
+    const { reconciliationService } = withServices(req);
+    const result = await reconciliationService.getFinancialLane(
+      'vat',
+      'integrity',
+      asOfDate as string,
+    );
+    return res.json({ success: true, data: result });
+  }),
+);
+
+/**
  * GET /api/erp-accounting/reconciliation/lanes/:domain/:lane
- * Generic financial lane resolver (ap | ar | inventory | cash).
+ * Generic financial lane resolver (ap | ar | inventory | cash | wht | vat).
  */
 router.get(
   '/reconciliation/lanes/:domain/:lane',
@@ -1194,8 +1243,8 @@ router.get(
     const { asOfDate } = req.query;
     const { reconciliationService } = withServices(req);
     const result = await reconciliationService.getFinancialLane(
-      domain as 'ap' | 'ar' | 'inventory' | 'cash',
-      lane as 'integrity' | 'cache' | 'history',
+      domain as 'ap' | 'ar' | 'inventory' | 'cash' | 'wht' | 'vat',
+      lane as 'integrity' | 'cache' | 'history' | 'quarantine',
       asOfDate as string,
     );
     return res.json({ success: true, data: result });

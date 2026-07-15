@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Database, History, RefreshCw, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Database, History, RefreshCw, ShieldCheck } from 'lucide-react';
 import { apiClient, type ApiResponse } from '../../utils/api';
 import type { FinancialLaneResult } from '../../types/financialLane';
 import { FinancialLaneCard } from './FinancialLaneCard';
 
-type ExpandedLane = 'integrity' | 'cache' | 'history' | null;
+type ExpandedLane = 'integrity' | 'cache' | 'history' | 'quarantine' | null;
 
 async function fetchLane(path: string, asOfDate: string): Promise<FinancialLaneResult> {
     const res = await apiClient.get<ApiResponse<FinancialLaneResult>>(path, {
@@ -40,9 +40,16 @@ export function InventoryReconciliationLanesPanel({ asOfDate }: Props) {
         staleTime: 30_000,
     });
 
+    const quarantineQuery = useQuery({
+        queryKey: ['inventory-lane-quarantine', asOfDate],
+        queryFn: () => fetchLane('/erp-accounting/reconciliation/inventory/quarantine', asOfDate),
+        staleTime: 30_000,
+    });
+
     const integrity = integrityQuery.data;
     const cache = cacheQuery.data;
     const history = historyQuery.data;
+    const quarantine = quarantineQuery.data;
 
     const refreshCacheMutation = useMutation({
         mutationFn: async () => {
@@ -55,7 +62,11 @@ export function InventoryReconciliationLanesPanel({ asOfDate }: Props) {
         },
     });
 
-    const isLoading = integrityQuery.isLoading || cacheQuery.isLoading || historyQuery.isLoading;
+    const isLoading =
+        integrityQuery.isLoading
+        || cacheQuery.isLoading
+        || historyQuery.isLoading
+        || quarantineQuery.isLoading;
 
     const toggleLane = (lane: ExpandedLane) => {
         setExpandedLane((prev) => (prev === lane ? null : lane));
@@ -74,8 +85,8 @@ export function InventoryReconciliationLanesPanel({ asOfDate }: Props) {
             <div className="px-1">
                 <h2 className="text-lg font-semibold text-gray-900">Inventory Reconciliation</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                    Three independent checks — only lanes marked <strong>Period-close gate</strong> block close when
-                    unreconciled. Batch subledger is SSOT; product cache is maintenance only.
+                    Independent checks — only period-close integrity blocks closing when out of balance.
+                    Quarantine exposure stays on inventory GL until disposal and is not treated as shrinkage.
                 </p>
             </div>
 
@@ -106,8 +117,27 @@ export function InventoryReconciliationLanesPanel({ asOfDate }: Props) {
                             <RefreshCw
                                 className={`h-3.5 w-3.5 ${refreshCacheMutation.isPending ? 'animate-spin' : ''}`}
                             />
-                            Rebuild Cache
+                            Refresh Balances
                         </button>
+                    }
+                />
+            )}
+
+            {quarantine && (
+                <FinancialLaneCard
+                    lane={quarantine}
+                    icon={<AlertTriangle className="h-5 w-5" />}
+                    expanded={expandedLane === 'quarantine'}
+                    onToggleExpand={() => toggleLane('quarantine')}
+                    entityColumnLabel="Product / store"
+                    expandLabel="View Quarantine Lines"
+                    action={
+                        <a
+                            href="/inventory/quarantine"
+                            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded font-medium"
+                        >
+                            Open workqueue
+                        </a>
                     }
                 />
             )}

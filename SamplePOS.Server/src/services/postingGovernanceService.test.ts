@@ -409,6 +409,27 @@ describe('PostingGovernanceService', () => {
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
 
+        it('allows VAT_REMITTANCE to credit Cash (ADR-005)', () => {
+            const vatPayable = makeAccount({
+                accountCode: '2300',
+                accountName: 'Tax Payable',
+                accountType: 'LIABILITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: false,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const req = makeRequest(
+                'VAT_REMITTANCE',
+                [
+                    { accountCode: '2300', debitAmount: 100_000, creditAmount: 0 },
+                    { accountCode: '1010', debitAmount: 0, creditAmount: 100_000 },
+                ],
+                [vatPayable, cashAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
         it('allows WHT_RECEIVABLE_RECOVERY to debit Cash', () => {
             const taxReceivable = makeAccount({
                 accountCode: '1250',
@@ -437,6 +458,207 @@ describe('PostingGovernanceService', () => {
             );
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
+        it('allows TREASURY_TRANSFER to credit Cash', () => {
+            const bank = makeAccount({
+                accountCode: '1030',
+                accountName: 'Bank',
+                accountType: 'ASSET',
+                normalBalance: 'DEBIT',
+                allowManualPosting: false,
+                allowedSources: ['TREASURY_TRANSFER', 'SYSTEM_CORRECTION'],
+                systemAccountTag: 'BANK',
+            });
+            const cashWithTreasury = makeAccount({
+                ...cashAccount,
+                allowedSources: [
+                    ...cashAccount.allowedSources,
+                    'TREASURY_TRANSFER',
+                    'TREASURY_DEPOSIT',
+                    'TREASURY_PETTY_CASH',
+                    'TREASURY_REVERSAL',
+                ],
+            });
+            const req = makeRequest(
+                'TREASURY_TRANSFER',
+                [
+                    { accountCode: '1030', debitAmount: 50_000, creditAmount: 0 },
+                    { accountCode: '1010', debitAmount: 0, creditAmount: 50_000 },
+                ],
+                [bank, cashWithTreasury],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('allows TREASURY_DEPOSIT to credit Cash', () => {
+            const cashWithTreasury = makeAccount({
+                ...cashAccount,
+                allowedSources: [...cashAccount.allowedSources, 'TREASURY_DEPOSIT'],
+            });
+            const undeposited = makeAccount({
+                ...undepositedFundsAccount,
+                allowedSources: [...undepositedFundsAccount.allowedSources, 'TREASURY_DEPOSIT'],
+            });
+            const req = makeRequest(
+                'TREASURY_DEPOSIT',
+                [
+                    { accountCode: '1010', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '1015', debitAmount: 0, creditAmount: 100 },
+                ],
+                [cashWithTreasury, undeposited],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('allows TREASURY_REVERSAL to credit Cash', () => {
+            const cashWithTreasury = makeAccount({
+                ...cashAccount,
+                allowedSources: [...cashAccount.allowedSources, 'TREASURY_REVERSAL'],
+            });
+            const bank = makeAccount({
+                accountCode: '1030',
+                accountName: 'Bank',
+                accountType: 'ASSET',
+                normalBalance: 'DEBIT',
+                allowManualPosting: false,
+                allowedSources: ['TREASURY_REVERSAL'],
+                systemAccountTag: 'BANK',
+            });
+            const req = makeRequest(
+                'TREASURY_REVERSAL',
+                [
+                    { accountCode: '1010', debitAmount: 0, creditAmount: 25_000 },
+                    { accountCode: '1030', debitAmount: 25_000, creditAmount: 0 },
+                ],
+                [cashWithTreasury, bank],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+        it('allows TREASURY_DEPOSIT with bank debit and undeposited credit', () => {
+            const cashWithTreasury = makeAccount({
+                ...cashAccount,
+                allowedSources: [...cashAccount.allowedSources, 'TREASURY_DEPOSIT'],
+            });
+            const undeposited = makeAccount({
+                ...undepositedFundsAccount,
+                allowedSources: [...undepositedFundsAccount.allowedSources, 'TREASURY_DEPOSIT'],
+            });
+            const req = makeRequest(
+                'TREASURY_DEPOSIT',
+                [
+                    { accountCode: '1010', debitAmount: 250, creditAmount: 0 },
+                    { accountCode: '1015', debitAmount: 0, creditAmount: 250 },
+                ],
+                [cashWithTreasury, undeposited],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('rejects TREASURY_DEPOSIT without undeposited credit', () => {
+            const cashWithTreasury = makeAccount({
+                ...cashAccount,
+                allowedSources: [...cashAccount.allowedSources, 'TREASURY_DEPOSIT'],
+            });
+            const bank = makeAccount({
+                accountCode: '1030',
+                accountName: 'Bank',
+                accountType: 'ASSET',
+                normalBalance: 'DEBIT',
+                allowManualPosting: false,
+                allowedSources: ['TREASURY_DEPOSIT'],
+                systemAccountTag: 'CASH',
+            });
+            const req = makeRequest(
+                'TREASURY_DEPOSIT',
+                [
+                    { accountCode: '1030', debitAmount: 250, creditAmount: 0 },
+                    { accountCode: '1010', debitAmount: 0, creditAmount: 250 },
+                ],
+                [bank, cashWithTreasury],
+            );
+            expect(() => PostingGovernanceService.validate(req)).toThrow('GOV_RULE_E_DEPOSIT_STRUCTURE');
+        });
+        it('allows TREASURY_TRANSFER cash credit (Rule D)', () => {
+            const cashWithTreasury = makeAccount({
+                ...cashAccount,
+                allowedSources: [...cashAccount.allowedSources, 'TREASURY_TRANSFER'],
+            });
+            const bank = makeAccount({
+                accountCode: '1030',
+                accountName: 'Bank',
+                accountType: 'ASSET',
+                normalBalance: 'DEBIT',
+                allowManualPosting: false,
+                allowedSources: ['TREASURY_TRANSFER'],
+                systemAccountTag: 'BANK',
+            });
+            const req = makeRequest(
+                'TREASURY_TRANSFER',
+                [
+                    { accountCode: '1030', debitAmount: 10_000, creditAmount: 0 },
+                    { accountCode: '1010', debitAmount: 0, creditAmount: 10_000 },
+                ],
+                [bank, cashWithTreasury],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('blocks MANUAL_JOURNAL from crediting Cash (treasury must use TREASURY_*)', () => {
+            const req = makeRequest(
+                'MANUAL_JOURNAL',
+                [
+                    { accountCode: '6900', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '1010', debitAmount: 0, creditAmount: 100 },
+                ],
+                [
+                    makeAccount({
+                        accountCode: '6900',
+                        accountName: 'Expense',
+                        accountType: 'EXPENSE',
+                        normalBalance: 'DEBIT',
+                        allowManualPosting: true,
+                        allowedSources: [],
+                    }),
+                    cashAccount,
+                ],
+            );
+            expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
+            try {
+                PostingGovernanceService.validate(req);
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                expect(
+                    msg.includes('GOV_RULE_D_CASH_CREDIT') || msg.includes('GOV_RULE_A_NORMAL_BALANCE'),
+                ).toBe(true);
+            }
+        });
+        it('allows TREASURY_PETTY_CASH to credit Petty Cash / Cash', () => {
+            const petty = makeAccount({
+                accountCode: '1012',
+                accountName: 'Petty Cash',
+                accountType: 'ASSET',
+                normalBalance: 'DEBIT',
+                allowManualPosting: false,
+                allowedSources: ['TREASURY_PETTY_CASH', 'TREASURY_TRANSFER'],
+                systemAccountTag: 'PETTY_CASH',
+            });
+            const expense = makeAccount({
+                accountCode: '6900',
+                accountName: 'General Expense',
+                accountType: 'EXPENSE',
+                normalBalance: 'DEBIT',
+                allowManualPosting: true,
+                allowedSources: ['TREASURY_PETTY_CASH'],
+            });
+            const req = makeRequest(
+                'TREASURY_PETTY_CASH',
+                [
+                    { accountCode: '6900', debitAmount: 5_000, creditAmount: 0 },
+                    { accountCode: '1012', debitAmount: 0, creditAmount: 5_000 },
+                ],
+                [expense, petty],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
     });
 
     // --------------------------------------------------------------------------
@@ -456,17 +678,38 @@ describe('PostingGovernanceService', () => {
             expect(() => PostingGovernanceService.validate(req)).toThrow('GOV_RULE_E_RECEIPT_STRUCTURE');
         });
 
-        it('rejects PAYMENT_RECEIPT without AR credit', () => {
+        it('rejects PAYMENT_RECEIPT without AR or Customer Deposits credit', () => {
             const req = makeRequest(
                 'PAYMENT_RECEIPT',
                 [
                     { accountCode: '1015', debitAmount: 100, creditAmount: 0 },
-                    { accountCode: '4000', debitAmount: 0, creditAmount: 100 }, // Wrong — should be AR
+                    { accountCode: '4000', debitAmount: 0, creditAmount: 100 }, // Wrong — should be AR or 2200
                 ],
                 [undepositedFundsAccount, revenueAccount]
             );
             expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
             expect(() => PostingGovernanceService.validate(req)).toThrow('GOV_RULE_E_RECEIPT_STRUCTURE');
+        });
+
+        it('allows PAYMENT_RECEIPT with Undeposited Funds / Customer Deposits (advance)', () => {
+            const customerDepositsAccount = makeAccount({
+                accountCode: '2200',
+                accountName: 'Customer Deposits',
+                accountType: 'LIABILITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: true,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const req = makeRequest(
+                'PAYMENT_RECEIPT',
+                [
+                    { accountCode: '1015', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '2200', debitAmount: 0, creditAmount: 100 },
+                ],
+                [undepositedFundsAccount, customerDepositsAccount]
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
 
         it('rejects PAYMENT_DEPOSIT without Cash debit', () => {

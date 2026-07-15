@@ -1,11 +1,11 @@
 /**
  * Profit & Loss Report Service
  *
- * ERP-grade P&L reporting with Clean Core principles:
- *   ✔ Single Source of Truth - All report data from gl_period_balances
+ * ERP-grade P&L reporting (ADR-007 / RP-INV-1):
+ *   ✔ Single Source of Truth — posted ledger via fn_get_profit_loss*
+ *   ✔ Migration 539 classification (5xxx = COGS, not OpEx)
  *   ✔ No frontend calculations
- *   ✔ Decimal-safe aggregations via database functions
- *   ✔ Totals reconcile with Trial Balance
+ *   ✔ Totals reconcile via verifyProfitLossConsistency
  */
 
 import { Pool } from 'pg';
@@ -85,77 +85,22 @@ export class ProfitLossReportService {
     }
 
     /**
-     * Get complete Profit & Loss report for a date range
-     *
-     * All figures derived from gl_period_balances (SAP totals table)
+     * Get complete Profit & Loss report for a date range.
+     * ADR-007 Phase 5B — same SSOT as ERP `/reports/profit-loss` (fn_get_profit_loss*).
      */
     async getProfitLossReport(dateFrom: string, dateTo: string): Promise<ProfitLossReport> {
         try {
-            // Parse date range to fiscal year/month for gl_period_balances
-            const [startYear, startMonth] = dateFrom.split('-').map(Number);
-            const [endYear, endMonth] = dateTo.split('-').map(Number);
+            const [detailResult, summaryResult] = await Promise.all([
+                this.pool.query('SELECT * FROM fn_get_profit_loss($1::DATE, $2::DATE)', [
+                    dateFrom,
+                    dateTo,
+                ]),
+                this.pool.query('SELECT * FROM fn_get_profit_loss_summary($1::DATE, $2::DATE)', [
+                    dateFrom,
+                    dateTo,
+                ]),
+            ]);
 
-            // Get detailed P&L from gl_period_balances (SAP totals table)
-            const detailResult = await this.pool.query(
-                `
-                SELECT
-                    CASE
-                        WHEN a."AccountCode" LIKE '4%' THEN 'REVENUE'
-                        WHEN a."AccountCode" LIKE '5%' THEN 'COST_OF_GOODS_SOLD'
-                        WHEN a."AccountCode" LIKE '6%' OR a."AccountType" = 'EXPENSE' THEN 'OPERATING_EXPENSES'
-                        ELSE 'OTHER'
-                    END AS section,
-                    a."AccountCode" AS account_code,
-                    a."AccountName" AS account_name,
-                    COALESCE(SUM(gpb.debit_total), 0)  AS debit_total,
-                    COALESCE(SUM(gpb.credit_total), 0) AS credit_total,
-                    COALESCE(SUM(gpb.debit_total), 0) - COALESCE(SUM(gpb.credit_total), 0) AS net_amount,
-                    CASE
-                        WHEN a."AccountCode" LIKE '4%'
-                            THEN COALESCE(SUM(gpb.credit_total), 0) - COALESCE(SUM(gpb.debit_total), 0)
-                        ELSE COALESCE(SUM(gpb.debit_total), 0) - COALESCE(SUM(gpb.credit_total), 0)
-                    END AS display_amount
-                FROM accounts a
-                LEFT JOIN gl_period_balances gpb
-                    ON gpb.account_id = a."Id"
-                   AND (gpb.fiscal_year > $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period >= $2))
-                   AND (gpb.fiscal_year < $3 OR (gpb.fiscal_year = $3 AND gpb.fiscal_period <= $4))
-                   AND gpb.fiscal_period > 0
-                WHERE a."IsActive" = true
-                  AND (a."AccountType" IN ('REVENUE', 'EXPENSE') OR a."AccountCode" LIKE '5%')
-                GROUP BY a."AccountCode", a."AccountName", a."AccountType"
-                HAVING COALESCE(SUM(gpb.debit_total), 0) > 0 OR COALESCE(SUM(gpb.credit_total), 0) > 0
-                ORDER BY
-                    CASE
-                        WHEN a."AccountCode" LIKE '4%' THEN 1
-                        WHEN a."AccountCode" LIKE '5%' THEN 2
-                        ELSE 3
-                    END,
-                    a."AccountCode"
-            `,
-                [startYear, startMonth, endYear, endMonth]
-            );
-
-            // Get summary from gl_period_balances (SAP totals table)
-            const summaryResult = await this.pool.query(
-                `
-                SELECT
-                    COALESCE(SUM(CASE WHEN a."AccountCode" LIKE '4%'
-                        THEN gpb.credit_total - gpb.debit_total ELSE 0 END), 0) AS total_revenue,
-                    COALESCE(SUM(CASE WHEN a."AccountCode" LIKE '5%'
-                        THEN gpb.debit_total - gpb.credit_total ELSE 0 END), 0) AS total_cogs,
-                    COALESCE(SUM(CASE WHEN a."AccountCode" LIKE '6%' OR a."AccountType" = 'EXPENSE'
-                        THEN gpb.debit_total - gpb.credit_total ELSE 0 END), 0) AS total_operating_expenses
-                FROM gl_period_balances gpb
-                JOIN accounts a ON gpb.account_id = a."Id"
-                WHERE (gpb.fiscal_year > $1 OR (gpb.fiscal_year = $1 AND gpb.fiscal_period >= $2))
-                  AND (gpb.fiscal_year < $3 OR (gpb.fiscal_year = $3 AND gpb.fiscal_period <= $4))
-                  AND gpb.fiscal_period > 0
-            `,
-                [startYear, startMonth, endYear, endMonth]
-            );
-
-            // Parse detail rows into sections
             const revenueAccounts: ProfitLossLineItem[] = [];
             const cogsAccounts: ProfitLossLineItem[] = [];
             const expenseAccounts: ProfitLossLineItem[] = [];
@@ -185,36 +130,23 @@ export class ProfitLossReportService {
                 }
             }
 
-            // Parse summary — compute derived fields from raw totals
             const summaryRow = summaryResult.rows[0] || {};
-            const totalRevenueDec = Money.parseDb(summaryRow.total_revenue);
-            const totalCogsDec = Money.parseDb(summaryRow.total_cogs);
-            const totalOpExDec = Money.parseDb(summaryRow.total_operating_expenses);
-            const grossProfitDec = totalRevenueDec.minus(totalCogsDec);
-            const operatingIncomeDec = grossProfitDec.minus(totalOpExDec);
-            const netIncomeDec = operatingIncomeDec; // Simplified (no other income/expense)
-
             const summary: ProfitLossSummary = {
-                totalRevenue: totalRevenueDec.toNumber(),
-                totalCogs: totalCogsDec.toNumber(),
-                grossProfit: grossProfitDec.toNumber(),
-                grossMarginPercent: totalRevenueDec.greaterThan(0)
-                    ? grossProfitDec.dividedBy(totalRevenueDec).times(100).toDecimalPlaces(4).toNumber()
-                    : 0,
-                totalOperatingExpenses: totalOpExDec.toNumber(),
-                operatingIncome: operatingIncomeDec.toNumber(),
-                operatingMarginPercent: totalRevenueDec.greaterThan(0)
-                    ? operatingIncomeDec.dividedBy(totalRevenueDec).times(100).toDecimalPlaces(4).toNumber()
-                    : 0,
-                netIncome: netIncomeDec.toNumber(),
-                netMarginPercent: totalRevenueDec.greaterThan(0)
-                    ? netIncomeDec.dividedBy(totalRevenueDec).times(100).toDecimalPlaces(4).toNumber()
-                    : 0,
+                totalRevenue: Money.parseDb(summaryRow.total_revenue).toNumber(),
+                totalCogs: Money.parseDb(summaryRow.total_cogs).toNumber(),
+                grossProfit: Money.parseDb(summaryRow.gross_profit).toNumber(),
+                grossMarginPercent: Money.parseDb(summaryRow.gross_margin_percent).toNumber(),
+                totalOperatingExpenses: Money.parseDb(summaryRow.total_operating_expenses).toNumber(),
+                operatingIncome: Money.parseDb(summaryRow.operating_income).toNumber(),
+                operatingMarginPercent: Money.parseDb(summaryRow.operating_margin_percent).toNumber(),
+                netIncome: Money.parseDb(summaryRow.net_income).toNumber(),
+                netMarginPercent: Money.parseDb(summaryRow.net_margin_percent).toNumber(),
             };
 
             logger.info('P&L report generated', {
                 dateFrom,
                 dateTo,
+                source: 'fn_get_profit_loss*',
                 revenue: summary.totalRevenue,
                 netIncome: summary.netIncome,
             });

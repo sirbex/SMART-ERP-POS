@@ -76,7 +76,7 @@ export interface CashFlowStatement {
 // All accounts where CashFlowClass IS NULL and AccountType = 'ASSET'
 // ============================================================================
 
-const CASH_BANK_CODES = ['1010', '1015', '1020', '1030', '1040'] as const;
+const CASH_BANK_CODES = ['1010', '1012', '1015', '1020', '1030', '1040'] as const;
 
 // ============================================================================
 // CORE ALGORITHM

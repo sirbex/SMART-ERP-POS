@@ -12,6 +12,7 @@ import { warehouseInventoryRepository } from './warehouseInventoryRepository.js'
 import { pool as defaultPool } from '../../../db/pool.js';
 import { alignBatchSubledgerToStoreBalances, assertWarehouseLayerConsistent } from '../../../services/warehouseInventoryCoupling.js';
 import { recordMovement } from '../../stock-movements/stockMovementRepository.js';
+import { syncLotStatusAfterQuarantine } from '../../loss-quarantine/quarantineLotStatus.js';
 
 export type AdjustmentDirection = 'IN' | 'OUT';
 export type AdjustmentReason =
@@ -342,6 +343,16 @@ export const warehouseAdjustmentService = {
                     referenceId: documentId,
                     notes: `${params.reason}: ${params.notes} ${storeTag} (internal quarantine transfer)`,
                     createdBy: params.userId,
+                    economicEvent: 'QUARANTINE_TRANSFER',
+                    postsGl: false,
+                });
+
+                // LQ-INV-4 / LQ-INV-5: mark lot QUARANTINED when no sellable qty remains
+                await syncLotStatusAfterQuarantine(client, {
+                    inventoryBatchId: batchId ?? lot.inventoryBatchId,
+                    productLotId,
+                    quarantineKind: 'DAMAGE',
+                    userId: params.userId,
                 });
 
                 await assertWarehouseLayerConsistent(
@@ -390,13 +401,30 @@ export const warehouseAdjustmentService = {
 
             const storeTag = `[store:${store.code}]`;
 
+            // LQ-INV-7: WRITE_OFF from DAMAGE/EXPIRED posts 5120/5130 (not silent 5110)
+            let effectiveMovementType = movementType;
+            let expenseAccountCode: string | undefined;
+            let allowDisposalStatuses = false;
+            if (params.reason === 'WRITE_OFF' && params.direction === 'OUT') {
+                const { resolveWriteOffPosting } = await import(
+                    '../../loss-quarantine/lossDisposalService.js'
+                );
+                const posting = resolveWriteOffPosting(store.storeType);
+                effectiveMovementType = posting.movementType;
+                expenseAccountCode = posting.expenseAccountCode;
+                allowDisposalStatuses =
+                    store.storeType === 'DAMAGE' ||
+                    store.storeType === 'EXPIRED' ||
+                    store.storeType === 'RETURN';
+            }
+
             const handlerPool = UnitOfWork.isPool(conn) ? conn : defaultPool;
             const handler = new StockMovementHandler(handlerPool);
             const result = await handler.processMovement(
                 {
                     productId: params.productId,
                     batchId,
-                    movementType,
+                    movementType: effectiveMovementType,
                     quantity: params.quantity,
                     unitCost: resolvedUnitCost,
                     targetStoreLocationId:
@@ -405,6 +433,8 @@ export const warehouseAdjustmentService = {
                     referenceType,
                     referenceId: documentId,
                     userId: params.userId,
+                    expenseAccountCode,
+                    allowDisposalStatuses,
                 },
                 client,
             );

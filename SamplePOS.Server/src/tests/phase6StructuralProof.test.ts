@@ -86,12 +86,10 @@ describe('Inventory lot domain Step 6 write-path migration', () => {
     expect(fn).not.toContain('productLotRepository.upsertLot');
   });
 
-  it('expiry automation transitions master status via LotService', () => {
+  it('expiry automation syncs lot status via quarantine helper (LQ-INV-4)', () => {
     const svc = src('src/modules/inventory/warehouse/expiryAutomationService.ts');
-    expect(svc).toContain('lotService.transitionLotStatus');
-    expect(svc).toMatch(
-      /if \(row\.inventoryBatchId\) \{\s*await lotService\.transitionLotStatus/,
-    );
+    expect(svc).toContain('syncLotStatusAfterQuarantine');
+    expect(svc).toContain("quarantineKind: 'EXPIRED'");
   });
 });
 

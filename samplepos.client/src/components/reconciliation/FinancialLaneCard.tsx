@@ -1,5 +1,6 @@
 import { CheckCircle, ChevronDown, ChevronRight } from 'lucide-react';
 import { formatCurrency } from '../../utils/currency';
+import { toBusinessLabel, translateRecommendedAction } from '../../lib/financialBusinessLabels';
 import { ResponsiveTableWrapper } from '../ui/ResponsiveTableWrapper';
 import type { FinancialLaneResult } from '../../types/financialLane';
 import {
@@ -56,8 +57,8 @@ export function FinancialLaneCard({
                     <div className="flex items-start gap-3">
                         <div className="mt-0.5 text-gray-500">{icon}</div>
                         <div>
-                            <p className="font-semibold text-gray-900">{lane.title}</p>
-                            <p className="text-sm text-gray-500">{lane.subtitle}</p>
+                            <p className="font-semibold text-gray-900">{toBusinessLabel(lane.title)}</p>
+                            <p className="text-sm text-gray-500">{toBusinessLabel(lane.subtitle)}</p>
                             {lane.periodCloseBlocking && (
                                 <p className="text-xs text-gray-400 mt-1">
                                     Period-close gate
@@ -75,19 +76,19 @@ export function FinancialLaneCard({
                         </div>
                     </div>
                     <span className={`self-start px-2.5 py-1 rounded-full text-xs font-medium ${statusClasses}`}>
-                        {laneStatusLabel(lane)}
+                        {toBusinessLabel(laneStatusLabel(lane))}
                     </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
                     <div className="min-w-0">
-                        <p className="text-xs text-gray-500">{lane.leftLabel}</p>
+                        <p className="text-xs text-gray-500">{toBusinessLabel(lane.leftLabel)}</p>
                         <p className="text-base font-semibold truncate text-gray-900">
                             {formatCurrency(lane.leftAmount)}
                         </p>
                     </div>
                     <div className="min-w-0">
-                        <p className="text-xs text-gray-500">{lane.rightLabel}</p>
+                        <p className="text-xs text-gray-500">{toBusinessLabel(lane.rightLabel)}</p>
                         <p className="text-base font-semibold truncate text-gray-900">
                             {formatCurrency(lane.rightAmount)}
                         </p>
@@ -102,7 +103,7 @@ export function FinancialLaneCard({
 
                 {lane.recommendedAction && (
                     <p className="text-sm text-amber-700 mt-3 bg-amber-50 rounded px-3 py-2">
-                        {lane.recommendedAction}
+                        {translateRecommendedAction(lane.recommendedAction) ?? lane.recommendedAction}
                     </p>
                 )}
 
@@ -131,8 +132,8 @@ export function FinancialLaneCard({
                             <thead>
                                 <tr className="text-gray-500">
                                     <th className="text-left py-2">{entityColumnLabel}</th>
-                                    <th className="text-right py-2">{lane.leftLabel}</th>
-                                    <th className="text-right py-2">{lane.rightLabel}</th>
+                                    <th className="text-right py-2">{toBusinessLabel(lane.leftLabel)}</th>
+                                    <th className="text-right py-2">{toBusinessLabel(lane.rightLabel)}</th>
                                     <th className="text-right py-2">Difference</th>
                                 </tr>
                             </thead>

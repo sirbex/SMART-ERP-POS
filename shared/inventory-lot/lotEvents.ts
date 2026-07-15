@@ -87,6 +87,11 @@ export interface LotConsumeInput {
    * (supplier return path). Requires recordMovement/syncProduct false when caller owns side effects.
    */
   deductAcrossAllStoreBalances?: boolean;
+  /**
+   * ADR-004 Phase 2C: dispose from quarantine — allow QUARANTINED/EXPIRED lots and
+   * DAMAGE/EXPIRED/RETURN store balances (never for POS sale).
+   */
+  allowDisposalStatuses?: boolean;
 }
 
 export interface LotConsumeLayer {

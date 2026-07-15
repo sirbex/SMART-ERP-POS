@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '../../utils/currency';
 import { api } from '../../services/api';
+import { DatePicker } from '../../components/ui/date-picker';
 
 // ─── Types ──────────────────────────────────────────────────────────
 interface AssetCategory {
@@ -746,9 +747,12 @@ export default function AssetAccountingPage() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">Disposal Date *</label>
-                        <input type="date" required value={disposeForm.disposalDate}
-                          onChange={e => setDisposeForm({ ...disposeForm, disposalDate: e.target.value })}
-                          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500" />
+                        <DatePicker
+                          required
+                          value={disposeForm.disposalDate}
+                          onChange={(v) => setDisposeForm({ ...disposeForm, disposalDate: v })}
+                          placeholder="Disposal date"
+                        />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">Proceeds / Sale Amount</label>
@@ -973,11 +977,10 @@ export default function AssetAccountingPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   ERP Go-Live Date (Cutover Date)
                 </label>
-                <input
-                  type="date"
+                <DatePicker
                   value={cutoverDate}
-                  onChange={e => { setCutoverDate(e.target.value); setCutoverPreviewData(null); setCutoverApplyResult(null); }}
-                  className="px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                  onChange={(v) => { setCutoverDate(v); setCutoverPreviewData(null); setCutoverApplyResult(null); }}
+                  placeholder="Cutover date"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   Assets acquired <em>before</em> this date are candidates for correction.
@@ -1169,9 +1172,18 @@ function FormField({ label, value, onChange, type = 'text', placeholder, require
   return (
     <div>
       <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder} required={required} min={min} step={step}
-        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+      {type === 'date' ? (
+        <DatePicker
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder || label}
+          required={required}
+        />
+      ) : (
+        <input type={type} value={value} onChange={e => onChange(e.target.value)}
+          placeholder={placeholder} required={required} min={min} step={step}
+          className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
+      )}
     </div>
   );
 }

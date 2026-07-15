@@ -35,7 +35,7 @@ import { BusinessRuleException } from '../errors/BusinessRuleException.js';
 export type PostingSource =
     | 'SALES_INVOICE'           // POS sale / invoice posting
     | 'SALES_REFUND'            // Sale refund/return — reverses revenue and credits cash/AR
-    | 'PAYMENT_RECEIPT'         // Customer payment → Dr Undeposited Funds / Cr AR
+    | 'PAYMENT_RECEIPT'         // Customer payment/deposit → Dr Undeposited Funds / Cr AR or Customer Deposits
     | 'PAYMENT_DEPOSIT'         // Bank deposit → Dr Cash / Cr Undeposited Funds
     | 'PURCHASE_BILL'           // Supplier bill / goods receipt (creates AP liability)
     | 'SUPPLIER_PAYMENT'        // Supplier payment — Dr AP / Cr Cash or Bank
@@ -51,7 +51,14 @@ export type PostingSource =
     | 'CUTOVER_OB'              // Cutover: supplier/customer opening balances (GL-only, no invoice)
     | 'CUTOVER_CORRECTION'      // Cutover: reversal of wrongly posted pre-ERP asset credits
     | 'WHT_REMITTANCE'          // Remit supplier WHT payable to tax authority — Dr 2350 / Cr Cash
-    | 'WHT_RECEIVABLE_RECOVERY'; // Recover customer Tax Receivable from URA — Dr Cash / Cr 1250
+    | 'WHT_RECEIVABLE_RECOVERY' // Recover customer Tax Receivable from URA — Dr Cash / Cr 1250
+    | 'VAT_REMITTANCE'          // Remit net VAT payable to tax authority — Dr 2300 / Cr Cash (ADR-005)
+    | 'TREASURY_DEPOSIT'        // Deposit worksheet / card / MoMo settlement — clears undeposited → bank/cash
+    | 'TREASURY_TRANSFER'       // Liquidity ↔ liquidity (cash/bank/MoMo/card clearing)
+    | 'TREASURY_PETTY_CASH'     // Petty cash fund / replenish / expense
+    | 'TREASURY_REVERSAL'       // Reversal of a posted Treasury Document
+    | 'AR_WRITEOFF'             // Bad debt direct write-off — Dr 5210 / Cr 1200 (ADR-006)
+    | 'AR_WRITEOFF_REVERSAL'    // Reversal of a posted AR write-off document
 
 // =============================================================================
 // GOVERNANCE ACCOUNT SHAPE
@@ -212,7 +219,12 @@ export class PostingGovernanceService {
             //  be able to debit Cash (reversing a wrong credit) and post to any system account.
             //  They are validated structurally by cutoverCorrectionService — not here.
             // ------------------------------------------------------------------
-            const isPaymentSource = source === 'PAYMENT_RECEIPT' || source === 'PAYMENT_DEPOSIT';
+            const isPaymentSource =
+                source === 'PAYMENT_RECEIPT' ||
+                source === 'PAYMENT_DEPOSIT' ||
+                source === 'TREASURY_DEPOSIT' ||
+                source === 'TREASURY_TRANSFER' ||
+                source === 'TREASURY_PETTY_CASH';
             const isCutoverSource = source === 'CUTOVER_CORRECTION' || source === 'CUTOVER_OB';
             const isCashTaggedCreditLine = account.systemAccountTag === 'CASH' && line.creditAmount > 0;
             const deferToRuleC = !account.allowManualPosting && source === 'MANUAL_JOURNAL';
@@ -249,8 +261,8 @@ export class PostingGovernanceService {
 
         // ------------------------------------------------------------------
         // Rule D: Crediting a CASH-tagged account is only allowed from PAYMENT_DEPOSIT,
-        //         SUPPLIER_PAYMENT (AP reduction → cash out), WHT_REMITTANCE,
-        //         or SYSTEM_CORRECTION.
+        //         SUPPLIER_PAYMENT (AP reduction → cash out), EXPENSE_PAYMENT,
+        //         WHT_REMITTANCE, VAT_REMITTANCE, TREASURY_* sources, or SYSTEM_CORRECTION.
         // ------------------------------------------------------------------
         for (const line of lines) {
             if (line.creditAmount > 0) {
@@ -262,12 +274,17 @@ export class PostingGovernanceService {
                         source !== 'EXPENSE_PAYMENT' &&
                         source !== 'SALES_REFUND' &&
                         source !== 'SYSTEM_CORRECTION' &&
-                        source !== 'CUTOVER_CORRECTION' && // reversing a wrong pre-ERP cash credit
-                        source !== 'WHT_REMITTANCE'
+                        source !== 'CUTOVER_CORRECTION' &&  // reversing a wrong pre-ERP cash credit
+                        source !== 'WHT_REMITTANCE' &&
+                        source !== 'VAT_REMITTANCE' &&
+                        source !== 'TREASURY_DEPOSIT' &&
+                        source !== 'TREASURY_TRANSFER' &&
+                        source !== 'TREASURY_PETTY_CASH' &&
+                        source !== 'TREASURY_REVERSAL'
                     ) {
                         throw new PostingGovernanceError(
                             `Cannot credit Cash account ${account.accountCode} (${account.accountName}) from source '${source}'. ` +
-                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), supplier payment (SUPPLIER_PAYMENT), WHT remittance (WHT_REMITTANCE), sale refund (SALES_REFUND), or system correction.`,
+                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), treasury document (TREASURY_*), supplier payment (SUPPLIER_PAYMENT), WHT remittance (WHT_REMITTANCE), VAT remittance (VAT_REMITTANCE), sale refund (SALES_REFUND), or system correction.`,
                             'GOV_RULE_D_CASH_CREDIT',
                             { accountCode: account.accountCode, source }
                         );
@@ -277,8 +294,11 @@ export class PostingGovernanceService {
         }
 
         // ------------------------------------------------------------------
-        // Rule E: Payment receipt must be Dr Undeposited Funds / Cr AR
+        // Rule E: Payment receipt must be Dr Undeposited Funds /
+        //         Cr AR (invoice payment) OR Cr Customer Deposits (advance)
         //         Payment deposit must be Dr Cash / Cr Undeposited Funds
+        // ------------------------------------------------------------------
+        // Rule E: Payment receipt / deposit / treasury deposit structure
         // ------------------------------------------------------------------
         if (source === 'PAYMENT_RECEIPT') {
             const hasDebitUndepositedFunds = lines.some((l) => {
@@ -289,6 +309,16 @@ export class PostingGovernanceService {
                 const acct = findAccount(accounts, l.accountCode);
                 return l.creditAmount > 0 && acct?.systemAccountTag === 'ACCOUNTS_RECEIVABLE';
             });
+            // Customer advances / on-account prepayments credit liability 2200
+            // (tag optional — CoA uses AccountCode 2200 as the SSOT code).
+            const hasCreditCustomerDeposits = lines.some((l) => {
+                const acct = findAccount(accounts, l.accountCode);
+                if (l.creditAmount <= 0 || !acct) return false;
+                return (
+                    acct.systemAccountTag === 'CUSTOMER_DEPOSITS' ||
+                    acct.accountCode === '2200'
+                );
+            });
 
             if (!hasDebitUndepositedFunds) {
                 throw new PostingGovernanceError(
@@ -298,37 +328,46 @@ export class PostingGovernanceService {
                     { source }
                 );
             }
-            if (!hasCreditAR) {
+            if (!hasCreditAR && !hasCreditCustomerDeposits) {
                 throw new PostingGovernanceError(
-                    `PAYMENT_RECEIPT must credit Accounts Receivable (tag: ACCOUNTS_RECEIVABLE). ` +
-                    `Payment receipt reduces the AR balance.`,
+                    `PAYMENT_RECEIPT must credit Accounts Receivable (tag: ACCOUNTS_RECEIVABLE) ` +
+                    `or Customer Deposits (2200). Invoice payments reduce AR; advances increase deposit liability.`,
                     'GOV_RULE_E_RECEIPT_STRUCTURE',
                     { source }
                 );
             }
         }
 
-        if (source === 'PAYMENT_DEPOSIT') {
-            const hasDebitCash = lines.some((l) => {
+        if (source === 'PAYMENT_DEPOSIT' || source === 'TREASURY_DEPOSIT') {
+            const hasDebitCashOrBank = lines.some((l) => {
                 const acct = findAccount(accounts, l.accountCode);
-                return l.debitAmount > 0 && acct?.systemAccountTag === 'CASH';
+                if (l.debitAmount <= 0 || !acct) return false;
+                return (
+                    acct.systemAccountTag === 'CASH' ||
+                    acct.systemAccountTag === 'BANK' ||
+                    acct.accountCode === '1010' ||
+                    acct.accountCode === '1030'
+                );
             });
             const hasCreditUndeposited = lines.some((l) => {
                 const acct = findAccount(accounts, l.accountCode);
-                return l.creditAmount > 0 && acct?.systemAccountTag === 'UNDEPOSITED_FUNDS';
+                return (
+                    l.creditAmount > 0 &&
+                    (acct?.systemAccountTag === 'UNDEPOSITED_FUNDS' || acct?.accountCode === '1015')
+                );
             });
 
-            if (!hasDebitCash) {
+            if (!hasDebitCashOrBank) {
                 throw new PostingGovernanceError(
-                    `PAYMENT_DEPOSIT must debit a Cash account (tag: CASH). ` +
-                    `Bank deposit moves money from Undeposited Funds to Cash.`,
+                    `${source} must debit a Cash/Bank account. ` +
+                    `Bank deposit moves money from Undeposited Funds to Cash/Bank.`,
                     'GOV_RULE_E_DEPOSIT_STRUCTURE',
                     { source }
                 );
             }
             if (!hasCreditUndeposited) {
                 throw new PostingGovernanceError(
-                    `PAYMENT_DEPOSIT must credit Undeposited Funds (tag: UNDEPOSITED_FUNDS). ` +
+                    `${source} must credit Undeposited Funds (1015). ` +
                     `Bank deposit clears the Undeposited Funds balance.`,
                     'GOV_RULE_E_DEPOSIT_STRUCTURE',
                     { source }

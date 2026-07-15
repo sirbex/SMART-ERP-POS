@@ -768,6 +768,15 @@ export class BankingService {
                 );
             }
 
+            // SSOT funds check (posted ledger) before TD or JE
+            const { assertSufficientLiquidityFunds } = await import(
+                '../modules/treasury/liquidityFundsGuard.js'
+            );
+            await assertSufficientLiquidityFunds(client, fromGlCode, dto.amount, {
+                asOfDate: dto.transactionDate,
+                actionLabel: `bank transfer to ${toAccount.rows[0].name}`,
+            });
+
             // Generate transaction numbers
             const outTxnNum = await BankingService.generateBankTxnNumber(client);
             const inTxnNum = await BankingService.generateBankTxnNumber(client);
@@ -778,32 +787,59 @@ export class BankingService {
             const description =
                 dto.description || `Transfer from ${fromAccount.rows[0].name} to ${toAccount.rows[0].name}`;
 
-            // GL Entry: DR ToBank, CR FromBank
-            const journalRequest: JournalEntryRequest = {
-                entryDate: dto.transactionDate,
-                description,
-                referenceType: 'BANK_TRANSFER',
-                referenceId: outTxnId,
-                referenceNumber: `${outTxnNum}/${inTxnNum}`,
-                lines: [
-                    {
-                        accountCode: toGlCode,
-                        description: `Transfer from ${fromAccount.rows[0].name}`,
-                        debitAmount: dto.amount,
-                        creditAmount: 0,
-                    },
-                    {
-                        accountCode: fromGlCode,
-                        description: `Transfer to ${toAccount.rows[0].name}`,
-                        debitAmount: 0,
-                        creditAmount: dto.amount,
-                    },
-                ],
-                userId,
-                idempotencyKey: `TRANSFER-${outTxnId}`,
-            };
+            // Phase 1C: post via Treasury Document when enabled (Rule D + TD-INV-6)
+            const { isTreasuryDocumentEnabled } = await import('../modules/treasury/treasurySettings.js');
+            const treasuryOn = await isTreasuryDocumentEnabled(client);
 
-            const glResult = await AccountingCore.createJournalEntry(journalRequest, undefined, client);
+            let glTransactionId: string;
+            if (treasuryOn) {
+                const { createAndPostTransferInTx } = await import(
+                    '../modules/treasury/treasuryTransferService.js'
+                );
+                const td = await createAndPostTransferInTx(client, pool, {
+                    transactionDate: dto.transactionDate,
+                    fromAccountCode: fromGlCode,
+                    toAccountCode: toGlCode,
+                    amount: dto.amount,
+                    memo: description,
+                    depositReference: dto.reference,
+                    documentType: 'TREASURY_TRANSFER',
+                    createdBy: userId,
+                });
+                if (!td.journalEntryId) {
+                    throw new Error('Treasury Transfer posted without journalEntryId');
+                }
+                glTransactionId = td.journalEntryId;
+            } else {
+                // GL Entry: DR ToBank, CR FromBank
+                const journalRequest: JournalEntryRequest = {
+                    entryDate: dto.transactionDate,
+                    description,
+                    referenceType: 'BANK_TRANSFER',
+                    referenceId: outTxnId,
+                    referenceNumber: `${outTxnNum}/${inTxnNum}`,
+                    lines: [
+                        {
+                            accountCode: toGlCode,
+                            description: `Transfer from ${fromAccount.rows[0].name}`,
+                            debitAmount: dto.amount,
+                            creditAmount: 0,
+                        },
+                        {
+                            accountCode: fromGlCode,
+                            description: `Transfer to ${toAccount.rows[0].name}`,
+                            debitAmount: 0,
+                            creditAmount: dto.amount,
+                        },
+                    ],
+                    userId,
+                    idempotencyKey: `TRANSFER-${outTxnId}`,
+                    source: 'TREASURY_TRANSFER',
+                };
+
+                const glResult = await AccountingCore.createJournalEntry(journalRequest, undefined, client);
+                glTransactionId = glResult.transactionId;
+            }
 
             // Create TRANSFER_OUT transaction first (without transfer_pair_id to avoid FK violation)
             await client.query(
@@ -824,7 +860,7 @@ export class BankingService {
                     description,
                     dto.reference || null,
                     dto.amount,
-                    glResult.transactionId,
+                    glTransactionId,
                     userId,
                 ]
             );
@@ -848,7 +884,7 @@ export class BankingService {
                     description,
                     dto.reference || null,
                     dto.amount,
-                    glResult.transactionId,
+                    glTransactionId,
                     outTxnId,
                     userId,
                 ]

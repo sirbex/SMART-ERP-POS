@@ -17,6 +17,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatCurrency } from '../../utils/currency';
 import Layout from '../../components/Layout';
+import { DatePicker } from '../../components/ui/date-picker';
 import { apiClient, api } from '../../utils/api';
 import type { ApiResponse } from '../../utils/api';
 import { formatTimestampDate } from '../../utils/businessDate';
@@ -1268,11 +1269,10 @@ function CreateOpportunityModal({
                     <div className="grid grid-cols-3 gap-3">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Deadline</label>
-                            <input
-                                type="date"
+                            <DatePicker
                                 value={form.deadline}
-                                onChange={(e) => setForm({ ...form, deadline: e.target.value })}
-                                className="w-full border rounded-lg px-3 py-2 text-sm"
+                                onChange={(v) => setForm({ ...form, deadline: v })}
+                                placeholder="Deadline"
                             />
                         </div>
                         <div>
@@ -1815,20 +1815,18 @@ function CreateActivityModal({
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Activity Date</label>
-                            <input
-                                type="date"
+                            <DatePicker
                                 value={form.activityDate}
-                                onChange={(e) => setForm({ ...form, activityDate: e.target.value })}
-                                className="w-full border rounded-lg px-3 py-2 text-sm"
+                                onChange={(v) => setForm({ ...form, activityDate: v })}
+                                placeholder="Activity date"
                             />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
-                            <input
-                                type="date"
+                            <DatePicker
                                 value={form.dueDate}
-                                onChange={(e) => setForm({ ...form, dueDate: e.target.value })}
-                                className="w-full border rounded-lg px-3 py-2 text-sm"
+                                onChange={(v) => setForm({ ...form, dueDate: v })}
+                                placeholder="Due date"
                             />
                         </div>
                     </div>

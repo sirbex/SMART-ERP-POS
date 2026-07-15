@@ -12,7 +12,7 @@ import { BarChart3, TrendingUp, Wallet, RefreshCw } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/ui/date-picker';
 import {
     Table,
     TableBody,
@@ -184,18 +184,18 @@ export const BankReportsTab: React.FC = () => {
                             </div>
                             <div className="space-y-2">
                                 <Label>Period Start</Label>
-                                <Input
-                                    type="date"
+                                <DatePicker
                                     value={periodStart}
-                                    onChange={(e) => setPeriodStart(e.target.value)}
+                                    onChange={setPeriodStart}
+                                    placeholder="Period start"
                                 />
                             </div>
                             <div className="space-y-2">
                                 <Label>Period End</Label>
-                                <Input
-                                    type="date"
+                                <DatePicker
                                     value={periodEnd}
-                                    onChange={(e) => setPeriodEnd(e.target.value)}
+                                    onChange={setPeriodEnd}
+                                    placeholder="Period end"
                                 />
                             </div>
                             <Button variant="outline" onClick={() => refetchActivity()} disabled={!selectedAccountId}>
@@ -293,10 +293,10 @@ export const BankReportsTab: React.FC = () => {
                         <div className="flex gap-2 items-end">
                             <div className="space-y-2">
                                 <Label>As of Date</Label>
-                                <Input
-                                    type="date"
+                                <DatePicker
                                     value={asOfDate}
-                                    onChange={(e) => setAsOfDate(e.target.value)}
+                                    onChange={setAsOfDate}
+                                    placeholder="As of date"
                                 />
                             </div>
                             <Button variant="outline" onClick={() => refetchCash()}>

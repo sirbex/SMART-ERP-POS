@@ -6,6 +6,7 @@ import { Pool } from 'pg';
 import { reportsController } from './reportsController.js';
 import { cnDnReportsController } from './cnDnReportController.js';
 import { taxComplianceReportController } from './taxComplianceReportController.js';
+import { liquidityMovementsReportController } from './liquidityMovementsReportController.js';
 import { inventoryReportsController } from './inventory/inventoryReportsController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
@@ -421,6 +422,28 @@ export function createReportsRouter(pool: Pool) {
     requirePermission('reports.read'),
     asyncHandler(async (req, res) => taxComplianceReportController.getLiability(req, res, p(req)))
   );
+
+  // Liquidity movements (Banking & Liquidity SSOT — posted ledger)
+  router.get(
+    '/liquidity-movements',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) =>
+      liquidityMovementsReportController.getMovements(req, res, p(req)),
+    ),
+  );
+  router.get(
+    '/liquidity-movements/balances',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) =>
+      liquidityMovementsReportController.getBalances(req, res, p(req)),
+    ),
+  );
+  router.get(
+    '/liquidity-movements/columns',
+    requirePermission('reports.read'),
+    asyncHandler(async (req, res) => liquidityMovementsReportController.getColumns(req, res)),
+  );
+
   router.get(
     '/invoice-adjustments/:invoiceId',
     requirePermission('reports.read'),

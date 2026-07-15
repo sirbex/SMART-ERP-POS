@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useUnreconciledItems, useReconciliationSuggestions, useReconcileEntries, useLockDates, useSetLockDates } from '../../hooks/useAccountingModules';
+import { DatePicker } from '../../components/ui/date-picker';
 import { Scale, CheckSquare, Lightbulb, Lock, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -71,10 +72,14 @@ export default function GLReconciliationPage() {
   };
 
   const handleSaveLockDates = async () => {
-    await setLockDatesMutation.mutateAsync({
-      advisorLockDate: advisorDate || null,
-      hardLockDate: hardDate || null,
-    });
+    try {
+      await setLockDatesMutation.mutateAsync({
+        advisorLockDate: advisorDate || null,
+        hardLockDate: hardDate || null,
+      });
+    } catch {
+      // toast handled by mutation onError
+    }
   };
 
   const selectedTotal = unreconciledList
@@ -285,11 +290,10 @@ export default function GLReconciliationPage() {
                 Advisor Lock Date
                 <span className="text-gray-400 text-xs ml-1">(advisors can still post)</span>
               </label>
-              <input
-                type="date"
+              <DatePicker
                 value={advisorDate}
-                onChange={(e) => setAdvisorDate(e.target.value)}
-                className="w-full border rounded-md px-3 py-2 text-sm"
+                onChange={setAdvisorDate}
+                placeholder="Advisor lock date"
               />
             </div>
             <div>
@@ -297,11 +301,10 @@ export default function GLReconciliationPage() {
                 Hard Lock Date
                 <span className="text-gray-400 text-xs ml-1">(nobody can post)</span>
               </label>
-              <input
-                type="date"
+              <DatePicker
                 value={hardDate}
-                onChange={(e) => setHardDate(e.target.value)}
-                className="w-full border rounded-md px-3 py-2 text-sm"
+                onChange={setHardDate}
+                placeholder="Hard lock date"
               />
             </div>
           </div>

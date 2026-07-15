@@ -9,6 +9,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import Layout from '../../components/Layout';
+import { DatePicker } from '../../components/ui/date-picker';
 import distributionApi, { type SalesOrderLine } from '../../api/distribution';
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
@@ -337,11 +338,10 @@ export default function DistSalesOrderEditPage() {
             {/* Date */}
             <div>
               <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Order Date</label>
-              <input
-                type="date"
+              <DatePicker
                 value={orderDate}
-                onChange={e => setOrderDate(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                onChange={setOrderDate}
+                placeholder="Order date"
               />
             </div>
 

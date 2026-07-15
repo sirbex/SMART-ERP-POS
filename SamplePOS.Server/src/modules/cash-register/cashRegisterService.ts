@@ -45,14 +45,15 @@ import { getBusinessDate } from '../../utils/dateRange.js';
 // =============================================================================
 
 const ACCOUNT_CODES = {
-    CASH: '1010', // Cash on Hand (Cash Drawer)
-    PETTY_CASH: '1015', // Petty Cash (Safe/Float source)
+    CASH: '1010', // Cash Drawer (till)
+    PETTY_CASH: '1012', // Petty Cash float (Phase 1D — was wrongly 1015)
+    UNDEPOSITED_FUNDS: '1015', // Receipt clearing only
     CHECKING_ACCOUNT: '1030', // Bank Checking Account
     ACCOUNTS_RECEIVABLE: '1200', // Customer receivables
     CASH_OVERAGE: '4900', // Other Income - Cash Overage
     OTHER_INCOME: '4200', // Other Income (misc cash in)
     CASH_SHORTAGE: '6850', // Operating Expense - Cash Shortage
-    GENERAL_EXPENSE: '6900', // General Expense (petty cash/misc)
+    GENERAL_EXPENSE: '6900', // General Expense (misc)
 } as const;
 
 // =============================================================================
@@ -500,8 +501,8 @@ export const cashRegisterService = {
      *
      * ACCOUNTING ENTRIES BY TYPE:
      *
-     * CASH_IN_FLOAT: Float received from safe/petty cash
-     *   DR Cash (1010), CR Petty Cash (1015)
+     * CASH_IN_FLOAT: Float received from petty cash
+     *   DR Cash Drawer (1010), CR Petty Cash (1012)
      *   No P&L impact - transfer between cash locations
      *
      * CASH_IN_OTHER: Miscellaneous income
@@ -512,18 +513,19 @@ export const cashRegisterService = {
      *   DR Checking Account (1030), CR Cash (1010)
      *   No P&L impact - transfer between cash locations
      *
-     * CASH_OUT_EXPENSE: Petty cash expense
-     *   DR General Expense (6900), CR Cash (1010)
+     * CASH_OUT_EXPENSE: Petty cash expense (from 1012 when treasury enabled)
+     *   DR General Expense (6900), CR Petty Cash (1012)
      *   P&L impact - expense
      *
-     * CASH_OUT_OTHER: Other withdrawal
-     *   DR General Expense (6900), CR Cash (1010)
+     * CASH_OUT_OTHER: Other drawer withdrawal
+     *   DR General Expense (6900), CR Cash Drawer (1010)
      *   P&L impact - expense
      *
      * NOTE: CASH_IN_PAYMENT is NOT posted here - AR payment is posted
      *       separately by the payment receipt workflow.
      * NOTE: SALE and REFUND are NOT posted here - handled by sales GL posting.
      * NOTE: FLOAT_ADJUSTMENT is NOT posted - it's the opening float.
+     * NOTE: 1015 Undeposited Funds is NEVER used for petty/float (Phase 1D).
      */
     async createMovementGLEntry(
         movement: CashMovement,
@@ -539,29 +541,6 @@ export const cashRegisterService = {
         let description = '';
 
         switch (movement.movementType) {
-            case 'CASH_IN_FLOAT':
-                // Float received from petty cash/safe
-                description = `Float received - Session ${session.sessionNumber}`;
-                lines = [
-                    {
-                        accountCode: ACCOUNT_CODES.CASH,
-                        description,
-                        debitAmount: amount,
-                        creditAmount: 0,
-                        entityType: 'CASH_MOVEMENT',
-                        entityId: movement.id,
-                    },
-                    {
-                        accountCode: ACCOUNT_CODES.PETTY_CASH,
-                        description,
-                        debitAmount: 0,
-                        creditAmount: amount,
-                        entityType: 'CASH_MOVEMENT',
-                        entityId: movement.id,
-                    },
-                ];
-                break;
-
             case 'CASH_IN_OTHER':
                 // Miscellaneous income
                 description = `Cash income - ${movement.reason || 'Other'}`;
@@ -586,11 +565,126 @@ export const cashRegisterService = {
                 break;
 
             case 'CASH_OUT_BANK':
-                // Bank deposit
-                description = `Bank deposit - ${movement.reason || 'Daily deposit'}`;
+            case 'CASH_IN_FLOAT': {
+                // Phase 1C: liquidity moves go through Treasury Document when enabled
+                const { isTreasuryDocumentEnabled } = await import('../treasury/treasurySettings.js');
+                const { createTreasuryTransfer } = await import('../treasury/treasuryTransferService.js');
+                const treasuryOn = await isTreasuryDocumentEnabled(dbPool || globalPool);
+
+                if (treasuryOn && movement.movementType === 'CASH_OUT_BANK') {
+                    description = `Bank deposit - ${movement.reason || 'Daily deposit'}`;
+                    await createTreasuryTransfer(dbPool || globalPool, {
+                        transactionDate: today,
+                        fromAccountCode: ACCOUNT_CODES.CASH,
+                        toAccountCode: ACCOUNT_CODES.CHECKING_ACCOUNT,
+                        amount,
+                        memo: description,
+                        documentType: 'CASH_WITHDRAWAL',
+                        sourceSessionMovementId: movement.id,
+                        createdBy: userId,
+                        postImmediately: true,
+                    });
+                    logger.info('Cash movement posted via Treasury Transfer', {
+                        movementId: movement.id,
+                        movementType: movement.movementType,
+                        amount,
+                    });
+                    return;
+                }
+
+                if (treasuryOn && movement.movementType === 'CASH_IN_FLOAT') {
+                    description = `Float received - Session ${session.sessionNumber}`;
+                    await createTreasuryTransfer(dbPool || globalPool, {
+                        transactionDate: today,
+                        fromAccountCode: ACCOUNT_CODES.PETTY_CASH, // 1012
+                        toAccountCode: ACCOUNT_CODES.CASH,
+                        amount,
+                        memo: description,
+                        documentType: 'TREASURY_TRANSFER',
+                        sourceSessionMovementId: movement.id,
+                        createdBy: userId,
+                        postImmediately: true,
+                    });
+                    logger.info('Cash movement posted via Treasury Transfer', {
+                        movementId: movement.id,
+                        movementType: movement.movementType,
+                        amount,
+                    });
+                    return;
+                }
+
+                if (movement.movementType === 'CASH_OUT_BANK') {
+                    description = `Bank deposit - ${movement.reason || 'Daily deposit'}`;
+                    lines = [
+                        {
+                            accountCode: ACCOUNT_CODES.CHECKING_ACCOUNT,
+                            description,
+                            debitAmount: amount,
+                            creditAmount: 0,
+                            entityType: 'CASH_MOVEMENT',
+                            entityId: movement.id,
+                        },
+                        {
+                            accountCode: ACCOUNT_CODES.CASH,
+                            description,
+                            debitAmount: 0,
+                            creditAmount: amount,
+                            entityType: 'CASH_MOVEMENT',
+                            entityId: movement.id,
+                        },
+                    ];
+                } else {
+                    description = `Float received - Session ${session.sessionNumber}`;
+                    lines = [
+                        {
+                            accountCode: ACCOUNT_CODES.CASH,
+                            description,
+                            debitAmount: amount,
+                            creditAmount: 0,
+                            entityType: 'CASH_MOVEMENT',
+                            entityId: movement.id,
+                        },
+                        {
+                            accountCode: ACCOUNT_CODES.PETTY_CASH,
+                            description,
+                            debitAmount: 0,
+                            creditAmount: amount,
+                            entityType: 'CASH_MOVEMENT',
+                            entityId: movement.id,
+                        },
+                    ];
+                }
+                break;
+            }
+
+            case 'CASH_OUT_EXPENSE': {
+                const { isTreasuryDocumentEnabled } = await import('../treasury/treasurySettings.js');
+                const treasuryOn = await isTreasuryDocumentEnabled(dbPool || globalPool);
+                description = `Petty cash expense - ${movement.reason || 'Misc'}`;
+
+                if (treasuryOn) {
+                    const { createPettyCashDocument } = await import('../treasury/pettyCashService.js');
+                    await createPettyCashDocument(dbPool || globalPool, {
+                        transactionDate: today,
+                        operation: 'EXPENSE',
+                        amount,
+                        contraAccountCode: ACCOUNT_CODES.GENERAL_EXPENSE,
+                        memo: description,
+                        sourceSessionMovementId: movement.id,
+                        createdBy: userId,
+                        postImmediately: true,
+                    });
+                    logger.info('Petty cash expense posted via Treasury Document', {
+                        movementId: movement.id,
+                        amount,
+                    });
+                    return;
+                }
+
+                // Flag-off legacy: expense from drawer (pre-1D behaviour)
                 lines = [
                     {
-                        accountCode: ACCOUNT_CODES.CHECKING_ACCOUNT,
+                        accountCode: ACCOUNT_CODES.GENERAL_EXPENSE,
                         description,
                         debitAmount: amount,
                         creditAmount: 0,
@@ -607,14 +701,11 @@ export const cashRegisterService = {
                     },
                 ];
                 break;
+            }
 
-            case 'CASH_OUT_EXPENSE':
             case 'CASH_OUT_OTHER':
-                // Petty cash expense or other withdrawal
-                description =
-                    movement.movementType === 'CASH_OUT_EXPENSE'
-                        ? `Petty cash expense - ${movement.reason || 'Misc'}`
-                        : `Cash withdrawal - ${movement.reason || 'Other'}`;
+                // Drawer withdrawal (not petty cash fund)
+                description = `Cash withdrawal - ${movement.reason || 'Other'}`;
                 lines = [
                     {
                         accountCode: ACCOUNT_CODES.GENERAL_EXPENSE,
@@ -646,6 +737,11 @@ export const cashRegisterService = {
         }
 
         try {
+            const postingSource =
+                movement.movementType === 'CASH_OUT_BANK' || movement.movementType === 'CASH_IN_FLOAT'
+                    ? ('TREASURY_TRANSFER' as const)
+                    : ('EXPENSE_PAYMENT' as const);
+
             await AccountingCore.createJournalEntry(
                 {
                     entryDate: today,
@@ -656,7 +752,7 @@ export const cashRegisterService = {
                     lines,
                     userId,
                     idempotencyKey,
-                    source: 'PAYMENT_RECEIPT' as const,
+                    source: postingSource,
                 },
                 dbPool
             );

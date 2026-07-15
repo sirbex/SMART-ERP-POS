@@ -5,7 +5,6 @@ import { isMultistoreEnabled } from './multistoreSettings.js';
 import { storeLocationRepository } from './storeLocationRepository.js';
 import { warehouseInventoryRepository } from './warehouseInventoryRepository.js';
 import logger from '../../../utils/logger.js';
-import { lotService } from '../../inventory-lot/lotService.js';
 import { recordMovement } from '../../stock-movements/stockMovementRepository.js';
 import { syncProductQuantity } from '../../../utils/inventorySync.js';
 
@@ -196,17 +195,21 @@ export const expiryAutomationService = {
                             referenceId: row.productLotId,
                             notes: `Auto expiry quarantine — moved to ${expiredStore.code}`,
                             createdBy: userId,
+                            economicEvent: 'QUARANTINE_TRANSFER',
+                            postsGl: false,
                         });
                         movementId = movement.id;
                         movementNumber = movement.movementNumber;
                         await syncProductQuantity(client, row.productId);
-                    }
 
-                    if (row.inventoryBatchId) {
-                        await lotService.transitionLotStatus(client, {
-                            lotId: row.inventoryBatchId,
-                            newStatus: 'EXPIRED',
-                            reason: 'Expiry automation — sellable stock quarantined',
+                        // LQ-INV-4: EXPIRED only when no sellable qty remains for the lot
+                        const { syncLotStatusAfterQuarantine } = await import(
+                            '../../loss-quarantine/quarantineLotStatus.js'
+                        );
+                        await syncLotStatusAfterQuarantine(client, {
+                            inventoryBatchId: row.inventoryBatchId,
+                            productLotId: row.productLotId,
+                            quarantineKind: 'EXPIRED',
                             userId,
                         });
                     } else {

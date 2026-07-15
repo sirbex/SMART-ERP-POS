@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { usePaymentPrograms, useCreatePaymentRun, useExecutePaymentRun } from '../../hooks/useAccountingModules';
 import { Banknote, Plus, X, Play } from 'lucide-react';
 import { getBusinessDate } from '../../utils/businessDate';
+import { DatePicker } from '../../components/ui/date-picker';
 
 interface PaymentRun {
   id: string;
@@ -97,7 +98,7 @@ export default function PaymentProgramPage() {
           <form onSubmit={handleCreate} className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Run Date</label>
-              <input type="date" value={form.runDate} onChange={(e) => setForm({ ...form, runDate: e.target.value })} required className="w-full px-3 py-2 border rounded-lg text-sm" />
+              <DatePicker value={form.runDate} onChange={(v) => setForm({ ...form, runDate: v })} required placeholder="Run date" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>

@@ -3,12 +3,14 @@ import { apReconciliationProvider } from './providers/apReconciliationProvider.j
 import { arReconciliationProvider } from './providers/arReconciliationProvider.js';
 import { inventoryReconciliationProvider } from './providers/inventoryReconciliationProvider.js';
 import { whtReconciliationProvider } from './providers/whtReconciliationProvider.js';
+import { vatReconciliationProvider } from './providers/vatReconciliationProvider.js';
 
 const PROVIDERS: Partial<Record<FinancialDomain, FinancialLaneProvider>> = {
   ap: apReconciliationProvider,
   ar: arReconciliationProvider,
   inventory: inventoryReconciliationProvider,
   wht: whtReconciliationProvider,
+  vat: vatReconciliationProvider,
 };
 
 export function getFinancialLaneProvider(domain: FinancialDomain): FinancialLaneProvider {

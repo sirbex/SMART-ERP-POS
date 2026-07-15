@@ -8,7 +8,12 @@ export interface LoadSelectableLotsOptions {
   forUpdate?: boolean;
   minDaysBeforeExpiry?: number;
   specificLotId?: string | null;
+  /**
+   * ADR-004 Phase 2C: allow QUARANTINED/EXPIRED lots when disposing (specificLotId required).
+   */
+  allowDisposalStatuses?: boolean;
 }
+
 
 function mapMasterRow(row: Record<string, unknown>): SelectableLot {
   return {
@@ -48,12 +53,15 @@ export async function loadGlobalSelectableLots(
     const expiry = buildMasterExpiryClause(minDays, 3);
     const params: unknown[] = [options.specificLotId, productId];
     if (expiry.paramCount) params.push(minDays);
+    const statusClause = options.allowDisposalStatuses
+      ? `status IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
+      : `status = 'ACTIVE'`;
 
     const result = await client.query(
       `SELECT id, batch_number, product_id, remaining_quantity, cost_price,
               expiry_date, received_date, created_at
        FROM inventory_batches
-       WHERE id = $1 AND product_id = $2 AND status = 'ACTIVE'
+       WHERE id = $1 AND product_id = $2 AND ${statusClause}
          AND remaining_quantity > 0
          AND ${expiry.clause}
        ${lockSql}`,
@@ -106,6 +114,15 @@ export async function loadStoreSelectableLots(
     params.push(options.specificLotId);
   }
 
+  const storeTypeClause = options.allowDisposalStatuses
+    ? `sl.store_type IN ('MAIN', 'SELLING', 'DAMAGE', 'EXPIRED', 'RETURN')`
+    : `sl.store_type IN ('MAIN', 'SELLING')`;
+  const lotStatusClause = options.allowDisposalStatuses
+    ? `pl.status IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')
+       AND ib.status IN ('ACTIVE', 'QUARANTINED', 'EXPIRED', 'BLOCKED')`
+    : `pl.status = 'ACTIVE'
+       AND ib.status = 'ACTIVE'`;
+
   const result = await client.query(
     `SELECT
        ib.id,
@@ -123,11 +140,12 @@ export async function loadStoreSelectableLots(
      FROM inventory_balances ib_bal
      INNER JOIN product_lots pl ON pl.id = ib_bal.product_lot_id
      INNER JOIN inventory_batches ib ON ib.id = pl.inventory_batch_id
+     INNER JOIN store_locations sl ON sl.id = ib_bal.store_location_id
      WHERE ib_bal.store_location_id = $1
        AND pl.product_id = $2
-       AND pl.status = 'ACTIVE'
-       AND ib.status = 'ACTIVE'
+       AND ${lotStatusClause}
        AND NOT ib_bal.blocked
+       AND ${storeTypeClause}
        AND ${expiryClause}
        AND (ib_bal.quantity_on_hand - ib_bal.quantity_reserved - ib_bal.quantity_committed) > 0
        ${specificClause}

@@ -209,6 +209,14 @@ const ExpensesPage: React.FC = () => {
 
   return (
     <div className="p-4 lg:p-6">
+      <div className="mb-6 max-w-3xl">
+        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Expenses</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Create expense vouchers for approval, then mark them paid from bank or cash. Spending
+          from the petty float belongs under Banking → Petty cash — not here.
+        </p>
+      </div>
+
       {/* Actions Bar */}
       <div className="flex items-center justify-end gap-3 mb-6">
         <Link to="/reports/expenses">

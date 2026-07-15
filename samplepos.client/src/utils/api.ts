@@ -616,7 +616,30 @@ export const api = {
         apiClient.get<ApiResponse>('inventory/reports/network/transfers', { params: { days } }),
       expiry: () => apiClient.get<ApiResponse>('inventory/reports/network/expiry'),
       quarantine: () => apiClient.get<ApiResponse>('inventory/reports/network/quarantine'),
+      quarantineAging: (params?: {
+        minAgeDays?: number;
+        storeType?: 'DAMAGE' | 'EXPIRED' | 'RETURN';
+        limit?: number;
+      }) =>
+        apiClient.get<ApiResponse>('inventory/loss-quarantine/quarantine-aging', { params }),
     },
+    quarantineAging: (params?: {
+      minAgeDays?: number;
+      storeType?: 'DAMAGE' | 'EXPIRED' | 'RETURN';
+      limit?: number;
+    }) =>
+      apiClient.get<ApiResponse>('inventory/loss-quarantine/quarantine-aging', { params }),
+    disposeFromQuarantine: (data: {
+      storeLocationId: string;
+      productId: string;
+      productLotId: string;
+      quantity: number;
+      reason?: 'DAMAGE' | 'EXPIRY' | 'SHRINKAGE' | 'WRITE_OFF' | 'PHYSICAL_COUNT';
+      memo?: string;
+      unitCost?: number;
+    }) => apiClient.post<ApiResponse>('inventory/loss-quarantine/dispose', data),
+    reverseDisposal: (id: string, data?: { reason?: string }) =>
+      apiClient.post<ApiResponse>(`inventory/loss-quarantine/dispose/${id}/reverse`, data ?? {}),
     stockCounts: {
       list: (params?: { state?: string; locationId?: string; page?: number; limit?: number }) =>
         apiClient.get<ApiResponse>('inventory/stockcounts', { params }),
@@ -852,6 +875,37 @@ export const api = {
       apiClient.get<ApiResponse>('reports/tax-compliance/register', { params }),
     getTaxLiability: (params: { startDate: string; endDate: string }) =>
       apiClient.get<ApiResponse>('reports/tax-compliance/liability', { params }),
+    liquidityMovements: (params: {
+      startDate: string;
+      endDate: string;
+      accountCode?: string;
+      documentType?: string;
+      q?: string;
+      treasuryDocumentsOnly?: boolean;
+      includeReversals?: boolean;
+      columns?: string;
+      limit?: number;
+    }) =>
+      apiClient.get<ApiResponse>('reports/liquidity-movements', {
+        params: {
+          ...params,
+          treasuryDocumentsOnly:
+            params.treasuryDocumentsOnly === undefined
+              ? undefined
+              : params.treasuryDocumentsOnly
+                ? 'true'
+                : 'false',
+          includeReversals:
+            params.includeReversals === undefined
+              ? undefined
+              : params.includeReversals
+                ? 'true'
+                : 'false',
+        },
+      }),
+    liquidityBalances: () => apiClient.get<ApiResponse>('reports/liquidity-movements/balances'),
+    liquidityMovementsColumns: () =>
+      apiClient.get<ApiResponse>('reports/liquidity-movements/columns'),
   },
 
   // Advanced Accounting Modules
@@ -947,6 +1001,112 @@ export const api = {
       startDate?: string;
       endDate?: string;
     }) => apiClient.get<ApiResponse>('withholding-tax/certificates', { params }),
+  },
+
+  vatRemittance: {
+    getEnabled: () => apiClient.get<ApiResponse>('vat-remittance/enabled'),
+    getWorksheet: (params: { periodFrom: string; periodTo: string }) =>
+      apiClient.get<ApiResponse>('vat-remittance/worksheet', { params }),
+    remit: (data: {
+      periodFrom: string;
+      periodTo: string;
+      amount: number;
+      transactionDate: string;
+      paymentAccountCode: string;
+      authorityReference: string;
+      memo?: string;
+      postImmediately?: boolean;
+    }) => apiClient.post<ApiResponse>('vat-remittance/remit', data),
+    reverse: (id: string, data?: { reason?: string }) =>
+      apiClient.post<ApiResponse>(`vat-remittance/${id}/reverse`, data ?? {}),
+  },
+
+  badDebt: {
+    getEnabled: () => apiClient.get<ApiResponse>('bad-debt/enabled'),
+    getWorkqueue: (params?: { minAgeDays?: number; customerId?: string; limit?: number }) =>
+      apiClient.get<ApiResponse>('bad-debt/workqueue', { params }),
+    listDocuments: (params?: { limit?: number; includeReversed?: boolean }) =>
+      apiClient.get<ApiResponse>('bad-debt/documents', { params }),
+    getDocument: (id: string) => apiClient.get<ApiResponse>(`bad-debt/${id}`),
+    writeoff: (data: {
+      customerId: string;
+      writeoffDate?: string;
+      reasonCode: string;
+      expenseAccountCode?: string;
+      memo?: string;
+      postImmediately?: boolean;
+      lines: Array<{ invoiceId: string; writeoffAmount: number; memo?: string }>;
+    }) => apiClient.post<ApiResponse>('bad-debt/writeoff', data),
+    reverse: (id: string, data?: { reason?: string }) =>
+      apiClient.post<ApiResponse>(`bad-debt/${id}/reverse`, data ?? {}),
+  },
+
+  treasury: {
+    getEnabled: () => apiClient.get<ApiResponse>('treasury/enabled'),
+    listDocuments: (params?: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      documentType?: string;
+    }) => apiClient.get<ApiResponse>('treasury/documents', { params }),
+    getDocument: (id: string) => apiClient.get<ApiResponse>(`treasury/documents/${id}`),
+    createDocument: (data: Record<string, unknown>) =>
+      apiClient.post<ApiResponse>('treasury/documents', data),
+    updateDocument: (id: string, data: Record<string, unknown>) =>
+      apiClient.patch<ApiResponse>(`treasury/documents/${id}`, data),
+    submit: (id: string) => apiClient.post<ApiResponse>(`treasury/documents/${id}/submit`),
+    approve: (id: string) => apiClient.post<ApiResponse>(`treasury/documents/${id}/approve`),
+    reject: (id: string, data?: { reason?: string }) =>
+      apiClient.post<ApiResponse>(`treasury/documents/${id}/reject`, data ?? {}),
+    post: (id: string) => apiClient.post<ApiResponse>(`treasury/documents/${id}/post`),
+    reverse: (id: string, data?: { reason?: string }) =>
+      apiClient.post<ApiResponse>(`treasury/documents/${id}/reverse`, data ?? {}),
+    listUnsettledReceipts: (params?: { clearingAccountCode?: string; limit?: number }) =>
+      apiClient.get<ApiResponse>('treasury/unsettled-receipts', { params }),
+    getDepositReconciliation: () =>
+      apiClient.get<ApiResponse>('treasury/deposit-reconciliation'),
+    createDepositWorksheet: (data: {
+      transactionDate: string;
+      bankAccountId: string;
+      depositReference?: string;
+      memo?: string;
+      shortageAmount?: number;
+      overageAmount?: number;
+      requiresApproval?: boolean;
+      receipts: Array<{
+        sourceType: 'AR_CUSTOMER_PAYMENT' | 'INVOICE_PAYMENT' | 'CUSTOMER_DEPOSIT';
+        sourceId: string;
+        amount: number;
+      }>;
+    }) => apiClient.post<ApiResponse>('treasury/deposit-worksheets', data),
+    listLiquidityAccounts: () => apiClient.get<ApiResponse>('treasury/liquidity-accounts'),
+    createTransfer: (data: {
+      transactionDate: string;
+      fromAccountCode: string;
+      toAccountCode: string;
+      amount: number;
+      memo?: string;
+      depositReference?: string;
+      bankAccountId?: string;
+      documentType?:
+        | 'TREASURY_TRANSFER'
+        | 'CASH_WITHDRAWAL'
+        | 'CASH_DEPOSIT'
+        | 'CARD_SETTLEMENT'
+        | 'MOBILE_MONEY_SETTLEMENT';
+      requiresApproval?: boolean;
+      postImmediately?: boolean;
+    }) => apiClient.post<ApiResponse>('treasury/transfers', data),
+    getPettyCashBalances: () => apiClient.get<ApiResponse>('treasury/petty-cash/balances'),
+    createPettyCash: (data: {
+      transactionDate: string;
+      operation: 'FUND' | 'REPLENISH' | 'EXPENSE';
+      amount: number;
+      contraAccountCode?: string;
+      memo?: string;
+      requiresApproval?: boolean;
+      postImmediately?: boolean;
+    }) => apiClient.post<ApiResponse>('treasury/petty-cash', data),
   },
 
   assets: {

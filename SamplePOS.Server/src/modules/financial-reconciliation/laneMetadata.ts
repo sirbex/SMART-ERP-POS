@@ -13,24 +13,32 @@ const DOMAIN_TITLES: Record<FinancialDomain, string> = {
   inventory: 'Inventory',
   cash: 'Cash',
   wht: 'Withholding Tax',
+  vat: 'VAT (Tax Payable)',
 };
 
 const LANE_TITLES: Record<LaneKind, string> = {
   integrity: 'Accounting Integrity',
-  cache: 'Cache Health',
+  cache: 'Stored Balances',
   history: 'Posted Journal Audit',
+  quarantine: 'Quarantine Exposure',
+  writeoff: 'Write-off / Aging Exposure',
 };
 
 const LANE_SUBTITLES: Record<LaneKind, string> = {
-  integrity: 'Period close — net-active GL vs open-item subledger',
-  cache: 'Maintenance — open-item vs denormalized cache (does not gate period close)',
-  history: 'Informational — gross posted vs net-active (reversals and history)',
+  integrity: 'Period close — general ledger vs outstanding balances',
+  cache: 'Stored values may need refresh — does not block period close',
+  history: 'Informational — total posted vs active balance (includes reversals)',
+  quarantine:
+    'Informational — quarantine stock still on inventory GL until disposal (not a shrink)',
+  writeoff:
+    'Informational — overdue open AR vs YTD bad debt write-offs (does not block period close)',
 };
 
+/** Operator-facing guidance only — never expose API paths or internal endpoints. */
 const MAINTENANCE_ACTIONS: Partial<Record<FinancialDomain, string>> = {
-  ap: 'POST /api/system/gl/recalc-supplier-balances',
-  ar: 'POST /api/system/gl/recalc-customer-balances',
-  inventory: 'POST /api/system/gl/rebuild-inventory-balances; rebase 1300 via rebase-account-balances',
+  ap: 'Refresh stored supplier balances from outstanding invoices',
+  ar: 'Refresh stored customer balances from outstanding invoices',
+  inventory: 'Refresh stored product values from inventory lots',
 };
 
 function integrityMatched(status: LaneStatus, difference: number): boolean {
@@ -41,12 +49,15 @@ function cacheHealthy(status: LaneStatus, difference: number): boolean {
   return status === 'HEALTHY' || Math.abs(difference) <= 0.01;
 }
 
-export function resolvePeriodCloseBlocking(lane: LaneKind): boolean {
+export function resolvePeriodCloseBlocking(lane: LaneKind, domain?: FinancialDomain): boolean {
+  // ADR-005 Decision B: VAT document↔GL recon is informational until purchase bills post input VAT
+  if (domain === 'vat') return false;
   return lane === 'integrity';
 }
 
 export function resolveSeverity(lane: LaneKind, status: LaneStatus, difference: number): LaneSeverity {
-  if (lane === 'history') return 'informational';
+  if (lane === 'history' || lane === 'quarantine' || lane === 'writeoff') return 'informational';
+  if (status === 'INFORMATIONAL') return 'informational';
   if (lane === 'cache') {
     return cacheHealthy(status, difference) ? 'informational' : 'maintenance';
   }
@@ -59,19 +70,29 @@ export function resolveRecommendedAction(
   status: LaneStatus,
   difference: number,
 ): string | null {
+  if (domain === 'vat' && lane === 'integrity' && Math.abs(difference) > 0.01) {
+    return 'Review VAT document boxes vs GL 2300 before remittance — purchase input may be inventory-embedded (Decision B)';
+  }
   if (lane === 'integrity' && !integrityMatched(status, difference)) {
-    return 'Investigate open-item vs GL gaps per entity; do not use cache heal for integrity fixes';
+    return 'Review source documents and post missing journal entries — do not refresh stored balances until resolved';
   }
   if (lane === 'cache' && !cacheHealthy(status, difference)) {
-    return MAINTENANCE_ACTIONS[domain] ?? 'Run domain cache recalculation maintenance endpoint';
+    return MAINTENANCE_ACTIONS[domain] ?? 'Refresh stored balances from source documents';
+  }
+  if (lane === 'quarantine' && Math.abs(difference) > 0.01) {
+    return 'Review quarantine aging and dispose lots when ready to recognize loss expense';
+  }
+  if (lane === 'writeoff' && Math.abs(difference) > 0.01) {
+    return 'Review overdue AR and post Bad Debt Write-offs where collection is exhausted — do not use credit notes';
   }
   return null;
 }
 
 export function resolveStatusLabel(lane: LaneKind, status: LaneStatus): string {
-  if (lane === 'history') return 'Informational';
-  if (lane === 'integrity') return status === 'RECONCILED' ? 'Reconciled' : 'Investigate';
-  if (lane === 'cache') return status === 'HEALTHY' ? 'Healthy' : 'Cache drift';
+  if (lane === 'history' || lane === 'quarantine' || lane === 'writeoff') return 'Informational';
+  if (status === 'INFORMATIONAL') return 'Informational';
+  if (lane === 'integrity') return status === 'RECONCILED' ? 'Reconciled' : 'Needs review';
+  if (lane === 'cache') return status === 'HEALTHY' ? 'Up to date' : 'Needs refresh';
   return status;
 }
 
@@ -81,7 +102,7 @@ export function buildFinancialLaneResult(
   asOfDate: string,
   computation: LaneComputation,
 ): FinancialLaneResult {
-  const periodCloseBlocking = resolvePeriodCloseBlocking(lane);
+  const periodCloseBlocking = resolvePeriodCloseBlocking(lane, domain);
   const severity = resolveSeverity(lane, computation.status, computation.difference);
   const recommendedAction = resolveRecommendedAction(
     domain,
@@ -95,7 +116,10 @@ export function buildFinancialLaneResult(
     domain,
     lane,
     title: `${DOMAIN_TITLES[domain]} ${LANE_TITLES[lane]}`,
-    subtitle: LANE_SUBTITLES[lane],
+    subtitle:
+      domain === 'vat'
+        ? 'Informational — document VAT return vs GL 2300 (Decision B; does not block period close)'
+        : LANE_SUBTITLES[lane],
     status: computation.status,
     leftLabel: computation.leftLabel,
     leftAmount: computation.leftAmount,

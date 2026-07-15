@@ -38,6 +38,10 @@ import type {
     CreateSupplierDebitNote,
 } from '../../../../shared/zod/creditDebitNote.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import {
+    assertCreditNoteReasonNotBadDebt,
+    BadDebtInvariantError,
+} from '@shared/bad-debt/index.js';
 import { recalculateOutstandingBalance as recalcSupplierBalance } from '../suppliers/supplierRepository.js';
 
 // ============================================================
@@ -55,6 +59,15 @@ export const creditDebitNoteService = {
         pool: Pool,
         input: CreateCustomerCreditNote,
     ): Promise<{ note: CreditDebitNoteRecord; lineItems: NoteLineItemRecord[] }> {
+
+        try {
+            assertCreditNoteReasonNotBadDebt(input.reason);
+        } catch (err) {
+            if (err instanceof BadDebtInvariantError) {
+                throw new Error(err.message);
+            }
+            throw err;
+        }
 
         return UnitOfWork.run(pool, async (client) => {
             // 1. Validate original invoice

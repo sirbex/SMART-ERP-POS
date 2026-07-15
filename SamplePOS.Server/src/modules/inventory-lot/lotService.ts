@@ -472,6 +472,26 @@ export const lotService: ILotService = {
     const minDays = input.minDaysBeforeExpiry ?? 0;
     const multistore = await isMultistoreEnabled(db);
     const useStore = multistore && Boolean(input.storeLocationId);
+    if (useStore && !input.allowDisposalStatuses) {
+      const storeRes = await db.query<{ store_type: string }>(
+        `SELECT store_type FROM store_locations WHERE id = $1`,
+        [input.storeLocationId],
+      );
+      const storeType = storeRes.rows[0]?.store_type;
+      if (
+        storeType === 'DAMAGE' ||
+        storeType === 'EXPIRED' ||
+        storeType === 'RETURN' ||
+        storeType === 'TRANSIT'
+      ) {
+        throw new ValidationError(
+          `Cannot allocate/sell stock from ${storeType} quarantine store (LQ-INV-5 / INV-005). Dispose via write-off instead.`,
+        );
+      }
+    }
+    if (input.allowDisposalStatuses && !input.specificLotId) {
+      throw new ValidationError('Disposal consume requires specificLotId');
+    }
     const crossStoreDeduct = Boolean(
       multistore
       && input.deductAcrossAllStoreBalances
@@ -487,11 +507,13 @@ export const lotService: ILotService = {
         forUpdate: true,
         minDaysBeforeExpiry: minDays,
         specificLotId: input.specificLotId,
+        allowDisposalStatuses: input.allowDisposalStatuses,
       })
       : await loadGlobalSelectableLots(db, input.productId, {
         forUpdate: true,
         minDaysBeforeExpiry: minDays,
         specificLotId: input.specificLotId,
+        allowDisposalStatuses: input.allowDisposalStatuses,
       });
 
     const selection = selectLots({

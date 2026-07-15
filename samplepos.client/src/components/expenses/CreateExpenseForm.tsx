@@ -7,7 +7,7 @@ import {
   PAYMENT_METHODS,
   Expense,
 } from '@shared/types/expense';
-import { useCreateExpense, usePaymentAccounts, useExpenseCategories } from '../../hooks/useExpenses';
+import { useCreateExpense, useExpenseCategories } from '../../hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,7 +34,6 @@ interface CreateExpenseFormProps {
 
 export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess, onCancel }) => {
   const createExpense = useCreateExpense();
-  const { data: paymentAccounts = [], isLoading: accountsLoading } = usePaymentAccounts();
   const { data: dbCategories = [], isLoading: categoriesLoading } = useExpenseCategories();
   const [uploadedDocuments] = useState<string[]>([]);
 
@@ -50,6 +49,7 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
       expenseDate: new Date().toLocaleDateString('en-CA'),
       receiptRequired: false,
       documentIds: [],
+      // Always create unpaid — pay after approval via Mark as paid (create API ignores PAID today)
       paymentStatus: 'UNPAID',
       paymentAccountId: null,
     },
@@ -58,19 +58,20 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
 
   const watchedAmount = watch('amount');
   const watchedCategory = watch('category');
-  const watchedPaymentStatus = watch('paymentStatus');
 
   const onSubmit = async (data: CreateExpenseData) => {
     try {
       const expenseData = {
         ...data,
+        paymentStatus: 'UNPAID' as const,
+        paymentAccountId: null,
         documentIds: uploadedDocuments.length > 0 ? uploadedDocuments : undefined,
       };
 
       const expense = await createExpense.mutateAsync(expenseData);
 
       toast.success('Expense created successfully', {
-        description: `Expense ${expense.expenseNumber} has been created`,
+        description: `Expense ${expense.expenseNumber} has been created as unpaid — submit for approval, then mark paid from bank or cash.`,
       });
 
       onSuccess?.(expense);
@@ -87,10 +88,17 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
         {/* Single Compact Card */}
         <Card className="shadow-md">
           <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white pb-3">
-            <CardTitle className="text-lg font-semibold">Create New Expense</CardTitle>
-            <p className="text-sm text-blue-100">Fill in the details below</p>
+            <CardTitle className="text-lg font-semibold">Create expense voucher</CardTitle>
+            <p className="text-sm text-blue-100">
+              Creates an unpaid voucher for approval. Pay from bank or cash after approval — not from
+              the petty float.
+            </p>
           </CardHeader>
           <CardContent className="space-y-4 pt-4">
+            <div className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-900 md:col-span-2">
+              Need to spend from the petty cash float instead? Use Banking → Petty cash, or Cash Out →
+              Spend from petty float on an open register.
+            </div>
             {/* Compact Grid Layout */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {/* Title */}
@@ -220,67 +228,6 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
                   className="h-9"
                 />
               </div>
-
-              {/* Payment Status */}
-              <div>
-                <Label className="text-sm font-medium">Payment Status *</Label>
-                <Controller
-                  name="paymentStatus"
-                  control={control}
-                  render={({ field }) => (
-                    <Select value={field.value ?? 'UNPAID'} onValueChange={field.onChange}>
-                      <SelectTrigger className="h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="UNPAID">Unpaid</SelectItem>
-                        <SelectItem value="PAID">Paid</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {watchedPaymentStatus === 'PAID' ? 'Deducted from account' : 'Creates liability'}
-                </p>
-              </div>
-
-              {/* Payment Account (if paid) */}
-              {watchedPaymentStatus === 'PAID' && (
-                <div className="md:col-span-2 bg-blue-50 p-3 rounded-md border border-blue-200">
-                  <Label className="text-sm font-medium">Pay From Account *</Label>
-                  <Controller
-                    name="paymentAccountId"
-                    control={control}
-                    render={({ field }) => (
-                      <Select
-                        value={field.value ?? ''}
-                        onValueChange={field.onChange}
-                        disabled={accountsLoading}
-                      >
-                        <SelectTrigger
-                          className={
-                            errors.paymentAccountId ? 'border-red-500 h-9 mt-1' : 'h-9 mt-1'
-                          }
-                        >
-                          <SelectValue
-                            placeholder={accountsLoading ? 'Loading...' : 'Select account'}
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {paymentAccounts.map((account) => (
-                            <SelectItem key={account.id} value={account.id}>
-                              {account.code} - {account.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
-                  {errors.paymentAccountId && (
-                    <p className="text-xs text-red-600 mt-0.5">{errors.paymentAccountId.message}</p>
-                  )}
-                </div>
-              )}
 
               {/* Description */}
               <div className="md:col-span-2">

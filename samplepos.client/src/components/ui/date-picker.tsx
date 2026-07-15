@@ -1,4 +1,13 @@
-import React, { useState } from 'react';
+/**
+ * DatePicker — global SSOT for single-date selection in the client.
+ *
+ * Rules:
+ * - Prefer this over `<input type="date">` or ad-hoc calendars.
+ * - Value is always YYYY-MM-DD (API / Zod date-only contract).
+ * - "Today" / relative quick picks use business timezone via getBusinessDate().
+ * - Date ranges should use DateRangeFilter (which wraps this component).
+ */
+import React, { useEffect, useState } from 'react';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
@@ -7,8 +16,9 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { format, parse, isValid } from 'date-fns';
+import { addDaysToDateString, getBusinessDate } from '@/utils/businessDate';
 
-interface DatePickerProps {
+export interface DatePickerProps {
   value?: string; // YYYY-MM-DD format
   onChange?: (date: string) => void;
   placeholder?: string;
@@ -16,6 +26,10 @@ interface DatePickerProps {
   maxDate?: Date;
   minDate?: Date;
   className?: string;
+  id?: string;
+  required?: boolean;
+  /** Accessible name when no visible label is associated */
+  'aria-label'?: string;
 }
 
 export const DatePicker: React.FC<DatePickerProps> = ({
@@ -26,9 +40,16 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   maxDate,
   minDate,
   className,
+  id,
+  required,
+  'aria-label': ariaLabel,
 }) => {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState(value || '');
+
+  useEffect(() => {
+    setInputValue(value || '');
+  }, [value]);
 
   const selectedDate = value ? parse(value, 'yyyy-MM-dd', new Date()) : undefined;
   const isValidDate = selectedDate && isValid(selectedDate);
@@ -63,19 +84,25 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     }
   };
 
-  const handleQuickSelect = (days: number) => {
-    const today = new Date();
-    const newDate = new Date(today);
-    newDate.setDate(today.getDate() - days);
-    handleDayClick(newDate);
+  /** Offset from business "today" (0 = today, 1 = yesterday, 7 = last week). */
+  const handleQuickSelect = (daysBack: number) => {
+    const businessToday = getBusinessDate();
+    const next = daysBack === 0 ? businessToday : addDaysToDateString(businessToday, -daysBack);
+    setInputValue(next);
+    onChange?.(next);
+    setOpen(false);
   };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
+          id={id}
+          type="button"
           variant="outline"
           disabled={disabled}
+          aria-label={ariaLabel ?? placeholder}
+          aria-required={required || undefined}
           className={cn(
             'w-full min-h-10 justify-start text-left font-normal',
             !isValidDate && 'text-muted-foreground',
@@ -105,7 +132,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex max-h-[inherit] flex-col md:flex-row md:divide-x md:divide-gray-100">
-          {/* Calendar — primary focus; grows on large screens */}
           <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
             <DayPicker
               mode="single"
@@ -121,7 +147,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             />
           </div>
 
-          {/* Actions panel — beside calendar on md+, below on mobile */}
           <div className="flex shrink-0 flex-col gap-4 border-t border-gray-100 p-4 sm:p-5 md:w-56 md:border-t-0 md:bg-gray-50/80">
             <div className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -195,3 +220,5 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     </Popover>
   );
 };
+
+export default DatePicker;

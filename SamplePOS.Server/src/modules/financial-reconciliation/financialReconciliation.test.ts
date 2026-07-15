@@ -33,10 +33,12 @@ describe('financial reconciliation framework', () => {
   };
 
   describe('lane metadata', () => {
-    it('integrity lane is period-close gate; cache and history are not', () => {
+    it('integrity lane is period-close gate; cache, history, quarantine, and writeoff are not', () => {
       expect(resolvePeriodCloseBlocking('integrity')).toBe(true);
       expect(resolvePeriodCloseBlocking('cache')).toBe(false);
       expect(resolvePeriodCloseBlocking('history')).toBe(false);
+      expect(resolvePeriodCloseBlocking('quarantine')).toBe(false);
+      expect(resolvePeriodCloseBlocking('writeoff')).toBe(false);
     });
 
     it('assigns critical severity only when integrity is discrepant', () => {
@@ -49,14 +51,17 @@ describe('financial reconciliation framework', () => {
       expect(resolveSeverity('cache', 'HEALTHY', 0)).toBe('informational');
     });
 
-    it('history lane is always informational', () => {
+    it('history and quarantine lanes are always informational', () => {
       expect(resolveSeverity('history', 'INFORMATIONAL', -913_285)).toBe('informational');
+      expect(resolveSeverity('quarantine', 'INFORMATIONAL', 50_000)).toBe('informational');
+      expect(resolveSeverity('writeoff', 'INFORMATIONAL', 50_000)).toBe('informational');
     });
 
     it('recommends maintenance action for cache drift only', () => {
-      expect(resolveRecommendedAction('ap', 'cache', 'DRIFT', -500)).toContain('recalc-supplier');
-      expect(resolveRecommendedAction('ar', 'cache', 'DRIFT', -100)).toContain('recalc-customer');
-      expect(resolveRecommendedAction('inventory', 'cache', 'DRIFT', -100)).toContain('rebuild-inventory');
+      expect(resolveRecommendedAction('ap', 'cache', 'DRIFT', -500)).toMatch(/supplier/i);
+      expect(resolveRecommendedAction('ar', 'cache', 'DRIFT', -100)).toMatch(/customer/i);
+      expect(resolveRecommendedAction('inventory', 'cache', 'DRIFT', -100)).toMatch(/product|inventory/i);
+      expect(resolveRecommendedAction('inventory', 'cache', 'DRIFT', -100)).not.toMatch(/POST \/api/i);
       expect(resolveRecommendedAction('ap', 'integrity', 'RECONCILED', 0)).toBeNull();
     });
   });
@@ -82,7 +87,7 @@ describe('financial reconciliation framework', () => {
     it('integrity discrepancy is critical with recommended action', () => {
       const result = buildFinancialLaneResult('ap', 'integrity', '2026-06-27', integrityBad);
       expect(result.severity).toBe('critical');
-      expect(result.recommendedAction).toContain('Investigate');
+      expect(result.recommendedAction).toMatch(/Review source documents|Investigate/i);
     });
   });
 

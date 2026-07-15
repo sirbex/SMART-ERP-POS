@@ -31,6 +31,7 @@ import {
   ChevronLeft,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { DatePicker } from '../../components/ui/date-picker';
 
 // ─── Types (matching backend service output) ─────────────────────────
 
@@ -861,13 +862,21 @@ function FilterInput({
   return (
     <div>
       <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2 border rounded-lg text-sm"
-        placeholder={placeholder}
-      />
+      {type === 'date' ? (
+        <DatePicker
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder || label}
+        />
+      ) : (
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full px-3 py-2 border rounded-lg text-sm"
+          placeholder={placeholder}
+        />
+      )}
     </div>
   );
 }

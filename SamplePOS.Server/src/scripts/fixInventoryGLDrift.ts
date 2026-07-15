@@ -101,6 +101,29 @@ async function main(): Promise<void> {
         console.warn(`  Source          : SYSTEM_CORRECTION`);
         console.warn('');
 
+        // ADR-004 Phase 2D: quarantine stock still on 1300 is correct until dispose — not heal target
+        try {
+            const { getQuarantineAging } = await import(
+                '../modules/loss-quarantine/quarantineAgingService.js'
+            );
+            const aging = await getQuarantineAging(pool, { limit: 50 });
+            console.warn('Quarantine exposure (still on GL 1300 until dispose — do NOT heal as shrinkage):');
+            console.warn(`  Lines  : ${aging.summary.totalLines}`);
+            console.warn(`  Qty    : ${aging.summary.totalQuantity.toLocaleString()}`);
+            console.warn(`  Value  : ${aging.summary.totalValue.toLocaleString()}`);
+            for (const [storeType, bucket] of Object.entries(aging.summary.byStoreType)) {
+                console.warn(
+                    `  ${storeType}: ${bucket.lines} lines, value ${bucket.value.toLocaleString()}`,
+                );
+            }
+            console.warn('');
+        } catch (qErr) {
+            console.warn(
+                `  (quarantine aging unavailable: ${qErr instanceof Error ? qErr.message : String(qErr)})`,
+            );
+            console.warn('');
+        }
+
         if (dryRun) {
             const preview = await healInventoryGlComplete(pool, ADMIN_USER_ID, { dryRun: true });
             console.warn(`Duplicate groups          : ${preview.duplicates.groups.length}`);
