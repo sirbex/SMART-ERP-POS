@@ -408,6 +408,8 @@ export const generateExpenseNumber = async (dbPool?: pg.Pool | pg.PoolClient): P
 export const getPaymentAccounts = async (dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
   try {
+    // Only cash-out liquidity accounts that allow EXPENSE_PAYMENT (Rule B).
+    // Exclude undeposited (1015) and card clearing (1020) — customer receipt lanes, not expense pay-from.
     const query = `
       SELECT 
         "Id" as id,
@@ -418,7 +420,11 @@ export const getPaymentAccounts = async (dbPool?: pg.Pool | pg.PoolClient) => {
       WHERE "AccountType" = 'ASSET' 
         AND "IsActive" = true
         AND "IsPostingAccount" = true
-        AND "AccountCode" IN ('1010', '1015', '1020', '1030')
+        AND (
+          "SystemAccountTag" IN ('CASH', 'BANK', 'MOBILE_MONEY', 'PETTY_CASH')
+          OR "AccountCode" IN ('1010', '1012', '1030', '1040')
+        )
+        AND 'EXPENSE_PAYMENT' = ANY(COALESCE("AllowedSources", ARRAY[]::text[]))
       ORDER BY "AccountCode"
     `;
 

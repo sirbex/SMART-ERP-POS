@@ -337,11 +337,39 @@ export const markExpensePaid = async (
     // Get default cash account if no payment account specified
     let paymentAccountId = paymentData.paymentAccountId;
     if (!paymentAccountId) {
-      // Default to Cash account (1010)
+      // Default to Cash account (1010) among accounts that allow EXPENSE_PAYMENT
       const cashAccounts = await expenseRepository.getPaymentAccounts(dbPool);
-      const cashAccount = cashAccounts.find((a) => a.code === '1010');
+      const cashAccount =
+        cashAccounts.find((a) => a.account_code === '1010' || a.code === '1010') || cashAccounts[0];
       if (cashAccount) {
         paymentAccountId = cashAccount.id;
+      }
+    }
+
+    if (paymentAccountId) {
+      const acctCheck = await dbPool.query(
+        `SELECT "AccountCode", "AccountName", "AllowedSources", "SystemAccountTag"
+         FROM accounts WHERE "Id" = $1`,
+        [paymentAccountId],
+      );
+      const acct = acctCheck.rows[0];
+      if (!acct) {
+        throw new BusinessError('Payment account not found', 'ERR_EXPENSE_009', {
+          paymentAccountId,
+        });
+      }
+      const allowed: string[] = Array.isArray(acct.AllowedSources) ? acct.AllowedSources : [];
+      if (!allowed.includes('EXPENSE_PAYMENT')) {
+        throw new BusinessError(
+          `Cannot pay expense from ${acct.AccountCode} (${acct.AccountName}). Choose Cash, Bank, MoMo, or Petty Cash.`,
+          'ERR_EXPENSE_010',
+          {
+            paymentAccountId,
+            accountCode: acct.AccountCode,
+            allowedSources: allowed,
+            requiredSource: 'EXPENSE_PAYMENT',
+          },
+        );
       }
     }
 

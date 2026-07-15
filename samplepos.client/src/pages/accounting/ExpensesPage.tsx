@@ -144,12 +144,13 @@ const ExpensesPage: React.FC = () => {
         id: selectedExpense.id,
         paymentAccountId: selectedPaymentAccountId
       });
+      toast.success('Expense marked as paid');
       setPaymentDialogOpen(false);
       setSelectedPaymentAccountId('');
       setSelectedExpense(null);
       refetch();
     } catch (err) {
-      console.error('Failed to mark expense as paid:', err);
+      toast.error('Failed to mark expense as paid', { description: getErrorMessage(err) });
     }
   };
 
