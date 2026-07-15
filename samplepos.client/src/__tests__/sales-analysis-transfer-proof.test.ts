@@ -29,6 +29,9 @@ describe('Sales Analysis + transfer reverse — UI contract', () => {
     expect(page).toContain("group_by: groupBy");
     expect(page).not.toMatch(/Formatted/);
     expect(page).toContain('reports/sales');
+    expect(page).toContain('Export PDF');
+    expect(page).toContain('Export CSV');
+    expect(page).toContain('downloadFile');
   });
 
   it('Reports gallery routes SALES_REPORT to sales-analysis', () => {

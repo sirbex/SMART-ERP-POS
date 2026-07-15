@@ -301,6 +301,48 @@ export const reportsController = {
       userId,
     });
 
+    const groupLabel = params.group_by ? ` · by ${params.group_by.replace(/_/g, ' ')}` : '';
+
+    // CSV export (same SSOT as JSON/PDF — Sales Analysis + legacy sales report)
+    if (params.format === 'csv') {
+      const csvEscape = (value: string) =>
+        /[",\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+      const headers = [
+        'Period',
+        'Category',
+        'Qty',
+        'Total Sales',
+        'Discounts',
+        'Net Revenue',
+        'Cost',
+        'Gross Profit',
+        'Margin %',
+        'Tickets',
+        'Avg Ticket',
+      ];
+      const lines = (report.data as Array<Record<string, unknown>>).map((row) =>
+        [
+          csvEscape(String(row.period ?? '')),
+          csvEscape(row.category == null || row.category === '' ? '—' : String(row.category)),
+          String(Number(row.totalQuantitySold ?? 0)),
+          Number(row.totalSales ?? 0).toFixed(2),
+          Number(row.totalDiscounts ?? 0).toFixed(2),
+          Number(row.netRevenue ?? 0).toFixed(2),
+          Number(row.totalCost ?? 0).toFixed(2),
+          Number(row.grossProfit ?? 0).toFixed(2),
+          Number(row.profitMargin ?? 0).toFixed(2),
+          String(Number(row.transactionCount ?? 0)),
+          Number(row.averageTransactionValue ?? 0).toFixed(2),
+        ].join(','),
+      );
+      const body = [headers.join(','), ...lines].join('\n');
+      const filename = `sales-analysis-${params.start_date}_${params.end_date}${params.group_by ? `-${params.group_by}` : ''}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(`\uFEFF${body}\n`);
+      return;
+    }
+
     // PDF export
     if (params.format === 'pdf') {
       const companyName = await getCompanyName(pool);
@@ -309,7 +351,10 @@ export const reportsController = {
 
       const date = getBusinessDate();
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="sales-report-${date}.pdf"`);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="sales-analysis-${date}${params.group_by ? `-${params.group_by}` : ''}.pdf"`,
+      );
       doc.pipe(res);
 
       const startDate = formatDatePDF(params.start_date);
@@ -317,8 +362,8 @@ export const reportsController = {
 
       pdfGen.addHeader({
         companyName,
-        title: 'Sales Report',
-        subtitle: `${startDate} - ${endDate}`,
+        title: 'Sales Analysis',
+        subtitle: `${startDate} - ${endDate}${groupLabel}`,
         generatedAt: formatDateTime(),
       });
 

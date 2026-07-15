@@ -8,6 +8,7 @@ import { Link } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { apiClient } from '../../utils/api';
 import type { ApiResponse } from '../../utils/api';
+import { downloadFile } from '../../utils/download';
 import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
@@ -20,6 +21,7 @@ import {
   ArrowDownWideNarrow,
   Columns3,
   FileSpreadsheet,
+  FileText,
   Lightbulb,
   Loader2,
   RefreshCw,
@@ -258,6 +260,7 @@ export default function SalesAnalysisReportPage() {
   const [rows, setRows] = useState<SalesRow[]>([]);
   const [summary, setSummary] = useState<SalesSummary | null>(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState<'pdf' | 'csv' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<{ recordCount?: number; executionTimeMs?: number }>({});
 
@@ -434,34 +437,31 @@ export default function SalesAnalysisReportPage() {
     return tips.slice(0, 3);
   }, [rows, summary, dimension.periodLabel]);
 
-  const exportCsv = () => {
-    const headers = [
-      ...visibleCols.map((c) => (c.id === 'period' ? dimension.periodLabel : c.label)),
-    ];
-    const lines = [
-      headers.join(','),
-      ...enriched.map((row) =>
-        visibleCols
-          .map((c) => {
-            if (c.id === 'rank') return String(row.rank);
-            if (c.id === 'shareOfNet') return Number(row.shareOfNet).toFixed(2);
-            const v = row[c.id as keyof SalesRow];
-            if (c.money) return Number(v).toFixed(2);
-            if (c.pct) return Number(v).toFixed(2);
-            const s = String(v ?? '');
-            return s.includes(',') ? `"${s.replace(/"/g, '""')}"` : s;
-          })
-          .join(','),
-      ),
-    ];
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `sales-analysis-${startDate}-${endDate}-${groupBy}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const buildExportPath = (format: 'pdf' | 'csv') => {
+    const params = new URLSearchParams();
+    params.set('start_date', startDate);
+    params.set('end_date', endDate);
+    params.set('group_by', groupBy);
+    params.set('format', format);
+    return `/reports/sales?${params.toString()}`;
   };
+
+  const exportReport = async (format: 'pdf' | 'csv') => {
+    setExporting(format);
+    setError(null);
+    try {
+      await downloadFile(
+        buildExportPath(format),
+        `sales-analysis-${startDate}_${endDate}-${groupBy}.${format}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to export ${format.toUpperCase()}`);
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const canExport = !loading && exporting == null;
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -518,13 +518,36 @@ export default function SalesAnalysisReportPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void exportReport('csv')}
+              disabled={!canExport}
+            >
+              {exporting === 'csv' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              <span className="ml-1.5">Export CSV</span>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void exportReport('pdf')}
+              disabled={!canExport}
+              className="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
+            >
+              {exporting === 'pdf' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileText className="h-4 w-4" />
+              )}
+              <span className="ml-1.5">Export PDF</span>
+            </Button>
             <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               <span className="ml-1.5">Refresh</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!enriched.length}>
-              <FileSpreadsheet className="h-4 w-4" />
-              <span className="ml-1.5">CSV</span>
             </Button>
           </div>
         </div>

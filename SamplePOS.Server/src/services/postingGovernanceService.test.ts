@@ -263,6 +263,52 @@ describe('PostingGovernanceService', () => {
             );
             expect(() => PostingGovernanceService.validate(req)).toThrow(PostingGovernanceError);
         });
+
+        it('blocks unpaid expense accrual via PURCHASE_BILL on 6900 (prod failure path)', () => {
+            // Migr 544: 6900 allows TREASURY_PETTY_CASH / EXPENSE_PAYMENT / SYSTEM_CORRECTION only.
+            // Pre-fix expense approval used PURCHASE_BILL → GOV_RULE_B_SOURCE_NOT_ALLOWED.
+            const expenseAcct = makeAccount({
+                accountCode: '6900',
+                accountName: 'General Expense',
+                accountType: 'EXPENSE',
+                normalBalance: 'DEBIT',
+                allowManualPosting: true,
+                allowedSources: ['TREASURY_PETTY_CASH', 'EXPENSE_PAYMENT', 'SYSTEM_CORRECTION'],
+            });
+            const ap = makeAccount({
+                accountCode: '2100',
+                accountName: 'Accounts Payable',
+                accountType: 'LIABILITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: false,
+                allowedSources: [
+                    'PURCHASE_BILL',
+                    'SUPPLIER_PAYMENT',
+                    'EXPENSE_PAYMENT',
+                    'SYSTEM_CORRECTION',
+                ],
+                systemAccountTag: 'AP',
+            });
+            const bad = makeRequest(
+                'PURCHASE_BILL',
+                [
+                    { accountCode: '6900', debitAmount: 102_000, creditAmount: 0 },
+                    { accountCode: '2100', debitAmount: 0, creditAmount: 102_000 },
+                ],
+                [expenseAcct, ap],
+            );
+            expect(() => PostingGovernanceService.validate(bad)).toThrow(/GOV_RULE_B_SOURCE_NOT_ALLOWED/);
+
+            const good = makeRequest(
+                'EXPENSE_PAYMENT',
+                [
+                    { accountCode: '6900', debitAmount: 102_000, creditAmount: 0 },
+                    { accountCode: '2100', debitAmount: 0, creditAmount: 102_000 },
+                ],
+                [expenseAcct, ap],
+            );
+            expect(() => PostingGovernanceService.validate(good)).not.toThrow();
+        });
     });
 
     // --------------------------------------------------------------------------

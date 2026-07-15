@@ -143,6 +143,10 @@ if (existsSync(salesPage)) {
   assert(src.includes('COLUMNS') || src.includes('Columns'), 'UI column picker');
   assert(!src.includes('Formatted'), 'UI does not render *Formatted KPIs');
   assert(src.includes('reports/sales'), 'UI calls reports/sales');
+  assert(src.includes('Export PDF'), 'UI has Export PDF');
+  assert(src.includes('Export CSV'), 'UI has Export CSV');
+  assert(src.includes('downloadFile'), 'Exports use downloadFile (auth SSOT)');
+  assert(src.includes("params.set('format', format)"), 'Export passes format param');
 }
 assert(existsSync(docsPage), 'TreasuryDocumentsPage exists');
 if (existsSync(docsPage)) {
@@ -359,6 +363,38 @@ try {
         }
       } else {
         skipped('Cross-dimension consistency', 'no sales data in range');
+      }
+
+      // ── Export PDF / CSV (same SSOT as Liquidity Movements) ────
+      lines.push('\n## Live API — Sales Analysis export PDF/CSV\n');
+      {
+        const exportPdf = await fetch(
+          `${BASE}/api/reports/sales?start_date=${start}&end_date=${end}&group_by=category&format=pdf`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const pdfBuf = Buffer.from(await exportPdf.arrayBuffer());
+        const pdfCt = exportPdf.headers.get('content-type') || '';
+        assert(
+          exportPdf.status === 200 &&
+            pdfCt.includes('application/pdf') &&
+            pdfBuf.slice(0, 4).toString('utf8') === '%PDF',
+          'PDF export is application/pdf',
+          `${exportPdf.status} · ${pdfCt} · ${pdfBuf.length}b`,
+        );
+
+        const exportCsv = await fetch(
+          `${BASE}/api/reports/sales?start_date=${start}&end_date=${end}&group_by=category&format=csv`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const csvText = await exportCsv.text();
+        const csvCt = exportCsv.headers.get('content-type') || '';
+        assert(
+          exportCsv.status === 200 &&
+            csvCt.includes('text/csv') &&
+            /Period|Net Revenue|Category/i.test(csvText),
+          'CSV export is text/csv with headers',
+          `${exportCsv.status} · ${csvCt} · ${csvText.length} chars`,
+        );
       }
 
       // ── Transfer reverse ────────────────────────────────────────

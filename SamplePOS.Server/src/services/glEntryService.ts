@@ -795,7 +795,8 @@ export async function recordExpenseToGL(expense: ExpenseData, pool?: pg.Pool): P
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE-${expense.expenseId}`,
-      source: 'PURCHASE_BILL' as const,
+      // Paid expense recognition: cash-credit path — same allowlist as approval (not PURCHASE_BILL)
+      source: 'EXPENSE_PAYMENT' as const,
     }, pool);
 
     logger.info('Recorded expense to GL', {
@@ -2738,9 +2739,11 @@ export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData, po
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `EXPENSE-${expense.expenseId}`,
-      // When paid at approval, we credit Cash directly → must use EXPENSE_PAYMENT source
-      // When not paid, we credit AP (liability) → PURCHASE_BILL is correct
-      source: expense.isPaidAtApproval ? 'EXPENSE_PAYMENT' as const : 'PURCHASE_BILL' as const,
+      // Expense P&L accounts (e.g. 6900) allow EXPENSE_PAYMENT / TREASURY_PETTY_CASH / SYSTEM_CORRECTION
+      // — not PURCHASE_BILL (supplier GR/invoice path). Use EXPENSE_PAYMENT for both:
+      //   paid:   Dr Expense / Cr Cash
+      //   unpaid: Dr Expense / Cr AP  (AP AllowedSources includes EXPENSE_PAYMENT, mig 512)
+      source: 'EXPENSE_PAYMENT' as const,
     }, pool, txClient);
 
     logger.info('Recorded expense approval to GL', {

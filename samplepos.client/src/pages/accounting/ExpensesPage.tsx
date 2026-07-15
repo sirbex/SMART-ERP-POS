@@ -20,6 +20,8 @@ import { Link } from 'react-router-dom';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import { formatTimestamp } from '../../utils/businessDate';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
+import { toast } from 'sonner';
+import { getErrorMessage } from '../../utils/api';
 
 const ExpensesPage: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -105,10 +107,11 @@ const ExpensesPage: React.FC = () => {
     if (!selectedExpense) return;
     try {
       await approveMutation.mutateAsync({ id: selectedExpense.id });
+      toast.success('Expense approved');
       setSelectedExpense(null);
       refetch();
     } catch (err) {
-      console.error('Failed to approve expense:', err);
+      toast.error('Failed to approve expense', { description: getErrorMessage(err) });
     }
   };
 
