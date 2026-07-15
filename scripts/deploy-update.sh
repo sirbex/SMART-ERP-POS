@@ -143,9 +143,11 @@ fi
 echo ">>> Migrations complete"
 echo ""
 
-# Build only app containers
-echo ">>> Building backend + frontend..."
-docker compose -f docker-compose.deploy.yml build backend frontend
+# Build app containers one at a time — parallel Vite+tsc OOMs the 2GB host.
+echo ">>> Building backend..."
+docker compose -f docker-compose.deploy.yml build backend
+echo ">>> Building frontend..."
+docker compose -f docker-compose.deploy.yml build frontend
 
 # Restart only app containers (--no-deps = don't touch postgres/redis/nginx)
 echo ">>> Restarting backend + frontend..."
