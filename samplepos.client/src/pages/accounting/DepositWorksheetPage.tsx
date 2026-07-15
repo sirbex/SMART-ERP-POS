@@ -75,7 +75,7 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
         api.treasury.listUnsettledReceipts({ limit: 200 }),
         api.treasury.getDepositReconciliation(),
       ]);
-      setReceipts((receiptsRes.data?.data?.items ?? []) as UnsettledReceipt[]);
+      setReceipts((receiptsRes.data?.data?.items ?? []) as unknown as UnsettledReceipt[]);
       setRecon((reconRes.data?.data ?? null) as DepositRecon | null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load deposit worksheet data');

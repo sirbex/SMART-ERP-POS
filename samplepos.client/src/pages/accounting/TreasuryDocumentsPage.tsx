@@ -66,7 +66,7 @@ export default function TreasuryDocumentsPage({ embedded = false }: { embedded?:
         return;
       }
       const listRes = await api.treasury.listDocuments({ limit: 50 });
-      const list = (listRes.data?.data?.items ?? []) as TreasuryDocument[];
+      const list = (listRes.data?.data?.items ?? []) as unknown as TreasuryDocument[];
       setItems(list);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load treasury documents');
@@ -83,7 +83,7 @@ export default function TreasuryDocumentsPage({ embedded = false }: { embedded?:
   const openDetail = async (id: string) => {
     try {
       const res = await api.treasury.getDocument(id);
-      setSelected(res.data?.data ?? null);
+      setSelected((res.data?.data as TreasuryDocument | undefined) ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load document');
     }

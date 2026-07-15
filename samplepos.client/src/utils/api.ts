@@ -519,6 +519,33 @@ export const api = {
       productLotId?: string;
       unitCost?: number;
     }) => apiClient.post<ApiResponse>('inventory/adjust-batch', data),
+    quarantineAging: (params?: {
+      minAgeDays?: number;
+      storeType?: 'DAMAGE' | 'EXPIRED' | 'RETURN';
+      limit?: number;
+    }) =>
+      apiClient.get<
+        ApiResponse<{
+          asOfDate?: string;
+          summary?: Record<string, unknown>;
+          lines?: unknown[];
+        }>
+      >('inventory/loss-quarantine/quarantine-aging', { params }),
+    disposeFromQuarantine: (data: {
+      storeLocationId: string;
+      productId: string;
+      productLotId: string;
+      quantity: number;
+      reason?: 'DAMAGE' | 'EXPIRY' | 'SHRINKAGE' | 'WRITE_OFF' | 'PHYSICAL_COUNT';
+      memo?: string;
+      unitCost?: number;
+    }) =>
+      apiClient.post<ApiResponse<{ documentNumber?: string; expenseAccountCode?: string }>>(
+        'inventory/loss-quarantine/dispose',
+        data,
+      ),
+    reverseDisposal: (id: string, data?: { reason?: string }) =>
+      apiClient.post<ApiResponse>(`inventory/loss-quarantine/dispose/${id}/reverse`, data ?? {}),
   },
 
   warehouse: {
@@ -623,23 +650,6 @@ export const api = {
       }) =>
         apiClient.get<ApiResponse>('inventory/loss-quarantine/quarantine-aging', { params }),
     },
-    quarantineAging: (params?: {
-      minAgeDays?: number;
-      storeType?: 'DAMAGE' | 'EXPIRED' | 'RETURN';
-      limit?: number;
-    }) =>
-      apiClient.get<ApiResponse>('inventory/loss-quarantine/quarantine-aging', { params }),
-    disposeFromQuarantine: (data: {
-      storeLocationId: string;
-      productId: string;
-      productLotId: string;
-      quantity: number;
-      reason?: 'DAMAGE' | 'EXPIRY' | 'SHRINKAGE' | 'WRITE_OFF' | 'PHYSICAL_COUNT';
-      memo?: string;
-      unitCost?: number;
-    }) => apiClient.post<ApiResponse>('inventory/loss-quarantine/dispose', data),
-    reverseDisposal: (id: string, data?: { reason?: string }) =>
-      apiClient.post<ApiResponse>(`inventory/loss-quarantine/dispose/${id}/reverse`, data ?? {}),
     stockCounts: {
       list: (params?: { state?: string; locationId?: string; page?: number; limit?: number }) =>
         apiClient.get<ApiResponse>('inventory/stockcounts', { params }),
@@ -886,7 +896,23 @@ export const api = {
       columns?: string;
       limit?: number;
     }) =>
-      apiClient.get<ApiResponse>('reports/liquidity-movements', {
+      apiClient.get<
+        ApiResponse<{
+          rows: Array<Record<string, unknown>>;
+          meta: {
+            count?: number;
+            totals?: {
+              moneyIn: number;
+              moneyOut: number;
+              net: number;
+              count: number;
+              truncated?: boolean;
+            };
+            columns?: string[];
+            ssot?: string;
+          };
+        }>
+      >('reports/liquidity-movements', {
         params: {
           ...params,
           treasuryDocumentsOnly:
@@ -903,9 +929,16 @@ export const api = {
                 : 'false',
         },
       }),
-    liquidityBalances: () => apiClient.get<ApiResponse>('reports/liquidity-movements/balances'),
+    liquidityBalances: () =>
+      apiClient.get<
+        ApiResponse<{
+          items: Array<{ accountCode: string; accountName: string; available: number }>;
+        }>
+      >('reports/liquidity-movements/balances'),
     liquidityMovementsColumns: () =>
-      apiClient.get<ApiResponse>('reports/liquidity-movements/columns'),
+      apiClient.get<ApiResponse<{ columns: Array<{ id: string; label: string }> }>>(
+        'reports/liquidity-movements/columns',
+      ),
   },
 
   // Advanced Accounting Modules
@@ -1042,15 +1075,21 @@ export const api = {
   },
 
   treasury: {
-    getEnabled: () => apiClient.get<ApiResponse>('treasury/enabled'),
+    getEnabled: () => apiClient.get<ApiResponse<{ enabled: boolean }>>('treasury/enabled'),
     listDocuments: (params?: {
       page?: number;
       limit?: number;
       status?: string;
       documentType?: string;
-    }) => apiClient.get<ApiResponse>('treasury/documents', { params }),
-    getDocument: (id: string) => apiClient.get<ApiResponse>(`treasury/documents/${id}`),
-    createDocument: (data: Record<string, unknown>) =>
+    }) =>
+      apiClient.get<ApiResponse<{ items: Array<Record<string, unknown>> }>>(
+        'treasury/documents',
+        { params },
+      ),
+    getDocument: (id: string) =>
+      apiClient.get<ApiResponse<Record<string, unknown> & { id: string; documentNumber?: string }>>(
+        `treasury/documents/${id}`,
+      ),    createDocument: (data: Record<string, unknown>) =>
       apiClient.post<ApiResponse>('treasury/documents', data),
     updateDocument: (id: string, data: Record<string, unknown>) =>
       apiClient.patch<ApiResponse>(`treasury/documents/${id}`, data),
@@ -1058,13 +1097,19 @@ export const api = {
     approve: (id: string) => apiClient.post<ApiResponse>(`treasury/documents/${id}/approve`),
     reject: (id: string, data?: { reason?: string }) =>
       apiClient.post<ApiResponse>(`treasury/documents/${id}/reject`, data ?? {}),
-    post: (id: string) => apiClient.post<ApiResponse>(`treasury/documents/${id}/post`),
+    post: (id: string) =>
+      apiClient.post<ApiResponse<{ id?: string; documentNumber?: string }>>(
+        `treasury/documents/${id}/post`,
+      ),
     reverse: (id: string, data?: { reason?: string }) =>
       apiClient.post<ApiResponse>(`treasury/documents/${id}/reverse`, data ?? {}),
     listUnsettledReceipts: (params?: { clearingAccountCode?: string; limit?: number }) =>
-      apiClient.get<ApiResponse>('treasury/unsettled-receipts', { params }),
+      apiClient.get<ApiResponse<{ items: Array<Record<string, unknown>> }>>(
+        'treasury/unsettled-receipts',
+        { params },
+      ),
     getDepositReconciliation: () =>
-      apiClient.get<ApiResponse>('treasury/deposit-reconciliation'),
+      apiClient.get<ApiResponse<Record<string, unknown>>>('treasury/deposit-reconciliation'),
     createDepositWorksheet: (data: {
       transactionDate: string;
       bankAccountId: string;
@@ -1078,8 +1123,23 @@ export const api = {
         sourceId: string;
         amount: number;
       }>;
-    }) => apiClient.post<ApiResponse>('treasury/deposit-worksheets', data),
-    listLiquidityAccounts: () => apiClient.get<ApiResponse>('treasury/liquidity-accounts'),
+    }) =>
+      apiClient.post<ApiResponse<{ id: string; documentNumber?: string }>>(
+        'treasury/deposit-worksheets',
+        data,
+      ),
+    listLiquidityAccounts: () =>
+      apiClient.get<
+        ApiResponse<{
+          items: Array<{
+            accountCode: string;
+            accountName: string;
+            systemAccountTag: string | null;
+            currentBalance?: number;
+            available?: number;
+          }>;
+        }>
+      >('treasury/liquidity-accounts'),
     createTransfer: (data: {
       transactionDate: string;
       fromAccountCode: string;
@@ -1096,8 +1156,12 @@ export const api = {
         | 'MOBILE_MONEY_SETTLEMENT';
       requiresApproval?: boolean;
       postImmediately?: boolean;
-    }) => apiClient.post<ApiResponse>('treasury/transfers', data),
-    getPettyCashBalances: () => apiClient.get<ApiResponse>('treasury/petty-cash/balances'),
+    }) =>
+      apiClient.post<ApiResponse<{ documentNumber?: string }>>('treasury/transfers', data),
+    getPettyCashBalances: () =>
+      apiClient.get<
+        ApiResponse<{ cashDrawer: number; pettyCash: number; undepositedFunds: number }>
+      >('treasury/petty-cash/balances'),
     createPettyCash: (data: {
       transactionDate: string;
       operation: 'FUND' | 'REPLENISH' | 'EXPENSE';
@@ -1106,7 +1170,8 @@ export const api = {
       memo?: string;
       requiresApproval?: boolean;
       postImmediately?: boolean;
-    }) => apiClient.post<ApiResponse>('treasury/petty-cash', data),
+    }) =>
+      apiClient.post<ApiResponse<{ documentNumber?: string }>>('treasury/petty-cash', data),
   },
 
   assets: {

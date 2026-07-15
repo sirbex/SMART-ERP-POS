@@ -79,7 +79,7 @@ export default function QuarantineWorkqueuePage() {
         memo: `Dispose from quarantine ${line.storeCode}`,
         unitCost: line.unitCost > 0 ? line.unitCost : undefined,
       });
-      return res.data?.data ?? res.data;
+      return (res.data?.data ?? {}) as { documentNumber?: string; expenseAccountCode?: string };
     },
     onSuccess: (result: { documentNumber?: string; expenseAccountCode?: string }) => {
       setLastDispose(

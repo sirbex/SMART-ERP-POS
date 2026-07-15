@@ -12,7 +12,7 @@ import { tableHasColumn } from '../../db/schemaColumnCache.js';
 
 type Db = Pool | PoolClient;
 
-export type TraceDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht';
+export type TraceDomain = 'ap' | 'ar' | 'inventory' | 'cash' | 'wht' | 'vat';
 export type TraceLane = 'integrity' | 'cache' | 'warning';
 
 export interface TraceAction {
@@ -110,6 +110,7 @@ const DOMAIN_TITLES: Record<TraceDomain, string> = {
     inventory: 'Inventory',
     cash: 'Cash',
     wht: 'Withholding Tax',
+    vat: 'VAT',
 };
 
 const DOMAIN_ACCOUNT: Record<TraceDomain, string> = {
@@ -118,6 +119,7 @@ const DOMAIN_ACCOUNT: Record<TraceDomain, string> = {
     inventory: '1300',
     cash: '1010',
     wht: '2350',
+    vat: '2300',
 };
 
 export function formatGrLabel(receiptNumber: string | null): string | null {
@@ -137,6 +139,8 @@ function domainWorkspacePath(domain: TraceDomain): string {
             return '/accounting/banking';
         case 'wht':
             return '/accounting/withholding-tax';
+        case 'vat':
+            return '/accounting/vat-remittance';
     }
 }
 
@@ -150,6 +154,10 @@ function entityExceptionPath(domain: TraceDomain, entityId: string): string | nu
             return `/inventory/products?highlight=${entityId}`;
         case 'wht':
             return '/accounting/withholding-tax';
+        case 'vat':
+            return '/accounting/vat-remittance';
+        case 'cash':
+            return '/accounting/banking';
         default:
             return null;
     }
@@ -930,7 +938,7 @@ async function traceInventoryProduct(
 
 async function traceDomainLane(
     pool: Db,
-    domain: FinancialDomain,
+    domain: TraceDomain,
     laneKind: 'integrity' | 'cache',
     asOfDate: string,
     parsed: ParsedExceptionId,

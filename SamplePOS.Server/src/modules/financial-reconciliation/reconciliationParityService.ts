@@ -9,7 +9,7 @@ import { captureArReconciliationMetrics } from '../customer-payments/arReconcili
 import { captureInventoryReconciliationMetrics, isInventoryGlIntegrityMatched } from '../inventory/inventoryReconciliationMetrics.js';
 import { isApSupplierGlIntegrityMatched } from '../supplier-payments/apReconciliationMetrics.js';
 import { isArGlIntegrityMatched } from '../customer-payments/arReconciliationMetrics.js';
-import type { FinancialDomain } from './types.js';
+import type { FinancialDomain, LaneKind, LaneSeverity, LaneStatus } from './types.js';
 
 type Db = Pool | PoolClient;
 
@@ -142,13 +142,13 @@ export async function compareSqlSummaryToFramework(
 
 export interface FrameworkBaselineLane {
   domain: FinancialDomain;
-  lane: 'integrity' | 'cache' | 'history';
+  lane: LaneKind;
   leftAmount: number;
   rightAmount: number;
   difference: number;
-  status: string;
+  status: LaneStatus;
   periodCloseBlocking: boolean;
-  severity: string;
+  severity: LaneSeverity;
   materialityThreshold?: number;
 }
 

@@ -23,6 +23,7 @@ interface LiquidityAccount {
   accountName: string;
   systemAccountTag: string | null;
   currentBalance: number;
+  available?: number;
 }
 
 export default function TreasuryTransferPage({ embedded = false }: { embedded?: boolean }) {
@@ -52,7 +53,13 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
         return;
       }
       const listRes = await api.treasury.listLiquidityAccounts();
-      const items = (listRes.data?.data?.items ?? []) as LiquidityAccount[];
+      const items = (listRes.data?.data?.items ?? []).map((a) => ({
+        accountCode: a.accountCode,
+        accountName: a.accountName,
+        systemAccountTag: a.systemAccountTag ?? null,
+        currentBalance: Number(a.currentBalance ?? a.available ?? 0),
+        available: a.available,
+      }));
       setAccounts(items);
       if (!fromAccountCode && items.find((a) => a.accountCode === '1010')) {
         setFromAccountCode('1010');

@@ -3367,7 +3367,7 @@ function GRItemRow({
   checkBatchDuplicate,
   isFromPO,
   itemIndex,
-  totalItems,
+  totalItems: _totalItems,
   bundledUoms,
   destinationStores,
   storeLabelMap,
