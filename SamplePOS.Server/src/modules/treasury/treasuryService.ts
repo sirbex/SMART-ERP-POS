@@ -319,6 +319,9 @@ export async function reverse(
   return UnitOfWork.run(pool, async (client) => {
     const original = await repo.getById(client, id);
     if (!original) throw new NotFoundError('Treasury Document not found');
+    if (original.documentType === 'TREASURY_REVERSAL' || original.reversesDocumentId) {
+      throw new ValidationError('Reversal documents cannot be reversed — post a correcting transfer instead');
+    }
     if (original.status !== 'POSTED') {
       throw new ValidationError('Only POSTED documents can be reversed');
     }
@@ -327,6 +330,21 @@ export async function reverse(
     }
     if (!original.journalEntryId) {
       throw new ValidationError('Posted document is missing journalEntryId');
+    }
+
+    // Block reverse when linked bank legs are already statement-reconciled (SAP/Odoo pattern)
+    const reconciledLegs = await client.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n
+         FROM bank_transactions
+        WHERE gl_transaction_id = $1
+          AND COALESCE(is_reconciled, FALSE) = TRUE
+          AND COALESCE(is_reversed, FALSE) = FALSE`,
+      [original.journalEntryId],
+    );
+    if (Number(reconciledLegs.rows[0]?.n || 0) > 0) {
+      throw new ValidationError(
+        'Cannot reverse: one or more linked bank transactions are reconciled. Unreconcile first or post a correcting transfer.',
+      );
     }
 
     if (original.documentType === 'DEPOSIT_WORKSHEET') {
@@ -362,6 +380,20 @@ export async function reverse(
       reversalDocumentId: postedReversal.id,
       reason: reason ?? null,
     });
+
+    // Keep bank register in sync when this TD owned the shared transfer JE
+    if (original.journalEntryId) {
+      await client.query(
+        `UPDATE bank_transactions
+            SET is_reversed = TRUE,
+                reversed_at = NOW(),
+                reversed_by = $2,
+                reversal_reason = $3
+          WHERE gl_transaction_id = $1
+            AND COALESCE(is_reversed, FALSE) = FALSE`,
+        [original.journalEntryId, actorUserId, reason || `Reversal of ${original.documentNumber}`],
+      );
+    }
 
     return {
       original: (await repo.getById(client, original.id))!,

@@ -620,13 +620,23 @@ export const reportsRepository = {
     options: {
       startDate: string;
       endDate: string;
-      groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method';
+      groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method' | 'cashier' | 'category';
       customerId?: string;
       sessionId?: string;
     }
   ): Promise<{
     rows: SalesReportRow[];
-    summary: { totalSales: number; totalDiscounts: number; netRevenue: number; totalCost: number; grossProfit: number; profitMargin: number; totalTransactions: number; averageDiscountRate: number };
+    summary: {
+      totalSales: number;
+      totalDiscounts: number;
+      netRevenue: number;
+      totalCost: number;
+      grossProfit: number;
+      profitMargin: number;
+      totalTransactions: number;
+      averageDiscountRate: number;
+      totalQuantitySold: number;
+    };
   }> {
     const [startUtc, endUtc] = toUtcParams(options.startDate, options.endDate);
     const params: unknown[] = [startUtc, endUtc];
@@ -662,6 +672,7 @@ export const reportsRepository = {
       sale_line_agg AS (
         SELECT si.sale_id,
                SUM(si.total_price) AS total_sales,
+               SUM(si.quantity) AS total_qty,
                SUM(si.quantity * si.unit_cost) AS total_cost,
                SUM(si.profit) AS gross_profit
         FROM sale_items si
@@ -674,6 +685,7 @@ export const reportsRepository = {
         ROUND((COALESCE(SUM(sla.total_sales), 0) - COALESCE(SUM(fs.discount_amount), 0))::numeric, 2) AS net_revenue,
         ROUND(COALESCE(SUM(sla.total_cost), 0)::numeric, 2) AS total_cost,
         ROUND((COALESCE(SUM(sla.total_sales), 0) - COALESCE(SUM(fs.discount_amount), 0) - COALESCE(SUM(sla.total_cost), 0))::numeric, 2) AS gross_profit,
+        ROUND(COALESCE(SUM(sla.total_qty), 0)::numeric, 3) AS total_quantity_sold,
         COUNT(fs.id)::integer AS total_transactions
       FROM filtered_sales fs
       LEFT JOIN sale_line_agg sla ON sla.sale_id = fs.id
@@ -697,6 +709,7 @@ export const reportsRepository = {
         groupByClause = `DATE_TRUNC('month', fs.sale_date AT TIME ZONE '${TZ}')`;
         break;
       case 'product':
+      case 'category':
         selectClause = '';
         groupByClause = '';
         break;
@@ -707,6 +720,10 @@ export const reportsRepository = {
       case 'payment_method':
         selectClause = 'fs.payment_method as period';
         groupByClause = 'fs.payment_method';
+        break;
+      case 'cashier':
+        selectClause = "COALESCE(u.full_name, 'Unknown cashier') as period";
+        groupByClause = "COALESCE(u.full_name, 'Unknown cashier')";
         break;
       default:
         selectClause = `(fs.sale_date AT TIME ZONE '${TZ}')::date as period`;
@@ -719,6 +736,7 @@ export const reportsRepository = {
       rowQuery = `
         SELECT 
           COALESCE(p.name, si.product_name, 'Custom Item') as period,
+          COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized') as category,
           COUNT(DISTINCT s.id) as transaction_count,
           SUM(si.quantity) as total_quantity_sold,
           SUM(si.total_price) as total_sales,
@@ -733,13 +751,36 @@ export const reportsRepository = {
           AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
           ${customerFilter}
           ${sessionFilter}
-        GROUP BY COALESCE(p.name, si.product_name, 'Custom Item')
+        GROUP BY COALESCE(p.name, si.product_name, 'Custom Item'),
+                 COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized')
+        ORDER BY period
+      `;
+    } else if (options.groupBy === 'category') {
+      rowQuery = `
+        SELECT 
+          COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized') as period,
+          COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized') as category,
+          COUNT(DISTINCT s.id) as transaction_count,
+          SUM(si.quantity) as total_quantity_sold,
+          SUM(si.total_price) as total_sales,
+          0 as total_discounts,
+          SUM(si.quantity * si.unit_cost) as total_cost,
+          SUM(si.profit) as gross_profit,
+          AVG(si.total_price) as average_transaction_value
+        FROM sale_items si
+        INNER JOIN sales s ON s.id = si.sale_id
+        LEFT JOIN products p ON p.id = si.product_id
+        WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
+          AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
+          ${customerFilter}
+          ${sessionFilter}
+        GROUP BY COALESCE(NULLIF(TRIM(p.category), ''), 'Uncategorized')
         ORDER BY period
       `;
     } else {
       rowQuery = `
         WITH filtered_sales AS (
-          SELECT s.id, s.sale_date, s.customer_id, s.payment_method,
+          SELECT s.id, s.sale_date, s.customer_id, s.payment_method, s.cashier_id,
                  s.total_amount, s.discount_amount
           FROM sales s
           WHERE s.sale_date >= ($1::timestamptz AT TIME ZONE '${TZ}')::date AND s.sale_date < ($2::timestamptz AT TIME ZONE '${TZ}')::date
@@ -769,6 +810,7 @@ export const reportsRepository = {
         FROM filtered_sales fs
         INNER JOIN sale_line_agg sla ON sla.sale_id = fs.id
         LEFT JOIN customers c ON c.id = fs.customer_id
+        LEFT JOIN users u ON u.id = fs.cashier_id
         GROUP BY ${groupByClause}
         ORDER BY period
       `;
@@ -787,10 +829,17 @@ export const reportsRepository = {
     const totalCost = new Decimal(sr.total_cost || 0).toDecimalPlaces(2).toNumber();
     const grossProfit = new Decimal(sr.gross_profit || 0).toDecimalPlaces(2).toNumber();
     const totalTransactions = parseInt(sr.total_transactions) || 0;
+    const totalQuantitySold = new Decimal(sr.total_quantity_sold || 0).toDecimalPlaces(3).toNumber();
     const profitMargin = netRevenue === 0 ? 0 :
       new Decimal(grossProfit).dividedBy(netRevenue).times(100).toDecimalPlaces(2).toNumber();
     const averageDiscountRate = totalSales === 0 ? 0 :
       new Decimal(totalDiscounts).dividedBy(totalSales).times(100).toDecimalPlaces(2).toNumber();
+
+    const dateGrouped =
+      !options.groupBy ||
+      options.groupBy === 'day' ||
+      options.groupBy === 'week' ||
+      options.groupBy === 'month';
 
     const rows = rowResult.rows.map((row) => {
       const rowTotalSales = new Decimal(row.total_sales || 0);
@@ -802,8 +851,13 @@ export const reportsRepository = {
         ? new Decimal(0)
         : rowGrossProfit.dividedBy(rowNetRevenue).times(100);
 
+      const periodRaw = row.period;
+      const period = dateGrouped
+        ? formatDateOnly(periodRaw) || String(periodRaw ?? '')
+        : String(periodRaw ?? '');
+
       return {
-        period: formatDateOnly(row.period) || String(row.period),
+        period,
         totalSales: rowTotalSales.toDecimalPlaces(2).toNumber(),
         totalDiscounts: rowTotalDiscounts.toDecimalPlaces(2).toNumber(),
         netRevenue: rowNetRevenue.toDecimalPlaces(2).toNumber(),
@@ -814,12 +868,29 @@ export const reportsRepository = {
         averageTransactionValue: new Decimal(row.average_transaction_value || 0)
           .toDecimalPlaces(2)
           .toNumber(),
+        totalQuantitySold: new Decimal(row.total_quantity_sold || 0).toDecimalPlaces(3).toNumber(),
+        category:
+          row.category != null && String(row.category).trim() !== ''
+            ? String(row.category)
+            : options.groupBy === 'product' || options.groupBy === 'category'
+              ? 'Uncategorized'
+              : null,
       };
     });
 
     return {
       rows,
-      summary: { totalSales, totalDiscounts, netRevenue, totalCost, grossProfit, profitMargin, totalTransactions, averageDiscountRate },
+      summary: {
+        totalSales,
+        totalDiscounts,
+        netRevenue,
+        totalCost,
+        grossProfit,
+        profitMargin,
+        totalTransactions,
+        averageDiscountRate,
+        totalQuantitySold,
+      },
     };
   },
 

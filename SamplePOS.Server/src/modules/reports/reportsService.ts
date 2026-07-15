@@ -288,7 +288,7 @@ export const reportsService = {
     options: {
       startDate: string;
       endDate: string;
-      groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method';
+      groupBy?: 'day' | 'week' | 'month' | 'product' | 'customer' | 'payment_method' | 'cashier' | 'category';
       customerId?: string;
       sessionId?: string;
       format?: 'json' | 'pdf' | 'csv';
@@ -340,16 +340,14 @@ export const reportsService = {
       data,
       summary: {
         totalSales: sqlSummary.totalSales,
-        totalSalesFormatted: formatCurrency(sqlSummary.totalSales, systemContext.currencySymbol),
         totalDiscounts: sqlSummary.totalDiscounts,
         netRevenue: sqlSummary.netRevenue,
-        netRevenueFormatted: formatCurrency(sqlSummary.netRevenue, systemContext.currencySymbol),
         totalCost: sqlSummary.totalCost,
         grossProfit: sqlSummary.grossProfit,
-        grossProfitFormatted: formatCurrency(sqlSummary.grossProfit, systemContext.currencySymbol),
         profitMargin: sqlSummary.profitMargin,
         averageDiscountRate: sqlSummary.averageDiscountRate,
         totalTransactions: sqlSummary.totalTransactions,
+        totalQuantitySold: sqlSummary.totalQuantitySold ?? 0,
       },
       recordCount: data.length,
       executionTimeMs: executionTime,

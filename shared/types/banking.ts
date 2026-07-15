@@ -65,9 +65,11 @@ export function normalizeBankAccount(row: BankAccountDbRow): BankAccount {
         glAccountCode: row.gl_account_code,
         glAccountName: row.gl_account_name,
         currentBalance: parseFloat(row.current_balance || '0'),
-        lastReconciledBalance: row.last_reconciled_balance
-            ? parseFloat(row.last_reconciled_balance)
-            : undefined,
+        // Preserve legitimate 0.00 — only null/undefined means never reconciled
+        lastReconciledBalance:
+            row.last_reconciled_balance != null && row.last_reconciled_balance !== ''
+                ? parseFloat(String(row.last_reconciled_balance))
+                : undefined,
         lastReconciledAt: row.last_reconciled_at,
         lowBalanceThreshold: row.low_balance_threshold
             ? parseFloat(row.low_balance_threshold)

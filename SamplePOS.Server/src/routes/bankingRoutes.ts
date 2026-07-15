@@ -78,9 +78,13 @@ const ReverseTransactionSchema = z.object({
 });
 
 const ReconcileSchema = z.object({
-  bankAccountId: z.string().uuid(),
-  transactionIds: z.array(z.string().uuid()),
+  bankAccountId: z.string().uuid().optional(),
+  transactionIds: z.array(z.string().uuid()).min(1),
   statementBalance: z.number(),
+  statementDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD')
+    .optional(),
 });
 
 const UpdateAlertStatusSchema = z.object({
@@ -386,14 +390,15 @@ router.post(
   '/accounts/:accountId/reconcile',
   requirePermission('banking.reconcile'),
   asyncHandler(async (req, res) => {
-    const { transactionIds, statementBalance } = ReconcileSchema.parse(req.body);
+    const { transactionIds, statementBalance, statementDate } = ReconcileSchema.parse(req.body);
 
     const result = await BankingService.reconcileTransactions(
       req.params.accountId,
       transactionIds,
       statementBalance,
       getUserId(req),
-      p(req)
+      p(req),
+      statementDate,
     );
 
     res.json({
@@ -412,14 +417,19 @@ router.post(
   '/reconcile',
   requirePermission('banking.reconcile'),
   asyncHandler(async (req, res) => {
-    const { bankAccountId, transactionIds, statementBalance } = ReconcileSchema.parse(req.body);
+    const { bankAccountId, transactionIds, statementBalance, statementDate } =
+      ReconcileSchema.parse(req.body);
+    if (!bankAccountId) {
+      return res.status(400).json({ success: false, error: 'bankAccountId is required' });
+    }
 
     const result = await BankingService.reconcileTransactions(
       bankAccountId,
       transactionIds,
       statementBalance,
       getUserId(req),
-      p(req)
+      p(req),
+      statementDate,
     );
 
     res.json({

@@ -366,8 +366,9 @@ interface ReportOption {
 const REPORT_OPTIONS: ReportOption[] = [
   {
     value: 'SALES_REPORT',
-    label: 'Sales Report',
-    description: 'Revenue, profit, and transactions by period or category',
+    label: 'Sales Analysis',
+    description:
+      'Designable sales register — by day, cashier, payment type, product, or customer; pick columns',
     requiresDateRange: true,
     supportsFilters: ['groupBy', 'customer', 'paymentMethod', 'sessionId'],
     category: 'Sales',
@@ -1104,6 +1105,11 @@ export default function ReportsPage() {
 
     if (selectedReport === 'LIQUIDITY_MOVEMENTS') {
       navigate('/reports/liquidity-movements');
+      return;
+    }
+
+    if (selectedReport === 'SALES_REPORT') {
+      navigate('/reports/sales-analysis');
       return;
     }
 
@@ -3487,6 +3493,10 @@ export default function ReportsPage() {
                           }
                           if (option.value === 'LIQUIDITY_MOVEMENTS') {
                             navigate('/reports/liquidity-movements');
+                            return;
+                          }
+                          if (option.value === 'SALES_REPORT') {
+                            navigate('/reports/sales-analysis');
                             return;
                           }
                           if (option.value === 'REORDER_RECOMMENDATIONS') {

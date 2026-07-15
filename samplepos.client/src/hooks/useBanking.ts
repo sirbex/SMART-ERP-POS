@@ -353,7 +353,15 @@ const bankingApi = {
         bankAccountId: string;
         transactionIds: string[];
         statementBalance: number;
-    }): Promise<{ reconciledCount: number; newBalance: number }> => {
+        statementDate?: string;
+    }): Promise<{
+        reconciledCount: number;
+        newBalance: number;
+        difference: number;
+        clearedBalance: number;
+        bookBalance: number;
+        lastReconciledBalance: number;
+    }> => {
         const response = await fetch(`${API_BASE}/reconcile`, {
             method: 'POST',
             headers: {

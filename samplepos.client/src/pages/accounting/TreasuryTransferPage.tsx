@@ -3,6 +3,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../../utils/api';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -256,6 +257,14 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
           <p>
             Only cash, bank, mobile money, card clearing, petty cash, and undeposited accounts can be
             used. Expense and customer/supplier balances are blocked.
+          </p>
+          <p className="text-xs">
+            Posted a wrong move? Open{' '}
+            <Link to="/accounting/treasury" className="text-blue-700 underline underline-offset-2">
+              Liquidity Documents
+            </Link>{' '}
+            → select the transfer → <span className="font-medium text-foreground">Reverse document</span>{' '}
+            (accounting permission; blocked if bank-reconciled). Then post the correct transfer.
           </p>
           <ul className="divide-y rounded border">
             {accounts.map((a) => (

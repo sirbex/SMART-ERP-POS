@@ -68,6 +68,12 @@ import {
     normalizeBankRecurringRule,
 } from '../../../shared/types/banking.js';
 import { getBusinessDate, getBusinessYear, formatDateBusiness } from '../utils/dateRange.js';
+import {
+    computeClearedBalance,
+    computeReconciliationDifference,
+    isReconciliationBalanced,
+} from './bankReconciliationMath.js';
+import { ValidationError } from '../middleware/errorHandler.js';
 
 // SYSTEM_USER_ID imported from ../utils/constants.js
 
@@ -113,8 +119,15 @@ export class BankingService {
     private static async generateBankTxnNumber(client: pg.Pool | pg.PoolClient): Promise<string> {
         const year = getBusinessYear();
         const prefix = `BTX-${year}-`;
+        // Serialize number allocation (MAX+1 without lock races under concurrent posts)
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [prefix]);
+        // IMPORTANT: use substr(string, int) — "SUBSTRING(x FROM $n)" with a bound
+        // parameter is parsed as regex substring and returns NULL.
         const result = await client.query(
-            `SELECT COALESCE(MAX(CAST(SUBSTRING(transaction_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
+            `SELECT COALESCE(
+               MAX(CAST(NULLIF(substr(transaction_number, $2), '') AS INTEGER)),
+               0
+             ) + 1 AS next_num
              FROM bank_transactions WHERE transaction_number LIKE $1`,
             [`${prefix}%`, prefix.length + 1]
         );
@@ -128,8 +141,12 @@ export class BankingService {
     private static async generateStatementNumber(client: pg.Pool | pg.PoolClient): Promise<string> {
         const year = getBusinessYear();
         const prefix = `STM-${year}-`;
+        await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [prefix]);
         const result = await client.query(
-            `SELECT COALESCE(MAX(CAST(SUBSTRING(statement_number FROM $2) AS INTEGER)), 0) + 1 AS next_num
+            `SELECT COALESCE(
+               MAX(CAST(NULLIF(substr(statement_number, $2), '') AS INTEGER)),
+               0
+             ) + 1 AS next_num
              FROM bank_statements WHERE statement_number LIKE $1`,
             [`${prefix}%`, prefix.length + 1]
         );
@@ -199,7 +216,7 @@ export class BankingService {
             [id]
         );
 
-        return result.rows[0] ? normalizeBankAccount(result.rows[0]) : null;
+        return result?.rows?.[0] ? normalizeBankAccount(result.rows[0]) : null;
     }
 
     /**
@@ -211,7 +228,7 @@ export class BankingService {
         dbPool?: pg.Pool
     ): Promise<BankAccount> {
         const pool = dbPool || globalPool;
-        return UnitOfWork.run(pool, async (client) => {
+        const created = await UnitOfWork.run(pool, async (client) => {
             // Verify GL account exists
             const glAccount = await client.query(
                 `
@@ -250,14 +267,30 @@ export class BankingService {
             }
 
             const id = uuidv4();
+            const glCode = String(glAccount.rows[0].AccountCode || 'BNK');
+            // Legacy columns (account_code/account_name/account_type/currency_code/opening_balance)
+            // remain NOT NULL on upgraded tenants — keep them in sync with the modern name/gl fields.
+            const legacyCode =
+                (dto.accountNumber && String(dto.accountNumber).trim()) ||
+                `BNK-${glCode}-${id.slice(0, 8).toUpperCase()}`;
+            const opening = dto.openingBalance && dto.openingBalance !== 0 ? dto.openingBalance : 0;
+
             const result = await client.query<BankAccountDbRow>(
                 `
         INSERT INTO bank_accounts (
           id, name, account_number, bank_name, branch,
           gl_account_id, current_balance, is_default, is_active,
-          created_at, updated_at
+          created_at, updated_at,
+          account_code, account_name, account_type, currency_code,
+          opening_balance, is_main_cash, is_main_bank
         )
-        VALUES ($1, $2, $3, $4, $5, $6, 0, $7, TRUE, NOW(), NOW())
+        VALUES (
+          $1, $2, $3, $4, $5,
+          $6, 0, $7, TRUE,
+          NOW(), NOW(),
+          $8, $2, 'BANK', 'UGX',
+          $9, FALSE, FALSE
+        )
         RETURNING *
       `,
                 [
@@ -268,12 +301,13 @@ export class BankingService {
                     dto.branch || null,
                     dto.glAccountId,
                     dto.isDefault || false,
+                    legacyCode,
+                    opening,
                 ]
             );
 
-            // If there's an opening balance, create an entry via GL (not stored in current_balance)
+            // If there's an opening balance, post governed cutover JE (DR bank GL / CR 3050 OBE)
             if (dto.openingBalance && dto.openingBalance !== 0) {
-                // Opening balance goes to Equity - Opening Balances (3900 or similar)
                 await this.createOpeningBalanceEntry(
                     client,
                     id,
@@ -301,10 +335,23 @@ export class BankingService {
                 gl_account_name: glAccount.rows[0].AccountName,
             });
         });
+
+        // Prefer GL-driven balance (includes opening JE) for immediate UI accuracy
+        const refreshed = await this.getAccountById(created.id, pool);
+        if (refreshed) return refreshed;
+        return {
+            ...created,
+            currentBalance:
+                dto.openingBalance && dto.openingBalance !== 0
+                    ? dto.openingBalance
+                    : created.currentBalance,
+        };
     }
 
     /**
-     * Create opening balance GL entry
+     * Create opening balance GL entry + bank book line.
+     * Cutover pattern (same family as customer/supplier OB):
+     *   DR Bank GL / CR Opening Balance Equity (3050), source CUTOVER_OB
      */
     private static async createOpeningBalanceEntry(
         client: PoolClient,
@@ -312,25 +359,10 @@ export class BankingService {
         amount: number,
         bankGlCode: string,
         userId: string,
-        dbPool?: pg.Pool
+        _dbPool?: pg.Pool
     ): Promise<void> {
         const entryDate = getBusinessDate();
-
-        // Get or create Opening Balance Equity account (3900)
-        const equityAccount = await client.query(`
-      SELECT "AccountCode" FROM accounts WHERE "AccountCode" = '3900'
-    `);
-
-        if (equityAccount.rows.length === 0) {
-            // Create Opening Balance Equity account if it doesn't exist
-            await client.query(
-                `
-        INSERT INTO accounts ("Id", "AccountCode", "AccountName", "AccountType", "NormalBalance", "ParentId", "IsActive")
-        VALUES ($1, '3900', 'Opening Balance Equity', 'EQUITY', 'CREDIT', NULL, TRUE)
-      `,
-                [uuidv4()]
-            );
-        }
+        const equityCode = await this.ensureOpeningBalanceEquityAccount(client);
 
         const request: JournalEntryRequest = {
             entryDate,
@@ -346,7 +378,7 @@ export class BankingService {
                     creditAmount: amount < 0 ? Math.abs(amount) : 0,
                 },
                 {
-                    accountCode: '3900',
+                    accountCode: equityCode,
                     description: 'Opening balance equity',
                     debitAmount: amount < 0 ? Math.abs(amount) : 0,
                     creditAmount: amount > 0 ? amount : 0,
@@ -354,9 +386,74 @@ export class BankingService {
             ],
             userId,
             idempotencyKey: `OPEN-${bankAccountId}`,
+            source: 'CUTOVER_OB',
         };
 
-        await AccountingCore.createJournalEntry(request, undefined, client);
+        const glResult = await AccountingCore.createJournalEntry(request, undefined, client);
+
+        // Mirror on bank register so Operators see the opening in Transactions
+        const txnNum = await BankingService.generateBankTxnNumber(client);
+        const txnId = uuidv4();
+        const isInflow = amount >= 0;
+        await client.query(
+            `
+        INSERT INTO bank_transactions (
+          id, transaction_number, bank_account_id, transaction_date,
+          type, description, reference, amount,
+          gl_transaction_id, source_type, source_id,
+          is_reconciled, is_reversed, created_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'MANUAL', $10, FALSE, FALSE, $11)
+      `,
+            [
+                txnId,
+                txnNum,
+                bankAccountId,
+                entryDate,
+                isInflow ? 'DEPOSIT' : 'WITHDRAWAL',
+                'Opening balance',
+                `OPEN-${bankAccountId.slice(0, 8).toUpperCase()}`,
+                Math.abs(amount),
+                glResult.transactionId,
+                bankAccountId,
+                userId,
+            ],
+        );
+    }
+
+    /** Resolve Opening Balance Equity (3050 / OPENING_BALANCE_EQUITY). Never invent 3900. */
+    private static async ensureOpeningBalanceEquityAccount(client: PoolClient): Promise<string> {
+        const tagged = await client.query<{ AccountCode: string }>(
+            `
+      SELECT "AccountCode" FROM accounts
+      WHERE "SystemAccountTag" = 'OPENING_BALANCE_EQUITY' AND "IsActive" = TRUE
+      ORDER BY "AccountCode"
+      LIMIT 1
+    `,
+        );
+        if (tagged.rows[0]?.AccountCode) return tagged.rows[0].AccountCode;
+
+        const byCode = await client.query<{ AccountCode: string }>(
+            `SELECT "AccountCode" FROM accounts WHERE "AccountCode" = '3050' LIMIT 1`,
+        );
+        if (byCode.rows[0]?.AccountCode) return byCode.rows[0].AccountCode;
+
+        await client.query(
+            `
+      INSERT INTO accounts (
+        "Id", "AccountCode", "AccountName", "AccountType", "NormalBalance",
+        "ParentAccountId", "Level", "IsPostingAccount", "IsActive",
+        "SystemAccountTag", "CurrentBalance", "CreatedAt", "UpdatedAt"
+      )
+      VALUES (
+        $1, '3050', 'Opening Balance Equity', 'EQUITY', 'CREDIT',
+        NULL, 1, TRUE, TRUE,
+        'OPENING_BALANCE_EQUITY', 0, NOW(), NOW()
+      )
+    `,
+            [uuidv4()],
+        );
+        return '3050';
     }
 
     // ---------------------------------------------------------------------------
@@ -702,7 +799,29 @@ export class BankingService {
                 amount: dto.amount,
             });
 
-            return (await this.getTransactionById(transactionId))!;
+            // Read back on THE SAME client — UnitOfWork is not committed yet, so
+            // a separate pool connection cannot see this row (returns null).
+            const created = await client.query<BankTransactionDbRow>(
+                `
+        SELECT 
+          bt.*,
+          ba.name as bank_account_name,
+          bc.code as category_code,
+          bc.name as category_name,
+          a."AccountCode" as contra_account_code,
+          a."AccountName" as contra_account_name
+        FROM bank_transactions bt
+        JOIN bank_accounts ba ON ba.id = bt.bank_account_id
+        LEFT JOIN bank_categories bc ON bc.id = bt.category_id
+        LEFT JOIN accounts a ON a."Id" = bt.contra_account_id
+        WHERE bt.id = $1
+      `,
+                [transactionId],
+            );
+            if (!created.rows[0]) {
+                throw new Error('Bank transaction insert did not return a row');
+            }
+            return normalizeBankTransaction(created.rows[0]);
         }).catch((error: unknown) => {
             logger.error('Failed to create bank transaction', { error, dto });
             throw error;
@@ -940,11 +1059,52 @@ export class BankingService {
                 throw new Error(`Transaction ${dto.transactionId} is already reversed`);
             }
 
+            if (origTxn.is_reconciled) {
+                throw new Error(
+                    `Transaction ${dto.transactionId} is reconciled and cannot be reversed. Unreconcile first or post a correcting transfer.`,
+                );
+            }
+
+            // Prefer Treasury Document reverse when this JE belongs to a posted TD (single SSOT)
+            if (origTxn.gl_transaction_id) {
+                const td = await client.query<{ id: string }>(
+                    `SELECT id FROM treasury_documents
+                      WHERE journal_entry_id = $1
+                        AND reversed_by_document_id IS NULL
+                        AND status = 'POSTED'
+                        AND document_type <> 'TREASURY_REVERSAL'
+                      LIMIT 1`,
+                    [origTxn.gl_transaction_id],
+                );
+                if (td.rows[0]?.id) {
+                    throw new Error(
+                        `This bank move is owned by a Treasury Document. Reverse it from Accounting → Liquidity Documents (document id ${td.rows[0].id}).`,
+                    );
+                }
+            }
+
             if (!origTxn.gl_transaction_id) {
                 throw new Error(`Transaction ${dto.transactionId} has no GL entry to reverse`);
             }
 
-            // Reverse the GL entry
+            let pairTxn: BankTransactionDbRow | null = null;
+            if (origTxn.transfer_pair_id) {
+                const pairRes = await client.query<BankTransactionDbRow>(
+                    `SELECT * FROM bank_transactions WHERE id = $1`,
+                    [origTxn.transfer_pair_id],
+                );
+                pairTxn = pairRes.rows[0] ?? null;
+                if (pairTxn?.is_reconciled) {
+                    throw new Error(
+                        `Transfer pair ${pairTxn.transaction_number} is reconciled and cannot be reversed.`,
+                    );
+                }
+                if (pairTxn?.is_reversed) {
+                    throw new Error(`Transfer pair ${pairTxn.transaction_number} is already reversed`);
+                }
+            }
+
+            // Reverse the GL entry once (shared by TRANSFER_OUT + TRANSFER_IN)
             await AccountingCore.reverseTransaction(
                 {
                     originalTransactionId: origTxn.gl_transaction_id,
@@ -960,7 +1120,7 @@ export class BankingService {
             const revTxnNum = await BankingService.generateBankTxnNumber(client);
             const revTxnId = uuidv4();
 
-            // Create reversal bank transaction
+            // Create reversal bank transaction for the selected leg
             const reversalType =
                 origTxn.type.startsWith('DEPOSIT') ||
                     origTxn.type === 'TRANSFER_IN' ||
@@ -1007,24 +1167,57 @@ export class BankingService {
                 [dto.transactionId, userId, dto.reason, revTxnId]
             );
 
-            // Handle transfer pairs
-            if (origTxn.transfer_pair_id) {
+            // Transfer pair: create countering bank row + mark pair reversed (GL already reversed once)
+            if (pairTxn) {
+                const pairRevType =
+                    pairTxn.type === 'TRANSFER_IN' || pairTxn.type.startsWith('DEPOSIT')
+                        ? 'WITHDRAWAL'
+                        : 'DEPOSIT';
+                const pairRevId = uuidv4();
+                const pairRevNum = await BankingService.generateBankTxnNumber(client);
+                await client.query(
+                    `
+          INSERT INTO bank_transactions (
+            id, transaction_number, bank_account_id, transaction_date,
+            type, category_id, description, reference, amount,
+            contra_account_id, source_type, transfer_pair_id,
+            is_reconciled, is_reversed, created_by
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'MANUAL', $11, FALSE, FALSE, $12)
+        `,
+                    [
+                        pairRevId,
+                        pairRevNum,
+                        pairTxn.bank_account_id,
+                        getBusinessDate(),
+                        pairRevType,
+                        pairTxn.category_id,
+                        `REVERSAL: ${dto.reason}`,
+                        `REV-${pairTxn.transaction_number}`,
+                        pairTxn.amount,
+                        pairTxn.contra_account_id,
+                        revTxnId,
+                        userId,
+                    ],
+                );
                 await client.query(
                     `
           UPDATE bank_transactions
           SET is_reversed = TRUE,
               reversed_at = NOW(),
               reversed_by = $2,
-              reversal_reason = $3
+              reversal_reason = $3,
+              reversal_transaction_id = $4
           WHERE id = $1
         `,
-                    [origTxn.transfer_pair_id, userId, dto.reason]
+                    [pairTxn.id, userId, dto.reason, pairRevId],
                 );
             }
 
             logger.info('Bank transaction reversed', {
                 originalId: dto.transactionId,
                 reversalId: revTxnId,
+                pairId: pairTxn?.id ?? null,
                 reason: dto.reason,
             });
 
@@ -1337,34 +1530,116 @@ export class BankingService {
     // ---------------------------------------------------------------------------
 
     /**
-     * Mark transactions as reconciled
+     * Mark transactions as reconciled (bank statement match).
+     * Accuracy contract (classic / QBO style):
+     *   cleared = last_reconciled_balance (0 if never) + Σ selected (in − out)
+     *   difference = statementEnding − cleared
+     * Refuses to post when |difference| > 0.01 — no silent inconsistency.
      */
     static async reconcileTransactions(
         bankAccountId: string,
         transactionIds: string[],
         statementBalance: number,
         userId: string,
-        dbPool?: pg.Pool
-    ): Promise<{ reconciledCount: number; difference: number }> {
+        dbPool?: pg.Pool,
+        statementDate?: string,
+    ): Promise<{
+        reconciledCount: number;
+        difference: number;
+        newBalance: number;
+        clearedBalance: number;
+        bookBalance: number;
+        lastReconciledBalance: number;
+    }> {
         const pool = dbPool || globalPool;
+        if (!transactionIds.length) {
+            throw new Error('Select at least one transaction to reconcile');
+        }
         return UnitOfWork.run(pool, async (client) => {
-            // Mark transactions as reconciled
+            const accountResult = await client.query<{
+                id: string;
+                last_reconciled_balance: string | null;
+            }>(
+                `SELECT id, last_reconciled_balance FROM bank_accounts WHERE id = $1 AND is_active = TRUE`,
+                [bankAccountId],
+            );
+            if (accountResult.rows.length === 0) {
+                throw new Error(`Bank account ${bankAccountId} not found or inactive`);
+            }
+
+            const lastReconciledBalance = Money.toNumber(
+                Money.round(Number(accountResult.rows[0]!.last_reconciled_balance ?? 0)),
+            );
+
+            const txnResult = await client.query<{
+                id: string;
+                type: string;
+                amount: string;
+                transaction_date: string;
+                is_reconciled: boolean;
+                is_reversed: boolean;
+            }>(
+                `
+        SELECT id, type, amount::text, transaction_date::text, is_reconciled, is_reversed
+        FROM bank_transactions
+        WHERE bank_account_id = $1
+          AND id = ANY($2::uuid[])
+      `,
+                [bankAccountId, transactionIds],
+            );
+
+            if (txnResult.rows.length !== transactionIds.length) {
+                throw new Error('One or more transactions were not found on this bank account');
+            }
+            for (const row of txnResult.rows) {
+                if (row.is_reversed) {
+                    throw new Error(`Transaction ${row.id} is reversed and cannot be reconciled`);
+                }
+                if (row.is_reconciled) {
+                    throw new Error(`Transaction ${row.id} is already reconciled`);
+                }
+                if (statementDate) {
+                    const txnDay = String(row.transaction_date).slice(0, 10);
+                    if (txnDay > statementDate) {
+                        throw new Error(
+                            `Transaction dated ${txnDay} is after statement date ${statementDate}`,
+                        );
+                    }
+                }
+            }
+
+            const selected = txnResult.rows.map((r) => ({
+                type: r.type,
+                amount: parseFloat(r.amount),
+            }));
+            const clearedBalance = computeClearedBalance(lastReconciledBalance, selected);
+            const difference = computeReconciliationDifference(statementBalance, clearedBalance);
+
+            if (!isReconciliationBalanced(difference)) {
+                throw new ValidationError(
+                    `Reconciliation unbalanced: statement ${statementBalance.toFixed(2)} vs cleared ${clearedBalance.toFixed(2)} ` +
+                        `(difference ${difference.toFixed(2)}). ` +
+                        `Cleared = last reconciled ${lastReconciledBalance.toFixed(2)} + selected net. ` +
+                        `Adjust selected transactions or the statement ending balance.`,
+                );
+            }
+
             const updateResult = await client.query(
                 `
         UPDATE bank_transactions
         SET is_reconciled = TRUE,
             reconciled_at = NOW(),
             reconciled_by = $3
-        WHERE bank_account_id = $1 
-          AND id = ANY($2)
+        WHERE bank_account_id = $1
+          AND id = ANY($2::uuid[])
           AND is_reconciled = FALSE
           AND is_reversed = FALSE
       `,
-                [bankAccountId, transactionIds, userId]
+                [bankAccountId, transactionIds, userId],
             );
 
-            // Calculate current book balance FROM GL (Single Source of Truth)
-            const balanceResult = await client.query(
+            // Book (GL) balance — informational; recon gate uses cleared balance, not GL vs statement.
+            const balanceResult = await client.query<{ current_balance: string }>(
                 `
         SELECT COALESCE(
           (SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
@@ -1373,17 +1648,14 @@ export class BankingService {
            WHERE le."AccountId" = ba.gl_account_id
              AND lt."Status" = 'POSTED'),
           0
-        ) as current_balance
+        )::text as current_balance
         FROM bank_accounts ba
         WHERE ba.id = $1
       `,
-                [bankAccountId]
+                [bankAccountId],
             );
+            const bookBalance = parseFloat(balanceResult.rows[0]?.current_balance ?? '0');
 
-            const bookBalance = parseFloat(balanceResult.rows[0].current_balance);
-            const difference = Money.subtract(statementBalance, bookBalance).toNumber();
-
-            // Update last reconciled info
             await client.query(
                 `
         UPDATE bank_accounts
@@ -1392,29 +1664,16 @@ export class BankingService {
             updated_at = NOW()
         WHERE id = $1
       `,
-                [bankAccountId, statementBalance]
+                [bankAccountId, statementBalance],
             );
-
-            // Create alert if there's a difference
-            if (Math.abs(difference) > 0.01) {
-                await this.createAlert(
-                    'RECONCILIATION_DIFFERENCE',
-                    Math.abs(difference) > 1000 ? 'CRITICAL' : 'WARNING',
-                    `Reconciliation difference of ${difference.toFixed(2)} detected`,
-                    {
-                        bankAccountId,
-                        details: {
-                            statementBalance,
-                            bookBalance,
-                            difference,
-                        },
-                    }
-                );
-            }
 
             return {
                 reconciledCount: updateResult.rowCount || 0,
-                difference,
+                difference: 0,
+                newBalance: statementBalance,
+                clearedBalance,
+                bookBalance,
+                lastReconciledBalance,
             };
         });
     }

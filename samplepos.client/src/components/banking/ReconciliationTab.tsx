@@ -1,14 +1,12 @@
 /**
  * RECONCILIATION TAB
- * 
- * Bank reconciliation workflow:
- * 1. Select account and enter statement balance
- * 2. View unreconciled transactions
- * 3. Check off transactions that match statement
- * 4. Submit reconciliation
+ *
+ * Bank reconciliation (classic / QBO style):
+ *   Cleared = Last reconciled (0 if never) + selected deposits − selected withdrawals
+ *   Difference = Statement ending − Cleared  → must be ~0 to post
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import Decimal from 'decimal.js';
 import { CheckCircle2, Circle, Calculator } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,10 +22,17 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
     useBankAccounts,
     useBankTransactions,
-    useReconcileTransactions
+    useReconcileTransactions,
 } from '../../hooks/useBanking';
 import { formatCurrency } from '../../utils/currency';
 import { formatTimestampDate } from '../../utils/businessDate';
+
+const INFLOW = new Set(['DEPOSIT', 'TRANSFER_IN', 'INTEREST']);
+const OUTFLOW = new Set(['WITHDRAWAL', 'TRANSFER_OUT', 'FEE']);
+
+function txnDay(date: string): string {
+    return String(date).slice(0, 10);
+}
 
 export const ReconciliationTab: React.FC = () => {
     const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -35,93 +40,109 @@ export const ReconciliationTab: React.FC = () => {
     const [statementDate, setStatementDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [selectedTransactionIds, setSelectedTransactionIds] = useState<Set<string>>(new Set());
     const [showReconciled, setShowReconciled] = useState(false);
-    const [reconcileResult, setReconcileResult] = useState<{ reconciledCount: number; newBalance: number } | null>(null);
+    const [reconcileResult, setReconcileResult] = useState<{
+        reconciledCount: number;
+        newBalance: number;
+        clearedBalance: number;
+        bookBalance: number;
+    } | null>(null);
 
     const { data: accounts = [] } = useBankAccounts();
     const { data: transactionsData } = useBankTransactions({
         bankAccountId: selectedAccountId || undefined,
         isReconciled: showReconciled ? undefined : false,
-        limit: 500
+        limit: 500,
     });
     const reconcileMutation = useReconcileTransactions();
 
-    const transactions = transactionsData?.transactions || [];
-    const selectedAccount = accounts.find(a => a.id === selectedAccountId);
+    const allTransactions = transactionsData?.transactions || [];
+    const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
 
-    // Calculate totals
+    // Only statement-period transactions participate in this reconcile
+    const transactions = useMemo(() => {
+        if (!statementDate) return allTransactions;
+        return allTransactions.filter((t) => {
+            if (t.isReconciled) return showReconciled;
+            return txnDay(t.transactionDate) <= statementDate;
+        });
+    }, [allTransactions, statementDate, showReconciled]);
+
+    const lastReconciled = selectedAccount?.lastReconciledBalance ?? 0;
+    const neverReconciled = selectedAccount != null && selectedAccount.lastReconciledBalance == null;
+
     const totals = useMemo(() => {
-        const selected = transactions.filter(t => selectedTransactionIds.has(t.id));
-        const unselected = transactions.filter(t => !selectedTransactionIds.has(t.id) && !t.isReconciled);
+        const selected = transactions.filter((t) => selectedTransactionIds.has(t.id));
+        const unselected = transactions.filter(
+            (t) => !selectedTransactionIds.has(t.id) && !t.isReconciled,
+        );
 
-        const selectedDeposits = selected
-            .filter(t => ['DEPOSIT', 'TRANSFER_IN', 'INTEREST'].includes(t.type))
-            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
+        const sumIn = (rows: typeof selected) =>
+            rows
+                .filter((t) => INFLOW.has(t.type))
+                .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
+        const sumOut = (rows: typeof selected) =>
+            rows
+                .filter((t) => OUTFLOW.has(t.type))
+                .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
 
-        const selectedWithdrawals = selected
-            .filter(t => ['WITHDRAWAL', 'TRANSFER_OUT', 'FEE'].includes(t.type))
-            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
-
-        const unselectedDeposits = unselected
-            .filter(t => ['DEPOSIT', 'TRANSFER_IN', 'INTEREST'].includes(t.type))
-            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
-
-        const unselectedWithdrawals = unselected
-            .filter(t => ['WITHDRAWAL', 'TRANSFER_OUT', 'FEE'].includes(t.type))
-            .reduce((sum, t) => new Decimal(sum).plus(t.amount).toNumber(), 0);
+        const selectedDeposits = sumIn(selected);
+        const selectedWithdrawals = sumOut(selected);
+        const selectedNet = new Decimal(selectedDeposits).minus(selectedWithdrawals).toNumber();
+        const clearedBalance = new Decimal(lastReconciled).plus(selectedNet).toNumber();
 
         return {
             selectedDeposits,
             selectedWithdrawals,
-            selectedNet: new Decimal(selectedDeposits).minus(selectedWithdrawals).toNumber(),
-            unselectedDeposits,
-            unselectedWithdrawals,
-            unselectedNet: new Decimal(unselectedDeposits).minus(unselectedWithdrawals).toNumber(),
+            selectedNet,
+            clearedBalance,
+            unselectedDeposits: sumIn(unselected),
+            unselectedWithdrawals: sumOut(unselected),
+            unselectedNet: new Decimal(sumIn(unselected)).minus(sumOut(unselected)).toNumber(),
             selectedCount: selected.length,
-            unselectedCount: unselected.length
+            unselectedCount: unselected.length,
         };
-    }, [transactions, selectedTransactionIds]);
+    }, [transactions, selectedTransactionIds, lastReconciled]);
 
-    // Calculate difference
     const difference = useMemo(() => {
         if (!statementBalance || !selectedAccount) return null;
         const stmtBal = parseFloat(statementBalance);
         if (isNaN(stmtBal)) return null;
+        return new Decimal(stmtBal).minus(totals.clearedBalance).toNumber();
+    }, [statementBalance, selectedAccount, totals.clearedBalance]);
 
-        // Expected book balance after reconciliation = last reconciled + selected transactions
-        const lastReconciled = selectedAccount.lastReconciledBalance || 0;
-        const expectedBook = lastReconciled + totals.selectedNet;
-        return stmtBal - expectedBook;
-    }, [statementBalance, selectedAccount, totals.selectedNet]);
+    const isBalanced = difference != null && Math.abs(difference) <= 0.01;
 
     const handleToggleTransaction = (transactionId: string) => {
-        setSelectedTransactionIds(prev => {
+        setSelectedTransactionIds((prev) => {
             const next = new Set(prev);
-            if (next.has(transactionId)) {
-                next.delete(transactionId);
-            } else {
-                next.add(transactionId);
-            }
+            if (next.has(transactionId)) next.delete(transactionId);
+            else next.add(transactionId);
             return next;
         });
     };
 
     const handleSelectAll = () => {
         const unreconciledIds = transactions
-            .filter(t => !t.isReconciled && !t.isReversed)
-            .map(t => t.id);
+            .filter((t) => !t.isReconciled && !t.isReversed)
+            .map((t) => t.id);
         setSelectedTransactionIds(new Set(unreconciledIds));
     };
 
-    const handleSelectNone = () => {
-        setSelectedTransactionIds(new Set());
-    };
+    const handleSelectNone = () => setSelectedTransactionIds(new Set());
 
     const handleReconcile = async () => {
         if (!selectedAccountId || selectedTransactionIds.size === 0) return;
 
         const stmtBal = parseFloat(statementBalance);
         if (isNaN(stmtBal)) {
-            alert('Please enter a valid statement balance');
+            alert('Please enter a valid statement ending balance');
+            return;
+        }
+        if (!isBalanced) {
+            alert(
+                `Reconciliation is not balanced (difference ${formatCurrency(difference ?? 0)}). ` +
+                    'Statement ending must equal last reconciled + selected net.',
+            );
             return;
         }
 
@@ -129,29 +150,29 @@ export const ReconciliationTab: React.FC = () => {
             const result = await reconcileMutation.mutateAsync({
                 bankAccountId: selectedAccountId,
                 transactionIds: Array.from(selectedTransactionIds),
-                statementBalance: stmtBal
+                statementBalance: stmtBal,
+                statementDate,
             });
 
-            setReconcileResult(result);
+            setReconcileResult({
+                reconciledCount: result.reconciledCount,
+                newBalance: result.newBalance,
+                clearedBalance: result.clearedBalance,
+                bookBalance: result.bookBalance,
+            });
             setSelectedTransactionIds(new Set());
+            setStatementBalance('');
         } catch (error) {
             alert((error as Error).message);
         }
     };
 
-    const getTransactionSign = (type: string) => {
-        return ['DEPOSIT', 'TRANSFER_IN', 'INTEREST'].includes(type) ? '+' : '-';
-    };
-
-    const getTransactionColor = (type: string) => {
-        return ['DEPOSIT', 'TRANSFER_IN', 'INTEREST'].includes(type)
-            ? 'text-green-600'
-            : 'text-red-600';
-    };
+    const getTransactionSign = (type: string) => (INFLOW.has(type) ? '+' : '-');
+    const getTransactionColor = (type: string) =>
+        INFLOW.has(type) ? 'text-green-600' : 'text-red-600';
 
     return (
         <div className="space-y-6">
-            {/* Reconciliation Setup */}
             <Card>
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
@@ -159,19 +180,27 @@ export const ReconciliationTab: React.FC = () => {
                         Bank Reconciliation
                     </CardTitle>
                     <CardDescription>
-                        Match your bank statement with recorded transactions
+                        Match your bank statement with recorded transactions. Cleared balance must
+                        equal the statement ending balance before you can complete.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="space-y-2">
                             <Label>Bank Account</Label>
-                            <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                            <Select
+                                value={selectedAccountId}
+                                onValueChange={(id) => {
+                                    setSelectedAccountId(id);
+                                    setSelectedTransactionIds(new Set());
+                                    setReconcileResult(null);
+                                }}
+                            >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Select account..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {accounts.map(acc => (
+                                    {accounts.map((acc) => (
                                         <SelectItem key={acc.id} value={acc.id}>
                                             {acc.name}
                                         </SelectItem>
@@ -184,7 +213,10 @@ export const ReconciliationTab: React.FC = () => {
                             <Label>Statement Date</Label>
                             <DatePicker
                                 value={statementDate}
-                                onChange={setStatementDate}
+                                onChange={(d) => {
+                                    setStatementDate(d);
+                                    setSelectedTransactionIds(new Set());
+                                }}
                                 placeholder="Statement date"
                             />
                         </div>
@@ -202,35 +234,52 @@ export const ReconciliationTab: React.FC = () => {
 
                         <div className="space-y-2">
                             <Label>Last Reconciled Balance</Label>
-                            <div className="h-10 flex items-center px-3 border rounded-md bg-muted">
-                                {selectedAccount?.lastReconciledBalance !== undefined
-                                    ? formatCurrency(selectedAccount.lastReconciledBalance)
-                                    : 'N/A'}
+                            <div className="h-10 flex items-center px-3 border rounded-md bg-muted font-medium">
+                                {selectedAccount
+                                    ? formatCurrency(lastReconciled)
+                                    : 'Select account…'}
                             </div>
                         </div>
                     </div>
 
-                    {selectedAccount?.lastReconciledAt && (
-                        <p className="text-sm text-muted-foreground">
-                            Last reconciled: {formatTimestampDate(selectedAccount.lastReconciledAt)}
-                        </p>
+                    {selectedAccount && (
+                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
+                            <span>
+                                {neverReconciled
+                                    ? 'Never reconciled — opening for this run is 0.00'
+                                    : selectedAccount.lastReconciledAt
+                                      ? `Last reconciled: ${formatTimestampDate(selectedAccount.lastReconciledAt)}`
+                                      : null}
+                            </span>
+                            <span>
+                                Book (GL) balance: {formatCurrency(selectedAccount.currentBalance)}
+                            </span>
+                            <span>
+                                Cleared (this run): {formatCurrency(totals.clearedBalance)}
+                            </span>
+                        </div>
                     )}
                 </CardContent>
             </Card>
 
-            {/* Reconciliation Summary */}
             {selectedAccountId && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <Card>
                         <CardHeader className="pb-2">
-                            <CardTitle className="text-sm font-medium">Selected for Reconciliation</CardTitle>
+                            <CardTitle className="text-sm font-medium">
+                                Selected for Reconciliation
+                            </CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold">{totals.selectedCount} transactions</div>
                             <div className="text-sm text-muted-foreground">
-                                <span className="text-green-600">+{formatCurrency(totals.selectedDeposits)}</span>
+                                <span className="text-green-600">
+                                    +{formatCurrency(totals.selectedDeposits)}
+                                </span>
                                 {' / '}
-                                <span className="text-red-600">-{formatCurrency(totals.selectedWithdrawals)}</span>
+                                <span className="text-red-600">
+                                    −{formatCurrency(totals.selectedWithdrawals)}
+                                </span>
                             </div>
                             <div className="text-sm font-medium mt-1">
                                 Net: {formatCurrency(totals.selectedNet)}
@@ -240,61 +289,71 @@ export const ReconciliationTab: React.FC = () => {
 
                     <Card>
                         <CardHeader className="pb-2">
-                            <CardTitle className="text-sm font-medium">Unselected Transactions</CardTitle>
+                            <CardTitle className="text-sm font-medium">Uncleared (in period)</CardTitle>
                         </CardHeader>
                         <CardContent>
                             <div className="text-2xl font-bold">{totals.unselectedCount} transactions</div>
                             <div className="text-sm text-muted-foreground">
                                 Deposits in transit or outstanding checks
                             </div>
+                            <div className="text-sm font-medium mt-1">
+                                Net: {formatCurrency(totals.unselectedNet)}
+                            </div>
                         </CardContent>
                     </Card>
 
                     <Card>
                         <CardHeader className="pb-2">
-                            <CardTitle className="text-sm font-medium">Reconciliation Difference</CardTitle>
+                            <CardTitle className="text-sm font-medium">
+                                Reconciliation Difference
+                            </CardTitle>
                         </CardHeader>
                         <CardContent>
-                            <div className={`text-2xl font-bold ${difference !== null && Math.abs(difference) > 0.01
-                                    ? 'text-red-600'
-                                    : 'text-green-600'
-                                }`}>
+                            <div
+                                className={`text-2xl font-bold ${
+                                    difference !== null && !isBalanced
+                                        ? 'text-red-600'
+                                        : 'text-green-600'
+                                }`}
+                            >
                                 {difference !== null ? formatCurrency(difference) : '—'}
                             </div>
                             <div className="text-sm text-muted-foreground">
-                                {difference !== null && Math.abs(difference) <= 0.01
-                                    ? '✓ Balanced'
-                                    : 'Should be zero when balanced'}
+                                {difference === null
+                                    ? 'Enter statement ending balance'
+                                    : isBalanced
+                                      ? '✓ Balanced — ready to complete'
+                                      : 'Statement − (last reconciled + selected net)'}
                             </div>
                         </CardContent>
                     </Card>
                 </div>
             )}
 
-            {/* Result Alert */}
             {reconcileResult && (
                 <Alert>
                     <CheckCircle2 className="h-4 w-4" />
                     <AlertTitle>Reconciliation Complete</AlertTitle>
                     <AlertDescription>
                         {reconcileResult.reconciledCount} transactions marked as reconciled.
-                        New balance: {formatCurrency(reconcileResult.newBalance)}
+                        New last reconciled balance: {formatCurrency(reconcileResult.newBalance)}.
+                        Cleared {formatCurrency(reconcileResult.clearedBalance)}; book (GL){' '}
+                        {formatCurrency(reconcileResult.bookBalance)}.
                     </AlertDescription>
                 </Alert>
             )}
 
-            {/* Transaction List */}
             {selectedAccountId && (
                 <Card>
                     <CardHeader>
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between gap-4 flex-wrap">
                             <div>
                                 <CardTitle>Transactions to Reconcile</CardTitle>
                                 <CardDescription>
-                                    Check off transactions that appear on your bank statement
+                                    Check off items on the statement through {statementDate || '…'}
                                 </CardDescription>
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 flex-wrap">
                                 <Button variant="outline" size="sm" onClick={handleSelectAll}>
                                     Select All
                                 </Button>
@@ -305,9 +364,15 @@ export const ReconciliationTab: React.FC = () => {
                                     variant="default"
                                     size="sm"
                                     onClick={handleReconcile}
-                                    disabled={selectedTransactionIds.size === 0 || reconcileMutation.isPending}
+                                    disabled={
+                                        selectedTransactionIds.size === 0 ||
+                                        !isBalanced ||
+                                        reconcileMutation.isPending
+                                    }
                                 >
-                                    {reconcileMutation.isPending ? 'Reconciling...' : 'Reconcile Selected'}
+                                    {reconcileMutation.isPending
+                                        ? 'Reconciling...'
+                                        : 'Reconcile Selected'}
                                 </Button>
                             </div>
                         </div>
@@ -326,7 +391,7 @@ export const ReconciliationTab: React.FC = () => {
                         {transactions.length === 0 ? (
                             <div className="text-center py-8 text-muted-foreground">
                                 <Circle className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                                <p>No unreconciled transactions found</p>
+                                <p>No unreconciled transactions on or before the statement date</p>
                             </div>
                         ) : (
                             <div className="rounded-md border">
@@ -335,8 +400,15 @@ export const ReconciliationTab: React.FC = () => {
                                         <TableRow>
                                             <TableHead className="w-12">
                                                 <Checkbox
-                                                    checked={selectedTransactionIds.size === transactions.filter(t => !t.isReconciled).length}
-                                                    onCheckedChange={(checked) => checked ? handleSelectAll() : handleSelectNone()}
+                                                    checked={
+                                                        selectedTransactionIds.size ===
+                                                            transactions.filter((t) => !t.isReconciled)
+                                                                .length &&
+                                                        transactions.some((t) => !t.isReconciled)
+                                                    }
+                                                    onCheckedChange={(checked) =>
+                                                        checked ? handleSelectAll() : handleSelectNone()
+                                                    }
                                                 />
                                             </TableHead>
                                             <TableHead>Date</TableHead>
@@ -348,22 +420,30 @@ export const ReconciliationTab: React.FC = () => {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {transactions.map(txn => (
+                                        {transactions.map((txn) => (
                                             <TableRow
                                                 key={txn.id}
                                                 className={txn.isReconciled ? 'bg-muted/30' : undefined}
                                             >
                                                 <TableCell>
                                                     <Checkbox
-                                                        checked={selectedTransactionIds.has(txn.id) || txn.isReconciled}
+                                                        checked={
+                                                            selectedTransactionIds.has(txn.id) ||
+                                                            txn.isReconciled
+                                                        }
                                                         disabled={txn.isReconciled}
-                                                        onCheckedChange={() => handleToggleTransaction(txn.id)}
+                                                        onCheckedChange={() =>
+                                                            handleToggleTransaction(txn.id)
+                                                        }
                                                     />
                                                 </TableCell>
                                                 <TableCell className="whitespace-nowrap">
                                                     {formatTimestampDate(txn.transactionDate)}
                                                 </TableCell>
-                                                <TableCell className="max-w-xs truncate" title={txn.description}>
+                                                <TableCell
+                                                    className="max-w-xs truncate"
+                                                    title={txn.description}
+                                                >
                                                     {txn.description}
                                                 </TableCell>
                                                 <TableCell className="text-muted-foreground">
@@ -374,12 +454,18 @@ export const ReconciliationTab: React.FC = () => {
                                                         {txn.type.toLowerCase().replace('_', ' ')}
                                                     </Badge>
                                                 </TableCell>
-                                                <TableCell className={`text-right font-medium ${getTransactionColor(txn.type)}`}>
-                                                    {getTransactionSign(txn.type)}{formatCurrency(txn.amount)}
+                                                <TableCell
+                                                    className={`text-right font-medium ${getTransactionColor(txn.type)}`}
+                                                >
+                                                    {getTransactionSign(txn.type)}
+                                                    {formatCurrency(txn.amount)}
                                                 </TableCell>
                                                 <TableCell>
                                                     {txn.isReconciled ? (
-                                                        <Badge variant="default" className="bg-green-100 text-green-800">
+                                                        <Badge
+                                                            variant="default"
+                                                            className="bg-green-100 text-green-800"
+                                                        >
                                                             <CheckCircle2 className="h-3 w-3 mr-1" />
                                                             Reconciled
                                                         </Badge>

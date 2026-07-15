@@ -24,21 +24,40 @@ import {
 } from '../../hooks/useBanking';
 import { formatCurrency } from '../../utils/currency';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'react-hot-toast';
 
-// Fetch GL accounts for dropdown (Asset accounts for bank account linking)
+type GlAccountOption = {
+    id: string;
+    accountCode: string;
+    accountName: string;
+    isPostingAccount?: boolean;
+};
+
+// Fetch GL accounts for dropdown (posting Asset accounts for bank account linking)
 const useGLAccounts = () => {
     return useQuery({
-        queryKey: ['glAccounts', 'ASSET'],
-        queryFn: async () => {
+        queryKey: ['glAccounts', 'ASSET', 'posting'],
+        queryFn: async (): Promise<GlAccountOption[]> => {
             const response = await fetch('/api/accounting/chart-of-accounts?type=ASSET', {
                 headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-                }
+                    Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+                },
             });
             if (!response.ok) throw new Error('Failed to fetch GL accounts');
             const result = await response.json();
-            return result.data || [];
-        }
+            const rows = (result.data || []) as Array<Record<string, unknown>>;
+            return rows
+                .map((acc) => {
+                    const id = String(acc.id ?? acc.Id ?? '');
+                    const accountCode = String(acc.accountCode ?? acc.accountNumber ?? acc.AccountCode ?? '');
+                    const accountName = String(acc.accountName ?? acc.AccountName ?? '');
+                    const isPostingAccount = Boolean(
+                        acc.isPostingAccount ?? acc.IsPostingAccount ?? true,
+                    );
+                    return { id, accountCode, accountName, isPostingAccount };
+                })
+                .filter((acc) => acc.id && acc.accountCode && acc.isPostingAccount);
+        },
     });
 };
 
@@ -133,9 +152,12 @@ export const BankAccountsTab: React.FC = () => {
                 });
             }
             setIsModalOpen(false);
+            toast.success(editingAccount ? 'Bank account updated' : 'Bank account created');
             refetch();
         } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to save bank account';
             console.error('Failed to save bank account:', error);
+            toast.error(message);
         }
     };
 
@@ -337,10 +359,10 @@ export const BankAccountsTab: React.FC = () => {
                                 </SelectTrigger>
                                 <SelectContent>
                                     {glAccounts
-                                        .filter((acc: { Id: string; AccountCode: string; AccountName: string }) => acc.Id && acc.Id !== '') // Filter out empty IDs
-                                        .map((acc: { Id: string; AccountCode: string; AccountName: string }) => (
-                                            <SelectItem key={acc.Id} value={acc.Id}>
-                                                {acc.AccountCode} - {acc.AccountName}
+                                        .filter((acc) => acc.id && acc.id !== '')
+                                        .map((acc) => (
+                                            <SelectItem key={acc.id} value={acc.id}>
+                                                {acc.accountCode} - {acc.accountName}
                                             </SelectItem>
                                         ))}
                                 </SelectContent>
@@ -358,6 +380,10 @@ export const BankAccountsTab: React.FC = () => {
                                     onChange={e => setFormData(prev => ({ ...prev, openingBalance: parseFloat(e.target.value) || 0 }))}
                                     placeholder="0.00"
                                 />
+                                <p className="text-xs text-muted-foreground">
+                                    Posts DR bank GL / CR Opening Balance Equity (3050). Use a unique
+                                    posting GL account not already linked to another bank book.
+                                </p>
                             </div>
                         )}
 

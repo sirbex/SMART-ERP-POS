@@ -339,50 +339,63 @@ export const reportsController = {
           color: PDFColors.info,
         },
         {
-          label: 'Transactions',
-          value: String(report.summary.totalTransactions),
+          label: 'Qty / Txns',
+          value: `${formatQuantityPDF(report.summary.totalQuantitySold || 0)} / ${report.summary.totalTransactions}`,
           color: PDFColors.secondary,
         },
       ]);
 
       const columns: PDFTableColumn[] = [
-        { header: 'Period', key: 'period', width: 0.2 },
+        { header: 'Period', key: 'period', width: 0.16 },
+        {
+          header: 'Category',
+          key: 'category',
+          width: 0.12,
+          format: (v) => (v == null || v === '' ? '—' : String(v)),
+        },
+        {
+          header: 'Qty',
+          key: 'totalQuantitySold',
+          width: 0.07,
+          align: 'right',
+          format: (v) => formatQuantityPDF(v as number),
+        },
         {
           header: 'Total Sales',
           key: 'totalSales',
-          width: 0.16,
+          width: 0.13,
           align: 'right',
           format: (v) => formatCurrencyPDF(v),
         },
         {
           header: 'Discounts',
           key: 'totalDiscounts',
-          width: 0.14,
+          width: 0.1,
           align: 'right',
           format: (v) => formatCurrencyPDF(v),
         },
         {
           header: 'Net Revenue',
           key: 'netRevenue',
-          width: 0.16,
+          width: 0.12,
           align: 'right',
           format: (v) => formatCurrencyPDF(v),
         },
         {
           header: 'Gross Profit',
           key: 'grossProfit',
-          width: 0.16,
+          width: 0.12,
           align: 'right',
           format: (v) => formatCurrencyPDF(v),
         },
         {
           header: 'Margin %',
           key: 'profitMargin',
-          width: 0.1,
+          width: 0.09,
           align: 'right',
           format: (v) => `${Number(v).toFixed(1)}%`,
         },
-        { header: 'Count', key: 'transactionCount', width: 0.08, align: 'right' },
+        { header: 'Count', key: 'transactionCount', width: 0.09, align: 'right' },
       ];
 
       pdfGen.addTable(columns, report.data);

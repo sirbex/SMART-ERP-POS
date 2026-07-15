@@ -14,6 +14,10 @@ export interface SalesReportRow {
     profitMargin: number;
     transactionCount: number;
     averageTransactionValue: number;
+    /** Units sold in the period / group (always present when SQL returns it). */
+    totalQuantitySold: number;
+    /** Product category when group_by is product or category (otherwise undefined). */
+    category?: string | null;
 }
 
 // ── Supplier Cost Analysis ──

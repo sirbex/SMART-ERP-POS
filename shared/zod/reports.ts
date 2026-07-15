@@ -86,7 +86,18 @@ export const SalesReportRequestSchema = z.object({
   reportType: z.literal('SALES_REPORT'),
   startDate: z.string(),
   endDate: z.string(),
-  groupBy: z.enum(['day', 'week', 'month', 'product', 'customer', 'payment_method']).optional(),
+  groupBy: z
+    .enum([
+      'day',
+      'week',
+      'month',
+      'product',
+      'customer',
+      'payment_method',
+      'cashier',
+      'category',
+    ])
+    .optional(),
   customerId: z.string().uuid().optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),
 }).strict();
@@ -321,7 +332,18 @@ export const InventoryValuationParamsSchema = z.object({
 export const SalesReportParamsSchema = z.object({
   start_date: z.string(),
   end_date: z.string(),
-  group_by: z.enum(['day', 'week', 'month', 'product', 'customer', 'payment_method']).optional(),
+  group_by: z
+    .enum([
+      'day',
+      'week',
+      'month',
+      'product',
+      'customer',
+      'payment_method',
+      'cashier',
+      'category',
+    ])
+    .optional(),
   customer_id: z.string().uuid().optional(),
   session_id: z.string().optional(),
   format: z.enum(['pdf', 'csv', 'json']).default('json'),

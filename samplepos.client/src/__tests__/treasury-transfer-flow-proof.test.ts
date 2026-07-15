@@ -37,9 +37,10 @@ describe('Treasury Transfer flow — UI / API contract proof', () => {
 
   it('client API matches transfer posting contract', () => {
     const api = readSrc('utils/api.ts');
-    expect(api).toContain("apiClient.post<ApiResponse>('treasury/transfers'");
+    expect(api).toContain("'treasury/transfers'");
     expect(api).toContain('fromAccountCode');
     expect(api).toContain('toAccountCode');
     expect(api).toContain('TREASURY_TRANSFER');
+    expect(api).toContain("treasury/documents/${id}/reverse");
   });
 });

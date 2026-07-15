@@ -129,6 +129,9 @@ const TaxComplianceReportsPage = lazyWithRetry(
 const LiquidityMovementsReportPage = lazyWithRetry(
   () => import('./pages/reports/LiquidityMovementsReportPage'),
 );
+const SalesAnalysisReportPage = lazyWithRetry(
+  () => import('./pages/reports/SalesAnalysisReportPage'),
+);
 const DeliveryPage = lazyWithRetry(() => import('./pages/delivery/DeliveryPage'));
 const DeliveryNotesPage = lazyWithRetry(() => import('./pages/delivery-notes/DeliveryNotesPage'));
 const DistSalesOrderListPage = lazyWithRetry(() => import('./pages/distribution/DistSalesOrderListPage'));
@@ -1065,6 +1068,17 @@ function App() {
                       <ProtectedRoute requiredPermissions={['reports.read', 'reports.financial_view', 'accounting.read']} requiredFeature="reports">
                         <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
                           <LiquidityMovementsReportPage />
+                        </Suspense>
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/reports/sales-analysis"
+                    element={
+                      <ProtectedRoute requiredPermissions={['reports.read', 'reports.financial_view']} requiredFeature="reports">
+                        <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+                          <SalesAnalysisReportPage />
                         </Suspense>
                       </ProtectedRoute>
                     }
