@@ -320,7 +320,7 @@ export const reportsController = {
         'Tickets',
         'Avg Ticket',
       ];
-      const lines = (report.data as Array<Record<string, unknown>>).map((row) =>
+      const lines = report.data.map((row) =>
         [
           csvEscape(String(row.period ?? '')),
           csvEscape(row.category == null || row.category === '' ? '—' : String(row.category)),
