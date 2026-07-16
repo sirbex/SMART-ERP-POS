@@ -14,6 +14,7 @@ export const MIGRATION_POSTCONDITION_FILES = [
     '20251118_create_stock_counts.sql',
     '20260616_cutover_accounting.sql',
     '524_relax_ledger_entries_constraints.sql',
+    '554_sales_liquidity_allowed_sources.sql',
 ] as const;
 
 export type MigrationPostconditionFile = (typeof MIGRATION_POSTCONDITION_FILES)[number];
@@ -130,6 +131,15 @@ export async function verifyMigrationPostcondition(
         }
         case '524_relax_ledger_entries_constraints.sql':
             return columnIsNullable(pool, 'ledger_entries', 'LedgerTransactionId');
+        case '554_sales_liquidity_allowed_sources.sql': {
+            const [cash, momo, bank, card] = await Promise.all([
+                accountAllowsSource(pool, '1010', 'SALES_INVOICE'),
+                accountAllowsSource(pool, '1040', 'SALES_INVOICE'),
+                accountAllowsSource(pool, '1030', 'SALES_INVOICE'),
+                accountAllowsSource(pool, '1020', 'SALES_INVOICE'),
+            ]);
+            return cash && momo && bank && card;
+        }
         default:
             return true;
     }
