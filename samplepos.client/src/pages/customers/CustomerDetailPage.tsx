@@ -27,6 +27,9 @@ import {
 import { AdjustCustomerInvoiceModal } from '../../components/shared/AdjustCustomerInvoiceModal';
 import { useHasAnyPermission } from '../../hooks/useRbac';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
+import { useWhtTypes } from '../../hooks/useAccountingModules';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 // ── Local interfaces for Customer Detail page ──────────────────
 
 /** Raw invoice row from API (supports camelCase, snake_case, PascalCase keys) */
@@ -105,6 +108,8 @@ interface CustomerDetailData {
   balance: number | string;
   creditLimit: number | string;
   isActive: boolean;
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -332,6 +337,21 @@ export default function CustomerDetailPage() {
     staleTime: 5 * 60 * 1000,
     enabled: tab === 'edit',
   });
+  const { data: whtTypesRaw } = useWhtTypes();
+  const customerWhtTypes = useMemo(() => {
+    const items = (Array.isArray(whtTypesRaw) ? whtTypesRaw : []) as Array<{
+      id: string;
+      code: string;
+      name: string;
+      rate: number;
+      appliesTo?: string;
+      isActive?: boolean;
+    }>;
+    return items.filter((t) => {
+      const a = String(t.appliesTo || '').toUpperCase();
+      return t.isActive !== false && (a === 'CUSTOMER' || a === 'BOTH');
+    });
+  }, [whtTypesRaw]);
   const { data: customerGroups = [] } = useCustomerGroupsList();
   const customerGroupName = useMemo(() => {
     const cust = customer as CustomerDetailData | undefined;
@@ -344,12 +364,17 @@ export default function CustomerDetailPage() {
 
   const [editPriceGroupId, setEditPriceGroupId] = useState('');
   const initialPriceGroupIdRef = useRef<string | null>(null);
+  const [editWhtLiable, setEditWhtLiable] = useState(false);
+  const [editDefaultWhtTypeId, setEditDefaultWhtTypeId] = useState('');
 
   useEffect(() => {
     if (tab === 'edit' && customer) {
       const { editValue, initialRef } = syncEditPriceGroupState(customer as CustomerDetailData);
       setEditPriceGroupId(editValue);
       initialPriceGroupIdRef.current = initialRef;
+      const c = customer as CustomerDetailData;
+      setEditWhtLiable(c.whtLiable === true);
+      setEditDefaultWhtTypeId(c.defaultWhtTypeId || '');
     }
   }, [tab, customer, priceGroupIdForEffectDeps(customer as CustomerDetailData | undefined)]);
 
@@ -373,6 +398,8 @@ export default function CustomerDetailPage() {
         phone: formData.get('phone')?.toString() || undefined,
         address: formData.get('address')?.toString() || undefined,
         creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
+        whtLiable: editWhtLiable,
+        defaultWhtTypeId: editWhtLiable ? editDefaultWhtTypeId || null : null,
       },
     );
     await updateCustomer.mutateAsync({ id, data: payload });
@@ -624,6 +651,11 @@ export default function CustomerDetailPage() {
               {customerIsAtCost(customer as CustomerDetailData | undefined) && (
                 <span className="inline-flex px-2.5 py-0.5 text-sm font-medium rounded-full bg-amber-100 text-amber-800">
                   At cost
+                </span>
+              )}
+              {(customer as CustomerDetailData | undefined)?.whtLiable && (
+                <span className="inline-flex px-2.5 py-0.5 text-sm font-medium rounded-full bg-sky-100 text-sky-800">
+                  WHT liable
                 </span>
               )}
             </div>
@@ -1319,6 +1351,47 @@ export default function CustomerDetailPage() {
                 <p className="text-xs text-gray-400 mt-1">
                   At Cost sells at inventory cost. Leave empty for normal retail pricing.
                 </p>
+              </div>
+              <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <Checkbox
+                    id="customer-wht-liable"
+                    checked={editWhtLiable}
+                    onCheckedChange={(checked) => {
+                      const on = checked === true;
+                      setEditWhtLiable(on);
+                      if (!on) setEditDefaultWhtTypeId('');
+                    }}
+                  />
+                  <div>
+                    <Label htmlFor="customer-wht-liable" className="text-sm font-medium text-gray-900">
+                      Customer withholds tax (WHT receivable)
+                    </Label>
+                    <p className="text-xs text-gray-600 mt-0.5">
+                      When this customer deducts WHT from payments to you, receipts will suggest that type.
+                    </p>
+                  </div>
+                </div>
+                {editWhtLiable && (
+                  <div>
+                    <Label htmlFor="customer-default-wht" className="text-sm font-medium text-gray-700">
+                      Default WHT type
+                    </Label>
+                    <select
+                      id="customer-default-wht"
+                      value={editDefaultWhtTypeId}
+                      onChange={(e) => setEditDefaultWhtTypeId(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="">— Select when receiving payment —</option>
+                      {customerWhtTypes.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.code} — {t.name} ({(Number(t.rate) * 100).toFixed(1)}%)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50" disabled={updateCustomer.isPending}>Save Changes</button>

@@ -113,6 +113,32 @@ export function assertWhtAppliesTo(side: WhtSide, appliesTo: WhtType['appliesTo'
   );
 }
 
+/**
+ * Validate partner master default WHT type (liable + type must match side).
+ */
+export async function assertPartnerDefaultWhtType(
+  side: WhtSide,
+  opts: { whtLiable?: boolean; defaultWhtTypeId?: string | null },
+  pool?: pg.Pool,
+): Promise<void> {
+  if (opts.whtLiable === false) return;
+  const typeId = opts.defaultWhtTypeId;
+  if (!typeId) {
+    if (opts.whtLiable === true) return; // liable without default is allowed
+    return;
+  }
+  const dbPool = pool || globalPool;
+  const result = await dbPool.query(
+    `SELECT id, code, applies_to, is_active FROM withholding_tax_types WHERE id = $1`,
+    [typeId],
+  );
+  const row = result.rows[0];
+  if (!row || row.is_active === false) {
+    throw new ValidationError('Default WHT type not found or inactive');
+  }
+  assertWhtAppliesTo(side, row.applies_to, row.code);
+}
+
 function defaultAccountForNewType(appliesTo: string): string {
   if (appliesTo === 'CUSTOMER') return WHT_RECEIVABLE_ACCOUNT;
   return WHT_PAYABLE_ACCOUNT;

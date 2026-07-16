@@ -19,6 +19,10 @@ import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { useServerTableSort } from '../hooks/useServerTableSort';
 import { WorkflowHelpTrigger } from '../components/inventory/shared';
+import { useWhtTypes } from '../hooks/useAccountingModules';
+import { PartnerWhtLiableBadge } from '../components/partners/PartnerWhtLiableBadge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
 // Frontend displays as-is without parsing to Date object
@@ -60,6 +64,7 @@ type SortField =
 interface Supplier {
   id: string;
   supplierCode?: string;
+  supplierNumber?: string;
   name: string;
   contactPerson: string;
   email: string;
@@ -70,6 +75,8 @@ interface Supplier {
   outstandingBalance?: number;
   notes?: string;
   isActive?: boolean;
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -169,6 +176,8 @@ interface SupplierFormData {
   address: string;
   paymentTerms: string;
   notes?: string;
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
 }
 
 interface SupplierLedgerEntry {
@@ -658,7 +667,10 @@ export default function SuppliersPage() {
                 suppliers.map((supplier: Supplier) => (
                   <div key={supplier.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
                     <div className="flex items-center justify-between mb-2">
-                      <div className="font-medium text-gray-900">{supplier.name}</div>
+                      <div className="font-medium text-gray-900 flex items-center gap-1.5 flex-wrap min-w-0">
+                        <span className="truncate">{supplier.name}</span>
+                        <PartnerWhtLiableBadge liable={supplier.whtLiable} />
+                      </div>
                       <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${supplier.isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
                         {supplier.isActive ? 'Active' : 'Inactive'}
                       </span>
@@ -764,7 +776,10 @@ export default function SuppliersPage() {
                       <tr key={supplier.id} className="hover:bg-gray-50">
                         {/* Supplier Name */}
                         <td className="px-4 py-4">
-                          <div className="text-sm font-medium text-gray-900">{supplier.name}</div>
+                          <div className="text-sm font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                            {supplier.name}
+                            <PartnerWhtLiableBadge liable={supplier.whtLiable} />
+                          </div>
                           {supplier.address && (
                             <div className="text-xs text-gray-500 mt-1">{supplier.address}</div>
                           )}
@@ -862,7 +877,10 @@ export default function SuppliersPage() {
                   {/* Card Header */}
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex-1">
-                      <h3 className="text-lg font-bold text-gray-900 mb-1">{supplier.name}</h3>
+                      <h3 className="text-lg font-bold text-gray-900 mb-1 flex items-center gap-2 flex-wrap">
+                        {supplier.name}
+                        <PartnerWhtLiableBadge liable={supplier.whtLiable} />
+                      </h3>
                       <span
                         className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${supplier.isActive
                           ? 'bg-green-100 text-green-800'
@@ -1505,7 +1523,10 @@ function SupplierDetailModal({
       >
         <div className="flex justify-between items-start mb-4 sm:mb-6">
           <div className="flex-1 min-w-0 pr-3">
-            <h3 className="text-lg sm:text-xl font-bold text-gray-900 truncate">{supplier.name}</h3>
+            <h3 className="text-lg sm:text-xl font-bold text-gray-900 truncate flex items-center gap-2 flex-wrap">
+              <span className="truncate">{supplier.name}</span>
+              <PartnerWhtLiableBadge liable={supplier.whtLiable} />
+            </h3>
             {supplier.contactPerson && (
               <p className="text-xs text-gray-500 mt-0.5 sm:hidden">{supplier.contactPerson}</p>
             )}
@@ -1609,7 +1630,7 @@ function SupplierDetailModal({
 
                   <div>
                     <label className="text-sm font-medium text-gray-500">Status</label>
-                    <div className="mt-1">
+                    <div className="mt-1 flex items-center gap-2 flex-wrap">
                       <span
                         className={`inline-flex px-3 py-1 text-sm font-semibold rounded-full ${supplier.isActive
                           ? 'bg-green-100 text-green-800'
@@ -1618,6 +1639,16 @@ function SupplierDetailModal({
                       >
                         {supplier.isActive ? '✓ Active' : '○ Inactive'}
                       </span>
+                      <PartnerWhtLiableBadge liable={supplier.whtLiable} />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-gray-500">Withholding tax</label>
+                    <div className="mt-1 text-gray-900 font-medium">
+                      {supplier.whtLiable
+                        ? 'Liable (subject to WHT on payments)'
+                        : 'Not liable'}
                     </div>
                   </div>
 
@@ -2983,6 +3014,22 @@ interface SupplierFormModalProps {
 }
 
 function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalProps) {
+  const { data: whtTypesRaw } = useWhtTypes();
+  const supplierWhtTypes = useMemo(() => {
+    const items = (Array.isArray(whtTypesRaw) ? whtTypesRaw : []) as Array<{
+      id: string;
+      code: string;
+      name: string;
+      rate: number;
+      appliesTo?: string;
+      isActive?: boolean;
+    }>;
+    return items.filter((t) => {
+      const a = String(t.appliesTo || '').toUpperCase();
+      return t.isActive !== false && (a === 'SUPPLIER' || a === 'BOTH');
+    });
+  }, [whtTypesRaw]);
+
   const [formData, setFormData] = useState<SupplierFormData>({
     name: supplier?.name || '',
     contactPerson: supplier?.contactPerson || '',
@@ -2990,6 +3037,8 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
     phone: supplier?.phone || '',
     address: supplier?.address || '',
     paymentTerms: supplier?.paymentTerms || 'NET30',
+    whtLiable: supplier?.whtLiable === true,
+    defaultWhtTypeId: supplier?.defaultWhtTypeId || null,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -3006,7 +3055,11 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
       return;
     }
 
-    onSubmit(formData);
+    onSubmit({
+      ...formData,
+      whtLiable: formData.whtLiable === true,
+      defaultWhtTypeId: formData.whtLiable ? formData.defaultWhtTypeId || null : null,
+    });
   };
 
   return (
@@ -3123,6 +3176,60 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50/60 p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <Checkbox
+                id="supplier-wht-liable"
+                checked={formData.whtLiable === true}
+                onCheckedChange={(checked) =>
+                  setFormData({
+                    ...formData,
+                    whtLiable: checked === true,
+                    defaultWhtTypeId: checked === true ? formData.defaultWhtTypeId : null,
+                  })
+                }
+              />
+              <div>
+                <Label htmlFor="supplier-wht-liable" className="text-sm font-medium text-gray-900">
+                  Subject to withholding tax
+                </Label>
+                <p className="text-xs text-gray-600 mt-0.5">
+                  When paying this supplier, WHT will be suggested automatically (you can still skip).
+                </p>
+              </div>
+            </div>
+            {formData.whtLiable && (
+              <div>
+                <Label htmlFor="supplier-default-wht" className="text-sm font-medium text-gray-700">
+                  Default WHT type
+                </Label>
+                <select
+                  id="supplier-default-wht"
+                  value={formData.defaultWhtTypeId || ''}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      defaultWhtTypeId: e.target.value || null,
+                    })
+                  }
+                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">— Select when paying —</option>
+                  {supplierWhtTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.code} — {t.name} ({(Number(t.rate) * 100).toFixed(1)}%)
+                    </option>
+                  ))}
+                </select>
+                {supplierWhtTypes.length === 0 && (
+                  <p className="text-xs text-amber-800 mt-1">
+                    No supplier WHT types yet. Create one under Accounting → Withholding Tax.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Form Actions */}

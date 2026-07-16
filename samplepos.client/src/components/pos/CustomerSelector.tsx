@@ -20,6 +20,8 @@ function offlineToCustomer(c: OfflineCustomer): Customer {
     pricingMode: c.pricingMode ?? null,
     balance: c.balance,
     creditLimit: c.creditLimit,
+    whtLiable: c.whtLiable ?? false,
+    defaultWhtTypeId: c.defaultWhtTypeId ?? null,
     isActive: c.isActive,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -39,26 +41,24 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
   const { isOnline } = useOfflineContext();
 
   const { data: customers, isLoading } = useQuery({
-    queryKey: ['customers', search, isOnline],
+    queryKey: ['customers', 'pos-search', search, isOnline],
     queryFn: async () => {
-      // Offline: search IndexedDB
+      // Offline: search IndexedDB (full cache, not first page)
       if (!isOnline) {
-        if (search) return (await searchOfflineCustomers(search)).map(offlineToCustomer);
-        return (await getAllCustomers()).map(offlineToCustomer);
+        if (search.trim()) return (await searchOfflineCustomers(search)).map(offlineToCustomer);
+        return (await getAllCustomers()).map(offlineToCustomer).slice(0, 50);
       }
-      // Online: search API
-      const res = await api.customers.list();
+      // Online: server search — never client-filter the first list page (only 50 of ~200+)
+      if (search.trim()) {
+        const res = await api.customers.search(search.trim(), 50);
+        if (!res.data.success) return [];
+        return (res.data.data || []) as Customer[];
+      }
+      const res = await api.customers.list({ page: 1, limit: 50 });
       if (!res.data.success) return [];
-      const all = (res.data.data || []) as Customer[];
-      if (!search) return all;
-      const term = search.toLowerCase();
-      return all.filter((c: Customer) =>
-        c.name.toLowerCase().includes(term) ||
-        (c.email && c.email.toLowerCase().includes(term)) ||
-        (c.phone && c.phone.includes(term))
-      );
+      return (res.data.data || []) as Customer[];
     },
-    staleTime: 30_000,
+    staleTime: 15_000,
   });
 
   const handleSelect = (customer: Customer) => {

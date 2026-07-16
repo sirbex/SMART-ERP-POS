@@ -11,6 +11,9 @@ export const SupplierSchema = z.object({
   phone: z.string().max(50).optional().nullable().or(z.literal('')),
   address: z.string().optional().nullable().or(z.literal('')),
   paymentTerms: z.string().max(50).default('NET30'),
+  /** When true, supplier payments should default WHT. */
+  whtLiable: z.boolean().default(false).optional(),
+  defaultWhtTypeId: z.string().uuid().optional().nullable(),
   isActive: z.boolean().default(true),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -27,6 +30,8 @@ export const CreateSupplierSchema = z.object({
   creditLimit: z.number().nonnegative().optional(),
   taxId: z.union([z.string().max(100), z.literal('')]).optional().transform(v => v === '' ? undefined : v),
   notes: z.union([z.string(), z.literal('')]).optional().transform(v => v === '' ? undefined : v),
+  whtLiable: z.boolean().optional(),
+  defaultWhtTypeId: z.string().uuid().optional().nullable(),
 }).strict();
 
 export const UpdateSupplierSchema = CreateSupplierSchema.extend({

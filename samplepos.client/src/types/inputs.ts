@@ -44,7 +44,11 @@ export interface CreateCustomerInput {
   phone?: string;
   address?: string;
   groupId?: string;
+  customerGroupId?: string;
+  priceGroupId?: string | null;
   creditLimit?: number | string;
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
   isActive?: boolean;
 }
 
@@ -59,6 +63,8 @@ export interface CreateSupplierInput {
   address?: string;
   contactPerson?: string;
   paymentTerms?: string;
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
   isActive?: boolean;
 }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment, useRef } from 'react';
+import { useState, useEffect, Fragment, useRef, useMemo } from 'react';
 import Decimal from 'decimal.js';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
 import { useCustomer, useCustomerSummary, useUpdateCustomer, useToggleCustomerActive, useDeleteCustomer, useCustomerStatement, useInvoices, useRecordInvoicePayment } from '../../hooks/useApi';
@@ -22,6 +22,9 @@ import { AdjustCustomerInvoiceModal } from '../shared/AdjustCustomerInvoiceModal
 import { InvoiceSourceQuotationPanel } from '../invoices/InvoiceSourceQuotationPanel';
 import { useHasAnyPermission } from '../../hooks/useRbac';
 import { CustomerSmartStatementPanel } from './CustomerSmartStatementPanel';
+import { useWhtTypes } from '../../hooks/useAccountingModules';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 interface CustomerData {
     id: string;
@@ -42,6 +45,8 @@ interface CustomerData {
     customerGroupId?: string | null;
     priceGroupId?: string | null;
     pricingMode?: 'STANDARD' | 'AT_COST' | null;
+    whtLiable?: boolean;
+    defaultWhtTypeId?: string | null;
     createdAt?: string;
 }
 
@@ -235,6 +240,23 @@ export default function CustomerDetailModal({
     const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
     const [editPriceGroupId, setEditPriceGroupId] = useState('');
     const initialPriceGroupIdRef = useRef<string | null>(null);
+    const [editWhtLiable, setEditWhtLiable] = useState(false);
+    const [editDefaultWhtTypeId, setEditDefaultWhtTypeId] = useState('');
+    const { data: whtTypesRaw } = useWhtTypes();
+    const customerWhtTypes = useMemo(() => {
+        const items = (Array.isArray(whtTypesRaw) ? whtTypesRaw : []) as Array<{
+            id: string;
+            code: string;
+            name: string;
+            rate: number;
+            appliesTo?: string;
+            isActive?: boolean;
+        }>;
+        return items.filter((t) => {
+            const a = String(t.appliesTo || '').toUpperCase();
+            return t.isActive !== false && (a === 'CUSTOMER' || a === 'BOTH');
+        });
+    }, [whtTypesRaw]);
 
     useEffect(() => {
         if (tab === 'edit') {
@@ -249,6 +271,9 @@ export default function CustomerDetailModal({
             const { editValue, initialRef } = syncEditPriceGroupState(customer as CustomerData);
             setEditPriceGroupId(editValue);
             initialPriceGroupIdRef.current = initialRef;
+            const c = customer as CustomerData;
+            setEditWhtLiable(c.whtLiable === true);
+            setEditDefaultWhtTypeId(c.defaultWhtTypeId || '');
         }
     }, [tab, customer, priceGroupIdForEffectDeps(customer as CustomerData | undefined)]);
 
@@ -288,6 +313,8 @@ export default function CustomerDetailModal({
                 phone: formData.get('phone')?.toString() || undefined,
                 address: formData.get('address')?.toString() || undefined,
                 creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
+                whtLiable: editWhtLiable,
+                defaultWhtTypeId: editWhtLiable ? editDefaultWhtTypeId || null : null,
             },
         );
         try {
@@ -490,11 +517,16 @@ export default function CustomerDetailModal({
                                             </div>
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                                 <div className="text-sm text-gray-600">Status</div>
-                                                <div className="flex items-center mt-1">
+                                                <div className="flex items-center mt-1 gap-2 flex-wrap">
                                                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium ${(customer as CustomerData).isActive ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
                                                         }`}>
                                                         {(customer as CustomerData).isActive ? '✓ Active' : '✗ Inactive'}
                                                     </span>
+                                                    {(customer as CustomerData).whtLiable && (
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-sky-100 text-sky-800">
+                                                            WHT liable
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -518,6 +550,14 @@ export default function CustomerDetailModal({
                                                 <div>
                                                     <span className="text-gray-500">Address:</span>
                                                     <span className="ml-2 text-gray-900">{(customer as CustomerData).address || '-'}</span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Withholding tax:</span>
+                                                    <span className="ml-2 text-gray-900 font-medium">
+                                                        {(customer as CustomerData).whtLiable
+                                                            ? 'Liable (customer deducts WHT)'
+                                                            : 'Not liable'}
+                                                    </span>
                                                 </div>
                                                 <div>
                                                     <span className="text-gray-500">Customer Number:</span>
@@ -1344,6 +1384,52 @@ export default function CustomerDetailModal({
                                             <p className="mt-1 text-xs text-gray-500">
                                                 Set to <strong>At Cost</strong> to always sell to this customer at inventory cost price (zero margin).
                                             </p>
+                                        </div>
+                                        <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-4 space-y-3">
+                                            <div className="flex items-start gap-3">
+                                                <Checkbox
+                                                    id="modal-customer-wht-liable"
+                                                    checked={editWhtLiable}
+                                                    onCheckedChange={(checked) => {
+                                                        const on = checked === true;
+                                                        setEditWhtLiable(on);
+                                                        if (!on) setEditDefaultWhtTypeId('');
+                                                    }}
+                                                />
+                                                <div>
+                                                    <Label htmlFor="modal-customer-wht-liable" className="text-sm font-medium text-gray-900">
+                                                        Customer withholds tax (WHT receivable)
+                                                    </Label>
+                                                    <p className="text-xs text-gray-600 mt-0.5">
+                                                        When this customer deducts WHT from payments to you, receipts will suggest that type.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {editWhtLiable && (
+                                                <div>
+                                                    <Label htmlFor="modal-customer-default-wht" className="text-sm font-medium text-gray-700">
+                                                        Default WHT type
+                                                    </Label>
+                                                    <select
+                                                        id="modal-customer-default-wht"
+                                                        value={editDefaultWhtTypeId}
+                                                        onChange={(e) => setEditDefaultWhtTypeId(e.target.value)}
+                                                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                                                    >
+                                                        <option value="">— Select when receiving payment —</option>
+                                                        {customerWhtTypes.map((t) => (
+                                                            <option key={t.id} value={t.id}>
+                                                                {t.code} — {t.name} ({(Number(t.rate) * 100).toFixed(1)}%)
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    {customerWhtTypes.length === 0 && (
+                                                        <p className="text-xs text-amber-800 mt-1">
+                                                            No customer WHT types yet. Create one under Accounting → Withholding Tax.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex gap-3 pt-4">
                                             <button

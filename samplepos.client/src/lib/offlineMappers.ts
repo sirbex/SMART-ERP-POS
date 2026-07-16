@@ -74,6 +74,9 @@ export function mapApiCustomer(item: ApiRow): OfflineCustomer {
     customerGroupId: item.customer_group_id || item.customerGroupId || undefined,
     priceGroupId: item.price_group_id || item.priceGroupId || undefined,
     pricingMode: item.pricing_mode || item.pricingMode || undefined,
+    customerNumber: item.customer_number || item.customerNumber || undefined,
+    whtLiable: item.wht_liable === true || item.whtLiable === true,
+    defaultWhtTypeId: item.default_wht_type_id || item.defaultWhtTypeId || null,
     isActive: item.is_active ?? item.isActive ?? true,
   };
 }

@@ -16,6 +16,9 @@ export const CustomerSchema = z.object({
   balance: z.number().default(0),
   creditLimit: z.number().nonnegative().default(0),
   depositBalance: z.number().default(0).optional(),
+  /** When true, payments should default WHT for this customer (customer-withheld). */
+  whtLiable: z.boolean().default(false).optional(),
+  defaultWhtTypeId: z.string().uuid().optional().nullable(),
   isActive: z.boolean().default(true),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -30,6 +33,8 @@ export const CreateCustomerSchema = z.object({
   customerGroupId: z.string().uuid().optional().nullable(),
   priceGroupId: z.string().uuid().optional().nullable(),
   creditLimit: z.number().nonnegative().default(0),
+  whtLiable: z.boolean().optional(),
+  defaultWhtTypeId: z.string().uuid().optional().nullable(),
 }).strict();
 
 export const UpdateCustomerSchema = CreateCustomerSchema.partial().extend({

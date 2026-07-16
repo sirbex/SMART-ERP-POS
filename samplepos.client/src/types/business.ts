@@ -76,6 +76,9 @@ export interface Customer {
   groupId?: string;
   creditLimit: string | Decimal;
   currentBalance: string | Decimal;
+  /** Customer deducts WHT from payments to us */
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -104,6 +107,8 @@ export interface Supplier {
   address?: string;
   contactPerson?: string;
   paymentTerms?: string;
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

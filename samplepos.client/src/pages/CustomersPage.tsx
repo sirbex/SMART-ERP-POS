@@ -16,6 +16,7 @@ import { getBusinessDate, formatTimestamp } from '../utils/businessDate';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../components/ui/MobileSortSelect';
 import { useServerTableSort } from '../hooks/useServerTableSort';
+import { PartnerWhtLiableBadge } from '../components/partners/PartnerWhtLiableBadge';
 
 interface StatementResponse {
   openingBalance: number | string;
@@ -299,7 +300,10 @@ export default function CustomersPage() {
                               <span className="text-blue-600 font-semibold text-xs">{customer.name.charAt(0).toUpperCase()}</span>
                             </div>
                             <div className="min-w-0">
-                              <div className="font-medium text-gray-900 text-sm truncate">{customer.name}</div>
+                              <div className="font-medium text-gray-900 text-sm truncate flex items-center gap-1.5 flex-wrap">
+                                <span className="truncate">{customer.name}</span>
+                                <PartnerWhtLiableBadge liable={customer.whtLiable} />
+                              </div>
                               <div className="text-xs text-gray-500 truncate">{customer.phone || customer.email || 'No contact'}</div>
                             </div>
                           </div>
@@ -350,7 +354,10 @@ export default function CustomersPage() {
                             onClick={() => { setSelectedCustomerId(customer.id); setDetailModalTab('overview'); setDetailModalOpen(true); }}
                           >
                             <td className="px-4 py-3">
-                              <div className="font-medium text-gray-900">{customer.name}</div>
+                              <div className="font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                                {customer.name}
+                                <PartnerWhtLiableBadge liable={customer.whtLiable} />
+                              </div>
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
                               <div>{customer.email || '-'}</div>
@@ -462,7 +469,10 @@ export default function CustomersPage() {
                               <span className="text-blue-600 font-semibold text-sm">{customer.name.charAt(0).toUpperCase()}</span>
                             </div>
                             <div>
-                              <div className="font-medium text-gray-900">{customer.name}</div>
+                              <div className="font-medium text-gray-900 flex items-center gap-1.5 flex-wrap">
+                                {customer.name}
+                                <PartnerWhtLiableBadge liable={customer.whtLiable} />
+                              </div>
                               <div className="text-xs text-gray-500">{customer.phone || customer.email || 'No contact'}</div>
                             </div>
                           </div>
@@ -524,7 +534,10 @@ export default function CustomersPage() {
                                   </span>
                                 </div>
                                 <div className="ml-4">
-                                  <div className="font-medium text-gray-900">{customer.name}</div>
+                                  <div className="font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                                    {customer.name}
+                                    <PartnerWhtLiableBadge liable={customer.whtLiable} />
+                                  </div>
                                   <div className="text-xs text-gray-500">
                                     ID: {customer.id.slice(0, 8)}...
                                   </div>

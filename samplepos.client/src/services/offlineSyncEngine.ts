@@ -89,7 +89,16 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
     try {
         const raw = localStorage.getItem(OFFLINE_CUSTOMERS_KEY);
         if (!raw) return idMap;
-        const queue: Array<{ id: string; name: string; email?: string; phone?: string; address?: string; creditLimit?: number }> = JSON.parse(raw);
+        const queue: Array<{
+            id: string;
+            name: string;
+            email?: string;
+            phone?: string;
+            address?: string;
+            creditLimit?: number;
+            whtLiable?: boolean;
+            defaultWhtTypeId?: string | null;
+        }> = JSON.parse(raw);
         if (queue.length === 0) return idMap;
 
         const remaining: typeof queue = [];
@@ -99,6 +108,8 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
                 const payload: Record<string, unknown> = {
                     name: cust.name,
                     creditLimit: cust.creditLimit ?? 0,
+                    whtLiable: cust.whtLiable === true,
+                    defaultWhtTypeId: cust.whtLiable === true ? cust.defaultWhtTypeId || null : null,
                 };
                 if (cust.email) payload.email = cust.email;
                 if (cust.phone) payload.phone = cust.phone;

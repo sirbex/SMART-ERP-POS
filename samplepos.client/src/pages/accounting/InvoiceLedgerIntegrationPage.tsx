@@ -157,7 +157,7 @@ const InvoiceLedgerIntegrationPage = () => {
 
     const loadCustomers = async () => {
         try {
-            const response = await api.customers.list();
+            const response = await api.customers.list({ page: 1, limit: 5000 });
             if (response.data.success) {
                 setCustomers((response.data.data || []) as Customer[]);
             }

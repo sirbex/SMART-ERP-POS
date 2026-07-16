@@ -30,6 +30,8 @@ const CUSTOMER_SELECT = `
       c.price_group_id as "priceGroupId",
       pg.pricing_mode as "pricingMode",
       c.balance, c.credit_limit as "creditLimit",
+      COALESCE(c.wht_liable, false) as "whtLiable",
+      c.default_wht_type_id as "defaultWhtTypeId",
       c.is_active as "isActive",
       c.created_at as "createdAt",
       c.updated_at as "updatedAt",
@@ -100,19 +102,9 @@ export async function findAllCustomers(
 export async function findCustomerById(id: string, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer | null> {
   const pool = dbPool || globalPool;
   const result = await pool.query(
-    `SELECT 
-      c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
-      c.customer_group_id as "customerGroupId",
-      c.price_group_id as "priceGroupId",
-      pg.pricing_mode as "pricingMode",
-      c.balance, c.credit_limit as "creditLimit",
-      c.is_active as "isActive",
-      c.created_at as "createdAt",
-      c.updated_at as "updatedAt",
-      c.version
-    FROM customers c
-    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
-    WHERE c.id = $1`,
+    `SELECT ${CUSTOMER_SELECT}
+     ${CUSTOMER_FROM_JOIN}
+     WHERE c.id = $1`,
     [id]
   );
 
@@ -122,19 +114,9 @@ export async function findCustomerById(id: string, dbPool?: pg.Pool | pg.PoolCli
 export async function findCustomerByEmail(email: string, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer | null> {
   const pool = dbPool || globalPool;
   const result = await pool.query(
-    `SELECT 
-      c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
-      c.customer_group_id as "customerGroupId",
-      c.price_group_id as "priceGroupId",
-      pg.pricing_mode as "pricingMode",
-      c.balance, c.credit_limit as "creditLimit",
-      c.is_active as "isActive",
-      c.created_at as "createdAt",
-      c.updated_at as "updatedAt",
-      c.version
-    FROM customers c
-    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
-    WHERE c.email = $1`,
+    `SELECT ${CUSTOMER_SELECT}
+     ${CUSTOMER_FROM_JOIN}
+     WHERE c.email = $1`,
     [email]
   );
 
@@ -157,8 +139,9 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
   const customerNumber = await generateCustomerNumber(pool);
   const result = await pool.query(
     `INSERT INTO customers (
-      customer_number, name, email, phone, address, customer_group_id, price_group_id, credit_limit
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      customer_number, name, email, phone, address, customer_group_id, price_group_id, credit_limit,
+      wht_liable, default_wht_type_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING id`,
     [
       customerNumber,
@@ -169,6 +152,8 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
       data.customerGroupId || null,
       data.priceGroupId || null,
       data.creditLimit || 0,
+      data.whtLiable === true,
+      data.whtLiable === true ? data.defaultWhtTypeId || null : null,
     ]
   );
 
@@ -211,6 +196,17 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
   if (data.creditLimit !== undefined) {
     fields.push(`credit_limit = $${paramIndex++}`);
     values.push(data.creditLimit);
+  }
+  if (data.whtLiable !== undefined) {
+    fields.push(`wht_liable = $${paramIndex++}`);
+    values.push(data.whtLiable === true);
+  }
+  if (data.whtLiable === false) {
+    fields.push(`default_wht_type_id = $${paramIndex++}`);
+    values.push(null);
+  } else if (data.defaultWhtTypeId !== undefined) {
+    fields.push(`default_wht_type_id = $${paramIndex++}`);
+    values.push(data.defaultWhtTypeId);
   }
 
   if (fields.length === 0) {
@@ -257,19 +253,12 @@ export async function toggleCustomerActive(id: string, isActive: boolean, dbPool
     `UPDATE customers 
      SET is_active = $1, version = version + 1
      WHERE id = $2
-     RETURNING 
-      id, customer_number as "customerNumber", name, email, phone, address,
-      customer_group_id as "customerGroupId",
-      price_group_id as "priceGroupId",
-      balance, credit_limit as "creditLimit",
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      version`,
+     RETURNING id`,
     [isActive, id]
   );
 
-  return result.rows[0] || null;
+  if (!result.rows[0]?.id) return null;
+  return findCustomerById(result.rows[0].id, pool);
 }
 
 export async function updateCustomerBalance(id: string, amount: number, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer | null> {
@@ -278,15 +267,7 @@ export async function updateCustomerBalance(id: string, amount: number, dbPool?:
     `UPDATE customers 
      SET balance = balance + $1, version = version + 1
      WHERE id = $2
-     RETURNING 
-      id, name, email, phone, address,
-      customer_group_id as "customerGroupId",
-      price_group_id as "priceGroupId",
-      balance, credit_limit as "creditLimit",
-      is_active as "isActive",
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      version`,
+     RETURNING id`,
     [amount, id]
   );
 
@@ -294,25 +275,16 @@ export async function updateCustomerBalance(id: string, amount: number, dbPool?:
   // AccountingCore via ledger_entries. Do NOT sync from customers.balance here —
   // that would bypass the GL and cause reconciliation drift.
 
-  return result.rows[0] || null;
+  if (!result.rows[0]?.id) return null;
+  return findCustomerById(result.rows[0].id, pool);
 }
 
 export async function findCustomerByNumber(customerNumber: string, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer | null> {
   const pool = dbPool || globalPool;
   const result = await pool.query(
-    `SELECT 
-      c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
-      c.customer_group_id as "customerGroupId",
-      c.price_group_id as "priceGroupId",
-      pg.pricing_mode as "pricingMode",
-      c.balance, c.credit_limit as "creditLimit",
-      c.is_active as "isActive",
-      c.created_at as "createdAt",
-      c.updated_at as "updatedAt",
-      c.version
-    FROM customers c
-    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
-    WHERE c.customer_number = $1`,
+    `SELECT ${CUSTOMER_SELECT}
+     ${CUSTOMER_FROM_JOIN}
+     WHERE c.customer_number = $1`,
     [customerNumber]
   );
 
@@ -322,19 +294,9 @@ export async function findCustomerByNumber(customerNumber: string, dbPool?: pg.P
 export async function searchCustomers(searchTerm: string, limit: number = 20, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer[]> {
   const pool = dbPool || globalPool;
   const result = await pool.query(
-    `SELECT 
-      c.id, c.customer_number as "customerNumber", c.name, c.email, c.phone, c.address,
-      c.customer_group_id as "customerGroupId",
-      c.price_group_id as "priceGroupId",
-      pg.pricing_mode as "pricingMode",
-      c.balance, c.credit_limit as "creditLimit",
-      c.is_active as "isActive",
-      c.created_at as "createdAt",
-      c.updated_at as "updatedAt",
-      c.version
-    FROM customers c
-    LEFT JOIN price_groups pg ON pg.id = c.price_group_id
-    WHERE c.is_active = true
+    `SELECT ${CUSTOMER_SELECT}
+     ${CUSTOMER_FROM_JOIN}
+     WHERE c.is_active = true
       AND (
         c.customer_number ILIKE $1
         OR c.name ILIKE $1

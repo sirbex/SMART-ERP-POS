@@ -83,6 +83,10 @@ export interface OfflineCustomer {
   customerGroupId?: string;
   priceGroupId?: string;
   pricingMode?: 'STANDARD' | 'AT_COST';
+  customerNumber?: string;
+  /** Customer deducts WHT from payments to us — preserved for offline→online create sync */
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
   isActive: boolean;
 }
 
@@ -247,8 +251,9 @@ export async function searchCustomers(query: string): Promise<OfflineCustomer[]>
   return all.filter(
     (c) =>
       c.name.toLowerCase().includes(term) ||
+      (c.customerNumber && c.customerNumber.toLowerCase().includes(term)) ||
       (c.email && c.email.toLowerCase().includes(term)) ||
-      (c.phone && c.phone.includes(term))
+      (c.phone && c.phone.toLowerCase().includes(term))
   );
 }
 

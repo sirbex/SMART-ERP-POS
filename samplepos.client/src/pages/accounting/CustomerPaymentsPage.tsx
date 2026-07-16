@@ -45,6 +45,7 @@ import { formatTimestampDate } from '../../utils/businessDate';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import { useWhtTypes } from '../../hooks/useAccountingModules';
+import { resolvePartnerWhtDefault } from '@shared/wht/partnerWhtDefault';
 
 interface AllocationRow {
   invoiceId: string;
@@ -135,7 +136,19 @@ const CustomerPaymentsPage: React.FC = () => {
     whtTypeId: '' as string,
     certificateNumber: '',
   });
+  const [partnerWhtHint, setPartnerWhtHint] = useState<string | null>(null);
   const [createAllocations, setCreateAllocations] = useState<AllocationRow[]>([]);
+
+  const applyCustomerWhtDefault = (customerId: string) => {
+    const customer = customers.find((c) => c.id === customerId);
+    const resolved = resolvePartnerWhtDefault(customer, customerWhtTypes, 'CUSTOMER');
+    setFormData((p) => ({
+      ...p,
+      customerId,
+      whtTypeId: resolved.whtTypeId || '',
+    }));
+    setPartnerWhtHint(resolved.hint);
+  };
 
   const [showObPanel, setShowObPanel] = useState(false);
 
@@ -169,7 +182,10 @@ const CustomerPaymentsPage: React.FC = () => {
 
   const loadCustomers = async () => {
     try {
-      const { data } = await api.get<{ success: boolean; data: Customer[] }>('/customers');
+      // Dropdown needs full active set — default list page is only 50 of 190+
+      const { data } = await api.get<{ success: boolean; data: Customer[] }>('/customers', {
+        params: { page: 1, limit: 5000 },
+      });
       if (data.success) setCustomers(data.data ?? []);
     } catch (error) {
       console.error('Error loading customers:', error);
@@ -356,6 +372,7 @@ const CustomerPaymentsPage: React.FC = () => {
       certificateNumber: '',
     });
     setCreateAllocations([]);
+    setPartnerWhtHint(null);
   };
 
   const unappliedTotal = payments.reduce((s, p) => s + (p.unallocatedAmount ?? 0), 0);
@@ -549,7 +566,7 @@ const CustomerPaymentsPage: React.FC = () => {
                 <OpeningBalancePanel
                   partyType="customer"
                   partyId={formData.customerId}
-                  onPartyIdChange={(v) => setFormData((p) => ({ ...p, customerId: v }))}
+                  onPartyIdChange={(v) => applyCustomerWhtDefault(v)}
                   parties={customers.map((c) => ({ id: c.id, name: c.name }))}
                   defaultExpanded
                   onSuccess={() => {
@@ -569,9 +586,14 @@ const CustomerPaymentsPage: React.FC = () => {
               <Label>Customer</Label>
               <Select
                 value={formData.customerId || '__none__'}
-                onValueChange={(v) =>
-                  setFormData((p) => ({ ...p, customerId: v === '__none__' ? '' : v }))
-                }
+                onValueChange={(v) => {
+                  if (v === '__none__') {
+                    setFormData((p) => ({ ...p, customerId: '', whtTypeId: '' }));
+                    setPartnerWhtHint(null);
+                  } else {
+                    applyCustomerWhtDefault(v);
+                  }
+                }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select customer" />
@@ -665,9 +687,13 @@ const CustomerPaymentsPage: React.FC = () => {
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Use when the customer deducts WHT from what they pay you.
-                  </p>
+                  {partnerWhtHint ? (
+                    <p className="text-xs text-sky-800 mt-1">{partnerWhtHint}</p>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Use when the customer deducts WHT from what they pay you.
+                    </p>
+                  )}
                 </div>
                 {formData.whtTypeId && (() => {
                   const selected = customerWhtTypes.find((t) => t.id === formData.whtTypeId);
@@ -675,18 +701,26 @@ const CustomerPaymentsPage: React.FC = () => {
                   const whtAmt = selected ? Math.round(gross * selected.rate * 100) / 100 : 0;
                   const netCash = Math.round((gross - whtAmt) * 100) / 100;
                   return (
-                    <div className="grid grid-cols-3 gap-2 text-sm">
-                      <div>
-                        <p className="text-xs text-gray-500">Gross (AR)</p>
-                        <p className="font-semibold">{formatCurrency(gross)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">WHT withheld</p>
-                        <p className="font-semibold text-sky-800">{formatCurrency(whtAmt)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Cash received</p>
-                        <p className="font-semibold text-green-700">{formatCurrency(netCash)}</p>
+                    <div className="space-y-2">
+                      {gross <= 0 && (
+                        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                          Enter an amount (or click <strong>Use full balance</strong>) to preview
+                          Gross / WHT withheld / Cash. WHT type is already set from the customer master.
+                        </p>
+                      )}
+                      <div className="grid grid-cols-3 gap-2 text-sm">
+                        <div>
+                          <p className="text-xs text-gray-500">Gross (AR)</p>
+                          <p className="font-semibold">{formatCurrency(gross)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">WHT withheld</p>
+                          <p className="font-semibold text-sky-800">{formatCurrency(whtAmt)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Cash received</p>
+                          <p className="font-semibold text-green-700">{formatCurrency(netCash)}</p>
+                        </div>
                       </div>
                     </div>
                   );

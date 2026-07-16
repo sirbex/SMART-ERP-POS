@@ -2053,7 +2053,7 @@ export default function POSPage() {
         // If we have customer name but no ID, try to find the customer in DB by name
         console.log('📋 Searching DB for customer by name:', quotation.customerName);
         try {
-          const listRes = await api.customers.list();
+          const listRes = await api.customers.search(quotation.customerName, 20);
           const allCustomers = (listRes.data?.data || []) as Customer[];
           const matchedCustomer = allCustomers.find(
             (c: Customer) => c.name.toLowerCase() === quotation.customerName!.toLowerCase()

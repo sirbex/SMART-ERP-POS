@@ -137,6 +137,11 @@ export async function createSupplier(
     phone?: string;
     address?: string;
     paymentTerms?: string;
+    taxId?: string;
+    notes?: string;
+    creditLimit?: number;
+    whtLiable?: boolean;
+    defaultWhtTypeId?: string | null;
   }
 ) {
   // BR-PO-001: Validate supplier data
@@ -147,6 +152,9 @@ export async function createSupplier(
   logger.info('BR-PO-001: Supplier data validation passed', {
     name: data.name,
   });
+
+  const { assertPartnerDefaultWhtType } = await import('../withholding-tax/whtService.js');
+  await assertPartnerDefaultWhtType('SUPPLIER', data, pool);
 
   return UnitOfWork.run(pool, async (client) => {
     const supplier = await supplierRepository.create(client, data);
@@ -169,6 +177,12 @@ export async function updateSupplier(
     phone: string;
     address: string;
     paymentTerms: string;
+    taxId: string;
+    notes: string;
+    creditLimit: number;
+    isActive: boolean;
+    whtLiable: boolean;
+    defaultWhtTypeId: string | null;
   }>
 ) {
   return UnitOfWork.run(pool, async (client) => {
@@ -185,6 +199,9 @@ export async function updateSupplier(
     if (data.name !== undefined && data.name.trim().length < 2) {
       throw new Error('Supplier name must be at least 2 characters');
     }
+
+    const { assertPartnerDefaultWhtType } = await import('../withholding-tax/whtService.js');
+    await assertPartnerDefaultWhtType('SUPPLIER', data, pool);
 
     const supplier = await supplierRepository.update(client, id, data);
     logger.info('Supplier updated successfully', { supplierId: id });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../utils/api';
 import type { CreateCustomer } from '@shared/zod/customer';
@@ -7,6 +7,7 @@ import POSModal from '../pos/POSModal';
 import POSButton from '../pos/POSButton';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { putCustomer } from '../../lib/offlineDb';
+import { useWhtTypes } from '../../hooks/useAccountingModules';
 
 // LocalStorage key for offline customer creation queue
 const OFFLINE_CUSTOMERS_KEY = 'pos_offline_customers';
@@ -55,9 +56,27 @@ export default function QuickAddCustomerModal({
     phone: '',
     address: '',
     creditLimit: 500000, // Default: 500,000 UGX
+    whtLiable: false,
+    defaultWhtTypeId: null,
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const { data: whtTypesRaw } = useWhtTypes();
+  const customerWhtTypes = useMemo(() => {
+    const items = (Array.isArray(whtTypesRaw) ? whtTypesRaw : []) as Array<{
+      id: string;
+      code: string;
+      name: string;
+      rate: number;
+      appliesTo?: string;
+      isActive?: boolean;
+    }>;
+    return items.filter((t) => {
+      const a = String(t.appliesTo || '').toUpperCase();
+      return t.isActive !== false && (a === 'CUSTOMER' || a === 'BOTH');
+    });
+  }, [whtTypesRaw]);
 
   const createMutation = useMutation({
     mutationFn: (data: CreateCustomer) => api.customers.create(data),
@@ -87,6 +106,8 @@ export default function QuickAddCustomerModal({
       phone: '',
       address: '',
       creditLimit: 500000, // Default: 500,000 UGX
+      whtLiable: false,
+      defaultWhtTypeId: null,
     });
     setErrors({});
   };
@@ -102,6 +123,8 @@ export default function QuickAddCustomerModal({
       phone: formData.phone?.trim() || undefined,
       address: formData.address?.trim() || undefined,
       customerGroupId: formData.customerGroupId || undefined,
+      whtLiable: formData.whtLiable === true,
+      defaultWhtTypeId: formData.whtLiable ? formData.defaultWhtTypeId || null : null,
     };
 
     // Validate with Zod
@@ -121,6 +144,8 @@ export default function QuickAddCustomerModal({
     if (isOffline) {
       // Save locally when offline
       const tempId = `offline_cust_${Date.now()}`;
+      const whtLiable = validation.data.whtLiable === true;
+      const defaultWhtTypeId = whtLiable ? validation.data.defaultWhtTypeId || null : null;
       const offlineCustomer: CreatedCustomerData = {
         id: tempId,
         name: validation.data.name,
@@ -128,6 +153,8 @@ export default function QuickAddCustomerModal({
         phone: validation.data.phone || undefined,
         address: validation.data.address || undefined,
         creditLimit: validation.data.creditLimit ?? 0,
+        whtLiable,
+        defaultWhtTypeId,
         balance: 0,
         isActive: true,
         createdAt: new Date().toISOString(),
@@ -144,6 +171,8 @@ export default function QuickAddCustomerModal({
         balance: 0,
         customerGroupId: validation.data.customerGroupId ?? undefined,
         priceGroupId: validation.data.priceGroupId ?? undefined,
+        whtLiable,
+        defaultWhtTypeId,
         isActive: true,
       }).catch(() => { /* best effort */ });
       // Queue for server sync when online
@@ -157,7 +186,7 @@ export default function QuickAddCustomerModal({
     createMutation.mutate(validation.data);
   };
 
-  const handleChange = (field: keyof CreateCustomer, value: string | number) => {
+  const handleChange = (field: keyof CreateCustomer, value: string | number | boolean | null) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     // Clear error for this field
     if (errors[field]) {
@@ -304,6 +333,62 @@ export default function QuickAddCustomerModal({
               </button>
             </div>
             <p className="text-xs text-gray-500 mt-1">💡 Default: 500,000 UGX • Set to 0 for cash-only customers</p>
+          </div>
+
+          {/* WHT defaults — same as customer edit */}
+          <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 space-y-3">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                id="quick-customer-wht-liable"
+                type="checkbox"
+                checked={formData.whtLiable === true}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  setFormData((prev) => ({
+                    ...prev,
+                    whtLiable: on,
+                    defaultWhtTypeId: on ? prev.defaultWhtTypeId : null,
+                  }));
+                }}
+                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                <span className="block text-sm font-medium text-gray-900">
+                  Customer withholds tax (WHT receivable)
+                </span>
+                <span className="block text-xs text-gray-600 mt-0.5">
+                  When this customer deducts WHT from payments to you, receipts will suggest that type.
+                </span>
+              </span>
+            </label>
+            {formData.whtLiable === true && (
+              <div>
+                <label htmlFor="quick-customer-default-wht" className="block text-sm font-medium text-gray-700 mb-1">
+                  Default WHT type
+                </label>
+                <select
+                  id="quick-customer-default-wht"
+                  value={formData.defaultWhtTypeId || ''}
+                  onChange={(e) => handleChange('defaultWhtTypeId', e.target.value || null)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                >
+                  <option value="">— Select when receiving payment —</option>
+                  {customerWhtTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.code} — {t.name} ({(Number(t.rate) * 100).toFixed(1)}%)
+                    </option>
+                  ))}
+                </select>
+                {customerWhtTypes.length === 0 && (
+                  <p className="text-xs text-amber-800 mt-1">
+                    No customer WHT types yet. Create one under Accounting → Withholding Tax.
+                  </p>
+                )}
+                {errors.defaultWhtTypeId && (
+                  <p className="text-red-500 text-xs mt-1">{errors.defaultWhtTypeId}</p>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Submit Error */}

@@ -57,6 +57,7 @@ import { useCanAccess } from '../../components/auth/ProtectedRoute';
 // SINGLE SOURCE OF TRUTH: Use the same useSuppliers hook as SuppliersPage
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useWhtTypes } from '../../hooks/useAccountingModules';
+import { resolvePartnerWhtDefault } from '@shared/wht/partnerWhtDefault';
 import {
     supplierPaymentService,
     supplierInvoiceService,
@@ -327,6 +328,7 @@ const SupplierPaymentsPage: React.FC = () => {
         whtTypeId: undefined,
         certificateNumber: '',
     });
+    const [partnerWhtHint, setPartnerWhtHint] = useState<string | null>(null);
 
     const [billFormData, setBillFormData] = useState<CreateSupplierInvoiceRequest>({
         supplierId: '',
@@ -518,9 +520,18 @@ const SupplierPaymentsPage: React.FC = () => {
         }
     };
 
-    // Handle supplier selection in payment modal
+    // Handle supplier selection in payment modal — apply WHT master default
     const handlePaymentSupplierChange = (supplierId: string) => {
-        setPaymentFormData(prev => ({ ...prev, supplierId }));
+        const supplier = suppliers.find((s) => s.id === supplierId) as
+            | { whtLiable?: boolean; defaultWhtTypeId?: string | null }
+            | undefined;
+        const resolved = resolvePartnerWhtDefault(supplier, supplierWhtTypes, 'SUPPLIER');
+        setPaymentFormData((prev) => ({
+            ...prev,
+            supplierId,
+            whtTypeId: resolved.whtTypeId,
+        }));
+        setPartnerWhtHint(resolved.hint);
         loadSupplierOutstanding(supplierId);
     };
 
@@ -940,6 +951,7 @@ const SupplierPaymentsPage: React.FC = () => {
         });
         setSupplierSearchFilter('');
         setSelectedSupplierOutstanding(null);
+        setPartnerWhtHint(null);
     };
 
     const resetBillForm = () => {
@@ -1640,7 +1652,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                 <OpeningBalancePanel
                                     partyType="supplier"
                                     partyId={paymentFormData.supplierId}
-                                    onPartyIdChange={(v) => setPaymentFormData((p) => ({ ...p, supplierId: v }))}
+                                    onPartyIdChange={(v) => handlePaymentSupplierChange(v)}
                                     parties={suppliers.map((s) => ({
                                         id: s.id,
                                         name: s.name || s.supplierNumber || 'Supplier',
@@ -1838,12 +1850,17 @@ const SupplierPaymentsPage: React.FC = () => {
                                             <Label htmlFor="payment-wht">Withholding tax (optional)</Label>
                                             <Select
                                                 value={paymentFormData.whtTypeId || '__none__'}
-                                                onValueChange={(value: string) =>
+                                                onValueChange={(value: string) => {
                                                     setPaymentFormData((prev) => ({
                                                         ...prev,
                                                         whtTypeId: value === '__none__' ? undefined : value,
-                                                    }))
-                                                }
+                                                    }));
+                                                    if (value === '__none__') {
+                                                        setPartnerWhtHint((h) =>
+                                                            h ? 'Partner is WHT-liable — you cleared the default for this payment.' : null,
+                                                        );
+                                                    }
+                                                }}
                                             >
                                                 <SelectTrigger id="payment-wht">
                                                     <SelectValue placeholder="No withholding" />
@@ -1857,6 +1874,9 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     ))}
                                                 </SelectContent>
                                             </Select>
+                                            {partnerWhtHint && (
+                                                <p className="text-xs text-amber-800">{partnerWhtHint}</p>
+                                            )}
                                         </div>
                                         {paymentFormData.whtTypeId && (() => {
                                             const selected = supplierWhtTypes.find(

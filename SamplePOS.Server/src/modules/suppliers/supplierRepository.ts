@@ -69,6 +69,8 @@ const SUPPLIER_SELECT = `
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
+      COALESCE("WhtLiable", false) as "whtLiable",
+      "DefaultWhtTypeId" as "defaultWhtTypeId",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version`;
 
@@ -86,6 +88,8 @@ export interface Supplier {
   taxId: string | null;
   notes: string | null;
   isActive: boolean;
+  whtLiable?: boolean;
+  defaultWhtTypeId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -174,6 +178,8 @@ export async function findById(pool: Pool, id: string): Promise<Supplier | null>
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
+      COALESCE("WhtLiable", false) as "whtLiable",
+      "DefaultWhtTypeId" as "defaultWhtTypeId",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
     FROM suppliers WHERE "Id" = $1`,
@@ -193,6 +199,8 @@ export async function findBySupplierNumber(pool: Pool, supplierNumber: string): 
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       ${SUPPLIER_OPEN_ITEM_BALANCE_SQL} as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
+      COALESCE("WhtLiable", false) as "whtLiable",
+      "DefaultWhtTypeId" as "defaultWhtTypeId",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version
     FROM suppliers WHERE "SupplierCode" = $1`,
@@ -247,21 +255,28 @@ export async function create(
     paymentTerms?: string;
     taxId?: string;
     notes?: string;
+    whtLiable?: boolean;
+    defaultWhtTypeId?: string | null;
   }
 ): Promise<Supplier> {
   const paymentTermsDays = paymentTermsStringToDays(data.paymentTerms || 'NET30');
   const supplierCode = `SUP-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+  const whtLiable = data.whtLiable === true;
+  const defaultWhtTypeId = whtLiable ? data.defaultWhtTypeId || null : null;
 
   const result = await client.query(
     `INSERT INTO suppliers ("Id", "SupplierCode", "CompanyName", "ContactName", "Email", "Phone", "Address", 
-      "DefaultPaymentTerms", "CreditLimit", "OutstandingBalance", "TaxId", "Notes", "IsActive", "CreatedAt", "UpdatedAt")
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, NOW(), NOW())
+      "DefaultPaymentTerms", "CreditLimit", "OutstandingBalance", "TaxId", "Notes", "IsActive",
+      "WhtLiable", "DefaultWhtTypeId", "CreatedAt", "UpdatedAt")
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true, $12, $13, NOW(), NOW())
      RETURNING 
       "Id" as id, "SupplierCode" as "supplierNumber", "CompanyName" as name, "ContactName" as "contactPerson", 
       "Email" as email, "Phone" as phone, "Address" as address,
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       COALESCE("OutstandingBalance", 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
+      COALESCE("WhtLiable", false) as "whtLiable",
+      "DefaultWhtTypeId" as "defaultWhtTypeId",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version`,
     [
@@ -272,10 +287,12 @@ export async function create(
       data.phone || null,
       data.address || null,
       paymentTermsDays,
-      0.00, // Default credit limit
-      0.00, // Default outstanding balance
+      0.00,
+      0.00,
       data.taxId || null,
-      data.notes || null
+      data.notes || null,
+      whtLiable,
+      defaultWhtTypeId,
     ]
   );
   return normalizeSupplierRow(result.rows[0]);
@@ -298,6 +315,8 @@ export async function update(
     taxId: string;
     notes: string;
     isActive: boolean;
+    whtLiable: boolean;
+    defaultWhtTypeId: string | null;
   }>
 ): Promise<Supplier | null> {
   const fields: string[] = ['"UpdatedAt" = NOW()', 'version = version + 1'];
@@ -345,6 +364,17 @@ export async function update(
     fields.push(`"IsActive" = $${paramIndex++}`);
     values.push(data.isActive);
   }
+  if (data.whtLiable !== undefined) {
+    fields.push(`"WhtLiable" = $${paramIndex++}`);
+    values.push(data.whtLiable === true);
+  }
+  if (data.whtLiable === false) {
+    fields.push(`"DefaultWhtTypeId" = $${paramIndex++}`);
+    values.push(null);
+  } else if (data.defaultWhtTypeId !== undefined) {
+    fields.push(`"DefaultWhtTypeId" = $${paramIndex++}`);
+    values.push(data.defaultWhtTypeId);
+  }
 
   if (fields.length === 2) { // Only UpdatedAt + version
     throw new Error('No fields to update');
@@ -362,6 +392,8 @@ export async function update(
       "DefaultPaymentTerms" as "paymentTerms", "CreditLimit" as "creditLimit", 
       COALESCE("OutstandingBalance", 0) as "outstandingBalance",
       "TaxId" as "taxId", "Notes" as notes, "IsActive" as "isActive",
+      COALESCE("WhtLiable", false) as "whtLiable",
+      "DefaultWhtTypeId" as "defaultWhtTypeId",
       "CreatedAt" as "createdAt", "UpdatedAt" as "updatedAt",
       version`,
     values

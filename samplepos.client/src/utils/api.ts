@@ -308,6 +308,9 @@ export const api = {
   customers: {
     list: (params?: ServerListParams & { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>('customers', { params: params ? { page: params.page, limit: params.limit, ...toServerListQuery(params) } : undefined }),
+    /** Server-side typeahead — use this instead of list()+client filter (list defaults to 50). */
+    search: (q: string, limit = 50) =>
+      apiClient.get<ApiResponse>('customers/search', { params: { q, limit } }),
     getById: (id: string) => apiClient.get<ApiResponse>(`customers/${id}`),
     create: (data: CreateCustomerInput) => apiClient.post<ApiResponse>('customers', data),
     update: (id: string, data: UpdateCustomerInput) =>

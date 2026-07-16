@@ -152,6 +152,9 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool): Pr
     });
   }
 
+  const { assertPartnerDefaultWhtType } = await import('../withholding-tax/whtService.js');
+  await assertPartnerDefaultWhtType('CUSTOMER', data, dbPool);
+
   // Use Decimal for bank-grade precision
   const customerData = {
     ...data,
@@ -208,6 +211,9 @@ export async function updateCustomer(
       creditLimit: creditLimitDecimal.toString(),
     });
   }
+
+  const { assertPartnerDefaultWhtType } = await import('../withholding-tax/whtService.js');
+  await assertPartnerDefaultWhtType('CUSTOMER', data, dbPool);
 
   // Use Decimal for bank-grade precision
   const updateData = {
