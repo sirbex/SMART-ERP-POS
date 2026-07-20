@@ -605,15 +605,10 @@ export const crmService = {
             if (status === 'WON') {
                 updateData.wonAt = new Date();
 
-                // Bridge: create a quotation from this opportunity's items
-                try {
-                    const { quotationService } = await import('../quotations/quotationService.js');
-                    const quotation = await quotationService.createFromOpportunity(client, id, context.userId);
-                    updateData.quotationId = quotation.quotation.id;
-                } catch (err) {
-                    // Log but do not block the status change
-                    console.error('Failed to create quotation from opportunity:', err);
-                }
+                // Bridge: create quotation via shared create path (must succeed)
+                const { quotationService } = await import('../quotations/quotationService.js');
+                const quotation = await quotationService.createFromOpportunity(client, id, context.userId);
+                updateData.quotationId = quotation.quotation.id;
             }
 
             if (status === 'LOST' && extra?.lostReason) {

@@ -1,6 +1,6 @@
 /**
  * Quote Conversion Page
- * Redirects to POS with the quote pre-loaded.
+ * UI SSOT: redirects to POS with the quote pre-loaded (does NOT call formal /quotations/:id/convert).
  * Kept as a guard page for direct URL access — shows warnings for
  * already-converted / expired / cancelled quotes.
  */

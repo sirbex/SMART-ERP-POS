@@ -10,14 +10,13 @@
  * BR-QUOTE-005: Quote total must match sale total
  * BR-QUOTE-006: Both quick and standard quotes follow same conversion rules
  * BR-QUOTE-011: GL entries must be posted on quotation→sale conversion
- * BR-QUOTE-012: Duplicate content hash prevents double-creation
+ * BR-QUOTE-012: Duplicate content hash prevents double-creation of *open* quotes
  * BR-QUOTE-013: Credit limit checked before credit-sale conversion
  * BR-QUOTE-014: Item-level acceptance/rejection (SAP-style)
  */
 
 import { Pool } from 'pg';
 import Decimal from 'decimal.js';
-import crypto from 'crypto';
 import { deductStockFEFO } from '../../utils/fefoDeduction.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { warehouseSaleDeductionService } from '../inventory/warehouse/warehouseSaleDeductionService.js';
@@ -28,6 +27,10 @@ import { invoiceService } from '../invoices/invoiceService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import { checkMaintenanceMode } from '../../utils/maintenanceGuard.js';
+import {
+  computeContentHash,
+  TERMINAL_CONTENT_HASH_STATUSES,
+} from './quotationContentHash.js';
 import * as glEntryService from '../../services/glEntryService.js';
 import { getBusinessDate, formatDateBusiness, addDaysToDateString } from '../../utils/dateRange.js';
 import { buildQuoteConversionLineSnapshots } from './quotationSaleUom.js';
@@ -39,6 +42,43 @@ import { createLogger } from '../../utils/logger.js';
 import { assertEditableQuotation, assertStatusChangeable } from './quotationGuards.js';
 
 const logger = createLogger('quotationService');
+
+/** Input shared by createQuotation and createQuotationInTransaction (CRM bridge). */
+export type CreateQuotationServiceInput = {
+  quoteType: 'quick' | 'standard';
+  customerId?: string | null;
+  customerName?: string | null;
+  customerPhone?: string | null;
+  customerEmail?: string | null;
+  reference?: string | null;
+  description?: string | null;
+  validFrom: string;
+  validUntil: string;
+  createdById?: string | null;
+  assignedToId?: string | null;
+  termsAndConditions?: string | null;
+  paymentTerms?: string | null;
+  deliveryTerms?: string | null;
+  internalNotes?: string | null;
+  requiresApproval?: boolean;
+  fulfillmentMode?: 'RETAIL' | 'WHOLESALE';
+  items: Array<{
+    productId?: string | null;
+    itemType: 'product' | 'service' | 'custom';
+    sku?: string | null;
+    description: string;
+    notes?: string | null;
+    quantity: number;
+    unitPrice: number;
+    discountAmount?: number;
+    isTaxable?: boolean;
+    taxRate?: number;
+    uomId?: string | null;
+    uomName?: string | null;
+    unitCost?: number | null;
+    productType?: string;
+  }>;
+};
 
 // ============================================================================
 // TYPE DEFINITIONS (camelCase for application layer)
@@ -196,70 +236,28 @@ function normalizeQuotationItem(row: QuotationItemDbRow): QuotationItem {
   };
 }
 
-/**
- * Compute a content hash for duplicate prevention (BR-QUOTE-012).
- * Hash is based on customer + items (product, qty, price) so
- * resubmitting the exact same quotation is blocked.
- */
-function computeContentHash(
-  customerId: string | null | undefined,
-  customerName: string | null | undefined,
-  items: Array<{ productId?: string | null; description: string; quantity: number; unitPrice: number }>
-): string {
-  const sortedItems = [...items]
-    .sort((a, b) => (a.description || '').localeCompare(b.description || ''))
-    .map((i) => `${i.productId || ''}|${i.description}|${i.quantity}|${i.unitPrice}`);
-  const payload = `${customerId || customerName || 'walk-in'}::${sortedItems.join(';')}`;
-  return crypto.createHash('sha256').update(payload).digest('hex').substring(0, 64);
-}
-
 // ============================================================================
 // SERVICE FUNCTIONS
 // ============================================================================
 
 export const quotationService = {
   /**
-   * Create quotation with items
+   * Create quotation with items (own transaction).
    */
   async createQuotation(
     pool: Pool,
-    data: {
-      quoteType: 'quick' | 'standard';
-      customerId?: string | null;
-      customerName?: string | null;
-      customerPhone?: string | null;
-      customerEmail?: string | null;
-      reference?: string | null;
-      description?: string | null;
-      validFrom: string;
-      validUntil: string;
-      createdById?: string | null;
-      assignedToId?: string | null;
-      termsAndConditions?: string | null;
-      paymentTerms?: string | null;
-      deliveryTerms?: string | null;
-      internalNotes?: string | null;
-      requiresApproval?: boolean;
-      fulfillmentMode?: 'RETAIL' | 'WHOLESALE';
-      items: Array<{
-        productId?: string | null;
-        itemType: 'product' | 'service' | 'custom';
-        sku?: string | null;
-        description: string;
-        notes?: string | null;
-        quantity: number;
-        unitPrice: number;
-        discountAmount?: number;
-        isTaxable?: boolean;
-        taxRate?: number;
-        uomId?: string | null;
-        uomName?: string | null;
-        unitCost?: number | null;
-        productType?: string;
-      }>;
-    }
+    data: CreateQuotationServiceInput,
   ): Promise<QuotationDetail> {
-    return UnitOfWork.run(pool, async (client) => {
+    return UnitOfWork.run(pool, async (client) => this.createQuotationInTransaction(client, data));
+  },
+
+  /**
+   * Core create path — callable inside an existing transaction (CRM WON bridge).
+   */
+  async createQuotationInTransaction(
+    client: import('pg').PoolClient,
+    data: CreateQuotationServiceInput,
+  ): Promise<QuotationDetail> {
       const masterUoms = await loadMasterUoms(client);
 
       // Calculate totals
@@ -312,35 +310,58 @@ export const quotationService = {
 
       const totalAmount = subtotal.plus(taxAmount);
 
-      // BR-QUOTE-012: Duplicate prevention via content hash
-      const contentHash = computeContentHash(data.customerId, data.customerName, data.items);
+      // BR-QUOTE-012: Duplicate prevention via content hash (open quotes only).
+      const contentHash = computeContentHash(
+        data.customerId,
+        data.customerName,
+        data.items.map((i) => ({
+          productId: i.productId,
+          description: i.description,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          discountAmount: i.discountAmount,
+          taxRate: i.taxRate,
+          isTaxable: i.isTaxable,
+          uomName: i.uomName,
+        })),
+        data.customerPhone,
+      );
 
-      // Check for existing OPEN quote with same content
+      const terminalStatuses = [...TERMINAL_CONTENT_HASH_STATUSES];
       const dupCheck = await client.query(
-        `SELECT id, quote_number FROM quotations
+        `SELECT id, quote_number, status, customer_name, created_at
+         FROM quotations
          WHERE content_hash = $1
-           AND status NOT IN ('CONVERTED', 'CANCELLED')
+           AND status <> ALL($2::text[])
          LIMIT 1`,
-        [contentHash]
+        [contentHash, terminalStatuses],
       );
       if (dupCheck.rows.length > 0) {
+        const dup = dupCheck.rows[0] as {
+          quote_number: string;
+          status: string;
+          customer_name: string | null;
+          created_at: Date | string;
+        };
+        const when = dup.created_at
+          ? new Date(dup.created_at).toISOString().slice(0, 10)
+          : 'unknown date';
         throw new Error(
-          `Duplicate quotation detected. An identical quotation ${dupCheck.rows[0].quote_number} already exists. ` +
-          `Please edit the existing quotation or cancel it first.`
+          `Duplicate quotation detected. Open quotation ${dup.quote_number} ` +
+            `(status ${dup.status}, customer "${dup.customer_name || 'n/a'}", created ${when}) ` +
+            `has the same customer and line items. Edit or cancel that quotation first.`,
         );
       }
 
-      // Create quotation
       const quotation = await quotationRepository.createQuotation(client, {
         ...data,
         subtotal: subtotal.toNumber(),
-        discountAmount: 0, // Global discount handled separately if needed
+        discountAmount: 0,
         taxAmount: taxAmount.toNumber(),
         totalAmount: totalAmount.toNumber(),
         contentHash,
       });
 
-      // Create items
       const items = await quotationRepository.createQuotationItems(
         client,
         quotation.id,
@@ -351,7 +372,6 @@ export const quotationService = {
         quotation: normalizeQuotation(quotation),
         items: items.map(normalizeQuotationItem),
       };
-    });
   },
 
   /**
@@ -502,12 +522,17 @@ export const quotationService = {
         const newContentHash = computeContentHash(
           customerId,
           customerName,
-          itemsWithTotals.map(i => ({
+          itemsWithTotals.map((i) => ({
             productId: i.productId,
             description: i.description,
             quantity: i.quantity,
             unitPrice: i.unitPrice,
-          }))
+            discountAmount: i.discountAmount,
+            taxRate: i.taxRate,
+            isTaxable: i.isTaxable,
+            uomName: i.uomName,
+          })),
+          existing.rows[0].customer_phone,
         );
 
         await quotationRepository.updateQuotation(client, id, {
@@ -579,6 +604,10 @@ export const quotationService = {
    * - 'full': Complete payment (COMPLETED sale, PAID invoice)
    * - 'partial': Deposit payment (COMPLETED sale, PARTIALLY_PAID invoice)
    * - 'none': No payment (COMPLETED sale, UNPAID invoice)
+   */
+  /**
+   * Formal API convert (sale + invoice). UI SSOT is POS load-quote → complete sale.
+   * Prefer not wiring new UI here — pricing/stock (BR-QUOTE) can diverge from POS convert.
    */
   async convertQuotationToSale(
     pool: Pool,
@@ -1167,21 +1196,11 @@ export const quotationService = {
     });
   },
 
-  /**
-   * Create a quotation from a CRM opportunity.
-   * Called by CRM module when opportunity status transitions to WON.
-   * Reads opportunity_items and creates a standard quotation with those items.
-   *
-   * @param client - PoolClient (called within a transaction from CRM service)
-   * @param opportunityId - The opportunity UUID
-   * @param userId - The user performing the action
-   */
   async createFromOpportunity(
     client: import('pg').PoolClient,
     opportunityId: string,
     userId: string
   ): Promise<QuotationDetail> {
-    // Read opportunity header
     const oppResult = await client.query(
       `SELECT o.*, c.name AS customer_name
        FROM opportunities o
@@ -1192,50 +1211,38 @@ export const quotationService = {
     const opp = oppResult.rows[0];
     if (!opp) throw new Error('Opportunity not found');
 
-    // Read opportunity items
     const itemsResult = await client.query(
       `SELECT * FROM opportunity_items WHERE opportunity_id = $1 ORDER BY sort_order, id`,
       [opportunityId]
     );
 
-    const items = itemsResult.rows.map((row: Record<string, unknown>, idx: number) => {
-      const qty = new Decimal(Number(row.quantity ?? 1));
-      const price = new Decimal(Number(row.estimated_price ?? 0));
-      const itemSubtotal = qty.times(price);
-      return {
-        lineNumber: idx + 1,
-        productId: null,
-        itemType: 'custom' as const,
-        sku: null,
-        description: String(row.description || `Item ${idx + 1}`),
-        notes: null,
-        quantity: qty.toNumber(),
-        unitPrice: price.toNumber(),
-        discountAmount: 0,
-        subtotal: itemSubtotal.toNumber(),
-        isTaxable: false,
-        taxRate: 0,
-        taxAmount: 0,
-        lineTotal: itemSubtotal.toNumber(),
-        uomId: null,
-        uomName: null,
-        unitCost: null,
-        costTotal: null,
-        productType: 'service',
-      };
-    });
-
-    // Calculate totals
-    let subtotal = new Decimal(0);
-    for (const item of items) {
-      subtotal = subtotal.plus(new Decimal(item.subtotal));
+    if (!itemsResult.rows.length) {
+      throw new ValidationError(
+        'Cannot create quotation from opportunity: add at least one line item first',
+      );
     }
+
+    const items = itemsResult.rows.map((row: Record<string, unknown>) => ({
+      productId: null as string | null,
+      itemType: 'custom' as const,
+      sku: null as string | null,
+      description: String(row.description || 'Opportunity item'),
+      notes: null as string | null,
+      quantity: Number(row.quantity ?? 1),
+      unitPrice: Number(row.estimated_price ?? 0),
+      discountAmount: 0,
+      isTaxable: false,
+      taxRate: 0,
+      uomId: null as string | null,
+      uomName: null as string | null,
+      unitCost: null as number | null,
+      productType: 'service',
+    }));
 
     const validFrom = getBusinessDate();
     const validUntil = addDaysToDateString(validFrom, 30);
 
-    // Create quotation header
-    const quotation = await quotationRepository.createQuotation(client, {
+    return this.createQuotationInTransaction(client, {
       quoteType: 'standard',
       customerId: opp.customer_id || null,
       customerName: opp.customer_name || null,
@@ -1245,29 +1252,10 @@ export const quotationService = {
       validFrom,
       validUntil,
       createdById: userId,
-      subtotal: subtotal.toNumber(),
-      discountAmount: 0,
-      taxAmount: 0,
-      totalAmount: subtotal.toNumber(),
+      items,
     });
-
-    // Create items
-    const createdItems = await quotationRepository.createQuotationItems(
-      client,
-      quotation.id,
-      items
-    );
-
-    return {
-      quotation: normalizeQuotation(quotation),
-      items: createdItems.map(normalizeQuotationItem),
-    };
   },
 
-  /**
-   * BR-QUOTE-014: Update item-level acceptance/rejection (SAP-style)
-   * Allows accepting some lines and rejecting others on a quotation.
-   */
   async updateItemDecisions(
     pool: Pool,
     quotationId: string,

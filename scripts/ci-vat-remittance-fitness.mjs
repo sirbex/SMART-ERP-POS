@@ -81,8 +81,8 @@ if (existsSync(gov)) {
 const schema = path.join(ROOT, 'SamplePOS.Server/src/constants/schemaVersion.ts');
 if (existsSync(schema)) {
   const text = readFileSync(schema, 'utf8');
-  if (!/CURRENT_SCHEMA_VERSION\s*=\s*(549|550|551|552|553|554)\b/.test(text)) {
-    fail('A-05', 'CURRENT_SCHEMA_VERSION must be >= 549 for Phase 3B (current = 554)');
+  if (!/CURRENT_SCHEMA_VERSION\s*=\s*(549|550|551|552|553|554|555)\b/.test(text)) {
+    fail('A-05', 'CURRENT_SCHEMA_VERSION must be >= 549 for Phase 3B (current = 555)');
   }
 }
 

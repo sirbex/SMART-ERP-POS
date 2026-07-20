@@ -15,6 +15,7 @@ export const MIGRATION_POSTCONDITION_FILES = [
     '20260616_cutover_accounting.sql',
     '524_relax_ledger_entries_constraints.sql',
     '554_sales_liquidity_allowed_sources.sql',
+    '555_quotation_content_hash_terminal_statuses.sql',
 ] as const;
 
 export type MigrationPostconditionFile = (typeof MIGRATION_POSTCONDITION_FILES)[number];
@@ -139,6 +140,19 @@ export async function verifyMigrationPostcondition(
                 accountAllowsSource(pool, '1020', 'SALES_INVOICE'),
             ]);
             return cash && momo && bank && card;
+        }
+        case '555_quotation_content_hash_terminal_statuses.sql': {
+            const { rows } = await pool.query<{ ok: boolean }>(
+                `SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_indexes
+                    WHERE schemaname = 'public'
+                      AND indexname = 'idx_quotations_content_hash_open'
+                      AND indexdef ILIKE '%EXPIRED%'
+                      AND indexdef ILIKE '%REJECTED%'
+                ) AS ok`,
+            );
+            return rows[0]?.ok === true;
         }
         default:
             return true;

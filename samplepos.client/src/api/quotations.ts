@@ -79,7 +79,9 @@ export const quotationApi = {
   },
 
   /**
-   * Convert quotation to sale + invoice
+   * Convert quotation to sale + invoice (API / scripts only).
+   * UI SSOT is POS: QuoteConversionPage and Quote Detail "Convert" load the quote into POS.
+   * Do not wire new UI to this method — BR-QUOTE pricing/stock behavior differs from POS convert.
    */
   async convertQuotation(
     id: string,

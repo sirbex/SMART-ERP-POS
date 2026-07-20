@@ -10,6 +10,8 @@ interface QuotationLineUomSelectProps {
   uomName?: string | null;
   /** POS catalog UoMs from stock-levels — selling price + conversion (preferred for product lines). */
   availableUoms?: StockProductUom[];
+  /** When true, switching UoM uses catalog cost (AT_COST customers). */
+  atCost?: boolean;
   disabled?: boolean;
   className?: string;
   inputRef?: (el: HTMLSelectElement | null) => void;
@@ -28,6 +30,7 @@ export function QuotationLineUomSelect({
   uomId,
   uomName,
   availableUoms,
+  atCost = false,
   disabled = false,
   className = '',
   inputRef,
@@ -54,7 +57,10 @@ export function QuotationLineUomSelect({
           const selected = availableUoms.find((u) => u.uomId === id);
           if (!selected) return;
           const resolvedId = selected.uomId.startsWith('default-') ? null : selected.uomId;
-          onChange(resolvedId, displayProductUomName(selected), Number(selected.price) || 0);
+          const sell = Number(selected.price) || 0;
+          const cost = Number(selected.cost) || 0;
+          const unitPrice = atCost ? (cost > 0 ? cost : sell) : sell;
+          onChange(resolvedId, displayProductUomName(selected), unitPrice);
         }}
         onKeyDown={onKeyDown}
         aria-label="Unit of measure"

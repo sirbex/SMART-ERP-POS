@@ -1874,10 +1874,45 @@ export default function POSPage() {
     try {
       setIsSavingQuote(true);
 
-      // Convert cart items to quote items
-      const quoteItems: QuickQuoteItemInput[] = items.map((item) => {
-        // Service/custom items have no real product in DB — send null productId
+      // Same customer resolve as sale — never save temp_/offline IDs as customerId
+      let quoteCustomer = selectedCustomer;
+      let quoteCustomerId = selectedCustomer?.id;
+      if (selectedCustomer) {
+        const resolved = await resolvePosCustomerForSale(selectedCustomer);
+        if (resolved.error || !resolved.customerId) {
+          toast.error(resolved.error || 'Select a saved customer before creating a quote');
+          setIsSavingQuote(false);
+          return;
+        }
+        quoteCustomer = resolved.customer;
+        quoteCustomerId = resolved.customerId;
+        if (resolved.customer && resolved.customer.id !== selectedCustomer.id) {
+          setSelectedCustomer(resolved.customer);
+        }
+      }
+
+      // Line discounts + proportional share of cart discount
+      const lineBases = items.map((item) => {
+        const gross = new Decimal(item.unitPrice).times(item.quantity);
+        const lineDisc = new Decimal(item.discount?.amount || 0);
+        return Math.max(0, gross.minus(lineDisc).toNumber());
+      });
+      const basesSum = lineBases.reduce((s, n) => s + n, 0);
+      let cartDiscLeft = cartDiscountAmount > 0 ? cartDiscountAmount : 0;
+
+      // Convert cart items to quote items (include discounts — previously dropped)
+      const quoteItems: QuickQuoteItemInput[] = items.map((item, idx) => {
         const isServiceOrCustom = item.productType === 'service' || item.id.startsWith('custom_');
+        const lineDisc = item.discount?.amount || 0;
+        let allocatedCart = 0;
+        if (cartDiscLeft > 0 && basesSum > 0 && lineBases[idx] > 0) {
+          if (idx === items.length - 1) {
+            allocatedCart = cartDiscLeft;
+          } else {
+            allocatedCart = Math.round((cartDiscLeft * lineBases[idx]) / basesSum);
+            cartDiscLeft -= allocatedCart;
+          }
+        }
         return {
           productId: isServiceOrCustom ? null : item.id,
           itemType: isServiceOrCustom ? ('service' as const) : ('product' as const),
@@ -1885,6 +1920,7 @@ export default function POSPage() {
           description: item.name,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
+          discountAmount: lineDisc + allocatedCart,
           isTaxable: item.isTaxable,
           taxRate: item.taxRate,
           uomId: item.selectedUomId && !item.selectedUomId.startsWith('default-') ? item.selectedUomId : undefined,
@@ -1896,9 +1932,9 @@ export default function POSPage() {
 
       // Create quick quote
       const response = await quotationApi.createQuickQuote({
-        customerId: selectedCustomer?.id,
-        customerName: quoteCustomerName || selectedCustomer?.name || 'Walk-in Customer',
-        customerPhone: quoteCustomerPhone || selectedCustomer?.phone || undefined,
+        customerId: quoteCustomerId,
+        customerName: quoteCustomerName || quoteCustomer?.name || selectedCustomer?.name || 'Walk-in Customer',
+        customerPhone: quoteCustomerPhone || quoteCustomer?.phone || selectedCustomer?.phone || undefined,
         items: quoteItems,
         validityDays: quoteValidityDays,
         notes: quoteNotes,
@@ -2004,13 +2040,29 @@ export default function POSPage() {
           unitPrice: Number(item.unitPrice),
           costPrice: item.unitCost ? Number(item.unitCost) : 0,
           quantity: Number(item.quantity),
-          subtotal: Number(item.lineTotal || item.quantity * item.unitPrice),
+          // Pre-tax line amount (NOT lineTotal — that includes tax and would double-count)
+          subtotal: Number(
+            item.subtotal != null
+              ? item.subtotal
+              : new Decimal(item.quantity)
+                  .times(item.unitPrice)
+                  .minus(item.discountAmount || 0)
+                  .toNumber(),
+          ),
           isTaxable: item.isTaxable,
           taxRate: item.taxRate || 18,
           uom: item.uomName || 'unit',
           selectedUomId: item.uomId || undefined, // Convert null to undefined for Zod validation
           productType: productType as LineItem['productType'],
           marginPct: 0,
+          discount:
+            item.discountAmount && Number(item.discountAmount) > 0
+              ? {
+                  type: 'amount' as const,
+                  value: Number(item.discountAmount),
+                  amount: Number(item.discountAmount),
+                }
+              : undefined,
         };
       });
 

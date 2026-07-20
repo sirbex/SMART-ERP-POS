@@ -79,10 +79,14 @@ export interface QuoteLineFromStock {
 /** Build quotation line fields when user picks a product from inventory search. */
 export function buildQuoteLineFromStockProduct(
   product: StockLevelProductRow,
+  opts?: { atCost?: boolean },
 ): QuoteLineFromStock {
   const availableUoms = normalizeStockLevelUoms(product);
   const selected = pickDefaultProductUom(availableUoms);
-  const unitPrice = Number(selected.price) || parseFloat(String(product.selling_price ?? '0')) || 0;
+  const catalogSell = Number(selected.price) || parseFloat(String(product.selling_price ?? '0')) || 0;
+  const catalogCost =
+    Number(selected.cost) || parseFloat(String(product.average_cost ?? '0')) || 0;
+  const unitPrice = opts?.atCost ? (catalogCost > 0 ? catalogCost : catalogSell) : catalogSell;
 
   return {
     productId: product.product_id,
@@ -99,17 +103,20 @@ export function buildQuoteLineFromStockProduct(
   };
 }
 
-/** POS-style: switching selling UoM updates display unit price from catalog price. */
+/** POS-style: switching selling UoM updates display unit price from catalog price (or cost for AT_COST). */
 export function applySellingUomToQuoteLine(
   availableUoms: StockProductUom[],
   uomId: string,
+  opts?: { atCost?: boolean },
 ): { uomId: string; uomName: string; unitPrice: number } | null {
   const selected = findProductUom(availableUoms, uomId);
   if (!selected) return null;
   const id = selected.uomId.startsWith('default-') ? '' : selected.uomId;
+  const sell = Number(selected.price) || 0;
+  const cost = Number(selected.cost) || 0;
   return {
     uomId: id,
     uomName: displayProductUomName(selected),
-    unitPrice: Number(selected.price) || 0,
+    unitPrice: opts?.atCost ? (cost > 0 ? cost : sell) : sell,
   };
 }

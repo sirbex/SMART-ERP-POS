@@ -13,7 +13,7 @@ export function isPersistedCustomerId(id: string | undefined): boolean {
 }
 
 /**
- * POS must never post a sale with a visible customer but null customer_id.
+ * POS must never post a sale/quote with a visible customer but null customer_id.
  * Resolves temp_/missing IDs to a real customer row by exact name match.
  */
 export async function resolvePosCustomerForSale(
@@ -37,7 +37,21 @@ export async function resolvePosCustomerForSale(
   }
 
   try {
-    const listRes = await api.customers.list({ limit: 500 });
+    // Prefer server search (full set) over list page truncation
+    const searchRes = await api.customers.search(name, 50);
+    const hits = (searchRes.data?.data || []) as Customer[];
+    const matched = hits.find(
+      (c) => c.name.trim().toLowerCase() === name.toLowerCase() && isPersistedCustomerId(c.id),
+    );
+    if (matched) {
+      return { customer: matched, customerId: matched.id };
+    }
+  } catch {
+    /* fall through to list */
+  }
+
+  try {
+    const listRes = await api.customers.list({ page: 1, limit: 5000 });
     const all = (listRes.data?.data || []) as Customer[];
     const matched = all.find((c) => c.name.trim().toLowerCase() === name.toLowerCase());
     if (matched && isPersistedCustomerId(matched.id)) {

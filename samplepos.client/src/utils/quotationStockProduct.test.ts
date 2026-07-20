@@ -45,6 +45,17 @@ describe('quotationStockProduct', () => {
     expect(line.availableUoms).toHaveLength(2);
   });
 
+  it('buildQuoteLineFromStockProduct uses cost when atCost', () => {
+    const line = buildQuoteLineFromStockProduct(stockRow, { atCost: true });
+    expect(line.unitPrice).toBe(100);
+  });
+
+  it('applySellingUomToQuoteLine uses cost when atCost', () => {
+    const uoms = normalizeStockLevelUoms(stockRow);
+    const next = applySellingUomToQuoteLine(uoms, 'uom-box', { atCost: true });
+    expect(next?.unitPrice).toBe(1000);
+  });
+
   it('applySellingUomToQuoteLine updates price by conversion', () => {
     const uoms = normalizeStockLevelUoms(stockRow);
     const next = applySellingUomToQuoteLine(uoms, 'uom-box');

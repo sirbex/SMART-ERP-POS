@@ -28,6 +28,8 @@ import {
 import { QuotationLineUomSelect } from '../../components/quotations/QuotationLineUomSelect';
 import { useMasterUoms } from '../../hooks/useMasterUoms';
 import { displayMasterUomName, pickDefaultMasterUom } from '../../utils/quotationUom';
+import { isPersistedCustomerId, resolvePosCustomerForSale } from '../../utils/resolvePosCustomerId';
+import { customerIsAtCost } from '../../utils/customerPriceGroupEdit';
 import {
   buildQuoteLineFromStockProduct,
   type StockLevelProductRow,
@@ -157,12 +159,13 @@ export default function NewQuotationPage() {
   };
 
   const addProductToItems = (product: StockLevelItem) => {
+    const atCost = customerIsAtCost(selectedCustomer);
     const existing = items.find((item) => item.productId === product.product_id);
     if (existing) {
       updateItem(items.indexOf(existing), 'quantity', existing.quantity + 1);
       toast.success(`Increased ${product.product_name} quantity`);
     } else {
-      const line = buildQuoteLineFromStockProduct(product);
+      const line = buildQuoteLineFromStockProduct(product, { atCost });
       setItems([
         ...items,
         {
@@ -182,7 +185,11 @@ export default function NewQuotationPage() {
           stockOnHand: line.stockOnHand,
         },
       ]);
-      toast.success(`Added ${product.product_name}`);
+      toast.success(
+        atCost
+          ? `Added ${product.product_name} at cost`
+          : `Added ${product.product_name}`,
+      );
     }
     setProductSearch('');
   };
@@ -360,7 +367,7 @@ export default function NewQuotationPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!customerName.trim()) {
+    if (!customerName.trim() && !selectedCustomer) {
       toast.error('Please enter a customer name');
       return;
     }
@@ -376,13 +383,26 @@ export default function NewQuotationPage() {
       return;
     }
 
+    let customerId = selectedCustomer?.id;
+    let resolvedCustomer = selectedCustomer;
+    if (selectedCustomer && !isPersistedCustomerId(selectedCustomer.id)) {
+      const resolved = await resolvePosCustomerForSale(selectedCustomer);
+      if (resolved.error || !resolved.customerId) {
+        toast.error(resolved.error || 'Select a saved customer before creating the quotation');
+        return;
+      }
+      customerId = resolved.customerId;
+      resolvedCustomer = resolved.customer;
+      setSelectedCustomer(resolved.customer);
+    }
+
     const quotationData = {
       quoteType: 'standard' as const,
       fulfillmentMode,
-      customerId: selectedCustomer?.id,
-      customerName: customerName || selectedCustomer?.name,
-      customerPhone: (customerPhone || selectedCustomer?.phone) || undefined,
-      customerEmail: (customerEmail || selectedCustomer?.email) || undefined,
+      customerId: customerId && isPersistedCustomerId(customerId) ? customerId : undefined,
+      customerName: customerName || resolvedCustomer?.name || selectedCustomer?.name,
+      customerPhone: (customerPhone || resolvedCustomer?.phone || selectedCustomer?.phone) || undefined,
+      customerEmail: (customerEmail || resolvedCustomer?.email || selectedCustomer?.email) || undefined,
       reference: reference || undefined,
       paymentTerms: paymentTerms || undefined,
       deliveryTerms: deliveryTerms || undefined,
@@ -457,6 +477,12 @@ export default function NewQuotationPage() {
                     onSelectCustomer={setSelectedCustomer}
                     saleTotal={totals.total}
                   />
+                  {customerIsAtCost(selectedCustomer) && (
+                    <p className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                      AT_COST customer — product lines use inventory cost (not FEFO layers).
+                      For exact FEFO cost quotes, create from POS.
+                    </p>
+                  )}
                   {!selectedCustomer && (
                     <input
                       type="text"
@@ -677,6 +703,7 @@ export default function NewQuotationPage() {
                               uomId={item.uomId}
                               uomName={item.uomName}
                               availableUoms={item.availableUoms}
+                              atCost={customerIsAtCost(selectedCustomer)}
                               inputRef={(el) => {
                                 if (!itemRefs.current[index]) itemRefs.current[index] = [null, null, null, null];
                                 itemRefs.current[index][2] = el;
