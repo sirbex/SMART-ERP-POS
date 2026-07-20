@@ -63,8 +63,18 @@ function rethrowInvariant(err: unknown): never {
 }
 
 async function resolveBankGlCode(client: PoolClient, bankAccountId: string): Promise<string> {
-  const result = await client.query<{ gl_account_code: string; name: string }>(
-    `SELECT a."AccountCode" AS gl_account_code, ba.name
+  const result = await client.query<{
+    gl_account_code: string;
+    name: string;
+    account_type: string;
+    system_account_tag: string | null;
+    is_posting: boolean;
+  }>(
+    `SELECT a."AccountCode" AS gl_account_code,
+            ba.name,
+            a."AccountType" AS account_type,
+            a."SystemAccountTag" AS system_account_tag,
+            a."IsPostingAccount" AS is_posting
      FROM bank_accounts ba
      JOIN accounts a ON a."Id" = ba.gl_account_id
      WHERE ba.id = $1 AND ba.is_active = TRUE`,
@@ -73,7 +83,37 @@ async function resolveBankGlCode(client: PoolClient, bankAccountId: string): Pro
   if (result.rows.length === 0) {
     throw new NotFoundError('Bank account not found or inactive');
   }
-  return result.rows[0].gl_account_code;
+  const row = result.rows[0];
+  const tag = String(row.system_account_tag || '').toUpperCase();
+  const type = String(row.account_type || '').toUpperCase();
+  const code = String(row.gl_account_code || '');
+
+  // Deposit worksheet must land on a real liquidity GL — never AR / equity / clearing / revenue.
+  const blockedTags = new Set([
+    'ACCOUNTS_RECEIVABLE',
+    'ACCOUNTS_PAYABLE',
+    'UNDEPOSITED_FUNDS',
+    'OPENING_BALANCE_EQUITY',
+    'COGS',
+    'INVENTORY',
+  ]);
+  if (blockedTags.has(tag) || code === '1200' || code === '1015' || code === '3050') {
+    throw new ValidationError(
+      `Bank account "${row.name}" is linked to GL ${code} (${tag || type}), which cannot receive deposits. ` +
+        `Edit the bank account under Banking → Accounts and link it to a Bank / Cash / Mobile Money asset account (e.g. 1030).`,
+    );
+  }
+  if (type !== 'ASSET') {
+    throw new ValidationError(
+      `Bank account "${row.name}" is linked to non-asset GL ${code}. Deposit destination must be an Asset bank/cash account.`,
+    );
+  }
+  if (row.is_posting === false) {
+    throw new ValidationError(
+      `Bank account "${row.name}" is linked to header GL ${code}. Select a posting Asset account.`,
+    );
+  }
+  return code;
 }
 
 export async function listUnsettledReceipts(

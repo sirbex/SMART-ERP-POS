@@ -156,6 +156,74 @@ describe('PostingGovernanceService', () => {
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
 
+        it('allows BANK_MANUAL deposit to DR bank GL / CR revenue (not MANUAL_JOURNAL)', () => {
+            const req = makeRequest(
+                'BANK_MANUAL',
+                [
+                    { accountCode: '1030', debitAmount: 275_000.5, creditAmount: 0 },
+                    { accountCode: '4000', debitAmount: 0, creditAmount: 275_000.5 },
+                ],
+                [
+                    makeAccount({
+                        accountCode: '1030',
+                        accountName: 'Bank',
+                        accountType: 'ASSET',
+                        normalBalance: 'DEBIT',
+                        allowManualPosting: false,
+                        allowedSources: ['SYSTEM_CORRECTION'],
+                        systemAccountTag: 'BANK',
+                    }),
+                    revenueAccount,
+                ],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('allows BANK_MANUAL deposit to DR bank / CR AR (Customer Payment category)', () => {
+            const req = makeRequest(
+                'BANK_MANUAL',
+                [
+                    { accountCode: '1030', debitAmount: 500, creditAmount: 0 },
+                    { accountCode: '1200', debitAmount: 0, creditAmount: 500 },
+                ],
+                [
+                    makeAccount({
+                        accountCode: '1030',
+                        accountName: 'Bank',
+                        accountType: 'ASSET',
+                        normalBalance: 'DEBIT',
+                        allowManualPosting: false,
+                        allowedSources: ['SYSTEM_CORRECTION'],
+                        systemAccountTag: 'BANK',
+                    }),
+                    arAccount,
+                ],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('blocks MANUAL_JOURNAL credit to AR (bank register must use BANK_MANUAL)', () => {
+            const req = makeRequest(
+                'MANUAL_JOURNAL',
+                [
+                    { accountCode: '1030', debitAmount: 500, creditAmount: 0 },
+                    { accountCode: '1200', debitAmount: 0, creditAmount: 500 },
+                ],
+                [
+                    makeAccount({
+                        accountCode: '1030',
+                        accountName: 'Bank',
+                        accountType: 'ASSET',
+                        normalBalance: 'DEBIT',
+                        allowManualPosting: true,
+                        allowedSources: ['MANUAL_JOURNAL'],
+                    }),
+                    arAccount,
+                ],
+            );
+            expect(() => PostingGovernanceService.validate(req)).toThrow(/Manual credit entries are not permitted/);
+        });
+
         it('allows INVENTORY_MOVE to DR COGS / CR Inventory', () => {
             const req = makeRequest(
                 'INVENTORY_MOVE',

@@ -939,6 +939,7 @@ export class BankingService {
                 ],
                 userId,
                 idempotencyKey: `BANK-${transactionId}`,
+                source: 'BANK_MANUAL',
             };
 
             // Post to GL (inside UnitOfWork — pass client so GL is atomic with bank_transactions insert)

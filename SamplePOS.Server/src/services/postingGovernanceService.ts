@@ -59,6 +59,7 @@ export type PostingSource =
     | 'TREASURY_REVERSAL'       // Reversal of a posted Treasury Document
     | 'AR_WRITEOFF'             // Bad debt direct write-off — Dr 5210 / Cr 1200 (ADR-006)
     | 'AR_WRITEOFF_REVERSAL'    // Reversal of a posted AR write-off document
+    | 'BANK_MANUAL'             // Manual bank register deposit/withdrawal (Banking module)
 
 // =============================================================================
 // GOVERNANCE ACCOUNT SHAPE
@@ -224,7 +225,8 @@ export class PostingGovernanceService {
                 source === 'PAYMENT_DEPOSIT' ||
                 source === 'TREASURY_DEPOSIT' ||
                 source === 'TREASURY_TRANSFER' ||
-                source === 'TREASURY_PETTY_CASH';
+                source === 'TREASURY_PETTY_CASH' ||
+                source === 'BANK_MANUAL';
             const isCutoverSource = source === 'CUTOVER_CORRECTION' || source === 'CUTOVER_OB';
             const isCashTaggedCreditLine = account.systemAccountTag === 'CASH' && line.creditAmount > 0;
             const deferToRuleC = !account.allowManualPosting && source === 'MANUAL_JOURNAL';
@@ -280,11 +282,12 @@ export class PostingGovernanceService {
                         source !== 'TREASURY_DEPOSIT' &&
                         source !== 'TREASURY_TRANSFER' &&
                         source !== 'TREASURY_PETTY_CASH' &&
-                        source !== 'TREASURY_REVERSAL'
+                        source !== 'TREASURY_REVERSAL' &&
+                        source !== 'BANK_MANUAL'
                     ) {
                         throw new PostingGovernanceError(
                             `Cannot credit Cash account ${account.accountCode} (${account.accountName}) from source '${source}'. ` +
-                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), treasury document (TREASURY_*), supplier payment (SUPPLIER_PAYMENT), WHT remittance (WHT_REMITTANCE), VAT remittance (VAT_REMITTANCE), sale refund (SALES_REFUND), or system correction.`,
+                            `Cash may only be credited by a bank deposit (PAYMENT_DEPOSIT), treasury document (TREASURY_*), manual bank withdrawal (BANK_MANUAL), supplier payment (SUPPLIER_PAYMENT), WHT remittance (WHT_REMITTANCE), VAT remittance (VAT_REMITTANCE), sale refund (SALES_REFUND), or system correction.`,
                             'GOV_RULE_D_CASH_CREDIT',
                             { accountCode: account.accountCode, source }
                         );
