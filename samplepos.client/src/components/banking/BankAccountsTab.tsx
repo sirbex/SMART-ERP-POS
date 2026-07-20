@@ -476,8 +476,8 @@ export const BankAccountsTab: React.FC = () => {
                                 <Label htmlFor="glAccount">GL Account *</Label>
                                 <Button
                                     type="button"
-                                    variant="link"
-                                    className="h-auto p-0 text-xs"
+                                    variant="ghost"
+                                    className="h-auto p-0 text-xs text-primary underline-offset-4 hover:underline"
                                     onClick={() => {
                                         setShowCreateGl((v) => !v);
                                         if (!newGlCode) setNewGlCode(suggestedGlCode);
