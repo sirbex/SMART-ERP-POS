@@ -43,6 +43,7 @@ import type {
     BankRecurringRule,
     BankRecurringRuleDbRow,
     CreateBankAccountDto,
+    UpdateBankAccountDto,
     CreateBankTransactionDto,
     CreateTransferDto,
     ReverseBankTransactionDto,
@@ -229,10 +230,10 @@ export class BankingService {
     ): Promise<BankAccount> {
         const pool = dbPool || globalPool;
         const created = await UnitOfWork.run(pool, async (client) => {
-            // Verify GL account exists
+            // Verify GL account exists and is a posting ASSET (bank books must be assets)
             const glAccount = await client.query(
                 `
-        SELECT "Id", "AccountCode", "AccountName" 
+        SELECT "Id", "AccountCode", "AccountName", "AccountType", "IsPostingAccount"
         FROM accounts 
         WHERE "Id" = $1 AND "IsActive" = TRUE
       `,
@@ -241,6 +242,19 @@ export class BankingService {
 
             if (glAccount.rows.length === 0) {
                 throw new Error(`GL Account ${dto.glAccountId} not found or inactive`);
+            }
+
+            const glRow = glAccount.rows[0];
+            if (String(glRow.AccountType).toUpperCase() !== 'ASSET') {
+                throw new Error(
+                    `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is ${glRow.AccountType}, not ASSET. ` +
+                    `Bank accounts must link to an Asset posting account (e.g. Cash at Bank).`,
+                );
+            }
+            if (glRow.IsPostingAccount === false) {
+                throw new Error(
+                    `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is a header account. Select a posting Asset account.`,
+                );
             }
 
             // Check if another bank account already uses this GL account
@@ -314,7 +328,6 @@ export class BankingService {
                     dto.openingBalance,
                     glAccount.rows[0].AccountCode,
                     userId,
-                    dbPool
                 );
             }
 
@@ -349,6 +362,178 @@ export class BankingService {
     }
 
     /**
+     * Update bank account metadata (and optionally correct cutover opening balance).
+     * Opening balance corrections post a delta JE (never rewrite history).
+     */
+    static async updateAccount(
+        id: string,
+        dto: UpdateBankAccountDto,
+        userId: string,
+        dbPool?: pg.Pool
+    ): Promise<BankAccount> {
+        const pool = dbPool || globalPool;
+        await UnitOfWork.run(pool, async (client) => {
+            const existing = await client.query<BankAccountDbRow>(
+                `SELECT * FROM bank_accounts WHERE id = $1`,
+                [id],
+            );
+            if (existing.rows.length === 0) {
+                throw new Error(`Bank account ${id} not found`);
+            }
+            const row = existing.rows[0];
+            const storedOpening =
+                row.opening_balance != null && row.opening_balance !== ''
+                    ? parseFloat(String(row.opening_balance))
+                    : 0;
+
+            let nextGlId = row.gl_account_id;
+            let nextGlCode: string | null = null;
+
+            if (dto.glAccountId && dto.glAccountId !== row.gl_account_id) {
+                const glAccount = await client.query(
+                    `
+          SELECT "Id", "AccountCode", "AccountName", "AccountType", "IsPostingAccount"
+          FROM accounts
+          WHERE "Id" = $1 AND "IsActive" = TRUE
+        `,
+                    [dto.glAccountId],
+                );
+                if (glAccount.rows.length === 0) {
+                    throw new Error(`GL Account ${dto.glAccountId} not found or inactive`);
+                }
+                const glRow = glAccount.rows[0];
+                if (String(glRow.AccountType).toUpperCase() !== 'ASSET') {
+                    throw new Error(
+                        `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is ${glRow.AccountType}, not ASSET. ` +
+                        `Bank accounts must link to an Asset posting account.`,
+                    );
+                }
+                if (glRow.IsPostingAccount === false) {
+                    throw new Error(
+                        `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is a header account. Select a posting Asset account.`,
+                    );
+                }
+                const clash = await client.query(
+                    `
+          SELECT id, name FROM bank_accounts
+          WHERE gl_account_id = $1 AND is_active = TRUE AND id <> $2
+        `,
+                    [dto.glAccountId, id],
+                );
+                if (clash.rows.length > 0) {
+                    throw new Error(
+                        `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is already used by ` +
+                        `bank account "${clash.rows[0].name}".`,
+                    );
+                }
+                nextGlId = dto.glAccountId;
+                nextGlCode = String(glRow.AccountCode);
+            }
+
+            if (dto.isDefault === true) {
+                await client.query(
+                    `UPDATE bank_accounts SET is_default = FALSE WHERE is_default = TRUE AND id <> $1`,
+                    [id],
+                );
+            }
+
+            const name = dto.name !== undefined ? dto.name : (row.name || row.account_name || '');
+            const accountNumber =
+                dto.accountNumber !== undefined ? dto.accountNumber : row.account_number;
+            const bankName = dto.bankName !== undefined ? dto.bankName : row.bank_name;
+            const branch = dto.branch !== undefined ? dto.branch : row.branch;
+            const isDefault =
+                dto.isDefault !== undefined ? dto.isDefault : (row.is_default ?? false);
+            const isActive =
+                dto.isActive !== undefined ? dto.isActive : (row.is_active ?? true);
+
+            let nextOpening = storedOpening;
+            if (dto.openingBalance !== undefined) {
+                const delta = new Decimal(dto.openingBalance).minus(storedOpening).toNumber();
+                if (Math.abs(delta) >= 0.005) {
+                    if (!nextGlCode) {
+                        const gl = await client.query<{ AccountCode: string }>(
+                            `SELECT "AccountCode" FROM accounts WHERE "Id" = $1`,
+                            [nextGlId],
+                        );
+                        nextGlCode = gl.rows[0]?.AccountCode || null;
+                    }
+                    if (!nextGlCode) {
+                        throw new Error('Cannot correct opening balance: bank GL code not found');
+                    }
+                    await this.createOpeningBalanceEntry(
+                        client,
+                        id,
+                        delta,
+                        nextGlCode,
+                        userId,
+                        {
+                            description: 'Opening balance correction',
+                            bankDescription: 'Opening balance correction',
+                            idempotencyKey: `OPEN-CORR-${id}-${uuidv4()}`,
+                            referenceNumber: `OPEN-CORR-${uuidv4().slice(0, 8).toUpperCase()}`,
+                            referenceType: 'BANK_OPENING_ADJ',
+                            referenceId: uuidv4(),
+                        },
+                    );
+                }
+                nextOpening = dto.openingBalance;
+            }
+
+            const legacyCode =
+                (accountNumber && String(accountNumber).trim()) ||
+                row.account_code ||
+                `BNK-${(nextGlCode || 'BNK').slice(0, 8)}-${id.slice(0, 8).toUpperCase()}`;
+
+            await client.query(
+                `
+        UPDATE bank_accounts SET
+          name = $2,
+          account_number = $3,
+          bank_name = $4,
+          branch = $5,
+          gl_account_id = $6,
+          is_default = $7,
+          is_active = $8,
+          opening_balance = $9,
+          account_code = $10,
+          account_name = $2,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+                [
+                    id,
+                    name,
+                    accountNumber || null,
+                    bankName || null,
+                    branch || null,
+                    nextGlId,
+                    isDefault,
+                    isActive,
+                    nextOpening,
+                    legacyCode,
+                ],
+            );
+
+            await client.query(
+                `
+        INSERT INTO audit_log (id, action, entity_type, entity_id, user_id, action_details)
+        VALUES ($1, 'UPDATE', 'SETTINGS', $2, $3, $4)
+      `,
+                [uuidv4(), id, userId, JSON.stringify(dto)],
+            );
+
+            logger.info('Bank account updated', { id, name });
+        });
+
+        const refreshed = await this.getAccountById(id, pool);
+        if (!refreshed) {
+            throw new Error(`Bank account ${id} not found after update`);
+        }
+        return refreshed;
+    }
+
+    /**
      * Create opening balance GL entry + bank book line.
      * Cutover pattern (same family as customer/supplier OB):
      *   DR Bank GL / CR Opening Balance Equity (3050), source CUTOVER_OB
@@ -359,33 +544,48 @@ export class BankingService {
         amount: number,
         bankGlCode: string,
         userId: string,
-        _dbPool?: pg.Pool
+        options?: {
+            description?: string;
+            bankDescription?: string;
+            idempotencyKey?: string;
+            referenceNumber?: string;
+            /** Distinct from initial OPEN so GL reference uniqueness allows corrections. */
+            referenceType?: string;
+            referenceId?: string;
+        },
     ): Promise<void> {
         const entryDate = getBusinessDate();
         const equityCode = await this.ensureOpeningBalanceEquityAccount(client);
+        const description = options?.description || 'Bank account opening balance';
+        const bankDescription = options?.bankDescription || 'Opening balance';
+        const referenceNumber =
+            options?.referenceNumber || `OPEN-${bankAccountId.slice(0, 8).toUpperCase()}`;
+        const idempotencyKey = options?.idempotencyKey || `OPEN-${bankAccountId}`;
+        const referenceType = options?.referenceType || 'BANK_OPENING';
+        const referenceId = options?.referenceId || bankAccountId;
 
         const request: JournalEntryRequest = {
             entryDate,
-            description: 'Bank account opening balance',
-            referenceType: 'BANK_OPENING',
-            referenceId: bankAccountId,
-            referenceNumber: `OPEN-${bankAccountId.slice(0, 8).toUpperCase()}`,
+            description,
+            referenceType,
+            referenceId,
+            referenceNumber,
             lines: [
                 {
                     accountCode: bankGlCode,
-                    description: 'Opening balance',
+                    description: bankDescription,
                     debitAmount: amount > 0 ? amount : 0,
                     creditAmount: amount < 0 ? Math.abs(amount) : 0,
                 },
                 {
                     accountCode: equityCode,
-                    description: 'Opening balance equity',
+                    description: amount >= 0 ? 'Opening balance equity' : 'Opening balance equity correction',
                     debitAmount: amount < 0 ? Math.abs(amount) : 0,
                     creditAmount: amount > 0 ? amount : 0,
                 },
             ],
             userId,
-            idempotencyKey: `OPEN-${bankAccountId}`,
+            idempotencyKey,
             source: 'CUTOVER_OB',
         };
 
@@ -411,8 +611,8 @@ export class BankingService {
                 bankAccountId,
                 entryDate,
                 isInflow ? 'DEPOSIT' : 'WITHDRAWAL',
-                'Opening balance',
-                `OPEN-${bankAccountId.slice(0, 8).toUpperCase()}`,
+                bankDescription,
+                referenceNumber,
                 Math.abs(amount),
                 glResult.transactionId,
                 bankAccountId,

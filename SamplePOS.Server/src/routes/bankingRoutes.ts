@@ -41,6 +41,17 @@ const CreateBankAccountSchema = z.object({
   isDefault: z.boolean().optional(),
 });
 
+const UpdateBankAccountSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  accountNumber: z.string().max(50).nullable().optional(),
+  bankName: z.string().max(100).nullable().optional(),
+  branch: z.string().max(100).nullable().optional(),
+  glAccountId: z.string().uuid().optional(),
+  openingBalance: z.number().optional(),
+  isDefault: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
 const CreateBankTransactionSchema = z.object({
   bankAccountId: z.string().uuid(),
   transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be YYYY-MM-DD'),
@@ -204,6 +215,21 @@ router.post(
     const account = await BankingService.createAccount(dto, getUserId(req), p(req));
 
     res.status(201).json({ success: true, data: account });
+  })
+);
+
+/**
+ * PATCH /api/banking/accounts/:id
+ * Update bank account metadata / correct opening balance / activate-deactivate
+ */
+router.patch(
+  '/accounts/:id',
+  requirePermission('banking.update'),
+  asyncHandler(async (req, res) => {
+    const dto = UpdateBankAccountSchema.parse(req.body);
+    const account = await BankingService.updateAccount(req.params.id, dto, getUserId(req), p(req));
+
+    res.json({ success: true, data: account });
   })
 );
 

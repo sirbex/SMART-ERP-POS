@@ -33,6 +33,8 @@
     "proof:inventory-supplier-inconsistencies": "node scripts/proof-inventory-supplier-inconsistencies.mjs",
     "proof:ap-reconciliation": "node ../scripts/proof-ap-reconciliation.mjs",
     "proof:scn-cancel-bill-ssot": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/tests/scnCancelBillLedgerSsotProof.test.ts --no-coverage --testTimeout=120000 --forceExit",
+    "proof:bank-account-create": "node scripts/proof-bank-account-create.mjs",
+    "proof:bank-account-update": "node scripts/proof-bank-account-update.mjs",
     "repair:lexie-sbill-0020": "tsx scripts/repair-lexie-sbill-0020-ap-ssot.ts",
     "proof:framework-baseline": "tsx scripts/proof-financial-framework-baseline.ts",
     "collect:stabilization-evidence": "node scripts/collect-stabilization-evidence.mjs",

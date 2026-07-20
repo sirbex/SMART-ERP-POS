@@ -21,6 +21,8 @@ export interface BankAccount {
     glAccountCode?: string;       // Joined from accounts table
     glAccountName?: string;       // Joined from accounts table
     currentBalance: number;
+    /** Cutover opening balance originally posted (legacy column; GL is source of truth for balance). */
+    openingBalance?: number;
     lastReconciledBalance?: number;
     lastReconciledAt?: string;
     lowBalanceThreshold?: number;
@@ -43,6 +45,7 @@ export interface BankAccountDbRow {
     gl_account_code?: string;
     gl_account_name?: string;
     current_balance: string;
+    opening_balance?: string | number | null;
     last_reconciled_balance?: string;
     last_reconciled_at?: string;
     low_balance_threshold?: string;
@@ -65,6 +68,10 @@ export function normalizeBankAccount(row: BankAccountDbRow): BankAccount {
         glAccountCode: row.gl_account_code,
         glAccountName: row.gl_account_name,
         currentBalance: parseFloat(row.current_balance || '0'),
+        openingBalance:
+            row.opening_balance != null && row.opening_balance !== ''
+                ? parseFloat(String(row.opening_balance))
+                : undefined,
         // Preserve legitimate 0.00 — only null/undefined means never reconciled
         lastReconciledBalance:
             row.last_reconciled_balance != null && row.last_reconciled_balance !== ''
@@ -731,6 +738,18 @@ export interface CreateBankAccountDto {
     glAccountId: string;
     openingBalance?: number;
     isDefault?: boolean;
+}
+
+export interface UpdateBankAccountDto {
+    name?: string;
+    accountNumber?: string | null;
+    bankName?: string | null;
+    branch?: string | null;
+    glAccountId?: string;
+    /** Correct cutover OB by posting the delta to GL (immutability-safe). */
+    openingBalance?: number;
+    isDefault?: boolean;
+    isActive?: boolean;
 }
 
 export interface CreateBankTransactionDto {

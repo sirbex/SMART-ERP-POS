@@ -99,6 +99,7 @@
     "proof:wht": "node SamplePOS.Server/scripts/proof-wht-payment-splits.mjs",
     "proof:wht-ops": "node SamplePOS.Server/scripts/proof-wht-ops.mjs",
     "proof:bank-account-create": "node SamplePOS.Server/scripts/proof-bank-account-create.mjs",
+    "proof:bank-account-update": "node SamplePOS.Server/scripts/proof-bank-account-update.mjs",
     "proof:bank-reconciliation": "node SamplePOS.Server/scripts/proof-bank-reconciliation.mjs",
     "proof:bank-reconciliation:e2e": "node SamplePOS.Server/scripts/proof-bank-reconciliation-e2e.mjs",
     "proof:pnl-ssot": "node SamplePOS.Server/scripts/proof-pnl-ssot.mjs",

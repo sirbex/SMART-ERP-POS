@@ -33,6 +33,23 @@ type GlAccountOption = {
     isPostingAccount?: boolean;
 };
 
+/** Money field helper: empty string while typing, no leading-zero / scroll-bump quirks. */
+function parseMoneyInput(raw: string): number {
+    const trimmed = raw.trim().replace(/,/g, '');
+    if (trimmed === '' || trimmed === '-' || trimmed === '.') return 0;
+    const n = Number(trimmed);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function moneyToInput(value: number | undefined | null): string {
+    if (value == null || value === 0) return '';
+    return String(value);
+}
+
+const preventNumberScroll = (e: React.WheelEvent<HTMLInputElement>) => {
+    e.currentTarget.blur();
+};
+
 // Fetch GL accounts for dropdown (posting Asset accounts for bank account linking)
 const useGLAccounts = () => {
     return useQuery({
@@ -67,9 +84,10 @@ interface AccountFormData {
     bankName: string;
     branch: string;
     glAccountId: string;
-    openingBalance: number;
+    /** String so the user can clear and type freely (avoids "05" / sticky 0). */
+    openingBalance: string;
     isDefault: boolean;
-    lowBalanceThreshold: number;
+    lowBalanceThreshold: string;
     lowBalanceAlertEnabled: boolean;
 }
 
@@ -79,9 +97,9 @@ const emptyForm: AccountFormData = {
     bankName: '',
     branch: '',
     glAccountId: '',
-    openingBalance: 0,
+    openingBalance: '',
     isDefault: false,
-    lowBalanceThreshold: 0,
+    lowBalanceThreshold: '',
     lowBalanceAlertEnabled: false
 };
 
@@ -111,9 +129,9 @@ export const BankAccountsTab: React.FC = () => {
             bankName: account.bankName || '',
             branch: account.branch || '',
             glAccountId: account.glAccountId,
-            openingBalance: 0, // Not editable
+            openingBalance: moneyToInput(account.openingBalance),
             isDefault: account.isDefault,
-            lowBalanceThreshold: account.lowBalanceThreshold || 0,
+            lowBalanceThreshold: moneyToInput(account.lowBalanceThreshold),
             lowBalanceAlertEnabled: account.lowBalanceAlertEnabled || false
         });
         setIsModalOpen(true);
@@ -121,6 +139,12 @@ export const BankAccountsTab: React.FC = () => {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (!formData.glAccountId) {
+            toast.error('Select a GL (Asset) account for this bank book');
+            return;
+        }
+        const openingBalance = parseMoneyInput(formData.openingBalance);
+        const lowBalanceThreshold = parseMoneyInput(formData.lowBalanceThreshold);
         try {
             if (editingAccount) {
                 await updateMutation.mutateAsync({
@@ -131,13 +155,13 @@ export const BankAccountsTab: React.FC = () => {
                         bankName: formData.bankName || undefined,
                         branch: formData.branch || undefined,
                         glAccountId: formData.glAccountId,
+                        openingBalance,
                         isDefault: formData.isDefault
                     }
                 });
-                // Update low balance settings separately
                 await lowBalanceMutation.mutateAsync({
                     bankAccountId: editingAccount.id,
-                    threshold: formData.lowBalanceThreshold,
+                    threshold: lowBalanceThreshold,
                     enabled: formData.lowBalanceAlertEnabled
                 });
             } else {
@@ -147,7 +171,7 @@ export const BankAccountsTab: React.FC = () => {
                     bankName: formData.bankName || undefined,
                     branch: formData.branch || undefined,
                     glAccountId: formData.glAccountId,
-                    openingBalance: formData.openingBalance || undefined,
+                    openingBalance: openingBalance || undefined,
                     isDefault: formData.isDefault
                 });
             }
@@ -167,9 +191,12 @@ export const BankAccountsTab: React.FC = () => {
                 id: account.id,
                 data: { isActive: !account.isActive }
             });
+            toast.success(account.isActive ? 'Bank account deactivated' : 'Bank account activated');
             refetch();
         } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update account status';
             console.error('Failed to toggle account status:', error);
+            toast.error(message);
         }
     };
 
@@ -267,6 +294,7 @@ export const BankAccountsTab: React.FC = () => {
                                                 variant="ghost"
                                                 size="sm"
                                                 onClick={() => handleOpenEdit(account)}
+                                                title="Edit"
                                             >
                                                 <Edit className="h-4 w-4" />
                                             </Button>
@@ -300,7 +328,7 @@ export const BankAccountsTab: React.FC = () => {
                         </DialogTitle>
                         <DialogDescription>
                             {editingAccount
-                                ? 'Update bank account details'
+                                ? 'Update bank account details. Wrong opening balance can be corrected here — the difference posts to GL.'
                                 : 'Create a new bank account for tracking transactions'
                             }
                         </DialogDescription>
@@ -367,25 +395,35 @@ export const BankAccountsTab: React.FC = () => {
                                         ))}
                                 </SelectContent>
                             </Select>
+                            <p className="text-xs text-muted-foreground">
+                                Must be a unique posting Asset account (Cash at Bank), not revenue/expense.
+                            </p>
                         </div>
 
-                        {!editingAccount && (
-                            <div className="space-y-2">
-                                <Label htmlFor="openingBalance">Opening Balance</Label>
-                                <Input
-                                    id="openingBalance"
-                                    type="number"
-                                    step="0.01"
-                                    value={formData.openingBalance}
-                                    onChange={e => setFormData(prev => ({ ...prev, openingBalance: parseFloat(e.target.value) || 0 }))}
-                                    placeholder="0.00"
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                    Posts DR bank GL / CR Opening Balance Equity (3050). Use a unique
-                                    posting GL account not already linked to another bank book.
-                                </p>
-                            </div>
-                        )}
+                        <div className="space-y-2">
+                            <Label htmlFor="openingBalance">Opening Balance</Label>
+                            <Input
+                                id="openingBalance"
+                                type="text"
+                                inputMode="decimal"
+                                value={formData.openingBalance}
+                                onChange={e => {
+                                    const v = e.target.value;
+                                    if (v === '' || /^-?\d*\.?\d*$/.test(v)) {
+                                        setFormData(prev => ({ ...prev, openingBalance: v }));
+                                    }
+                                }}
+                                onFocus={e => e.target.select()}
+                                onWheel={preventNumberScroll}
+                                placeholder="0.00"
+                                autoComplete="off"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                {editingAccount
+                                    ? 'If this was entered wrong, change it and Save — only the difference is posted (DR bank / CR Opening Balance Equity).'
+                                    : 'Posts DR bank GL / CR Opening Balance Equity (3050). Leave blank for zero.'}
+                            </p>
+                        </div>
 
                         <div className="flex items-center gap-2">
                             <Switch
@@ -418,11 +456,19 @@ export const BankAccountsTab: React.FC = () => {
                                         <Label htmlFor="lowBalanceThreshold">Alert Threshold</Label>
                                         <Input
                                             id="lowBalanceThreshold"
-                                            type="number"
-                                            step="0.01"
+                                            type="text"
+                                            inputMode="decimal"
                                             value={formData.lowBalanceThreshold}
-                                            onChange={e => setFormData(prev => ({ ...prev, lowBalanceThreshold: parseFloat(e.target.value) || 0 }))}
+                                            onChange={e => {
+                                                const v = e.target.value;
+                                                if (v === '' || /^-?\d*\.?\d*$/.test(v)) {
+                                                    setFormData(prev => ({ ...prev, lowBalanceThreshold: v }));
+                                                }
+                                            }}
+                                            onFocus={e => e.target.select()}
+                                            onWheel={preventNumberScroll}
                                             placeholder="Enter minimum balance..."
+                                            autoComplete="off"
                                         />
                                         <p className="text-xs text-muted-foreground">
                                             Alert when balance falls below this amount
@@ -438,9 +484,11 @@ export const BankAccountsTab: React.FC = () => {
                             </Button>
                             <Button
                                 type="submit"
-                                disabled={createMutation.isPending || updateMutation.isPending}
+                                disabled={createMutation.isPending || updateMutation.isPending || lowBalanceMutation.isPending}
                             >
-                                {createMutation.isPending || updateMutation.isPending ? 'Saving...' : 'Save'}
+                                {createMutation.isPending || updateMutation.isPending || lowBalanceMutation.isPending
+                                    ? 'Saving...'
+                                    : 'Save'}
                             </Button>
                         </DialogFooter>
                     </form>

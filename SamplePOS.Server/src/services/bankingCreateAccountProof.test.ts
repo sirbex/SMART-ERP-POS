@@ -79,7 +79,7 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
   it('creates account with required name + GL and optional bank fields', async () => {
     mockClientQuery
       .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Stanbic Operating' }]),
+        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true }]),
       )
       .mockResolvedValueOnce(qResult([])) // no GL conflict
       .mockResolvedValueOnce(mockInsertReturning())
@@ -121,7 +121,7 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
   it('rejects GL already linked to another active bank account', async () => {
     mockClientQuery
       .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Bank' }]),
+        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Bank', AccountType: 'ASSET', IsPostingAccount: true }]),
       )
       .mockResolvedValueOnce(qResult([{ id: 'existing', name: 'Existing Bank' }]));
 
@@ -134,10 +134,23 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
     ).rejects.toThrow(/already used by bank account "Existing Bank"/);
   });
 
+  it('rejects non-ASSET GL account (e.g. Sales Revenue)', async () => {
+    mockClientQuery.mockResolvedValueOnce(
+      qResult([{ Id: GL_ID, AccountCode: '4000', AccountName: 'Sales Revenue', AccountType: 'REVENUE', IsPostingAccount: true }]),
+    );
+    await expect(
+      BankingService.createAccount(
+        { name: 'Bad GL', glAccountId: GL_ID },
+        USER_ID,
+        mockPool,
+      ),
+    ).rejects.toThrow(/not ASSET/);
+  });
+
   it('clears other defaults when Set as default is true', async () => {
     mockClientQuery
       .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Bank' }]),
+        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Bank', AccountType: 'ASSET', IsPostingAccount: true }]),
       )
       .mockResolvedValueOnce(qResult([]))
       .mockResolvedValueOnce(qResult([])) // clear defaults UPDATE
@@ -159,7 +172,7 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
   it('posts opening balance DR bank GL / CR 3050 Opening Balance Equity (CUTOVER_OB)', async () => {
     mockClientQuery
       .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Stanbic Operating' }]),
+        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true }]),
       )
       .mockResolvedValueOnce(qResult([])) // no GL conflict
       .mockResolvedValueOnce(mockInsertReturning())
@@ -224,8 +237,12 @@ describe('Add Bank Account UI + API wiring', () => {
     expect(tab).toMatch(/openingBalance/);
 
     expect(routes).toMatch(/CreateBankAccountSchema/);
+    expect(routes).toMatch(/UpdateBankAccountSchema/);
     expect(routes).toMatch(/glAccountId: z\.string\(\)\.uuid\(\)/);
     expect(routes).toMatch(/BankingService\.createAccount/);
+    expect(routes).toMatch(/BankingService\.updateAccount/);
+    expect(routes).toMatch(/\/accounts\/:id/);
+    expect(routes).toMatch(/requirePermission\('banking\.update'\)/);
 
     expect(hook).toMatch(/useCreateBankAccount/);
     expect(hook).toMatch(/API_BASE = '\/api\/banking'/);

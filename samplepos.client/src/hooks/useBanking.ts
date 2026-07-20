@@ -89,8 +89,12 @@ const bankingApi = {
             body: JSON.stringify(data)
         });
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.error || 'Failed to create bank account');
+            const err = await response.json().catch(() => ({}));
+            const detail =
+                typeof err.error === 'string'
+                    ? err.error
+                    : err.error?.message || err.message || 'Failed to create bank account';
+            throw new Error(detail);
         }
         const result = await response.json();
         return result.data;
@@ -102,6 +106,7 @@ const bankingApi = {
         bankName: string;
         branch: string;
         glAccountId: string;
+        openingBalance: number;
         isDefault: boolean;
         isActive: boolean;
     }>): Promise<BankAccount> => {
@@ -114,8 +119,12 @@ const bankingApi = {
             body: JSON.stringify(data)
         });
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.error || 'Failed to update bank account');
+            const err = await response.json().catch(() => ({}));
+            const detail =
+                typeof err.error === 'string'
+                    ? err.error
+                    : err.error?.message || err.message || 'Failed to update bank account';
+            throw new Error(detail);
         }
         const result = await response.json();
         return result.data;
