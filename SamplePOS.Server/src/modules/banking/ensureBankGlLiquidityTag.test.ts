@@ -111,4 +111,33 @@ describe('ensureBankGlLiquidityTag', () => {
     expect(result.stamped).toBe(false);
     expect(query).toHaveBeenCalledTimes(1);
   });
+
+  it('does not stamp blocked codes like 1200 even when untagged', async () => {
+    query.mockResolvedValueOnce(
+      qResult([
+        {
+          AccountCode: '1200',
+          AccountName: 'Accounts Receivable',
+          AccountType: 'ASSET',
+          IsPostingAccount: true,
+          SystemAccountTag: null,
+        },
+      ]),
+    );
+    const result = await ensureBankGlLiquidityTag(client, 'gl-1200');
+    expect(result.stamped).toBe(false);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('isBlockedBankBookGl / isEligibleBankBookLiquidity', () => {
+  it('blocks AR 1200 and allows BANK-tagged 1032', async () => {
+    const { isBlockedBankBookGl, isEligibleBankBookLiquidity } = await import(
+      './ensureBankGlLiquidityTag.js'
+    );
+    expect(isBlockedBankBookGl('1200', 'ACCOUNTS_RECEIVABLE')).toBe(true);
+    expect(isEligibleBankBookLiquidity('1200', 'ACCOUNTS_RECEIVABLE')).toBe(false);
+    expect(isEligibleBankBookLiquidity('1032', 'BANK')).toBe(true);
+    expect(isEligibleBankBookLiquidity('1030', 'BANK')).toBe(true);
+  });
 });

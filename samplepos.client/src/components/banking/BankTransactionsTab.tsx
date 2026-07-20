@@ -45,6 +45,20 @@ function formatBankAccountLabel(
     return label;
 }
 
+/** Bank ↔ bank transfer destinations must be Cash/Bank liquidity GLs (not AR 1200). */
+function isTransferEligibleBankAccount(acc: { glAccountCode?: string | null }): boolean {
+    const code = String(acc.glAccountCode || '');
+    if (!code) return false;
+    if (['1000', '1015', '1200', '1250', '1300', '1500', '2100', '2200', '3050'].includes(code)) {
+        return false;
+    }
+    if (/^12\d{2}/.test(code) || /^2\d{3}/.test(code) || /^3\d{3}/.test(code) || /^[4567]\d{3}/.test(code)) {
+        return false;
+    }
+    // Cash / bank / MoMo / card / extra bank books (10xx liquidity range)
+    return /^10\d{2}/.test(code) || /^10\d{3,}/.test(code);
+}
+
 type TransactionFormData = {
     bankAccountId: string;
     transactionDate: string;
@@ -139,6 +153,15 @@ export const BankTransactionsTab: React.FC = () => {
 
     const transactions = transactionsData?.transactions || [];
 
+    /** Only bank books linked to Cash/Bank GLs may appear in transfer From/To (TD-INV-6). */
+    const transferAccounts = useMemo(
+        () => accounts.filter((a) => a.isActive !== false && isTransferEligibleBankAccount(a)),
+        [accounts],
+    );
+    const blockedTransferCount = accounts.filter(
+        (a) => a.isActive !== false && !isTransferEligibleBankAccount(a),
+    ).length;
+
     /** Deposit/interest → IN categories; withdrawal/fee → OUT. Exclude transfer categories. */
     const categoriesForType = useMemo(() => {
         const isInflow = transactionForm.type === 'DEPOSIT' || transactionForm.type === 'INTEREST';
@@ -180,7 +203,7 @@ export const BankTransactionsTab: React.FC = () => {
     const handleOpenTransferModal = () => {
         setTransferForm({
             ...emptyTransferForm,
-            fromAccountId: accounts[0]?.id || '',
+            fromAccountId: transferAccounts[0]?.id || accounts[0]?.id || '',
             toAccountId: accounts[1]?.id || ''
         });
         setIsTransferModalOpen(true);
@@ -577,7 +600,7 @@ export const BankTransactionsTab: React.FC = () => {
                                     <SelectValue placeholder="Select account..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {accounts.map(acc => (
+                                    {transferAccounts.map(acc => (
                                         <SelectItem key={acc.id} value={acc.id}>
                                             {formatBankAccountLabel(acc, { showBalance: true })}
                                         </SelectItem>
@@ -596,7 +619,7 @@ export const BankTransactionsTab: React.FC = () => {
                                     <SelectValue placeholder="Select account..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {accounts
+                                    {transferAccounts
                                         .filter(acc => acc.id !== transferForm.fromAccountId)
                                         .map(acc => (
                                             <SelectItem key={acc.id} value={acc.id}>
@@ -605,6 +628,12 @@ export const BankTransactionsTab: React.FC = () => {
                                         ))}
                                 </SelectContent>
                             </Select>
+                            {blockedTransferCount > 0 && (
+                                <p className="text-xs text-amber-700">
+                                    {blockedTransferCount} bank book(s) hidden — linked to a non-bank GL (e.g. AR 1200).
+                                    Edit them under Banking → Accounts and use Create & use this GL for a real bank Asset.
+                                </p>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">

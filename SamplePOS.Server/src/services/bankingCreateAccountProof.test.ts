@@ -51,6 +51,21 @@ function qResult(rows: unknown[]): QueryResult {
   return { rows, rowCount: rows.length, command: '', oid: 0, fields: [] } as QueryResult;
 }
 
+function glRow(
+  code: string,
+  name: string,
+  opts: { type?: string; posting?: boolean; tag?: string | null } = {},
+) {
+  return {
+    Id: GL_ID,
+    AccountCode: code,
+    AccountName: name,
+    AccountType: opts.type ?? 'ASSET',
+    IsPostingAccount: opts.posting ?? true,
+    SystemAccountTag: opts.tag === undefined ? 'BANK' : opts.tag,
+  };
+}
+
 function mockInsertReturning(overrides: Record<string, unknown> = {}) {
   return qResult([
     {
@@ -74,20 +89,19 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockCreateJournalEntry.mockResolvedValue({ transactionId: 'gl-open-1' });
+    (mockPool.query as jest.Mock).mockResolvedValue(qResult([]));
   });
 
   it('creates account with required name + GL and optional bank fields', async () => {
+    const tagged = glRow('1030', 'Stanbic Operating', { tag: 'BANK' });
     mockClientQuery
-      .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true }]),
-      )
-      .mockResolvedValueOnce(qResult([])) // no GL conflict
-      .mockResolvedValueOnce(
-        qResult([{ AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true, SystemAccountTag: 'BANK' }]),
-      ) // ensureBankGlLiquidityTag — already tagged
+      .mockResolvedValueOnce(qResult([tagged])) // exists
+      .mockResolvedValueOnce(qResult([])) // conflict
+      .mockResolvedValueOnce(qResult([tagged])) // assert load
+      .mockResolvedValueOnce(qResult([tagged])) // ensure load
+      .mockResolvedValueOnce(qResult([tagged])) // assert after
       .mockResolvedValueOnce(mockInsertReturning())
-      .mockResolvedValueOnce(qResult([])); // audit_log
-    (mockPool.query as jest.Mock).mockResolvedValue(qResult([])); // getAccountById → fall back to created
+      .mockResolvedValueOnce(qResult([]));
 
     const account = await BankingService.createAccount(
       {
@@ -114,56 +128,55 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
   it('rejects inactive / missing GL account', async () => {
     mockClientQuery.mockResolvedValueOnce(qResult([]));
     await expect(
-      BankingService.createAccount(
-        { name: 'X', glAccountId: GL_ID },
-        USER_ID,
-        mockPool,
-      ),
+      BankingService.createAccount({ name: 'X', glAccountId: GL_ID }, USER_ID, mockPool),
     ).rejects.toThrow(/not found or inactive/);
   });
 
   it('rejects GL already linked to another active bank account', async () => {
     mockClientQuery
-      .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Bank', AccountType: 'ASSET', IsPostingAccount: true }]),
-      )
+      .mockResolvedValueOnce(qResult([glRow('1030', 'Bank')]))
       .mockResolvedValueOnce(qResult([{ id: 'existing', name: 'Existing Bank' }]));
 
     await expect(
-      BankingService.createAccount(
-        { name: 'Duplicate GL', glAccountId: GL_ID },
-        USER_ID,
-        mockPool,
-      ),
+      BankingService.createAccount({ name: 'Duplicate GL', glAccountId: GL_ID }, USER_ID, mockPool),
     ).rejects.toThrow(/already used by bank account "Existing Bank"/);
   });
 
   it('rejects non-ASSET GL account (e.g. Sales Revenue)', async () => {
-    mockClientQuery.mockResolvedValueOnce(
-      qResult([{ Id: GL_ID, AccountCode: '4000', AccountName: 'Sales Revenue', AccountType: 'REVENUE', IsPostingAccount: true }]),
-    );
+    const rev = glRow('4000', 'Sales Revenue', { type: 'REVENUE', tag: null });
+    mockClientQuery
+      .mockResolvedValueOnce(qResult([rev]))
+      .mockResolvedValueOnce(qResult([]))
+      .mockResolvedValueOnce(qResult([rev]));
+
     await expect(
-      BankingService.createAccount(
-        { name: 'Bad GL', glAccountId: GL_ID },
-        USER_ID,
-        mockPool,
-      ),
+      BankingService.createAccount({ name: 'Bad GL', glAccountId: GL_ID }, USER_ID, mockPool),
     ).rejects.toThrow(/not ASSET/);
   });
 
-  it('clears other defaults when Set as default is true', async () => {
+  it('rejects Accounts Receivable (1200) as bank book GL', async () => {
+    const ar = glRow('1200', 'Accounts Receivable', { tag: 'ACCOUNTS_RECEIVABLE' });
     mockClientQuery
-      .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Bank', AccountType: 'ASSET', IsPostingAccount: true }]),
-      )
+      .mockResolvedValueOnce(qResult([ar]))
       .mockResolvedValueOnce(qResult([]))
-      .mockResolvedValueOnce(
-        qResult([{ AccountCode: '1030', AccountName: 'Bank', AccountType: 'ASSET', IsPostingAccount: true, SystemAccountTag: 'BANK' }]),
-      )
-      .mockResolvedValueOnce(qResult([])) // clear defaults UPDATE
+      .mockResolvedValueOnce(qResult([ar]));
+
+    await expect(
+      BankingService.createAccount({ name: 'Bad AR link', glAccountId: GL_ID }, USER_ID, mockPool),
+    ).rejects.toThrow(/cannot be used as a bank book|not a liquidity|1200/);
+  });
+
+  it('clears other defaults when Set as default is true', async () => {
+    const tagged = glRow('1030', 'Bank', { tag: 'BANK' });
+    mockClientQuery
+      .mockResolvedValueOnce(qResult([tagged]))
+      .mockResolvedValueOnce(qResult([]))
+      .mockResolvedValueOnce(qResult([tagged]))
+      .mockResolvedValueOnce(qResult([tagged]))
+      .mockResolvedValueOnce(qResult([tagged]))
+      .mockResolvedValueOnce(qResult([])) // clear defaults
       .mockResolvedValueOnce(mockInsertReturning({ is_default: true }))
-      .mockResolvedValueOnce(qResult([])); // audit
-    (mockPool.query as jest.Mock).mockResolvedValue(qResult([]));
+      .mockResolvedValueOnce(qResult([]));
 
     await BankingService.createAccount(
       { name: 'Default Bank', glAccountId: GL_ID, isDefault: true },
@@ -178,21 +191,19 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
   });
 
   it('posts opening balance DR bank GL / CR 3050 Opening Balance Equity (CUTOVER_OB)', async () => {
+    const tagged = glRow('1030', 'Stanbic Operating', { tag: 'BANK' });
     mockClientQuery
-      .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true }]),
-      )
-      .mockResolvedValueOnce(qResult([])) // no GL conflict
-      .mockResolvedValueOnce(
-        qResult([{ AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true, SystemAccountTag: 'BANK' }]),
-      )
+      .mockResolvedValueOnce(qResult([tagged]))
+      .mockResolvedValueOnce(qResult([]))
+      .mockResolvedValueOnce(qResult([tagged]))
+      .mockResolvedValueOnce(qResult([tagged]))
+      .mockResolvedValueOnce(qResult([tagged]))
       .mockResolvedValueOnce(mockInsertReturning())
-      .mockResolvedValueOnce(qResult([{ AccountCode: '3050' }])) // OBE tagged
+      .mockResolvedValueOnce(qResult([{ AccountCode: '3050' }])) // OBE
       .mockResolvedValueOnce(qResult([])) // advisory lock
-      .mockResolvedValueOnce(qResult([{ next_num: 1 }])) // BTX number
+      .mockResolvedValueOnce(qResult([{ next_num: 1 }]))
       .mockResolvedValueOnce(qResult([])) // insert bank_transactions
       .mockResolvedValueOnce(qResult([])); // audit
-    (mockPool.query as jest.Mock).mockResolvedValue(qResult([]));
 
     await BankingService.createAccount(
       {
@@ -219,18 +230,17 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
   });
 
   it('stamps BANK tag when linked GL is untagged (Create & use this GL)', async () => {
+    const untagged = glRow('1033', 'Stanbic Operating', { tag: null });
+    const tagged = glRow('1033', 'Stanbic Operating', { tag: 'BANK' });
     mockClientQuery
-      .mockResolvedValueOnce(
-        qResult([{ Id: GL_ID, AccountCode: '1033', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true }]),
-      )
+      .mockResolvedValueOnce(qResult([untagged]))
       .mockResolvedValueOnce(qResult([]))
-      .mockResolvedValueOnce(
-        qResult([{ AccountCode: '1033', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true, SystemAccountTag: null }]),
-      )
-      .mockResolvedValueOnce(qResult([])) // UPDATE SystemAccountTag = BANK
-      .mockResolvedValueOnce(mockInsertReturning({ name: 'Stanbic Book', gl_account_id: GL_ID }))
+      .mockResolvedValueOnce(qResult([untagged])) // assert load
+      .mockResolvedValueOnce(qResult([untagged])) // ensure load
+      .mockResolvedValueOnce(qResult([])) // UPDATE stamp
+      .mockResolvedValueOnce(qResult([tagged])) // assert after
+      .mockResolvedValueOnce(mockInsertReturning({ name: 'Stanbic Book' }))
       .mockResolvedValueOnce(qResult([]));
-    (mockPool.query as jest.Mock).mockResolvedValue(qResult([]));
 
     await BankingService.createAccount(
       { name: 'Stanbic Book', glAccountId: GL_ID },

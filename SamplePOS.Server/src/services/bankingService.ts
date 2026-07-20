@@ -22,7 +22,7 @@ import { AccountingCore, JournalEntryRequest } from './accountingCore.js';
 import logger from '../utils/logger.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
-import { ensureBankGlLiquidityTag } from '../modules/banking/ensureBankGlLiquidityTag.js';
+import { ensureBankGlLiquidityTag, assertBankBookGlEligible, isEligibleBankBookLiquidity } from '../modules/banking/ensureBankGlLiquidityTag.js';
 
 import type {
     BankAccount,
@@ -250,7 +250,7 @@ export class BankingService {
     ): Promise<BankAccount> {
         const pool = dbPool || globalPool;
         const created = await UnitOfWork.run(pool, async (client) => {
-            // Verify GL account exists and is a posting ASSET (bank books must be assets)
+            // Verify GL exists and is eligible liquidity (rejects AR 1200, inventory, etc.)
             const glAccount = await client.query(
                 `
         SELECT "Id", "AccountCode", "AccountName", "AccountType", "IsPostingAccount"
@@ -262,19 +262,6 @@ export class BankingService {
 
             if (glAccount.rows.length === 0) {
                 throw new Error(`GL Account ${dto.glAccountId} not found or inactive`);
-            }
-
-            const glRow = glAccount.rows[0];
-            if (String(glRow.AccountType).toUpperCase() !== 'ASSET') {
-                throw new Error(
-                    `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is ${glRow.AccountType}, not ASSET. ` +
-                    `Bank accounts must link to an Asset posting account (e.g. Cash at Bank).`,
-                );
-            }
-            if (glRow.IsPostingAccount === false) {
-                throw new Error(
-                    `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is a header account. Select a posting Asset account.`,
-                );
             }
 
             // Check if another bank account already uses this GL account
@@ -295,8 +282,8 @@ export class BankingService {
                 );
             }
 
-            // Untagged CoA bank GLs (e.g. 1032 Centenary) must be BANK for TREASURY_DEPOSIT.
-            await ensureBankGlLiquidityTag(client, dto.glAccountId);
+            // TD-INV-6: bank books must be Cash/Bank liquidity — never AR 1200 etc.
+            await assertBankBookGlEligible(client, dto.glAccountId);
 
             // If setting as default, clear other defaults first
             if (dto.isDefault) {
@@ -413,29 +400,6 @@ export class BankingService {
             let nextGlCode: string | null = null;
 
             if (dto.glAccountId && dto.glAccountId !== row.gl_account_id) {
-                const glAccount = await client.query(
-                    `
-          SELECT "Id", "AccountCode", "AccountName", "AccountType", "IsPostingAccount"
-          FROM accounts
-          WHERE "Id" = $1 AND "IsActive" = TRUE
-        `,
-                    [dto.glAccountId],
-                );
-                if (glAccount.rows.length === 0) {
-                    throw new Error(`GL Account ${dto.glAccountId} not found or inactive`);
-                }
-                const glRow = glAccount.rows[0];
-                if (String(glRow.AccountType).toUpperCase() !== 'ASSET') {
-                    throw new Error(
-                        `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is ${glRow.AccountType}, not ASSET. ` +
-                        `Bank accounts must link to an Asset posting account.`,
-                    );
-                }
-                if (glRow.IsPostingAccount === false) {
-                    throw new Error(
-                        `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is a header account. Select a posting Asset account.`,
-                    );
-                }
                 const clash = await client.query(
                     `
           SELECT id, name FROM bank_accounts
@@ -445,17 +409,15 @@ export class BankingService {
                 );
                 if (clash.rows.length > 0) {
                     throw new Error(
-                        `GL Account "${glRow.AccountCode} - ${glRow.AccountName}" is already used by ` +
-                        `bank account "${clash.rows[0].name}".`,
+                        `GL Account is already used by bank account "${clash.rows[0].name}".`,
                     );
                 }
-                await ensureBankGlLiquidityTag(client, dto.glAccountId);
+                const eligible = await assertBankBookGlEligible(client, dto.glAccountId);
                 nextGlId = dto.glAccountId;
-                nextGlCode = String(glRow.AccountCode);
-            }
-
-            // Heal untagged bank GLs on any update (e.g. Centenary created before BANK stamp)
-            if (nextGlId) {
+                nextGlCode = eligible.accountCode;
+            } else if (nextGlId) {
+                // Heal untagged bank GLs; do not hard-fail legacy bad links on name-only edits
+                // (transfer/deposit will reject with a clear message until GL is fixed).
                 await ensureBankGlLiquidityTag(client, nextGlId);
             }
 
@@ -1072,10 +1034,11 @@ export class BankingService {
     }> {
         const pool = dbPool || globalPool;
         return UnitOfWork.run(pool, async (client) => {
-            // Get both bank accounts
+            // Get both bank accounts (include GL tag for TD-INV-6 messaging)
             const fromAccount = await client.query(
                 `
-        SELECT ba.*, a."AccountCode" as gl_account_code
+        SELECT ba.*, a."AccountCode" as gl_account_code, a."AccountName" as gl_account_name,
+               a."SystemAccountTag" as gl_system_account_tag
         FROM bank_accounts ba
         JOIN accounts a ON a."Id" = ba.gl_account_id
         WHERE ba.id = $1 AND ba.is_active = TRUE
@@ -1085,7 +1048,8 @@ export class BankingService {
 
             const toAccount = await client.query(
                 `
-        SELECT ba.*, a."AccountCode" as gl_account_code
+        SELECT ba.*, a."AccountCode" as gl_account_code, a."AccountName" as gl_account_name,
+               a."SystemAccountTag" as gl_system_account_tag
         FROM bank_accounts ba
         JOIN accounts a ON a."Id" = ba.gl_account_id
         WHERE ba.id = $1 AND ba.is_active = TRUE
@@ -1106,6 +1070,36 @@ export class BankingService {
 
             const fromGlCode = fromAccount.rows[0].gl_account_code;
             const toGlCode = toAccount.rows[0].gl_account_code;
+
+            // Heal untagged bank GLs, then reject non-liquidity (e.g. AR 1200) with bank names
+            await ensureBankGlLiquidityTag(client, fromAccount.rows[0].gl_account_id);
+            await ensureBankGlLiquidityTag(client, toAccount.rows[0].gl_account_id);
+
+            const fromTagRow = await client.query<{ SystemAccountTag: string | null }>(
+                `SELECT "SystemAccountTag" FROM accounts WHERE "Id" = $1`,
+                [fromAccount.rows[0].gl_account_id],
+            );
+            const toTagRow = await client.query<{ SystemAccountTag: string | null }>(
+                `SELECT "SystemAccountTag" FROM accounts WHERE "Id" = $1`,
+                [toAccount.rows[0].gl_account_id],
+            );
+            const fromTag = fromTagRow.rows[0]?.SystemAccountTag ?? fromAccount.rows[0].gl_system_account_tag;
+            const toTag = toTagRow.rows[0]?.SystemAccountTag ?? toAccount.rows[0].gl_system_account_tag;
+
+            if (!isEligibleBankBookLiquidity(fromGlCode, fromTag)) {
+                throw new Error(
+                    `Cannot transfer from "${fromAccount.rows[0].name}" — it is linked to GL ${fromGlCode} ` +
+                    `(${fromAccount.rows[0].gl_account_name || 'non-liquidity'}), which is not a Cash/Bank account (TD-INV-6). ` +
+                    `Edit the bank account under Banking → Accounts and link it to a bank GL (Create & use this GL), not Accounts Receivable (1200).`,
+                );
+            }
+            if (!isEligibleBankBookLiquidity(toGlCode, toTag)) {
+                throw new Error(
+                    `Cannot transfer to "${toAccount.rows[0].name}" — it is linked to GL ${toGlCode} ` +
+                    `(${toAccount.rows[0].gl_account_name || 'non-liquidity'}), which is not a Cash/Bank account (TD-INV-6). ` +
+                    `Edit the bank account under Banking → Accounts and link it to a bank GL (Create & use this GL), not Accounts Receivable (1200).`,
+                );
+            }
 
             // Prevent transfers between accounts sharing the same GL account
             // This would create invalid double-entry (DR/CR same account) and incorrect balances

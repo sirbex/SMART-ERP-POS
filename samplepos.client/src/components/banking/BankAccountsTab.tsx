@@ -129,8 +129,15 @@ export const BankAccountsTab: React.FC = () => {
         return glAccounts
             .filter((g) => {
                 if (!g.id || usedByOther.has(g.id)) return false;
-                // Hide clearing / non-bank books that should never be deposit destinations
-                if (g.accountCode === '1015' || g.accountCode === '3050' || g.accountCode === '1200') {
+                const code = String(g.accountCode || '');
+                // Never offer AR / inventory / equity / undeposited / P&L as bank-book GLs
+                if (
+                    ['1000', '1015', '1200', '1250', '1300', '1500', '2100', '2200', '3050'].includes(code) ||
+                    /^12\d{2}/.test(code) ||
+                    /^2\d{3}/.test(code) ||
+                    /^3\d{3}/.test(code) ||
+                    /^[4567]\d{3}/.test(code)
+                ) {
                     return false;
                 }
                 return true;
