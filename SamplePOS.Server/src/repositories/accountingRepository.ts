@@ -255,8 +255,9 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
       `
       INSERT INTO accounts (
         "Id", "AccountCode", "AccountName", "AccountType", "NormalBalance",
-        "ParentAccountId", "Level", "IsPostingAccount", "IsActive", "CashFlowClass"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        "ParentAccountId", "Level", "IsPostingAccount", "IsActive", "CashFlowClass",
+        "CurrentBalance", "CreatedAt", "UpdatedAt"
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NOW(), NOW())
       RETURNING 
         "Id" as id,
         "AccountCode" as "accountCode",
@@ -267,7 +268,8 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
         "Level" as level,
         "IsPostingAccount" as "isPostingAccount",
         "IsActive" as "isActive",
-        "CashFlowClass" as "cashFlowClass"
+        "CashFlowClass" as "cashFlowClass",
+        "CurrentBalance" as "currentBalance"
     `,
       [
         id,

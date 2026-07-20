@@ -136,6 +136,19 @@ export async function createTreasuryTransfer(
       rethrowInvariant(err);
     }
 
+    // Undeposited clearing is settled by Deposit Worksheet — not generic Move Money.
+    if (
+      fromAcct.systemAccountTag === 'UNDEPOSITED_FUNDS' ||
+      toAcct.systemAccountTag === 'UNDEPOSITED_FUNDS' ||
+      fromAcct.accountCode === '1015' ||
+      toAcct.accountCode === '1015'
+    ) {
+      throw new ValidationError(
+        `Undeposited Funds (${fromAcct.accountCode === '1015' || fromAcct.systemAccountTag === 'UNDEPOSITED_FUNDS' ? fromAcct.accountCode : toAcct.accountCode}) ` +
+          `cannot be used in Move Money. Use Banking → Undeposited receipts to deposit customer receipts into a bank account.`,
+      );
+    }
+
     await assertSufficientLiquidityFunds(client, fromAcct.accountCode, amount, {
       asOfDate: input.transactionDate,
       actionLabel: `transfer to ${toAcct.accountCode}`,
