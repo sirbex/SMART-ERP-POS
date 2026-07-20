@@ -62,12 +62,17 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
         available: a.available,
       }));
       setAccounts(items);
-      if (!fromAccountCode && items.find((a) => a.accountCode === '1010')) {
-        setFromAccountCode('1010');
-      }
-      if (!toAccountCode && items.find((a) => a.accountCode === '1030')) {
-        setToAccountCode('1030');
-      }
+      const movable = items.filter((a) => a.systemAccountTag !== 'UNDEPOSITED_FUNDS');
+      const pickFrom =
+        movable.find((a) => a.accountCode === '1010' && a.currentBalance > 0) ||
+        movable.find((a) => a.currentBalance > 0) ||
+        movable[0];
+      const pickTo =
+        movable.find((a) => a.accountCode === '1030') ||
+        movable.find((a) => a.accountCode !== pickFrom?.accountCode && a.currentBalance >= 0) ||
+        movable.find((a) => a.accountCode !== pickFrom?.accountCode);
+      if (!fromAccountCode && pickFrom) setFromAccountCode(pickFrom.accountCode);
+      if (!toAccountCode && pickTo) setToAccountCode(pickTo.accountCode);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load liquidity accounts');
     } finally {
@@ -85,14 +90,44 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
     setToAccountCode(fromAccountCode);
   };
 
-  const fromBal = accounts.find((a) => a.accountCode === fromAccountCode)?.currentBalance;
+  const fromAcct = accounts.find((a) => a.accountCode === fromAccountCode);
+  const toAcct = accounts.find((a) => a.accountCode === toAccountCode);
+  const fromBal = fromAcct?.currentBalance;
   const amountNum = Number(amount);
+  const fromIsNegativeOrEmpty = fromBal != null && fromBal <= 0.0001;
   const insufficient =
     Boolean(fromAccountCode) &&
     Number.isFinite(amountNum) &&
     amountNum > 0 &&
     fromBal != null &&
     amountNum > fromBal + 0.0001;
+
+  /** Move Money is for funded liquidity only — undeposited clearing uses Deposit Worksheet. */
+  const transferAccounts = accounts.filter((a) => a.systemAccountTag !== 'UNDEPOSITED_FUNDS');
+  const blockedFromUndeposited = fromAccountCode === '1015' || fromAcct?.systemAccountTag === 'UNDEPOSITED_FUNDS';
+  const blockedToUndeposited = toAccountCode === '1015' || toAcct?.systemAccountTag === 'UNDEPOSITED_FUNDS';
+
+  const blockReason = (() => {
+    if (blockedFromUndeposited || blockedToUndeposited) {
+      return 'Undeposited Funds (1015) cannot be used in Move Money. Use Banking → Undeposited receipts to clear receipts into a bank.';
+    }
+    if (fromIsNegativeOrEmpty && fromAcct) {
+      return (
+        `${fromAcct.accountCode} ${fromAcct.accountName}` +
+        (fromAcct.systemAccountTag ? ` [${fromAcct.systemAccountTag}]` : '') +
+        ` has balance ${formatCurrency(fromBal ?? 0)}. ` +
+        `You cannot move money out of an empty or overdrawn account. Fund it first (or reverse a wrong earlier move).`
+      );
+    }
+    if (insufficient && fromAcct) {
+      return (
+        `Insufficient funds in ${fromAcct.accountCode} ${fromAcct.accountName}` +
+        (fromAcct.systemAccountTag ? ` [${fromAcct.systemAccountTag}]` : '') +
+        `. Available ${formatCurrency(fromBal ?? 0)}, required ${formatCurrency(amountNum)}.`
+      );
+    }
+    return null;
+  })();
 
   const submit = async () => {
     setPosting(true);
@@ -102,11 +137,7 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
       const value = Number(amount);
       if (!fromAccountCode || !toAccountCode) throw new Error('Select from and to accounts');
       if (!(value > 0)) throw new Error('Enter a positive amount');
-      if (insufficient) {
-        throw new Error(
-          `Insufficient funds in ${fromAccountCode}. Available ${formatCurrency(fromBal ?? 0)}, required ${formatCurrency(value)}.`,
-        );
-      }
+      if (blockReason) throw new Error(blockReason);
       const res = await api.treasury.createTransfer({
         transactionDate,
         fromAccountCode,
@@ -185,13 +216,25 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
                 <SelectValue placeholder="From" />
               </SelectTrigger>
               <SelectContent>
-                {accounts.map((a) => (
+                {transferAccounts.map((a) => (
                   <SelectItem key={a.accountCode} value={a.accountCode}>
-                    {a.accountCode} — {a.accountName} ({formatCurrency(a.currentBalance)})
+                    {a.accountCode} — {a.accountName}
+                    {a.systemAccountTag ? ` [${a.systemAccountTag}]` : ''} (
+                    {formatCurrency(a.currentBalance)})
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {fromAcct && (
+              <p
+                className={`text-xs ${fromIsNegativeOrEmpty ? 'text-red-700 font-medium' : 'text-muted-foreground'}`}
+              >
+                Selected: {fromAcct.accountCode} {fromAcct.accountName}
+                {fromAcct.systemAccountTag ? ` [${fromAcct.systemAccountTag}]` : ''} — balance{' '}
+                {formatCurrency(fromAcct.currentBalance)}
+                {fromIsNegativeOrEmpty ? ' — cannot pay out from this account' : ''}
+              </p>
+            )}
           </div>
           <div className="flex justify-center">
             <Button type="button" variant="ghost" size="sm" onClick={swap}>
@@ -206,13 +249,22 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
                 <SelectValue placeholder="To" />
               </SelectTrigger>
               <SelectContent>
-                {accounts.map((a) => (
+                {transferAccounts.map((a) => (
                   <SelectItem key={a.accountCode} value={a.accountCode}>
-                    {a.accountCode} — {a.accountName} ({formatCurrency(a.currentBalance)})
+                    {a.accountCode} — {a.accountName}
+                    {a.systemAccountTag ? ` [${a.systemAccountTag}]` : ''} (
+                    {formatCurrency(a.currentBalance)})
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {toAcct && (
+              <p className="text-xs text-muted-foreground">
+                Selected: {toAcct.accountCode} {toAcct.accountName}
+                {toAcct.systemAccountTag ? ` [${toAcct.systemAccountTag}]` : ''} — balance{' '}
+                {formatCurrency(toAcct.currentBalance)}
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label>Date</Label>
@@ -231,11 +283,10 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
-            {insufficient && (
-              <p className="text-xs text-red-700">
-                Insufficient funds in {fromAccountCode}. Available{' '}
-                {formatCurrency(fromBal ?? 0)}. Reduce the amount or fund the account first.
-              </p>
+            {blockReason && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                {blockReason}
+              </div>
             )}
           </div>
           <div className="space-y-2">
@@ -244,7 +295,7 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
           </div>
           <Button
             className="w-full"
-            disabled={posting || enabled === false || insufficient}
+            disabled={posting || enabled === false || !!blockReason || !(Number(amount) > 0)}
             onClick={() => void submit()}
           >
             {posting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -267,17 +318,35 @@ export default function TreasuryTransferPage({ embedded = false }: { embedded?: 
             (accounting permission; blocked if bank-reconciled). Then post the correct transfer.
           </p>
           <ul className="divide-y rounded border">
-            {accounts.map((a) => (
-              <li key={a.accountCode} className="flex justify-between px-3 py-2">
-                <span>
-                  {a.accountCode} {a.accountName}
-                  {a.systemAccountTag ? (
-                    <span className="ml-2 text-xs">[{a.systemAccountTag}]</span>
-                  ) : null}
-                </span>
-                <span>{formatCurrency(a.currentBalance)}</span>
-              </li>
-            ))}
+            {accounts.map((a) => {
+              const negative = a.currentBalance < -0.0001;
+              return (
+                <li
+                  key={a.accountCode}
+                  className={`flex justify-between gap-2 px-3 py-2 ${negative ? 'bg-red-50' : ''}`}
+                >
+                  <span>
+                    {a.accountCode} {a.accountName}
+                    {a.systemAccountTag ? (
+                      <span className="ml-2 text-xs">[{a.systemAccountTag}]</span>
+                    ) : null}
+                    {negative ? (
+                      <span className="mt-0.5 block text-[11px] font-medium text-red-700">
+                        Overdrawn / negative — cannot pay out from this account
+                      </span>
+                    ) : null}
+                    {a.systemAccountTag === 'UNDEPOSITED_FUNDS' ? (
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                        Clear via Undeposited receipts — not Move Money
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className={negative ? 'font-medium text-red-700' : ''}>
+                    {formatCurrency(a.currentBalance)}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>

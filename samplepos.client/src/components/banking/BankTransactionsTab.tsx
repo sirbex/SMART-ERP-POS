@@ -30,6 +30,21 @@ import {
 import { useTreasuryEnabled } from '../../hooks/useTreasuryEnabled';
 import { formatCurrency } from '../../utils/currency';
 
+/** Disambiguate same-named bank books (e.g. three "PHARMACURE ACCOUNT") in dropdowns. */
+function formatBankAccountLabel(
+    acc: { name: string; bankName?: string | null; glAccountCode?: string | null; currentBalance?: number | null },
+    opts?: { showBalance?: boolean },
+): string {
+    const bits = [acc.name];
+    if (acc.bankName) bits.push(acc.bankName);
+    if (acc.glAccountCode) bits.push(acc.glAccountCode);
+    let label = bits.join(' · ');
+    if (opts?.showBalance) {
+        label += ` (${formatCurrency(acc.currentBalance || 0)})`;
+    }
+    return label;
+}
+
 type TransactionFormData = {
     bankAccountId: string;
     transactionDate: string;
@@ -111,6 +126,7 @@ export const BankTransactionsTab: React.FC = () => {
 
     const [transactionForm, setTransactionForm] = useState<TransactionFormData>(emptyTransactionForm);
     const [transferForm, setTransferForm] = useState<TransferFormData>(emptyTransferForm);
+    const [transactionError, setTransactionError] = useState<string | null>(null);
 
     const { data: accounts = [] } = useBankAccounts();
     const { data: categories = [] } = useBankCategories();
@@ -122,6 +138,20 @@ export const BankTransactionsTab: React.FC = () => {
     });
 
     const transactions = transactionsData?.transactions || [];
+
+    /** Deposit/interest → IN categories; withdrawal/fee → OUT. Exclude transfer categories. */
+    const categoriesForType = useMemo(() => {
+        const isInflow = transactionForm.type === 'DEPOSIT' || transactionForm.type === 'INTEREST';
+        const wantDirection = isInflow ? 'IN' : 'OUT';
+        return categories.filter(
+            (c) =>
+                c.direction === wantDirection &&
+                c.code !== 'TRANSFER_IN' &&
+                c.code !== 'TRANSFER_OUT' &&
+                c.code !== 'CUSTOMER_PAYMENT' &&
+                c.defaultAccountId,
+        );
+    }, [categories, transactionForm.type]);
 
     const createTransactionMutation = useCreateBankTransaction();
     const createTransferMutation = useCreateBankTransfer();
@@ -143,6 +173,7 @@ export const BankTransactionsTab: React.FC = () => {
             ...emptyTransactionForm,
             bankAccountId: filterAccountId || accounts[0]?.id || ''
         });
+        setTransactionError(null);
         setIsTransactionModalOpen(true);
     };
 
@@ -163,6 +194,11 @@ export const BankTransactionsTab: React.FC = () => {
 
     const handleSubmitTransaction = async (e: React.FormEvent) => {
         e.preventDefault();
+        setTransactionError(null);
+        if (!transactionForm.categoryId) {
+            setTransactionError('Select a category with a GL account (e.g. Sales Deposit or Expense Payment).');
+            return;
+        }
         try {
             await createTransactionMutation.mutateAsync({
                 bankAccountId: transactionForm.bankAccountId,
@@ -176,7 +212,7 @@ export const BankTransactionsTab: React.FC = () => {
             setIsTransactionModalOpen(false);
             refetch();
         } catch (error) {
-            console.error('Failed to create transaction:', error);
+            setTransactionError((error as Error).message || 'Failed to create transaction');
         }
     };
 
@@ -285,7 +321,7 @@ export const BankTransactionsTab: React.FC = () => {
                         <SelectContent>
                             <SelectItem value="_all">All Accounts</SelectItem>
                             {accounts.map(acc => (
-                                <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
+                                <SelectItem key={acc.id} value={acc.id}>{formatBankAccountLabel(acc)}</SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
@@ -401,7 +437,7 @@ export const BankTransactionsTab: React.FC = () => {
                                 </SelectTrigger>
                                 <SelectContent>
                                     {accounts.map(acc => (
-                                        <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
+                                        <SelectItem key={acc.id} value={acc.id}>{formatBankAccountLabel(acc)}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
@@ -424,7 +460,8 @@ export const BankTransactionsTab: React.FC = () => {
                                     value={transactionForm.type}
                                     onValueChange={value => setTransactionForm(prev => ({
                                         ...prev,
-                                        type: value as TransactionFormData['type']
+                                        type: value as TransactionFormData['type'],
+                                        categoryId: '',
                                     }))}
                                 >
                                     <SelectTrigger>
@@ -441,7 +478,7 @@ export const BankTransactionsTab: React.FC = () => {
                         </div>
 
                         <div className="space-y-2">
-                            <Label htmlFor="txn-category">Category</Label>
+                            <Label htmlFor="txn-category">Category *</Label>
                             <Select
                                 value={transactionForm.categoryId}
                                 onValueChange={value => setTransactionForm(prev => ({ ...prev, categoryId: value }))}
@@ -450,12 +487,27 @@ export const BankTransactionsTab: React.FC = () => {
                                     <SelectValue placeholder="Select category..." />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {categories.map(cat => (
-                                        <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                                    {categoriesForType.map(cat => (
+                                        <SelectItem key={cat.id} value={cat.id}>
+                                            {cat.name}
+                                            {cat.defaultAccountCode
+                                                ? ` → ${cat.defaultAccountCode}${cat.defaultAccountName ? ` ${cat.defaultAccountName}` : ''}`
+                                                : ''}
+                                        </SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
+                            {transactionForm.type === 'DEPOSIT' && (
+                                <p className="text-xs text-muted-foreground">
+                                    Customer invoice payments: use Accounting → Customer Payments so receipts
+                                    allocate to invoices. Use Sales Deposit for cash sales banked directly.
+                                </p>
+                            )}
                         </div>
+
+                        {transactionError && (
+                            <p className="text-sm text-destructive">{transactionError}</p>
+                        )}
 
                         <div className="space-y-2">
                             <Label htmlFor="txn-amount">Amount *</Label>
@@ -527,7 +579,7 @@ export const BankTransactionsTab: React.FC = () => {
                                 <SelectContent>
                                     {accounts.map(acc => (
                                         <SelectItem key={acc.id} value={acc.id}>
-                                            {acc.name} ({formatCurrency(acc.currentBalance || 0)})
+                                            {formatBankAccountLabel(acc, { showBalance: true })}
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -548,7 +600,7 @@ export const BankTransactionsTab: React.FC = () => {
                                         .filter(acc => acc.id !== transferForm.fromAccountId)
                                         .map(acc => (
                                             <SelectItem key={acc.id} value={acc.id}>
-                                                {acc.name} ({formatCurrency(acc.currentBalance || 0)})
+                                                {formatBankAccountLabel(acc, { showBalance: true })}
                                             </SelectItem>
                                         ))}
                                 </SelectContent>

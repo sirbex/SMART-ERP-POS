@@ -62,15 +62,54 @@ log('\n── Static wiring ──');
   assertTrue('UI opening balance + default', /Opening Balance/.test(tab) && /Set as default/.test(tab));
   assertTrue('UI loads ASSET GL accounts', /type=ASSET/.test(tab));
   assertTrue('UI createMutation payload', /glAccountId: formData\.glAccountId/.test(tab));
+  assertTrue(
+    'UI Create & use GL sends bankLiquidity',
+    /bankLiquidity:\s*true/.test(tab) && /Create & use this GL|Create & use/.test(tab),
+  );
   assertTrue('Route CreateBankAccountSchema', /CreateBankAccountSchema/.test(routes));
   assertTrue('Route createAccount', /BankingService\.createAccount/.test(routes));
   assertTrue('Service unique GL guard', /already used by/.test(service));
+  assertTrue(
+    'Service stamps BANK on linked GL',
+    /ensureBankGlLiquidityTag/.test(service),
+  );
+  assertTrue(
+    'Transfer allocates 2 distinct BTX numbers under one lock',
+    /generateBankTxnNumbers\(client,\s*2\)/.test(service) &&
+      /Allocate N consecutive BTX/.test(service),
+  );
   assertTrue(
     'Service opening BANK_OPENING → 3050 CUTOVER_OB',
     /BANK_OPENING/.test(service) &&
       /3050|OPENING_BALANCE_EQUITY/.test(service) &&
       /CUTOVER_OB/.test(service) &&
       !/ParentId/.test(service),
+  );
+
+  const deposit = readFileSync(
+    path.join(repoRoot, 'SamplePOS.Server/src/modules/treasury/depositWorksheetService.ts'),
+    'utf8',
+  );
+  const coaRoutes = readFileSync(
+    path.join(repoRoot, 'SamplePOS.Server/src/modules/accounting/accountingRoutes.ts'),
+    'utf8',
+  );
+  assertTrue(
+    'Deposit resolveBankGlCode heals BANK tag',
+    /ensureBankGlLiquidityTag/.test(deposit),
+  );
+  assertTrue(
+    'CoA create accepts bankLiquidity → BANK tag',
+    /bankLiquidity/.test(coaRoutes) && /systemAccountTag:\s*bankLiquidity \? 'BANK'/.test(coaRoutes),
+  );
+  assertTrue(
+    'Governance accepts BANK/MOBILE_MONEY/PETTY_CASH debit on TREASURY_DEPOSIT',
+    /MOBILE_MONEY/.test(
+      readFileSync(
+        path.join(repoRoot, 'SamplePOS.Server/src/services/postingGovernanceService.ts'),
+        'utf8',
+      ),
+    ),
   );
 }
 
@@ -90,6 +129,7 @@ if (!jestBin) {
       '--experimental-vm-modules',
       jestBin,
       'src/services/bankingCreateAccountProof.test.ts',
+      'src/modules/banking/ensureBankGlLiquidityTag.test.ts',
       '--no-coverage',
     ],
     { cwd: serverRoot, encoding: 'utf8', shell: false },

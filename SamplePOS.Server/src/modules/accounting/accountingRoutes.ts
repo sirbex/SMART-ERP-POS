@@ -48,6 +48,8 @@ const CreateAccountSchema = z.object({
   parentAccountId: z.string().uuid().optional().nullable(),
   isPostingAccount: z.boolean().optional().default(true),
   cashFlowClass: z.enum(['operating', 'investing', 'financing']).optional().nullable(),
+  /** Banking "Create & use this GL" — stamps SystemAccountTag=BANK for deposit eligibility */
+  bankLiquidity: z.boolean().optional().default(false),
 });
 const GLQuerySchema = z.object({
   page: z
@@ -210,7 +212,23 @@ router.post(
       parentAccountId,
       isPostingAccount,
       cashFlowClass,
+      bankLiquidity,
     } = CreateAccountSchema.parse(req.body);
+
+    if (bankLiquidity) {
+      if (accountType !== 'ASSET') {
+        return res.status(400).json({
+          success: false,
+          error: 'bankLiquidity GLs must be ASSET accounts',
+        });
+      }
+      if (isPostingAccount === false) {
+        return res.status(400).json({
+          success: false,
+          error: 'bankLiquidity GLs must be posting accounts',
+        });
+      }
+    }
 
     // Determine level based on parent
     let level = 1;
@@ -232,6 +250,7 @@ router.post(
         isPostingAccount: isPostingAccount !== false,
         isActive: true,
         cashFlowClass: cashFlowClass ?? null,
+        systemAccountTag: bankLiquidity ? 'BANK' : null,
       },
       pool
     );

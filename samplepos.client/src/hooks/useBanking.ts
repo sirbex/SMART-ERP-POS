@@ -180,8 +180,12 @@ const bankingApi = {
             body: JSON.stringify(data)
         });
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.error || 'Failed to create transaction');
+            const err = await response.json().catch(() => ({}));
+            const detail =
+                typeof err.error === 'string'
+                    ? err.error
+                    : err.error?.message || err.message || 'Failed to create transaction';
+            throw new Error(detail);
         }
         const result = await response.json();
         return result.data;

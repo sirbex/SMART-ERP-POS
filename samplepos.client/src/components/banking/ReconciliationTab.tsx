@@ -6,7 +6,7 @@
  *   Difference = Statement ending − Cleared  → must be ~0 to post
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Decimal from 'decimal.js';
 import { CheckCircle2, Circle, Calculator } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,8 @@ export const ReconciliationTab: React.FC = () => {
         clearedBalance: number;
         bookBalance: number;
     } | null>(null);
+    /** User typed statement ending manually — do not overwrite with auto-fill. */
+    const statementBalanceTouched = useRef(false);
 
     const { data: accounts = [] } = useBankAccounts();
     const { data: transactionsData } = useBankTransactions({
@@ -111,6 +113,32 @@ export const ReconciliationTab: React.FC = () => {
     }, [statementBalance, selectedAccount, totals.clearedBalance]);
 
     const isBalanced = difference != null && Math.abs(difference) <= 0.01;
+
+    const reconcileDisabledReason = useMemo(() => {
+        if (!selectedAccountId) return 'Select a bank account';
+        if (selectedTransactionIds.size === 0) return 'Select at least one transaction on the statement';
+        if (!statementBalance.trim()) {
+            return 'Enter the statement ending balance from your bank (for first reconciliation, this is usually the opening balance)';
+        }
+        if (difference == null) return 'Enter a valid statement ending balance';
+        if (!isBalanced) {
+            return `Difference must be zero (currently ${formatCurrency(difference)}). Adjust selected items or the statement ending balance.`;
+        }
+        return null;
+    }, [
+        selectedAccountId,
+        selectedTransactionIds.size,
+        statementBalance,
+        difference,
+        isBalanced,
+    ]);
+
+    // First reconciliation: when user checks transactions, pre-fill statement ending = cleared.
+    useEffect(() => {
+        if (statementBalanceTouched.current) return;
+        if (selectedTransactionIds.size === 0 || totals.clearedBalance === 0) return;
+        setStatementBalance(String(totals.clearedBalance));
+    }, [selectedTransactionIds, totals.clearedBalance]);
 
     const handleToggleTransaction = (transactionId: string) => {
         setSelectedTransactionIds((prev) => {
@@ -194,6 +222,8 @@ export const ReconciliationTab: React.FC = () => {
                                     setSelectedAccountId(id);
                                     setSelectedTransactionIds(new Set());
                                     setReconcileResult(null);
+                                    setStatementBalance('');
+                                    statementBalanceTouched.current = false;
                                 }}
                             >
                                 <SelectTrigger>
@@ -216,6 +246,8 @@ export const ReconciliationTab: React.FC = () => {
                                 onChange={(d) => {
                                     setStatementDate(d);
                                     setSelectedTransactionIds(new Set());
+                                    setStatementBalance('');
+                                    statementBalanceTouched.current = false;
                                 }}
                                 placeholder="Statement date"
                             />
@@ -223,13 +255,37 @@ export const ReconciliationTab: React.FC = () => {
 
                         <div className="space-y-2">
                             <Label>Statement Ending Balance</Label>
-                            <Input
-                                type="number"
-                                step="0.01"
-                                value={statementBalance}
-                                onChange={(e) => setStatementBalance(e.target.value)}
-                                placeholder="0.00"
-                            />
+                            <div className="flex gap-2">
+                                <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={statementBalance}
+                                    onChange={(e) => {
+                                        statementBalanceTouched.current = true;
+                                        setStatementBalance(e.target.value);
+                                    }}
+                                    placeholder="0.00"
+                                />
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="shrink-0"
+                                    disabled={totals.clearedBalance === 0}
+                                    onClick={() => {
+                                        statementBalanceTouched.current = true;
+                                        setStatementBalance(String(totals.clearedBalance));
+                                    }}
+                                >
+                                    Use cleared
+                                </Button>
+                            </div>
+                            {neverReconciled && (
+                                <p className="text-xs text-muted-foreground">
+                                    First reconciliation: check the opening-balance line, then enter the
+                                    same amount as your statement ending balance.
+                                </p>
+                            )}
                         </div>
 
                         <div className="space-y-2">
@@ -365,16 +421,19 @@ export const ReconciliationTab: React.FC = () => {
                                     size="sm"
                                     onClick={handleReconcile}
                                     disabled={
-                                        selectedTransactionIds.size === 0 ||
-                                        !isBalanced ||
+                                        !!reconcileDisabledReason ||
                                         reconcileMutation.isPending
                                     }
+                                    title={reconcileDisabledReason ?? undefined}
                                 >
                                     {reconcileMutation.isPending
                                         ? 'Reconciling...'
                                         : 'Reconcile Selected'}
                                 </Button>
                             </div>
+                            {reconcileDisabledReason && selectedTransactionIds.size > 0 && (
+                                <p className="text-sm text-amber-700 mt-2">{reconcileDisabledReason}</p>
+                            )}
                         </div>
                     </CardHeader>
                     <CardContent>

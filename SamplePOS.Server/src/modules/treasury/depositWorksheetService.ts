@@ -23,6 +23,7 @@ import {
   assertDepositConsumesUnsettled,
   assertSettlementCeiling,
 } from '@shared/treasury/index.js';
+import { ensureBankGlLiquidityTag } from '../banking/ensureBankGlLiquidityTag.js';
 
 const CLEARING_CODE = '1015';
 const SHORTAGE_CODE = '6850';
@@ -64,13 +65,15 @@ function rethrowInvariant(err: unknown): never {
 
 async function resolveBankGlCode(client: PoolClient, bankAccountId: string): Promise<string> {
   const result = await client.query<{
+    gl_account_id: string;
     gl_account_code: string;
     name: string;
     account_type: string;
     system_account_tag: string | null;
     is_posting: boolean;
   }>(
-    `SELECT a."AccountCode" AS gl_account_code,
+    `SELECT a."Id" AS gl_account_id,
+            a."AccountCode" AS gl_account_code,
             ba.name,
             a."AccountType" AS account_type,
             a."SystemAccountTag" AS system_account_tag,
@@ -113,6 +116,10 @@ async function resolveBankGlCode(client: PoolClient, bankAccountId: string): Pro
       `Bank account "${row.name}" is linked to header GL ${code}. Select a posting Asset account.`,
     );
   }
+
+  // Never fail TREASURY_DEPOSIT because CoA create left SystemAccountTag null.
+  await ensureBankGlLiquidityTag(client, row.gl_account_id);
+
   return code;
 }
 

@@ -4,7 +4,7 @@
  * Displays list of bank accounts with CRUD operations.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Plus, Edit, Building2, CheckCircle, XCircle, Bell, BellOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -108,16 +108,106 @@ export const BankAccountsTab: React.FC = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingAccount, setEditingAccount] = useState<BankAccount | null>(null);
     const [formData, setFormData] = useState<AccountFormData>(emptyForm);
+    const [showCreateGl, setShowCreateGl] = useState(false);
+    const [newGlCode, setNewGlCode] = useState('');
+    const [newGlName, setNewGlName] = useState('');
+    const [creatingGl, setCreatingGl] = useState(false);
 
     const { data: accounts = [], isLoading, refetch } = useBankAccounts(showInactive);
-    const { data: glAccounts = [] } = useGLAccounts();
+    const { data: glAccounts = [], refetch: refetchGlAccounts } = useGLAccounts();
     const createMutation = useCreateBankAccount();
     const updateMutation = useUpdateBankAccount();
     const lowBalanceMutation = useSetLowBalanceThreshold();
 
+    /** GLs already linked to another active bank book — hide from picker (keep current when editing). */
+    const availableGlAccounts = useMemo(() => {
+        const usedByOther = new Set(
+            accounts
+                .filter((a) => a.isActive !== false && a.glAccountId && a.id !== editingAccount?.id)
+                .map((a) => a.glAccountId),
+        );
+        return glAccounts
+            .filter((g) => {
+                if (!g.id || usedByOther.has(g.id)) return false;
+                // Hide clearing / non-bank books that should never be deposit destinations
+                if (g.accountCode === '1015' || g.accountCode === '3050' || g.accountCode === '1200') {
+                    return false;
+                }
+                return true;
+            })
+            .sort((a, b) => a.accountCode.localeCompare(b.accountCode, undefined, { numeric: true }));
+    }, [accounts, glAccounts, editingAccount?.id]);
+
+    const suggestedGlCode = useMemo(() => {
+        const usedCodes = new Set(
+            [...accounts.map((a) => a.glAccountCode), ...glAccounts.map((g) => g.accountCode)].filter(
+                Boolean,
+            ) as string[],
+        );
+        for (let n = 1031; n <= 1090; n++) {
+            const code = String(n);
+            if (!usedCodes.has(code)) return code;
+        }
+        return `10${Date.now().toString().slice(-4)}`;
+    }, [accounts, glAccounts]);
+
+    const handleCreateGlInline = async () => {
+        const code = (newGlCode || suggestedGlCode).trim();
+        const name = newGlName.trim() || formData.name.trim() || 'Bank Account';
+        if (!code) {
+            toast.error('Enter a GL account code (e.g. 1031)');
+            return;
+        }
+        setCreatingGl(true);
+        try {
+            const response = await fetch('/api/accounting/chart-of-accounts', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+                },
+                body: JSON.stringify({
+                    accountNumber: code,
+                    accountName: name,
+                    accountType: 'ASSET',
+                    normalBalance: 'DEBIT',
+                    isPostingAccount: true,
+                    // Required for Deposit Worksheet (TREASURY_DEPOSIT) — stamps SystemAccountTag=BANK
+                    bankLiquidity: true,
+                }),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                const detail =
+                    typeof result.error === 'string'
+                        ? result.error
+                        : result.error?.message || result.message || 'Failed to create GL account';
+                throw new Error(detail);
+            }
+            const createdId = String(result.data?.id ?? '');
+            await refetchGlAccounts();
+            if (createdId) {
+                setFormData((prev) => ({ ...prev, glAccountId: createdId }));
+            }
+            setShowCreateGl(false);
+            setNewGlCode('');
+            setNewGlName('');
+            toast.success(`Created GL ${code} — ${name}`);
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Failed to create GL account');
+        } finally {
+            setCreatingGl(false);
+        }
+    };
+
     const handleOpenCreate = () => {
         setEditingAccount(null);
         setFormData(emptyForm);
+        setShowCreateGl(false);
+        setNewGlCode('');
+        setNewGlName('');
+        void refetch();
+        void refetchGlAccounts();
         setIsModalOpen(true);
     };
 
@@ -134,6 +224,11 @@ export const BankAccountsTab: React.FC = () => {
             lowBalanceThreshold: moneyToInput(account.lowBalanceThreshold),
             lowBalanceAlertEnabled: account.lowBalanceAlertEnabled || false
         });
+        setShowCreateGl(false);
+        setNewGlCode('');
+        setNewGlName('');
+        void refetch();
+        void refetchGlAccounts();
         setIsModalOpen(true);
     };
 
@@ -377,26 +472,80 @@ export const BankAccountsTab: React.FC = () => {
                         </div>
 
                         <div className="space-y-2">
-                            <Label htmlFor="glAccount">GL Account *</Label>
-                            <Select
-                                value={formData.glAccountId}
-                                onValueChange={value => setFormData(prev => ({ ...prev, glAccountId: value }))}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select GL account..." />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {glAccounts
-                                        .filter((acc) => acc.id && acc.id !== '')
-                                        .map((acc) => (
+                            <div className="flex items-center justify-between gap-2">
+                                <Label htmlFor="glAccount">GL Account *</Label>
+                                <Button
+                                    type="button"
+                                    variant="link"
+                                    className="h-auto p-0 text-xs"
+                                    onClick={() => {
+                                        setShowCreateGl((v) => !v);
+                                        if (!newGlCode) setNewGlCode(suggestedGlCode);
+                                        if (!newGlName && formData.name) setNewGlName(formData.name);
+                                    }}
+                                >
+                                    {showCreateGl ? 'Cancel new GL' : '+ Create new GL'}
+                                </Button>
+                            </div>
+                            {showCreateGl ? (
+                                <div className="rounded-md border bg-muted/30 p-3 space-y-3">
+                                    <p className="text-xs text-muted-foreground">
+                                        Creates a posting Asset account, then selects it for this bank book.
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div className="space-y-1">
+                                            <Label className="text-xs">Code *</Label>
+                                            <Input
+                                                value={newGlCode}
+                                                onChange={(e) => setNewGlCode(e.target.value)}
+                                                placeholder={suggestedGlCode}
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-xs">Name *</Label>
+                                            <Input
+                                                value={newGlName}
+                                                onChange={(e) => setNewGlName(e.target.value)}
+                                                placeholder={formData.name || 'e.g. Stanbic Operating'}
+                                            />
+                                        </div>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        disabled={creatingGl}
+                                        onClick={() => void handleCreateGlInline()}
+                                    >
+                                        {creatingGl ? 'Creating…' : 'Create & use this GL'}
+                                    </Button>
+                                </div>
+                            ) : (
+                                <Select
+                                    value={formData.glAccountId}
+                                    onValueChange={(value) =>
+                                        setFormData((prev) => ({ ...prev, glAccountId: value }))
+                                    }
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue
+                                            placeholder={
+                                                availableGlAccounts.length === 0
+                                                    ? 'No free GL — create one above'
+                                                    : 'Select GL account…'
+                                            }
+                                        />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {availableGlAccounts.map((acc) => (
                                             <SelectItem key={acc.id} value={acc.id}>
                                                 {acc.accountCode} - {acc.accountName}
                                             </SelectItem>
                                         ))}
-                                </SelectContent>
-                            </Select>
+                                    </SelectContent>
+                                </Select>
+                            )}
                             <p className="text-xs text-muted-foreground">
-                                Must be a unique posting Asset account (Cash at Bank), not revenue/expense.
+                                Each bank book needs its own unused Asset GL. Used accounts are hidden from this list.
                             </p>
                         </div>
 
@@ -484,7 +633,13 @@ export const BankAccountsTab: React.FC = () => {
                             </Button>
                             <Button
                                 type="submit"
-                                disabled={createMutation.isPending || updateMutation.isPending || lowBalanceMutation.isPending}
+                                disabled={
+                                    createMutation.isPending ||
+                                    updateMutation.isPending ||
+                                    lowBalanceMutation.isPending ||
+                                    !formData.glAccountId ||
+                                    (!editingAccount && availableGlAccounts.length === 0)
+                                }
                             >
                                 {createMutation.isPending || updateMutation.isPending || lowBalanceMutation.isPending
                                     ? 'Saving...'

@@ -22,6 +22,7 @@ import { AccountingCore, JournalEntryRequest } from './accountingCore.js';
 import logger from '../utils/logger.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import { SYSTEM_USER_ID } from '../utils/constants.js';
+import { ensureBankGlLiquidityTag } from '../modules/banking/ensureBankGlLiquidityTag.js';
 
 import type {
     BankAccount,
@@ -118,21 +119,40 @@ export class BankingService {
      * Replaces fn_generate_bank_txn_number() which used a sequence
      */
     private static async generateBankTxnNumber(client: pg.Pool | pg.PoolClient): Promise<string> {
+        const [num] = await BankingService.generateBankTxnNumbers(client, 1);
+        return num;
+    }
+
+    /**
+     * Allocate N consecutive BTX numbers under one advisory lock.
+     * Required for transfers (OUT+IN) — calling generateBankTxnNumber twice
+     * before INSERT reused the same MAX+1 and hit bank_transactions_transaction_number_key.
+     */
+    private static async generateBankTxnNumbers(
+        client: pg.Pool | pg.PoolClient,
+        count: number,
+    ): Promise<string[]> {
+        if (count < 1) {
+            throw new Error('generateBankTxnNumbers requires count >= 1');
+        }
         const year = getBusinessYear();
         const prefix = `BTX-${year}-`;
         // Serialize number allocation (MAX+1 without lock races under concurrent posts)
         await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [prefix]);
         // IMPORTANT: use substr(string, int) — "SUBSTRING(x FROM $n)" with a bound
         // parameter is parsed as regex substring and returns NULL.
-        const result = await client.query(
+        const result = await client.query<{ next_num: number | string }>(
             `SELECT COALESCE(
                MAX(CAST(NULLIF(substr(transaction_number, $2), '') AS INTEGER)),
                0
              ) + 1 AS next_num
              FROM bank_transactions WHERE transaction_number LIKE $1`,
-            [`${prefix}%`, prefix.length + 1]
+            [`${prefix}%`, prefix.length + 1],
         );
-        return `${prefix}${String(result.rows[0].next_num).padStart(4, '0')}`;
+        const start = Number(result.rows[0]?.next_num ?? 1);
+        return Array.from({ length: count }, (_, i) =>
+            `${prefix}${String(start + i).padStart(4, '0')}`,
+        );
     }
 
     /**
@@ -274,6 +294,9 @@ export class BankingService {
                     `Please create a new GL sub-account or select a different one.`
                 );
             }
+
+            // Untagged CoA bank GLs (e.g. 1032 Centenary) must be BANK for TREASURY_DEPOSIT.
+            await ensureBankGlLiquidityTag(client, dto.glAccountId);
 
             // If setting as default, clear other defaults first
             if (dto.isDefault) {
@@ -426,8 +449,14 @@ export class BankingService {
                         `bank account "${clash.rows[0].name}".`,
                     );
                 }
+                await ensureBankGlLiquidityTag(client, dto.glAccountId);
                 nextGlId = dto.glAccountId;
                 nextGlCode = String(glRow.AccountCode);
+            }
+
+            // Heal untagged bank GLs on any update (e.g. Centenary created before BANK stamp)
+            if (nextGlId) {
+                await ensureBankGlLiquidityTag(client, nextGlId);
             }
 
             if (dto.isDefault === true) {
@@ -1097,9 +1126,8 @@ export class BankingService {
                 actionLabel: `bank transfer to ${toAccount.rows[0].name}`,
             });
 
-            // Generate transaction numbers
-            const outTxnNum = await BankingService.generateBankTxnNumber(client);
-            const inTxnNum = await BankingService.generateBankTxnNumber(client);
+            // Generate transaction numbers (must be distinct — allocate together under one lock)
+            const [outTxnNum, inTxnNum] = await BankingService.generateBankTxnNumbers(client, 2);
 
             const outTxnId = uuidv4();
             const inTxnId = uuidv4();

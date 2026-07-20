@@ -126,7 +126,7 @@ export async function getWhtJournalAuditLane(pool: Db, asOfDate?: string) {
        lt."ReferenceNumber" AS reference_number,
        lt."TransactionDate"::text AS transaction_date,
        lt."IsReversed" AS is_reversed,
-       (lt."ReversedTransactionId" IS NOT NULL) AS is_reversing_entry,
+       (lt."ReversesTransactionId" IS NOT NULL) AS is_reversing_entry,
        a."AccountCode" AS account_code,
        CASE
          WHEN a."AccountCode" = $1
@@ -140,7 +140,7 @@ export async function getWhtJournalAuditLane(pool: Db, asOfDate?: string) {
        AND lt."Status" = 'POSTED'
        AND lt."TransactionDate"::DATE <= $3::date
      GROUP BY lt."Id", lt."TransactionNumber", lt."ReferenceType", lt."ReferenceNumber",
-              lt."TransactionDate", lt."IsReversed", lt."ReversedTransactionId", a."AccountCode"
+              lt."TransactionDate", lt."IsReversed", lt."ReversesTransactionId", a."AccountCode"
      ORDER BY lt."TransactionDate" DESC
      LIMIT 100`,
     [AccountCodes.WHT_PAYABLE, AccountCodes.WHT_RECEIVABLE, date],

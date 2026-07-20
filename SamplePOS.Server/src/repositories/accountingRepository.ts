@@ -39,6 +39,8 @@ export interface Account {
   currentBalance?: string | number; // Optional: returned from DB as string for precision
   /** IAS 7 Cash Flow classification. NULL for Cash/Bank accounts (they are the subject, not classifiers). */
   cashFlowClass?: 'operating' | 'investing' | 'financing' | null;
+  /** System posting role — BANK for bank-book GLs so TREASURY_DEPOSIT accepts them */
+  systemAccountTag?: string | null;
 }
 
 export interface JournalEntry {
@@ -256,8 +258,9 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
       INSERT INTO accounts (
         "Id", "AccountCode", "AccountName", "AccountType", "NormalBalance",
         "ParentAccountId", "Level", "IsPostingAccount", "IsActive", "CashFlowClass",
+        "SystemAccountTag",
         "CurrentBalance", "CreatedAt", "UpdatedAt"
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, NOW(), NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, NOW(), NOW())
       RETURNING 
         "Id" as id,
         "AccountCode" as "accountCode",
@@ -269,6 +272,7 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
         "IsPostingAccount" as "isPostingAccount",
         "IsActive" as "isActive",
         "CashFlowClass" as "cashFlowClass",
+        "SystemAccountTag" as "systemAccountTag",
         "CurrentBalance" as "currentBalance"
     `,
       [
@@ -282,6 +286,7 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
         data.isPostingAccount,
         data.isActive,
         data.cashFlowClass ?? null,
+        data.systemAccountTag ?? null,
       ]
     );
 

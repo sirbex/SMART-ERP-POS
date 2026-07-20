@@ -345,9 +345,14 @@ export class PostingGovernanceService {
             const hasDebitCashOrBank = lines.some((l) => {
                 const acct = findAccount(accounts, l.accountCode);
                 if (l.debitAmount <= 0 || !acct) return false;
+                // Any liquidity destination: till, bank books, MoMo, petty cash, card clearing.
+                // Extra bank GLs (1031/1032/…) must carry SystemAccountTag BANK (set on bank-account link).
                 return (
                     acct.systemAccountTag === 'CASH' ||
                     acct.systemAccountTag === 'BANK' ||
+                    acct.systemAccountTag === 'MOBILE_MONEY' ||
+                    acct.systemAccountTag === 'PETTY_CASH' ||
+                    acct.systemAccountTag === 'CARD_CLEARING' ||
                     acct.accountCode === '1010' ||
                     acct.accountCode === '1030'
                 );

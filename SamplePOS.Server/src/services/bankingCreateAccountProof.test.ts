@@ -82,8 +82,12 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
         qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true }]),
       )
       .mockResolvedValueOnce(qResult([])) // no GL conflict
+      .mockResolvedValueOnce(
+        qResult([{ AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true, SystemAccountTag: 'BANK' }]),
+      ) // ensureBankGlLiquidityTag — already tagged
       .mockResolvedValueOnce(mockInsertReturning())
       .mockResolvedValueOnce(qResult([])); // audit_log
+    (mockPool.query as jest.Mock).mockResolvedValue(qResult([])); // getAccountById → fall back to created
 
     const account = await BankingService.createAccount(
       {
@@ -153,9 +157,13 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
         qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Bank', AccountType: 'ASSET', IsPostingAccount: true }]),
       )
       .mockResolvedValueOnce(qResult([]))
+      .mockResolvedValueOnce(
+        qResult([{ AccountCode: '1030', AccountName: 'Bank', AccountType: 'ASSET', IsPostingAccount: true, SystemAccountTag: 'BANK' }]),
+      )
       .mockResolvedValueOnce(qResult([])) // clear defaults UPDATE
       .mockResolvedValueOnce(mockInsertReturning({ is_default: true }))
       .mockResolvedValueOnce(qResult([])); // audit
+    (mockPool.query as jest.Mock).mockResolvedValue(qResult([]));
 
     await BankingService.createAccount(
       { name: 'Default Bank', glAccountId: GL_ID, isDefault: true },
@@ -175,12 +183,16 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
         qResult([{ Id: GL_ID, AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true }]),
       )
       .mockResolvedValueOnce(qResult([])) // no GL conflict
+      .mockResolvedValueOnce(
+        qResult([{ AccountCode: '1030', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true, SystemAccountTag: 'BANK' }]),
+      )
       .mockResolvedValueOnce(mockInsertReturning())
       .mockResolvedValueOnce(qResult([{ AccountCode: '3050' }])) // OBE tagged
       .mockResolvedValueOnce(qResult([])) // advisory lock
       .mockResolvedValueOnce(qResult([{ next_num: 1 }])) // BTX number
       .mockResolvedValueOnce(qResult([])) // insert bank_transactions
       .mockResolvedValueOnce(qResult([])); // audit
+    (mockPool.query as jest.Mock).mockResolvedValue(qResult([]));
 
     await BankingService.createAccount(
       {
@@ -204,6 +216,32 @@ describe('Add Bank Account (BankingService.createAccount)', () => {
       expect.objectContaining({ accountCode: '1030', debitAmount: 5_000_000, creditAmount: 0 }),
       expect.objectContaining({ accountCode: '3050', debitAmount: 0, creditAmount: 5_000_000 }),
     ]);
+  });
+
+  it('stamps BANK tag when linked GL is untagged (Create & use this GL)', async () => {
+    mockClientQuery
+      .mockResolvedValueOnce(
+        qResult([{ Id: GL_ID, AccountCode: '1033', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true }]),
+      )
+      .mockResolvedValueOnce(qResult([]))
+      .mockResolvedValueOnce(
+        qResult([{ AccountCode: '1033', AccountName: 'Stanbic Operating', AccountType: 'ASSET', IsPostingAccount: true, SystemAccountTag: null }]),
+      )
+      .mockResolvedValueOnce(qResult([])) // UPDATE SystemAccountTag = BANK
+      .mockResolvedValueOnce(mockInsertReturning({ name: 'Stanbic Book', gl_account_id: GL_ID }))
+      .mockResolvedValueOnce(qResult([]));
+    (mockPool.query as jest.Mock).mockResolvedValue(qResult([]));
+
+    await BankingService.createAccount(
+      { name: 'Stanbic Book', glAccountId: GL_ID },
+      USER_ID,
+      mockPool,
+    );
+
+    const stamp = mockClientQuery.mock.calls.find(
+      (c) => typeof c[0] === 'string' && String(c[0]).includes('"SystemAccountTag" = \'BANK\''),
+    );
+    expect(stamp).toBeTruthy();
   });
 });
 
@@ -235,6 +273,7 @@ describe('Add Bank Account UI + API wiring', () => {
     expect(tab).toMatch(/useCreateBankAccount/);
     expect(tab).toMatch(/glAccountId/);
     expect(tab).toMatch(/openingBalance/);
+    expect(tab).toMatch(/bankLiquidity:\s*true/);
 
     expect(routes).toMatch(/CreateBankAccountSchema/);
     expect(routes).toMatch(/UpdateBankAccountSchema/);

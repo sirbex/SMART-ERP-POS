@@ -41,13 +41,16 @@ export const adminRepository = {
         assertSafeTableName(tableName);
         try {
           await client.query(`SAVEPOINT sp_${step}`);
-          const result = await client.query(
-            `DELETE FROM ${tableName} WHERE id IS NOT NULL RETURNING id`
-          );
+          // No WHERE id — some tables use PascalCase "Id" (or other PKs).
+          const result = await client.query(`DELETE FROM ${tableName}`);
           await client.query(`RELEASE SAVEPOINT sp_${step}`);
           return result.rowCount || 0;
         } catch (error: unknown) {
-          await client.query(`ROLLBACK TO SAVEPOINT sp_${step}`);
+          try {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_${step}`);
+          } catch {
+            /* transaction already aborted or savepoint missing */
+          }
           logger.warn(`Table ${tableName} not found or error: ${(error instanceof Error ? error.message : String(error))}`);
           return 0;
         }
@@ -84,12 +87,35 @@ export const adminRepository = {
       try {
         await client.query('SAVEPOINT sp_reset_account_balances');
         const accountReset = await client.query(`
-          UPDATE accounts SET "CurrentBalance" = 0, updated_at = NOW() WHERE id IS NOT NULL
+          UPDATE accounts SET "CurrentBalance" = 0, "UpdatedAt" = NOW()
         `);
         deletedRecords.accounts_balance_reset = accountReset.rowCount || 0;
         await client.query('RELEASE SAVEPOINT sp_reset_account_balances');
-      } catch {
-        deletedRecords.accounts_balance_reset = 0;
+      } catch (error: unknown) {
+        try {
+          await client.query('ROLLBACK TO SAVEPOINT sp_reset_account_balances');
+        } catch {
+          /* ignore */
+        }
+        // Fallback if UpdatedAt column naming differs
+        try {
+          await client.query('SAVEPOINT sp_reset_account_balances2');
+          const accountReset = await client.query(`
+            UPDATE accounts SET "CurrentBalance" = 0
+          `);
+          deletedRecords.accounts_balance_reset = accountReset.rowCount || 0;
+          await client.query('RELEASE SAVEPOINT sp_reset_account_balances2');
+        } catch (error2: unknown) {
+          try {
+            await client.query('ROLLBACK TO SAVEPOINT sp_reset_account_balances2');
+          } catch {
+            /* ignore */
+          }
+          logger.warn(
+            `Account balance reset skipped: ${(error2 instanceof Error ? error2.message : String(error2)) || (error instanceof Error ? error.message : String(error))}`
+          );
+          deletedRecords.accounts_balance_reset = 0;
+        }
       }
 
       // =========================================================================
@@ -125,6 +151,16 @@ export const adminRepository = {
       deletedRecords.accounting_period_history = await safeDelete('accounting_period_history', step++);
       deletedRecords.accounting_periods = await safeDelete('accounting_periods', step++);
 
+      // Treasury documents + deposit-worksheet settlement (CRP unsettled receipts)
+      deletedRecords.receipt_settlement_applications = await safeDelete(
+        'receipt_settlement_applications',
+        step++
+      );
+      deletedRecords.receipt_settlements = await safeDelete('receipt_settlements', step++);
+      deletedRecords.treasury_document_audit = await safeDelete('treasury_document_audit', step++);
+      deletedRecords.treasury_document_lines = await safeDelete('treasury_document_lines', step++);
+      deletedRecords.treasury_documents = await safeDelete('treasury_documents', step++);
+
       // =========================================================================
       // PHASE 2: SALES & CUSTOMER DATA
       // =========================================================================
@@ -137,6 +173,9 @@ export const adminRepository = {
       deletedRecords.customer_deposits = await safeDelete('customer_deposits', step++);
       deletedRecords.pos_customer_deposits = await safeDelete('pos_customer_deposits', step++);
       deletedRecords.customer_payments = await safeDelete('customer_payments', step++);
+      // AR receipt headers (CRP-*) — separate from legacy customer_payments
+      deletedRecords.ar_payment_allocations = await safeDelete('ar_payment_allocations', step++);
+      deletedRecords.ar_customer_payments = await safeDelete('ar_customer_payments', step++);
       deletedRecords.customer_credits = await safeDelete('customer_credits', step++);
       deletedRecords.customer_balance_adjustments = await safeDelete('customer_balance_adjustments', step++);
       deletedRecords.customer_accounts = await safeDelete('customer_accounts', step++);
@@ -153,12 +192,22 @@ export const adminRepository = {
       deletedRecords.sale_discounts = await safeDelete('sale_discounts', step++);
 
       // Sales
+      deletedRecords.sale_discounts = await safeDelete('sale_discounts', step++);
+      deletedRecords.sale_line_price_events = await safeDelete('sale_line_price_events', step++);
+      deletedRecords.sale_payments = await safeDelete('sale_payments', step++);
       deletedRecords.sale_items = await safeDelete('sale_items', step++);
       deletedRecords.sales = await safeDelete('sales', step++);
+      // Denormalized report state (survives DELETE FROM sales if not cleared)
+      deletedRecords.sales_daily_summary = await safeDelete('sales_daily_summary', step++);
+      deletedRecords.product_daily_summary = await safeDelete('product_daily_summary', step++);
+      deletedRecords.dist_sales_order_lines = await safeDelete('dist_sales_order_lines', step++);
+      deletedRecords.dist_sales_orders = await safeDelete('dist_sales_orders', step++);
 
       // Held orders
       deletedRecords.pos_held_order_items = await safeDelete('pos_held_order_items', step++);
       deletedRecords.pos_held_orders = await safeDelete('pos_held_orders', step++);
+      deletedRecords.pos_order_items = await safeDelete('pos_order_items', step++);
+      deletedRecords.pos_orders = await safeDelete('pos_orders', step++);
 
       // =========================================================================
       // PHASE 3: SUPPLIER & PURCHASE DATA
@@ -324,11 +373,15 @@ export const adminRepository = {
         await client.query(`
           UPDATE customers 
           SET balance = 0, updated_at = NOW()
-          WHERE id IS NOT NULL
         `);
         await client.query('RELEASE SAVEPOINT sp_reset_customers');
         logger.info('Reset customer balances to zero');
       } catch (error) {
+        try {
+          await client.query('ROLLBACK TO SAVEPOINT sp_reset_customers');
+        } catch {
+          /* ignore */
+        }
         logger.warn('Customer balance reset failed', { error: (error as Error).message });
       }
 
@@ -338,11 +391,15 @@ export const adminRepository = {
         await client.query(`
           UPDATE suppliers 
           SET "OutstandingBalance" = 0, "UpdatedAt" = NOW()
-          WHERE "Id" IS NOT NULL
         `);
         await client.query('RELEASE SAVEPOINT sp_reset_suppliers');
         logger.info('Reset supplier balances to zero');
       } catch (error) {
+        try {
+          await client.query('ROLLBACK TO SAVEPOINT sp_reset_suppliers');
+        } catch {
+          /* ignore */
+        }
         logger.warn('Supplier balance reset failed', { error: (error as Error).message });
       }
 
@@ -463,16 +520,22 @@ export const adminRepository = {
     // Transactional data counts (can be cleared)
     const transactionalTables = [
       // Sales & POS
-      'sales', 'sale_items', 'sale_discounts',
+      'sales', 'sale_items', 'sale_discounts', 'sale_payments', 'sale_line_price_events',
       'pos_held_orders', 'pos_held_order_items',
+      'pos_orders', 'pos_order_items',
       'pos_customer_deposits', 'pos_deposit_applications',
       'discount_authorizations',
+      'sales_daily_summary', 'product_daily_summary',
+      'dist_sales_orders', 'dist_sales_order_lines',
 
       // Invoices & Payments
       'invoices', 'invoice_line_items', 'invoice_payments',
       'customer_payments', 'customer_deposits', 'deposit_applications',
       'credit_applications', 'customer_credits', 'customer_balance_adjustments',
       'customer_accounts', 'payment_transactions',
+      'ar_customer_payments', 'ar_payment_allocations',
+      'receipt_settlements', 'receipt_settlement_applications',
+      'treasury_documents', 'treasury_document_lines', 'treasury_document_audit',
 
       // Purchase Orders & Receiving
       'purchase_orders', 'purchase_order_items',
