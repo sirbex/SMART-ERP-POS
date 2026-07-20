@@ -2058,9 +2058,10 @@ export default function POSPage() {
           discount:
             item.discountAmount && Number(item.discountAmount) > 0
               ? {
-                  type: 'amount' as const,
+                  type: 'FIXED_AMOUNT' as DiscountType,
                   value: Number(item.discountAmount),
                   amount: Number(item.discountAmount),
+                  reason: 'From quotation',
                 }
               : undefined,
         };
