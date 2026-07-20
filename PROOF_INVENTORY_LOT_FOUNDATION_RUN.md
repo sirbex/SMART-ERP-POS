@@ -1,6 +1,6 @@
 # Inventory Lot Foundation — Operational Proof Run
 
-Run: 2026-07-07T08:13:14.638Z
+Run: 2026-07-10T05:38:07.931Z
 
 Charter: [PROOF_INVENTORY_LOT_FOUNDATION.md](./PROOF_INVENTORY_LOT_FOUNDATION.md)
 
@@ -29,21 +29,22 @@ Charter: [PROOF_INVENTORY_LOT_FOUNDATION.md](./PROOF_INVENTORY_LOT_FOUNDATION.md
 - **PASS** `FOR UPDATE` on batch/balance selectors — `inventoryLotConcurrencyProof.test.ts`
 - **PASS** Advisory movement lock before deduct — `inventoryLotConcurrencyProof.test.ts`
 - **PASS** Fail-closed shortfall before decrement — `inventoryLotConcurrencyProof.test.ts`
-- **RUN** Live race suite requested (`LOT_PROOF_CONCURRENCY=1`) — see Jest output
+- **PENDING** Live race scenarios (two cashiers, transfer+sale, receipt+expiry) — staging checklist (charter §4.2)
 
 ## Gate J — Architectural integrity
 
 - **PASS** Architecture fitness functions (Gate J)
 - **PASS** No new direct writes / duplicate rules / gateway bypass (PR mode)
-- **PASS** Strict certification fitness (zero debt)
+- **PENDING** Strict certification (`npm run proof:inventory-lot-certification`) — zero debt + zero NOT_STARTED
+
 
 ## Gates E–I — Enterprise certification (charter)
 
 - **PASS** Gate E recovery proofs (structural)
-- **RUN** Gate E live TX rollback (`LOT_PROOF_RECOVERY=1`)
+- **PENDING** Gate E live TX rollback — `LOT_PROOF_RECOVERY=1 DATABASE_URL=...`
 - **PENDING** Gates F–I — see `npm run proof:inventory-lot-enterprise-gates`
 
 
 ## Summary
 
-Pass: 10 | Fail: 0
+Pass: 9 | Fail: 0

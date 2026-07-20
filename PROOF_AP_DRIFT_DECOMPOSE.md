@@ -1,18 +1,18 @@
 # AP Drift Decomposition — Verified Proof (Henber)
 
-**Generated:** 2026-07-05T11:25:40.539Z
+**Generated:** 2026-07-10T06:09:33.486Z
 
 ## Headline (matches UI reconciliation report)
 
 | Metric | UGX |
 |--------|-----|
-| GL 2100 total | 38,255,793.00 |
-| GL supplier scope (SUPPLIER_AP_GL) | 37,855,793.00 |
-| Open-item subledger | 37,855,793.00 |
+| GL 2100 total | 39,915,693.00 |
+| GL supplier scope (SUPPLIER_AP_GL) | 39,515,693.00 |
+| Open-item subledger | 39,515,693.00 |
 | **integrityGlDrift** | **0.00** |
 | Expense on 2100 | 400,000.00 |
 | Unposted pipeline | 0.00 |
-| STORED_BALANCE (stale) | 30,980,764.00 |
+| STORED_BALANCE (stale) | 32,640,664.00 |
 
 ## Decomposition (must sum to integrityGlDrift)
 

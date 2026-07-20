@@ -1,11 +1,11 @@
 ════════════════════════════════════════════════════════════════════════
- HENBER AR PHASE 3 REMEDIATION — LIVE | BATCH=A
- Generated: 2026-07-05T14:01:51.036Z
+ HENBER AR PHASE 3 REMEDIATION — DRY-RUN | BATCH=B
+ Generated: 2026-07-10T11:01:31.698Z
 ════════════════════════════════════════════════════════════════════════
 
 ── Before ──
-  GL 1200 net-active:  UGX 22,481,614.00
-  Open-item subledger: UGX 22,481,614.00
+  GL 1200 net-active:  UGX 24,440,114.00
+  Open-item subledger: UGX 24,440,114.00
   integrityGlDrift:    UGX 0.00
 
 ── Investigate TXN-015298 ──
@@ -17,26 +17,26 @@
     amount 52,800.00 | sale status PARTIALLY_RETURNED | pay CASH
 
 ── Batch A: Reverse TXN-015298 SALE_REFUND (−52,800) ──
+  skipped (BATCH excludes A)
 
 ── Simulated after Batch A (if reversal applied) ──
-  GL 1200:        UGX 22,481,614.00
-  integrityGlDrift: UGX 0.00 ✓ RECONCILED
+  GL 1200:        UGX 24,492,914.00
+  integrityGlDrift: UGX 52,800.00 
 
-── Batch B: skipped (BATCH excludes B) ──
-
-── Re-proof ──
-  integrityGlDrift after apply: UGX 0.00
-  proof-ar-drift-decompose: FAIL
-════════════════════════════════════════════════════════════════════════
- AR DRIFT DECOMPOSITION PROOF (read-only)
- Generated: 2026-07-05T14:01:53.032Z
- Mode: production
- Database: HENBER_DATABASE_URL (configured)
-════════════════════════════════════════════════════════════════════════
-
-── Layer 1: Integrity (net-active GL vs open-item subledger) ──
-  GL 1200 total (net-active):           UGX 22,4
+── Batch B: Retag untagged CREDIT SALE GL (customer entity) ──
+  Candidates: 8 transactions
+  would retag TXN-002387 → CUSTOMER case hospital (43eecb7b) net 1,181,999.00
+  would retag TXN-007206 → CUSTOMER case hospital (43eecb7b) net 708,000.00
+  would retag TXN-004923 → CUSTOMER case hospital (43eecb7b) net 492,000.00
+  would retag TXN-008930 → CUSTOMER case hospital (43eecb7b) net 241,900.00
+  would retag TXN-008910 → CUSTOMER case hospital (43eecb7b) net 118,900.00
+  would retag TXN-006759 → CUSTOMER Musa Semanda (88552122) net 94,500.00
+  would retag TXN-008576 → CUSTOMER PHARMACURE LTD (86b0846c) net 57,600.00
+  would retag TXN-007087 → CUSTOMER HENBER RUBAGA (ecc4301b) net 30,000.00
+  Would retag: 8 transaction(s)
+  Note: Retag does not change gl_total — integrityGlDrift unchanged.
 
 ════════════════════════════════════════════════════════════════════════
- LIVE REMEDIATION COMPLETE
+ DRY-RUN COMPLETE — no mutations
+ Finance sign-off required before: DRY_RUN=0 node scripts/henber-ar-phase3-remediate.mjs
 ════════════════════════════════════════════════════════════════════════

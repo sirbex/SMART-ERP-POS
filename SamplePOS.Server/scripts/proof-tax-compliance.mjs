@@ -187,6 +187,7 @@ const jestArgs = [
   'src/modules/withholding-tax/whtCertificateNumber.test.ts',
   'src/modules/withholding-tax/ensureWhtAccounts.test.ts',
   'src/modules/withholding-tax/whtReportService.test.ts',
+  'src/modules/withholding-tax/whtOpsProof.test.ts',
   'src/modules/financial-reconciliation/providers/whtReconciliationLanes.test.ts',
   '--no-coverage',
 ];

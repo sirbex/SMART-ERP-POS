@@ -1,7 +1,7 @@
 ════════════════════════════════════════════════════════════════════════
  FINANCIAL LANE FRAMEWORK BASELINE (Phase F0 proof)
- As of: 2026-07-05
- Generated: 2026-07-05T14:04:23.435Z
+ As of: 2026-07-10
+ Generated: 2026-07-10T06:10:57.375Z
 ════════════════════════════════════════════════════════════════════════
 
 ── AP ──
@@ -10,7 +10,7 @@
 ✓ ap cache does not gate period close
 ✓ ap audit informational
   Integrity: RECONCILED diff=0.00 severity=informational
-  Cache:     DRIFT diff=-63,000.00 severity=maintenance
+  Cache:     HEALTHY diff=0.00 severity=informational
   Audit:     reversalImpact=-913,285.00
 
 ── AR ──
@@ -27,8 +27,8 @@
 ✓ inventory integrity gates period close
 ✓ inventory cache does not gate period close
 ✓ inventory audit informational
-  Integrity: RECONCILED diff=4,210.00 severity=informational threshold=11,219.89
-  Cache:     DRIFT diff=91,404.00 severity=maintenance
+  Integrity: RECONCILED diff=4,060.00 severity=informational threshold=11,389.73
+  Cache:     DRIFT diff=72,076.00 severity=maintenance
   Audit:     reversalImpact=733,084.00
 
 ── Period-close aggregation ──
@@ -38,6 +38,6 @@
 
 ── Legacy SQL parity (fn_full_reconciliation_report) ──
 ⚠ SQL summary parity: 2 mismatch(es) (expected during F0 — legacy SQL uses pre-framework semantics)
-  ap.integrityDifference: framework=0 legacy=-976285
+  ap.integrityDifference: framework=0 legacy=-913285
   ap.status: framework=MATCHED legacy=DISCREPANCY
 ✓ SQL parity logged (non-blocking in F0): 2 mismatch(es)
