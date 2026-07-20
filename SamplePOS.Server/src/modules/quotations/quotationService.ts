@@ -332,7 +332,7 @@ export const quotationService = {
         `SELECT id, quote_number, status, customer_name, created_at
          FROM quotations
          WHERE content_hash = $1
-           AND status <> ALL($2::text[])
+           AND status <> ALL($2::quotation_status[])
          LIMIT 1`,
         [contentHash, terminalStatuses],
       );
