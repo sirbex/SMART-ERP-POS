@@ -56,6 +56,7 @@ export interface SupplierInvoice {
     amountPaid: number;
     outstandingBalance: number;
     status: string;
+    documentType?: string | null;
     notes: string | null;
     createdAt: string;
     updatedAt: string;
