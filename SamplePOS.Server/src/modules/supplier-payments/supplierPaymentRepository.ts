@@ -691,6 +691,7 @@ export async function findInvoicesBySupplier(pool: Pool | PoolClient, supplierId
        COALESCE(si."AmountPaid", 0) as "amountPaid",
        COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
        si."Status" as status,
+       si.document_type as "documentType",
        si."Notes" as notes,
        si."CreatedAt" as "createdAt",
        si."UpdatedAt" as "updatedAt",

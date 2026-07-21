@@ -137,6 +137,7 @@ interface SupplierInvoiceSummary {
   amountPaid: number;
   outstandingBalance: number;
   status: string;
+  documentType?: string | null;
   notes: string | null;
   lineItemCount: number;
 }
@@ -1167,7 +1168,23 @@ function SupplierDetailModal({
 
   const isPayableInvoice = (inv: SupplierInvoiceSummary) =>
     Number(inv.outstandingBalance || 0) > 0 &&
-    !['Cancelled', 'CANCELLED', 'DRAFT', 'Paid', 'PAID', 'VOIDED'].includes(inv.status || '');
+    String(inv.documentType || '').toUpperCase() !== 'SUPPLIER_CREDIT_NOTE' &&
+    !['Cancelled', 'CANCELLED', 'DRAFT', 'Paid', 'PAID', 'VOIDED', 'APPLIED'].includes(inv.status || '');
+
+  /** Open-item AP: bills add, credit notes reduce (matches statement / supplier cache SSOT). */
+  const netInvoiceOutstanding = (list: SupplierInvoiceSummary[]) =>
+    Math.max(
+      0,
+      list.reduce((sum, inv) => {
+        const status = String(inv.status || '').toUpperCase();
+        if (['PAID', 'CANCELLED', 'DELETED', 'DRAFT', 'APPLIED', 'VOIDED'].includes(status)) {
+          return sum;
+        }
+        const bal = Number(inv.outstandingBalance || 0);
+        const isCn = String(inv.documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE';
+        return new Decimal(sum).plus(isCn ? -bal : bal).toNumber();
+      }, 0),
+    );
 
   const toggleMultiRow = (inv: SupplierInvoiceSummary) => {
     if (!isPayableInvoice(inv)) return;
@@ -2079,18 +2096,7 @@ function SupplierDetailModal({
                     <div className="bg-red-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-red-600 mb-1">Outstanding</div>
                       <div className="text-lg font-bold text-red-900">
-                        {formatCurrency(
-                          Math.max(
-                            0,
-                            filteredInvoices.reduce(
-                              (sum: number, inv: SupplierInvoiceSummary) =>
-                                new Decimal(sum)
-                                  .plus(Number(inv.outstandingBalance || 0))
-                                  .toNumber(),
-                              0
-                            )
-                          )
-                        )}
+                        {formatCurrency(netInvoiceOutstanding(filteredInvoices))}
                       </div>
                     </div>
                   </div>
