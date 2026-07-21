@@ -1186,6 +1186,15 @@ function SupplierDetailModal({
       }, 0),
     );
 
+  const isOpenCreditNote = (inv: SupplierInvoiceSummary) => {
+    const status = String(inv.status || '').toUpperCase();
+    if (['PAID', 'CANCELLED', 'DELETED', 'DRAFT', 'APPLIED', 'VOIDED'].includes(status)) {
+      return false;
+    }
+    return String(inv.documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE'
+      && Number(inv.outstandingBalance || 0) > 0.009;
+  };
+
   const toggleMultiRow = (inv: SupplierInvoiceSummary) => {
     if (!isPayableInvoice(inv)) return;
     setMultiSelected(prev => {
@@ -1293,6 +1302,15 @@ function SupplierDetailModal({
     }
     return result;
   }, [invoices, invoiceSearch, invoiceStatusFilter]);
+
+  const openCreditNoteSummary = useMemo(() => {
+    const openCns = filteredInvoices.filter(isOpenCreditNote);
+    const amount = openCns.reduce(
+      (sum, inv) => new Decimal(sum).plus(Number(inv.outstandingBalance || 0)).toNumber(),
+      0,
+    );
+    return { count: openCns.length, amount };
+  }, [filteredInvoices]);
 
   const invoiceTotalPages = Math.max(1, Math.ceil(filteredInvoices.length / INVOICE_PAGE_SIZE));
   const paginatedInvoices = useMemo(() => {
@@ -2076,7 +2094,7 @@ function SupplierDetailModal({
                   </div>
 
                   {/* Invoice Summary Cards */}
-                  <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-4">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 mb-4">
                     <div className="bg-blue-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-blue-600 mb-1">Showing</div>
                       <div className="text-xl font-bold text-blue-900">{filteredInvoices.length} <span className="text-sm font-normal text-blue-500">/ {invoices.length}</span></div>
@@ -2093,11 +2111,29 @@ function SupplierDetailModal({
                         )}
                       </div>
                     </div>
+                    <div className="bg-teal-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-teal-700 mb-1">Open credit notes</div>
+                      <div className="text-lg font-bold text-teal-900">
+                        {openCreditNoteSummary.count > 0
+                          ? formatCurrency(openCreditNoteSummary.amount)
+                          : formatCurrency(0)}
+                      </div>
+                      <div className="text-[11px] text-teal-700/80 mt-0.5">
+                        {openCreditNoteSummary.count > 0
+                          ? `${openCreditNoteSummary.count} note${openCreditNoteSummary.count === 1 ? '' : 's'} reducing what you owe`
+                          : 'None open'}
+                      </div>
+                    </div>
                     <div className="bg-red-50 rounded-lg p-3 text-center">
-                      <div className="text-xs text-red-600 mb-1">Outstanding</div>
+                      <div className="text-xs text-red-600 mb-1">Outstanding (net)</div>
                       <div className="text-lg font-bold text-red-900">
                         {formatCurrency(netInvoiceOutstanding(filteredInvoices))}
                       </div>
+                      {openCreditNoteSummary.count > 0 && (
+                        <div className="text-[11px] text-red-700/80 mt-0.5">
+                          After deducting credit notes
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -2106,17 +2142,19 @@ function SupplierDetailModal({
                   <div className="block sm:hidden space-y-3">
                     {filteredInvoices.length === 0 ? (
                       <div className="text-center py-8 text-gray-500 text-sm">No invoices match your search.</div>
-                    ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
+                      ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
                       const balance = Number(inv.outstandingBalance || 0);
                       const payable = isPayableInvoice(inv);
+                      const isCn = String(inv.documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE';
                       const checked = multiSelected.has(inv.id);
                       const statusColor =
-                        inv.status === 'Paid' ? 'bg-green-100 text-green-800'
+                        isCn ? 'bg-teal-100 text-teal-800'
+                          : inv.status === 'Paid' ? 'bg-green-100 text-green-800'
                           : inv.status === 'PartiallyPaid' ? 'bg-yellow-100 text-yellow-800'
                             : inv.status === 'Pending' ? 'bg-blue-100 text-blue-800'
                               : 'bg-gray-100 text-gray-800';
                       return (
-                        <div key={inv.id} className={`border rounded-lg p-3 ${checked ? 'border-purple-400 bg-purple-50' : 'border-gray-200'}`}>
+                        <div key={inv.id} className={`border rounded-lg p-3 ${checked ? 'border-purple-400 bg-purple-50' : isCn ? 'border-teal-200 bg-teal-50/40' : 'border-gray-200'}`}>
                           <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-2">
                               {canCreatePayment && payable && (
@@ -2129,6 +2167,11 @@ function SupplierDetailModal({
                                 />
                               )}
                               <span className="font-semibold text-blue-600 text-sm">{inv.invoiceNumber}</span>
+                              {isCn && (
+                                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded bg-teal-100 text-teal-800">
+                                  Credit note
+                                </span>
+                              )}
                             </div>
                             <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusColor}`}>{inv.status}</span>
                           </div>
@@ -2141,7 +2184,14 @@ function SupplierDetailModal({
                             <span className="text-right font-semibold">{formatCurrency(Number(inv.totalAmount || 0))}</span>
                             <span className="text-gray-500">Paid</span>
                             <span className="text-right text-green-600">{formatCurrency(Number(inv.amountPaid || 0))}</span>
-                            {balance > 0 && <><span className="text-gray-500">Balance</span><span className="text-right font-bold text-red-600">{formatCurrency(balance)}</span></>}
+                            {balance > 0 && (
+                              <>
+                                <span className="text-gray-500">{isCn ? 'Credit left' : 'Balance'}</span>
+                                <span className={`text-right font-bold ${isCn ? 'text-teal-700' : 'text-red-600'}`}>
+                                  {formatCurrency(balance)}
+                                </span>
+                              </>
+                            )}
                           </div>
                           {/* Inline pay amount when checked */}
                           {checked && (
@@ -2198,9 +2248,12 @@ function SupplierDetailModal({
                           const paid = Number(inv.amountPaid || 0);
                           const balance = Number(inv.outstandingBalance || 0);
                           const payable = isPayableInvoice(inv);
+                          const isCn = String(inv.documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE';
                           const checked = multiSelected.has(inv.id);
                           const statusColor =
-                            inv.status === 'Paid'
+                            isCn
+                              ? 'bg-teal-100 text-teal-800'
+                              : inv.status === 'Paid'
                               ? 'bg-green-100 text-green-800'
                               : inv.status === 'PartiallyPaid'
                                 ? 'bg-yellow-100 text-yellow-800'
@@ -2212,7 +2265,7 @@ function SupplierDetailModal({
                             <Fragment key={inv.id}>
                               <tr
                                 onClick={() => handleInlineInvoiceToggle(inv.id)}
-                                className={`${checked ? 'bg-purple-50' : 'hover:bg-gray-50'} cursor-pointer ${isExpanded ? 'bg-blue-50/40' : ''}`}
+                                className={`${checked ? 'bg-purple-50' : isCn ? 'bg-teal-50/50 hover:bg-teal-50' : 'hover:bg-gray-50'} cursor-pointer ${isExpanded ? 'bg-blue-50/40' : ''}`}
                               >
                                 {canCreatePayment && (
                                   <td className="px-3 py-3 text-center">
@@ -2228,7 +2281,16 @@ function SupplierDetailModal({
                                     )}
                                   </td>
                                 )}
-                                <td className="px-4 py-3 text-sm font-medium text-blue-600">{inv.invoiceNumber}</td>
+                                <td className="px-4 py-3 text-sm font-medium text-blue-600">
+                                  <div className="flex items-center gap-2">
+                                    <span>{inv.invoiceNumber}</span>
+                                    {isCn && (
+                                      <span className="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded bg-teal-100 text-teal-800 whitespace-nowrap">
+                                        Credit note
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                                 <td className="px-4 py-3 text-sm text-gray-600">{inv.supplierInvoiceNumber || '-'}</td>
                                 <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
                                 <td className="px-4 py-3 text-sm text-gray-600">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}</td>
@@ -2237,8 +2299,12 @@ function SupplierDetailModal({
                                 </td>
                                 <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
                                 <td className="px-4 py-3 text-sm text-right text-green-600">{formatCurrency(paid)}</td>
-                                <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
-                                  {balance > 0 ? formatCurrency(balance) : balance < 0 ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span> : <span className="text-green-600">Paid</span>}
+                                <td className={`px-4 py-3 text-sm text-right font-semibold ${isCn ? 'text-teal-700' : 'text-red-600'}`}>
+                                  {balance > 0
+                                    ? (isCn ? `Credit ${formatCurrency(balance)}` : formatCurrency(balance))
+                                    : balance < 0
+                                      ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span>
+                                      : <span className="text-green-600">Paid</span>}
                                 </td>
                                 {canCreatePayment && (
                                   <td className="px-4 py-3 text-right">
