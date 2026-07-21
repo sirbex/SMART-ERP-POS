@@ -7,6 +7,7 @@ import { AlertTriangle, Plus, Search, X } from 'lucide-react';
 interface DunningLevel {
   id: string;
   levelNumber: number;
+  name?: string;
   daysOverdue: number;
   feeAmount: number;
   feePercentage?: number;
@@ -45,6 +46,7 @@ export default function DunningPage() {
 
   const [form, setForm] = useState({
     levelNumber: 1,
+    name: '',
     daysOverdue: 30,
     feeAmount: 0,
     letterTemplate: '',
@@ -59,14 +61,23 @@ export default function DunningPage() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
+    const name = form.name.trim() || `Level ${form.levelNumber}`;
     await createMutation.mutateAsync({
       levelNumber: form.levelNumber,
+      name,
       daysOverdue: form.daysOverdue,
       feeAmount: form.feeAmount,
       letterTemplate: form.letterTemplate,
-      blockDelivery: form.blockFurtherCredit,
+      blockFurtherCredit: form.blockFurtherCredit,
     });
-    setForm({ levelNumber: items.length + 2, daysOverdue: 30, feeAmount: 0, letterTemplate: '', blockFurtherCredit: false });
+    setForm({
+      levelNumber: items.length + 2,
+      name: '',
+      daysOverdue: 30,
+      feeAmount: 0,
+      letterTemplate: '',
+      blockFurtherCredit: false,
+    });
     setShowForm(false);
   };
 
@@ -112,6 +123,16 @@ export default function DunningPage() {
                 onChange={(e) => setForm({ ...form, levelNumber: parseInt(e.target.value) })}
                 required
                 className="w-full px-3 py-2 border rounded-lg text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <input
+                type="text"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                className="w-full px-3 py-2 border rounded-lg text-sm"
+                placeholder={`Level ${form.levelNumber}`}
               />
             </div>
             <div>
@@ -180,6 +201,7 @@ export default function DunningPage() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Level</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days Overdue</th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Fee</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Block Credit</th>
@@ -189,7 +211,7 @@ export default function DunningPage() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {items.length === 0 ? (
-                <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500">No dunning levels configured.</td></tr>
+                <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">No dunning levels configured.</td></tr>
               ) : items.map((level) => (
                 <tr key={level.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
@@ -197,6 +219,7 @@ export default function DunningPage() {
                       {level.levelNumber}
                     </span>
                   </td>
+                  <td className="px-6 py-4 text-sm">{level.name || `Level ${level.levelNumber}`}</td>
                   <td className="px-6 py-4 text-sm">{level.daysOverdue} days</td>
                   <td className="px-6 py-4 text-sm text-right font-medium">{fmt(level.feeAmount)}</td>
                   <td className="px-6 py-4 text-sm">

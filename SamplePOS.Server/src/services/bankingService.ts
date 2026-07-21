@@ -191,6 +191,7 @@ export class BankingService {
         ba.*,
         a."AccountCode" as gl_account_code,
         a."AccountName" as gl_account_name,
+        a."SystemAccountTag" as gl_system_account_tag,
         -- Calculate current_balance from GL (DEBIT minus CREDIT for asset accounts)
         COALESCE((
           SELECT SUM(le."DebitAmount") - SUM(le."CreditAmount")
@@ -207,7 +208,17 @@ export class BankingService {
             [includeInactive]
         );
 
-        return result.rows.map(normalizeBankAccount);
+        return result.rows.map((row) => {
+            const normalized = normalizeBankAccount(row);
+            return {
+                ...normalized,
+                glSystemAccountTag: row.gl_system_account_tag ?? null,
+                transferEligible: isEligibleBankBookLiquidity(
+                    row.gl_account_code || '',
+                    row.gl_system_account_tag,
+                ),
+            };
+        });
     }
 
     /**
@@ -1153,6 +1164,14 @@ export class BankingService {
                 }
                 glTransactionId = td.journalEntryId;
             } else {
+                // Same liquidity invariant as treasury path (TD-INV-6) — never allow AR/inventory
+                // just because treasury_document_enabled is false (local/prod parity).
+                const { assertLiquidityAccountsOnly } = await import('@shared/treasury/index.js');
+                assertLiquidityAccountsOnly([
+                    { accountCode: fromGlCode, systemAccountTag: fromTag },
+                    { accountCode: toGlCode, systemAccountTag: toTag },
+                ]);
+
                 // GL Entry: DR ToBank, CR FromBank
                 const journalRequest: JournalEntryRequest = {
                     entryDate: dto.transactionDate,

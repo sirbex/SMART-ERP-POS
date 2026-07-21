@@ -310,8 +310,14 @@ export function useDunningLevels() {
 export function useCreateDunningLevel() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { levelNumber: number; daysOverdue: number; feeAmount: number; letterTemplate: string; blockDelivery?: boolean }) =>
-      api.dunning.createLevel(data),
+    mutationFn: (data: {
+      levelNumber: number;
+      name: string;
+      daysOverdue: number;
+      feeAmount: number;
+      letterTemplate: string;
+      blockFurtherCredit?: boolean;
+    }) => api.dunning.createLevel(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.dunning.all });
       toast.success('Dunning level created');

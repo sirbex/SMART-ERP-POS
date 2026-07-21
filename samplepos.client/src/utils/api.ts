@@ -994,8 +994,14 @@ export const api = {
 
   dunning: {
     getLevels: () => apiClient.get<ApiResponse>('dunning/levels'),
-    createLevel: (data: { levelNumber: number; daysOverdue: number; feeAmount: number; letterTemplate: string; blockDelivery?: boolean }) =>
-      apiClient.post<ApiResponse>('dunning/levels', data),
+    createLevel: (data: {
+      levelNumber: number;
+      name: string;
+      daysOverdue: number;
+      feeAmount: number;
+      letterTemplate: string;
+      blockFurtherCredit?: boolean;
+    }) => apiClient.post<ApiResponse>('dunning/levels', data),
     analyze: (data: { asOfDate: string; customerId?: string }) =>
       apiClient.post<ApiResponse>('dunning/analyze', data),
     createRun: (data: { asOfDate: string; levelId: string; customerIds?: string[] }) =>

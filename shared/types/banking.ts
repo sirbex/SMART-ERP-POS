@@ -20,6 +20,10 @@ export interface BankAccount {
     glAccountId: string;
     glAccountCode?: string;       // Joined from accounts table
     glAccountName?: string;       // Joined from accounts table
+    /** SystemAccountTag of linked GL (BANK, CASH, …) — used for TD-INV-6 eligibility */
+    glSystemAccountTag?: string | null;
+    /** False when GL is AR/inventory/equity etc. — transfer/deposit blocked */
+    transferEligible?: boolean;
     currentBalance: number;
     /** Cutover opening balance originally posted (legacy column; GL is source of truth for balance). */
     openingBalance?: number;
@@ -44,6 +48,7 @@ export interface BankAccountDbRow {
     gl_account_id: string;
     gl_account_code?: string;
     gl_account_name?: string;
+    gl_system_account_tag?: string | null;
     current_balance: string;
     opening_balance?: string | number | null;
     last_reconciled_balance?: string;
@@ -67,6 +72,7 @@ export function normalizeBankAccount(row: BankAccountDbRow): BankAccount {
         glAccountId: row.gl_account_id,
         glAccountCode: row.gl_account_code,
         glAccountName: row.gl_account_name,
+        glSystemAccountTag: row.gl_system_account_tag ?? null,
         currentBalance: parseFloat(row.current_balance || '0'),
         openingBalance:
             row.opening_balance != null && row.opening_balance !== ''

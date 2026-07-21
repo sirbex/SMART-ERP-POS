@@ -106,15 +106,37 @@ export const getDunningLevels = async (pool?: pg.Pool): Promise<DunningLevel[]> 
 };
 
 export const createDunningLevel = async (
-  data: Omit<DunningLevel, 'id' | 'isActive'>,
+  data: Omit<DunningLevel, 'id' | 'isActive'> & { blockDelivery?: boolean },
   pool?: pg.Pool
 ): Promise<DunningLevel> => {
   const dbPool = pool || globalPool;
+  const levelNumber = Number(data.levelNumber);
+  if (!Number.isFinite(levelNumber) || levelNumber < 1) {
+    throw new ValidationError('levelNumber must be a positive integer');
+  }
+  const name = (data.name?.trim() || `Level ${levelNumber}`).slice(0, 50);
+  const daysOverdue = Number(data.daysOverdue);
+  if (!Number.isFinite(daysOverdue) || daysOverdue < 1) {
+    throw new ValidationError('daysOverdue must be a positive integer');
+  }
+  const blockFurtherCredit =
+    data.blockFurtherCredit ?? data.blockDelivery ?? false;
+
   const result = await dbPool.query(
     `INSERT INTO dunning_levels (id, level_number, name, days_overdue, fee_amount, fee_percentage, interest_rate, letter_template, block_further_credit)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      RETURNING *`,
-    [uuidv4(), data.levelNumber, data.name, data.daysOverdue, data.feeAmount, data.feePercentage, data.interestRate, data.letterTemplate, data.blockFurtherCredit]
+    [
+      uuidv4(),
+      levelNumber,
+      name,
+      daysOverdue,
+      data.feeAmount ?? 0,
+      data.feePercentage ?? 0,
+      data.interestRate ?? 0,
+      data.letterTemplate ?? null,
+      blockFurtherCredit,
+    ]
   );
   return normalizeDunningLevel(result.rows[0]);
 };

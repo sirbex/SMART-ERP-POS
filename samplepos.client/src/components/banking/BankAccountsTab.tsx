@@ -365,7 +365,20 @@ export const BankAccountsTab: React.FC = () => {
                                         {account.branch && ` / ${account.branch}`}
                                     </TableCell>
                                     <TableCell>{account.accountNumber || '-'}</TableCell>
-                                    <TableCell>{account.glAccountName || '-'}</TableCell>
+                                    <TableCell>
+                                        <div className="flex flex-col gap-0.5">
+                                            <span>
+                                                {account.glAccountCode
+                                                    ? `${account.glAccountCode} · ${account.glAccountName || ''}`
+                                                    : account.glAccountName || '-'}
+                                            </span>
+                                            {account.transferEligible === false && (
+                                                <Badge variant="destructive" className="w-fit text-xs">
+                                                    Not a bank GL — edit and Create new GL
+                                                </Badge>
+                                            )}
+                                        </div>
+                                    </TableCell>
                                     <TableCell className="text-right font-mono">
                                         {formatCurrency(account.currentBalance || 0)}
                                     </TableCell>
