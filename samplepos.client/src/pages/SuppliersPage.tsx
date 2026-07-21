@@ -31,6 +31,10 @@ import {
   methodNeedsPayFromAccount,
   pickDefaultPayFromAccount,
 } from '../utils/supplierPaymentPayFrom';
+import {
+  isSupplierCreditNote,
+  summarizeSupplierOpenItems,
+} from '../utils/supplierOpenItemSummary';
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
 // Frontend displays as-is without parsing to Date object
@@ -1075,6 +1079,7 @@ function SupplierDetailModal({
   const [invoices, setInvoices] = useState<SupplierInvoiceSummary[]>([]);
   const [invoiceSearch, setInvoiceSearch] = useState('');
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState<string>('');
+  const [invoiceDocTypeFilter, setInvoiceDocTypeFilter] = useState<'all' | 'bills' | 'credits'>('all');
   const [invoicePage, setInvoicePage] = useState(1);
   const INVOICE_PAGE_SIZE = 25;
   const [selectedInvoice, setSelectedInvoice] = useState<string | null>(null);
@@ -1168,32 +1173,8 @@ function SupplierDetailModal({
 
   const isPayableInvoice = (inv: SupplierInvoiceSummary) =>
     Number(inv.outstandingBalance || 0) > 0 &&
-    String(inv.documentType || '').toUpperCase() !== 'SUPPLIER_CREDIT_NOTE' &&
+    !isSupplierCreditNote(inv) &&
     !['Cancelled', 'CANCELLED', 'DRAFT', 'Paid', 'PAID', 'VOIDED', 'APPLIED'].includes(inv.status || '');
-
-  /** Open-item AP: bills add, credit notes reduce (matches statement / supplier cache SSOT). */
-  const netInvoiceOutstanding = (list: SupplierInvoiceSummary[]) =>
-    Math.max(
-      0,
-      list.reduce((sum, inv) => {
-        const status = String(inv.status || '').toUpperCase();
-        if (['PAID', 'CANCELLED', 'DELETED', 'DRAFT', 'APPLIED', 'VOIDED'].includes(status)) {
-          return sum;
-        }
-        const bal = Number(inv.outstandingBalance || 0);
-        const isCn = String(inv.documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE';
-        return new Decimal(sum).plus(isCn ? -bal : bal).toNumber();
-      }, 0),
-    );
-
-  const isOpenCreditNote = (inv: SupplierInvoiceSummary) => {
-    const status = String(inv.status || '').toUpperCase();
-    if (['PAID', 'CANCELLED', 'DELETED', 'DRAFT', 'APPLIED', 'VOIDED'].includes(status)) {
-      return false;
-    }
-    return String(inv.documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE'
-      && Number(inv.outstandingBalance || 0) > 0.009;
-  };
 
   const toggleMultiRow = (inv: SupplierInvoiceSummary) => {
     if (!isPayableInvoice(inv)) return;
@@ -1300,17 +1281,18 @@ function SupplierDetailModal({
     if (invoiceStatusFilter) {
       result = result.filter((inv) => inv.status === invoiceStatusFilter);
     }
+    if (invoiceDocTypeFilter === 'bills') {
+      result = result.filter((inv) => !isSupplierCreditNote(inv));
+    } else if (invoiceDocTypeFilter === 'credits') {
+      result = result.filter((inv) => isSupplierCreditNote(inv));
+    }
     return result;
-  }, [invoices, invoiceSearch, invoiceStatusFilter]);
+  }, [invoices, invoiceSearch, invoiceStatusFilter, invoiceDocTypeFilter]);
 
-  const openCreditNoteSummary = useMemo(() => {
-    const openCns = filteredInvoices.filter(isOpenCreditNote);
-    const amount = openCns.reduce(
-      (sum, inv) => new Decimal(sum).plus(Number(inv.outstandingBalance || 0)).toNumber(),
-      0,
-    );
-    return { count: openCns.length, amount };
-  }, [filteredInvoices]);
+  const openItemBreakdown = useMemo(
+    () => summarizeSupplierOpenItems(invoices),
+    [invoices],
+  );
 
   const invoiceTotalPages = Math.max(1, Math.ceil(filteredInvoices.length / INVOICE_PAGE_SIZE));
   const paginatedInvoices = useMemo(() => {
@@ -2091,49 +2073,63 @@ function SupplierDetailModal({
                       <option value="Overdue">Overdue</option>
                       <option value="Cancelled">Cancelled</option>
                     </select>
+                    <select
+                      value={invoiceDocTypeFilter}
+                      onChange={(e) => {
+                        setInvoiceDocTypeFilter(e.target.value as 'all' | 'bills' | 'credits');
+                        setInvoicePage(1);
+                      }}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    >
+                      <option value="all">Bills + credit notes</option>
+                      <option value="bills">Bills only</option>
+                      <option value="credits">Credit notes only</option>
+                    </select>
                   </div>
 
-                  {/* Invoice Summary Cards */}
+                  {/* Open-item breakdown: bills due − open credits = net payable */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4 mb-4">
                     <div className="bg-blue-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-blue-600 mb-1">Showing</div>
                       <div className="text-xl font-bold text-blue-900">{filteredInvoices.length} <span className="text-sm font-normal text-blue-500">/ {invoices.length}</span></div>
                     </div>
-                    <div className="bg-green-50 rounded-lg p-3 text-center">
-                      <div className="text-xs text-green-600 mb-1">Total Amount</div>
-                      <div className="text-lg font-bold text-green-900">
-                        {formatCurrency(
-                          filteredInvoices.reduce(
-                            (sum: number, inv: SupplierInvoiceSummary) =>
-                              new Decimal(sum).plus(Number(inv.totalAmount || 0)).toNumber(),
-                            0
-                          )
-                        )}
+                    <div className="bg-orange-50 rounded-lg p-3 text-center">
+                      <div className="text-xs text-orange-700 mb-1">Bills due</div>
+                      <div className="text-lg font-bold text-orange-900">
+                        {formatCurrency(openItemBreakdown.billsDue)}
+                      </div>
+                      <div className="text-[11px] text-orange-800/80 mt-0.5">
+                        {openItemBreakdown.openBillCount} open bill{openItemBreakdown.openBillCount === 1 ? '' : 's'}
                       </div>
                     </div>
                     <div className="bg-teal-50 rounded-lg p-3 text-center">
                       <div className="text-xs text-teal-700 mb-1">Open credit notes</div>
                       <div className="text-lg font-bold text-teal-900">
-                        {openCreditNoteSummary.count > 0
-                          ? formatCurrency(openCreditNoteSummary.amount)
-                          : formatCurrency(0)}
+                        {formatCurrency(openItemBreakdown.openCredits)}
                       </div>
                       <div className="text-[11px] text-teal-700/80 mt-0.5">
-                        {openCreditNoteSummary.count > 0
-                          ? `${openCreditNoteSummary.count} note${openCreditNoteSummary.count === 1 ? '' : 's'} reducing what you owe`
+                        {openItemBreakdown.openCreditCount > 0
+                          ? `${openItemBreakdown.openCreditCount} note${openItemBreakdown.openCreditCount === 1 ? '' : 's'} available to apply`
                           : 'None open'}
                       </div>
+                      {openItemBreakdown.openCreditCount > 0 && (
+                        <Link
+                          to="/accounting/credit-debit-notes"
+                          className="inline-block mt-1 text-[11px] font-medium text-teal-800 underline hover:text-teal-950"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Apply / manage credits
+                        </Link>
+                      )}
                     </div>
                     <div className="bg-red-50 rounded-lg p-3 text-center">
-                      <div className="text-xs text-red-600 mb-1">Outstanding (net)</div>
+                      <div className="text-xs text-red-600 mb-1">Net payable</div>
                       <div className="text-lg font-bold text-red-900">
-                        {formatCurrency(netInvoiceOutstanding(filteredInvoices))}
+                        {formatCurrency(openItemBreakdown.netPayable)}
                       </div>
-                      {openCreditNoteSummary.count > 0 && (
-                        <div className="text-[11px] text-red-700/80 mt-0.5">
-                          After deducting credit notes
-                        </div>
-                      )}
+                      <div className="text-[11px] text-red-700/80 mt-0.5">
+                        Bills due − open credits
+                      </div>
                     </div>
                   </div>
 
@@ -2145,7 +2141,7 @@ function SupplierDetailModal({
                       ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
                       const balance = Number(inv.outstandingBalance || 0);
                       const payable = isPayableInvoice(inv);
-                      const isCn = String(inv.documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE';
+                      const isCn = isSupplierCreditNote(inv);
                       const checked = multiSelected.has(inv.id);
                       const statusColor =
                         isCn ? 'bg-teal-100 text-teal-800'
@@ -2248,7 +2244,7 @@ function SupplierDetailModal({
                           const paid = Number(inv.amountPaid || 0);
                           const balance = Number(inv.outstandingBalance || 0);
                           const payable = isPayableInvoice(inv);
-                          const isCn = String(inv.documentType || '').toUpperCase() === 'SUPPLIER_CREDIT_NOTE';
+                          const isCn = isSupplierCreditNote(inv);
                           const checked = multiSelected.has(inv.id);
                           const statusColor =
                             isCn
