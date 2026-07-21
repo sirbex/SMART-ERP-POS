@@ -20,9 +20,17 @@ import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { useServerTableSort } from '../hooks/useServerTableSort';
 import { WorkflowHelpTrigger } from '../components/inventory/shared';
 import { useWhtTypes } from '../hooks/useAccountingModules';
+import { useBankAccounts } from '../hooks/useBanking';
 import { PartnerWhtLiableBadge } from '../components/partners/PartnerWhtLiableBadge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { SUPPLIER_PAYMENT_METHODS } from '../constants/paymentMethods';
+import {
+  accountsForSupplierPaymentMethod,
+  filterPayFromAccounts,
+  methodNeedsPayFromAccount,
+  pickDefaultPayFromAccount,
+} from '../utils/supplierPaymentPayFrom';
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
 // Frontend displays as-is without parsing to Date object
@@ -1109,7 +1117,13 @@ function SupplierDetailModal({
   const [payingInvoice, setPayingInvoice] = useState<SupplierInvoiceSummary | null>(null);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('BANK_TRANSFER');
+  const [paymentBankAccountId, setPaymentBankAccountId] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
+  const { data: bankAccounts = [] } = useBankAccounts();
+  const payFromAccounts = useMemo(() => filterPayFromAccounts(bankAccounts), [bankAccounts]);
+  const accountsForMethod = (method: string) =>
+    accountsForSupplierPaymentMethod(payFromAccounts, method);
+  const methodNeedsPayFrom = methodNeedsPayFromAccount;
   const [paymentNotes, setPaymentNotes] = useState('');
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -1119,6 +1133,7 @@ function SupplierDetailModal({
   const [multiSelected, setMultiSelected] = useState<Map<string, number>>(new Map()); // invoiceId → payAmount
   const [multiPayDate, setMultiPayDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [multiPayMethod, setMultiPayMethod] = useState('BANK_TRANSFER');
+  const [multiPayBankAccountId, setMultiPayBankAccountId] = useState('');
   const [multiPayRef, setMultiPayRef] = useState('');
   const [multiPayNotes, setMultiPayNotes] = useState('');
   const [multiPosting, setMultiPosting] = useState(false);
@@ -1130,6 +1145,25 @@ function SupplierDetailModal({
     multiSelected.forEach((amt) => { t = t.plus(amt); });
     return t.toNumber();
   }, [multiSelected]);
+
+  useEffect(() => {
+    if (!payingInvoice) return;
+    if (!methodNeedsPayFrom(paymentMethod)) return;
+    const books = accountsForMethod(paymentMethod);
+    if (books.length === 0) return;
+    if (paymentBankAccountId && books.some((b) => b.id === paymentBankAccountId)) return;
+    const defaultId = pickDefaultPayFromAccount(payFromAccounts, paymentMethod);
+    if (defaultId) setPaymentBankAccountId(defaultId);
+  }, [payingInvoice, paymentMethod, payFromAccounts, paymentBankAccountId]);
+
+  useEffect(() => {
+    if (multiSelected.size === 0 || !methodNeedsPayFrom(multiPayMethod)) return;
+    const books = accountsForMethod(multiPayMethod);
+    if (books.length === 0) return;
+    if (multiPayBankAccountId && books.some((b) => b.id === multiPayBankAccountId)) return;
+    const defaultId = pickDefaultPayFromAccount(payFromAccounts, multiPayMethod);
+    if (defaultId) setMultiPayBankAccountId(defaultId);
+  }, [multiSelected.size, multiPayMethod, payFromAccounts, multiPayBankAccountId]);
 
   const isPayableInvoice = (inv: SupplierInvoiceSummary) =>
     Number(inv.outstandingBalance || 0) > 0 &&
@@ -1160,6 +1194,36 @@ function SupplierDetailModal({
 
   const handlePostMultiRun = async () => {
     if (multiSelected.size === 0) return;
+    if (
+      methodNeedsPayFrom(multiPayMethod) &&
+      accountsForMethod(multiPayMethod).length > 0 &&
+      !multiPayBankAccountId
+    ) {
+      setMultiError('Select which bank account to pay from');
+      return;
+    }
+    if (multiPayMethod === 'CASH') {
+      const cashBooks = accountsForMethod('CASH');
+      const cashBook = cashBooks.find((b) => b.glAccountCode === '1010') ?? cashBooks[0];
+      const cashAvail = cashBook?.currentBalance;
+      if (typeof cashAvail === 'number' && multiRunTotal > cashAvail) {
+        setMultiError(
+          `Not enough funds in Cash Drawer (${formatCurrency(cashAvail)} available). ` +
+            'Choose Bank Transfer and select Pay from account to pay from a bank account.',
+        );
+        return;
+      }
+    } else if (methodNeedsPayFrom(multiPayMethod) && multiPayBankAccountId) {
+      const selected = accountsForMethod(multiPayMethod).find((b) => b.id === multiPayBankAccountId);
+      const avail = selected?.currentBalance;
+      if (selected && typeof avail === 'number' && multiRunTotal > avail) {
+        setMultiError(
+          `Not enough funds in ${selected.name} (${formatCurrency(avail)} available, ` +
+            `payment total ${formatCurrency(multiRunTotal)}).`,
+        );
+        return;
+      }
+    }
     setMultiPosting(true);
     setMultiError(null);
     setMultiSuccess(null);
@@ -1174,6 +1238,7 @@ function SupplierDetailModal({
       const { data } = await api.post('/supplier-payments/payments/mass-run', {
         paymentDate: multiPayDate,
         paymentMethod: multiPayMethod,
+        bankAccountId: multiPayBankAccountId || undefined,
         reference: multiPayRef || undefined,
         notes: multiPayNotes || undefined,
         allocations,
@@ -1477,6 +1542,36 @@ function SupplierDetailModal({
       );
       return;
     }
+    if (
+      methodNeedsPayFrom(paymentMethod) &&
+      accountsForMethod(paymentMethod).length > 0 &&
+      !paymentBankAccountId
+    ) {
+      setPaymentError('Select which bank account to pay from');
+      return;
+    }
+    if (paymentMethod === 'CASH') {
+      const cashBooks = accountsForMethod('CASH');
+      const cashBook = cashBooks.find((b) => b.glAccountCode === '1010') ?? cashBooks[0];
+      const cashAvail = cashBook?.currentBalance;
+      if (typeof cashAvail === 'number' && amount > cashAvail) {
+        setPaymentError(
+          `Not enough funds in Cash Drawer (${formatCurrency(cashAvail, true, 0)} available). ` +
+            'Choose Bank Transfer and select Pay from account to pay from a bank account.',
+        );
+        return;
+      }
+    } else if (methodNeedsPayFrom(paymentMethod) && paymentBankAccountId) {
+      const selected = accountsForMethod(paymentMethod).find((b) => b.id === paymentBankAccountId);
+      const avail = selected?.currentBalance;
+      if (selected && typeof avail === 'number' && amount > avail) {
+        setPaymentError(
+          `Not enough funds in ${selected.name} (${formatCurrency(avail, true, 0)} available, ` +
+            `payment ${formatCurrency(amount, true, 0)}).`,
+        );
+        return;
+      }
+    }
     setSubmittingPayment(true);
     setPaymentError(null);
     try {
@@ -1484,6 +1579,7 @@ function SupplierDetailModal({
         supplierId: supplier.id,
         amount,
         paymentMethod,
+        bankAccountId: paymentBankAccountId || undefined,
         reference: paymentReference || undefined,
         notes: paymentNotes || undefined,
         targetInvoiceId: payingInvoice.id,
@@ -1503,8 +1599,23 @@ function SupplierDetailModal({
         loadInvoices();
       }, 2000);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Payment failed';
-      setPaymentError(message);
+      const raw =
+        error && typeof error === 'object' && 'response' in error
+          ? String(
+              (error as { response?: { data?: { error?: string } } }).response?.data?.error ||
+                (error instanceof Error ? error.message : 'Payment failed'),
+            )
+          : error instanceof Error
+            ? error.message
+            : 'Payment failed';
+      const cleaned = raw
+        .replace(/^\[GL_ERROR\]\s*GL posting failed for supplier payment [^:]+:\s*/i, '')
+        .trim();
+      setPaymentError(
+        /not enough money|insufficient funds/i.test(cleaned)
+          ? cleaned
+          : cleaned || 'Payment failed',
+      );
     } finally {
       setSubmittingPayment(false);
     }
@@ -2381,17 +2492,57 @@ function SupplierDetailModal({
                           <label className="block text-xs font-medium text-purple-800 mb-1">Payment Method *</label>
                           <select
                             value={multiPayMethod}
-                            onChange={(e) => setMultiPayMethod(e.target.value)}
+                            onChange={(e) => {
+                              const next = e.target.value;
+                              setMultiPayMethod(next);
+                              const books = methodNeedsPayFrom(next) ? accountsForMethod(next) : [];
+                              setMultiPayBankAccountId(
+                                books.length === 1
+                                  ? books[0].id
+                                  : pickDefaultPayFromAccount(payFromAccounts, next) || '',
+                              );
+                            }}
                             className="w-full border border-purple-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
                             disabled={multiPosting}
                           >
-                            <option value="BANK_TRANSFER">Bank Transfer</option>
-                            <option value="CASH">Cash</option>
-                            <option value="CHECK">Check</option>
-                            <option value="CARD">Card</option>
-                            <option value="OTHER">Other</option>
+                            {SUPPLIER_PAYMENT_METHODS.map((m) => (
+                              <option key={m.value} value={m.value}>
+                                {m.label}
+                              </option>
+                            ))}
                           </select>
                         </div>
+                        {methodNeedsPayFrom(multiPayMethod) &&
+                          accountsForMethod(multiPayMethod).length > 0 && (
+                          <div className="col-span-2">
+                            <label className="block text-xs font-medium text-purple-800 mb-1">
+                              Pay from account *
+                            </label>
+                            <select
+                              value={multiPayBankAccountId}
+                              onChange={(e) => setMultiPayBankAccountId(e.target.value)}
+                              className="w-full border border-purple-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 bg-white"
+                              disabled={multiPosting}
+                            >
+                              <option value="">Select bank account…</option>
+                              {accountsForMethod(multiPayMethod).map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name}
+                                  {a.glAccountCode ? ` · ${a.glAccountCode}` : ''}
+                                  {typeof a.currentBalance === 'number'
+                                    ? ` · ${formatCurrency(a.currentBalance, true, 0)}`
+                                    : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+                        {multiPayMethod === 'CASH' && (
+                          <p className="col-span-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                            Cash uses the till (1010), not bank accounts. Choose Bank Transfer to pay
+                            from a bank account.
+                          </p>
+                        )}
                         <div>
                           <label className="block text-xs font-medium text-purple-800 mb-1">Reference</label>
                           <input
@@ -2918,17 +3069,70 @@ function SupplierDetailModal({
                   </label>
                   <select
                     value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setPaymentMethod(next);
+                      const books = methodNeedsPayFrom(next) ? accountsForMethod(next) : [];
+                      setPaymentBankAccountId(
+                        books.length === 1 ? books[0].id : pickDefaultPayFromAccount(payFromAccounts, next) || '',
+                      );
+                    }}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                     disabled={submittingPayment || !!paymentSuccess}
                   >
-                    <option value="CASH">Cash</option>
-                    <option value="BANK_TRANSFER">Bank Transfer</option>
-                    <option value="CHECK">Check</option>
-                    <option value="CARD">Card</option>
-                    <option value="OTHER">Other</option>
+                    {SUPPLIER_PAYMENT_METHODS.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
+
+                {methodNeedsPayFrom(paymentMethod) && accountsForMethod(paymentMethod).length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Pay from account *
+                    </label>
+                    <select
+                      value={paymentBankAccountId}
+                      onChange={(e) => setPaymentBankAccountId(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      disabled={submittingPayment || !!paymentSuccess}
+                    >
+                      <option value="">Select bank account…</option>
+                      {accountsForMethod(paymentMethod).map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                          {a.glAccountCode ? ` · ${a.glAccountCode}` : ''}
+                          {typeof a.currentBalance === 'number'
+                            ? ` · ${formatCurrency(a.currentBalance, true, 0)}`
+                            : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {(() => {
+                      const selected = accountsForMethod(paymentMethod).find(
+                        (b) => b.id === paymentBankAccountId,
+                      );
+                      if (!selected || typeof selected.currentBalance !== 'number') return null;
+                      return (
+                        <p className="text-xs text-gray-600 mt-1">
+                          Paying from {selected.name}
+                          {selected.glAccountCode ? ` (GL ${selected.glAccountCode})` : ''}
+                          {' — '}
+                          {formatCurrency(selected.currentBalance, true, 0)} available
+                        </p>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {paymentMethod === 'CASH' && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                    Cash payments use the till / Cash Drawer (1010), not your bank accounts. Choose
+                    Bank Transfer to pay from a bank account.
+                  </p>
+                )}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Reference</label>

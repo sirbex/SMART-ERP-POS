@@ -6,7 +6,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
 import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
-import { requirePermission } from '../../rbac/middleware.js';
+import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 import * as supplierPaymentService from './supplierPaymentService.js';
 import Decimal from 'decimal.js';
 import logger from '../../utils/logger.js';
@@ -53,6 +53,7 @@ const CreatePaymentSchema = z.object({
     reference: z.string().optional(),
     notes: z.string().optional(),
     targetInvoiceId: z.string().uuid().nullable().optional(),
+    bankAccountId: z.string().uuid().nullable().optional(),
     whtTypeId: z.string().uuid().nullable().optional(),
     certificateNumber: z.string().max(100).optional(),
 });
@@ -200,6 +201,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                     reference: validated.reference,
                     notes: validated.notes,
                     targetInvoiceId: validated.targetInvoiceId ?? undefined,
+                    bankAccountId: validated.bankAccountId ?? undefined,
                     whtTypeId: validated.whtTypeId ?? undefined,
                     certificateNumber: validated.certificateNumber,
                 },
@@ -257,6 +259,70 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
             const userId = req.user?.id;
             const allocations = await supplierPaymentService.autoAllocatePayment(p(req), id, userId);
             res.json({ success: true, data: allocations });
+        })
+    );
+
+    const ReversePaymentSchema = z.object({
+        reason: z.string().min(5),
+        reversalDate: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .optional(),
+    });
+
+    const CorrectPaymentMethodSchema = z.object({
+        newPaymentMethod: z.string().min(1),
+        reason: z.string().min(5),
+        paymentDate: z
+            .string()
+            .regex(/^\d{4}-\d{2}-\d{2}$/)
+            .optional(),
+        reference: z.string().optional(),
+        notes: z.string().optional(),
+        bankAccountId: z.string().uuid().optional(),
+        reallocate: z.boolean().optional(),
+    });
+
+    // Reverse completed supplier payment (unapply + reverse GL) — SAP FBRA / Odoo cancel
+    router.post(
+        '/payments/:id/reverse',
+        requireAnyPermission(['corrections.execute', 'suppliers.update']),
+        asyncHandler(async (req, res) => {
+            const { id } = UuidParamSchema.parse(req.params);
+            const body = ReversePaymentSchema.parse(req.body);
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ success: false, error: 'Authentication required' });
+            }
+            const result = await supplierPaymentService.reverseSupplierPayment(
+                p(req),
+                id,
+                userId,
+                body.reason,
+                { reversalDate: body.reversalDate },
+            );
+            res.json({ success: true, data: result });
+        })
+    );
+
+    // Correct payment method (reverse + re-post with new method) e.g. CASH → BANK_TRANSFER
+    router.post(
+        '/payments/:id/correct-method',
+        requireAnyPermission(['corrections.execute', 'suppliers.update']),
+        asyncHandler(async (req, res) => {
+            const { id } = UuidParamSchema.parse(req.params);
+            const body = CorrectPaymentMethodSchema.parse(req.body);
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ success: false, error: 'Authentication required' });
+            }
+            const result = await supplierPaymentService.correctSupplierPaymentMethod(
+                p(req),
+                id,
+                body,
+                userId,
+            );
+            res.json({ success: true, data: result });
         })
     );
 
@@ -593,6 +659,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         paymentMethod: z.string().min(1),
         reference: z.string().optional(),
         notes: z.string().optional(),
+        bankAccountId: z.string().uuid().optional(),
         allocations: z.array(z.object({
             supplierId: z.string().uuid(),
             invoiceId: z.string().uuid(),
@@ -613,6 +680,7 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                     paymentMethod: validated.paymentMethod,
                     reference: validated.reference,
                     notes: validated.notes,
+                    bankAccountId: validated.bankAccountId,
                     allocations: validated.allocations.map((a) => ({
                         supplierId: a.supplierId,
                         invoiceId: a.invoiceId,

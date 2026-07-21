@@ -23,6 +23,10 @@ import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository
 import { PricingEngine } from '../../utils/pricingEngine.js';
 import { assertSupplierCreditHeadroom } from '../suppliers/supplierCreditGuard.js';
 import * as whtService from '../withholding-tax/whtService.js';
+import {
+    resolveSupplierPaymentCreditAccount,
+    paymentMethodFromLiquidityTag,
+} from './supplierPaymentPayFrom.js';
 
 // Configure Decimal.js for currency precision
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -35,9 +39,15 @@ export interface CreateSupplierPaymentInput {
     reference?: string;
     notes?: string;
     targetInvoiceId?: string;
+    /** Banking book to pay from (required when multiple banks / bank or MoMo methods). */
+    bankAccountId?: string;
     /** Optional WHT type — amount is gross AP settlement; cash paid = net after WHT. */
     whtTypeId?: string;
     certificateNumber?: string;
+    /**
+     * Exact invoice allocations (correction path). When set, skips FIFO and applies these only.
+     */
+    exactAllocations?: Array<{ invoiceId: string; amount: number }>;
 }
 
 export interface CreateSupplierInvoiceInput {
@@ -136,9 +146,10 @@ export async function getSupplierPaymentById(pool: Pool, id: string) {
 export async function createSupplierPayment(
     pool: Pool,
     data: CreateSupplierPaymentInput,
-    userId?: string
+    userId?: string,
+    options?: { client?: PoolClient },
 ) {
-    const receiptData = await UnitOfWork.run(pool, async (client) => {
+    const run = async (client: PoolClient) => {
         // Use Decimal.js for precise amount handling
         const paymentAmount = new Decimal(data.amount);
 
@@ -181,26 +192,56 @@ export async function createSupplierPayment(
             }
         }
 
+        // Resolve pay-from liquidity book (multi-bank / MoMo) before insert
+        const payFrom = await resolveSupplierPaymentCreditAccount(client, {
+            paymentMethod: data.paymentMethod,
+            bankAccountId: data.bankAccountId,
+        });
+        const effectiveMethod =
+            payFrom.bankAccountId && payFrom.glAccountTag
+                ? paymentMethodFromLiquidityTag(payFrom.glAccountTag, data.paymentMethod)
+                : data.paymentMethod;
+
         // Create the payment record
         const payment = await supplierPaymentRepository.createPayment(client, {
             supplierId: data.supplierId,
             paymentDate: data.paymentDate,
-            paymentMethod: data.paymentMethod,
+            paymentMethod: effectiveMethod,
             amount: paymentAmount.toNumber(),
             reference: data.reference,
             notes: data.notes,
             createdById: userId,
+            bankAccountId: payFrom.bankAccountId,
         });
 
-        // Auto-allocate to outstanding invoices (FIFO by due date)
+        // Auto-allocate to outstanding invoices (FIFO by due date), or exact correction snapshots
         // Use client (not pool) so this read is inside the transaction and sees locked rows.
         let outstandingInvoices = await supplierPaymentRepository.findOutstandingInvoices(
             client,
             data.supplierId
         );
 
-        // If a target invoice is specified, prioritize it by moving it to the front
-        if (data.targetInvoiceId) {
+        if (data.exactAllocations?.length) {
+            const byId = new Map(outstandingInvoices.map((inv) => [inv.id, inv]));
+            outstandingInvoices = [];
+            for (const snap of data.exactAllocations) {
+                const inv = byId.get(snap.invoiceId);
+                if (!inv) {
+                    throw new ValidationError(
+                        `Cannot re-allocate to invoice ${snap.invoiceId} — not outstanding after reverse.`,
+                    );
+                }
+                // Cap at snapshot amount via temporary outstanding override for the loop below
+                outstandingInvoices.push({
+                    ...inv,
+                    outstandingBalance: Math.min(
+                        Number(inv.outstandingBalance),
+                        snap.amount,
+                    ),
+                });
+            }
+        } else if (data.targetInvoiceId) {
+            // If a target invoice is specified, prioritize it by moving it to the front
             const targetIdx = outstandingInvoices.findIndex((inv) => inv.id === data.targetInvoiceId);
             if (targetIdx > 0) {
                 const [target] = outstandingInvoices.splice(targetIdx, 1);
@@ -356,12 +397,18 @@ export async function createSupplierPayment(
                 id: payment.id,
                 paymentNumber: payment.paymentNumber,
                 paymentDate: data.paymentDate,
-                paymentMethod: data.paymentMethod,
+                paymentMethod: effectiveMethod,
                 reference: data.reference || null,
                 notes: data.notes || null,
                 amount: paymentAmount.toNumber(),
                 allocatedAmount: totalAllocated.toNumber(),
                 unallocatedAmount: unallocatedAmount.toNumber(),
+                bankAccountId: payFrom.bankAccountId,
+                bankAccountName: payFrom.bankAccountName,
+                bankName: payFrom.bankName,
+                bankAccountNumber: payFrom.bankAccountNumber,
+                glAccountCode: payFrom.creditAccountCode,
+                paymentAccountCode: payFrom.creditAccountCode,
                 whtAmount: whtCalc?.whtAmount ?? 0,
                 netCashAmount: whtCalc?.netAmount ?? paymentAmount.toNumber(),
                 whtTypeName: whtCalc?.whtTypeName ?? null,
@@ -408,7 +455,8 @@ export async function createSupplierPayment(
                 paymentNumber: payment.paymentNumber,
                 paymentDate: data.paymentDate,
                 amount: paymentAmount.toNumber(),
-                paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY',
+                paymentMethod: effectiveMethod as 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY',
+                paymentAccountCode: payFrom.creditAccountCode,
                 supplierId: data.supplierId,
                 supplierName: supplier?.CompanyName || 'Unknown',
                 whtAmount: whtCalc?.whtAmount,
@@ -428,9 +476,12 @@ export async function createSupplierPayment(
         await recalcSupplierBalance(client, data.supplierId);
 
         return receiptData;
-    });
+    };
 
-    return receiptData;
+    if (options?.client) {
+        return run(options.client);
+    }
+    return UnitOfWork.run(pool, run);
 }
 
 export async function updateSupplierPayment(
@@ -464,6 +515,274 @@ export async function deleteSupplierPayment(pool: Pool, id: string) {
         }
 
         return result;
+    });
+}
+
+export type ReverseSupplierPaymentResult = {
+    paymentId: string;
+    paymentNumber: string;
+    supplierId: string;
+    amount: number;
+    previousPaymentMethod: string;
+    glReversed: boolean;
+    reversalTransactionId: string | null;
+    allocationsRemoved: number;
+    invoiceIds: string[];
+    allocationSnapshots: Array<{ invoiceId: string; amount: number }>;
+    whtTypeId: string | null;
+};
+
+export type CorrectSupplierPaymentMethodInput = {
+    newPaymentMethod: string;
+    reason: string;
+    paymentDate?: string;
+    reference?: string;
+    notes?: string;
+    /** Pay-from bank book for the replacement payment */
+    bankAccountId?: string;
+    /** When true (default), re-apply prior invoice allocations via target + FIFO on recreate */
+    reallocate?: boolean;
+};
+
+/**
+ * SAP FBRA / Odoo cancel payment: unapply allocations, reverse SUPPLIER_PAYMENT GL, mark REVERSED.
+ * Bills reopen; cash/bank is restored. Does not create a replacement payment.
+ */
+export async function reverseSupplierPayment(
+    pool: Pool,
+    paymentId: string,
+    userId: string,
+    reason: string,
+    options?: { client?: PoolClient; reversalDate?: string },
+): Promise<ReverseSupplierPaymentResult> {
+    if (!reason || reason.trim().length < 5) {
+        throw new ValidationError('Reversal reason is required (min 5 characters)');
+    }
+
+    const run = async (client: PoolClient): Promise<ReverseSupplierPaymentResult> => {
+        await client.query(`
+          ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS bank_account_id UUID NULL
+        `);
+        const payRes = await client.query<{
+            Id: string;
+            PaymentNumber: string;
+            SupplierId: string;
+            PaymentMethod: string;
+            Amount: string | number;
+            Status: string;
+            PaymentDate: string;
+            bank_account_id: string | null;
+        }>(
+            `SELECT "Id", "PaymentNumber", "SupplierId", "PaymentMethod", "Amount", "Status", "PaymentDate",
+                    bank_account_id
+             FROM supplier_payments
+             WHERE "Id" = $1 AND deleted_at IS NULL
+             FOR UPDATE`,
+            [paymentId],
+        );
+        if (!payRes.rows[0]) {
+            throw new ValidationError('Supplier payment not found');
+        }
+        const pay = payRes.rows[0];
+        const status = String(pay.Status || '').toUpperCase();
+        if (status === 'REVERSED') {
+            throw new ValidationError(
+                `Payment ${pay.PaymentNumber} is already reversed.`,
+            );
+        }
+        if (status !== 'COMPLETED') {
+            throw new ValidationError(
+                `Cannot reverse payment ${pay.PaymentNumber} with status ${pay.Status}. Only COMPLETED payments can be reversed.`,
+            );
+        }
+
+        const reversalDate = options?.reversalDate || getBusinessDate();
+        await checkAccountingPeriodOpen(client, reversalDate);
+
+        const allocations = await supplierPaymentRepository.findAllocationsByPaymentId(client, paymentId);
+        const invoiceIds = [...new Set(allocations.map((a) => a.supplierInvoiceId))];
+        const allocationSnapshots = allocations.map((a) => ({
+            invoiceId: a.supplierInvoiceId,
+            amount: new Decimal(a.amount).toNumber(),
+        }));
+
+        for (const alloc of allocations) {
+            await supplierPaymentRepository.deleteAllocation(client, alloc.id);
+        }
+        for (const invoiceId of invoiceIds) {
+            const sumResult = await client.query(
+                `SELECT COALESCE(SUM("AmountAllocated"), 0) as total_paid
+                 FROM supplier_payment_allocations
+                 WHERE "SupplierInvoiceId" = $1 AND deleted_at IS NULL`,
+                [invoiceId],
+            );
+            const newPaidAmount = new Decimal(sumResult.rows[0].total_paid).toNumber();
+            await supplierPaymentRepository.updateInvoicePaidAmount(client, invoiceId, newPaidAmount);
+        }
+
+        const whtRes = await client.query<{ wht_type_id: string }>(
+            `SELECT wht_type_id FROM withholding_tax_entries
+             WHERE transaction_type = 'SUPPLIER_PAYMENT' AND transaction_id = $1
+             LIMIT 1`,
+            [paymentId],
+        );
+        const whtTypeId = whtRes.rows[0]?.wht_type_id ?? null;
+        // Remove WHT subledger rows so payable control stays aligned after GL reverse
+        await client.query(
+            `DELETE FROM withholding_tax_entries
+             WHERE transaction_type = 'SUPPLIER_PAYMENT' AND transaction_id = $1`,
+            [paymentId],
+        );
+
+        let glReversed = false;
+        let reversalTransactionId: string | null = null;
+        const glTxn = await client.query<{ Id: string }>(
+            `SELECT "Id" FROM ledger_transactions
+             WHERE "ReferenceType" = 'SUPPLIER_PAYMENT'
+               AND "ReferenceId" = $1
+               AND "IsReversed" = FALSE
+             ORDER BY "CreatedAt" DESC
+             LIMIT 1`,
+            [paymentId],
+        );
+
+        if (glTxn.rows[0]) {
+            try {
+                const rev = await AccountingCore.reverseTransaction(
+                    {
+                        originalTransactionId: glTxn.rows[0].Id,
+                        reversalDate,
+                        reason: `REVERSE ${pay.PaymentNumber}: ${reason.trim()}`,
+                        userId,
+                        idempotencyKey: `SUPPLIER_PAYMENT_REVERSE-${paymentId}`,
+                    },
+                    pool,
+                    client,
+                );
+                glReversed = true;
+                reversalTransactionId = rev.transactionId;
+            } catch (error: unknown) {
+                if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
+                    glReversed = true;
+                } else {
+                    throw error;
+                }
+            }
+        } else {
+            logger.warn('Supplier payment reverse: no open GL transaction found', {
+                paymentId,
+                paymentNumber: pay.PaymentNumber,
+            });
+        }
+
+        const noteSuffix = `\n[REVERSED ${reversalDate}] ${reason.trim()}`;
+        await client.query(
+            `UPDATE supplier_payments
+             SET "Status" = 'REVERSED',
+                 "AllocatedAmount" = 0,
+                 "UnallocatedAmount" = 0,
+                 "Notes" = LEFT(COALESCE("Notes", '') || $2, 2000),
+                 "UpdatedAt" = NOW()
+             WHERE "Id" = $1`,
+            [paymentId, noteSuffix],
+        );
+
+        await recalcSupplierBalance(client, pay.SupplierId);
+
+        logger.info('Supplier payment reversed', {
+            paymentId,
+            paymentNumber: pay.PaymentNumber,
+            glReversed,
+            allocationsRemoved: allocations.length,
+            userId,
+        });
+
+        return {
+            paymentId,
+            paymentNumber: pay.PaymentNumber,
+            supplierId: pay.SupplierId,
+            amount: new Decimal(pay.Amount).toNumber(),
+            previousPaymentMethod: pay.PaymentMethod,
+            glReversed,
+            reversalTransactionId,
+            allocationsRemoved: allocations.length,
+            invoiceIds,
+            allocationSnapshots,
+            whtTypeId,
+        };
+    };
+
+    if (options?.client) {
+        return run(options.client);
+    }
+    return UnitOfWork.run(pool, run);
+}
+
+/**
+ * Smart correction: reverse wrong liquidity payment and re-post with the correct method
+ * (e.g. CASH → BANK_TRANSFER) in one transaction — SAP reset+repay / Odoo cancel+recreate.
+ */
+export async function correctSupplierPaymentMethod(
+    pool: Pool,
+    paymentId: string,
+    input: CorrectSupplierPaymentMethodInput,
+    userId: string,
+) {
+    if (!input.newPaymentMethod?.trim()) {
+        throw new ValidationError('newPaymentMethod is required');
+    }
+    if (!input.reason || input.reason.trim().length < 5) {
+        throw new ValidationError('Correction reason is required (min 5 characters)');
+    }
+
+    return UnitOfWork.run(pool, async (client) => {
+        const existing = await client.query<{ PaymentMethod: string; Status: string }>(
+            `SELECT "PaymentMethod", "Status" FROM supplier_payments WHERE "Id" = $1 AND deleted_at IS NULL FOR UPDATE`,
+            [paymentId],
+        );
+        if (!existing.rows[0]) {
+            throw new ValidationError('Supplier payment not found');
+        }
+        if (String(existing.rows[0].Status).toUpperCase() !== 'COMPLETED') {
+            throw new ValidationError('Only COMPLETED payments can be corrected');
+        }
+        if (existing.rows[0].PaymentMethod === input.newPaymentMethod) {
+            throw new ValidationError(
+                `Payment is already recorded as ${input.newPaymentMethod}. Choose a different method.`,
+            );
+        }
+
+        const reversed = await reverseSupplierPayment(pool, paymentId, userId, input.reason, {
+            client,
+            reversalDate: input.paymentDate || getBusinessDate(),
+        });
+
+        const reallocate = input.reallocate !== false;
+
+        const receipt = await createSupplierPayment(
+            pool,
+            {
+                supplierId: reversed.supplierId,
+                amount: reversed.amount,
+                paymentMethod: input.newPaymentMethod,
+                paymentDate: input.paymentDate || getBusinessDate(),
+                reference: input.reference || `Corrects ${reversed.paymentNumber}`,
+                notes:
+                    input.notes ||
+                    `Corrected from ${reversed.previousPaymentMethod} → ${input.newPaymentMethod}. ` +
+                        `Original: ${reversed.paymentNumber}. ${input.reason.trim()}`,
+                exactAllocations: reallocate ? reversed.allocationSnapshots : undefined,
+                whtTypeId: reversed.whtTypeId || undefined,
+                bankAccountId: input.bankAccountId,
+            },
+            userId,
+            { client },
+        );
+
+        return {
+            reversed,
+            replacement: receipt,
+        };
     });
 }
 
@@ -1196,6 +1515,8 @@ export interface MassPaymentRunInput {
     paymentMethod: string;
     reference?: string;
     notes?: string;
+    /** Pay-from bank book (required when multiple banks for bank/MoMo methods). */
+    bankAccountId?: string;
     allocations: MassPaymentAllocation[];
 }
 
@@ -1247,6 +1568,15 @@ export async function massPaymentRun(
     const results: MassPaymentRunResult['payments'] = [];
 
     await UnitOfWork.run(pool, async (client) => {
+        const payFrom = await resolveSupplierPaymentCreditAccount(client, {
+            paymentMethod: data.paymentMethod,
+            bankAccountId: data.bankAccountId,
+        });
+        const effectiveMethod =
+            payFrom.bankAccountId && payFrom.glAccountTag
+                ? paymentMethodFromLiquidityTag(payFrom.glAccountTag, data.paymentMethod)
+                : data.paymentMethod;
+
         for (const [supplierId, supplierAllocs] of bySupplier) {
             const supplierTotal = supplierAllocs.reduce(
                 (sum, a) => sum.plus(new Decimal(a.amount)),
@@ -1257,11 +1587,12 @@ export async function massPaymentRun(
             const payment = await supplierPaymentRepository.createPayment(client, {
                 supplierId,
                 paymentDate: data.paymentDate,
-                paymentMethod: data.paymentMethod,
+                paymentMethod: effectiveMethod,
                 amount: supplierTotal.toNumber(),
                 reference: data.reference,
                 notes: data.notes,
                 createdById: userId,
+                bankAccountId: payFrom.bankAccountId,
             });
 
             // Apply each allocation — validate against ledger BEFORE writing
@@ -1336,7 +1667,8 @@ export async function massPaymentRun(
                     paymentNumber: payment.paymentNumber,
                     paymentDate: data.paymentDate,
                     amount: supplierTotal.toNumber(),
-                    paymentMethod: data.paymentMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CHECK',
+                    paymentMethod: effectiveMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CHECK',
+                    paymentAccountCode: payFrom.creditAccountCode,
                     supplierId,
                     supplierName,
                 },

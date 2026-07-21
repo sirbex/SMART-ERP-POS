@@ -1,11 +1,14 @@
 /**
- * Liquidity funds guard — SSOT = posted ledger (same formula as AccountingCore.getAccountBalance).
- * Blocks treasury / banking cash outs when available funds < required amount.
+ * Liquidity funds guard — SSOT = posted ledger (same formula as Banking getAllAccounts).
+ * See postedLedgerBalance.ts for why INNER POSTED is required.
  */
-
 import type { Pool, PoolClient } from 'pg';
 import { ValidationError } from '../../middleware/errorHandler.js';
 import { roundMoney } from '@shared/treasury/index.js';
+import {
+  availableFromPostedTotals,
+  postedLedgerBalanceLateral,
+} from './postedLedgerBalance.js';
 
 type DbConn = Pool | PoolClient;
 
@@ -16,7 +19,6 @@ export async function getLiquidityAvailable(
   accountCode: string,
   asOfDate?: string,
 ): Promise<{ available: number; accountName: string; normalBalance: string }> {
-  const dateFilter = asOfDate ? `AND DATE(lt."TransactionDate") <= $2` : '';
   const params: string[] = [accountCode];
   if (asOfDate) params.push(asOfDate);
 
@@ -30,14 +32,11 @@ export async function getLiquidityAvailable(
     SELECT
       a."AccountName",
       a."NormalBalance",
-      COALESCE(SUM(le."DebitAmount"), 0)::text AS "debitTotal",
-      COALESCE(SUM(le."CreditAmount"), 0)::text AS "creditTotal"
+      COALESCE(bal.debit_total, 0)::text AS "debitTotal",
+      COALESCE(bal.credit_total, 0)::text AS "creditTotal"
     FROM accounts a
-    LEFT JOIN ledger_entries le ON a."Id" = le."AccountId"
-    LEFT JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
-      AND lt."Status" = 'POSTED' ${dateFilter}
+    ${postedLedgerBalanceLateral(asOfDate ? '$2' : undefined)}
     WHERE a."AccountCode" = $1 AND a."IsActive" = true
-    GROUP BY a."Id", a."AccountName", a."NormalBalance"
     `,
     params,
   );
@@ -47,10 +46,11 @@ export async function getLiquidityAvailable(
   }
 
   const row = result.rows[0];
-  const debit = Number(row.debitTotal);
-  const credit = Number(row.creditTotal);
-  const available =
-    row.NormalBalance === 'DEBIT' ? roundMoney(debit - credit) : roundMoney(credit - debit);
+  const available = availableFromPostedTotals(
+    Number(row.debitTotal),
+    Number(row.creditTotal),
+    row.NormalBalance,
+  );
 
   return {
     available,
@@ -78,11 +78,17 @@ export async function assertSufficientLiquidityFunds(
   );
 
   if (available + EPS < need) {
-    const action = opts?.actionLabel || 'this movement';
+    const action = opts?.actionLabel || 'this payment';
+    const isCashDrawer =
+      accountCode === '1010' ||
+      /cash drawer|petty cash/i.test(accountName);
+    const payFromHint = isCashDrawer
+      ? ' This payment uses the till/cash account — to pay from a bank account, choose Bank Transfer and select Pay from account.'
+      : '';
     throw new ValidationError(
-      `Insufficient funds in ${accountCode} (${accountName}) for ${action}. ` +
-        `Available ${available.toFixed(2)}, required ${need.toFixed(2)}. ` +
-        `Reduce the amount or fund the account first.`,
+      `Not enough money in ${accountName} (${accountCode}). ` +
+        `Available ${available.toFixed(2)}, but ${action} needs ${need.toFixed(2)}. ` +
+        `Reduce the amount or add funds to the account first.${payFromHint}`,
     );
   }
 }

@@ -373,7 +373,33 @@ export const supplierPaymentService = {
     async autoAllocatePayment(paymentId: string): Promise<ApiResponse<SupplierPaymentAllocation[]>> {
         const response = await supplierApi.post(`/payments/${paymentId}/auto-allocate`);
         return response.data;
-    }
+    },
+
+    /** Reverse posted payment (unapply bills + reverse cash/bank GL). */
+    async reverseSupplierPayment(
+        id: string,
+        data: { reason: string; reversalDate?: string },
+    ): Promise<ApiResponse<unknown>> {
+        const response = await supplierApi.post(`/payments/${id}/reverse`, data);
+        return response.data;
+    },
+
+    /** Reverse then re-post with a different method (e.g. CASH → BANK_TRANSFER). */
+    async correctSupplierPaymentMethod(
+        id: string,
+        data: {
+            newPaymentMethod: string;
+            reason: string;
+            paymentDate?: string;
+            reference?: string;
+            notes?: string;
+            bankAccountId?: string;
+            reallocate?: boolean;
+        },
+    ): Promise<ApiResponse<unknown>> {
+        const response = await supplierApi.post(`/payments/${id}/correct-method`, data);
+        return response.data;
+    },
 };
 
 /**

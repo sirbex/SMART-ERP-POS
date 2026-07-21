@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../utils/api';
-import type { CreateCustomer } from '@shared/zod/customer';
+import type { CreateCustomerInput } from '../../types/inputs';
 import { CreateCustomerSchema } from '@shared/zod/customer';
 import POSModal from '../pos/POSModal';
 import POSButton from '../pos/POSButton';
@@ -50,7 +50,7 @@ export default function QuickAddCustomerModal({
   const queryClient = useQueryClient();
   const modalRef = useFocusTrap(isOpen);
 
-  const [formData, setFormData] = useState<Partial<CreateCustomer>>({
+  const [formData, setFormData] = useState<Partial<CreateCustomerInput>>({
     name: '',
     email: '',
     phone: '',
@@ -79,7 +79,7 @@ export default function QuickAddCustomerModal({
   }, [whtTypesRaw]);
 
   const createMutation = useMutation({
-    mutationFn: (data: CreateCustomer) => api.customers.create(data),
+    mutationFn: (data: CreateCustomerInput) => api.customers.create(data),
     onSuccess: (response) => {
       // Invalidate customer queries to refresh lists
       queryClient.invalidateQueries({ queryKey: ['customers'] });
@@ -183,10 +183,20 @@ export default function QuickAddCustomerModal({
       return;
     }
 
-    createMutation.mutate(validation.data);
+    createMutation.mutate({
+      name: validation.data.name,
+      email: validation.data.email,
+      phone: validation.data.phone,
+      address: validation.data.address,
+      customerGroupId: validation.data.customerGroupId ?? undefined,
+      priceGroupId: validation.data.priceGroupId ?? undefined,
+      creditLimit: validation.data.creditLimit,
+      whtLiable: validation.data.whtLiable,
+      defaultWhtTypeId: validation.data.defaultWhtTypeId ?? undefined,
+    });
   };
 
-  const handleChange = (field: keyof CreateCustomer, value: string | number | boolean | null) => {
+  const handleChange = (field: keyof CreateCustomerInput, value: string | number | boolean | null) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     // Clear error for this field
     if (errors[field]) {

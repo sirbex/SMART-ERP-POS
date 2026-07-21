@@ -122,23 +122,46 @@ export const createDunningLevel = async (
   const blockFurtherCredit =
     data.blockFurtherCredit ?? data.blockDelivery ?? false;
 
-  const result = await dbPool.query(
-    `INSERT INTO dunning_levels (id, level_number, name, days_overdue, fee_amount, fee_percentage, interest_rate, letter_template, block_further_credit)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     RETURNING *`,
-    [
-      uuidv4(),
-      levelNumber,
-      name,
-      daysOverdue,
-      data.feeAmount ?? 0,
-      data.feePercentage ?? 0,
-      data.interestRate ?? 0,
-      data.letterTemplate ?? null,
-      blockFurtherCredit,
-    ]
+  const existing = await dbPool.query(
+    `SELECT id, is_active FROM dunning_levels WHERE level_number = $1 LIMIT 1`,
+    [levelNumber],
   );
-  return normalizeDunningLevel(result.rows[0]);
+  if (existing.rows.length > 0) {
+    const active = existing.rows[0].is_active;
+    throw new ValidationError(
+      active
+        ? `Dunning level ${levelNumber} already exists. Use the next level number (${levelNumber + 1}) or edit the existing level.`
+        : `Dunning level ${levelNumber} exists but is inactive. Reactivate it or choose a different level number.`,
+    );
+  }
+
+  try {
+    const result = await dbPool.query(
+      `INSERT INTO dunning_levels (id, level_number, name, days_overdue, fee_amount, fee_percentage, interest_rate, letter_template, block_further_credit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [
+        uuidv4(),
+        levelNumber,
+        name,
+        daysOverdue,
+        data.feeAmount ?? 0,
+        data.feePercentage ?? 0,
+        data.interestRate ?? 0,
+        data.letterTemplate ?? null,
+        blockFurtherCredit,
+      ]
+    );
+    return normalizeDunningLevel(result.rows[0]);
+  } catch (err: unknown) {
+    const pg = err as { code?: string; constraint?: string };
+    if (pg.code === '23505' && pg.constraint === 'dunning_levels_level_number_key') {
+      throw new ValidationError(
+        `Dunning level ${levelNumber} already exists. Choose a unique level number.`,
+      );
+    }
+    throw err;
+  }
 };
 
 export const updateDunningLevel = async (

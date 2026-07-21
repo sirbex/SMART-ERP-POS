@@ -17,7 +17,7 @@ import Decimal from 'decimal.js';
 import { AxiosError } from 'axios';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
-import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks, FileMinus, User } from 'lucide-react';
+import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks, FileMinus, User, Undo2, RefreshCw } from 'lucide-react';
 import { OpeningBalancePanel } from '../../components/accounting/OpeningBalancePanel';
 import { useNavigate } from 'react-router-dom';
 import { downloadFile } from '../../utils/download';
@@ -56,7 +56,15 @@ import { SUPPLIER_PAYMENT_METHODS as PAYMENT_METHODS } from '../../constants/pay
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 // SINGLE SOURCE OF TRUTH: Use the same useSuppliers hook as SuppliersPage
 import { useSuppliers } from '../../hooks/useSuppliers';
+import { useBankAccounts } from '../../hooks/useBanking';
 import { useWhtTypes } from '../../hooks/useAccountingModules';
+import {
+    accountsForSupplierPaymentMethod,
+    filterPayFromAccounts,
+    methodNeedsPayFromAccount,
+    pickDefaultPayFromAccount,
+} from '../../utils/supplierPaymentPayFrom';
+import { formatPayFromLabel } from '../../utils/formatBankBookLabel';
 import { resolvePartnerWhtDefault } from '@shared/wht/partnerWhtDefault';
 import {
     supplierPaymentService,
@@ -108,6 +116,7 @@ const SupplierPaymentsPage: React.FC = () => {
     const navigate = useNavigate();
     // Permission checks (hide actions user cannot perform)
     const canCreatePayment = useCanAccess([], ['suppliers.create']);
+    const canCorrectPayment = useCanAccess([], ['corrections.execute', 'suppliers.update']);
     const { data: whtTypesRaw } = useWhtTypes();
     const supplierWhtTypes = useMemo(() => {
         const items = (Array.isArray(whtTypesRaw) ? whtTypesRaw : []) as Array<{
@@ -126,6 +135,15 @@ const SupplierPaymentsPage: React.FC = () => {
     }, [whtTypesRaw]);
     const canCreateBill = useCanAccess([], ['purchasing.create']);
     const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
+    const { data: bankAccounts = [] } = useBankAccounts();
+    const payFromAccounts = useMemo(() => filterPayFromAccounts(bankAccounts), [bankAccounts]);
+
+    const accountsForMethod = useCallback(
+        (method: string) => accountsForSupplierPaymentMethod(payFromAccounts, method),
+        [payFromAccounts],
+    );
+
+    const methodNeedsPayFrom = methodNeedsPayFromAccount;
     const [showObPanel, setShowObPanel] = useState(false);
 
     const [activeTab, setActiveTab] = useState('payments');
@@ -158,6 +176,12 @@ const SupplierPaymentsPage: React.FC = () => {
     const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
     const [isBillModalOpen, setIsBillModalOpen] = useState(false);
     const [isAllocationModalOpen, setIsAllocationModalOpen] = useState(false);
+    const [correctPayment, setCorrectPayment] = useState<SupplierPayment | null>(null);
+    const [correctMethod, setCorrectMethod] = useState('BANK_TRANSFER');
+    const [correctBankAccountId, setCorrectBankAccountId] = useState('');
+    const [correctReason, setCorrectReason] = useState('');
+    const [correctingPayment, setCorrectingPayment] = useState(false);
+    const [reversingPaymentId, setReversingPaymentId] = useState<string | null>(null);
     const [isReceiptModalOpen, setIsReceiptModalOpen] = useState(false);
     const [adjustInvoice, setAdjustInvoice] = useState<{ id: string; invoiceNumber: string } | null>(null);
 
@@ -232,6 +256,7 @@ const SupplierPaymentsPage: React.FC = () => {
     const [massSelected, setMassSelected] = useState<Map<string, number>>(new Map()); // invoiceId → payAmount
     const [massPaymentDate, setMassPaymentDate] = useState(new Date().toLocaleDateString('en-CA'));
     const [massPaymentMethod, setMassPaymentMethod] = useState('BANK_TRANSFER');
+    const [massBankAccountId, setMassBankAccountId] = useState('');
     const [massReference, setMassReference] = useState('');
     const [massNotes, setMassNotes] = useState('');
     const [massPosting, setMassPosting] = useState(false);
@@ -294,6 +319,14 @@ const SupplierPaymentsPage: React.FC = () => {
     const handlePostMassRun = async () => {
         if (massSelected.size === 0) { toast.error('No invoices selected'); return; }
         if (!massPaymentDate) { toast.error('Payment date is required'); return; }
+        if (
+            methodNeedsPayFrom(massPaymentMethod) &&
+            !massBankAccountId &&
+            accountsForMethod(massPaymentMethod).length > 0
+        ) {
+            toast.error('Select which bank account to pay from');
+            return;
+        }
         const allocations = massInvoices
             .filter(inv => massSelected.has(inv.id))
             .map(inv => ({ supplierId: inv.supplierId, invoiceId: inv.id, amount: massSelected.get(inv.id)! }));
@@ -302,6 +335,7 @@ const SupplierPaymentsPage: React.FC = () => {
             await api.supplierPayments.massRun({
                 paymentDate: massPaymentDate,
                 paymentMethod: massPaymentMethod,
+                bankAccountId: massBankAccountId || undefined,
                 reference: massReference || undefined,
                 notes: massNotes || undefined,
                 allocations,
@@ -329,6 +363,28 @@ const SupplierPaymentsPage: React.FC = () => {
         certificateNumber: '',
     });
     const [partnerWhtHint, setPartnerWhtHint] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!isPaymentModalOpen) return;
+        const method = paymentFormData.paymentMethod;
+        if (!methodNeedsPayFrom(method)) return;
+        const books = accountsForMethod(method);
+        if (books.length === 0) return;
+        setPaymentFormData((prev) => {
+            if (prev.bankAccountId && books.some((b) => b.id === prev.bankAccountId)) return prev;
+            const defaultId = pickDefaultPayFromAccount(payFromAccounts, method);
+            return defaultId ? { ...prev, bankAccountId: defaultId } : prev;
+        });
+    }, [isPaymentModalOpen, payFromAccounts, accountsForMethod, paymentFormData.paymentMethod]);
+
+    useEffect(() => {
+        if (massSelected.size === 0 || !methodNeedsPayFrom(massPaymentMethod)) return;
+        const books = accountsForMethod(massPaymentMethod);
+        if (books.length === 0) return;
+        if (massBankAccountId && books.some((b) => b.id === massBankAccountId)) return;
+        const defaultId = pickDefaultPayFromAccount(payFromAccounts, massPaymentMethod);
+        if (defaultId) setMassBankAccountId(defaultId);
+    }, [massSelected.size, massPaymentMethod, massBankAccountId, payFromAccounts, accountsForMethod]);
 
     const [billFormData, setBillFormData] = useState<CreateSupplierInvoiceRequest>({
         supplierId: '',
@@ -567,9 +623,45 @@ const SupplierPaymentsPage: React.FC = () => {
                 toast.error('Please select a payment method');
                 return;
             }
+            if (
+                methodNeedsPayFrom(paymentFormData.paymentMethod) &&
+                !paymentFormData.bankAccountId &&
+                accountsForMethod(paymentFormData.paymentMethod).length > 0
+            ) {
+                toast.error('Select which bank account to pay from');
+                return;
+            }
             if (!paymentFormData.paymentDate) {
                 toast.error('Please select a payment date');
                 return;
+            }
+
+            const method = paymentFormData.paymentMethod;
+            if (method === 'CASH') {
+                const cashBooks = accountsForMethod('CASH');
+                const cashBook = cashBooks.find((b) => b.glAccountCode === '1010') ?? cashBooks[0];
+                const cashAvail = cashBook?.currentBalance;
+                if (typeof cashAvail === 'number' && amount > cashAvail) {
+                    toast.error(
+                        `Not enough funds in Cash Drawer. Available ${formatCurrency(cashAvail)} in ${cashBook?.name || 'cash'}. ` +
+                            'Choose Bank Transfer and select Pay from account to pay from a bank account.',
+                        { duration: 8000 },
+                    );
+                    return;
+                }
+            } else if (methodNeedsPayFrom(method) && paymentFormData.bankAccountId) {
+                const selectedBook = accountsForMethod(method).find(
+                    (b) => b.id === paymentFormData.bankAccountId,
+                );
+                const avail = selectedBook?.currentBalance;
+                if (selectedBook && typeof avail === 'number' && amount > avail) {
+                    toast.error(
+                        `Not enough funds. ${selectedBook.name} has ${formatCurrency(avail)} available, ` +
+                            `but this payment is ${formatCurrency(amount)}.`,
+                        { duration: 8000 },
+                    );
+                    return;
+                }
             }
 
             setIsRecordingPayment(true);
@@ -599,12 +691,20 @@ const SupplierPaymentsPage: React.FC = () => {
                 setIsReceiptModalOpen(true);
             }
         } catch (error: unknown) {
-            console.error('Error creating payment:', error);
             if (!(error instanceof AxiosError && error.response?.status === 403)) {
                 const errMsg = error instanceof AxiosError
                     ? (error.response?.data as { error?: string })?.error
                     : error instanceof Error ? error.message : undefined;
-                toast.error(errMsg || 'Failed to record payment');
+                const cleaned = String(errMsg || '')
+                    .replace(/^\[GL_ERROR\]\s*GL posting failed for supplier payment [^:]+:\s*/i, '')
+                    .trim();
+                if (/not enough money|insufficient funds/i.test(cleaned)) {
+                    toast.error(cleaned || 'Not enough funds — reduce the amount or fund the account first.', {
+                        duration: 8000,
+                    });
+                } else {
+                    toast.error(cleaned || 'Failed to record payment');
+                }
             }
         } finally {
             setIsRecordingPayment(false);
@@ -830,6 +930,71 @@ const SupplierPaymentsPage: React.FC = () => {
             if (!(error instanceof AxiosError && error.response?.status === 403)) {
                 toast.error('Failed to load outstanding bills');
             }
+        }
+    };
+
+    const handleCorrectPaymentMethod = async () => {
+        if (!correctPayment) return;
+        if (!correctReason.trim() || correctReason.trim().length < 5) {
+            toast.error('Enter a reason (at least 5 characters)');
+            return;
+        }
+        if (correctMethod === correctPayment.paymentMethod) {
+            toast.error('Choose a different payment method than the original');
+            return;
+        }
+        try {
+            setCorrectingPayment(true);
+            await supplierPaymentService.correctSupplierPaymentMethod(correctPayment.id, {
+                newPaymentMethod: correctMethod,
+                reason: correctReason.trim(),
+                bankAccountId: correctBankAccountId || undefined,
+            });
+            toast.success(
+                `Corrected ${correctPayment.paymentNumber}: ${correctPayment.paymentMethod} → ${correctMethod}`,
+            );
+            setCorrectPayment(null);
+            setCorrectReason('');
+            await loadPayments();
+        } catch (error: unknown) {
+            const errMsg =
+                error instanceof AxiosError
+                    ? (error.response?.data as { error?: string })?.error
+                    : error instanceof Error
+                      ? error.message
+                      : undefined;
+            toast.error(errMsg || 'Failed to correct payment method');
+        } finally {
+            setCorrectingPayment(false);
+        }
+    };
+
+    const handleReversePayment = async (payment: SupplierPayment) => {
+        const reason = window.prompt(
+            `Reverse payment ${payment.paymentNumber}? Bills will reopen and cash/bank GL will reverse.\n\nReason (required):`,
+        );
+        if (reason === null) return;
+        if (!reason.trim() || reason.trim().length < 5) {
+            toast.error('Reversal reason is required (min 5 characters)');
+            return;
+        }
+        try {
+            setReversingPaymentId(payment.id);
+            await supplierPaymentService.reverseSupplierPayment(payment.id, {
+                reason: reason.trim(),
+            });
+            toast.success(`Reversed ${payment.paymentNumber}`);
+            await loadPayments();
+        } catch (error: unknown) {
+            const errMsg =
+                error instanceof AxiosError
+                    ? (error.response?.data as { error?: string })?.error
+                    : error instanceof Error
+                      ? error.message
+                      : undefined;
+            toast.error(errMsg || 'Failed to reverse payment');
+        } finally {
+            setReversingPaymentId(null);
         }
     };
 
@@ -1258,6 +1423,13 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     <Badge variant="outline" className="text-xs">
                                                         {payment.paymentMethod || 'N/A'}
                                                     </Badge>
+                                                    {payment.bankAccountName && (
+                                                        <Badge variant="secondary" className="text-xs max-w-md truncate">
+                                                            <span title={formatPayFromLabel(payment)}>
+                                                                {formatPayFromLabel(payment)}
+                                                            </span>
+                                                        </Badge>
+                                                    )}
                                                     {safeParseFloat(payment.unallocatedAmount) > 0 && (
                                                         <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-800">
                                                             Unallocated: {formatCurrency(safeParseFloat(payment.unallocatedAmount))}
@@ -1265,7 +1437,7 @@ const SupplierPaymentsPage: React.FC = () => {
                                                     )}
                                                 </div>
 
-                                                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 text-sm text-gray-600">
+                                                <div className="grid grid-cols-2 lg:grid-cols-6 gap-4 text-sm text-gray-600">
                                                     <div>
                                                         <span className="font-medium">Supplier:</span>
                                                         <div>{payment.supplierName || 'Unknown'}</div>
@@ -1276,6 +1448,14 @@ const SupplierPaymentsPage: React.FC = () => {
                                                             {formatCurrency(safeParseFloat(payment.amount))}
                                                         </div>
                                                     </div>
+                                                    {(payment.bankAccountName || payment.glAccountCode) && (
+                                                        <div className="lg:col-span-2">
+                                                            <span className="font-medium">Paid from:</span>
+                                                            <div className="font-medium text-gray-900">
+                                                                {formatPayFromLabel(payment) || '—'}
+                                                            </div>
+                                                        </div>
+                                                    )}
                                                     <div>
                                                         <span className="font-medium">Date:</span>
                                                         <div>{payment.paymentDate ? formatTimestampDate(payment.paymentDate) : 'N/A'}</div>
@@ -1294,7 +1474,46 @@ const SupplierPaymentsPage: React.FC = () => {
                                                 </div>
                                             </div>
 
-                                            <div className="flex items-center gap-2 ml-4">
+                                            <div className="flex items-center gap-2 ml-4 flex-wrap justify-end">
+                                                {canCorrectPayment && (
+                                                    <>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            onClick={() => {
+                                                                setCorrectPayment(payment);
+                                                                const nextMethod =
+                                                                    payment.paymentMethod === 'CASH'
+                                                                        ? 'BANK_TRANSFER'
+                                                                        : 'CASH';
+                                                                setCorrectMethod(nextMethod);
+                                                                const books = accountsForMethod(nextMethod);
+                                                                setCorrectBankAccountId(
+                                                                    books.length === 1 ? books[0].id : '',
+                                                                );
+                                                                setCorrectReason(
+                                                                    payment.paymentMethod === 'CASH'
+                                                                        ? 'Paid from cash by mistake — should be bank'
+                                                                        : 'Correct payment method',
+                                                                );
+                                                            }}
+                                                            className="flex items-center gap-1"
+                                                        >
+                                                            <RefreshCw className="h-4 w-4" />
+                                                            Correct method
+                                                        </Button>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            disabled={reversingPaymentId === payment.id}
+                                                            onClick={() => handleReversePayment(payment)}
+                                                            className="flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                                                        >
+                                                            <Undo2 className="h-4 w-4" />
+                                                            Reverse
+                                                        </Button>
+                                                    </>
+                                                )}
                                                 {safeParseFloat(payment.unallocatedAmount) > 0 ? (
                                                     canCreatePayment ? (
                                                         <Button
@@ -1588,7 +1807,14 @@ const SupplierPaymentsPage: React.FC = () => {
                                     </div>
                                     <div>
                                         <Label className="text-xs text-gray-600 mb-1 block">Payment Method</Label>
-                                        <Select value={massPaymentMethod} onValueChange={setMassPaymentMethod}>
+                                        <Select
+                                            value={massPaymentMethod}
+                                            onValueChange={(v) => {
+                                                setMassPaymentMethod(v);
+                                                const books = accountsForMethod(v);
+                                                setMassBankAccountId(books.length === 1 ? books[0].id : '');
+                                            }}
+                                        >
                                             <SelectTrigger><SelectValue /></SelectTrigger>
                                             <SelectContent>
                                                 {PAYMENT_METHODS.map(m => (
@@ -1597,6 +1823,25 @@ const SupplierPaymentsPage: React.FC = () => {
                                             </SelectContent>
                                         </Select>
                                     </div>
+                                    {methodNeedsPayFrom(massPaymentMethod) && (
+                                    <div>
+                                        <Label className="text-xs text-gray-600 mb-1 block">Pay from account</Label>
+                                        <Select
+                                            value={massBankAccountId || '__none__'}
+                                            onValueChange={(v) => setMassBankAccountId(v === '__none__' ? '' : v)}
+                                        >
+                                            <SelectTrigger><SelectValue placeholder="Select bank account" /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="__none__">Select…</SelectItem>
+                                                {accountsForMethod(massPaymentMethod).map((a) => (
+                                                    <SelectItem key={a.id} value={a.id}>
+                                                        {a.name}{a.glAccountCode ? ` · ${a.glAccountCode}` : ''}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    )}
                                     <div>
                                         <Label className="text-xs text-gray-600 mb-1 block">Reference</Label>
                                         <Input value={massReference} onChange={e => setMassReference(e.target.value)} placeholder="Cheque #, transfer ref…" />
@@ -1823,12 +2068,22 @@ const SupplierPaymentsPage: React.FC = () => {
                                         <Label htmlFor="payment-method">Payment method</Label>
                                         <Select
                                             value={paymentFormData.paymentMethod}
-                                            onValueChange={(value: string) =>
+                                            onValueChange={(value: string) => {
+                                                const needsPayFrom =
+                                                    value === 'BANK_TRANSFER' || value === 'CHECK';
+                                                const books = needsPayFrom ? accountsForMethod(value) : [];
                                                 setPaymentFormData((prev) => ({
                                                     ...prev,
                                                     paymentMethod: value as CreateSupplierPaymentRequest['paymentMethod'],
-                                                }))
-                                            }
+                                                    bankAccountId: needsPayFrom
+                                                        ? books.length === 1
+                                                            ? books[0].id
+                                                            : books.some((b) => b.id === prev.bankAccountId)
+                                                              ? prev.bankAccountId
+                                                              : undefined
+                                                        : undefined,
+                                                }));
+                                            }}
                                         >
                                             <SelectTrigger>
                                                 <SelectValue />
@@ -1842,6 +2097,61 @@ const SupplierPaymentsPage: React.FC = () => {
                                             </SelectContent>
                                         </Select>
                                     </div>
+                                    {methodNeedsPayFrom(paymentFormData.paymentMethod) && (
+                                        <div className="space-y-2">
+                                            <Label>Pay from account</Label>
+                                            <Select
+                                                value={paymentFormData.bankAccountId || '__none__'}
+                                                onValueChange={(value: string) =>
+                                                    setPaymentFormData((prev) => ({
+                                                        ...prev,
+                                                        bankAccountId: value === '__none__' ? undefined : value,
+                                                    }))
+                                                }
+                                            >
+                                                <SelectTrigger>
+                                                    <SelectValue placeholder="Select bank account" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="__none__">Select account…</SelectItem>
+                                                    {accountsForMethod(paymentFormData.paymentMethod).map((a) => (
+                                                        <SelectItem key={a.id} value={a.id}>
+                                                            {a.name}
+                                                            {a.bankName ? ` · ${a.bankName}` : ''}
+                                                            {a.glAccountCode ? ` · GL ${a.glAccountCode}` : ''}
+                                                            {typeof a.currentBalance === 'number'
+                                                                ? ` · ${formatCurrency(a.currentBalance)}`
+                                                                : ''}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                            {(() => {
+                                                const selected = accountsForMethod(
+                                                    paymentFormData.paymentMethod,
+                                                ).find((b) => b.id === paymentFormData.bankAccountId);
+                                                if (!selected || typeof selected.currentBalance !== 'number') {
+                                                    return null;
+                                                }
+                                                return (
+                                                    <p className="text-xs text-gray-600">
+                                                        Paying from {selected.name}
+                                                        {selected.glAccountCode
+                                                            ? ` (GL ${selected.glAccountCode})`
+                                                            : ''}
+                                                        {' — '}
+                                                        {formatCurrency(selected.currentBalance)} available
+                                                    </p>
+                                                );
+                                            })()}
+                                        </div>
+                                    )}
+                                    {paymentFormData.paymentMethod === 'CASH' && (
+                                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                                            Cash payments use the till / Cash Drawer (1010), not your bank
+                                            accounts. Choose Bank Transfer to pay from a bank account.
+                                        </p>
+                                    )}
                                 </div>
 
                                 {supplierWhtTypes.length > 0 && (
@@ -2134,6 +2444,104 @@ const SupplierPaymentsPage: React.FC = () => {
                 </DialogContent>
             </Dialog>
 
+            {/* Correct payment method (cash ↔ bank) — reverse + re-post */}
+            <Dialog
+                open={!!correctPayment}
+                onOpenChange={(open) => {
+                    if (!open) {
+                        setCorrectPayment(null);
+                        setCorrectReason('');
+                    }
+                }}
+            >
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Correct payment method</DialogTitle>
+                        <DialogDescription>
+                            Reverses {correctPayment?.paymentNumber} ({correctPayment?.paymentMethod}) and
+                            posts a new payment with the method you choose. Bills stay paid against the
+                            same invoices.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div>
+                            <Label>New payment method</Label>
+                            <Select
+                                value={correctMethod}
+                                onValueChange={(v) => {
+                                    setCorrectMethod(v);
+                                    const books = accountsForMethod(v);
+                                    setCorrectBankAccountId(books.length === 1 ? books[0].id : '');
+                                }}
+                            >
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {PAYMENT_METHODS.filter(
+                                        (m) => m.value !== correctPayment?.paymentMethod,
+                                    ).map((m) => (
+                                        <SelectItem key={m.value} value={m.value}>
+                                            {m.label}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        {methodNeedsPayFrom(correctMethod) && (
+                            <div>
+                                <Label>Pay from account</Label>
+                                <Select
+                                    value={correctBankAccountId || '__none__'}
+                                    onValueChange={(v) => setCorrectBankAccountId(v === '__none__' ? '' : v)}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select bank account" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="__none__">Select…</SelectItem>
+                                        {accountsForMethod(correctMethod).map((a) => (
+                                            <SelectItem key={a.id} value={a.id}>
+                                                {a.name}
+                                                {a.glAccountCode ? ` · ${a.glAccountCode}` : ''}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
+                        <div>
+                            <Label>Reason</Label>
+                            <Textarea
+                                value={correctReason}
+                                onChange={(e) => setCorrectReason(e.target.value)}
+                                rows={3}
+                                placeholder="Paid from cash by mistake — should be bank"
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setCorrectPayment(null);
+                                setCorrectReason('');
+                            }}
+                            disabled={correctingPayment}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handleCorrectPaymentMethod}
+                            disabled={correctingPayment}
+                            className="bg-blue-600 hover:bg-blue-700 text-white"
+                        >
+                            {correctingPayment ? 'Correcting…' : 'Reverse & repay'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
             {/* Payment Allocation Modal — guarded: cancellable=false, double allocation prevented */}
             <Dialog open={isAllocationModalOpen} onOpenChange={setIsAllocationModalOpen} zIndex={allocationGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
                 <DialogContent className="max-w-4xl">
@@ -2284,6 +2692,14 @@ const SupplierPaymentsPage: React.FC = () => {
                                         <label className="text-gray-500 block">Payment Method</label>
                                         <span className="font-medium">{paymentReceipt.payment.paymentMethod}</span>
                                     </div>
+                                    {formatPayFromLabel(paymentReceipt.payment) && (
+                                        <div className="col-span-2">
+                                            <label className="text-gray-500 block">Paid from</label>
+                                            <span className="font-medium">
+                                                {formatPayFromLabel(paymentReceipt.payment)}
+                                            </span>
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="text-gray-500 block">Reference</label>
                                         <span className="font-medium">{paymentReceipt.payment.reference || 'N/A'}</span>

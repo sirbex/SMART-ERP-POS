@@ -50,6 +50,7 @@ export async function createPaymentHeader(
     createdById?: string;
     currencyCode?: string;
     exchangeRate?: number;
+    bankAccountId?: string | null;
   },
 ): Promise<ArCustomerPayment> {
   const amt = new Decimal(data.totalAmount);
@@ -57,8 +58,8 @@ export async function createPaymentHeader(
     `INSERT INTO ar_customer_payments (
        payment_number, customer_id, payment_method, currency_code, exchange_rate,
        payment_date, reference, notes, total_amount, allocated_amount, unallocated_amount,
-       status, created_by_id, created_at, updated_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$9,'POSTED',$10,NOW(),NOW())
+       status, created_by_id, bank_account_id, created_at, updated_at
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$9,'POSTED',$10,$11,NOW(),NOW())
      RETURNING *`,
     [
       data.paymentNumber,
@@ -71,6 +72,7 @@ export async function createPaymentHeader(
       data.notes ?? null,
       amt.toNumber(),
       data.createdById ?? null,
+      data.bankAccountId ?? null,
     ],
   );
   return mapPayment(res.rows[0]);

@@ -84,6 +84,10 @@ import {
     LEDGER_NET_ACTIVE_SQL,
 } from '../utils/ledgerNetActive.js';
 import { ACTIVE_GL_REFERENCE_PREDICATE_BARE } from '../utils/activeGlReference.js';
+import {
+    availableFromPostedTotals,
+    postedLedgerBalanceLateral,
+} from '../modules/treasury/postedLedgerBalance.js';
 
 // =============================================================================
 // TYPE DEFINITIONS
@@ -1296,7 +1300,6 @@ export class AccountingCore {
         dbPool?: pg.Pool
     ): Promise<AccountBalance | null> {
         const pool = dbPool || globalPool;
-        const dateFilter = asOfDate ? `AND DATE(lt."TransactionDate") <= $2` : '';
 
         const params: (string | undefined)[] = [accountCode];
         if (asOfDate) params.push(asOfDate);
@@ -1309,14 +1312,11 @@ export class AccountingCore {
         a."AccountName" as "accountName",
         a."AccountType" as "accountType",
         a."NormalBalance" as "normalBalance",
-        COALESCE(SUM(le."DebitAmount"), 0) as "debitTotal",
-        COALESCE(SUM(le."CreditAmount"), 0) as "creditTotal"
+        COALESCE(bal.debit_total, 0) as "debitTotal",
+        COALESCE(bal.credit_total, 0) as "creditTotal"
       FROM accounts a
-      LEFT JOIN ledger_entries le ON a."Id" = le."AccountId"
-      LEFT JOIN ledger_transactions lt ON le."TransactionId" = lt."Id" 
-        AND lt."Status" = 'POSTED' ${dateFilter}
+      ${postedLedgerBalanceLateral(asOfDate ? '$2' : undefined)}
       WHERE a."AccountCode" = $1
-      GROUP BY a."Id", a."AccountCode", a."AccountName", a."AccountType", a."NormalBalance"
     `,
             params
         );
@@ -1327,11 +1327,11 @@ export class AccountingCore {
         const debitTotal = Money.parseDb(row.debitTotal);
         const creditTotal = Money.parseDb(row.creditTotal);
 
-        // Calculate balance based on normal balance type
-        const balance =
-            row.normalBalance === 'DEBIT'
-                ? Money.subtract(debitTotal, creditTotal).toNumber()
-                : Money.subtract(creditTotal, debitTotal).toNumber();
+        const balance = availableFromPostedTotals(
+            debitTotal.toNumber(),
+            creditTotal.toNumber(),
+            row.normalBalance,
+        );
 
         return {
             accountId: row.accountId,

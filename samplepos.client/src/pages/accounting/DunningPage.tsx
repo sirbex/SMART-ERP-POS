@@ -44,8 +44,12 @@ export default function DunningPage() {
   const createMutation = useCreateDunningLevel();
   const analysisMutation = useDunningAnalysis();
 
-  const [form, setForm] = useState({
-    levelNumber: 1,
+  const items = (Array.isArray(levels) ? levels : []) as DunningLevel[];
+  const nextLevelNumber = () =>
+    items.reduce((max, l) => Math.max(max, Number(l.levelNumber) || 0), 0) + 1;
+
+  const emptyForm = (levelNumber: number) => ({
+    levelNumber,
     name: '',
     daysOverdue: 30,
     feeAmount: 0,
@@ -53,32 +57,34 @@ export default function DunningPage() {
     blockFurtherCredit: false,
   });
 
-  const items = (Array.isArray(levels) ? levels : []) as DunningLevel[];
+  const [form, setForm] = useState(() => emptyForm(1));
 
   // Analysis response has nested proposals
   const analysisData = analysisMutation.data?.data?.data as { proposals?: DunningProposal[] } | undefined;
   const analysisResults = (Array.isArray(analysisData?.proposals) ? analysisData.proposals : []) as DunningProposal[];
 
+  const openForm = () => {
+    setForm(emptyForm(nextLevelNumber()));
+    setShowForm(true);
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     const name = form.name.trim() || `Level ${form.levelNumber}`;
-    await createMutation.mutateAsync({
-      levelNumber: form.levelNumber,
-      name,
-      daysOverdue: form.daysOverdue,
-      feeAmount: form.feeAmount,
-      letterTemplate: form.letterTemplate,
-      blockFurtherCredit: form.blockFurtherCredit,
-    });
-    setForm({
-      levelNumber: items.length + 2,
-      name: '',
-      daysOverdue: 30,
-      feeAmount: 0,
-      letterTemplate: '',
-      blockFurtherCredit: false,
-    });
-    setShowForm(false);
+    try {
+      await createMutation.mutateAsync({
+        levelNumber: form.levelNumber,
+        name,
+        daysOverdue: form.daysOverdue,
+        feeAmount: form.feeAmount,
+        letterTemplate: form.letterTemplate,
+        blockFurtherCredit: form.blockFurtherCredit,
+      });
+      setForm(emptyForm(form.levelNumber + 1));
+      setShowForm(false);
+    } catch {
+      // toast handled by useCreateDunningLevel.onError
+    }
   };
 
   const runAnalysis = () => {
@@ -97,7 +103,7 @@ export default function DunningPage() {
           <p className="text-sm text-gray-500 mt-1">Configure dunning levels and analyze overdue receivables</p>
         </div>
         <button
-          onClick={() => setShowForm(true)}
+          onClick={openForm}
           className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
         >
           <Plus className="h-4 w-4 mr-2" /> Add Level

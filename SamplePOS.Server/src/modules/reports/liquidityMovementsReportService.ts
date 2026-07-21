@@ -279,17 +279,23 @@ export async function getLiquidityAccountBalances(
       a."AccountName",
       a."SystemAccountTag",
       a."NormalBalance",
-      COALESCE(SUM(le."DebitAmount"), 0)::text AS "debitTotal",
-      COALESCE(SUM(le."CreditAmount"), 0)::text AS "creditTotal"
+      COALESCE(bal.debit_total, 0)::text AS "debitTotal",
+      COALESCE(bal.credit_total, 0)::text AS "creditTotal"
     FROM accounts a
-    LEFT JOIN ledger_entries le ON a."Id" = le."AccountId"
-    LEFT JOIN ledger_transactions lt ON le."TransactionId" = lt."Id" AND lt."Status" = 'POSTED'
+    LEFT JOIN LATERAL (
+      SELECT
+        SUM(le."DebitAmount") AS debit_total,
+        SUM(le."CreditAmount") AS credit_total
+      FROM ledger_entries le
+      INNER JOIN ledger_transactions lt ON le."TransactionId" = lt."Id"
+      WHERE le."AccountId" = a."Id"
+        AND lt."Status" = 'POSTED'
+    ) bal ON TRUE
     WHERE a."IsActive" = true
       AND (
         a."AccountCode" = ANY($1::text[])
         OR a."SystemAccountTag" = ANY($2::text[])
       )
-    GROUP BY a."Id", a."AccountCode", a."AccountName", a."SystemAccountTag", a."NormalBalance"
     ORDER BY a."AccountCode"
     `,
     [LIQUIDITY_CODES, LIQUIDITY_TAGS],

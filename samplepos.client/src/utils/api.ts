@@ -1303,6 +1303,7 @@ export const api = {
     massRun: (data: {
       paymentDate: string;
       paymentMethod: string;
+      bankAccountId?: string;
       reference?: string;
       notes?: string;
       allocations: Array<{ supplierId: string; invoiceId: string; amount: number }>;

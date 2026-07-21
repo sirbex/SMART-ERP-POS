@@ -29,6 +29,7 @@
 import type pg from 'pg';
 import { AccountingCore, JournalLine, AccountingError } from './accountingCore.js';
 import { BusinessRuleException } from '../errors/BusinessRuleException.js';
+import { AppError, ValidationError } from '../middleware/errorHandler.js';
 import { pool as globalPool } from '../db/pool.js';
 import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
@@ -604,18 +605,20 @@ export interface CustomerPaymentData {
   whtEntryId?: string;
   /** GL account for customer WHT receivable leg (defaults to 1250). */
   whtAccountCode?: string;
+  /** @deprecated Receipts always clear through Undeposited Funds (1015). Bank settlement is Deposit Worksheet. */
+  paymentAccountCode?: string;
 }
 
 /**
  * Record a customer payment in the general ledger (clearing step 1).
  *
- * Journal entry — PAYMENT_RECEIPT (matches invoice payment flow):
- *   DR Undeposited Funds (1015)    amount − WHT (or full amount)
- *   DR WHT Receivable (1250+)      WHT (when customer withheld)
- *   CR Accounts Receivable (1200)  amount   when reducesAR = true
- *   CR Customer Deposits (2200)    amount   when reducesAR = false (on-account prepayment)
+ * Journal entry — PAYMENT_RECEIPT:
+ *   DR Undeposited Funds (1015)       amount − WHT
+ *   DR WHT Receivable (1250+)         WHT (when customer withheld)
+ *   CR Accounts Receivable (1200)     amount   when reducesAR = true
+ *   CR Customer Deposits (2200)       amount   when reducesAR = false (on-account prepayment)
  *
- * Bank/cash recognition is step 2 — PAYMENT_DEPOSIT (separate process).
+ * Bank/cash settlement is a separate Deposit Worksheet (TREASURY_DEPOSIT): DR bank / CR 1015.
  */
 export async function recordCustomerPaymentToGL(
   payment: CustomerPaymentData,
@@ -627,6 +630,8 @@ export async function recordCustomerPaymentToGL(
     const creditAccountCode = reducesAR
       ? AccountCodes.ACCOUNTS_RECEIVABLE
       : AccountCodes.CUSTOMER_DEPOSITS;
+
+    const debitAccountCode = AccountCodes.UNDEPOSITED_FUNDS;
 
     const creditDescription = reducesAR
       ? `Reduce A/R for ${payment.customerName}${payment.invoiceNumber ? ` - ${payment.invoiceNumber}` : ''}`
@@ -657,7 +662,7 @@ export async function recordCustomerPaymentToGL(
       entityId?: string;
     }> = [
       {
-        accountCode: AccountCodes.UNDEPOSITED_FUNDS,
+        accountCode: debitAccountCode,
         description: whtDebit > 0
           ? `Net payment after customer WHT — ${payment.paymentNumber}`
           : `Payment received — ${payment.paymentNumber}`,
@@ -707,6 +712,7 @@ export async function recordCustomerPaymentToGL(
       amount: payment.amount,
       customerId: payment.customerId,
       reducesAR,
+      debitAccount: debitAccountCode,
       creditAccount: creditAccountCode,
       whtAmount: whtDebit,
       whtAccountCode: whtDebit > 0.009 ? whtAccountCode : undefined,
@@ -715,6 +721,8 @@ export async function recordCustomerPaymentToGL(
     return { transactionId: glResult.transactionId };
   } catch (error: unknown) {
     if (error instanceof BusinessRuleException) throw error;
+    if (error instanceof ValidationError) throw error;
+    if (error instanceof AppError) throw error;
     logger.error('Failed to record customer payment to GL', { error, payment });
     // CRITICAL: GL failure MUST throw to prevent payments without AR adjustment.
     // Use [GL_ERROR] prefix so nested 'not found' is not misclassified as HTTP 404.
@@ -1245,6 +1253,8 @@ export interface SupplierPaymentData {
   paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY';
   supplierId: string;
   supplierName: string;
+  /** Explicit liquidity GL to credit (multi-bank / MoMo book). Overrides method default. */
+  paymentAccountCode?: string;
   /** Optional WHT withheld from cash; cash credit = amount − whtAmount. */
   whtAmount?: number;
   whtTypeName?: string;
@@ -1267,24 +1277,28 @@ export async function recordSupplierPaymentToGL(
   txClient?: pg.PoolClient,
 ): Promise<{ transactionId: string }> {
   try {
-    // Determine credit account based on payment method
+    // Determine credit account: explicit pay-from book wins; else method defaults
     let creditAccountCode: string;
-    switch (payment.paymentMethod) {
-      case 'CASH':
-        creditAccountCode = AccountCodes.CASH;
-        break;
-      case 'BANK_TRANSFER':
-      case 'CHECK':
-        creditAccountCode = AccountCodes.CHECKING_ACCOUNT;
-        break;
-      case 'CARD':
-        creditAccountCode = AccountCodes.CHECKING_ACCOUNT;
-        break;
-      case 'MOBILE_MONEY':
-        creditAccountCode = AccountCodes.MOBILE_MONEY;
-        break;
-      default:
-        creditAccountCode = AccountCodes.CASH;
+    if (payment.paymentAccountCode?.trim()) {
+      creditAccountCode = payment.paymentAccountCode.trim();
+    } else {
+      switch (payment.paymentMethod) {
+        case 'CASH':
+          creditAccountCode = AccountCodes.CASH;
+          break;
+        case 'BANK_TRANSFER':
+        case 'CHECK':
+          creditAccountCode = AccountCodes.CHECKING_ACCOUNT;
+          break;
+        case 'CARD':
+          creditAccountCode = AccountCodes.CHECKING_ACCOUNT;
+          break;
+        case 'MOBILE_MONEY':
+          creditAccountCode = AccountCodes.MOBILE_MONEY;
+          break;
+        default:
+          creditAccountCode = AccountCodes.CASH;
+      }
     }
 
     const gross = payment.amount;
@@ -1292,6 +1306,18 @@ export async function recordSupplierPaymentToGL(
     const { cashCredit: cashAmount, whtCredit } = splitSupplierPaymentCredits(gross, whtAmount);
     const whtLabel = payment.whtTypeName ? ` (${payment.whtTypeName})` : '';
     let whtAccountCode = payment.whtAccountCode?.trim() || AccountCodes.WHT_PAYABLE;
+
+    // Block overdrawing cash/bank/MoMo — same SSOT guard as treasury transfers
+    if (cashAmount > 0.009) {
+      const conn = txClient || pool || globalPool;
+      const { assertSufficientLiquidityFunds } = await import(
+        '../modules/treasury/liquidityFundsGuard.js'
+      );
+      await assertSufficientLiquidityFunds(conn, creditAccountCode, cashAmount, {
+        asOfDate: payment.paymentDate,
+        actionLabel: `supplier payment ${payment.paymentNumber}`,
+      });
+    }
 
     if (whtCredit > 0.009 && txClient) {
       const { ensureWhtGlAccountForCode } = await import(
@@ -1361,7 +1387,11 @@ export async function recordSupplierPaymentToGL(
     });
     return { transactionId: glResult.transactionId };
   } catch (error: unknown) {
+    // User-facing rules (e.g. insufficient cash/bank) — do not wrap as [GL_ERROR]
     if (error instanceof BusinessRuleException) throw error;
+    if (error instanceof ValidationError) throw error;
+    if (error instanceof AppError) throw error;
+
     logger.error('Failed to record supplier payment to GL', { error, payment });
     // CRITICAL: GL failure MUST throw to prevent payments without AP adjustment.
     // Use [GL_ERROR] prefix so the error handler does not misclassify

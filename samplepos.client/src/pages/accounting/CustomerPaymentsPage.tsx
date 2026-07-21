@@ -128,7 +128,7 @@ const CustomerPaymentsPage: React.FC = () => {
   const [formData, setFormData] = useState({
     customerId: '',
     amount: '',
-    paymentMethod: 'CASH',
+    paymentMethod: 'BANK_TRANSFER',
     reference: '',
     paymentDate: todayIso(),
     notes: '',
@@ -272,7 +272,10 @@ const CustomerPaymentsPage: React.FC = () => {
           : error instanceof Error
             ? error.message
             : undefined;
-      toast.error(errMsg || 'Failed to record payment');
+      const cleaned = String(errMsg || '')
+        .replace(/^\[GL_ERROR\]\s*GL posting failed for customer payment [^:]+:\s*/i, '')
+        .trim();
+      toast.error(cleaned || 'Failed to record payment');
     } finally {
       setSubmitting(false);
     }
@@ -363,7 +366,7 @@ const CustomerPaymentsPage: React.FC = () => {
     setFormData({
       customerId: '',
       amount: '',
-      paymentMethod: 'CASH',
+      paymentMethod: 'BANK_TRANSFER',
       reference: '',
       paymentDate: todayIso(),
       notes: '',
@@ -557,7 +560,7 @@ const CustomerPaymentsPage: React.FC = () => {
             <DialogDescription>
               {showObPanel
                 ? 'Post or correct legacy AR brought forward. All changes are audited with your user and reason.'
-                : 'Posts receipt to GL (undeposited funds → AR). Allocate to open invoices or use FIFO.'}
+                : 'Posts receipt to Undeposited Funds (GL 1015) and allocates to open invoices. Bank the money later via Deposit Worksheet.'}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
@@ -662,6 +665,11 @@ const CustomerPaymentsPage: React.FC = () => {
                 </Select>
               </div>
             </div>
+            <p className="text-xs text-sky-800 bg-sky-50 border border-sky-200 rounded px-2 py-1.5">
+              All customer receipts post to <strong>Undeposited Funds (GL 1015)</strong> first.
+              To move money into a bank account, use{' '}
+              <strong>Accounting → Deposit Worksheet</strong> after recording the receipt.
+            </p>
             {customerWhtTypes.length > 0 && (
               <div className="space-y-3 rounded-lg border border-sky-200 bg-sky-50/60 p-3">
                 <div>

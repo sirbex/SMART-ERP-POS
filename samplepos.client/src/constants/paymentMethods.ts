@@ -3,19 +3,19 @@
  */
 
 export const CUSTOMER_PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'CARD', label: 'Card' },
-  { value: 'MOBILE_MONEY', label: 'Mobile Money' },
   { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
+  { value: 'CASH', label: 'Cash' },
+  { value: 'MOBILE_MONEY', label: 'Mobile Money' },
+  { value: 'CARD', label: 'Card' },
   { value: 'OTHER', label: 'Other' }
 ];
 
 export const SUPPLIER_PAYMENT_METHODS = [
-  { value: 'CASH', label: 'Cash' },
-  { value: 'CARD', label: 'Card' },
   { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
+  { value: 'CASH', label: 'Cash' },
+  { value: 'MOBILE_MONEY', label: 'Mobile Money' },
+  { value: 'CARD', label: 'Card' },
   { value: 'CHECK', label: 'Check' },
-  { value: 'OTHER', label: 'Other' }
 ];
 
 export const DEPOSIT_METHODS = [

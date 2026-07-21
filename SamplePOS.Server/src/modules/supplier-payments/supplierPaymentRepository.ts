@@ -29,6 +29,13 @@ export interface SupplierPayment {
     unallocatedAmount: number;
     reference: string | null;
     notes: string | null;
+    status?: string;
+    bankAccountId?: string | null;
+    bankAccountName?: string | null;
+    bankName?: string | null;
+    bankAccountNumber?: string | null;
+    glAccountCode?: string | null;
+    glAccountName?: string | null;
     createdById?: string | null;
     createdByName?: string | null;
     createdAt: string;
@@ -84,7 +91,11 @@ export async function findAllPayments(
 ): Promise<{ items: SupplierPayment[]; total: number }> {
     const { limit = 50, offset = 0, supplierId, paymentMethod, search, startDate, endDate } = options;
 
-    let whereClause = 'WHERE sp.deleted_at IS NULL';
+    await pool.query(`
+      ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS bank_account_id UUID NULL
+    `);
+
+    let whereClause = `WHERE sp.deleted_at IS NULL AND sp."Status" = 'COMPLETED'`;
     const params: (string | number)[] = [];
     let paramIndex = 1;
 
@@ -137,12 +148,21 @@ export async function findAllPayments(
        COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0)) as "unallocatedAmount",
        sp."Reference" as reference,
        sp."Notes" as notes,
+       sp."Status" as status,
+       sp.bank_account_id as "bankAccountId",
+       ba.name as "bankAccountName",
+       ba.bank_name as "bankName",
+       ba.account_number as "bankAccountNumber",
+       a."AccountCode" as "glAccountCode",
+       a."AccountName" as "glAccountName",
        sp."CreatedBy" as "createdById",
        COALESCE(u.full_name, u.email, 'Unknown') as "createdByName",
        sp."CreatedAt" as "createdAt",
        sp."UpdatedAt" as "updatedAt"
      FROM supplier_payments sp
      LEFT JOIN suppliers s ON sp."SupplierId" = s."Id"
+     LEFT JOIN bank_accounts ba ON ba.id = sp.bank_account_id
+     LEFT JOIN accounts a ON a."Id" = ba.gl_account_id
      LEFT JOIN users u ON u.id = sp."CreatedBy"
      ${whereClause}
      ORDER BY sp."PaymentDate" DESC, sp."CreatedAt" DESC
@@ -160,6 +180,9 @@ export async function findAllPayments(
  * Find supplier payment by ID
  */
 export async function findPaymentById(pool: Pool | PoolClient, id: string): Promise<SupplierPayment | null> {
+    await pool.query(`
+      ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS bank_account_id UUID NULL
+    `);
     const result = await pool.query(
         `SELECT 
        sp."Id" as id,
@@ -173,12 +196,21 @@ export async function findPaymentById(pool: Pool | PoolClient, id: string): Prom
        COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0)) as "unallocatedAmount",
        sp."Reference" as reference,
        sp."Notes" as notes,
+       sp."Status" as status,
+       sp.bank_account_id as "bankAccountId",
+       ba.name as "bankAccountName",
+       ba.bank_name as "bankName",
+       ba.account_number as "bankAccountNumber",
+       a."AccountCode" as "glAccountCode",
+       a."AccountName" as "glAccountName",
        sp."CreatedBy" as "createdById",
        COALESCE(u.full_name, u.email, 'Unknown') as "createdByName",
        sp."CreatedAt" as "createdAt",
        sp."UpdatedAt" as "updatedAt"
      FROM supplier_payments sp
      LEFT JOIN suppliers s ON sp."SupplierId" = s."Id"
+     LEFT JOIN bank_accounts ba ON ba.id = sp.bank_account_id
+     LEFT JOIN accounts a ON a."Id" = ba.gl_account_id
      LEFT JOIN users u ON u.id = sp."CreatedBy"
      WHERE sp."Id" = $1 AND sp.deleted_at IS NULL`,
         [id]
@@ -199,6 +231,7 @@ export async function createPayment(
         reference?: string;
         notes?: string;
         createdById?: string;
+        bankAccountId?: string | null;
     }
 ): Promise<SupplierPayment> {
     // Generate payment number
@@ -209,12 +242,16 @@ export async function createPayment(
     const nextNum = seqResult.rows[0].next_num;
     const paymentNumber = `PAY-${String(nextNum).padStart(6, '0')}`;
 
+    await client.query(`
+      ALTER TABLE supplier_payments ADD COLUMN IF NOT EXISTS bank_account_id UUID NULL
+    `);
+
     const result = await client.query(
         `INSERT INTO supplier_payments (
        "Id", "PaymentNumber", "SupplierId", "PaymentDate", "PaymentMethod", 
        "Amount", "AllocatedAmount", "UnallocatedAmount", "Reference", "Notes", 
-       "Status", "CurrencyCode", "CreatedBy", "CreatedAt", "UpdatedAt"
-     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 0, $5, $6, $7, 'COMPLETED', 'USD', $8, NOW(), NOW())
+       "Status", "CurrencyCode", "CreatedBy", bank_account_id, "CreatedAt", "UpdatedAt"
+     ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 0, $5, $6, $7, 'COMPLETED', 'USD', $8, $9, NOW(), NOW())
      RETURNING 
        "Id" as id,
        "PaymentNumber" as "paymentNumber",
@@ -226,6 +263,7 @@ export async function createPayment(
        "UnallocatedAmount" as "unallocatedAmount",
        "Reference" as reference,
        "Notes" as notes,
+       bank_account_id as "bankAccountId",
        "CreatedBy" as "createdById",
        "CreatedAt" as "createdAt",
        "UpdatedAt" as "updatedAt"`,
@@ -238,6 +276,7 @@ export async function createPayment(
             data.reference || null,
             data.notes || null,
             data.createdById ?? null,
+            data.bankAccountId ?? null,
         ]
     );
     return result.rows[0];

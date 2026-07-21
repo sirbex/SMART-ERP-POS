@@ -171,11 +171,17 @@ export interface SupplierPayment {
     supplierName: string;
     paymentDate: string;
     amount: string | Decimal;
-    paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'OTHER';
+    paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'OTHER' | 'MOBILE_MONEY';
     reference?: string;
     allocatedAmount: string | Decimal;
     unallocatedAmount: string | Decimal;
     notes?: string;
+    bankAccountId?: string | null;
+    bankAccountName?: string | null;
+    bankName?: string | null;
+    bankAccountNumber?: string | null;
+    glAccountCode?: string | null;
+    glAccountName?: string | null;
     createdById?: string | null;
     createdByName?: string | null;
     createdAt: string;
@@ -257,6 +263,8 @@ export interface CreateSupplierPaymentRequest {
     paymentDate: string;
     notes?: string;
     targetInvoiceId?: string;
+    /** Banking book to pay from when multiple cash/bank/MoMo accounts exist */
+    bankAccountId?: string;
     /** Optional WHT type — amount is gross bill settlement; bank pays net. */
     whtTypeId?: string;
     certificateNumber?: string;
@@ -355,6 +363,12 @@ export interface SupplierPaymentReceipt {
         netCashAmount?: number;
         whtTypeName?: string | null;
         certificateNumber?: string | null;
+        bankAccountId?: string | null;
+        bankAccountName?: string | null;
+        bankName?: string | null;
+        bankAccountNumber?: string | null;
+        glAccountCode?: string | null;
+        paymentAccountCode?: string | null;
     };
     supplier: {
         id: string;
