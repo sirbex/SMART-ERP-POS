@@ -465,9 +465,14 @@ export interface BusinessPerformanceFilters {
 
 export function useBusinessPerformance(filters?: BusinessPerformanceFilters) {
   const { startDate, endDate, paymentMethod, includeStockAdjustments, includeExpenses } = filters || {};
+  const hasValidDates =
+    !!startDate &&
+    !!endDate &&
+    /^\d{4}-\d{2}-\d{2}$/.test(startDate) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(endDate);
   const params: Record<string, string | undefined> = {
-    start_date: startDate,
-    end_date: endDate,
+    start_date: hasValidDates ? startDate : undefined,
+    end_date: hasValidDates ? endDate : undefined,
     payment_method: paymentMethod,
     include_stock_adjustments: includeStockAdjustments === false ? 'false' : undefined,
     include_expenses: includeExpenses === false ? 'false' : undefined,
@@ -475,7 +480,7 @@ export function useBusinessPerformance(filters?: BusinessPerformanceFilters) {
   return useApiQuery(
     queryKeys.reports.businessPerformance(params),
     () => api.reports.businessPerformance(params),
-    { staleTime: 60000 }
+    { staleTime: 60000, enabled: hasValidDates }
   );
 }
 

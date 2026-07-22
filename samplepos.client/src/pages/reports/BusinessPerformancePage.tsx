@@ -16,6 +16,7 @@ import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import { formatCurrency } from '../../utils/currency';
 import { useBusinessPerformance } from '../../hooks/useApi';
+import { computeDateRange } from '../../utils/dateRangePresets';
 
 // ---------------------------------------------------------------------------
 // Types matching the new ledger-based API response
@@ -120,8 +121,9 @@ const SECTION_OPTIONS = [
 type SectionKey = 'ALL' | 'MONEY_IN' | 'REVENUE' | 'COST_STOCK' | 'EXPENSES' | 'NET_POSITION';
 
 const BusinessPerformancePage: React.FC = () => {
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const initialRange = computeDateRange('THIS_MONTH')!;
+  const [startDate, setStartDate] = useState(initialRange.startDate);
+  const [endDate, setEndDate] = useState(initialRange.endDate);
   const [paymentMethod, setPaymentMethod] = useState('');
   const [includeStockAdj, setIncludeStockAdj] = useState(true);
   const [includeExpenses, setIncludeExpenses] = useState(true);

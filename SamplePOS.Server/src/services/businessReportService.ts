@@ -2,9 +2,24 @@ import type { Pool, PoolClient } from 'pg';
 import { pool as globalPool } from '../db/pool.js';
 import { Money } from '../utils/money.js';
 import logger from '../utils/logger.js';
+import { ValidationError } from '../middleware/errorHandler.js';
 import * as repo from '../repositories/businessReportRepository.js';
 import type { BusinessReportFilters } from '../repositories/businessReportRepository.js';
 import { reportsRepository } from '../modules/reports/reportsRepository.js';
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function requireReportDates(filters: BusinessReportFilters): { startDate: string; endDate: string } {
+  const startDate = filters.startDate?.trim() ?? '';
+  const endDate = filters.endDate?.trim() ?? '';
+  if (!ISO_DATE.test(startDate) || !ISO_DATE.test(endDate)) {
+    throw new ValidationError('start_date and end_date are required (YYYY-MM-DD)');
+  }
+  if (startDate > endDate) {
+    throw new ValidationError('start_date must be on or before end_date');
+  }
+  return { startDate, endDate };
+}
 
 // ---------------------------------------------------------------------------
 // Section 1 — Money In
@@ -122,23 +137,25 @@ export async function getBusinessPerformanceReport(
   dbPool?: Pool | PoolClient
 ): Promise<BusinessPerformanceReport> {
   const pool = dbPool || globalPool;
+  const { startDate, endDate } = requireReportDates(filters);
+  const datedFilters: BusinessReportFilters = { ...filters, startDate, endDate };
 
   try {
     // Run all 5 sections in parallel
     // Section 2 uses the canonical reportsRepository.getSalesByCategory (live transaction tables)
     const [moneyInRows, revRows, costRows, expRows, supplierPayRows, totals, depositSummary] = await Promise.all([
-      repo.getMoneyIn(filters, pool),
+      repo.getMoneyIn(datedFilters, pool),
       reportsRepository.getSalesByCategory(pool as Pool, {
-        startDate: filters.startDate ?? '',
-        endDate: filters.endDate ?? '',
+        startDate,
+        endDate,
       }),
-      repo.getCostAndStock(filters, pool),
-      filters.includeExpenses !== false
-        ? repo.getExpensesByAccount(filters, pool)
+      repo.getCostAndStock(datedFilters, pool),
+      datedFilters.includeExpenses !== false
+        ? repo.getExpensesByAccount(datedFilters, pool)
         : Promise.resolve([]),
-      repo.getSupplierPaymentsByAccount(filters, pool),
-      repo.getSummaryTotals(filters, pool),
-      repo.getCustomerDepositSummary(filters, pool),
+      repo.getSupplierPaymentsByAccount(datedFilters, pool),
+      repo.getSummaryTotals(datedFilters, pool),
+      repo.getCustomerDepositSummary(datedFilters, pool),
     ]);
 
     // --- Normalize Section 1 ---
