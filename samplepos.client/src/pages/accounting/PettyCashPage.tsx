@@ -15,7 +15,9 @@ import {
   SelectValue,
 } from '../../components/ui/select';
 import { Loader2, RefreshCw, Wallet } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { formatCurrency } from '../../utils/currency';
+import { handleApiError } from '../../utils/errorHandler';
 import { TreasuryFeatureDisabledNotice } from '../../components/treasury/TreasuryFeatureDisabledNotice';
 
 type Operation = 'FUND' | 'REPLENISH' | 'EXPENSE';
@@ -36,12 +38,9 @@ export default function PettyCashPage({ embedded = false }: { embedded?: boolean
   );
   const [loading, setLoading] = useState(true);
   const [posting, setPosting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const enabledRes = await api.treasury.getEnabled();
       const isOn = Boolean(enabledRes.data?.data?.enabled);
@@ -53,7 +52,8 @@ export default function PettyCashPage({ embedded = false }: { embedded?: boolean
       const balRes = await api.treasury.getPettyCashBalances();
       setBalances(balRes.data?.data ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load petty cash');
+      // HandledApiError already toasted by the API interceptor — do not pin a permanent banner
+      handleApiError(err, { fallback: 'Failed to load petty cash' });
     } finally {
       setLoading(false);
     }
@@ -73,11 +73,12 @@ export default function PettyCashPage({ embedded = false }: { embedded?: boolean
 
   const submit = async () => {
     setPosting(true);
-    setMessage(null);
-    setError(null);
     try {
       const value = Number(amount);
-      if (!(value > 0)) throw new Error('Enter a positive amount');
+      if (!(value > 0)) {
+        toast.error('Enter a positive amount', { duration: 4000 });
+        return;
+      }
       const res = await api.treasury.createPettyCash({
         transactionDate,
         operation,
@@ -87,12 +88,16 @@ export default function PettyCashPage({ embedded = false }: { embedded?: boolean
         postImmediately: true,
       });
       const doc = res.data?.data;
-      setMessage(`Posted ${doc?.documentNumber ?? 'petty cash'} — ${formatCurrency(value)}`);
+      toast.success(
+        `Posted ${doc?.documentNumber ?? 'petty cash'} — ${formatCurrency(value)}`,
+        { duration: 4000 },
+      );
       setAmount('');
       setMemo('');
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to post petty cash');
+      // Insufficient-funds / other API errors: global toast already shown (~7s) and auto-dismisses
+      handleApiError(err, { fallback: 'Failed to post petty cash' });
     } finally {
       setPosting(false);
     }
@@ -149,17 +154,6 @@ export default function PettyCashPage({ embedded = false }: { embedded?: boolean
             <div className="text-xs text-muted-foreground">1015 Undeposited (receipts)</div>
             <div className="text-lg font-semibold">{formatCurrency(balances.undepositedFunds)}</div>
           </div>
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </div>
-      )}
-      {message && (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-          {message}
         </div>
       )}
 
