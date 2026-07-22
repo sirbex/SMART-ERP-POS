@@ -230,6 +230,27 @@ function App() {
     return () => window.removeEventListener('app:forbidden', handler);
   }, []);
 
+  // SSOT: all other API failures (400/404/409/5xx/network) — clear title + message, never status codes
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ title?: string; message?: string; toastId?: string }>).detail;
+      const title = detail?.title || 'Something went wrong';
+      const message = detail?.message || 'Please try again.';
+      const id = detail?.toastId || 'app-api-error';
+      toast.error(
+        () => (
+          <div>
+            <div style={{ fontWeight: 600 }}>{title}</div>
+            <div style={{ fontSize: 13, marginTop: 4, opacity: 0.9 }}>{message}</div>
+          </div>
+        ),
+        { duration: 7000, icon: '⚠️', id }
+      );
+    };
+    window.addEventListener('app:api-error', handler);
+    return () => window.removeEventListener('app:api-error', handler);
+  }, []);
+
   // Session expiry warning — visible toast when idle timeout is about to fire
   useEffect(() => {
     const handler = () => {

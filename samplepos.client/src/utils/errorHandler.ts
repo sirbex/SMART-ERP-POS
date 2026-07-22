@@ -65,8 +65,13 @@ export function friendlyHttpErrorMessage(
     return apiError;
   }
   if (resolvedStatus === 401) return 'Your session has expired. Please sign in again.';
+  if (resolvedStatus === 400 || resolvedStatus === 422) {
+    return 'Please check your input and try again.';
+  }
   if (resolvedStatus === 404) return 'The requested item was not found.';
-  if (resolvedStatus === 409) return 'This conflicts with existing data. Please refresh and try again.';
+  if (resolvedStatus === 409) {
+    return 'This conflicts with existing data. Please refresh and try again.';
+  }
   if (resolvedStatus === 429) return 'Too many requests. Please wait a moment and try again.';
   if (resolvedStatus && resolvedStatus >= 500) {
     return 'Something went wrong on the server. Please try again.';
@@ -74,13 +79,48 @@ export function friendlyHttpErrorMessage(
   return fallback;
 }
 
+/** Standard toast title for an HTTP status — never includes status codes. */
+export function titleForHttpStatus(status?: number): string {
+  switch (status) {
+    case 400:
+      return 'Invalid request';
+    case 401:
+      return 'Session expired';
+    case 403:
+      return 'Access denied';
+    case 404:
+      return 'Not found';
+    case 409:
+      return 'Conflict';
+    case 422:
+      return 'Action not allowed';
+    case 429:
+      return 'Too many requests';
+    default:
+      if (status && status >= 500) return 'Server error';
+      return 'Something went wrong';
+  }
+}
+
+export interface UserFacingApiNotification {
+  title: string;
+  message: string;
+  /** Stable id so rapid duplicate failures collapse to one toast */
+  toastId: string;
+  status?: number;
+}
+
 /**
  * Toast an API error unless the interceptor already notified (HandledApiError).
  */
 export function toastApiError(error: unknown, fallback?: string): void {
   if (error instanceof HandledApiError) return;
-  const msg = getStructuredErrorMessage(error, fallback);
-  toast.error(msg, { duration: 6000 });
+  const notification = resolveUserFacingApiNotification(error);
+  const msg =
+    fallback && notification.message === 'Something went wrong. Please try again.'
+      ? fallback
+      : notification.message;
+  toast.error(msg, { duration: 6000, id: notification.toastId });
 }
 
 export interface ValidationDetail {
@@ -451,4 +491,63 @@ export function handleApiError(error: unknown, options: HandleApiErrorOptions = 
  */
 export function getStructuredErrorMessage(error: unknown, fallback?: string): string {
   return handleApiError(error, { silent: true, fallback });
+}
+
+/**
+ * SSOT: resolve any API/Axios/unknown error into a clear user notification.
+ * Never returns "Request failed with status code NNN".
+ */
+export function resolveUserFacingApiNotification(error: unknown): UserFacingApiNotification {
+  if (error instanceof HandledApiError) {
+    return {
+      title: 'Notice',
+      message: error.message || 'Something went wrong. Please try again.',
+      toastId: 'app-api-handled',
+    };
+  }
+
+  const parsed = parseApiError(error, 'Something went wrong. Please try again.');
+  let message =
+    parsed.status === 403 ? ACCESS_DENIED_MESSAGE : formatByErrorCode(parsed);
+
+  if (AXIOS_STATUS_CODE_MESSAGE.test(message)) {
+    message = friendlyHttpErrorMessage(parsed.status, message);
+  }
+
+  const reason =
+    typeof parsed.details?.reason === 'string' ? parsed.details.reason.trim() : '';
+  if (
+    reason &&
+    (message === parsed.message ||
+      isGenericPermissionMessage(message) ||
+      message === 'Please check your input and try again.')
+  ) {
+    message = reason;
+  }
+
+  const status = parsed.status;
+  const toastId =
+    status === 403
+      ? 'app-forbidden'
+      : `app-api-${status ?? 'error'}-${(parsed.errorCode || message).slice(0, 48)}`;
+
+  return {
+    title: titleForHttpStatus(status),
+    message,
+    toastId,
+    status,
+  };
+}
+
+/** Dispatch the global standard API error toast (App.tsx listener). */
+export function dispatchUserFacingApiNotification(error: unknown): HandledApiError {
+  const notification = resolveUserFacingApiNotification(error);
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    if (notification.status === 403) {
+      window.dispatchEvent(new CustomEvent('app:forbidden', { detail: notification.message }));
+    } else {
+      window.dispatchEvent(new CustomEvent('app:api-error', { detail: notification }));
+    }
+  }
+  return new HandledApiError(notification.message);
 }

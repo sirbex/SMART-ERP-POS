@@ -18,7 +18,7 @@ import {
 import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
 import { isPublicApiRoute } from '../lib/apiPublicRoutes';
-import { HandledApiError, ACCESS_DENIED_MESSAGE, friendlyHttpErrorMessage } from './errorHandler';
+import { HandledApiError, ACCESS_DENIED_MESSAGE, friendlyHttpErrorMessage, dispatchUserFacingApiNotification, resolveUserFacingApiNotification } from './errorHandler';
 import { toast } from 'sonner';
 import type { ServerListParams } from '../lib/serverListParams';
 import { toServerListQuery } from '../lib/serverListParams';
@@ -223,6 +223,28 @@ apiClient.interceptors.response.use(
       const msg = friendlyHttpErrorMessage(403, error.response.data?.error);
       console.error('Access denied:', error.response.data?.error || msg);
       window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
+      return Promise.reject(new HandledApiError(msg));
+    }
+
+    // SSOT: any other HTTP error → clear notification (never "Request failed with status code NNN")
+    if (error.response?.status) {
+      return Promise.reject(dispatchUserFacingApiNotification(error));
+    }
+
+    // Network / no response
+    if (!error.response) {
+      const msg = navigator.onLine
+        ? 'Could not reach the server. Please try again.'
+        : 'You appear to be offline. Check your connection and try again.';
+      window.dispatchEvent(
+        new CustomEvent('app:api-error', {
+          detail: {
+            title: 'Connection problem',
+            message: msg,
+            toastId: 'app-network',
+          },
+        })
+      );
       return Promise.reject(new HandledApiError(msg));
     }
 
@@ -1341,25 +1363,12 @@ export const api = {
     apiClient.delete<T>(url, config),
 };
 
-// Error Helper — never surfaces raw Axios "Request failed with status code NNN"
+// Error Helper — SSOT via resolveUserFacingApiNotification (never Axios status-code text)
 export const getErrorMessage = (error: unknown): string => {
   if (error instanceof HandledApiError) {
     return error.message || ACCESS_DENIED_MESSAGE;
   }
-
-  if (axios.isAxiosError(error)) {
-    const axiosError = error as AxiosError<ApiResponse>;
-    return friendlyHttpErrorMessage(
-      axiosError.response?.status,
-      axiosError.response?.data?.error || axiosError.message
-    );
-  }
-
-  if (error instanceof Error) {
-    return friendlyHttpErrorMessage(undefined, error.message);
-  }
-
-  return 'An unknown error occurred';
+  return resolveUserFacingApiNotification(error).message;
 };
 
 /**
