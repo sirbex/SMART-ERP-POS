@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { RefreshCw } from 'lucide-react';
 import { accountingApi } from '../../services/api';
-import { apiClient, type ApiResponse } from '../../utils/api';
+import { apiClient, RECONCILIATION_API_TIMEOUT, type ApiResponse } from '../../utils/api';
 import type { DomainLaneSummary } from '../../types/financialLane';
 import { ReconciliationWorkspaceShell } from '../../components/reconciliation-workspace/ReconciliationWorkspaceShell';
 import { GlReviewControlAccounts } from '../../components/reconciliation-workspace/GlReviewControlAccounts';
@@ -31,7 +31,7 @@ interface ReconciliationSummary {
 async function fetchFinancialHealth(asOfDate: string): Promise<DomainLaneSummary[]> {
     const res = await apiClient.get<ApiResponse<DomainLaneSummary[]>>(
         '/erp-accounting/reconciliation/financial-health',
-        { params: { asOfDate } },
+        { params: { asOfDate }, timeout: RECONCILIATION_API_TIMEOUT },
     );
     return res.data.data ?? [];
 }
@@ -40,7 +40,7 @@ async function fetchSummary(asOfDate: string): Promise<ReconciliationSummary | u
     try {
         const response = await apiClient.get<ApiResponse<ReconciliationSummary>>(
             '/erp-accounting/reconciliation/summary',
-            { params: { asOfDate } },
+            { params: { asOfDate }, timeout: RECONCILIATION_API_TIMEOUT },
         );
         return response.data.data;
     } catch {
@@ -82,6 +82,7 @@ export default function GeneralLedgerReviewPage() {
         queryKey: ['reconciliation-summary', asOfDate],
         queryFn: () => fetchSummary(asOfDate),
         staleTime: 30_000,
+        enabled: healthQuery.isSuccess,
     });
 
     const trialBalanceQuery = useQuery({

@@ -48,10 +48,6 @@ import {
   withLegacyArFields,
   withLegacyInventoryFields,
 } from '../modules/financial-reconciliation/financialLaneService.js';
-import {
-  compareSqlSummaryToFramework,
-  type ReconciliationParityReport,
-} from '../modules/financial-reconciliation/reconciliationParityService.js';
 import { logLegacyReconciliationAccess } from '../modules/financial-reconciliation/legacyReconciliationAudit.js';
 import type { FinancialLaneResult } from '../modules/financial-reconciliation/types.js';
 
@@ -101,10 +97,10 @@ export interface FullReconciliationSummary {
     }>;
     overallStatus: 'ALL_RECONCILED' | 'HAS_DISCREPANCIES';
     discrepancyCount: number;
-    /** Phase F0 — framework is authoritative; SQL parity logged when mismatched. */
+    /** Phase F0 — framework is authoritative; parity lives on stabilization endpoint. */
     _meta?: {
         authoritative: 'financial-lane-framework';
-        legacyParity?: ReconciliationParityReport;
+        parityEndpoint?: string;
     };
 }
 
@@ -610,21 +606,12 @@ export class ReconciliationService {
 
             const discrepancies = accounts.filter((a) => a.status === 'DISCREPANCY');
 
-            let legacyParity;
-            try {
-                legacyParity = await compareSqlSummaryToFramework(this.pool, date);
-            } catch (parityError: unknown) {
-                logger.warn('[LEGACY RECON] SQL parity check failed (non-fatal)', {
-                    asOfDate: date,
-                    error: parityError instanceof Error ? parityError.message : String(parityError),
-                });
-            }
-
+            // Parity vs fn_full_reconciliation_report re-runs getAllDomainSummaries —
+            // keep it off this hot path (use GET .../stabilization/parity).
             logger.info('Full reconciliation completed (framework-authoritative)', {
                 asOfDate: date,
                 accountCount: accounts.length,
                 discrepancyCount: discrepancies.length,
-                legacyParityOk: legacyParity?.ok,
             });
 
             return {
@@ -635,7 +622,7 @@ export class ReconciliationService {
                 discrepancyCount: discrepancies.length,
                 _meta: {
                     authoritative: 'financial-lane-framework',
-                    legacyParity,
+                    parityEndpoint: '/api/erp-accounting/reconciliation/stabilization/parity',
                 },
             };
         } catch (error: unknown) {

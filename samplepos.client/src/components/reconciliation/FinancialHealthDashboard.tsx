@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle, HelpCircle, ShieldAlert, Wrench } from 'lucide-react';
-import { apiClient, type ApiResponse } from '../../utils/api';
+import { apiClient, RECONCILIATION_API_TIMEOUT, type ApiResponse } from '../../utils/api';
 import type { DomainLaneSummary, FinancialLaneResult } from '../../types/financialLane';
 import { formatCurrency } from '../../utils/currency';
 import { laneStatusLabel, laneStatusTone } from '../../types/financialLane';
@@ -13,7 +13,7 @@ interface Props {
 async function fetchFinancialHealth(asOfDate: string): Promise<DomainLaneSummary[]> {
     const res = await apiClient.get<ApiResponse<DomainLaneSummary[]>>(
         '/erp-accounting/reconciliation/financial-health',
-        { params: { asOfDate } },
+        { params: { asOfDate }, timeout: RECONCILIATION_API_TIMEOUT },
     );
     return res.data.data ?? [];
 }

@@ -49,6 +49,26 @@ export const AP_INACTIVE_INVOICE_STATUSES = [
 ] as const;
 
 /**
+ * Bills whose APPLIED SCNs still have net-active AP (2100) impact.
+ * Uncorrelated semi-join (IN) — avoids per-row EXISTS+GROUP BY on open-item scans.
+ */
+export const AP_SCN_GL_BILL_IDS_SQL = `
+  SELECT scn.reference_invoice_id
+  FROM supplier_invoices scn
+  JOIN ledger_transactions lt ON lt."ReferenceId" = scn."Id"
+  JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+  JOIN accounts a ON a."Id" = le."AccountId"
+  WHERE scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+    AND scn.deleted_at IS NULL
+    AND UPPER(scn."Status") = 'APPLIED'
+    AND scn.reference_invoice_id IS NOT NULL
+    AND a."AccountCode" = '2100'
+    AND ${LEDGER_NET_ACTIVE_SQL}
+  GROUP BY scn."Id", scn.reference_invoice_id
+  HAVING ABS(SUM(le."CreditAmount" - le."DebitAmount")) > 0.009
+`;
+
+/**
  * Status filter for open-item SSOT.
  * PAID is normally excluded, BUT PAID rows with negative OutstandingBalance are
  * over-applied credits (cash paid in full AND SCN applied). Include those only when
@@ -61,21 +81,7 @@ export const AP_OPEN_INVOICE_STATUS_SQL = `
     OR (
       UPPER(si."Status") = 'PAID'
       AND COALESCE(si."OutstandingBalance", 0) < -0.009
-      AND EXISTS (
-        SELECT 1
-        FROM supplier_invoices scn
-        JOIN ledger_transactions lt ON lt."ReferenceId" = scn."Id"
-        JOIN ledger_entries le ON le."TransactionId" = lt."Id"
-        JOIN accounts a ON a."Id" = le."AccountId"
-        WHERE scn.reference_invoice_id = si."Id"
-          AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
-          AND scn.deleted_at IS NULL
-          AND UPPER(scn."Status") = 'APPLIED'
-          AND a."AccountCode" = '2100'
-          AND ${LEDGER_NET_ACTIVE_SQL}
-        GROUP BY scn."Id"
-        HAVING ABS(SUM(le."CreditAmount" - le."DebitAmount")) > 0.009
-      )
+      AND si."Id" IN (${AP_SCN_GL_BILL_IDS_SQL})
     )
   )`;
 
@@ -179,6 +185,12 @@ function ledgerDerivedOpenInvoiceSql(
         ${ctx?.asOfDate ? `AND scn."InvoiceDate"::DATE <= $1::date` : ''}
       GROUP BY scn.reference_invoice_id
     ),
+    scn_gl_bills AS (
+      SELECT DISTINCT reference_invoice_id AS bill_id
+      FROM (
+        ${AP_SCN_GL_BILL_IDS_SQL}
+      ) scn_gl_src
+    ),
     open_rows AS (
       SELECT si.document_type,
         UPPER(si."Status") AS status,
@@ -192,29 +204,11 @@ function ledgerDerivedOpenInvoiceSql(
             - COALESCE(ic.credit_notes, 0)
         END AS raw_open,
         COALESCE(ic.return_credits, 0) + COALESCE(ic.credit_notes, 0) AS applied_scn_total,
-        EXISTS (
-          SELECT 1
-          FROM supplier_invoices scn
-          JOIN ledger_transactions lt2 ON lt2."ReferenceId" = scn."Id"
-          JOIN ledger_entries le2 ON le2."TransactionId" = lt2."Id"
-          JOIN accounts a2 ON a2."Id" = le2."AccountId"
-          WHERE scn.reference_invoice_id = si."Id"
-            AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
-            AND scn.deleted_at IS NULL
-            AND UPPER(scn."Status") = 'APPLIED'
-            AND a2."AccountCode" = '2100'
-            AND lt2."Status" = 'POSTED'
-            AND lt2."IsReversed" = FALSE
-            AND lt2."Id" NOT IN (
-              SELECT "ReversedByTransactionId" FROM ledger_transactions
-              WHERE "ReversedByTransactionId" IS NOT NULL
-            )
-          GROUP BY scn."Id"
-          HAVING ABS(SUM(le2."CreditAmount" - le2."DebitAmount")) > 0.009
-        ) AS scn_has_ap_gl
+        (sg.bill_id IS NOT NULL) AS scn_has_ap_gl
       FROM supplier_invoices si
       LEFT JOIN inv_paid ip ON ip.invoice_id = si."Id"
       LEFT JOIN inv_credits ic ON ic.invoice_id = si."Id"
+      LEFT JOIN scn_gl_bills sg ON sg.bill_id = si."Id"
       WHERE si.deleted_at IS NULL
         AND UPPER(si."Status") NOT IN ('CANCELLED', 'DELETED', 'DRAFT')
         ${AP_OPEN_INVOICE_GL_POSTED_SQL}

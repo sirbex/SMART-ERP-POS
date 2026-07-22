@@ -48,7 +48,9 @@ import { getApiBaseUrl } from '../lib/apiBase';
 // API Configuration
 // Use relative URL in dev so requests go through Vite proxy (handles HTTPS)
 const API_BASE_URL = getApiBaseUrl();
-const API_TIMEOUT = 30000; // 30 seconds
+const API_TIMEOUT = 30000; // 30 seconds default
+/** Reconciliation health/summary run many lane queries — allow longer than default. */
+export const RECONCILIATION_API_TIMEOUT = 90_000;
 
 // API Response Types
 export interface ApiResponse<T = unknown> {

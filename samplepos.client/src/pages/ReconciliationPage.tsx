@@ -10,7 +10,7 @@ import { AlertTriangle, RefreshCw, Settings2 } from 'lucide-react';
 
 import { AxiosError } from 'axios';
 
-import { apiClient, type ApiResponse } from '../utils/api';
+import { apiClient, RECONCILIATION_API_TIMEOUT, type ApiResponse } from '../utils/api';
 
 import { DatePicker } from '../components/ui/date-picker';
 
@@ -104,7 +104,7 @@ async function fetchFinancialHealth(asOfDate: string): Promise<DomainLaneSummary
 
         '/erp-accounting/reconciliation/financial-health',
 
-        { params: { asOfDate } },
+        { params: { asOfDate }, timeout: RECONCILIATION_API_TIMEOUT },
 
     );
 
@@ -140,7 +140,7 @@ async function fetchSummary(asOfDate: string): Promise<ReconciliationSummary | u
 
             '/erp-accounting/reconciliation/summary',
 
-            { params: { asOfDate } },
+            { params: { asOfDate }, timeout: RECONCILIATION_API_TIMEOUT },
 
         );
 
@@ -246,7 +246,9 @@ export default function ReconciliationPage() {
 
         refetchOnWindowFocus: false,
 
-        enabled: needsLaneData && !authLoading,
+        // Avoid stacking with financial-health (both hit the same heavy lane queries).
+
+        enabled: needsLaneData && !authLoading && healthQuery.isSuccess,
 
     });
 

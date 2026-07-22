@@ -67,6 +67,7 @@ describe('apReconciliationEngine — Wave 5', () => {
     expect(AP_OPEN_INVOICE_STATUS_SQL).toMatch(/OutstandingBalance/);
     expect(AP_OPEN_INVOICE_STATUS_SQL).toMatch(/SUPPLIER_CREDIT_NOTE/);
     expect(AP_OPEN_INVOICE_STATUS_SQL).toMatch(/2100/);
+    expect(AP_OPEN_INVOICE_STATUS_SQL).toMatch(/IN \(/);
   });
 
   it('blocks heal-ap-drift when drift equals unposted pipeline gap', () => {

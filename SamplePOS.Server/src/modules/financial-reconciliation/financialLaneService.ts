@@ -75,11 +75,9 @@ export async function getDomainLaneSummary(
   asOfDate?: string,
 ): Promise<DomainLaneSummary> {
   const provider = getFinancialLaneProvider(domain);
-  const lanes: FinancialLaneResult[] = [];
-
-  for (const lane of provider.supportedLanes) {
-    lanes.push(await getFinancialLane(pool, domain, lane, asOfDate));
-  }
+  const lanes = await Promise.all(
+    provider.supportedLanes.map((lane) => getFinancialLane(pool, domain, lane, asOfDate)),
+  );
 
   const integrity = lanes.find((l) => l.lane === 'integrity');
   const periodCloseBlocked =
