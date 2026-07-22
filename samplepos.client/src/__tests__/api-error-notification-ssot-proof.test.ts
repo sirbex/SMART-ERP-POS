@@ -69,10 +69,8 @@ describe('PROOF — API error notification SSOT (no status codes)', () => {
     }
     (globalThis as unknown as { CustomEvent: typeof FakeCustomEvent }).CustomEvent =
       FakeCustomEvent;
-    const g = globalThis as typeof globalThis & {
-      window?: { dispatchEvent: (ev: { type: string; detail?: unknown }) => boolean };
-    };
-    g.window = {
+    type FakeDispatchEvent = { type: string; detail?: unknown };
+    (globalThis as unknown as { window: { dispatchEvent: (ev: FakeDispatchEvent) => boolean } }).window = {
       dispatchEvent: (ev) => {
         dispatched.push({ type: ev.type, detail: ev.detail });
         return true;
