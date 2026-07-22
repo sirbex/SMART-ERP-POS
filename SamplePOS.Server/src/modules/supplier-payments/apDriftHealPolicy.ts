@@ -1,6 +1,7 @@
 /**
  * AP drift heal policy — blocks symptom-only GL adjustments; returns actionable decomposition.
  */
+import type { Pool } from 'pg';
 import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 import {
   captureApReconciliationMetrics,
