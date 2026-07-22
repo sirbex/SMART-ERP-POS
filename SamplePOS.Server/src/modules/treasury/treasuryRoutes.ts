@@ -6,13 +6,25 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { pool as globalPool } from '../../db/pool.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requirePermission } from '../../rbac/middleware.js';
+import { requireAnyPermission } from '../../rbac/middleware.js';
 import { asyncHandler, ValidationError } from '../../middleware/errorHandler.js';
 import { TREASURY_DOCUMENT_TYPES } from '@shared/treasury/index.js';
 import * as treasuryService from './treasuryService.js';
 import * as depositWorksheetService from './depositWorksheetService.js';
 import * as treasuryTransferService from './treasuryTransferService.js';
 import * as pettyCashService from './pettyCashService.js';
+
+/** Banking & Liquidity workspace: accountants/managers with banking rights. */
+const requireLiquidityRead = requireAnyPermission([
+  'banking.read',
+  'accounting.read',
+]);
+const requireLiquidityWrite = requireAnyPermission([
+  'banking.create',
+  'banking.update',
+  'banking.reconcile',
+  'accounting.manage',
+]);
 
 const router = Router();
 
@@ -114,7 +126,7 @@ router.use(authenticate);
 
 router.get(
   '/enabled',
-  requirePermission('accounting.read'),
+  requireLiquidityRead,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const enabled = await treasuryService.isEnabled(pool);
@@ -124,7 +136,7 @@ router.get(
 
 router.get(
   '/unsettled-receipts',
-  requirePermission('accounting.read'),
+  requireLiquidityRead,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const clearingAccountCode = req.query.clearingAccountCode
@@ -141,7 +153,7 @@ router.get(
 
 router.get(
   '/deposit-reconciliation',
-  requirePermission('accounting.read'),
+  requireLiquidityRead,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const data = await depositWorksheetService.getDepositReconciliation(pool);
@@ -151,7 +163,7 @@ router.get(
 
 router.post(
   '/deposit-worksheets',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const parsed = DepositWorksheetSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -168,7 +180,7 @@ router.post(
 
 router.get(
   '/liquidity-accounts',
-  requirePermission('accounting.read'),
+  requireLiquidityRead,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const items = await treasuryTransferService.listLiquidityAccounts(pool);
@@ -178,7 +190,7 @@ router.get(
 
 router.post(
   '/transfers',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const parsed = TransferSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -195,7 +207,7 @@ router.post(
 
 router.get(
   '/petty-cash/balances',
-  requirePermission('accounting.read'),
+  requireLiquidityRead,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const data = await pettyCashService.getPettyCashBalance(pool);
@@ -205,7 +217,7 @@ router.get(
 
 router.post(
   '/petty-cash',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const parsed = PettyCashSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -222,7 +234,7 @@ router.post(
 
 router.get(
   '/documents',
-  requirePermission('accounting.read'),
+  requireLiquidityRead,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const page = parseInt(String(req.query.page ?? '1'), 10) || 1;
@@ -241,7 +253,7 @@ router.get(
 
 router.get(
   '/documents/:id',
-  requirePermission('accounting.read'),
+  requireLiquidityRead,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const doc = await treasuryService.getDocument(pool, req.params.id);
@@ -254,7 +266,7 @@ router.get(
 
 router.post(
   '/documents',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const parsed = CreateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -272,7 +284,7 @@ router.post(
 
 router.patch(
   '/documents/:id',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const parsed = UpdateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -289,7 +301,7 @@ router.patch(
 
 router.post(
   '/documents/:id/submit',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const doc = await treasuryService.submit(pool, req.params.id, req.user!.id);
@@ -299,7 +311,7 @@ router.post(
 
 router.post(
   '/documents/:id/approve',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const doc = await treasuryService.approve(pool, req.params.id, req.user!.id);
@@ -309,7 +321,7 @@ router.post(
 
 router.post(
   '/documents/:id/reject',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
@@ -320,7 +332,7 @@ router.post(
 
 router.post(
   '/documents/:id/post',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const doc = await treasuryService.post(pool, req.params.id, req.user!.id);
@@ -330,7 +342,7 @@ router.post(
 
 router.post(
   '/documents/:id/reverse',
-  requirePermission('accounting.manage'),
+  requireLiquidityWrite,
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;

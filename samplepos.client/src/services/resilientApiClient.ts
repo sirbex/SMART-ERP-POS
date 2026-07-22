@@ -1,7 +1,7 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import { attachAuthInterceptors } from '../hooks/useTokenRefresh';
 import logger from '../utils/logger';
-import { HandledApiError } from '../utils/errorHandler';
+import { HandledApiError, ACCESS_DENIED_MESSAGE } from '../utils/errorHandler';
 import { toast } from 'sonner';
 
 /**
@@ -80,6 +80,13 @@ class ResilientApiClient {
                     return Promise.reject(new HandledApiError(reason));
                 }
 
+                if (error.response?.status === 403) {
+                    window.dispatchEvent(
+                        new CustomEvent('app:forbidden', { detail: ACCESS_DENIED_MESSAGE })
+                    );
+                    return Promise.reject(new HandledApiError(ACCESS_DENIED_MESSAGE));
+                }
+
                 return Promise.reject(this.normalizeError(error));
             }
         );
@@ -100,9 +107,21 @@ class ResilientApiClient {
     }
 
     private normalizeError(error: AxiosError): Error {
+        if (error.response?.status === 403) {
+            return new HandledApiError(ACCESS_DENIED_MESSAGE);
+        }
         if (error.response?.data && typeof error.response.data === 'object') {
             const data = error.response.data as { error?: string; message?: string };
-            return new Error(data.error || data.message || 'An error occurred');
+            const msg = data.error || data.message;
+            if (error.response.status === 403 || msg === 'Insufficient permissions') {
+                return new HandledApiError(ACCESS_DENIED_MESSAGE);
+            }
+            return new Error(msg || 'An error occurred');
+        }
+        if (/^Request failed with status code \d+$/i.test(error.message || '')) {
+            const status = error.response?.status;
+            if (status === 403) return new HandledApiError(ACCESS_DENIED_MESSAGE);
+            return new Error('Something went wrong. Please try again.');
         }
         return new Error(error.message || 'An error occurred');
     }

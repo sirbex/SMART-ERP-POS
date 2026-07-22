@@ -235,6 +235,37 @@ describe('getStructuredErrorMessage — INV_RULE_* errors', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// HTTP 403 — never surface Axios status-code text
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('friendly 403 / permission errors', () => {
+    it('maps Insufficient permissions to Access denied copy', async () => {
+        const { ACCESS_DENIED_MESSAGE, friendlyHttpErrorMessage } = await import('../utils/errorHandler');
+        expect(friendlyHttpErrorMessage(403, 'Insufficient permissions')).toBe(ACCESS_DENIED_MESSAGE);
+        expect(friendlyHttpErrorMessage(undefined, 'Request failed with status code 403')).toBe(
+            ACCESS_DENIED_MESSAGE
+        );
+    });
+
+    it('parseApiError never returns Request failed with status code 403', () => {
+        const axError = makeAxiosError(403, {
+            success: false,
+            error: 'Insufficient permissions',
+        });
+        const parsed = parseApiError(axError);
+        expect(parsed.message).not.toMatch(/status code/i);
+        expect(parsed.message).toMatch(/permission/i);
+    });
+
+    it('handleApiError skips toast for HandledApiError', () => {
+        toastErrorSpy.mockClear();
+        const handled = new HandledApiError('You do not have permission to perform this action.');
+        handleApiError(handled);
+        expect(toastErrorSpy).not.toHaveBeenCalled();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // parseApiError — base contract (GOV_RULE_* error structure)
 // ─────────────────────────────────────────────────────────────────────────────
 

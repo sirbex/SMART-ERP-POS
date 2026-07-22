@@ -1,5 +1,6 @@
 import {
   SYSTEM_ACCOUNTANT_EXTRA_KEYS,
+  SYSTEM_ACCOUNTANT_MODULES,
   SYSTEM_MANAGER_MODULES,
   isSystemAccountantPermission,
   isSystemManagerPermission,
@@ -17,6 +18,21 @@ describe('systemRoleGrants SSOT', () => {
   it('isSystemManagerPermission grants accounting.read', () => {
     expect(isSystemManagerPermission({ key: 'accounting.read', module: 'accounting' })).toBe(true);
     expect(isSystemManagerPermission({ key: 'system.update', module: 'system' })).toBe(false);
+  });
+
+  it('Manager modules include banking for Banking & Liquidity', () => {
+    expect(SYSTEM_MANAGER_MODULES).toContain('banking');
+    expect(isSystemManagerPermission({ key: 'banking.read', module: 'banking' })).toBe(true);
+    expect(isSystemManagerPermission({ key: 'banking.reconcile', module: 'banking' })).toBe(true);
+  });
+
+  it('Accountant includes full banking module for Banking & Liquidity', () => {
+    expect(SYSTEM_ACCOUNTANT_MODULES).toContain('banking');
+    expect(isSystemAccountantPermission({ key: 'banking.read', module: 'banking' })).toBe(true);
+    expect(isSystemAccountantPermission({ key: 'banking.create', module: 'banking' })).toBe(true);
+    expect(isSystemAccountantPermission({ key: 'banking.update', module: 'banking' })).toBe(true);
+    expect(isSystemAccountantPermission({ key: 'banking.reconcile', module: 'banking' })).toBe(true);
+    expect(isSystemAccountantPermission({ key: 'accounting.manage', module: 'accounting' })).toBe(true);
   });
 
   it('Accountant includes customers.update for AR payments', () => {

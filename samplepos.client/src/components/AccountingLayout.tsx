@@ -29,6 +29,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
   const navigate = useNavigate();
   const canManageAccounting = useBackendPermission('accounting.manage');
   const canReadAccounting = useBackendPermission('accounting.read');
+  const canReadBanking = useBackendPermission('banking.read');
   const showDiagnosticsNav = canManageAccounting || canReadAccounting;
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['Overview', 'ERP Controls', 'Advanced Accounting']));
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -286,6 +287,14 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
     return groups;
   }, [showDiagnosticsNav]);
 
+  const visibleNavGroups = useMemo(() => {
+    if (canReadBanking) return navGroups;
+    return navGroups.map((g) => ({
+      ...g,
+      items: g.items.filter((item) => item.path !== '/accounting/banking'),
+    }));
+  }, [navGroups, canReadBanking]);
+
   const isActive = (path: string) => {
     return location.pathname === path ||
       (path === '/accounting/dashboard' && location.pathname === '/accounting');
@@ -321,7 +330,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
 
       {/* Navigation Groups */}
       <nav className="flex-1 overflow-y-auto py-4 px-3">
-        {navGroups.map((group) => (
+        {visibleNavGroups.map((group) => (
           <div key={group.name} className="mb-2">
             {/* Group Header */}
             <button

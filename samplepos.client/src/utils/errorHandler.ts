@@ -33,6 +33,56 @@ export class HandledApiError extends Error {
   }
 }
 
+/** User-facing copy for HTTP 403 / RBAC denials — never show status codes. */
+export const ACCESS_DENIED_MESSAGE =
+  'You do not have permission to perform this action. Contact an administrator if you need access.';
+
+const AXIOS_STATUS_CODE_MESSAGE = /^Request failed with status code (\d+)$/i;
+
+function isGenericPermissionMessage(message: string | undefined): boolean {
+  if (!message) return false;
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized === 'insufficient permissions' ||
+    normalized === 'forbidden' ||
+    normalized === 'access denied'
+  );
+}
+
+/** Map HTTP status / raw Axios text to a stable user-facing message. */
+export function friendlyHttpErrorMessage(
+  status: number | undefined,
+  apiError?: string,
+  fallback = 'Something went wrong. Please try again.'
+): string {
+  const statusFromAxiosMsg = apiError?.match(AXIOS_STATUS_CODE_MESSAGE)?.[1];
+  const resolvedStatus = status ?? (statusFromAxiosMsg ? Number(statusFromAxiosMsg) : undefined);
+
+  if (resolvedStatus === 403 || isGenericPermissionMessage(apiError)) {
+    return ACCESS_DENIED_MESSAGE;
+  }
+  if (apiError && !AXIOS_STATUS_CODE_MESSAGE.test(apiError)) {
+    return apiError;
+  }
+  if (resolvedStatus === 401) return 'Your session has expired. Please sign in again.';
+  if (resolvedStatus === 404) return 'The requested item was not found.';
+  if (resolvedStatus === 409) return 'This conflicts with existing data. Please refresh and try again.';
+  if (resolvedStatus === 429) return 'Too many requests. Please wait a moment and try again.';
+  if (resolvedStatus && resolvedStatus >= 500) {
+    return 'Something went wrong on the server. Please try again.';
+  }
+  return fallback;
+}
+
+/**
+ * Toast an API error unless the interceptor already notified (HandledApiError).
+ */
+export function toastApiError(error: unknown, fallback?: string): void {
+  if (error instanceof HandledApiError) return;
+  const msg = getStructuredErrorMessage(error, fallback);
+  toast.error(msg, { duration: 6000 });
+}
+
 export interface ValidationDetail {
   path: string;
   message: string;
@@ -75,6 +125,10 @@ export function parseApiError(
   error: unknown,
   fallback = 'An unexpected error occurred'
 ): ParsedApiError {
+  if (error instanceof HandledApiError) {
+    return { message: error.message || fallback };
+  }
+
   if (axios.isAxiosError(error)) {
     const axErr = error as AxiosError<StructuredErrorResponse>;
     const data = axErr.response?.data;
@@ -90,7 +144,7 @@ export function parseApiError(
         ('message' in rawDetails[0] || 'path' in rawDetails[0]);
 
       return {
-        message: data.error || fallback,
+        message: friendlyHttpErrorMessage(status, data.error, fallback),
         errorCode: data.error_code,
         details: isValidationArray ? undefined : (rawDetails as Record<string, unknown>),
         validationErrors: isValidationArray ? (rawDetails as ValidationDetail[]) : undefined,
@@ -99,12 +153,16 @@ export function parseApiError(
     }
 
     return {
-      message: axErr.message || fallback,
+      message: friendlyHttpErrorMessage(status, axErr.message, fallback),
       status,
     };
   }
 
   if (error instanceof Error) {
+    if (AXIOS_STATUS_CODE_MESSAGE.test(error.message)) {
+      const status = Number(error.message.match(AXIOS_STATUS_CODE_MESSAGE)?.[1]);
+      return { message: friendlyHttpErrorMessage(status, error.message, fallback), status };
+    }
     return { message: error.message || fallback };
   }
 
@@ -347,7 +405,7 @@ function formatByErrorCode(parsed: ParsedApiError): string {
   if (code === 'ERR_NOT_FOUND')
     return `Not found: ${(parsed.details?.reason as string) || parsed.message}`;
   if (code === 'ERR_AUTH') return parsed.message;
-  if (code === 'ERR_FORBIDDEN') return `Access denied: ${parsed.message}`;
+  if (code === 'ERR_FORBIDDEN' || parsed.status === 403) return ACCESS_DENIED_MESSAGE;
   if (code === 'ERR_VALIDATION') return parsed.message;
   if (code === 'ERR_BUSINESS') return parsed.message;
   if (code === 'ERR_CONSTRAINT')
@@ -368,17 +426,21 @@ function formatByErrorCode(parsed: ParsedApiError): string {
 export function handleApiError(error: unknown, options: HandleApiErrorOptions = {}): string {
   const { silent = false, fallback = 'An unexpected error occurred' } = options;
 
-  // The API interceptor already showed a toast for GOV/ACC/INV rule errors;
+  // The API interceptor already showed a toast for GOV/ACC/INV rule errors and 403s;
   // don't toast again from individual catch blocks.
   if (error instanceof HandledApiError) {
     return error.message;
   }
 
   const parsed = parseApiError(error, fallback);
-  const friendly = formatByErrorCode(parsed);
+  const friendly =
+    parsed.status === 403 ? ACCESS_DENIED_MESSAGE : formatByErrorCode(parsed);
 
   if (!silent) {
-    toast.error(friendly, { duration: 6000 });
+    toast.error(friendly, {
+      duration: 6000,
+      ...(parsed.status === 403 ? { id: 'app-forbidden', icon: '🔒' } : {}),
+    });
   }
 
   return friendly;

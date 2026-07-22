@@ -210,12 +210,21 @@ function TenantAppServices() {
 function App() {
   const { isAuthenticated, isLoading } = useAuth();
 
-  // Global 403 Forbidden listener — shows toast when backend rejects due to missing permissions
+  // Global 403 Forbidden listener — standard Access denied toast (no HTTP status codes)
   useEffect(() => {
     const handler = (e: Event) => {
-      const msg = (e as CustomEvent).detail || 'You do not have permission to perform this action';
-      // Stable id collapses rapid duplicate 403s (common on dashboard multi-fetch)
-      toast.error(msg, { duration: 6000, icon: '🔒', id: 'app-forbidden' });
+      const msg =
+        (e as CustomEvent<string>).detail ||
+        'You do not have permission to perform this action. Contact an administrator if you need access.';
+      toast.error(
+        () => (
+          <div>
+            <div style={{ fontWeight: 600 }}>Access denied</div>
+            <div style={{ fontSize: 13, marginTop: 4, opacity: 0.9 }}>{msg}</div>
+          </div>
+        ),
+        { duration: 6000, icon: '🔒', id: 'app-forbidden' }
+      );
     };
     window.addEventListener('app:forbidden', handler);
     return () => window.removeEventListener('app:forbidden', handler);

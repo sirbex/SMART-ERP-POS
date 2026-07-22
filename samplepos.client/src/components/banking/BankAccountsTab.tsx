@@ -25,6 +25,7 @@ import {
 import { formatCurrency } from '../../utils/currency';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'react-hot-toast';
+import { HandledApiError, getStructuredErrorMessage } from '../../utils/errorHandler';
 
 type GlAccountOption = {
     id: string;
@@ -201,6 +202,7 @@ export const BankAccountsTab: React.FC = () => {
             setNewGlName('');
             toast.success(`Created GL ${code} — ${name}`);
         } catch (error) {
+            if (error instanceof HandledApiError) return;
             toast.error(error instanceof Error ? error.message : 'Failed to create GL account');
         } finally {
             setCreatingGl(false);
@@ -281,9 +283,9 @@ export const BankAccountsTab: React.FC = () => {
             toast.success(editingAccount ? 'Bank account updated' : 'Bank account created');
             refetch();
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to save bank account';
+            if (error instanceof HandledApiError) return;
             console.error('Failed to save bank account:', error);
-            toast.error(message);
+            toast.error(getStructuredErrorMessage(error, 'Failed to save bank account'));
         }
     };
 
@@ -296,9 +298,9 @@ export const BankAccountsTab: React.FC = () => {
             toast.success(account.isActive ? 'Bank account deactivated' : 'Bank account activated');
             refetch();
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to update account status';
+            if (error instanceof HandledApiError) return;
             console.error('Failed to toggle account status:', error);
-            toast.error(message);
+            toast.error(getStructuredErrorMessage(error, 'Failed to update account status'));
         }
     };
 

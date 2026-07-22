@@ -15,6 +15,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Decimal from 'decimal.js';
 import { AxiosError } from 'axios';
+import { HandledApiError } from '../../utils/errorHandler';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Plus, Search, FileText, DollarSign, ArrowUpRight, Trash2, AlertCircle, Building2, Printer, CheckCircle, ChevronDown, ChevronRight, Download, Wallet, ListChecks, FileMinus, User, Undo2, RefreshCw } from 'lucide-react';
@@ -481,7 +482,7 @@ const SupplierPaymentsPage: React.FC = () => {
             ]);
         } catch (error: unknown) {
             console.error('[SupplierPayments] Error loading tab data:', error);
-            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+            if (!(error instanceof HandledApiError)) {
                 const errMsg = error instanceof AxiosError
                     ? (error.response?.data as { error?: string })?.error
                     : error instanceof Error ? error.message : undefined;
@@ -691,7 +692,7 @@ const SupplierPaymentsPage: React.FC = () => {
                 setIsReceiptModalOpen(true);
             }
         } catch (error: unknown) {
-            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+            if (!(error instanceof HandledApiError)) {
                 const errMsg = error instanceof AxiosError
                     ? (error.response?.data as { error?: string })?.error
                     : error instanceof Error ? error.message : undefined;
@@ -893,7 +894,7 @@ const SupplierPaymentsPage: React.FC = () => {
             }
         } catch (error: unknown) {
             console.error('Error creating bill:', error);
-            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+            if (!(error instanceof HandledApiError)) {
                 const errMsg = error instanceof AxiosError
                     ? (error.response?.data as { error?: string })?.error
                     : error instanceof Error ? error.message : undefined;
@@ -927,7 +928,7 @@ const SupplierPaymentsPage: React.FC = () => {
             setIsAllocationModalOpen(true);
         } catch (error) {
             console.error('Error loading outstanding bills:', error);
-            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+            if (!(error instanceof HandledApiError)) {
                 toast.error('Failed to load outstanding bills');
             }
         }
@@ -1014,7 +1015,7 @@ const SupplierPaymentsPage: React.FC = () => {
             }
         } catch (error: unknown) {
             console.error('Error auto-allocating payment:', error);
-            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+            if (!(error instanceof HandledApiError)) {
                 const errMsg = error instanceof AxiosError
                     ? (error.response?.data as { error?: string })?.error
                     : error instanceof Error ? error.message : undefined;
@@ -1057,7 +1058,7 @@ const SupplierPaymentsPage: React.FC = () => {
             refetchSuppliers();
         } catch (error: unknown) {
             console.error('Error allocating payment:', error);
-            if (!(error instanceof AxiosError && error.response?.status === 403)) {
+            if (!(error instanceof HandledApiError)) {
                 const errMsg = error instanceof AxiosError
                     ? (error.response?.data as { error?: string })?.error
                     : error instanceof Error ? error.message : undefined;

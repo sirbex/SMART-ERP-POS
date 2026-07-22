@@ -18,7 +18,7 @@ import {
 import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
 import { isPublicApiRoute } from '../lib/apiPublicRoutes';
-import { HandledApiError } from './errorHandler';
+import { HandledApiError, ACCESS_DENIED_MESSAGE, friendlyHttpErrorMessage } from './errorHandler';
 import { toast } from 'sonner';
 import type { ServerListParams } from '../lib/serverListParams';
 import { toServerListQuery } from '../lib/serverListParams';
@@ -219,10 +219,11 @@ apiClient.interceptors.response.use(
     }
 
     if (error.response?.status === 403) {
-      // Forbidden — dedupe toasts so background polls don't spam the UI
-      const msg = error.response.data?.error || 'You do not have permission to perform this action';
-      console.error('Access denied:', msg);
+      // Forbidden — one standard toast; reject HandledApiError so catch blocks don't show Axios codes
+      const msg = friendlyHttpErrorMessage(403, error.response.data?.error);
+      console.error('Access denied:', error.response.data?.error || msg);
       window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
+      return Promise.reject(new HandledApiError(msg));
     }
 
     return Promise.reject(error);
@@ -1340,15 +1341,22 @@ export const api = {
     apiClient.delete<T>(url, config),
 };
 
-// Error Helper
+// Error Helper — never surfaces raw Axios "Request failed with status code NNN"
 export const getErrorMessage = (error: unknown): string => {
+  if (error instanceof HandledApiError) {
+    return error.message || ACCESS_DENIED_MESSAGE;
+  }
+
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError<ApiResponse>;
-    return axiosError.response?.data?.error || axiosError.message || 'An unknown error occurred';
+    return friendlyHttpErrorMessage(
+      axiosError.response?.status,
+      axiosError.response?.data?.error || axiosError.message
+    );
   }
 
   if (error instanceof Error) {
-    return error.message;
+    return friendlyHttpErrorMessage(undefined, error.message);
   }
 
   return 'An unknown error occurred';

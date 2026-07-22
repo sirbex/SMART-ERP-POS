@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api, getErrorMessage } from '../utils/api';
+import { api } from '../utils/api';
+import { toastApiError } from '../utils/errorHandler';
 import toast from 'react-hot-toast';
 
 // ── Query Key Factories ──────────────────────────────────────────────
@@ -127,7 +128,7 @@ export function useCreateCostCenter() {
       qc.invalidateQueries({ queryKey: accountingKeys.costCenters.all });
       toast.success('Cost center created');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -140,7 +141,7 @@ export function useUpdateCostCenter() {
       qc.invalidateQueries({ queryKey: accountingKeys.costCenters.all });
       toast.success('Cost center updated');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -164,7 +165,7 @@ export function useOpenPeriod() {
       qc.invalidateQueries({ queryKey: accountingKeys.periodControl.all });
       toast.success('Period opened');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -176,7 +177,7 @@ export function useClosePeriod() {
       qc.invalidateQueries({ queryKey: accountingKeys.periodControl.all });
       toast.success('Period closed');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -189,7 +190,7 @@ export function useCreateSpecialPeriod() {
       qc.invalidateQueries({ queryKey: accountingKeys.periodControl.all });
       toast.success('Special period created');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -278,7 +279,7 @@ export function useClearGrirItem() {
       qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
       toast.success('GR/IR item cleared');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -291,7 +292,7 @@ export function useGrirAutoMatch() {
       qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
       toast.success('Auto-match complete');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -322,7 +323,7 @@ export function useCreateDunningLevel() {
       qc.invalidateQueries({ queryKey: accountingKeys.dunning.all });
       toast.success('Dunning level created');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -334,7 +335,7 @@ export function useDunningAnalysis() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.dunning.all });
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -376,7 +377,7 @@ export function useCreateWhtType() {
       qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
       toast.success('WHT type created');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -404,7 +405,7 @@ export function useRemitWht() {
       qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
       toast.success('WHT remittance posted');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -464,7 +465,7 @@ export function useRemitVat() {
       qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
       toast.success('VAT remittance posted');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -543,7 +544,7 @@ export function usePostBadDebtWriteoff() {
       qc.invalidateQueries({ queryKey: accountingKeys.badDebt.all });
       toast.success('Bad debt write-off posted');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -561,7 +562,7 @@ export function useReverseBadDebtWriteoff() {
       qc.invalidateQueries({ queryKey: accountingKeys.badDebt.all });
       toast.success('Write-off reversed');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -579,7 +580,7 @@ export function useRecoverWhtReceivable() {
       qc.invalidateQueries({ queryKey: accountingKeys.wht.all });
       toast.success('Tax Receivable recovery posted');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -660,7 +661,7 @@ export function useCreateAssetCategory() {
       qc.invalidateQueries({ queryKey: accountingKeys.assets.all });
       toast.success('Asset category created');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -692,7 +693,7 @@ export function useCreateAsset() {
       qc.invalidateQueries({ queryKey: accountingKeys.assets.all });
       toast.success('Asset created');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -705,7 +706,7 @@ export function useRunDepreciation() {
       qc.invalidateQueries({ queryKey: accountingKeys.assets.all });
       toast.success('Depreciation run completed');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -718,14 +719,14 @@ export function useDisposeAsset() {
       qc.invalidateQueries({ queryKey: accountingKeys.assets.all });
       toast.success('Asset disposed and GL posted');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
 export function useCutoverPreview() {
   return useMutation({
     mutationFn: (data: { cutoverDate: string }) => api.assets.cutoverPreview(data),
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -737,7 +738,7 @@ export function useApplyCutoverCorrections() {
       qc.invalidateQueries({ queryKey: accountingKeys.assets.all });
       toast.success('Cutover corrections applied — GL entries reversed and Opening Balance Equity credited');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -762,7 +763,7 @@ export function useCreateJeApprovalRule() {
       qc.invalidateQueries({ queryKey: accountingKeys.jeApproval.all });
       toast.success('Approval rule created');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -785,7 +786,7 @@ export function useApproveEntry() {
       qc.invalidateQueries({ queryKey: accountingKeys.jeApproval.all });
       toast.success('Entry approved');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -798,7 +799,7 @@ export function useRejectEntry() {
       qc.invalidateQueries({ queryKey: accountingKeys.jeApproval.all });
       toast.success('Entry rejected');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -823,7 +824,7 @@ export function useCreatePaymentRun() {
       qc.invalidateQueries({ queryKey: accountingKeys.paymentProgram.all });
       toast.success('Payment run created');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -835,7 +836,7 @@ export function useExecutePaymentRun() {
       qc.invalidateQueries({ queryKey: accountingKeys.paymentProgram.all });
       toast.success('Payment run executed');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -870,7 +871,7 @@ export function useSetExchangeRate() {
       qc.invalidateQueries({ queryKey: accountingKeys.currency.all });
       toast.success('Exchange rate saved');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -883,7 +884,7 @@ export function useUpdateCurrencyConfig() {
       qc.invalidateQueries({ queryKey: accountingKeys.currency.all });
       toast.success('Currency config updated');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -908,7 +909,7 @@ export function useCloseFiscalYear() {
       qc.invalidateQueries({ queryKey: accountingKeys.enterprise.all });
       toast.success('Fiscal year closed successfully');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -953,7 +954,7 @@ export function useReconcileEntries() {
       qc.invalidateQueries({ queryKey: accountingKeys.enterprise.all });
       toast.success('Entries reconciled');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -976,7 +977,7 @@ export function useSetLockDates() {
       qc.invalidateQueries({ queryKey: accountingKeys.enterprise.lockDates() });
       toast.success('Lock dates updated');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 
@@ -1000,7 +1001,7 @@ export function useExecuteRevaluation() {
       qc.invalidateQueries({ queryKey: accountingKeys.enterprise.all });
       toast.success('Currency revaluation completed');
     },
-    onError: (err) => toast.error(getErrorMessage(err)),
+    onError: (err) => toastApiError(err),
   });
 }
 

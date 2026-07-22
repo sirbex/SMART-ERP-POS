@@ -72,13 +72,15 @@ describe('Treasury architecture proof (Gate A)', () => {
 });
 
 describe('Treasury governance proof (Gate E)', () => {
-  it('E-01 mutating routes require accounting.manage (documented mapping)', () => {
+  it('E-01 mutating routes require liquidity write (banking or accounting.manage)', () => {
     const routes = readRepo('SamplePOS.Server/src/modules/treasury/treasuryRoutes.ts');
-    expect(routes).toMatch(/requirePermission\('accounting\.manage'\)/);
-    expect(routes).toMatch(/requirePermission\('accounting\.read'\)/);
-    // Mutating verbs must not be read-only only
-    const manageCount = (routes.match(/requirePermission\('accounting\.manage'\)/g) ?? []).length;
-    expect(manageCount).toBeGreaterThanOrEqual(5);
+    expect(routes).toMatch(/requireLiquidityWrite/);
+    expect(routes).toMatch(/requireLiquidityRead/);
+    expect(routes).toMatch(/banking\.create/);
+    expect(routes).toMatch(/banking\.read/);
+    expect(routes).toMatch(/accounting\.manage/);
+    const writeCount = (routes.match(/requireLiquidityWrite/g) ?? []).length;
+    expect(writeCount).toBeGreaterThanOrEqual(5);
   });
 
   it('E-03 posted immutability enforced in shared invariants', () => {
