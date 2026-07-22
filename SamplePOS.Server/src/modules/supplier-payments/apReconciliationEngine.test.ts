@@ -1,6 +1,7 @@
 import { describe, it, expect } from '@jest/globals';
 import {
   AP_OPEN_INVOICE_GL_POSTED_SQL,
+  AP_OPEN_INVOICE_STATUS_SQL,
   apMaterialityThreshold,
   isApDriftExplainedByExpenses,
   isApDriftExplainedByUnpostedInvoices,
@@ -59,6 +60,13 @@ describe('apReconciliationEngine — Wave 5', () => {
 
   it('open-item SSOT only includes invoices posted to GL', () => {
     expect(AP_OPEN_INVOICE_GL_POSTED_SQL).toContain('is_posted_to_gl');
+  });
+
+  it('open-item SSOT includes PAID over-applied credits only when SCN hit AP GL', () => {
+    expect(AP_OPEN_INVOICE_STATUS_SQL).toMatch(/PAID/);
+    expect(AP_OPEN_INVOICE_STATUS_SQL).toMatch(/OutstandingBalance/);
+    expect(AP_OPEN_INVOICE_STATUS_SQL).toMatch(/SUPPLIER_CREDIT_NOTE/);
+    expect(AP_OPEN_INVOICE_STATUS_SQL).toMatch(/2100/);
   });
 
   it('blocks heal-ap-drift when drift equals unposted pipeline gap', () => {

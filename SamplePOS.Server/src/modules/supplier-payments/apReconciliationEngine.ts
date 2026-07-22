@@ -4,6 +4,8 @@
  *
  * Formula:
  *   AP subledger = SUM(open supplier invoice obligations with is_posted_to_gl)
+ *                  + PAID over-applied credits (negative OB) only when linked APPLIED SCN
+ *                    has net-active 2100 impact
  *                  − SUM(unallocated completed supplier payments)
  *   AP GL (supplier scope) = net-active 2100 excluding EXPENSE / EXPENSE_PAYMENT
  *
@@ -39,13 +41,43 @@ function paymentAsOfFilter(ctx?: ApQueryContext): string {
   return ctx?.asOfDate ? `AND sp."PaymentDate"::DATE <= $1::date` : '';
 }
 
-/** Invoice rows excluded from open-item subledger. */
+/** Invoice rows fully excluded from open-item subledger (never contribute). */
 export const AP_INACTIVE_INVOICE_STATUSES = [
-  'PAID',
   'CANCELLED',
   'DELETED',
   'DRAFT',
 ] as const;
+
+/**
+ * Status filter for open-item SSOT.
+ * PAID is normally excluded, BUT PAID rows with negative OutstandingBalance are
+ * over-applied credits (cash paid in full AND SCN applied). Include those only when
+ * the applied SCN still has net-active AP (2100) impact — otherwise OB is document-only
+ * (SCN-0008 / KAMCARE-class: applied with no GL) and would invent false credit.
+ */
+export const AP_OPEN_INVOICE_STATUS_SQL = `
+  AND (
+    UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+    OR (
+      UPPER(si."Status") = 'PAID'
+      AND COALESCE(si."OutstandingBalance", 0) < -0.009
+      AND EXISTS (
+        SELECT 1
+        FROM supplier_invoices scn
+        JOIN ledger_transactions lt ON lt."ReferenceId" = scn."Id"
+        JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+        JOIN accounts a ON a."Id" = le."AccountId"
+        WHERE scn.reference_invoice_id = si."Id"
+          AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+          AND scn.deleted_at IS NULL
+          AND UPPER(scn."Status") = 'APPLIED'
+          AND a."AccountCode" = '2100'
+          AND ${LEDGER_NET_ACTIVE_SQL}
+        GROUP BY scn."Id"
+        HAVING ABS(SUM(le."CreditAmount" - le."DebitAmount")) > 0.009
+      )
+    )
+  )`;
 
 /** Standalone expenses on 2100 — valid GL but not supplier subledger. */
 export const AP_NON_SUPPLIER_REFERENCE_TYPES = ['EXPENSE', 'EXPENSE_PAYMENT'] as const;
@@ -96,7 +128,7 @@ export const SUPPLIER_OPEN_ITEM_BALANCE_SQL = `
       FROM supplier_invoices si
       WHERE si."SupplierId" = suppliers."Id"
         AND si.deleted_at IS NULL
-        AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+        ${AP_OPEN_INVOICE_STATUS_SQL}
         ${AP_OPEN_INVOICE_GL_POSTED_SQL}
     ), 0)
     - COALESCE((
@@ -149,24 +181,54 @@ function ledgerDerivedOpenInvoiceSql(
     ),
     open_rows AS (
       SELECT si.document_type,
+        UPPER(si."Status") AS status,
         CASE
           WHEN si.document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE') THEN
-            GREATEST(0, si."TotalAmount" - COALESCE(si."AmountPaid", 0))
-          ELSE GREATEST(0,
+            si."TotalAmount" - COALESCE(si."AmountPaid", 0)
+          ELSE
             si."TotalAmount"
             - COALESCE(ip.paid_amount, 0)
             - COALESCE(ic.return_credits, 0)
             - COALESCE(ic.credit_notes, 0)
-          )
-        END AS ledger_open
+        END AS raw_open,
+        COALESCE(ic.return_credits, 0) + COALESCE(ic.credit_notes, 0) AS applied_scn_total,
+        EXISTS (
+          SELECT 1
+          FROM supplier_invoices scn
+          JOIN ledger_transactions lt2 ON lt2."ReferenceId" = scn."Id"
+          JOIN ledger_entries le2 ON le2."TransactionId" = lt2."Id"
+          JOIN accounts a2 ON a2."Id" = le2."AccountId"
+          WHERE scn.reference_invoice_id = si."Id"
+            AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+            AND scn.deleted_at IS NULL
+            AND UPPER(scn."Status") = 'APPLIED'
+            AND a2."AccountCode" = '2100'
+            AND lt2."Status" = 'POSTED'
+            AND lt2."IsReversed" = FALSE
+            AND lt2."Id" NOT IN (
+              SELECT "ReversedByTransactionId" FROM ledger_transactions
+              WHERE "ReversedByTransactionId" IS NOT NULL
+            )
+          GROUP BY scn."Id"
+          HAVING ABS(SUM(le2."CreditAmount" - le2."DebitAmount")) > 0.009
+        ) AS scn_has_ap_gl
       FROM supplier_invoices si
       LEFT JOIN inv_paid ip ON ip.invoice_id = si."Id"
       LEFT JOIN inv_credits ic ON ic.invoice_id = si."Id"
       WHERE si.deleted_at IS NULL
-        AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+        AND UPPER(si."Status") NOT IN ('CANCELLED', 'DELETED', 'DRAFT')
         ${AP_OPEN_INVOICE_GL_POSTED_SQL}
         ${invDateFilter}
         ${supplierFilter}
+    ),
+    normalized AS (
+      SELECT document_type,
+        CASE
+          WHEN status = 'PAID' AND scn_has_ap_gl THEN LEAST(0, raw_open)
+          WHEN status = 'PAID' THEN 0
+          ELSE GREATEST(0, raw_open)
+        END AS ledger_open
+      FROM open_rows
     )
     SELECT COALESCE(SUM(
       CASE
@@ -174,8 +236,8 @@ function ledgerDerivedOpenInvoiceSql(
         ELSE ledger_open
       END
     ), 0) AS invoice_open
-    FROM open_rows
-    WHERE ledger_open > 0.009
+    FROM normalized
+    WHERE ABS(ledger_open) > 0.009
   `;
 }
 
@@ -405,6 +467,51 @@ function correlatedLedgerInvoiceOpenSql(supplierIdColumn: string, ctx?: ApQueryC
     FROM (
       SELECT si.document_type,
         CASE
+          WHEN UPPER(si."Status") = 'PAID' THEN
+            CASE WHEN EXISTS (
+              SELECT 1
+              FROM supplier_invoices scn
+              JOIN ledger_transactions lt ON lt."ReferenceId" = scn."Id"
+              JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+              JOIN accounts a ON a."Id" = le."AccountId"
+              WHERE scn.reference_invoice_id = si."Id"
+                AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+                AND scn.deleted_at IS NULL
+                AND UPPER(scn."Status") = 'APPLIED'
+                AND a."AccountCode" = '2100'
+                AND ${LEDGER_NET_ACTIVE_SQL}
+              GROUP BY scn."Id"
+              HAVING ABS(SUM(le."CreditAmount" - le."DebitAmount")) > 0.009
+            ) THEN
+              LEAST(0,
+                CASE
+                  WHEN si.document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE') THEN
+                    si."TotalAmount" - COALESCE(si."AmountPaid", 0)
+                  ELSE
+                    si."TotalAmount"
+                    - COALESCE((
+                        SELECT COALESCE(SUM(spa."AmountAllocated"), 0)
+                        FROM supplier_payment_allocations spa
+                        JOIN supplier_payments sp ON sp."Id" = spa."PaymentId"
+                        WHERE spa."SupplierInvoiceId" = si."Id"
+                          AND spa.deleted_at IS NULL
+                          AND sp.deleted_at IS NULL
+                          AND sp."Status" != 'DELETED'
+                          ${payDate}
+                      ), 0)
+                    - COALESCE((
+                        SELECT COALESCE(SUM(scn."TotalAmount"), 0)
+                        FROM supplier_invoices scn
+                        WHERE scn.reference_invoice_id = si."Id"
+                          AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+                          AND scn.deleted_at IS NULL
+                          AND UPPER(scn."Status") = 'APPLIED'
+                          ${scnDate}
+                      ), 0)
+                END
+              )
+            ELSE 0
+            END
           WHEN si.document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE') THEN
             GREATEST(0, si."TotalAmount" - COALESCE(si."AmountPaid", 0))
           ELSE GREATEST(0,
@@ -446,11 +553,11 @@ function correlatedLedgerInvoiceOpenSql(supplierIdColumn: string, ctx?: ApQueryC
       FROM supplier_invoices si
       WHERE si."SupplierId" = ${supplierIdColumn}
         AND si.deleted_at IS NULL
-        AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+        AND UPPER(si."Status") NOT IN ('CANCELLED', 'DELETED', 'DRAFT')
         ${AP_OPEN_INVOICE_GL_POSTED_SQL}
         ${invDate}
     ) open_rows
-    WHERE ledger_open > 0.009
+    WHERE ABS(ledger_open) > 0.009
   `;
 }
 
@@ -605,7 +712,7 @@ export async function syncSupplierBalanceFromOpenItems(
        FROM supplier_invoices si
        WHERE si."SupplierId" = $1
          AND si.deleted_at IS NULL
-         AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+         ${AP_OPEN_INVOICE_STATUS_SQL}
          ${AP_OPEN_INVOICE_GL_POSTED_SQL}
      ),
      unalloc AS (

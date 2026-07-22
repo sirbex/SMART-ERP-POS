@@ -13,6 +13,8 @@ import {
   computeApGlSupplierScope,
   computeApGlSupplierScopeGrossPosted,
   isApDriftExplainedByExpenses,
+  AP_OPEN_INVOICE_STATUS_SQL,
+  AP_OPEN_INVOICE_GL_POSTED_SQL,
   type ApQueryContext,
 } from './apReconciliationEngine.js';
 import {
@@ -103,8 +105,8 @@ const INTEGRITY_SUPPLIER_SQL = `
       ), 0) AS inv_bal
     FROM supplier_invoices si
     WHERE si.deleted_at IS NULL
-      AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
-      AND COALESCE(si.is_posted_to_gl, FALSE) = TRUE
+      ${AP_OPEN_INVOICE_STATUS_SQL}
+      ${AP_OPEN_INVOICE_GL_POSTED_SQL}
       AND si."InvoiceDate"::DATE <= $1::date
     GROUP BY si."SupplierId"
   )
@@ -130,8 +132,8 @@ const CACHE_SUPPLIER_SQL = `
       ), 0) AS inv_bal
     FROM supplier_invoices si
     WHERE si.deleted_at IS NULL
-      AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
-      AND COALESCE(si.is_posted_to_gl, FALSE) = TRUE
+      ${AP_OPEN_INVOICE_STATUS_SQL}
+      ${AP_OPEN_INVOICE_GL_POSTED_SQL}
       AND si."InvoiceDate"::DATE <= $1::date
     GROUP BY si."SupplierId"
   ),

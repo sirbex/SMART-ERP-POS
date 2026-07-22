@@ -1,7 +1,7 @@
 /**
  * AP drift heal policy — blocks symptom-only GL adjustments; returns actionable decomposition.
  */
-import type { Pool } from 'pg';
+import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 import {
   captureApReconciliationMetrics,
   type ApReconciliationMetrics,
@@ -11,8 +11,8 @@ import {
   computeApReconciliationSnapshot,
   isApDriftExplainedByExpenses,
   isApDriftExplainedByUnpostedInvoices,
+  AP_OPEN_INVOICE_STATUS_SQL,
 } from './apReconciliationEngine.js';
-import { LEDGER_NET_ACTIVE_SQL } from '../../utils/ledgerNetActive.js';
 
 export interface ApDriftHealAssessment {
   eligible: boolean;
@@ -104,7 +104,7 @@ export async function assessApDriftHealEligibility(pool: Pool): Promise<ApDriftH
              ), 0) AS inv_bal
       FROM supplier_invoices si
       WHERE si.deleted_at IS NULL
-        AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT')
+        ${AP_OPEN_INVOICE_STATUS_SQL}
         AND COALESCE(si.is_posted_to_gl, FALSE) = TRUE
       GROUP BY si."SupplierId"
     )
