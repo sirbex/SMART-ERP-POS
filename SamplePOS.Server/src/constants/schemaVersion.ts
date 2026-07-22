@@ -9,4 +9,4 @@
 // against this constant. If the tenant is behind, pending migrations
 // are auto-applied before the request proceeds.
 
-export const CURRENT_SCHEMA_VERSION = 557;
+export const CURRENT_SCHEMA_VERSION = 558;

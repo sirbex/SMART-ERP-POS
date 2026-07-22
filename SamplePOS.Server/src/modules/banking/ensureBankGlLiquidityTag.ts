@@ -88,6 +88,7 @@ async function loadGl(client: PoolClient, glAccountId: string): Promise<GlRow | 
 /**
  * Stamp SystemAccountTag=BANK on an untagged posting Asset GL.
  * Idempotent. Safe to call on every bank create/update and before every deposit.
+ * Multiple GLs may share BANK (migration 558 relaxed uidx for liquidity tags).
  */
 export async function ensureBankGlLiquidityTag(
   client: PoolClient,

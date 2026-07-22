@@ -293,6 +293,20 @@ export async function createAccount(data: Omit<Account, 'id'>, dbPool?: pg.Pool)
     return result.rows[0];
   } catch (error) {
     logger.error('Error creating account', { error, data });
+    const pg = error as { code?: string; constraint?: string; message?: string };
+    if (
+      pg?.code === '23505' &&
+      (pg.constraint === 'uidx_accounts_system_tag' ||
+        pg.constraint === 'uidx_accounts_system_tag_singleton' ||
+        String(pg.message || '').includes('uidx_accounts_system_tag'))
+    ) {
+      throw new Error(
+        data.systemAccountTag === 'BANK'
+          ? 'Could not create bank GL: another account already holds this system role tag. ' +
+            'Apply schema migration 558 (multi-bank BANK tags) or pick an existing bank Asset GL.'
+          : `Could not create account: system role tag "${data.systemAccountTag}" is already assigned to another account.`,
+      );
+    }
     throw error;
   }
 }
