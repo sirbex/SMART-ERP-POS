@@ -136,7 +136,7 @@ export interface SmartStatementEntry {
     /** Running cumulative balance after this entry */
     balanceAfter: number;
     /** Status badge shown to users */
-    itemStatus: 'Pending Bill' | 'Unpaid' | 'Paid' | 'Applied' | 'Voided' | 'Cancelled' | 'Reversed' | 'Unallocated' | 'Info';
+    itemStatus: 'Pending Bill' | 'Unpaid' | 'Paid' | 'Received' | 'Applied' | 'Voided' | 'Cancelled' | 'Reversed' | 'Unallocated' | 'Info';
     paymentMethod?: string;
     /** UUID of the GL ledger_transaction — powers "View GL Journals" drilldown */
     transactionId: string;

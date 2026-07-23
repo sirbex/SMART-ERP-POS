@@ -1016,7 +1016,8 @@ export async function getSmartCustomerStatementEntries(
             ? `Payment received (${paymentMethodLabel})`
             : 'Payment received';
           vchType = 'Payment';
-          itemStatus = 'Paid';
+          // GL receipt is always "received"; open-item may still be unallocated (on account).
+          itemStatus = 'Received';
           break;
         case 'CREDIT_NOTE':
           particulars = 'Credit note issued';

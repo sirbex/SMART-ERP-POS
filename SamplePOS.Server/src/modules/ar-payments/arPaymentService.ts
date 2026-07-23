@@ -228,6 +228,80 @@ export async function allocatePayment(
   });
 }
 
+/**
+ * Apply oldest unallocated receipts (FIFO) onto a single open invoice — used after
+ * OB replace so cancelled OB allocations land on the corrected opening balance.
+ */
+export async function allocateUnallocatedReceiptsToInvoice(
+  handle: DbConnection,
+  params: {
+    customerId: string;
+    invoiceId: string;
+    createdById: string;
+  },
+): Promise<{ allocatedTotal: number; allocationCount: number }> {
+  return UnitOfWork.runOrJoin(handle, async (client) => {
+    let remaining = await openItemEngine.getInvoiceOpenBalance(client, params.invoiceId);
+    if (remaining.lessThanOrEqualTo(0.009)) {
+      return { allocatedTotal: 0, allocationCount: 0 };
+    }
+
+    const receipts = await client.query<{
+      id: string;
+      unallocated_amount: string;
+      payment_date: Date | string;
+      payment_method: string;
+    }>(
+      `SELECT id, unallocated_amount, payment_date, payment_method
+       FROM ar_customer_payments
+       WHERE customer_id = $1
+         AND status NOT IN ('REVERSED', 'CANCELLED', 'DRAFT')
+         AND unallocated_amount > 0.009
+       ORDER BY payment_date ASC, created_at ASC`,
+      [params.customerId],
+    );
+
+    let allocatedTotal = new Decimal(0);
+    let allocationCount = 0;
+
+    for (const row of receipts.rows) {
+      if (remaining.lessThanOrEqualTo(0.009)) break;
+      const avail = Money.parseDb(row.unallocated_amount);
+      const amt = Decimal.min(remaining, avail);
+      if (amt.lessThanOrEqualTo(0.009)) continue;
+
+      const paymentDate = String(row.payment_date).slice(0, 10);
+      await applyAllocations(client, {
+        paymentId: row.id,
+        customerId: params.customerId,
+        paymentDate,
+        paymentMethod: row.payment_method,
+        lines: [{ invoiceId: params.invoiceId, amount: Money.toNumber(amt) }],
+        allocationType: 'FIFO',
+        createdById: params.createdById,
+        processedById: params.createdById,
+      });
+
+      allocatedTotal = allocatedTotal.plus(amt);
+      remaining = remaining.minus(amt);
+      allocationCount += 1;
+    }
+
+    if (allocationCount > 0) {
+      await openItemEngine.syncCustomerBalanceFromOpenItems(
+        client,
+        params.customerId,
+        'AR_OB_REPLACE_REALLOCATE',
+      );
+    }
+
+    return {
+      allocatedTotal: Money.toNumber(allocatedTotal),
+      allocationCount,
+    };
+  });
+}
+
 async function applyAllocations(
   client: import('pg').PoolClient,
   params: {

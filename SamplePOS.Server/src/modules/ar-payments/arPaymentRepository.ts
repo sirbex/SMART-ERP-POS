@@ -171,6 +171,19 @@ export async function createAllocationRow(
   return mapAllocation(res.rows[0]);
 }
 
+/**
+ * Derive receipt status from open-item amounts after allocate / reverse.
+ * REVERSED / CANCELLED / DRAFT are caller-owned and must not pass through here.
+ */
+export function deriveArPaymentAllocationStatus(
+  allocatedAmount: number,
+  unallocatedAmount: number,
+): 'POSTED' | 'PARTIALLY_ALLOCATED' | 'FULLY_ALLOCATED' {
+  if (allocatedAmount <= 0.009) return 'POSTED';
+  if (unallocatedAmount <= 0.009) return 'FULLY_ALLOCATED';
+  return 'PARTIALLY_ALLOCATED';
+}
+
 export async function bumpPaymentAllocated(
   client: PoolClient,
   paymentId: string,
@@ -181,9 +194,11 @@ export async function bumpPaymentAllocated(
      SET allocated_amount = allocated_amount + $2,
          unallocated_amount = total_amount - (allocated_amount + $2),
          status = CASE
+           WHEN status IN ('REVERSED', 'CANCELLED', 'DRAFT') THEN status
+           WHEN ABS(allocated_amount + $2) <= 0.009 THEN 'POSTED'
            WHEN total_amount - (allocated_amount + $2) <= 0.009 THEN 'FULLY_ALLOCATED'
            WHEN (allocated_amount + $2) > 0.009 THEN 'PARTIALLY_ALLOCATED'
-           ELSE status
+           ELSE 'POSTED'
          END,
          updated_at = NOW()
      WHERE id = $1`,

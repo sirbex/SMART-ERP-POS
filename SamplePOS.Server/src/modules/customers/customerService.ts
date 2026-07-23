@@ -996,6 +996,32 @@ export async function replaceCustomerOpeningBalance(
   });
 
   if (replaced) {
+    try {
+      const { allocateUnallocatedReceiptsToInvoice } = await import(
+        '../ar-payments/arPaymentService.js'
+      );
+      const reapplied = await allocateUnallocatedReceiptsToInvoice(pool, {
+        customerId: data.customerId,
+        invoiceId: created.invoiceId,
+        createdById: data.userId,
+      });
+      if (reapplied.allocationCount > 0) {
+        logger.info('Reapplied unallocated receipts to replacement customer OB', {
+          customerId: data.customerId,
+          invoiceId: created.invoiceId,
+          invoiceNumber: created.invoiceNumber,
+          ...reapplied,
+        });
+      }
+    } catch (err: unknown) {
+      logger.error('Failed to reapply unallocated receipts after OB replace', {
+        customerId: data.customerId,
+        invoiceId: created.invoiceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+
     const custRes = await pool.query<{ name: string }>(
       'SELECT name FROM customers WHERE id = $1',
       [data.customerId],
