@@ -19,7 +19,7 @@ import * as auditRepository from '../audit/auditRepository.js';
 import { CustomerStatementSchema } from '../../../../shared/zod/customerStatement.js';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
 import { SalesBusinessRules } from '../../middleware/businessRules.js';
-import { ConflictError } from '../../middleware/errorHandler.js';
+import { ConflictError, BusinessError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import { BUSINESS_TIMEZONE, getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
@@ -956,10 +956,16 @@ export async function cancelCustomerOpeningBalance(
 /**
  * Replace customer opening balance: cancel existing active OB (if any) then post new amount.
  * Use when the cutover figure was entered incorrectly.
+ *
+ * Governance: if replace would unallocate receipts and/or leave surplus on-account
+ * (customer can go into GL credit), requires confirmImpact=true after UI warning.
  */
 export async function replaceCustomerOpeningBalance(
   pool: Pool,
-  data: ImportCustomerOpeningBalanceInput & { replaceReason: string },
+  data: ImportCustomerOpeningBalanceInput & {
+    replaceReason: string;
+    confirmImpact?: boolean;
+  },
 ): Promise<{ invoiceId: string; invoiceNumber: string; amount: number; replaced: boolean }> {
   const existing = await pool.query<{ id: string }>(
     `SELECT id FROM invoices
@@ -973,6 +979,20 @@ export async function replaceCustomerOpeningBalance(
   let previousAmount: number | undefined;
 
   if (existing.rows[0]) {
+    const impact = await assessCustomerObReplaceImpact(
+      pool,
+      data.customerId,
+      existing.rows[0].id,
+      data.amount,
+    );
+    if (impact.requiresConfirmation && !data.confirmImpact) {
+      throw new BusinessError(
+        'Confirm opening-balance correction: this will unallocate receipts and may leave the customer in credit on AR.',
+        'OB_REPLACE_CONFIRM_REQUIRED',
+        { ...impact },
+      );
+    }
+
     const oldInv = await pool.query<{ total_amount: string | number; invoice_number: string }>(
       `SELECT total_amount, invoice_number FROM invoices WHERE id = $1`,
       [existing.rows[0].id],
@@ -1045,4 +1065,101 @@ export async function replaceCustomerOpeningBalance(
   }
 
   return { ...created, replaced };
+}
+
+export interface CustomerObReplaceImpact {
+  currentObAmount: number;
+  newObAmount: number;
+  allocatedOnOb: number;
+  existingUnallocatedReceipts: number;
+  /** Receipts freed from OB + already-unallocated − new OB (floored at 0). */
+  projectedSurplusOnAccount: number;
+  willUnallocateReceipts: boolean;
+  mayLeaveCustomerInCredit: boolean;
+  requiresConfirmation: boolean;
+  warnings: string[];
+}
+
+/** Preview replace side-effects before unallocating / reversing GL. */
+export async function assessCustomerObReplaceImpact(
+  pool: Pool,
+  customerId: string,
+  currentObInvoiceId: string,
+  newAmount: number,
+): Promise<CustomerObReplaceImpact> {
+  const ob = await pool.query<{ total_amount: string | number }>(
+    `SELECT total_amount FROM invoices
+     WHERE id = $1 AND customer_id = $2
+       AND document_type = 'OPENING_BALANCE'
+       AND status NOT IN ('CANCELLED', 'VOIDED')`,
+    [currentObInvoiceId, customerId],
+  );
+  if (!ob.rows[0]) {
+    throw new Error('Opening balance invoice not found');
+  }
+
+  const currentObAmount = new Decimal(ob.rows[0].total_amount || 0);
+  const newObAmount = new Decimal(assertPositiveFinite(newAmount, 'Opening balance amount'));
+
+  const alloc = await pool.query<{ total: string | number }>(
+    `SELECT COALESCE(SUM(amount_allocated), 0) AS total
+     FROM ar_payment_allocations
+     WHERE invoice_id = $1 AND status = 'ACTIVE'`,
+    [currentObInvoiceId],
+  );
+  const allocatedOnOb = new Decimal(alloc.rows[0]?.total || 0);
+
+  const unalloc = await pool.query<{ total: string | number }>(
+    `SELECT COALESCE(SUM(unallocated_amount), 0) AS total
+     FROM ar_customer_payments
+     WHERE customer_id = $1
+       AND status NOT IN ('REVERSED', 'CANCELLED', 'DRAFT')
+       AND unallocated_amount > 0.009`,
+    [customerId],
+  );
+  const existingUnallocatedReceipts = new Decimal(unalloc.rows[0]?.total || 0);
+
+  const freedPlusExisting = allocatedOnOb.plus(existingUnallocatedReceipts);
+  const projectedSurplusOnAccount = Decimal.max(0, freedPlusExisting.minus(newObAmount));
+
+  const willUnallocateReceipts = allocatedOnOb.greaterThan(0.009);
+  const mayLeaveCustomerInCredit = projectedSurplusOnAccount.greaterThan(0.009);
+  const amountReduced = newObAmount.lessThan(currentObAmount.minus(0.009));
+
+  const warnings: string[] = [];
+  if (willUnallocateReceipts) {
+    warnings.push(
+      `${formatMoney(allocatedOnOb)} of receipts currently applied to this opening balance will be unallocated.`,
+    );
+  }
+  if (amountReduced) {
+    warnings.push(
+      `New amount (${formatMoney(newObAmount)}) is lower than the current opening balance (${formatMoney(currentObAmount)}).`,
+    );
+  }
+  if (mayLeaveCustomerInCredit) {
+    warnings.push(
+      `About ${formatMoney(projectedSurplusOnAccount)} may remain as unallocated customer credit (AR can show a credit / negative opening on the statement).`,
+    );
+  }
+
+  return {
+    currentObAmount: Moneyish(currentObAmount),
+    newObAmount: Moneyish(newObAmount),
+    allocatedOnOb: Moneyish(allocatedOnOb),
+    existingUnallocatedReceipts: Moneyish(existingUnallocatedReceipts),
+    projectedSurplusOnAccount: Moneyish(projectedSurplusOnAccount),
+    willUnallocateReceipts,
+    mayLeaveCustomerInCredit,
+    requiresConfirmation: willUnallocateReceipts || mayLeaveCustomerInCredit || amountReduced,
+    warnings,
+  };
+}
+
+function Moneyish(d: Decimal): number {
+  return d.toDecimalPlaces(2).toNumber();
+}
+
+function formatMoney(d: Decimal): string {
+  return d.toDecimalPlaces(2).toFixed(2);
 }

@@ -73,6 +73,7 @@ export const replaceCustomerOpeningBalance = asyncHandler(async (req: Request, r
     userName: req.user!.fullName,
     userRole: req.user!.role,
     replaceReason: validated.replaceReason,
+    confirmImpact: validated.confirmImpact,
   });
   res.status(201).json({ success: true, data: result });
 });

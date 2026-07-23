@@ -128,7 +128,7 @@ export const OpeningBalancePanel: React.FC<Props> = ({
       if (partyType === 'customer') {
         const customerPayload = { ...payload, customerId: partyId };
         if (correctMode) {
-          await api.customers.replaceOpeningBalance({
+          await postCustomerReplace({
             customerId: partyId,
             amount: amt,
             asOfDate,
@@ -144,6 +144,12 @@ export const OpeningBalancePanel: React.FC<Props> = ({
       } else {
         const supplierPayload = { ...payload, supplierId: partyId };
         if (correctMode) {
+          const ok = window.confirm(
+            'Correct supplier opening balance?\n\n' +
+              'This reverses the prior OB journal and posts the new amount. ' +
+              'If payments were applied to the old OB, they may become unallocated.',
+          );
+          if (!ok) return;
           await api.supplierPayments.replaceOpeningBalance({
             supplierId: partyId,
             amount: amt,
@@ -165,12 +171,65 @@ export const OpeningBalancePanel: React.FC<Props> = ({
       void loadHistory();
       onSuccess?.();
     } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg === 'Correction cancelled') {
+        toast('Correction cancelled');
+        return;
+      }
       const axErr = err as AxiosError<{ error?: string }>;
-      toast.error(axErr.response?.data?.error ?? 'Failed to post opening balance');
+      toast.error(axErr.response?.data?.error ?? (msg || 'Failed to post opening balance'));
     } finally {
       setPosting(false);
     }
   };
+
+  async function postCustomerReplace(body: {
+    customerId: string;
+    amount: number;
+    asOfDate: string;
+    dueDate?: string;
+    notes?: string;
+    replaceReason: string;
+    confirmImpact?: boolean;
+  }) {
+    try {
+      await api.customers.replaceOpeningBalance(body);
+    } catch (err) {
+      const axErr = err as AxiosError<{
+        error?: string;
+        error_code?: string;
+        details?: {
+          warnings?: string[];
+          currentObAmount?: number;
+          newObAmount?: number;
+          allocatedOnOb?: number;
+          projectedSurplusOnAccount?: number;
+        };
+      }>;
+      if (axErr.response?.data?.error_code !== 'OB_REPLACE_CONFIRM_REQUIRED') {
+        throw err;
+      }
+      const d = axErr.response.data.details ?? {};
+      const lines = [
+        'Confirm opening-balance correction',
+        '',
+        ...(d.warnings ?? []),
+        '',
+        `Current OB: ${formatCurrency(Number(d.currentObAmount ?? 0))}`,
+        `New OB: ${formatCurrency(Number(d.newObAmount ?? 0))}`,
+        `Receipts on current OB: ${formatCurrency(Number(d.allocatedOnOb ?? 0))}`,
+        `Projected surplus on-account: ${formatCurrency(Number(d.projectedSurplusOnAccount ?? 0))}`,
+        '',
+        'Opening balance = amount the customer OWED at cutover (not cash received).',
+        'Continue?',
+      ];
+      const ok = window.confirm(lines.join('\n'));
+      if (!ok) {
+        throw new Error('Correction cancelled');
+      }
+      await api.customers.replaceOpeningBalance({ ...body, confirmImpact: true });
+    }
+  }
 
   const glHint =
     partyType === 'customer'
@@ -198,8 +257,11 @@ export const OpeningBalancePanel: React.FC<Props> = ({
       {expanded && (
         <div className="px-4 pb-4 space-y-4 border-t border-indigo-100 bg-white/60">
           <p className="text-xs text-gray-600 pt-3">
-            {glHint}. One active OB per {partyType}. Corrections reverse the prior journal and
-            re-post — recorded in audit history below.
+            {glHint}. One active OB per {partyType}. This is the amount{' '}
+            {partyType === 'customer' ? 'the customer owed you' : 'you owed the supplier'} at cutover
+            — not cash received. Corrections reverse the prior journal and re-post (audit history
+            below). Replacing a lower amount may leave receipts unallocated / customer in credit —
+            you will be asked to confirm.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

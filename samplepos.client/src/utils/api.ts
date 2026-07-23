@@ -230,6 +230,10 @@ apiClient.interceptors.response.use(
 
     // SSOT: any other HTTP error → clear notification (never "Request failed with status code NNN")
     if (error.response?.status) {
+      // Soft-confirm gates: caller shows impact dialog and may retry — do not toast here.
+      if (brvCode === 'OB_REPLACE_CONFIRM_REQUIRED') {
+        return Promise.reject(error);
+      }
       return Promise.reject(dispatchUserFacingApiNotification(error));
     }
 
@@ -373,6 +377,7 @@ export const api = {
       dueDate?: string;
       notes?: string;
       replaceReason: string;
+      confirmImpact?: boolean;
     }) => apiClient.post<ApiResponse>('customers/opening-balance/replace', data),
     cancelOpeningBalance: (data: { invoiceId: string; reason: string }) =>
       apiClient.post<ApiResponse>('customers/opening-balance/cancel', data),

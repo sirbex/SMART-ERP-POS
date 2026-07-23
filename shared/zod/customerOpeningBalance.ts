@@ -17,6 +17,11 @@ export const CustomerOpeningBalanceReplaceSchema = CustomerOpeningBalanceSchema.
   postReason: true,
 }).extend({
   replaceReason: z.string().min(5, 'Reason must be at least 5 characters'),
+  /**
+   * Required when replace would unallocate receipts and/or leave surplus on-account
+   * (customer GL can go into credit). UI must show impact and resubmit with true.
+   */
+  confirmImpact: z.boolean().optional(),
 });
 
 /** Body for POST /customers/opening-balance/cancel */
