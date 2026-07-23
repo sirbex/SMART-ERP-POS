@@ -1121,7 +1121,7 @@ export async function assessCustomerObReplaceImpact(
 
   const freedPlusExisting = allocatedOnOb.plus(existingUnallocatedReceipts);
   const surplusRaw = freedPlusExisting.minus(newObAmount);
-  const projectedSurplusOnAccount = surplusRaw.isNegative() ? new Decimal(0) : surplusRaw;
+  const projectedSurplusOnAccount = surplusRaw.lt(0) ? new Decimal(0) : surplusRaw;
 
   const willUnallocateReceipts = allocatedOnOb.greaterThan(0.009);
   const mayLeaveCustomerInCredit = projectedSurplusOnAccount.greaterThan(0.009);
