@@ -254,20 +254,32 @@ export default function CustomerDetailModal({
         }
     }, [tab, customer, priceGroupIdForEffectDeps(customer as CustomerData | undefined)]);
 
-    // Reset tab when modal opens with different customer
+    // Apply initialTab only when the modal opens or the customer changes — never while browsing tabs.
+    const wasOpenRef = useRef(false);
+    const openCustomerIdRef = useRef<string | null>(null);
     useEffect(() => {
-        if (isOpen) {
-            setTab(initialTab);
-            setStmtStart('');
-            setStmtEnd('');
-            setStmtPage(1);
-            setInvoicePage(1);
-            setPaymentOpen(false);
-            setSelectedInvoice(null);
-            setExpandedInvoiceId(null);
-            setExpandedInvoiceDetails(null);
-            setLoadingExpandedInvoiceId(null);
+        if (!isOpen) {
+            wasOpenRef.current = false;
+            openCustomerIdRef.current = null;
+            return;
         }
+        const justOpened = !wasOpenRef.current;
+        const customerChanged =
+            openCustomerIdRef.current !== null && openCustomerIdRef.current !== customerId;
+        wasOpenRef.current = true;
+        openCustomerIdRef.current = customerId;
+        if (!justOpened && !customerChanged) return;
+
+        setTab(initialTab);
+        setStmtStart('');
+        setStmtEnd('');
+        setStmtPage(1);
+        setInvoicePage(1);
+        setPaymentOpen(false);
+        setSelectedInvoice(null);
+        setExpandedInvoiceId(null);
+        setExpandedInvoiceDetails(null);
+        setLoadingExpandedInvoiceId(null);
     }, [isOpen, customerId, initialTab]);
 
     const toNumber = (v: unknown): number => {
@@ -409,19 +421,28 @@ export default function CustomerDetailModal({
 
     if (!isOpen || !customerId) return null;
 
+    const tabLabels: Record<Tab, string> = {
+        overview: 'Overview',
+        invoices: 'Invoices',
+        transactions: 'Transactions',
+        deposits: 'Deposits',
+        quotations: 'Quotations',
+        edit: 'Edit',
+    };
+
     return (
         <div className="fixed inset-0 z-50 overflow-y-auto">
-            <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-            <div className="flex min-h-full items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden="true" />
+            <div className="relative z-10 flex min-h-full items-center justify-center p-4 pointer-events-none">
                 <div
                     ref={modalRef}
                     role="dialog"
                     aria-modal="true"
                     aria-label={`Customer Details - ${(customer as CustomerData | undefined)?.name || 'Loading'}`}
-                    className="relative bg-white w-full max-w-[95vw] sm:max-w-5xl rounded-lg shadow-xl border border-gray-200 max-h-[90vh] overflow-hidden flex flex-col"
+                    className="pointer-events-auto relative bg-white w-full max-w-[95vw] sm:max-w-5xl rounded-lg shadow-xl border border-gray-200 max-h-[90vh] overflow-hidden flex flex-col"
                 >
                     {/* Header */}
-                    <div className="border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4 flex items-start sm:items-center justify-between bg-gray-50 gap-3">
+                    <div className="shrink-0 border-b border-gray-200 px-4 sm:px-6 py-3 sm:py-4 flex items-start sm:items-center justify-between bg-gray-50 gap-3">
                         <div className="flex items-center space-x-3 sm:space-x-4 min-w-0">
                             <div className="h-10 w-10 sm:h-12 sm:w-12 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
                                 <span className="text-blue-600 font-bold text-base sm:text-lg">
@@ -434,6 +455,7 @@ export default function CustomerDetailModal({
                             </div>
                         </div>
                         <button
+                            type="button"
                             onClick={onClose}
                             className="p-2 rounded hover:bg-gray-200 transition-colors flex-shrink-0"
                             aria-label="Close"
@@ -442,26 +464,29 @@ export default function CustomerDetailModal({
                         </button>
                     </div>
 
-                    {/* Tabs */}
-                    <div className="border-b border-gray-200 px-4 sm:px-6 bg-white overflow-x-auto">
-                        <nav className="-mb-px flex space-x-3 sm:space-x-6 min-w-max">
+                    {/* Tabs — sticky above scrollable body so statement never covers them */}
+                    <div className="shrink-0 sticky top-0 z-20 border-b border-gray-200 px-4 sm:px-6 bg-white overflow-x-auto">
+                        <nav className="-mb-px flex space-x-3 sm:space-x-6 min-w-max" role="tablist" aria-label="Customer sections">
                             {(['overview', 'invoices', 'transactions', 'deposits', 'quotations', 'edit'] as Tab[]).map((t) => (
                                 <button
                                     key={t}
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={tab === t}
                                     onClick={() => setTab(t)}
-                                    className={`py-3 px-1 border-b-2 font-medium text-sm capitalize ${tab === t
+                                    className={`py-3 px-2 border-b-2 font-medium text-sm whitespace-nowrap ${tab === t
                                         ? 'border-blue-500 text-blue-600'
                                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                                         }`}
                                 >
-                                    {t}
+                                    {tabLabels[t]}
                                 </button>
                             ))}
                         </nav>
                     </div>
 
                     {/* Content */}
-                    <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+                    <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
                         {isLoadingCustomer ? (
                             <div className="flex items-center justify-center py-12">
                                 <div className="text-gray-500">Loading customer details...</div>
