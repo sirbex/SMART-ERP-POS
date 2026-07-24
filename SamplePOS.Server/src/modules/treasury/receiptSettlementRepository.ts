@@ -393,6 +393,9 @@ export async function sumUnsettledResidual(
 /**
  * Close undeposited residual when an AR receipt is reversed (not yet deposited).
  * Refuses if any amount was already applied on a Deposit Worksheet — reverse the deposit first.
+ *
+ * Enterprise rule: Undeposited Funds (1015) is a clearing account only.
+ * Never reverse a receipt cash leg after it has been deposited (that over-credits 1015 → negative).
  */
 export async function voidSettlementForReversedArPayment(
   conn: DbConn,
@@ -410,6 +413,31 @@ export async function voidSettlementForReversedArPayment(
      FOR UPDATE`,
     [paymentId],
   );
+
+  // Belt-and-suspenders: even if settlement row missing/stale, block when deposit apps exist.
+  const apps = await conn.query<{ n: string; amt: string }>(
+    `SELECT COUNT(*)::text AS n, COALESCE(SUM(rsa.amount), 0)::text AS amt
+     FROM receipt_settlement_applications rsa
+     JOIN receipt_settlements rs ON rs.id = rsa.receipt_settlement_id
+     WHERE rs.source_type = 'AR_CUSTOMER_PAYMENT'
+       AND rs.source_id = $1
+       AND rsa.reversed_at IS NULL`,
+    [paymentId],
+  );
+  const appCount = Number(apps.rows[0]?.n || 0);
+  const appAmt = Number(apps.rows[0]?.amt || 0);
+  if (appCount > 0 || appAmt > 0.009) {
+    throw Object.assign(
+      new Error(
+        `Cannot reverse receipt ${result.rows[0]?.source_number || paymentId}: ` +
+          `${appAmt.toFixed(2)} already deposited via Deposit Worksheet. ` +
+          `Reverse that deposit first, then reverse/correct the receipt. ` +
+          `Undeposited Funds cannot go negative.`,
+      ),
+      { code: 'RECEIPT_ALREADY_DEPOSITED' },
+    );
+  }
+
   if (result.rows.length === 0) return;
 
   const row = result.rows[0];
@@ -419,7 +447,8 @@ export async function voidSettlementForReversedArPayment(
       new Error(
         `Cannot reverse receipt ${row.source_number || paymentId}: ` +
           `${settled.toFixed(2)} already deposited via Deposit Worksheet. ` +
-          `Reverse that deposit first, then reverse the receipt.`,
+          `Reverse that deposit first, then reverse the receipt. ` +
+          `Undeposited Funds cannot go negative.`,
       ),
       { code: 'RECEIPT_ALREADY_DEPOSITED' },
     );
