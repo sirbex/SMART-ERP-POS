@@ -30,10 +30,13 @@ describe('AR reverse ↔ undeposited settlement SSOT (enterprise)', () => {
     expect(settle).toMatch(/already deposited via Deposit Worksheet/i);
     expect(settle).toMatch(/receipt_settlement_applications/);
     expect(settle).toMatch(/Undeposited Funds cannot go negative/i);
+    // chk_receipt_settlement_residual: residual = originating - settled
+    expect(settle).toMatch(/settled_amount = originating_amount/);
   });
 
   it('sync closes residual for REVERSED AR payments that were never deposited', () => {
     expect(settle).toMatch(/p\.status = 'REVERSED'/);
+    expect(settle).toMatch(/settled_amount = rs\.originating_amount/);
     expect(settle).toMatch(/residual_amount = 0/);
   });
 

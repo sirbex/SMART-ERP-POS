@@ -161,9 +161,11 @@ export async function syncReceiptSettlements(conn: DbConn): Promise<number> {
 
   // Close deposit residuals for receipts that were fully reversed (no bank deposit applied).
   // Prevents Undeposited Funds recon: GL already credited by REVERSE, residual still counting.
+  // Must keep chk_receipt_settlement_residual: residual = originating - settled.
   await conn.query(
     `UPDATE receipt_settlements rs
-     SET residual_amount = 0,
+     SET settled_amount = rs.originating_amount,
+         residual_amount = 0,
          settlement_status = 'SETTLED',
          updated_at = NOW()
      FROM ar_customer_payments p
@@ -454,9 +456,12 @@ export async function voidSettlementForReversedArPayment(
     );
   }
 
+  // Clear from undeposited pool. Constraint: residual = originating - settled.
+  // SETTLED here means "no longer awaiting deposit" (reversed), not bank-deposited.
   await conn.query(
     `UPDATE receipt_settlements
-     SET residual_amount = 0,
+     SET settled_amount = originating_amount,
+         residual_amount = 0,
          settlement_status = 'SETTLED',
          updated_at = NOW()
      WHERE id = $1`,

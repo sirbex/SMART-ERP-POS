@@ -108,7 +108,8 @@ async function main() {
     await client.query('BEGIN');
     const upd = await client.query(
       `UPDATE receipt_settlements rs
-       SET residual_amount = 0,
+       SET settled_amount = rs.originating_amount,
+           residual_amount = 0,
            settlement_status = 'SETTLED',
            updated_at = NOW()
        FROM ar_customer_payments p
