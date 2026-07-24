@@ -47,6 +47,9 @@ describe('Expense category ↔ GL consistency', () => {
     expect(sql).toContain("WHEN 'OFFICE' THEN '6400'");
     expect(sql).toContain('Backfill expenses.category_id');
     expect(sql).toContain('Sync expenses.account_id');
+    // Must not collide on display name when code differs (prod deploy failure)
+    expect(sql).toContain('LOWER(ec.name) = LOWER(v.name)');
+    expect(sql).not.toMatch(/INSERT INTO expense_categories[\s\S]*ON CONFLICT \(code\) DO NOTHING/);
   });
 
   it('create expense form sends categoryId with category code', () => {

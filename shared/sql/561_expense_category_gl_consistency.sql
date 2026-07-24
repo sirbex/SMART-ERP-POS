@@ -41,27 +41,35 @@ END $$;
 
 -- ---------------------------------------------------------------------------
 -- 2. Ensure canonical categories exist (idempotent)
+--    Skip when code OR name already exists (tenants may have PROFESSIONAL_SERVICES
+--    named "Professional Services" — ON CONFLICT (code) alone hits name unique).
 -- ---------------------------------------------------------------------------
 INSERT INTO expense_categories (name, code, description, is_active)
-VALUES
-  ('Office Supplies', 'OFFICE', 'General office supplies and materials', true),
-  ('Travel', 'TRAVEL', 'Business travel expenses', true),
-  ('Meals & Entertainment', 'MEALS', 'Business meals and client entertainment', true),
-  ('Fuel & Transportation', 'FUEL', 'Vehicle fuel and transportation costs', true),
-  ('Utilities', 'UTILITIES', 'Electricity, water, internet, phone', true),
-  ('Maintenance & Repairs', 'MAINTENANCE', 'Equipment and facility maintenance', true),
-  ('Marketing & Advertising', 'MARKETING', 'Marketing campaigns and advertising', true),
-  ('Equipment', 'EQUIPMENT', 'Office and business equipment', true),
-  ('Software & Licenses', 'SOFTWARE', 'Software subscriptions and licenses', true),
-  ('Professional Services', 'PROFESSIONAL', 'Consulting, legal, and professional fees', true),
-  ('Accommodation', 'ACCOMMODATION', 'Hotel and accommodation expenses', true),
-  ('Training & Development', 'TRAINING', 'Employee training and development', true),
-  ('Employee Allowances', 'ALLOWANCE', 'Employee allowances and reimbursements', true),
-  ('Other', 'OTHER', 'Miscellaneous business expenses', true),
-  ('Rent', 'RENT', 'Facility and equipment rent', true),
-  ('Salaries & Wages', 'SALARIES', 'Payroll and wage expenses', true),
-  ('Insurance', 'INSURANCE', 'Business insurance premiums', true)
-ON CONFLICT (code) DO NOTHING;
+SELECT v.name, v.code, v.description, true
+FROM (VALUES
+  ('Office Supplies', 'OFFICE', 'General office supplies and materials'),
+  ('Travel', 'TRAVEL', 'Business travel expenses'),
+  ('Meals & Entertainment', 'MEALS', 'Business meals and client entertainment'),
+  ('Fuel & Transportation', 'FUEL', 'Vehicle fuel and transportation costs'),
+  ('Utilities', 'UTILITIES', 'Electricity, water, internet, phone'),
+  ('Maintenance & Repairs', 'MAINTENANCE', 'Equipment and facility maintenance'),
+  ('Marketing & Advertising', 'MARKETING', 'Marketing campaigns and advertising'),
+  ('Equipment', 'EQUIPMENT', 'Office and business equipment'),
+  ('Software & Licenses', 'SOFTWARE', 'Software subscriptions and licenses'),
+  ('Professional Services', 'PROFESSIONAL', 'Consulting, legal, and professional fees'),
+  ('Accommodation', 'ACCOMMODATION', 'Hotel and accommodation expenses'),
+  ('Training & Development', 'TRAINING', 'Employee training and development'),
+  ('Employee Allowances', 'ALLOWANCE', 'Employee allowances and reimbursements'),
+  ('Other', 'OTHER', 'Miscellaneous business expenses'),
+  ('Rent', 'RENT', 'Facility and equipment rent'),
+  ('Salaries & Wages', 'SALARIES', 'Payroll and wage expenses'),
+  ('Insurance', 'INSURANCE', 'Business insurance premiums')
+) AS v(name, code, description)
+WHERE NOT EXISTS (
+  SELECT 1 FROM expense_categories ec
+  WHERE UPPER(ec.code) = UPPER(v.code)
+     OR LOWER(ec.name) = LOWER(v.name)
+);
 
 -- ---------------------------------------------------------------------------
 -- 3. Link every category code (canonical + aliases) to CoA
