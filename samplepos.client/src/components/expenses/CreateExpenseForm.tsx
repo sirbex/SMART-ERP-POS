@@ -42,6 +42,7 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
     control,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors, isValid },
   } = useForm<CreateExpenseData>({
     resolver: zodResolver(CreateExpenseSchema),
@@ -169,7 +170,14 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
                   name="category"
                   control={control}
                   render={({ field }) => (
-                    <Select value={field.value ?? ''} onValueChange={field.onChange}>
+                    <Select
+                      value={field.value ?? ''}
+                      onValueChange={(code) => {
+                        field.onChange(code);
+                        const cat = dbCategories.find((c) => c.code === code);
+                        setValue('categoryId', cat?.id, { shouldValidate: true });
+                      }}
+                    >
                       <SelectTrigger className={errors.category ? 'border-red-500 h-9' : 'h-9'}>
                         <SelectValue placeholder={categoriesLoading ? 'Loading...' : 'Select category'} />
                       </SelectTrigger>

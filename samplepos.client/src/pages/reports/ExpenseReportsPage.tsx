@@ -1,490 +1,554 @@
-import React, { useState } from 'react';
-import { FileText, Download } from 'lucide-react';
+/**
+ * Expense Reports — SAP/Odoo-style designer.
+ * Business logic:
+ *   Recognized (P&L) = APPROVED + PAID (GL posts on approval)
+ *   Unpaid AP        = APPROVED
+ *   Cash paid        = PAID
+ *   CANCELLED excluded from operational reports
+ * Column chooser lets the operator pick visible fields (persisted per report).
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { DateRangeFilter } from '../../components/ui/DateRangeFilter';
-import { formatCurrency } from '../../utils/currency';
+import { Button } from '../../components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 import { useAuth } from '../../contexts/AuthContext';
+import { getBusinessDate } from '../../utils/businessDate';
+import { formatCurrency } from '../../utils/currency';
+import {
+  Columns3,
+  Download,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Receipt,
+} from 'lucide-react';
 
-// TIMEZONE STRATEGY: Display dates without conversion
-const formatDisplayDate = (dateString: string | null | undefined): string => {
-    if (!dateString) return 'N/A';
-    if (dateString.includes('T')) {
-        return dateString.split('T')[0];
-    }
-    return dateString;
-};
+function monthStart(iso: string): string {
+  return `${iso.slice(0, 7)}-01`;
+}
 
 type ReportDataValue = string | number | boolean | null | undefined;
 type ReportDataRow = Record<string, ReportDataValue>;
 
-// Dynamic field formatting
-const formatFieldValue = (key: string, value: ReportDataValue): string => {
-    const lowerKey = key.toLowerCase();
-    if (value === null || value === undefined) return '-';
+type ExpenseReportType =
+  | 'SUMMARY'
+  | 'BY_CATEGORY'
+  | 'BY_VENDOR'
+  | 'TRENDS'
+  | 'BY_PAYMENT_METHOD'
+  | 'DETAILED_LIST'
+  | 'APPROVAL_PIPELINE';
 
-    if (typeof value === 'number') {
-        // Count-like fields that happen to contain currency keywords (e.g., totalOrders, totalSuppliers)
-        const isCountField = (
-            lowerKey.endsWith('orders') ||
-            lowerKey.endsWith('suppliers') ||
-            lowerKey.endsWith('customers') ||
-            lowerKey.endsWith('products') ||
-            lowerKey.endsWith('items') ||
-            lowerKey.endsWith('transactions') ||
-            lowerKey.endsWith('batches') ||
-            lowerKey.endsWith('records') ||
-            lowerKey.endsWith('movements') ||
-            lowerKey.endsWith('entries') ||
-            lowerKey.endsWith('receipts') ||
-            lowerKey.endsWith('invoices') ||
-            lowerKey.endsWith('users') ||
-            lowerKey.endsWith('categories') ||
-            lowerKey.includes('count')
-        );
-        if (isCountField) {
-            return value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-        }
-
-        // Non-monetary fields (terms, method, status, type, days)
-        const isNonMonetaryField = (
-            lowerKey.endsWith('terms') ||
-            lowerKey.endsWith('method') ||
-            lowerKey.endsWith('status') ||
-            lowerKey.endsWith('type') ||
-            lowerKey.endsWith('days')
-        );
-        if (isNonMonetaryField) {
-            return value.toLocaleString();
-        }
-
-        if (lowerKey.includes('amount') || lowerKey.includes('total') || lowerKey.includes('average') || lowerKey.includes('value')) {
-            return formatCurrency(value);
-        }
-        if (lowerKey.includes('count') || lowerKey.includes('quantity')) {
-            return value.toLocaleString();
-        }
-        return value.toLocaleString();
-    }
-
-    if (lowerKey.includes('date') || lowerKey.includes('period')) {
-        return formatDisplayDate(String(value));
-    }
-
-    return String(value);
+type ColumnDef = {
+  id: string;
+  label: string;
+  money?: boolean;
+  count?: boolean;
+  default?: boolean;
 };
 
-// Color coding for values
-const getFieldColorClass = (key: string): string => {
-    const lowerKey = key.toLowerCase();
-    if (lowerKey.includes('amount') || lowerKey.includes('total') || lowerKey.includes('revenue')) {
-        return 'text-green-600 font-semibold';
-    }
-    if (lowerKey.includes('count')) {
-        return 'text-blue-600 font-medium';
-    }
-    return 'text-gray-900';
-};
+const STORAGE_KEY = 'expense-reports-layout-v1';
 
-interface DateRange {
-    startDate: string | null;
-    endDate: string | null;
-}
-
-
-type ExpenseReportType = 'SUMMARY' | 'BY_CATEGORY' | 'BY_VENDOR' | 'TRENDS' | 'BY_PAYMENT_METHOD' | 'DETAILED_LIST' | 'APPROVAL_PIPELINE';
-
-interface ReportOption {
-    value: ExpenseReportType;
-    label: string;
-    description: string;
-    icon: string;
-}
-
-const EXPENSE_REPORT_OPTIONS: ReportOption[] = [
-    {
-        value: 'SUMMARY',
-        label: 'Expense Summary',
-        description: 'Overall expense statistics and totals',
-        icon: '📊'
-    },
-    {
-        value: 'BY_CATEGORY',
-        label: 'By Category',
-        description: 'Expense breakdown by category',
-        icon: '📂'
-    },
-    {
-        value: 'BY_VENDOR',
-        label: 'By Vendor',
-        description: 'Top vendors and spending analysis',
-        icon: '🏢'
-    },
-    {
-        value: 'TRENDS',
-        label: 'Monthly Trends',
-        description: 'Expense trends over time',
-        icon: '📈'
-    },
-    {
-        value: 'BY_PAYMENT_METHOD',
-        label: 'By Payment Method',
-        description: 'Payment method distribution',
-        icon: '💳'
-    },
-    {
-        value: 'DETAILED_LIST',
-        label: 'Detailed List',
-        description: 'Individual expenses with approval, GL account & payment tracking',
-        icon: '📋'
-    },
-    {
-        value: 'APPROVAL_PIPELINE',
-        label: 'Approval Pipeline',
-        description: 'Expense workflow stages with approval metrics',
-        icon: '✅'
-    }
+const REPORT_OPTIONS: Array<{
+  value: ExpenseReportType;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: 'SUMMARY',
+    label: 'Executive summary',
+    description: 'Recognized P&L, unpaid AP, paid cash, pipeline',
+  },
+  {
+    value: 'BY_CATEGORY',
+    label: 'By category / GL',
+    description: 'Spend by expense category and P&L account',
+  },
+  {
+    value: 'BY_VENDOR',
+    label: 'By vendor',
+    description: 'Who you spent with',
+  },
+  {
+    value: 'TRENDS',
+    label: 'Monthly trends',
+    description: 'Recognized vs paid over time',
+  },
+  {
+    value: 'BY_PAYMENT_METHOD',
+    label: 'By payment method',
+    description: 'Intended pay method on vouchers',
+  },
+  {
+    value: 'DETAILED_LIST',
+    label: 'Line list',
+    description: 'Individual vouchers — pick columns to display',
+  },
+  {
+    value: 'APPROVAL_PIPELINE',
+    label: 'Approval pipeline',
+    description: 'Workflow stages and aging',
+  },
 ];
 
-const ExpenseReportsPage: React.FC = () => {
-    const { isAuthenticated } = useAuth();
-    const [selectedReport, setSelectedReport] = useState<ExpenseReportType>('SUMMARY');
-    const [dateRange, setDateRange] = useState<DateRange>({
-        startDate: '',
-        endDate: ''
-    });
-    const [reportData, setReportData] = useState<ReportDataRow | ReportDataRow[] | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    // Show auth message if not logged in
-    if (!isAuthenticated) {
-        return (
-            <Layout>
-                <div className="max-w-7xl mx-auto p-6 space-y-6">
-                    <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
-                        <div className="flex">
-                            <div className="flex-shrink-0">
-                                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                                </svg>
-                            </div>
-                            <div className="ml-3">
-                                <p className="text-sm text-yellow-700">
-                                    You must be logged in to view expense reports. Please <a href="/login" className="font-medium underline">log in</a> to continue.
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </Layout>
-        );
-    }
-
-    // Generate report
-    const generateReport = async () => {
-        setLoading(true);
-        setError(null);
-
-        try {
-            // Check authentication first
-            if (!isAuthenticated) {
-                throw new Error('Authentication required. Please log in.');
-            }
-
-            // Use the correct token key that AuthContext uses
-            const token = localStorage.getItem('auth_token');
-
-            if (!token) {
-                throw new Error('Authentication token not found. Please log in again.');
-            }
-
-            const params = new URLSearchParams();
-            if (dateRange.startDate) params.append('start_date', dateRange.startDate);
-            if (dateRange.endDate) params.append('end_date', dateRange.endDate);
-
-            const endpointMap: Record<ExpenseReportType, string> = {
-                'SUMMARY': '/api/expenses/summary',
-                'BY_CATEGORY': '/api/expenses/reports/by-category',
-                'BY_VENDOR': '/api/expenses/reports/by-vendor',
-                'TRENDS': '/api/expenses/reports/trends',
-                'BY_PAYMENT_METHOD': '/api/expenses/reports/by-payment-method',
-                'DETAILED_LIST': '/api/expenses/reports/detailed-list',
-                'APPROVAL_PIPELINE': '/api/expenses/reports/approval-pipeline'
-            };
-
-            const url = `${endpointMap[selectedReport]}?${params.toString()}`;
-            console.log('Fetching expense report:', url);
-
-            const response = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('API Error:', response.status, errorText);
-
-                try {
-                    const errorJson = JSON.parse(errorText);
-                    throw new Error(errorJson.error || `Server error: ${response.status}`);
-                } catch {
-                    throw new Error(`Failed to generate report: ${response.status} ${response.statusText}`);
-                }
-            }
-
-            const result = await response.json();
-            console.log('Report data received:', result);
-
-            if (result.success && result.data) {
-                setReportData(result.data);
-            } else {
-                throw new Error(result.error || 'Invalid response format from server');
-            }
-        } catch (err) {
-            console.error('Report generation error:', err);
-            setError(err instanceof Error ? err.message : 'An error occurred');
-            setReportData(null);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // Export to CSV
-    const exportToCSV = async () => {
-        try {
-            const token = localStorage.getItem('auth_token');
-            const params = new URLSearchParams();
-            if (dateRange.startDate) params.append('start_date', dateRange.startDate);
-            if (dateRange.endDate) params.append('end_date', dateRange.endDate);
-
-            const response = await fetch(`/api/expenses/reports/export?${params.toString()}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!response.ok) throw new Error('Failed to export');
-
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `expense_report_${dateRange.startDate}_${dateRange.endDate}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-        } catch {
-            alert('Failed to export report');
-        }
-    };
-
-    // Export to PDF
-    const exportToPDF = async () => {
-        try {
-            const token = localStorage.getItem('auth_token');
-            const params = new URLSearchParams();
-            params.append('format', 'pdf');
-            if (dateRange.startDate) params.append('start_date', dateRange.startDate);
-            if (dateRange.endDate) params.append('end_date', dateRange.endDate);
-
-            const endpointMap: Record<ExpenseReportType, string> = {
-                'SUMMARY': '/api/expenses/summary',
-                'BY_CATEGORY': '/api/expenses/reports/by-category',
-                'BY_VENDOR': '/api/expenses/reports/by-vendor',
-                'TRENDS': '/api/expenses/reports/trends',
-                'BY_PAYMENT_METHOD': '/api/expenses/reports/by-payment-method',
-                'DETAILED_LIST': '/api/expenses/reports/detailed-list',
-                'APPROVAL_PIPELINE': '/api/expenses/reports/approval-pipeline'
-            };
-
-            const url = `${endpointMap[selectedReport]}?${params.toString()}`;
-            const response = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            if (!response.ok) throw new Error('Failed to generate PDF');
-
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/pdf')) {
-                throw new Error('Server did not return a PDF file');
-            }
-
-            const blob = await response.blob();
-            const blobUrl = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.download = `expense_report_${selectedReport}_${dateRange.startDate || 'all'}.pdf`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(blobUrl);
-            document.body.removeChild(a);
-        } catch (err) {
-            alert(err instanceof Error ? err.message : 'Failed to generate PDF');
-        }
-    };
-
-    // Render summary cards
-    const renderSummary = (data: ReportDataRow) => {
-        if (!data || typeof data !== 'object') return null;
-
-        return (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
-                {Object.entries(data).map(([key, value]) => (
-                    <div key={key} className="bg-white border rounded-lg p-4 shadow-sm">
-                        <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                            {key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim().replace(/^\w/, c => c.toUpperCase())}
-                        </div>
-                        <div className={`text-xl font-bold ${getFieldColorClass(key)}`}>
-                            {formatFieldValue(key, value)}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        );
-    };
-
-    // Render data table
-    const renderTable = (data: ReportDataRow[]) => {
-        if (!Array.isArray(data) || data.length === 0) {
-            return <div className="text-center py-8 text-gray-500">No data available</div>;
-        }
-
-        const columns = Object.keys(data[0]);
-
-        return (
-            <div className="overflow-x-auto">
-                <table className="min-w-full bg-white border">
-                    <thead className="bg-gray-50">
-                        <tr>
-                            {columns.map((col) => (
-                                <th key={col} className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">
-                                    {col.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').trim().replace(/^\w/, c => c.toUpperCase())}
-                                </th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                        {data.map((row, idx) => (
-                            <tr key={idx} className="hover:bg-gray-50">
-                                {columns.map((col) => (
-                                    <td key={col} className="px-4 py-3 text-sm whitespace-nowrap">
-                                        <span className={getFieldColorClass(col)}>
-                                            {formatFieldValue(col, row[col])}
-                                        </span>
-                                    </td>
-                                ))}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        );
-    };
-
-    return (
-        <Layout>
-            <div className="p-6 max-w-7xl mx-auto space-y-6">
-                {/* Header */}
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="text-3xl font-bold text-gray-900">💰 Expense Reports</h1>
-                        <p className="text-gray-600 mt-1">Comprehensive expense analytics and insights</p>
-                    </div>
-                </div>
-
-                {/* Report Type Selection */}
-                <div className="bg-white rounded-lg border shadow-sm p-6">
-                    <h2 className="text-lg font-semibold mb-4">Report Type</h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                        {EXPENSE_REPORT_OPTIONS.map((option) => (
-                            <button
-                                key={option.value}
-                                onClick={() => setSelectedReport(option.value)}
-                                className={`p-4 rounded-lg border-2 text-left transition-all hover:shadow-md ${selectedReport === option.value
-                                    ? 'border-blue-500 bg-blue-50'
-                                    : 'border-gray-200 hover:border-blue-300'
-                                    }`}
-                            >
-                                <div className="text-2xl mb-2">{option.icon}</div>
-                                <div className="font-semibold text-sm">{option.label}</div>
-                                <div className="text-xs text-gray-500 mt-1">{option.description}</div>
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Filters */}
-                <div className="bg-white rounded-lg border shadow-sm p-6">
-                    <h2 className="text-lg font-semibold mb-4">Filters</h2>
-                    <DateRangeFilter
-                        startDate={dateRange.startDate || ''}
-                        endDate={dateRange.endDate || ''}
-                        onStartDateChange={(date) => setDateRange((prev) => ({ ...prev, startDate: date }))}
-                        onEndDateChange={(date) => setDateRange((prev) => ({ ...prev, endDate: date }))}
-                        defaultPreset="THIS_MONTH"
-                    />
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex flex-wrap gap-3">
-                    <button
-                        onClick={generateReport}
-                        disabled={loading}
-                        className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                    >
-                        <FileText className="h-4 w-4" />
-                        {loading ? 'Generating...' : 'Generate Report'}
-                    </button>
-
-                    {reportData && (
-                        <>
-                            <button
-                                onClick={exportToPDF}
-                                className="px-6 py-2.5 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center gap-2"
-                            >
-                                <FileText className="h-4 w-4" />
-                                Export PDF
-                            </button>
-                            <button
-                                onClick={exportToCSV}
-                                className="px-6 py-2.5 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
-                            >
-                                <Download className="h-4 w-4" />
-                                Export CSV
-                            </button>
-                        </>
-                    )}
-                </div>
-
-                {/* Error Message */}
-                {error && (
-                    <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded">
-                        <div className="flex">
-                            <div className="flex-shrink-0">
-                                <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                                </svg>
-                            </div>
-                            <div className="ml-3">
-                                <p className="text-sm text-red-700">{error}</p>
-                            </div>
-                        </div>
-                    </div>
-                )}
-
-                {/* Report Results */}
-                {reportData && !loading && (
-                    <div className="bg-white rounded-lg border shadow-sm p-6">
-                        <h2 className="text-xl font-bold mb-6">Report Results</h2>
-
-                        {/* Summary Cards (if single object) */}
-                        {!Array.isArray(reportData) && renderSummary(reportData)}
-
-                        {/* Data Table (if array) */}
-                        {Array.isArray(reportData) && renderTable(reportData)}
-                    </div>
-                )}
-            </div>
-        </Layout>
-    );
+const ENDPOINTS: Record<ExpenseReportType, string> = {
+  SUMMARY: '/api/expenses/summary',
+  BY_CATEGORY: '/api/expenses/reports/by-category',
+  BY_VENDOR: '/api/expenses/reports/by-vendor',
+  TRENDS: '/api/expenses/reports/trends',
+  BY_PAYMENT_METHOD: '/api/expenses/reports/by-payment-method',
+  DETAILED_LIST: '/api/expenses/reports/detailed-list',
+  APPROVAL_PIPELINE: '/api/expenses/reports/approval-pipeline',
 };
 
-export default ExpenseReportsPage;
+/** Column catalogs — lean business fields only (no twin name+code columns). */
+const COLUMN_CATALOG: Record<ExpenseReportType, ColumnDef[]> = {
+  SUMMARY: [],
+  BY_CATEGORY: [
+    { id: 'category', label: 'Category', default: true },
+    { id: 'glAccount', label: 'GL account', default: true },
+    { id: 'expenseCount', label: 'Vouchers', count: true, default: true },
+    { id: 'recognizedAmount', label: 'Recognized (P&L)', money: true, default: true },
+    { id: 'unpaidApAmount', label: 'Unpaid AP', money: true, default: true },
+    { id: 'paidAmount', label: 'Paid', money: true, default: true },
+    { id: 'totalAmount', label: 'All statuses', money: true },
+    { id: 'pendingCount', label: 'Pending #', count: true },
+  ],
+  BY_VENDOR: [
+    { id: 'vendor', label: 'Vendor', default: true },
+    { id: 'expenseCount', label: 'Vouchers', count: true, default: true },
+    { id: 'recognizedAmount', label: 'Recognized (P&L)', money: true, default: true },
+    { id: 'paidAmount', label: 'Paid', money: true, default: true },
+    { id: 'totalAmount', label: 'All statuses', money: true },
+    { id: 'firstExpenseDate', label: 'First date' },
+    { id: 'lastExpenseDate', label: 'Last date', default: true },
+  ],
+  TRENDS: [
+    { id: 'period', label: 'Month', default: true },
+    { id: 'expenseCount', label: 'Vouchers', count: true, default: true },
+    { id: 'recognizedAmount', label: 'Recognized (P&L)', money: true, default: true },
+    { id: 'paidAmount', label: 'Paid', money: true, default: true },
+    { id: 'totalAmount', label: 'All statuses', money: true },
+    { id: 'categoryCount', label: 'Categories', count: true },
+  ],
+  BY_PAYMENT_METHOD: [
+    { id: 'paymentMethod', label: 'Payment method', default: true },
+    { id: 'expenseCount', label: 'Vouchers', count: true, default: true },
+    { id: 'recognizedAmount', label: 'Recognized (P&L)', money: true, default: true },
+    { id: 'paidAmount', label: 'Paid', money: true, default: true },
+    { id: 'totalAmount', label: 'All statuses', money: true },
+  ],
+  DETAILED_LIST: [
+    { id: 'expenseNumber', label: 'Expense #', default: true },
+    { id: 'expenseDate', label: 'Date', default: true },
+    { id: 'title', label: 'Title', default: true },
+    { id: 'category', label: 'Category', default: true },
+    { id: 'glAccount', label: 'GL account', default: true },
+    { id: 'amount', label: 'Amount', money: true, default: true },
+    { id: 'status', label: 'Status', default: true },
+    { id: 'paymentStatus', label: 'Payment status' },
+    { id: 'paymentMethod', label: 'Pay method' },
+    { id: 'vendor', label: 'Vendor', default: true },
+    { id: 'receiptNumber', label: 'Receipt #' },
+    { id: 'referenceNumber', label: 'Reference' },
+    { id: 'createdBy', label: 'Created by' },
+    { id: 'approvedBy', label: 'Approved by' },
+    { id: 'approvedAt', label: 'Approved at' },
+    { id: 'paidBy', label: 'Paid by' },
+    { id: 'paidAt', label: 'Paid at' },
+    { id: 'daysPending', label: 'Days pending', count: true },
+    { id: 'rejectionReason', label: 'Rejection reason' },
+    { id: 'notes', label: 'Notes' },
+  ],
+  APPROVAL_PIPELINE: [
+    { id: 'status', label: 'Stage', default: true },
+    { id: 'expenseCount', label: 'Vouchers', count: true, default: true },
+    { id: 'totalAmount', label: 'Amount', money: true, default: true },
+    { id: 'averageAmount', label: 'Average', money: true },
+    { id: 'avgDaysInStatus', label: 'Avg days', count: true, default: true },
+  ],
+};
+
+const SUMMARY_CARDS: Array<{ id: string; label: string; hint: string; money?: boolean }> = [
+  { id: 'recognizedAmount', label: 'Recognized (P&L)', hint: 'Approved + paid — hits expense GL', money: true },
+  { id: 'unpaidApAmount', label: 'Unpaid AP', hint: 'Approved, not yet paid', money: true },
+  { id: 'paidAmount', label: 'Paid (cash out)', hint: 'Cleared from bank / cash / MoMo', money: true },
+  { id: 'pendingAmount', label: 'Awaiting approval', hint: 'Submitted, not decided', money: true },
+  { id: 'voucherCount', label: 'Vouchers', hint: 'Non-cancelled in period' },
+  { id: 'draftAmount', label: 'Drafts', hint: 'Not yet submitted', money: true },
+  { id: 'rejectedAmount', label: 'Rejected', hint: 'Not recognized', money: true },
+];
+
+function defaultColumns(type: ExpenseReportType): string[] {
+  return COLUMN_CATALOG[type].filter((c) => c.default).map((c) => c.id);
+}
+
+function loadLayout(): {
+  report?: ExpenseReportType;
+  columnsByReport?: Partial<Record<ExpenseReportType, string[]>>;
+} {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function formatCell(col: ColumnDef, value: ReportDataValue): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (col.money && typeof value === 'number') return formatCurrency(value);
+  if (col.money && typeof value === 'string' && value !== '' && !Number.isNaN(Number(value))) {
+    return formatCurrency(Number(value));
+  }
+  if (col.count && typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'string' && (col.id.toLowerCase().includes('date') || col.id === 'period')) {
+    return value.includes('T') ? value.split('T')[0]! : value;
+  }
+  return String(value);
+}
+
+function downloadCsv(filename: string, headers: string[], rows: string[][]) {
+  const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const body = [headers.map(esc).join(','), ...rows.map((r) => r.map(esc).join(','))].join('\n');
+  const blob = new Blob([body], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function ExpenseReportsPage() {
+  const { isAuthenticated } = useAuth();
+  const today = getBusinessDate();
+  const saved = useMemo(() => loadLayout(), []);
+
+  const [selectedReport, setSelectedReport] = useState<ExpenseReportType>(
+    saved.report || 'SUMMARY',
+  );
+  const [startDate, setStartDate] = useState(() => monthStart(today));
+  const [endDate, setEndDate] = useState(today);
+  const [columnsByReport, setColumnsByReport] = useState<
+    Partial<Record<ExpenseReportType, string[]>>
+  >(saved.columnsByReport || {});
+  const [reportData, setReportData] = useState<ReportDataRow | ReportDataRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const catalog = COLUMN_CATALOG[selectedReport];
+  const selectedColumns = columnsByReport[selectedReport] || defaultColumns(selectedReport);
+  const visibleCols = catalog.filter((c) => selectedColumns.includes(c.id));
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ report: selectedReport, columnsByReport }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [selectedReport, columnsByReport]);
+
+  const toggleColumn = (id: string) => {
+    setColumnsByReport((prev) => {
+      const current = prev[selectedReport] || defaultColumns(selectedReport);
+      if (current.includes(id)) {
+        if (current.length <= 2) return prev;
+        return { ...prev, [selectedReport]: current.filter((c) => c !== id) };
+      }
+      return { ...prev, [selectedReport]: [...current, id] };
+    });
+  };
+
+  const generateReport = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Authentication required. Please log in.');
+
+      const params = new URLSearchParams();
+      if (startDate) params.append('start_date', startDate);
+      if (endDate) params.append('end_date', endDate);
+
+      const response = await fetch(`${ENDPOINTS[selectedReport]}?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        let message = `Failed to generate report (${response.status})`;
+        try {
+          const json = JSON.parse(text);
+          if (json.error) message = json.error;
+        } catch {
+          /* keep default */
+        }
+        throw new Error(message);
+      }
+      const result = await response.json();
+      if (!result.success) throw new Error(result.error || 'Invalid response');
+      setReportData(result.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'An error occurred');
+      setReportData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedReport, startDate, endDate]);
+
+  useEffect(() => {
+    if (isAuthenticated) void generateReport();
+  }, [isAuthenticated, generateReport]);
+
+  const exportVisibleCsv = () => {
+    if (!reportData || !Array.isArray(reportData) || visibleCols.length === 0) return;
+    const headers = visibleCols.map((c) => c.label);
+    const rows = reportData.map((row) =>
+      visibleCols.map((c) => formatCell(c, row[c.id])),
+    );
+    downloadCsv(
+      `expenses_${selectedReport.toLowerCase()}_${startDate}_${endDate}.csv`,
+      headers,
+      rows,
+    );
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <Layout>
+        <div className="mx-auto max-w-3xl p-6">
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Log in to view expense reports.{' '}
+            <Link to="/login" className="font-medium underline">
+              Log in
+            </Link>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  const summary = !Array.isArray(reportData) && reportData ? reportData : null;
+  const tableRows = Array.isArray(reportData) ? reportData : null;
+
+  return (
+    <Layout>
+      <div className="mx-auto max-w-7xl space-y-5 p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-900">
+              <Receipt className="h-6 w-6" />
+              Expense reports
+            </h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Recognized expense hits P&amp;L on approval; pay clears AP from Cash / Bank / MoMo /
+              Petty. Cancelled vouchers are excluded.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => void generateReport()} disabled={loading}>
+              {loading ? (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+            {tableRows && visibleCols.length > 0 && (
+              <Button variant="outline" size="sm" onClick={exportVisibleCsv}>
+                <Download className="mr-1.5 h-4 w-4" />
+                Export CSV
+              </Button>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Report type
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            {REPORT_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  setSelectedReport(opt.value);
+                  setReportData(null);
+                }}
+                className={`rounded-lg border px-3 py-2.5 text-left transition ${
+                  selectedReport === opt.value
+                    ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="text-sm font-semibold text-slate-900">{opt.label}</div>
+                <div className="mt-0.5 text-xs text-slate-500">{opt.description}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="min-w-[260px] flex-1">
+            <DateRangeFilter
+              startDate={startDate}
+              endDate={endDate}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+              defaultPreset="THIS_MONTH"
+            />
+          </div>
+          {catalog.length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm">
+                  <Columns3 className="mr-1.5 h-4 w-4" />
+                  Columns ({visibleCols.length}/{catalog.length})
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-3">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Display columns
+                </div>
+                <div className="max-h-72 space-y-1 overflow-auto">
+                  {catalog.map((c) => (
+                    <label
+                      key={c.id}
+                      className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded border-slate-300"
+                        checked={selectedColumns.includes(c.id)}
+                        onChange={() => toggleColumn(c.id)}
+                      />
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="mt-2 text-xs font-medium text-indigo-600 hover:underline"
+                  onClick={() =>
+                    setColumnsByReport((prev) => ({
+                      ...prev,
+                      [selectedReport]: defaultColumns(selectedReport),
+                    }))
+                  }
+                >
+                  Reset to defaults
+                </button>
+              </PopoverContent>
+            </Popover>
+          )}
+          <Button onClick={() => void generateReport()} disabled={loading}>
+            <FileText className="mr-1.5 h-4 w-4" />
+            {loading ? 'Loading…' : 'Run report'}
+          </Button>
+        </div>
+
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {error}
+          </div>
+        )}
+
+        {loading && !reportData && (
+          <div className="flex items-center justify-center gap-2 py-16 text-slate-500">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading report…
+          </div>
+        )}
+
+        {summary && selectedReport === 'SUMMARY' && (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {SUMMARY_CARDS.map((card) => {
+              const value = summary[card.id];
+              return (
+                <div
+                  key={card.id}
+                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {card.label}
+                  </div>
+                  <div className="mt-1 text-xl font-semibold tabular-nums text-slate-900">
+                    {card.money
+                      ? formatCurrency(Number(value || 0))
+                      : Number(value || 0).toLocaleString()}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">{card.hint}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {tableRows && (
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 backdrop-blur">
+                  <tr>
+                    {visibleCols.map((col) => (
+                      <th
+                        key={col.id}
+                        className={`whitespace-nowrap px-3 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500 ${
+                          col.money || col.count ? 'text-right' : ''
+                        }`}
+                      >
+                        {col.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {tableRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={visibleCols.length || 1}
+                        className="p-12 text-center text-slate-500"
+                      >
+                        No expenses in this period
+                      </td>
+                    </tr>
+                  ) : (
+                    tableRows.map((row, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/80">
+                        {visibleCols.map((col) => (
+                          <td
+                            key={col.id}
+                            className={`whitespace-nowrap px-3 py-2.5 ${
+                              col.money || col.count
+                                ? 'text-right tabular-nums font-medium text-slate-900'
+                                : 'text-slate-700'
+                            }`}
+                          >
+                            {formatCell(col, row[col.id])}
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {tableRows.length > 0 && (
+              <div className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+                {tableRows.length.toLocaleString()} row{tableRows.length === 1 ? '' : 's'} · showing{' '}
+                {visibleCols.length} of {catalog.length} columns
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Layout>
+  );
+}

@@ -8,6 +8,7 @@ import { pool as globalPool } from '../db/pool.js';
 import { UnitOfWork } from '../db/unitOfWork.js';
 import { Pool, PoolClient } from 'pg';
 import { getBusinessDate } from '../utils/dateRange.js';
+import { normalizeExpenseCategoryCode } from '../../../shared/expense/categoryGlMap.js';
 
 /**
  * Get expenses with filtering and pagination
@@ -228,13 +229,20 @@ export const approveExpense = async (
       );
       const isPaidAtApproval = paymentStatusResult.rows[0]?.payment_status === 'PAID';
 
+      const expenseAccountCode = await expenseRepository.resolveExpenseGlAccountCode(
+        id,
+        existingExpense.categoryCode || existingExpense.category || 'OTHER',
+        client
+      );
+
       await glEntryService.recordExpenseApprovalToGL(
         {
           expenseId: id,
           expenseNumber: existingExpense.expenseNumber,
           expenseDate: existingExpense.expenseDate,
           amount: existingExpense.amount,
-          categoryCode: existingExpense.categoryCode || existingExpense.category || 'GENERAL',
+          categoryCode: existingExpense.categoryCode || existingExpense.category || 'OTHER',
+          expenseAccountCode,
           description: existingExpense.title || existingExpense.expenseNumber,
           isPaidAtApproval,
         },
@@ -337,10 +345,14 @@ export const markExpensePaid = async (
     // Get default cash account if no payment account specified
     let paymentAccountId = paymentData.paymentAccountId;
     if (!paymentAccountId) {
-      // Default to Cash account (1010) among accounts that allow EXPENSE_PAYMENT
       const cashAccounts = await expenseRepository.getPaymentAccounts(dbPool);
       const cashAccount =
-        cashAccounts.find((a) => a.account_code === '1010' || a.code === '1010') || cashAccounts[0];
+        cashAccounts.find(
+          (a) =>
+            (a.account_code === '1010' || a.code === '1010') &&
+            a.currentBalance + 0.0001 >= existingExpense.amount
+        ) ||
+        cashAccounts.find((a) => a.currentBalance + 0.0001 >= existingExpense.amount);
       if (cashAccount) {
         paymentAccountId = cashAccount.id;
       }
@@ -348,7 +360,8 @@ export const markExpensePaid = async (
 
     if (paymentAccountId) {
       const acctCheck = await dbPool.query(
-        `SELECT "AccountCode", "AccountName", "AllowedSources", "SystemAccountTag"
+        `SELECT "AccountCode", "AccountName", "AllowedSources", "SystemAccountTag",
+                COALESCE("CurrentBalance", 0)::numeric(15,2) AS current_balance
          FROM accounts WHERE "Id" = $1`,
         [paymentAccountId],
       );
@@ -368,6 +381,19 @@ export const markExpensePaid = async (
             accountCode: acct.AccountCode,
             allowedSources: allowed,
             requiredSource: 'EXPENSE_PAYMENT',
+          },
+        );
+      }
+      const available = parseFloat(acct.current_balance || '0');
+      if (available + 0.0001 < existingExpense.amount) {
+        throw new BusinessError(
+          `Insufficient funds in ${acct.AccountCode} (${acct.AccountName}). Available ${available.toFixed(2)}, required ${Number(existingExpense.amount).toFixed(2)}.`,
+          'ERR_EXPENSE_011',
+          {
+            paymentAccountId,
+            accountCode: acct.AccountCode,
+            available,
+            required: existingExpense.amount,
           },
         );
       }
@@ -491,15 +517,16 @@ export const createExpenseCategory = async (
 ) => {
   try {
     const dbPool = pool || globalPool;
-    // Check if category with same name or code exists
-    const existing = await expenseRepository.getExpenseCategoryByCode(data.code, dbPool);
+    const code = normalizeExpenseCategoryCode(data.code);
+    // Check if category with same name or code exists (including alias → canonical)
+    const existing = await expenseRepository.getExpenseCategoryByCode(code, dbPool);
     if (existing) {
       throw new BusinessError('Category with this code already exists', 'ERR_EXPENSE_007', {
-        code: data.code,
+        code,
       });
     }
 
-    return await expenseRepository.createExpenseCategory(data, dbPool);
+    return await expenseRepository.createExpenseCategory({ ...data, code }, dbPool);
   } catch (error) {
     logger.error('Error in expense service createExpenseCategory', { error, data });
     throw error;
@@ -625,7 +652,7 @@ export const getExpensesByPaymentMethod = async (
 };
 
 /**
- * Get expenses for export
+ * Get expenses for export — same shape as detailed list (no duplicate thin export).
  */
 export const getExpensesForExport = async (
   filters: {
@@ -637,7 +664,7 @@ export const getExpensesForExport = async (
   pool?: Pool
 ) => {
   try {
-    return await expenseRepository.getExpensesForExport(filters, pool || globalPool);
+    return await expenseRepository.getExpenseDetailedList(filters, pool || globalPool);
   } catch (error) {
     logger.error('Error in expenseService getExpensesForExport', { error, filters });
     throw new Error(`Failed to get expenses for export: ${(error as Error).message}`);

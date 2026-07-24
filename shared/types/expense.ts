@@ -7,6 +7,7 @@ export type ExpenseStatus =
   | 'CANCELLED';
 
 export type ExpenseCategory =
+  | 'OFFICE'
   | 'OFFICE_SUPPLIES'
   | 'TRAVEL'
   | 'MEALS'
@@ -16,11 +17,16 @@ export type ExpenseCategory =
   | 'MARKETING'
   | 'EQUIPMENT'
   | 'SOFTWARE'
+  | 'PROFESSIONAL'
   | 'PROFESSIONAL_SERVICES'
   | 'ACCOMMODATION'
   | 'TRAINING'
   | 'ALLOWANCE'
-  | 'OTHER';
+  | 'OTHER'
+  | 'RENT'
+  | 'SALARIES'
+  | 'INSURANCE'
+  | 'GENERAL';
 
 export type PaymentMethod =
   | 'CASH'
@@ -118,7 +124,8 @@ export interface UpdateExpenseData {
 
 export interface ExpenseFilter {
   status?: ExpenseStatus;
-  category?: ExpenseCategory;
+  category?: string;
+  categoryId?: string;
   startDate?: string; // YYYY-MM-DD
   endDate?: string; // YYYY-MM-DD
   minAmount?: number;
@@ -179,7 +186,8 @@ export function normalizeExpense(dbRow: ExpenseDbRow): Expense {
 }
 
 // Constants for UI and validation
-export const EXPENSE_CATEGORIES: Record<ExpenseCategory, string> = {
+export const EXPENSE_CATEGORIES: Record<string, string> = {
+  OFFICE: 'Office Supplies',
   OFFICE_SUPPLIES: 'Office Supplies',
   TRAVEL: 'Travel & Transportation',
   MEALS: 'Meals & Entertainment',
@@ -189,11 +197,16 @@ export const EXPENSE_CATEGORIES: Record<ExpenseCategory, string> = {
   MARKETING: 'Marketing & Advertising',
   EQUIPMENT: 'Equipment & Tools',
   SOFTWARE: 'Software & Licenses',
+  PROFESSIONAL: 'Professional Services',
   PROFESSIONAL_SERVICES: 'Professional Services',
   ACCOMMODATION: 'Accommodation',
   TRAINING: 'Training & Education',
   ALLOWANCE: 'Employee Allowances',
-  OTHER: 'Other Expenses'
+  OTHER: 'Other Expenses',
+  RENT: 'Rent',
+  SALARIES: 'Salaries & Wages',
+  INSURANCE: 'Insurance',
+  GENERAL: 'General Expense'
 };
 
 export const EXPENSE_STATUSES: Record<ExpenseStatus, string> = {

@@ -2,7 +2,7 @@ import { Request } from 'express';
 import * as expenseService from '../services/expenseService.js';
 import { pool as globalPool } from '../db/pool.js';
 import logger from '../utils/logger.js';
-import type { ExpenseDbRow, UpdateExpenseData } from '../types/expense.js';
+import type { UpdateExpenseData } from '../types/expense.js';
 import { asyncHandler, AppError, NotFoundError, ValidationError, UnauthorizedError } from '../middleware/errorHandler.js';
 import {
   CreateExpenseSchema,
@@ -39,6 +39,8 @@ export const getExpenses = asyncHandler(async (req, res) => {
     // Accept both snake_case (legacy) and camelCase (frontend hook)
     category_id,
     categoryId,
+    category,
+    categoryCode,
     start_date,
     startDate,
     end_date,
@@ -46,11 +48,15 @@ export const getExpenses = asyncHandler(async (req, res) => {
     search
   } = req.query;
 
+  const categoryParam = (categoryId || category_id || category || categoryCode) as string | undefined;
+  const isUuid = !!categoryParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(categoryParam);
+
   const filters = {
     page: parseInt(page as string),
     limit: parseInt(limit as string),
     status: status as string,
-    categoryId: (categoryId || category_id) as string,
+    categoryId: isUuid ? categoryParam : undefined,
+    categoryCode: !isUuid && categoryParam ? categoryParam : undefined,
     startDate: (startDate || start_date) as string,
     endDate: (endDate || end_date) as string,
     search: search as string
@@ -136,6 +142,7 @@ export const updateExpense = asyncHandler(async (req, res) => {
       description: validated.description,
       amount: validated.amount,
       expense_date: validated.expenseDate,
+      category_id: validated.categoryId,
       vendor: validated.vendor,
       payment_method: validated.paymentMethod,
       status: validated.status,
@@ -538,42 +545,73 @@ export const getExpensesByPaymentMethod = asyncHandler(async (req, res) => {
 });
 
 /**
- * Export expenses to CSV
+ * Export expenses to CSV — single source: detailed list (no duplicate thin export shape).
  */
 export const exportExpenses = asyncHandler(async (req, res) => {
   const pool = req.tenantPool || globalPool;
   const { start_date, end_date, category_id, status } = req.query;
 
-  const expenses = await expenseService.getExpensesForExport({
+  const expenses = await expenseService.getExpenseDetailedList({
     startDate: start_date as string,
     endDate: end_date as string,
     categoryId: category_id as string,
-    status: status as string
+    status: status as string,
   }, pool);
 
-  // Generate CSV
-  const headers = ['ID', 'Title', 'Description', 'Amount', 'Date', 'Status', 'Payment Method', 'Payment Status', 'Vendor', 'Category', 'Category Code', 'Created By', 'Created At', 'Notes'];
+  const headers = [
+    'Expense Number',
+    'Title',
+    'Amount',
+    'Expense Date',
+    'Category',
+    'GL Account',
+    'Status',
+    'Payment Status',
+    'Payment Method',
+    'Vendor',
+    'Receipt Number',
+    'Reference Number',
+    'Created By',
+    'Approved By',
+    'Approved At',
+    'Rejected By',
+    'Rejected At',
+    'Rejection Reason',
+    'Paid By',
+    'Paid At',
+    'Days Pending',
+    'Notes',
+  ];
   const csvRows = [headers.join(',')];
 
-  expenses.forEach((expense: ExpenseDbRow) => {
-    const row = [
-      expense.id,
-      `"${(expense.title || '').replace(/"/g, '""')}"`,
-      `"${(expense.description || '').replace(/"/g, '""')}"`,
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+  for (const expense of expenses) {
+    csvRows.push([
+      esc(expense.expenseNumber),
+      esc(expense.title),
       expense.amount,
-      expense.expense_date,
+      expense.expenseDate,
+      esc(expense.category),
+      esc(expense.glAccount),
       expense.status,
-      expense.payment_method,
-      expense.payment_method,
-      `"${(expense.vendor || '').replace(/"/g, '""')}"`,
-      `"${(expense.category_name || '').replace(/"/g, '""')}"`,
-      expense.category_code || '',
-      `"${(expense.created_by_name || '').replace(/"/g, '""')}"`,
-      expense.created_at,
-      `"${(expense.notes || '').replace(/"/g, '""')}"`
-    ];
-    csvRows.push(row.join(','));
-  });
+      expense.paymentStatus,
+      expense.paymentMethod,
+      esc(expense.vendor),
+      esc(expense.receiptNumber),
+      esc(expense.referenceNumber),
+      esc(expense.createdBy),
+      esc(expense.approvedBy),
+      expense.approvedAt || '',
+      esc(expense.rejectedBy),
+      expense.rejectedAt || '',
+      esc(expense.rejectionReason),
+      esc(expense.paidBy),
+      expense.paidAt || '',
+      expense.daysPending ?? '',
+      esc(expense.notes),
+    ].join(','));
+  }
 
   const csv = csvRows.join('\n');
 

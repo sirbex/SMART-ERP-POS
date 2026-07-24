@@ -2,8 +2,127 @@ import { pool as globalPool } from '../db/pool.js';
 import type pg from 'pg';
 import { ExpenseFilters, Expense, ExpenseDbRow, CreateExpenseData, UpdateExpenseData } from '../types/expense.js';
 import logger from '../utils/logger.js';
-import { ConflictError } from '../middleware/errorHandler.js';
+import { ConflictError, ValidationError } from '../middleware/errorHandler.js';
 import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
+import {
+  mapExpenseCategoryCodeToGl,
+  normalizeExpenseCategoryCode,
+} from '../../../shared/expense/categoryGlMap.js';
+
+type ResolvedExpenseCategory = {
+  id: string;
+  code: string;
+  name: string;
+  accountId: string | null;
+};
+
+/**
+ * Resolve an expense category by id and/or code (including legacy aliases).
+ * Ensures both category_id and GL account_id can be set accurately.
+ */
+export const resolveExpenseCategory = async (
+  opts: { categoryId?: string | null; categoryCode?: string | null },
+  dbPool?: pg.Pool | pg.PoolClient
+): Promise<ResolvedExpenseCategory> => {
+  const pool = dbPool || globalPool;
+  const rawCode = opts.categoryCode?.trim();
+  const normalizedCode = rawCode ? normalizeExpenseCategoryCode(rawCode) : null;
+
+  if (opts.categoryId) {
+    const byId = await pool.query(
+      `SELECT id, code, name, account_id
+       FROM expense_categories
+       WHERE id = $1`,
+      [opts.categoryId]
+    );
+    if (byId.rows[0]) {
+      return {
+        id: byId.rows[0].id,
+        code: byId.rows[0].code,
+        name: byId.rows[0].name,
+        accountId: byId.rows[0].account_id,
+      };
+    }
+  }
+
+  if (rawCode || normalizedCode) {
+    const codes = Array.from(
+      new Set([rawCode?.toUpperCase(), normalizedCode].filter(Boolean) as string[])
+    );
+    const byCode = await pool.query(
+      `SELECT id, code, name, account_id
+       FROM expense_categories
+       WHERE UPPER(code) = ANY($1::text[])
+       ORDER BY CASE WHEN is_active THEN 0 ELSE 1 END, updated_at DESC
+       LIMIT 1`,
+      [codes]
+    );
+    if (byCode.rows[0]) {
+      return {
+        id: byCode.rows[0].id,
+        code: byCode.rows[0].code,
+        name: byCode.rows[0].name,
+        accountId: byCode.rows[0].account_id,
+      };
+    }
+  }
+
+  throw new ValidationError(
+    `Unknown expense category${rawCode ? `: ${rawCode}` : opts.categoryId ? ` id ${opts.categoryId}` : ''}`
+  );
+};
+
+async function resolveGlAccountIdForCategory(
+  category: ResolvedExpenseCategory,
+  dbPool: pg.Pool | pg.PoolClient
+): Promise<string | null> {
+  if (category.accountId) return category.accountId;
+
+  const glCode = mapExpenseCategoryCodeToGl(category.code);
+  const fallback = await dbPool.query(
+    `SELECT "Id" FROM accounts WHERE "AccountCode" = $1 LIMIT 1`,
+    [glCode]
+  );
+  if (fallback.rows[0]?.Id) {
+    // Persist mapping so future posts / reports stay consistent
+    await dbPool.query(
+      `UPDATE expense_categories SET account_id = $1, updated_at = NOW() WHERE id = $2 AND account_id IS NULL`,
+      [fallback.rows[0].Id, category.id]
+    );
+    return fallback.rows[0].Id;
+  }
+
+  const general = await dbPool.query(
+    `SELECT "Id" FROM accounts WHERE "AccountCode" = '6900' LIMIT 1`
+  );
+  return general.rows[0]?.Id ?? null;
+}
+
+/**
+ * Resolve GL AccountCode for an expense (DB account_id → category → hardcoded map).
+ */
+export const resolveExpenseGlAccountCode = async (
+  expenseId: string,
+  fallbackCategoryCode: string | null | undefined,
+  dbPool?: pg.Pool | pg.PoolClient
+): Promise<string> => {
+  const pool = dbPool || globalPool;
+  const result = await pool.query(
+    `SELECT a."AccountCode" AS expense_account_code,
+            ca."AccountCode" AS category_account_code,
+            COALESCE(ec.code, e.category) AS category_code
+     FROM expenses e
+     LEFT JOIN accounts a ON e.account_id = a."Id"
+     LEFT JOIN expense_categories ec ON e.category_id = ec.id
+     LEFT JOIN accounts ca ON ec.account_id = ca."Id"
+     WHERE e.id = $1`,
+    [expenseId]
+  );
+  const row = result.rows[0];
+  if (row?.expense_account_code) return row.expense_account_code;
+  if (row?.category_account_code) return row.category_account_code;
+  return mapExpenseCategoryCodeToGl(row?.category_code || fallbackCategoryCode);
+};
 
 /**
  * Get expenses with filtering and pagination
@@ -69,6 +188,15 @@ export const getExpenses = async (filters: ExpenseFilters, dbPool?: pg.Pool | pg
       query += ` AND e.category_id = $${paramIndex}`;
       queryParams.push(filters.categoryId);
       paramIndex++;
+    } else if (filters.categoryCode) {
+      query += ` AND (
+        UPPER(e.category) = UPPER($${paramIndex})
+        OR e.category_id IN (
+          SELECT id FROM expense_categories WHERE UPPER(code) = UPPER($${paramIndex})
+        )
+      )`;
+      queryParams.push(filters.categoryCode);
+      paramIndex++;
     }
 
     if (filters.startDate) {
@@ -129,6 +257,15 @@ export const getExpenseCount = async (filters: ExpenseFilters, dbPool?: pg.Pool 
     if (filters.categoryId) {
       query += ` AND e.category_id = $${paramIndex}`;
       queryParams.push(filters.categoryId);
+      paramIndex++;
+    } else if (filters.categoryCode) {
+      query += ` AND (
+        UPPER(e.category) = UPPER($${paramIndex})
+        OR e.category_id IN (
+          SELECT id FROM expense_categories WHERE UPPER(code) = UPPER($${paramIndex})
+        )
+      )`;
+      queryParams.push(filters.categoryCode);
       paramIndex++;
     }
 
@@ -217,26 +354,11 @@ export const getExpenseById = async (id: string, dbPool?: pg.Pool | pg.PoolClien
 export const createExpense = async (data: CreateExpenseData & { expense_number: string; status: string }, dbPool?: pg.Pool | pg.PoolClient): Promise<Expense> => {
   const pool = dbPool || globalPool;
   try {
-    // Lookup account_id from expense category (this is the expense GL account - DEBIT side)
-    let expenseAccountId: string | null = null;
-    const categoryCode = data.category || 'GENERAL';
-
-    const categoryResult = await pool.query(
-      'SELECT account_id FROM expense_categories WHERE code = $1',
-      [categoryCode]
+    const category = await resolveExpenseCategory(
+      { categoryId: data.category_id, categoryCode: data.category },
+      pool
     );
-
-    if (categoryResult.rows.length > 0 && categoryResult.rows[0].account_id) {
-      expenseAccountId = categoryResult.rows[0].account_id;
-    } else {
-      // Fallback to General Expense (6900) if no category mapping
-      const fallbackResult = await pool.query(
-        `SELECT "Id" FROM accounts WHERE "AccountCode" = '6900' LIMIT 1`
-      );
-      if (fallbackResult.rows.length > 0) {
-        expenseAccountId = fallbackResult.rows[0].Id;
-      }
-    }
+    const expenseAccountId = await resolveGlAccountIdForCategory(category, pool);
 
     // payment_account_id is the cash/bank account used for payment (CREDIT side)
     // This comes from user selection when they mark expense as PAID
@@ -259,8 +381,8 @@ export const createExpense = async (data: CreateExpenseData & { expense_number: 
       data.description || null,
       data.amount,
       data.expense_date,
-      categoryCode,
-      data.category_id || null,
+      category.code,
+      category.id,
       data.vendor || null,
       data.payment_method || null,
       data.notes || null,
@@ -299,10 +421,18 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?
       }
     }
 
+    // When category_id changes, sync legacy category text + GL account_id
+    const updatePayload: Record<string, unknown> = { ...data };
+    if (data.category_id) {
+      const category = await resolveExpenseCategory({ categoryId: data.category_id }, pool);
+      updatePayload.category = category.code;
+      updatePayload.account_id = await resolveGlAccountIdForCategory(category, pool);
+    }
+
     // Whitelist of allowed column names to prevent SQL injection
     const ALLOWED_UPDATE_FIELDS = new Set([
-      'title', 'description', 'amount', 'expense_date', 'category_id',
-      'supplier_id', 'vendor', 'payment_method', 'receipt_number',
+      'title', 'description', 'amount', 'expense_date', 'category', 'category_id',
+      'account_id', 'supplier_id', 'vendor', 'payment_method', 'receipt_number',
       'reference_number', 'notes', 'tags', 'status', 'approved_by',
       'approved_at', 'rejected_by', 'rejected_at', 'rejection_reason',
       'paid_by', 'paid_at', 'payment_status', 'payment_account_id'
@@ -313,7 +443,7 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?
     let paramIndex = 1;
 
     // Build dynamic update query with whitelisted fields only
-    for (const [key, value] of Object.entries(data)) {
+    for (const [key, value] of Object.entries(updatePayload)) {
       if (value !== undefined && ALLOWED_UPDATE_FIELDS.has(key)) {
         fields.push(`${key} = $${paramIndex}`);
         values.push(value);
@@ -402,8 +532,8 @@ export const generateExpenseNumber = async (dbPool?: pg.Pool | pg.PoolClient): P
 };
 
 /**
- * Get payment accounts (cash/bank accounts) for expense payment source
- * These are asset accounts that can be used as the CREDIT side of expense entries
+ * Get payment accounts (cash/bank/MoMo/petty) for expense payment source.
+ * Includes CurrentBalance so the UI can hide / disable unfunded accounts.
  */
 export const getPaymentAccounts = async (dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
@@ -415,7 +545,9 @@ export const getPaymentAccounts = async (dbPool?: pg.Pool | pg.PoolClient) => {
         "Id" as id,
         "AccountCode" as account_code,
         "AccountName" as account_name,
-        "AccountType" as account_type
+        "AccountType" as account_type,
+        COALESCE("SystemAccountTag", '') as system_account_tag,
+        COALESCE("CurrentBalance", 0)::numeric(15,2) as current_balance
       FROM accounts 
       WHERE "AccountType" = 'ASSET' 
         AND "IsActive" = true
@@ -429,7 +561,22 @@ export const getPaymentAccounts = async (dbPool?: pg.Pool | pg.PoolClient) => {
     `;
 
     const result = await pool.query(query);
-    return result.rows;
+    return result.rows.map((row) => {
+      const balance = parseFloat(row.current_balance || '0');
+      return {
+        id: row.id,
+        account_code: row.account_code,
+        code: row.account_code,
+        account_name: row.account_name,
+        name: row.account_name,
+        account_type: row.account_type,
+        type: row.account_type,
+        systemAccountTag: row.system_account_tag || null,
+        currentBalance: balance,
+        /** True when the account has a positive funded balance */
+        hasFunds: balance > 0.0001,
+      };
+    });
   } catch (error) {
     logger.error('Error in expenseRepository getPaymentAccounts', { error });
     throw error;
@@ -500,13 +647,21 @@ export const getExpenseCategoryByCode = async (code: string, dbPool?: pg.Pool | 
 export const createExpenseCategory = async (data: { name: string; code: string; description?: string }, dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
   try {
+    const code = normalizeExpenseCategoryCode(data.code);
+    const glCode = mapExpenseCategoryCodeToGl(code);
+    const accountResult = await pool.query(
+      `SELECT "Id" FROM accounts WHERE "AccountCode" = $1 LIMIT 1`,
+      [glCode]
+    );
+    const accountId = accountResult.rows[0]?.Id ?? null;
+
     const query = `
-      INSERT INTO expense_categories (name, code, description)
-      VALUES ($1, $2, $3)
+      INSERT INTO expense_categories (name, code, description, account_id)
+      VALUES ($1, $2, $3, $4)
       RETURNING *
     `;
 
-    const result = await pool.query(query, [data.name, data.code, data.description || null]);
+    const result = await pool.query(query, [data.name, code, data.description || null, accountId]);
     return result.rows[0];
   } catch (error) {
     logger.error('Error in expenseRepository createExpenseCategory', { error, data });
@@ -636,23 +791,31 @@ export const deleteExpenseDocument = async (documentId: string, dbPool?: pg.Pool
 };
 
 /**
- * Get expense summary/statistics
+ * Expense summary — business KPIs (excludes CANCELLED).
+ * Recognized = APPROVED + PAID (GL posts on approval).
+ * Unpaid AP = APPROVED not yet paid. Cash out = PAID only.
  */
 export const getExpenseSummary = async (filters: { startDate?: string; endDate?: string; categoryId?: string }, dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
   try {
     let query = `
       SELECT 
-        COUNT(*)::integer as total_count,
-        COALESCE(SUM(amount), 0)::numeric(10,2) as total_amount,
-        COUNT(CASE WHEN status = 'DRAFT' THEN 1 END)::integer as draft_count,
-        COUNT(CASE WHEN status = 'PENDING_APPROVAL' THEN 1 END)::integer as pending_count,
-        COUNT(CASE WHEN status = 'APPROVED' THEN 1 END)::integer as approved_count,
-        COUNT(CASE WHEN status = 'REJECTED' THEN 1 END)::integer as rejected_count,
-        COUNT(CASE WHEN status = 'PAID' THEN 1 END)::integer as paid_count,
-        COALESCE(SUM(CASE WHEN status = 'PAID' THEN amount ELSE 0 END), 0)::numeric(10,2) as paid_amount
+        COUNT(*)::integer as voucher_count,
+        COALESCE(SUM(amount), 0)::numeric(12,2) as total_amount,
+        COUNT(*) FILTER (WHERE status = 'DRAFT')::integer as draft_count,
+        COALESCE(SUM(amount) FILTER (WHERE status = 'DRAFT'), 0)::numeric(12,2) as draft_amount,
+        COUNT(*) FILTER (WHERE status = 'PENDING_APPROVAL')::integer as pending_count,
+        COALESCE(SUM(amount) FILTER (WHERE status = 'PENDING_APPROVAL'), 0)::numeric(12,2) as pending_amount,
+        COUNT(*) FILTER (WHERE status = 'APPROVED')::integer as unpaid_ap_count,
+        COALESCE(SUM(amount) FILTER (WHERE status = 'APPROVED'), 0)::numeric(12,2) as unpaid_ap_amount,
+        COUNT(*) FILTER (WHERE status IN ('APPROVED', 'PAID'))::integer as recognized_count,
+        COALESCE(SUM(amount) FILTER (WHERE status IN ('APPROVED', 'PAID')), 0)::numeric(12,2) as recognized_amount,
+        COUNT(*) FILTER (WHERE status = 'PAID')::integer as paid_count,
+        COALESCE(SUM(amount) FILTER (WHERE status = 'PAID'), 0)::numeric(12,2) as paid_amount,
+        COUNT(*) FILTER (WHERE status = 'REJECTED')::integer as rejected_count,
+        COALESCE(SUM(amount) FILTER (WHERE status = 'REJECTED'), 0)::numeric(12,2) as rejected_amount
       FROM expenses e
-      WHERE 1=1
+      WHERE e.status != 'CANCELLED'
     `;
 
     const queryParams: unknown[] = [];
@@ -676,7 +839,23 @@ export const getExpenseSummary = async (filters: { startDate?: string; endDate?:
     }
 
     const result = await pool.query(query, queryParams);
-    return result.rows[0];
+    const row = result.rows[0] || {};
+    return {
+      voucherCount: parseInt(row.voucher_count || '0', 10),
+      totalAmount: parseFloat(row.total_amount || '0'),
+      draftCount: parseInt(row.draft_count || '0', 10),
+      draftAmount: parseFloat(row.draft_amount || '0'),
+      pendingCount: parseInt(row.pending_count || '0', 10),
+      pendingAmount: parseFloat(row.pending_amount || '0'),
+      unpaidApCount: parseInt(row.unpaid_ap_count || '0', 10),
+      unpaidApAmount: parseFloat(row.unpaid_ap_amount || '0'),
+      recognizedCount: parseInt(row.recognized_count || '0', 10),
+      recognizedAmount: parseFloat(row.recognized_amount || '0'),
+      paidCount: parseInt(row.paid_count || '0', 10),
+      paidAmount: parseFloat(row.paid_amount || '0'),
+      rejectedCount: parseInt(row.rejected_count || '0', 10),
+      rejectedAmount: parseFloat(row.rejected_amount || '0'),
+    };
   } catch (error) {
     logger.error('Error in expenseRepository getExpenseSummary', { error, filters });
     throw error;
@@ -684,51 +863,54 @@ export const getExpenseSummary = async (filters: { startDate?: string; endDate?:
 };
 
 /**
- * Get expense report by category with breakdown
+ * Expense report by category — P&L-aligned (excludes CANCELLED).
+ * One category column (name + code), recognized vs paid amounts.
  */
 export const getExpensesByCategory = async (filters: { startDate?: string; endDate?: string }, dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
-        c.id as category_id,
         c.name as category_name,
         c.code as category_code,
+        COALESCE(a."AccountCode", '') as gl_account_code,
         COUNT(e.id)::integer as expense_count,
-        COALESCE(SUM(e.amount), 0)::numeric(10,2) as total_amount,
-        COALESCE(AVG(e.amount), 0)::numeric(10,2) as average_amount,
-        COALESCE(MIN(e.amount), 0)::numeric(10,2) as min_amount,
-        COALESCE(MAX(e.amount), 0)::numeric(10,2) as max_amount,
-        COUNT(CASE WHEN e.status = 'PAID' THEN 1 END)::integer as paid_count,
-        COALESCE(SUM(CASE WHEN e.status = 'PAID' THEN e.amount ELSE 0 END), 0)::numeric(10,2) as paid_amount,
-        COUNT(CASE WHEN e.status = 'APPROVED' THEN 1 END)::integer as approved_count,
-        COALESCE(SUM(CASE WHEN e.status = 'APPROVED' THEN e.amount ELSE 0 END), 0)::numeric(10,2) as approved_amount
+        COALESCE(SUM(e.amount), 0)::numeric(12,2) as total_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status IN ('APPROVED', 'PAID')), 0)::numeric(12,2) as recognized_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status = 'APPROVED'), 0)::numeric(12,2) as unpaid_ap_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status = 'PAID'), 0)::numeric(12,2) as paid_amount,
+        COUNT(*) FILTER (WHERE e.status = 'PENDING_APPROVAL')::integer as pending_count
       FROM expense_categories c
+      LEFT JOIN accounts a ON c.account_id = a."Id"
       LEFT JOIN expenses e ON c.id = e.category_id
+        AND e.status != 'CANCELLED'
         AND ($1::date IS NULL OR e.expense_date >= $1)
         AND ($2::date IS NULL OR e.expense_date <= $2)
-      GROUP BY c.id, c.name, c.code
+      WHERE c.is_active = true OR EXISTS (
+        SELECT 1 FROM expenses ex WHERE ex.category_id = c.id AND ex.status != 'CANCELLED'
+      )
+      GROUP BY c.id, c.name, c.code, a."AccountCode"
       HAVING COUNT(e.id) > 0
-      ORDER BY total_amount DESC
+      ORDER BY recognized_amount DESC, total_amount DESC
     `;
 
     const result = await pool.query(query, [filters.startDate || null, filters.endDate || null]);
 
-    // Normalize data to ensure consistent types
-    return result.rows.map(row => ({
-      category_id: row.category_id,
-      category_name: row.category_name,
-      category_code: row.category_code,
-      expense_count: parseInt(row.expense_count, 10),
-      total_amount: parseFloat(row.total_amount || 0).toFixed(2),
-      average_amount: parseFloat(row.average_amount || 0).toFixed(2),
-      min_amount: parseFloat(row.min_amount || 0).toFixed(2),
-      max_amount: parseFloat(row.max_amount || 0).toFixed(2),
-      paid_count: parseInt(row.paid_count, 10),
-      paid_amount: parseFloat(row.paid_amount || 0).toFixed(2),
-      approved_count: parseInt(row.approved_count, 10),
-      approved_amount: parseFloat(row.approved_amount || 0).toFixed(2)
-    }));
+    return result.rows.map(row => {
+      const name = row.category_name || 'Uncategorized';
+      const code = row.category_code || '';
+      const gl = row.gl_account_code || '';
+      return {
+        category: code ? `${name} (${code})` : name,
+        glAccount: gl || '—',
+        expenseCount: parseInt(row.expense_count, 10),
+        totalAmount: parseFloat(row.total_amount || '0'),
+        recognizedAmount: parseFloat(row.recognized_amount || '0'),
+        unpaidApAmount: parseFloat(row.unpaid_ap_amount || '0'),
+        paidAmount: parseFloat(row.paid_amount || '0'),
+        pendingCount: parseInt(row.pending_count || '0', 10),
+      };
+    });
   } catch (error) {
     logger.error('Error in expenseRepository getExpensesByCategory', { error, filters });
     throw error;
@@ -736,7 +918,7 @@ export const getExpensesByCategory = async (filters: { startDate?: string; endDa
 };
 
 /**
- * Get expense report by vendor
+ * Expense report by vendor (excludes CANCELLED)
  */
 export const getExpensesByVendor = async (filters: { startDate?: string; endDate?: string }, dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
@@ -745,31 +927,29 @@ export const getExpensesByVendor = async (filters: { startDate?: string; endDate
       SELECT 
         COALESCE(NULLIF(TRIM(e.vendor), ''), 'Unknown') as vendor_name,
         COUNT(e.id)::integer as expense_count,
-        COALESCE(SUM(e.amount), 0)::numeric(10,2) as total_amount,
-        COALESCE(AVG(e.amount), 0)::numeric(10,2) as average_amount,
+        COALESCE(SUM(e.amount), 0)::numeric(12,2) as total_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status IN ('APPROVED', 'PAID')), 0)::numeric(12,2) as recognized_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status = 'PAID'), 0)::numeric(12,2) as paid_amount,
         MIN(e.expense_date)::date as first_expense_date,
-        MAX(e.expense_date)::date as last_expense_date,
-        COUNT(CASE WHEN e.status = 'PAID' THEN 1 END)::integer as paid_count,
-        COALESCE(SUM(CASE WHEN e.status = 'PAID' THEN e.amount ELSE 0 END), 0)::numeric(10,2) as paid_amount
+        MAX(e.expense_date)::date as last_expense_date
       FROM expenses e
-      WHERE ($1::date IS NULL OR e.expense_date >= $1)
+      WHERE e.status != 'CANCELLED'
+        AND ($1::date IS NULL OR e.expense_date >= $1)
         AND ($2::date IS NULL OR e.expense_date <= $2)
       GROUP BY COALESCE(NULLIF(TRIM(e.vendor), ''), 'Unknown')
-      ORDER BY total_amount DESC
+      ORDER BY recognized_amount DESC, total_amount DESC
     `;
 
     const result = await pool.query(query, [filters.startDate || null, filters.endDate || null]);
 
-    // Normalize data to ensure consistent types
     return result.rows.map(row => ({
-      vendor_name: row.vendor_name,
-      expense_count: parseInt(row.expense_count, 10),
-      total_amount: parseFloat(row.total_amount || 0).toFixed(2),
-      average_amount: parseFloat(row.average_amount || 0).toFixed(2),
-      first_expense_date: row.first_expense_date,
-      last_expense_date: row.last_expense_date,
-      paid_count: parseInt(row.paid_count, 10),
-      paid_amount: parseFloat(row.paid_amount || 0).toFixed(2)
+      vendor: row.vendor_name,
+      expenseCount: parseInt(row.expense_count, 10),
+      totalAmount: parseFloat(row.total_amount || '0'),
+      recognizedAmount: parseFloat(row.recognized_amount || '0'),
+      paidAmount: parseFloat(row.paid_amount || '0'),
+      firstExpenseDate: row.first_expense_date,
+      lastExpenseDate: row.last_expense_date,
     }));
   } catch (error) {
     logger.error('Error in expenseRepository getExpensesByVendor', { error, filters });
@@ -778,38 +958,36 @@ export const getExpensesByVendor = async (filters: { startDate?: string; endDate
 };
 
 /**
- * Get expense trends by period (monthly)
+ * Monthly expense trends (excludes CANCELLED)
  */
 export const getExpenseTrends = async (filters: { startDate?: string; endDate?: string }, dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
   try {
     const query = `
       SELECT 
-        DATE_TRUNC('month', e.expense_date)::date as period,
+        TO_CHAR(DATE_TRUNC('month', e.expense_date), 'YYYY-MM') as period,
         COUNT(e.id)::integer as expense_count,
-        COALESCE(SUM(e.amount), 0)::numeric(10,2) as total_amount,
-        COALESCE(AVG(e.amount), 0)::numeric(10,2) as average_amount,
-        COUNT(DISTINCT e.category_id)::integer as category_count,
-        COUNT(CASE WHEN e.status = 'PAID' THEN 1 END)::integer as paid_count,
-        COALESCE(SUM(CASE WHEN e.status = 'PAID' THEN e.amount ELSE 0 END), 0)::numeric(10,2) as paid_amount
+        COALESCE(SUM(e.amount), 0)::numeric(12,2) as total_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status IN ('APPROVED', 'PAID')), 0)::numeric(12,2) as recognized_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status = 'PAID'), 0)::numeric(12,2) as paid_amount,
+        COUNT(DISTINCT e.category_id)::integer as category_count
       FROM expenses e
-      WHERE ($1::date IS NULL OR e.expense_date >= $1)
+      WHERE e.status != 'CANCELLED'
+        AND ($1::date IS NULL OR e.expense_date >= $1)
         AND ($2::date IS NULL OR e.expense_date <= $2)
       GROUP BY DATE_TRUNC('month', e.expense_date)
-      ORDER BY period DESC
+      ORDER BY DATE_TRUNC('month', e.expense_date) DESC
     `;
 
     const result = await pool.query(query, [filters.startDate || null, filters.endDate || null]);
 
-    // Normalize data to ensure consistent types
     return result.rows.map(row => ({
       period: row.period,
-      expense_count: parseInt(row.expense_count, 10),
-      total_amount: parseFloat(row.total_amount || 0).toFixed(2),
-      average_amount: parseFloat(row.average_amount || 0).toFixed(2),
-      category_count: parseInt(row.category_count, 10),
-      paid_count: parseInt(row.paid_count, 10),
-      paid_amount: parseFloat(row.paid_amount || 0).toFixed(2)
+      expenseCount: parseInt(row.expense_count, 10),
+      totalAmount: parseFloat(row.total_amount || '0'),
+      recognizedAmount: parseFloat(row.recognized_amount || '0'),
+      paidAmount: parseFloat(row.paid_amount || '0'),
+      categoryCount: parseInt(row.category_count, 10),
     }));
   } catch (error) {
     logger.error('Error in expenseRepository getExpenseTrends', { error, filters });
@@ -818,7 +996,7 @@ export const getExpenseTrends = async (filters: { startDate?: string; endDate?: 
 };
 
 /**
- * Get expense report by payment method
+ * By payment method — intended pay method on voucher (excludes CANCELLED)
  */
 export const getExpensesByPaymentMethod = async (filters: { startDate?: string; endDate?: string }, dbPool?: pg.Pool | pg.PoolClient) => {
   const pool = dbPool || globalPool;
@@ -827,94 +1005,28 @@ export const getExpensesByPaymentMethod = async (filters: { startDate?: string; 
       SELECT 
         COALESCE(e.payment_method, 'UNKNOWN') as payment_method,
         COUNT(e.id)::integer as expense_count,
-        COALESCE(SUM(e.amount), 0)::numeric(10,2) as total_amount,
-        COALESCE(AVG(e.amount), 0)::numeric(10,2) as average_amount,
-        COUNT(CASE WHEN e.status = 'PAID' THEN 1 END)::integer as paid_count,
-        COALESCE(SUM(CASE WHEN e.status = 'PAID' THEN e.amount ELSE 0 END), 0)::numeric(10,2) as paid_amount
+        COALESCE(SUM(e.amount), 0)::numeric(12,2) as total_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status IN ('APPROVED', 'PAID')), 0)::numeric(12,2) as recognized_amount,
+        COALESCE(SUM(e.amount) FILTER (WHERE e.status = 'PAID'), 0)::numeric(12,2) as paid_amount
       FROM expenses e
-      WHERE ($1::date IS NULL OR e.expense_date >= $1)
+      WHERE e.status != 'CANCELLED'
+        AND ($1::date IS NULL OR e.expense_date >= $1)
         AND ($2::date IS NULL OR e.expense_date <= $2)
       GROUP BY e.payment_method
-      ORDER BY total_amount DESC
+      ORDER BY paid_amount DESC, total_amount DESC
     `;
 
     const result = await pool.query(query, [filters.startDate || null, filters.endDate || null]);
 
-    // Normalize data to ensure consistent types
     return result.rows.map(row => ({
-      payment_method: row.payment_method,
-      expense_count: parseInt(row.expense_count, 10),
-      total_amount: parseFloat(row.total_amount || 0).toFixed(2),
-      average_amount: parseFloat(row.average_amount || 0).toFixed(2),
-      paid_count: parseInt(row.paid_count, 10),
-      paid_amount: parseFloat(row.paid_amount || 0).toFixed(2)
+      paymentMethod: row.payment_method,
+      expenseCount: parseInt(row.expense_count, 10),
+      totalAmount: parseFloat(row.total_amount || '0'),
+      recognizedAmount: parseFloat(row.recognized_amount || '0'),
+      paidAmount: parseFloat(row.paid_amount || '0'),
     }));
   } catch (error) {
     logger.error('Error in expenseRepository getExpensesByPaymentMethod', { error, filters });
-    throw error;
-  }
-};
-
-/**
- * Get detailed expense list for export
- */
-export const getExpensesForExport = async (filters: { startDate?: string; endDate?: string; categoryId?: string; status?: string }, dbPool?: pg.Pool | pg.PoolClient) => {
-  const pool = dbPool || globalPool;
-  try {
-    let query = `
-      SELECT 
-        e.id,
-        e.title,
-        e.description,
-        e.amount::numeric(10,2),
-        e.expense_date::date,
-        e.status,
-        e.payment_method,
-        e.payment_status,
-        COALESCE(NULLIF(TRIM(e.vendor), ''), 'N/A') as vendor,
-        COALESCE(c.name, 'Uncategorized') as category_name,
-        COALESCE(c.code, 'N/A') as category_code,
-        COALESCE(u.full_name, 'System') as created_by_name,
-        e.created_at::timestamptz,
-        COALESCE(e.notes, '') as notes
-      FROM expenses e
-      LEFT JOIN expense_categories c ON e.category_id = c.id
-      LEFT JOIN users u ON e.created_by = u.id
-      WHERE 1=1
-    `;
-
-    const queryParams: unknown[] = [];
-    let paramIndex = 1;
-
-    if (filters.startDate) {
-      query += ` AND e.expense_date >= $${paramIndex}`;
-      queryParams.push(filters.startDate);
-      paramIndex++;
-    }
-
-    if (filters.endDate) {
-      query += ` AND e.expense_date <= $${paramIndex}`;
-      queryParams.push(filters.endDate);
-      paramIndex++;
-    }
-
-    if (filters.categoryId) {
-      query += ` AND e.category_id = $${paramIndex}`;
-      queryParams.push(filters.categoryId);
-      paramIndex++;
-    }
-
-    if (filters.status) {
-      query += ` AND e.status = $${paramIndex}`;
-      queryParams.push(filters.status);
-    }
-
-    query += ' ORDER BY e.expense_date DESC, e.created_at DESC';
-
-    const result = await pool.query(query, queryParams);
-    return result.rows;
-  } catch (error) {
-    logger.error('Error in expenseRepository getExpensesForExport', { error, filters });
     throw error;
   }
 };
@@ -972,9 +1084,24 @@ export const updateExpenseCategory = async (id: string, updateData: Record<strin
   let idx = 2;
 
   if (updateData.name !== undefined) { setClauses.push(`name = $${idx++}`); params.push(updateData.name); }
-  if (updateData.code !== undefined) { setClauses.push(`code = $${idx++}`); params.push((updateData.code as string).toUpperCase()); }
+  if (updateData.code !== undefined) {
+    const code = normalizeExpenseCategoryCode(updateData.code as string);
+    setClauses.push(`code = $${idx++}`);
+    params.push(code);
+    // Keep GL link accurate when code changes
+    const glCode = mapExpenseCategoryCodeToGl(code);
+    const acct = await pool.query(`SELECT "Id" FROM accounts WHERE "AccountCode" = $1 LIMIT 1`, [glCode]);
+    if (acct.rows[0]?.Id) {
+      setClauses.push(`account_id = $${idx++}`);
+      params.push(acct.rows[0].Id);
+    }
+  }
   if (updateData.description !== undefined) { setClauses.push(`description = $${idx++}`); params.push((updateData.description as string) || null); }
   if (updateData.isActive !== undefined) { setClauses.push(`is_active = $${idx++}`); params.push(updateData.isActive); }
+  if (updateData.accountId !== undefined || updateData.account_id !== undefined) {
+    setClauses.push(`account_id = $${idx++}`);
+    params.push(updateData.accountId ?? updateData.account_id);
+  }
 
   const query = `UPDATE expense_categories SET ${setClauses.join(', ')} WHERE id = $1 RETURNING *`;
 
@@ -1059,7 +1186,14 @@ export const getExpenseDetailedList = async (
       conditions.push(`e.category_id = $${params.length}::uuid`);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = conditions.length > 0
+      ? `WHERE ${conditions.join(' AND ')} AND e.status != 'CANCELLED'`
+      : `WHERE e.status != 'CANCELLED'`;
+
+    // If caller explicitly filters status (including CANCELLED), honor it without the default exclude
+    const whereFinal = filters.status
+      ? (conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '')
+      : whereClause;
 
     const query = `
       SELECT 
@@ -1099,43 +1233,52 @@ export const getExpenseDetailedList = async (
       LEFT JOIN users ua ON e.approved_by = ua.id
       LEFT JOIN users ur ON e.rejected_by = ur.id
       LEFT JOIN users up ON e.paid_by = up.id
-      ${whereClause}
+      ${whereFinal}
       ORDER BY e.expense_date DESC, e.created_at DESC
     `;
 
     const result = await pool.query(query, params);
 
-    return result.rows.map(row => ({
-      expenseNumber: row.expense_number,
-      title: row.title,
-      amount: parseFloat(row.amount || '0'),
-      expenseDate: row.expense_date,
-      categoryName: row.category_name,
-      categoryCode: row.category_code,
-      glAccountCode: row.gl_account_code,
-      glAccountName: row.gl_account_name,
-      status: row.status,
-      paymentStatus: row.payment_status,
-      paymentMethod: row.payment_method || 'N/A',
-      vendor: row.vendor,
-      receiptNumber: row.receipt_number || '',
-      referenceNumber: row.reference_number || '',
-      createdBy: row.created_by,
-      approvedBy: row.approved_by || '',
-      approvedAt: row.approved_at ? formatDateBusiness(new Date(row.approved_at)) : '',
-      rejectedBy: row.rejected_by || '',
-      rejectedAt: row.rejected_at ? formatDateBusiness(new Date(row.rejected_at)) : '',
-      rejectionReason: row.rejection_reason || '',
-      paidBy: row.paid_by || '',
-      paidAt: row.paid_at ? formatDateBusiness(new Date(row.paid_at)) : '',
-      daysPending: row.days_pending,
-      notes: row.notes || '',
-    }));
+    return result.rows.map(row => {
+      const categoryName = row.category_name || 'Uncategorized';
+      const categoryCode = row.category_code || '';
+      const glCode = row.gl_account_code || '';
+      const glName = row.gl_account_name || '';
+      return {
+        expenseNumber: row.expense_number,
+        title: row.title,
+        amount: parseFloat(row.amount || '0'),
+        expenseDate: row.expense_date,
+        // Merged — avoid Category Name + Category Code twin columns
+        category: categoryCode ? `${categoryName} (${categoryCode})` : categoryName,
+        // Merged — avoid GL Code + GL Name twin columns
+        glAccount: glCode && glName ? `${glCode} - ${glName}` : glCode || glName || '',
+        status: row.status,
+        paymentStatus: row.payment_status,
+        paymentMethod: row.payment_method || 'N/A',
+        vendor: row.vendor,
+        receiptNumber: row.receipt_number || '',
+        referenceNumber: row.reference_number || '',
+        createdBy: row.created_by,
+        approvedBy: row.approved_by || '',
+        approvedAt: row.approved_at ? formatDateBusiness(new Date(row.approved_at)) : '',
+        rejectedBy: row.rejected_by || '',
+        rejectedAt: row.rejected_at ? formatDateBusiness(new Date(row.rejected_at)) : '',
+        rejectionReason: row.rejection_reason || '',
+        paidBy: row.paid_by || '',
+        paidAt: row.paid_at ? formatDateBusiness(new Date(row.paid_at)) : '',
+        daysPending: row.days_pending,
+        notes: row.notes || '',
+      };
+    });
   } catch (error) {
     logger.error('Error in expenseRepository getExpenseDetailedList', { error, filters });
     throw error;
   }
 };
+
+/** @deprecated Alias — use getExpenseDetailedList */
+export const getExpensesForExport = getExpenseDetailedList;
 
 /**
  * Enterprise Approval Pipeline — expenses grouped by approval status with workflow metrics
@@ -1183,8 +1326,6 @@ export const getExpenseApprovalPipeline = async (
       expenseCount: parseInt(row.expense_count, 10),
       totalAmount: parseFloat(row.total_amount || '0'),
       averageAmount: parseFloat(row.average_amount || '0'),
-      minAmount: parseFloat(row.min_amount || '0'),
-      maxAmount: parseFloat(row.max_amount || '0'),
       avgDaysInStatus: row.avg_days_in_status ? parseFloat(row.avg_days_in_status) : null,
     }));
   } catch (error) {

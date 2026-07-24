@@ -160,6 +160,8 @@ export interface ExpenseFilters {
   limit: number;
   status?: string;
   categoryId?: string;
+  /** Filter by category code (e.g. OFFICE) when UUID not provided */
+  categoryCode?: string;
   startDate?: string;
   endDate?: string;
   search?: string;

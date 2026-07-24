@@ -25,7 +25,8 @@ const expenseApi = {
     const params = new URLSearchParams();
 
     if (filter.status) params.append('status', filter.status);
-    if (filter.category) params.append('category', filter.category);
+    if (filter.categoryId) params.append('categoryId', filter.categoryId);
+    else if (filter.category) params.append('category', filter.category);
     if (filter.startDate) params.append('startDate', filter.startDate);
     if (filter.endDate) params.append('endDate', filter.endDate);
     if (filter.minAmount) params.append('minAmount', filter.minAmount.toString());
@@ -128,7 +129,8 @@ const expenseApi = {
     const params = new URLSearchParams();
 
     if (filter.status) params.append('status', filter.status);
-    if (filter.category) params.append('category', filter.category);
+    if (filter.categoryId) params.append('categoryId', filter.categoryId);
+    else if (filter.category) params.append('category', filter.category);
     if (filter.startDate) params.append('startDate', filter.startDate);
     if (filter.endDate) params.append('endDate', filter.endDate);
     if (filter.minAmount) params.append('minAmount', filter.minAmount.toString());
@@ -175,19 +177,48 @@ const expenseApi = {
     code: string;
     name: string;
     type: string;
+    systemAccountTag?: string | null;
+    currentBalance: number;
+    hasFunds: boolean;
   }[]> => {
     const { data: result } = await api.get<ApiEnvelope<Array<{
-      id: string; account_code?: string; code?: string; account_name?: string; name?: string; account_type?: string; type?: string;
+      id: string;
+      account_code?: string;
+      code?: string;
+      account_name?: string;
+      name?: string;
+      account_type?: string;
+      type?: string;
+      systemAccountTag?: string | null;
+      currentBalance?: number | string;
+      current_balance?: number | string;
+      hasFunds?: boolean;
     }>>>('/expenses/payment-accounts');
     const rows = (result.data ?? result) as Array<{
-      id: string; account_code?: string; code?: string; account_name?: string; name?: string; account_type?: string; type?: string;
+      id: string;
+      account_code?: string;
+      code?: string;
+      account_name?: string;
+      name?: string;
+      account_type?: string;
+      type?: string;
+      systemAccountTag?: string | null;
+      currentBalance?: number | string;
+      current_balance?: number | string;
+      hasFunds?: boolean;
     }>;
-    return (rows || []).map((acc) => ({
-      id: acc.id,
-      code: acc.account_code || acc.code || '',
-      name: acc.account_name || acc.name || '',
-      type: acc.account_type || acc.type || '',
-    }));
+    return (rows || []).map((acc) => {
+      const balance = Number(acc.currentBalance ?? acc.current_balance ?? 0);
+      return {
+        id: acc.id,
+        code: acc.account_code || acc.code || '',
+        name: acc.account_name || acc.name || '',
+        type: acc.account_type || acc.type || '',
+        systemAccountTag: acc.systemAccountTag ?? null,
+        currentBalance: balance,
+        hasFunds: acc.hasFunds ?? balance > 0.0001,
+      };
+    });
   }
 };
 
@@ -212,7 +243,7 @@ export const usePaymentAccounts = () => {
   return useQuery({
     queryKey: ['payment-accounts'],
     queryFn: expenseApi.getPaymentAccounts,
-    staleTime: 30 * 60 * 1000, // 30 minutes - accounts don't change often
+    staleTime: 30 * 1000, // balances change when paying expenses
   });
 };
 
@@ -297,6 +328,7 @@ export const useMarkAsPaid = () => {
     onSuccess: (_, { id }) => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense', id] });
+      queryClient.invalidateQueries({ queryKey: ['payment-accounts'] });
     },
   });
 };

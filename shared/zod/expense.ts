@@ -11,6 +11,7 @@ export const ExpenseStatusSchema = z.enum([
 ]);
 
 export const ExpenseCategorySchema = z.enum([
+  'OFFICE',
   'OFFICE_SUPPLIES',
   'TRAVEL',
   'MEALS',
@@ -20,11 +21,16 @@ export const ExpenseCategorySchema = z.enum([
   'MARKETING',
   'EQUIPMENT',
   'SOFTWARE',
+  'PROFESSIONAL',
   'PROFESSIONAL_SERVICES',
   'ACCOMMODATION',
   'TRAINING',
   'ALLOWANCE',
-  'OTHER'
+  'OTHER',
+  'RENT',
+  'SALARIES',
+  'INSURANCE',
+  'GENERAL'
 ]);
 
 export const PaymentMethodSchema = z.enum([
@@ -119,7 +125,8 @@ export const UpdateExpenseSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expense date must be in YYYY-MM-DD format')
     .optional(),
 
-  category: ExpenseCategorySchema.optional(),
+  category: z.string().min(1).max(100).trim().optional(),
+  categoryId: z.string().uuid('Invalid category ID').optional(),
 
   vendor: z.string()
     .max(255, 'Vendor name cannot exceed 255 characters')
@@ -141,7 +148,8 @@ export const UpdateExpenseSchema = z.object({
 // Expense Filter Schema
 export const ExpenseFilterSchema = z.object({
   status: ExpenseStatusSchema.optional(),
-  category: ExpenseCategorySchema.optional(),
+  category: z.string().min(1).max(100).optional(),
+  categoryId: z.string().uuid().optional(),
 
   startDate: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Start date must be in YYYY-MM-DD format')

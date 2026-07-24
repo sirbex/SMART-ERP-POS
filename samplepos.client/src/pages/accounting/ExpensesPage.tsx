@@ -130,10 +130,10 @@ const ExpensesPage: React.FC = () => {
 
   const handleOpenPaymentDialog = () => {
     if (!selectedExpense) return;
-    // Default to first payment account
-    if (paymentAccounts && paymentAccounts.length > 0) {
-      setSelectedPaymentAccountId(paymentAccounts[0].id);
-    }
+    const amount = selectedExpense.amount;
+    const funded =
+      paymentAccounts?.filter((a) => a.currentBalance + 0.0001 >= amount) ?? [];
+    setSelectedPaymentAccountId(funded[0]?.id ?? '');
     setPaymentDialogOpen(true);
   };
 
@@ -336,14 +336,31 @@ const ExpensesPage: React.FC = () => {
               </SelectContent>
             </Select>
 
-            <Select onValueChange={(value) => handleFilterChange('category', value === 'all' ? undefined : value as ExpenseFilter['category'])}>
+            <Select onValueChange={(value) => {
+              if (value === 'all') {
+                setFilter((prev) => ({
+                  ...prev,
+                  categoryId: undefined,
+                  category: undefined,
+                  page: 1,
+                }));
+                return;
+              }
+              const cat = dbCategories.find((c) => c.id === value || c.code === value);
+              setFilter((prev) => ({
+                ...prev,
+                categoryId: cat?.id,
+                category: cat?.code,
+                page: 1,
+              }));
+            }}>
               <SelectTrigger>
                 <SelectValue placeholder="All Categories" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Categories</SelectItem>
                 {dbCategories.map((cat) => (
-                  <SelectItem key={cat.id} value={cat.code}>{cat.name}</SelectItem>
+                  <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -828,20 +845,46 @@ const ExpensesPage: React.FC = () => {
                 onValueChange={setSelectedPaymentAccountId}
               >
                 <SelectTrigger id="payment-account" className="h-12">
-                  <SelectValue placeholder="Select payment account" />
+                  <SelectValue placeholder="Select payment account with available funds" />
                 </SelectTrigger>
                 <SelectContent>
-                  {paymentAccounts?.map((account) => (
-                    <SelectItem key={account.id} value={account.id} className="py-3">
-                      <div className="flex items-center justify-between w-full">
-                        <span className="font-medium">{account.code} - {account.name}</span>
-                      </div>
-                    </SelectItem>
-                  ))}
+                  {(paymentAccounts ?? []).map((account) => {
+                    const amount = selectedExpense?.amount ?? 0;
+                    const canCover = account.currentBalance + 0.0001 >= amount;
+                    const tag = account.systemAccountTag
+                      ? ` · ${account.systemAccountTag.replace(/_/g, ' ')}`
+                      : '';
+                    return (
+                      <SelectItem
+                        key={account.id}
+                        value={account.id}
+                        disabled={!canCover}
+                        className="py-3"
+                      >
+                        <div className="flex w-full items-center justify-between gap-4">
+                          <span className="font-medium">
+                            {account.code} - {account.name}{tag}
+                          </span>
+                          <span className={canCover ? 'text-green-700 font-semibold' : 'text-gray-400'}>
+                            {formatCurrency(account.currentBalance)}
+                            {!canCover ? ' (insufficient)' : ''}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
+              {selectedExpense && (paymentAccounts ?? []).every(
+                (a) => a.currentBalance + 0.0001 < selectedExpense.amount
+              ) && (
+                <p className="text-sm text-red-600">
+                  No Cash, Bank, MoMo, or Petty Cash account has enough balance for{' '}
+                  {formatCurrency(selectedExpense.amount)}. Fund an account first.
+                </p>
+              )}
               <p className="text-xs text-gray-500">
-                The amount will be deducted from this account's balance.
+                Only accounts with enough available balance can be selected. The amount is deducted from that account.
               </p>
             </div>
           </div>

@@ -822,34 +822,36 @@ export async function recordExpenseToGL(expense: ExpenseData, pool?: pg.Pool): P
 
 /**
  * Map expense category to GL account code
- * 
- * Uses database mapping from expense_categories.account_id -> accounts.AccountCode
- * Falls back to hardcoded mappings if database lookup fails
+ *
+ * Prefer expense_categories.account_id at call sites (resolveExpenseGlAccountCode).
+ * This table is the hardcoded fallback for aliases / missing DB links.
  */
 function mapExpenseCategoryToAccount(categoryCode: string): string {
-  // Primary mappings based on expense_categories linked to accounts
+  // Keep in sync with shared/expense/categoryGlMap.ts
   const categoryMappings: Record<string, string> = {
-    // From expense_categories table
     'OFFICE': AccountCodes.OFFICE_SUPPLIES,      // 6400
-    'TRAVEL': '6800',                             // Travel & Entertainment
-    'MEALS': '6800',                              // Travel & Entertainment
-    'FUEL': '6800',                               // Travel & Entertainment
+    'OFFICE_SUPPLIES': AccountCodes.OFFICE_SUPPLIES,
+    'TRAVEL': '6800',
+    'MEALS': '6800',
+    'FUEL': '6800',
+    'ACCOMMODATION': '6800',
     'UTILITIES': AccountCodes.UTILITIES,          // 6200
     'SALARIES': AccountCodes.SALARIES,            // 6000
+    'ALLOWANCE': AccountCodes.SALARIES,
     'RENT': AccountCodes.RENT,                    // 6100
     'MARKETING': AccountCodes.MARKETING,          // 6300
     'INSURANCE': AccountCodes.INSURANCE,          // 6600
-    'PROFESSIONAL': '6700',                       // Professional Fees
+    'PROFESSIONAL': '6700',
+    'PROFESSIONAL_SERVICES': '6700',
     'MAINTENANCE': AccountCodes.GENERAL_EXPENSE,  // 6900
-    'EQUIPMENT': AccountCodes.GENERAL_EXPENSE,    // 6900
-    'SOFTWARE': AccountCodes.GENERAL_EXPENSE,     // 6900
-    // Legacy mappings
-    'OFFICE_SUPPLIES': AccountCodes.OFFICE_SUPPLIES,
+    'EQUIPMENT': AccountCodes.GENERAL_EXPENSE,
+    'SOFTWARE': AccountCodes.GENERAL_EXPENSE,
+    'TRAINING': AccountCodes.GENERAL_EXPENSE,
+    'OTHER': AccountCodes.GENERAL_EXPENSE,
     'GENERAL': AccountCodes.GENERAL_EXPENSE
   };
 
-  // Try exact match first, then uppercase
-  const code = categoryCode.toUpperCase().replace(/[^A-Z]/g, '_');
+  const code = categoryCode.toUpperCase().replace(/[^A-Z0-9]/g, '_');
   return categoryMappings[code] || categoryMappings[categoryCode] || AccountCodes.GENERAL_EXPENSE;
 }
 
@@ -2723,10 +2725,12 @@ export interface ExpenseApprovalData {
   expenseNumber: string;
   expenseDate: string;
   amount: number;
-  categoryCode: string;   // Maps to GL expense account via mapExpenseCategoryToAccount
+  categoryCode: string;   // Fallback map when expenseAccountCode omitted
   description: string;
   isPaidAtApproval: boolean;
   paymentAccountId?: string;
+  /** Prefer DB-resolved CoA code from expense_categories.account_id */
+  expenseAccountCode?: string;
 }
 
 /**
@@ -2742,7 +2746,8 @@ export interface ExpenseApprovalData {
  */
 export async function recordExpenseApprovalToGL(expense: ExpenseApprovalData, pool?: pg.Pool, txClient?: pg.PoolClient): Promise<void> {
   try {
-    const expenseAccountCode = mapExpenseCategoryToAccount(expense.categoryCode);
+    const expenseAccountCode =
+      expense.expenseAccountCode || mapExpenseCategoryToAccount(expense.categoryCode);
     const creditAccountCode = expense.isPaidAtApproval
       ? AccountCodes.CASH
       : AccountCodes.ACCOUNTS_PAYABLE;
