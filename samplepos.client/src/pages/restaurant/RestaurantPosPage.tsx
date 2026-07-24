@@ -1297,9 +1297,9 @@ export default function RestaurantPosPage() {
           changeGiven: paid.changeAmount,
           payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
           cashierName: user?.fullName || user?.email || undefined,
-          companyName: config.companyName,
-          companyAddress: config.companyAddress,
-          companyPhone: config.companyPhone,
+          companyName: config.branding.companyName,
+          companyAddress: config.branding.companyAddress,
+          companyPhone: config.branding.companyPhone,
           items: paid.lines.map((l) => ({
             name: l.productName,
             quantity: l.quantity,

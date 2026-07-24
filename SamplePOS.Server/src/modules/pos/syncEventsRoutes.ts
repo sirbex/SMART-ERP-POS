@@ -13,7 +13,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { Pool } from 'pg';
-import { posEventReplayer } from './posEventReplayer.js';
+import { posEventReplayer, type ReplayableEvent } from './posEventReplayer.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -262,7 +262,8 @@ export function createSyncEventsRoutes(pool: Pool): Router {
             const userId = req.user?.id ?? '00000000-0000-0000-0000-000000000000';
 
             // ── Delegate ALL business logic to the event replayer ──
-            const result = await posEventReplayer.replay(dbPool, event, userId);
+            // Zod passthrough + optional fields are structurally close but not assignable to ReplayableEvent
+            const result = await posEventReplayer.replay(dbPool, event as ReplayableEvent, userId);
 
             switch (result.status) {
                 case 'SYNCED':

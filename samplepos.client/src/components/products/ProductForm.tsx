@@ -7,7 +7,6 @@ import {
   serviceInventoryClearsForm,
 } from '@shared/utils/productTypeRules';
 import { useRestaurantEnabled } from '@/hooks/useRestaurantEnabled';
-import { useRestaurantEnabled } from '@/hooks/useRestaurantEnabled';
 
 /**
  * SAP/Odoo formula preview: safely evaluates the pricing formula in the browser

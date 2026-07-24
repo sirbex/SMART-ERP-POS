@@ -618,6 +618,7 @@ export default function ProductsPage() {
       purchaseUomId: formData.purchaseUomId,
       leadTimeDays: formData.leadTimeDays,
       reorderQuantity: formData.reorderQuantity,
+      availableInRestaurant: formData.availableInRestaurant,
     }, modalMode === 'edit' ? 'update' : 'create');
 
     const errors: Record<string, string> = { ...(z.valid ? {} : z.errors) };

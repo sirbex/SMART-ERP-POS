@@ -177,8 +177,9 @@ export interface PaymentAddedEvent {
 export interface SaleVoidedEvent {
     eventType: 'SALE_VOIDED';
     key: string;
-    orderId: string;
-    offlineId: string;
+    orderId?: string;
+    saleId?: string;
+    offlineId?: string;
     reason?: string;
     ts: number;
     [extra: string]: unknown;

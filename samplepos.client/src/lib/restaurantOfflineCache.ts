@@ -130,12 +130,14 @@ export function getRestaurantCacheLastSync(): number | null {
 /**
  * Refresh restaurant operational cache from live APIs (call when online).
  */
+type ApiListResult<T> = { data: { data?: T[] | unknown } };
+
 export async function refreshRestaurantOfflineCache(api: {
-  listTables: () => Promise<{ data: { data?: CachedRestaurantTable[] } }>;
-  listStations: () => Promise<{ data: { data?: CachedStation[] } }>;
-  menuProducts: () => Promise<{ data: { data?: CachedMenuProduct[] } }>;
-  menuCategories: () => Promise<{ data: { data?: CachedCategory[] } }>;
-  listWaiters: () => Promise<{ data: { data?: CachedWaiter[] } }>;
+  listTables: () => Promise<ApiListResult<CachedRestaurantTable>>;
+  listStations: () => Promise<ApiListResult<CachedStation>>;
+  menuProducts: () => Promise<ApiListResult<CachedMenuProduct>>;
+  menuCategories: () => Promise<ApiListResult<CachedCategory>>;
+  listWaiters: () => Promise<ApiListResult<CachedWaiter>>;
 }): Promise<void> {
   const [tables, stations, products, categories, waiters] = await Promise.all([
     api.listTables(),
@@ -144,9 +146,9 @@ export async function refreshRestaurantOfflineCache(api: {
     api.menuCategories(),
     api.listWaiters(),
   ]);
-  cacheRestaurantTables(tables.data.data || []);
-  cacheRestaurantStations(stations.data.data || []);
-  cacheRestaurantMenu(products.data.data || []);
-  cacheRestaurantCategories(categories.data.data || []);
-  cacheRestaurantWaiters(waiters.data.data || []);
+  cacheRestaurantTables((tables.data.data as CachedRestaurantTable[] | undefined) || []);
+  cacheRestaurantStations((stations.data.data as CachedStation[] | undefined) || []);
+  cacheRestaurantMenu((products.data.data as CachedMenuProduct[] | undefined) || []);
+  cacheRestaurantCategories((categories.data.data as CachedCategory[] | undefined) || []);
+  cacheRestaurantWaiters((waiters.data.data as CachedWaiter[] | undefined) || []);
 }
