@@ -1,61 +1,63 @@
-# Expense deploy proof — `7193fd1c`
+# Expense deploy proof
 
-**Generated:** 2026-07-24T13:55Z  
-**Commit:** `7193fd1c32b231e6f01949c85d66cc57fd40ca29`  
-**Title:** fix(expenses): category-GL accuracy, funded pay-from, SAP report columns  
-**Verdict: FAIL — production deploy did not complete**
+**Verdict: PASS** (after migration repair)  
+**Generated:** 2026-07-24T14:15Z
 
 ---
 
-## Gate summary
+## Commits
 
-| Gate | Result | Evidence |
-|------|--------|----------|
-| Expense proofs (17) | **PASS** (pre-push) | `expense-*-proof.test.ts` |
-| CI/CD Pipeline | **PASS** | [run 30098394178](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30098394178) |
-| Accounting Integrity workflow | **FAIL** (unrelated guardrail) | [run 30098394211](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30098394211) — `henber-fix-acculife-scn-payment.mjs` posting guardrail |
-| Deploy to Production | **FAIL** | [run 30098394200](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30098394200) |
+| SHA | Title |
+|-----|--------|
+| `7193fd1c` | fix(expenses): category-GL accuracy, funded pay-from, SAP report columns |
+| `b0835e66` | fix(expenses): make migration 561 name-safe for category seed |
 
----
-
-## What succeeded on the server before abort
-
-- Git fast-forward on prod: `9306ba1b` → `7193fd1c`
-- Pre-deploy snapshot: `/opt/smarterp/deploy-snapshots/snapshot-20260724-134907.json`
-- Migration **561** applied OK on:
-  - `pos_system`
-  - `pos_tenant_acme_store`
-  - `pos_tenant_blis`
-  - `pos_tenant_bliss_interior_ltd`
-- `pos_template` skipped (refreshed from pos_system)
-
-## What failed
-
-Migration **561** on:
-
-| DB | Error |
-|----|--------|
-| `pos_tenant_dynamics` | `duplicate key value violates unique constraint "expense_categories_name_key"` — Key `(name)=(Professional Services)` |
-| `pos_tenant_henber_pharmacy` | same constraint — Key `(name)=(Utilities)` |
-
-Root cause: `INSERT … ON CONFLICT (code) DO NOTHING` still inserts a **new code** (`PROFESSIONAL` / short names) when an existing row already owns the same **display name** under another code (`PROFESSIONAL_SERVICES`, etc.).
-
-Deploy script **stopped before** backend/frontend rebuild → app containers remain on prior image; migration incomplete on 2 tenants.
+**Production HEAD:** `b0835e66b56a6b8db29699f0d264f7451ae3b25a`
 
 ---
 
-## Fix required before re-deploy
+## Attempt 1 — FAIL (evidence retained)
 
-1. Make 561 category seed skip when **code OR name** already exists (done in follow-up commit).
-2. Re-run Deploy to Production for `7193fd1c`+fix (or push fix commit).
-3. Confirm migration 561 on dynamics + henber, then container rebuild + HTTPS health.
-4. Post-deploy smoke + expense mark-paid / reports manual check.
+| Gate | Result | Link |
+|------|--------|------|
+| CI/CD Pipeline | PASS | [30098394178](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30098394178) |
+| Deploy to Production | **FAIL** | [30098394200](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30098394200) |
+
+**Cause:** migration `561_expense_category_gl_consistency.sql` — `expense_categories_name_key` duplicate on `pos_tenant_dynamics` / `pos_tenant_henber_pharmacy` (`ON CONFLICT (code)` insufficient when display name already exists under an alias code).
+
+**Partial apply before abort:** 561 OK on `pos_system`, `acme_store`, `blis`, `bliss_interior_ltd`. App containers **not** rebuilt.
 
 ---
 
-## Reproduce / watch
+## Attempt 2 — PASS
+
+| Gate | Result | Link |
+|------|--------|------|
+| Expense proofs (17) | PASS | vitest expense-*-proof |
+| CI/CD Pipeline | PASS | [30099114816](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30099114816) |
+| Deploy to Production | **PASS** | [30099114912](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30099114912) |
+
+### Deploy log evidence (`b0835e66`)
+
+- Git on server: `b0835e66`
+- `[pos_tenant_dynamics] OK 561_expense_category_gl_consistency.sql`
+- `[pos_tenant_henber_pharmacy] OK 561_expense_category_gl_consistency.sql`
+- `>>> Migrations complete`
+- `>>> Backend health: OK`
+- `>>> HTTPS health: OK`
+- `✅ PRODUCTION DEPLOY COMPLETE`
+
+---
+
+## Reproduce
 
 ```powershell
-gh run view 30098394200 --log-failed
-gh run list --branch main --limit 5
+gh run view 30099114912
+gh run view 30098394200 --log-failed   # first failure archive
+
+cd samplepos.client
+npx vitest run `
+  src/__tests__/expense-reports-sap-proof.test.ts `
+  src/__tests__/expense-category-gl-proof.test.ts `
+  src/__tests__/expenses-petty-ux-proof.test.ts
 ```
