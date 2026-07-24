@@ -96,4 +96,33 @@ export const arPaymentService = {
     );
     return data;
   },
+
+  /** Full receipt reverse (unapply + reverse CUSTOMER_PAYMENT GL) — supplier reverse parity. */
+  async reversePayment(paymentId: string, body: { reason: string; reversalDate?: string }) {
+    const { data } = await api.post<{ success: boolean; data: unknown }>(
+      `/ar-payments/${paymentId}/reverse`,
+      body,
+    );
+    return data;
+  },
+
+  /** Reverse + re-post with a different method — supplier correct-method parity. */
+  async correctPaymentMethod(
+    paymentId: string,
+    body: {
+      newPaymentMethod: string;
+      reason: string;
+      paymentDate?: string;
+      reference?: string;
+      notes?: string;
+      bankAccountId?: string;
+      reallocate?: boolean;
+    },
+  ) {
+    const { data } = await api.post<{ success: boolean; data: unknown }>(
+      `/ar-payments/${paymentId}/correct-method`,
+      body,
+    );
+    return data;
+  },
 };

@@ -5,6 +5,7 @@ import * as openItemEngine from './openItemAllocationEngine.js';
 import type { AllocationLineInput, AllocationType } from './openItemAllocationEngine.js';
 import { invoiceRepository } from '../invoices/invoiceRepository.js';
 import * as glEntryService from '../../services/glEntryService.js';
+import { AccountingCore, AccountingError } from '../../services/accountingCore.js';
 import { UnitOfWork, DbConnection } from '../../db/unitOfWork.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
@@ -14,6 +15,13 @@ import { Money } from '../../utils/money.js';
 import * as documentFlowService from '../document-flow/documentFlowService.js';
 import type { InvoicePaymentRecord } from '../invoices/invoiceRepository.js';
 import * as whtService from '../withholding-tax/whtService.js';
+import * as receiptSettlementRepo from '../treasury/receiptSettlementRepository.js';
+
+const REVERSIBLE_AR_PAYMENT_STATUSES = new Set([
+  'POSTED',
+  'PARTIALLY_ALLOCATED',
+  'FULLY_ALLOCATED',
+]);
 
 const SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000001';
 
@@ -48,7 +56,34 @@ export interface CreateArPaymentInput {
   /** Optional WHT type — amount is gross AR settlement; cash received = net after customer WHT. */
   whtTypeId?: string;
   certificateNumber?: string;
+  /** Optional bank book link (parity with supplier payments / deposit routing). */
+  bankAccountId?: string | null;
 }
+
+export type ReverseCustomerPaymentResult = {
+  paymentId: string;
+  paymentNumber: string;
+  customerId: string;
+  amount: number;
+  previousPaymentMethod: string;
+  glReversed: boolean;
+  reversalTransactionId: string | null;
+  allocationsRemoved: number;
+  invoiceIds: string[];
+  allocationSnapshots: Array<{ invoiceId: string; amount: number }>;
+  whtTypeId: string | null;
+};
+
+export type CorrectCustomerPaymentMethodInput = {
+  newPaymentMethod: string;
+  reason: string;
+  paymentDate?: string;
+  reference?: string;
+  notes?: string;
+  bankAccountId?: string;
+  /** When true (default), re-apply prior invoice allocations on recreate */
+  reallocate?: boolean;
+};
 
 export async function createCustomerPayment(handle: DbConnection, input: CreateArPaymentInput) {
   const paymentAmount = new Decimal(input.amount);
@@ -76,6 +111,7 @@ export async function createCustomerPayment(handle: DbConnection, input: CreateA
       reference: input.reference,
       notes: input.notes,
       createdById: input.createdById,
+      bankAccountId: input.bankAccountId,
     });
 
     let whtCalc: Awaited<ReturnType<typeof whtService.calculateWht>> = null;
@@ -542,4 +578,247 @@ export async function listOpenInvoices(pool: Pool, customerId: string) {
   } finally {
     client.release();
   }
+}
+
+/**
+ * SAP FBRA / Odoo cancel payment (AR): unapply allocations, reverse CUSTOMER_PAYMENT GL, mark REVERSED.
+ * Invoices reopen; undeposited funds / AR cash side is restored. Does not create a replacement receipt.
+ */
+export async function reverseCustomerPayment(
+  pool: Pool,
+  paymentId: string,
+  userId: string,
+  reason: string,
+  options?: { client?: PoolClient; reversalDate?: string },
+): Promise<ReverseCustomerPaymentResult> {
+  if (!reason || reason.trim().length < 5) {
+    throw new ValidationError('Reversal reason is required (min 5 characters)');
+  }
+
+  const run = async (client: PoolClient): Promise<ReverseCustomerPaymentResult> => {
+    const payRes = await client.query<{
+      id: string;
+      payment_number: string;
+      customer_id: string;
+      payment_method: string;
+      total_amount: string | number;
+      status: string;
+    }>(
+      `SELECT id, payment_number, customer_id, payment_method, total_amount, status
+       FROM ar_customer_payments
+       WHERE id = $1
+       FOR UPDATE`,
+      [paymentId],
+    );
+    if (!payRes.rows[0]) {
+      throw new ValidationError('Customer payment not found');
+    }
+    const pay = payRes.rows[0];
+    const status = String(pay.status || '').toUpperCase();
+    if (status === 'REVERSED') {
+      throw new ValidationError(`Payment ${pay.payment_number} is already reversed.`);
+    }
+    if (!REVERSIBLE_AR_PAYMENT_STATUSES.has(status)) {
+      throw new ValidationError(
+        `Cannot reverse payment ${pay.payment_number} with status ${pay.status}. ` +
+          `Only posted / allocated receipts can be reversed.`,
+      );
+    }
+
+    const reversalDate = options?.reversalDate || getBusinessDate();
+    await checkAccountingPeriodOpen(client, reversalDate);
+
+    const allocations = (
+      await arPaymentRepository.findAllocationsByPaymentId(client, paymentId)
+    ).filter((a) => a.status === 'ACTIVE');
+    const invoiceIds = [...new Set(allocations.map((a) => a.invoiceId))];
+    const allocationSnapshots = allocations.map((a) => ({
+      invoiceId: a.invoiceId,
+      amount: a.amountAllocated,
+    }));
+
+    for (const alloc of allocations) {
+      await arPaymentRepository.reverseAllocation(client, alloc.id, userId);
+      await invoiceRepository.recalcInvoice(client, alloc.invoiceId);
+    }
+
+    try {
+      await receiptSettlementRepo.voidSettlementForReversedArPayment(client, paymentId);
+    } catch (err: unknown) {
+      const code = err && typeof err === 'object' && 'code' in err ? String((err as { code: string }).code) : '';
+      if (code === 'RECEIPT_ALREADY_DEPOSITED') {
+        throw new ValidationError(err instanceof Error ? err.message : String(err));
+      }
+      throw err;
+    }
+
+    const whtRes = await client.query<{ wht_type_id: string }>(
+      `SELECT wht_type_id FROM withholding_tax_entries
+       WHERE transaction_type = 'CUSTOMER_PAYMENT' AND transaction_id = $1
+       LIMIT 1`,
+      [paymentId],
+    );
+    const whtTypeId = whtRes.rows[0]?.wht_type_id ?? null;
+    await client.query(
+      `DELETE FROM withholding_tax_entries
+       WHERE transaction_type = 'CUSTOMER_PAYMENT' AND transaction_id = $1`,
+      [paymentId],
+    );
+
+    let glReversed = false;
+    let reversalTransactionId: string | null = null;
+    const glTxn = await client.query<{ Id: string }>(
+      `SELECT "Id" FROM ledger_transactions
+       WHERE "ReferenceType" = 'CUSTOMER_PAYMENT'
+         AND "ReferenceId" = $1
+         AND "IsReversed" = FALSE
+       ORDER BY "CreatedAt" DESC
+       LIMIT 1`,
+      [paymentId],
+    );
+
+    if (glTxn.rows[0]) {
+      try {
+        const rev = await AccountingCore.reverseTransaction(
+          {
+            originalTransactionId: glTxn.rows[0].Id,
+            reversalDate,
+            reason: `REVERSE ${pay.payment_number}: ${reason.trim()}`,
+            userId,
+            idempotencyKey: `CUSTOMER_PAYMENT_REVERSE-${paymentId}`,
+          },
+          pool,
+          client,
+        );
+        glReversed = true;
+        reversalTransactionId = rev.transactionId;
+      } catch (error: unknown) {
+        if (error instanceof AccountingError && error.code === 'ALREADY_REVERSED') {
+          glReversed = true;
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      logger.warn('Customer payment reverse: no open GL transaction found', {
+        paymentId,
+        paymentNumber: pay.payment_number,
+      });
+    }
+
+    const noteSuffix = `\n[REVERSED ${reversalDate}] ${reason.trim()}`;
+    // alloc_bounds: allocated + unallocated = total_amount (cannot zero both while total > 0)
+    await client.query(
+      `UPDATE ar_customer_payments
+       SET status = 'REVERSED',
+           allocated_amount = 0,
+           unallocated_amount = total_amount,
+           notes = LEFT(COALESCE(notes, '') || $2, 2000),
+           reversed_by_id = $3,
+           reversed_at = NOW(),
+           updated_at = NOW()
+       WHERE id = $1`,
+      [paymentId, noteSuffix, userId],
+    );
+
+    await openItemEngine.syncCustomerBalanceFromOpenItems(
+      client,
+      pay.customer_id,
+      'AR_PAYMENT_REVERSAL',
+    );
+
+    logger.info('Customer payment reversed', {
+      paymentId,
+      paymentNumber: pay.payment_number,
+      glReversed,
+      allocationsRemoved: allocations.length,
+      userId,
+    });
+
+    return {
+      paymentId,
+      paymentNumber: pay.payment_number,
+      customerId: pay.customer_id,
+      amount: new Decimal(pay.total_amount).toNumber(),
+      previousPaymentMethod: pay.payment_method,
+      glReversed,
+      reversalTransactionId,
+      allocationsRemoved: allocations.length,
+      invoiceIds,
+      allocationSnapshots,
+      whtTypeId,
+    };
+  };
+
+  if (options?.client) {
+    return run(options.client);
+  }
+  return UnitOfWork.run(pool, run);
+}
+
+/**
+ * Smart correction: reverse wrong receipt liquidity method and re-post with the correct method
+ * (e.g. CASH → BANK_TRANSFER) — same pattern as supplier correctSupplierPaymentMethod.
+ */
+export async function correctCustomerPaymentMethod(
+  pool: Pool,
+  paymentId: string,
+  input: CorrectCustomerPaymentMethodInput,
+  userId: string,
+) {
+  if (!input.newPaymentMethod?.trim()) {
+    throw new ValidationError('newPaymentMethod is required');
+  }
+  if (!input.reason || input.reason.trim().length < 5) {
+    throw new ValidationError('Correction reason is required (min 5 characters)');
+  }
+
+  return UnitOfWork.run(pool, async (client) => {
+    const existing = await client.query<{ payment_method: string; status: string }>(
+      `SELECT payment_method, status FROM ar_customer_payments WHERE id = $1 FOR UPDATE`,
+      [paymentId],
+    );
+    if (!existing.rows[0]) {
+      throw new ValidationError('Customer payment not found');
+    }
+    const status = String(existing.rows[0].status || '').toUpperCase();
+    if (!REVERSIBLE_AR_PAYMENT_STATUSES.has(status)) {
+      throw new ValidationError('Only posted / allocated receipts can be corrected');
+    }
+    if (existing.rows[0].payment_method === input.newPaymentMethod) {
+      throw new ValidationError(
+        `Payment is already recorded as ${input.newPaymentMethod}. Choose a different method.`,
+      );
+    }
+
+    const reversed = await reverseCustomerPayment(pool, paymentId, userId, input.reason, {
+      client,
+      reversalDate: input.paymentDate || getBusinessDate(),
+    });
+
+    const reallocate = input.reallocate !== false;
+
+    const receipt = await createCustomerPayment(client, {
+      customerId: reversed.customerId,
+      amount: reversed.amount,
+      paymentMethod: input.newPaymentMethod,
+      paymentDate: input.paymentDate || getBusinessDate(),
+      reference: input.reference || `Corrects ${reversed.paymentNumber}`,
+      notes:
+        input.notes ||
+        `Corrected from ${reversed.previousPaymentMethod} → ${input.newPaymentMethod}. ` +
+          `Original: ${reversed.paymentNumber}. ${input.reason.trim()}`,
+      createdById: userId,
+      autoAllocate: false,
+      allocations: reallocate ? reversed.allocationSnapshots : undefined,
+      allocationType: 'MANUAL',
+      whtTypeId: reversed.whtTypeId || undefined,
+      bankAccountId: input.bankAccountId,
+    });
+
+    return {
+      reversed,
+      replacement: receipt,
+    };
+  });
 }

@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { AxiosError } from 'axios';
-import { Plus, Search, DollarSign, FileText, ArrowUpRight, Wallet, User } from 'lucide-react';
+import { Plus, Search, DollarSign, FileText, ArrowUpRight, Wallet, User, Undo2, RefreshCw } from 'lucide-react';
 import { OpeningBalancePanel } from '../../components/accounting/OpeningBalancePanel';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
@@ -65,6 +65,7 @@ const todayIso = () => new Date().toLocaleDateString('en-CA');
 
 const CustomerPaymentsPage: React.FC = () => {
   const canCreate = useCanAccess([], ['customers.update']);
+  const canCorrectPayment = useCanAccess([], ['corrections.execute', 'customers.update']);
   const canManageOpeningBalance = useCanAccess([], ['accounting.opening_balance']);
   const { data: whtTypesRaw } = useWhtTypes();
   const customerWhtTypes = useMemo(() => {
@@ -90,6 +91,11 @@ const CustomerPaymentsPage: React.FC = () => {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isAllocationModalOpen, setIsAllocationModalOpen] = useState(false);
+  const [reversingPaymentId, setReversingPaymentId] = useState<string | null>(null);
+  const [correctPayment, setCorrectPayment] = useState<ArCustomerPayment | null>(null);
+  const [correctMethod, setCorrectMethod] = useState('CASH');
+  const [correctReason, setCorrectReason] = useState('');
+  const [correctingPayment, setCorrectingPayment] = useState(false);
 
   const { openGuard, closeGuard } = useTransactionGuard();
   const createGuardRef = useRef<GuardHandle | null>(null);
@@ -342,6 +348,73 @@ const CustomerPaymentsPage: React.FC = () => {
     }
   };
 
+  const isReversibleStatus = (status: string) => {
+    const s = String(status || '').toUpperCase();
+    return s === 'POSTED' || s === 'PARTIALLY_ALLOCATED' || s === 'FULLY_ALLOCATED';
+  };
+
+  const handleReversePayment = async (payment: ArCustomerPayment) => {
+    const reason = window.prompt(
+      `Reverse receipt ${payment.paymentNumber}? Invoices will reopen and Undeposited Funds / AR GL will reverse.\n\nReason (required):`,
+    );
+    if (reason === null) return;
+    if (!reason.trim() || reason.trim().length < 5) {
+      toast.error('Reversal reason is required (min 5 characters)');
+      return;
+    }
+    try {
+      setReversingPaymentId(payment.id);
+      await arPaymentService.reversePayment(payment.id, { reason: reason.trim() });
+      toast.success(`Reversed ${payment.paymentNumber}`);
+      await loadPayments();
+    } catch (error: unknown) {
+      const errMsg =
+        error instanceof AxiosError
+          ? (error.response?.data as { error?: string })?.error
+          : error instanceof Error
+            ? error.message
+            : undefined;
+      toast.error(errMsg || 'Failed to reverse payment');
+    } finally {
+      setReversingPaymentId(null);
+    }
+  };
+
+  const handleCorrectPaymentMethod = async () => {
+    if (!correctPayment) return;
+    if (!correctReason.trim() || correctReason.trim().length < 5) {
+      toast.error('Enter a reason (at least 5 characters)');
+      return;
+    }
+    if (correctMethod === correctPayment.paymentMethod) {
+      toast.error('Choose a different payment method than the original');
+      return;
+    }
+    try {
+      setCorrectingPayment(true);
+      await arPaymentService.correctPaymentMethod(correctPayment.id, {
+        newPaymentMethod: correctMethod,
+        reason: correctReason.trim(),
+      });
+      toast.success(
+        `Corrected ${correctPayment.paymentNumber}: ${correctPayment.paymentMethod} → ${correctMethod}`,
+      );
+      setCorrectPayment(null);
+      setCorrectReason('');
+      await loadPayments();
+    } catch (error: unknown) {
+      const errMsg =
+        error instanceof AxiosError
+          ? (error.response?.data as { error?: string })?.error
+          : error instanceof Error
+            ? error.message
+            : undefined;
+      toast.error(errMsg || 'Failed to correct payment method');
+    } finally {
+      setCorrectingPayment(false);
+    }
+  };
+
   const updateAllocation = (invoiceId: string, amount: number, maxDue: number) => {
     setAllocations((prev) =>
       prev.map((a) =>
@@ -526,17 +599,52 @@ const CustomerPaymentsPage: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                  {canCreate && payment.unallocatedAmount > 0.01 && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openAllocationModal(payment)}
-                      className="flex items-center gap-1 shrink-0"
-                    >
-                      <ArrowUpRight className="h-4 w-4" />
-                      Allocate
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+                    {canCorrectPayment && isReversibleStatus(payment.status) && (
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setCorrectPayment(payment);
+                            setCorrectMethod(
+                              payment.paymentMethod === 'CASH' ? 'BANK_TRANSFER' : 'CASH',
+                            );
+                            setCorrectReason(
+                              payment.paymentMethod === 'CASH'
+                                ? 'Received as cash by mistake — should be bank'
+                                : 'Correct payment method',
+                            );
+                          }}
+                          className="flex items-center gap-1"
+                        >
+                          <RefreshCw className="h-4 w-4" />
+                          Correct method
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={reversingPaymentId === payment.id}
+                          onClick={() => handleReversePayment(payment)}
+                          className="flex items-center gap-1 text-red-700 border-red-200 hover:bg-red-50"
+                        >
+                          <Undo2 className="h-4 w-4" />
+                          Reverse
+                        </Button>
+                      </>
+                    )}
+                    {canCreate && payment.unallocatedAmount > 0.01 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openAllocationModal(payment)}
+                        className="flex items-center gap-1"
+                      >
+                        <ArrowUpRight className="h-4 w-4" />
+                        Allocate
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -913,6 +1021,68 @@ const CustomerPaymentsPage: React.FC = () => {
             </Button>
             <Button disabled={allocatingPayment} onClick={() => handleAllocate(false)}>
               Apply allocation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!correctPayment}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCorrectPayment(null);
+            setCorrectReason('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Correct payment method</DialogTitle>
+            <DialogDescription>
+              Reverses {correctPayment?.paymentNumber} ({correctPayment?.paymentMethod}) and posts a
+              new receipt with the method you choose. Allocations are reapplied to the same invoices.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>New payment method</Label>
+              <Select value={correctMethod} onValueChange={setCorrectMethod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAYMENT_METHODS.filter((m) => m.value !== correctPayment?.paymentMethod).map(
+                    (m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ),
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Reason</Label>
+              <Textarea
+                value={correctReason}
+                onChange={(e) => setCorrectReason(e.target.value)}
+                rows={3}
+                placeholder="Why is the method being corrected?"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCorrectPayment(null);
+                setCorrectReason('');
+              }}
+            >
+              Cancel
+            </Button>
+            <Button disabled={correctingPayment} onClick={handleCorrectPaymentMethod}>
+              {correctingPayment ? 'Correcting…' : 'Reverse & re-post'}
             </Button>
           </DialogFooter>
         </DialogContent>

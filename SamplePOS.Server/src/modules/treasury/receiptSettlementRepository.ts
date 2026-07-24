@@ -127,6 +127,53 @@ export async function syncReceiptSettlements(conn: DbConn): Promise<number> {
   );
   inserted += dep.rowCount ?? 0;
 
+  // Legacy invoice_payments that posted DR 1015 (pre-AR-SSOT) — include in Deposit Worksheet SSOT
+  const invPay = await conn.query(
+    `INSERT INTO receipt_settlements (
+       source_type, source_id, source_number, originating_amount, settled_amount, residual_amount,
+       clearing_account_code, settlement_status, customer_id, payment_date, payment_method, ledger_transaction_id
+     )
+     SELECT
+       'INVOICE_PAYMENT', ip.id, COALESCE(ip.receipt_number, ip.id::text),
+       ROUND(le_cash.cash_debit::numeric, 2), 0, ROUND(le_cash.cash_debit::numeric, 2),
+       '1015', 'UNSETTLED', i.customer_id, ip.payment_date::date, ip.payment_method, le_cash.txn_id
+     FROM invoice_payments ip
+     JOIN invoices i ON i.id = ip.invoice_id
+     JOIN LATERAL (
+       SELECT lt."Id" AS txn_id, SUM(le."DebitAmount") AS cash_debit
+       FROM ledger_transactions lt
+       JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+       JOIN accounts a ON a."Id" = le."AccountId"
+       WHERE lt."ReferenceType" = 'INVOICE_PAYMENT'
+         AND lt."ReferenceId" = ip.id
+         AND a."AccountCode" = '1015'
+         AND le."DebitAmount" > 0
+       GROUP BY lt."Id"
+     ) le_cash ON TRUE
+     WHERE le_cash.cash_debit > 0.009
+       AND NOT EXISTS (
+         SELECT 1 FROM receipt_settlements rs
+         WHERE rs.source_type = 'INVOICE_PAYMENT' AND rs.source_id = ip.id
+       )
+     ON CONFLICT (source_type, source_id) DO NOTHING`,
+  );
+  inserted += invPay.rowCount ?? 0;
+
+  // Close deposit residuals for receipts that were fully reversed (no bank deposit applied).
+  // Prevents Undeposited Funds recon: GL already credited by REVERSE, residual still counting.
+  await conn.query(
+    `UPDATE receipt_settlements rs
+     SET residual_amount = 0,
+         settlement_status = 'SETTLED',
+         updated_at = NOW()
+     FROM ar_customer_payments p
+     WHERE rs.source_type = 'AR_CUSTOMER_PAYMENT'
+       AND rs.source_id = p.id
+       AND p.status = 'REVERSED'
+       AND rs.residual_amount > 0.009
+       AND COALESCE(rs.settled_amount, 0) <= 0.009`,
+  );
+
   // Align AR cash leg with 1015 debit when WHT split the payment
   await conn.query(
     `UPDATE receipt_settlements rs
@@ -172,9 +219,12 @@ export async function listUnsettledReceipts(
     `SELECT rs.*, c.name AS customer_name
      FROM receipt_settlements rs
      LEFT JOIN customers c ON c.id = rs.customer_id
+     LEFT JOIN ar_customer_payments p
+       ON rs.source_type = 'AR_CUSTOMER_PAYMENT' AND p.id = rs.source_id
      WHERE rs.clearing_account_code = $1
        AND rs.residual_amount > 0.009
        AND rs.settlement_status IN ('UNSETTLED', 'PARTIALLY_SETTLED')
+       AND (rs.source_type <> 'AR_CUSTOMER_PAYMENT' OR p.status IS DISTINCT FROM 'REVERSED')
      ORDER BY rs.payment_date ASC NULLS LAST, rs.created_at ASC
      LIMIT $2`,
     [clearing, limit],
@@ -328,11 +378,59 @@ export async function sumUnsettledResidual(
   accountCode = '1015',
 ): Promise<number> {
   const result = await conn.query<{ total: string }>(
-    `SELECT COALESCE(SUM(residual_amount), 0)::text AS total
-     FROM receipt_settlements
-     WHERE clearing_account_code = $1
-       AND residual_amount > 0.009`,
+    `SELECT COALESCE(SUM(rs.residual_amount), 0)::text AS total
+     FROM receipt_settlements rs
+     LEFT JOIN ar_customer_payments p
+       ON rs.source_type = 'AR_CUSTOMER_PAYMENT' AND p.id = rs.source_id
+     WHERE rs.clearing_account_code = $1
+       AND rs.residual_amount > 0.009
+       AND (rs.source_type <> 'AR_CUSTOMER_PAYMENT' OR p.status IS DISTINCT FROM 'REVERSED')`,
     [accountCode],
   );
   return Number(result.rows[0]?.total ?? 0);
+}
+
+/**
+ * Close undeposited residual when an AR receipt is reversed (not yet deposited).
+ * Refuses if any amount was already applied on a Deposit Worksheet — reverse the deposit first.
+ */
+export async function voidSettlementForReversedArPayment(
+  conn: DbConn,
+  paymentId: string,
+): Promise<void> {
+  const result = await conn.query<{
+    id: string;
+    settled_amount: string | number;
+    residual_amount: string | number;
+    source_number: string | null;
+  }>(
+    `SELECT id, settled_amount, residual_amount, source_number
+     FROM receipt_settlements
+     WHERE source_type = 'AR_CUSTOMER_PAYMENT' AND source_id = $1
+     FOR UPDATE`,
+    [paymentId],
+  );
+  if (result.rows.length === 0) return;
+
+  const row = result.rows[0];
+  const settled = Number(row.settled_amount || 0);
+  if (settled > 0.009) {
+    throw Object.assign(
+      new Error(
+        `Cannot reverse receipt ${row.source_number || paymentId}: ` +
+          `${settled.toFixed(2)} already deposited via Deposit Worksheet. ` +
+          `Reverse that deposit first, then reverse the receipt.`,
+      ),
+      { code: 'RECEIPT_ALREADY_DEPOSITED' },
+    );
+  }
+
+  await conn.query(
+    `UPDATE receipt_settlements
+     SET residual_amount = 0,
+         settlement_status = 'SETTLED',
+         updated_at = NOW()
+     WHERE id = $1`,
+    [row.id],
+  );
 }

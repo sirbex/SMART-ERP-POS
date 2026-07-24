@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
-import { requirePermission } from '../../rbac/middleware.js';
+import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import * as arPaymentService from './arPaymentService.js';
 import { pool as globalPool } from '../../db/pool.js';
@@ -30,6 +30,7 @@ const CreatePaymentSchema = z.object({
     .optional(),
   whtTypeId: z.string().uuid().nullable().optional(),
   certificateNumber: z.string().max(100).optional(),
+  bankAccountId: z.string().uuid().optional(),
 });
 
 const AllocateSchema = z.object({
@@ -42,6 +43,27 @@ const AllocateSchema = z.object({
       }),
     )
     .default([]),
+});
+
+const ReversePaymentSchema = z.object({
+  reason: z.string().min(5),
+  reversalDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+});
+
+const CorrectPaymentMethodSchema = z.object({
+  newPaymentMethod: z.string().min(1),
+  reason: z.string().min(5),
+  paymentDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  reference: z.string().optional(),
+  notes: z.string().optional(),
+  bankAccountId: z.string().uuid().optional(),
+  reallocate: z.boolean().optional(),
 });
 
 router.post(
@@ -65,6 +87,7 @@ router.post(
       })),
       whtTypeId: body.whtTypeId ?? undefined,
       certificateNumber: body.certificateNumber,
+      bankAccountId: body.bankAccountId,
     });
     res.status(201).json({ success: true, data: result });
   }),
@@ -123,6 +146,41 @@ router.post(
         allocationType: body.allocationType,
         createdById: req.user!.id,
       },
+    );
+    res.json({ success: true, data: result });
+  }),
+);
+
+/** Reverse posted receipt (unapply + reverse CUSTOMER_PAYMENT GL) — supplier reverse parity. */
+router.post(
+  '/:paymentId/reverse',
+  requireAnyPermission(['corrections.execute', 'customers.update']),
+  asyncHandler(async (req, res) => {
+    const paymentId = z.string().uuid().parse(req.params.paymentId);
+    const body = ReversePaymentSchema.parse(req.body);
+    const result = await arPaymentService.reverseCustomerPayment(
+      p(req),
+      paymentId,
+      req.user!.id,
+      body.reason,
+      { reversalDate: body.reversalDate },
+    );
+    res.json({ success: true, data: result });
+  }),
+);
+
+/** Correct payment method (reverse + re-post) — supplier correct-method parity. */
+router.post(
+  '/:paymentId/correct-method',
+  requireAnyPermission(['corrections.execute', 'customers.update']),
+  asyncHandler(async (req, res) => {
+    const paymentId = z.string().uuid().parse(req.params.paymentId);
+    const body = CorrectPaymentMethodSchema.parse(req.body);
+    const result = await arPaymentService.correctCustomerPaymentMethod(
+      p(req),
+      paymentId,
+      body,
+      req.user!.id,
     );
     res.json({ success: true, data: result });
   }),
