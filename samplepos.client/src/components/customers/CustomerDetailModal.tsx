@@ -25,6 +25,11 @@ import { CustomerSmartStatementPanel } from './CustomerSmartStatementPanel';
 import { useWhtTypes } from '../../hooks/useAccountingModules';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import {
+    isAdjustableCustomerInvoice,
+    isListableCustomerInvoice,
+    type CustomerInvoiceListRow,
+} from '../../utils/customerInvoiceListFilters';
 
 interface CustomerData {
     id: string;
@@ -70,42 +75,14 @@ interface SummaryData {
     pendingInvoices?: number | string;
 }
 
-interface InvoiceRow {
+interface InvoiceRow extends CustomerInvoiceListRow {
     id: string;
-    invoiceNumber?: string;
-    invoice_number?: string;
     issueDate?: string;
     issue_date?: string;
     dueDate?: string;
     due_date?: string;
     status: string;
-    totalAmount?: number | string;
-    total_amount?: number | string;
-    amountPaid?: number | string;
-    amount_paid?: number | string;
-    balance?: number | string;
-    amount_due?: number | string;
     notes?: string;
-    documentType?: string;
-    document_type?: string;
-}
-
-function invoiceOutstandingAmount(inv: InvoiceRow): number {
-    const total = Number(inv.totalAmount ?? inv.total_amount ?? 0);
-    const paid = Number(inv.amountPaid ?? inv.amount_paid ?? 0);
-    return Number(inv.balance ?? inv.amount_due ?? new Decimal(total).minus(paid).toNumber());
-}
-
-/** Real customer invoices only — not credit/debit notes; must have AR left to correct */
-function isAdjustableCustomerInvoice(inv: InvoiceRow): boolean {
-    const num = String(inv.invoiceNumber ?? inv.invoice_number ?? '').toUpperCase();
-    if (num.startsWith('CN-') || num.startsWith('DN-')) return false;
-    const docType = String(inv.documentType ?? inv.document_type ?? 'INVOICE').toUpperCase();
-    if (docType !== 'INVOICE') return false;
-    const status = String(inv.status ?? '').toUpperCase();
-    if (['CANCELLED', 'VOIDED', 'VOID'].includes(status)) return false;
-    // Fully settled invoices: use credit note reversal flow, not Adjust wizard
-    return invoiceOutstandingAmount(inv) > 0.009;
 }
 
 interface InvoiceDetailItem {
@@ -229,8 +206,8 @@ export default function CustomerDetailModal({
 
     const { data: invoicesData, isLoading: isLoadingInvoices, refetch: refetchInvoices } = useInvoices(invoicePage, 20, customerId || undefined);
     const allInvoiceRows: InvoiceRow[] = Array.isArray(invoicesData) ? invoicesData : [];
-    /** AR invoices only — credit notes are listed separately */
-    const salesInvoices = allInvoiceRows.filter(isAdjustableCustomerInvoice);
+    /** Full invoice list (incl. paid / OB); Adjust button still gated by isAdjustableCustomerInvoice */
+    const salesInvoices = allInvoiceRows.filter(isListableCustomerInvoice);
     const recordPayment = useRecordInvoicePayment();
 
     const updateCustomer = useUpdateCustomer();
