@@ -13,6 +13,9 @@ import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js'
 
 const PRODUCT_SELECT_COLUMNS = `
       p.id, p.product_number as "productNumber", p.sku, p.barcode, p.name, p.description, p.category,
+      p.category_id as "categoryId",
+      COALESCE(p.product_type, 'inventory') as "productType",
+      COALESCE(p.available_in_restaurant, false) as "availableInRestaurant",
       p.generic_name as "genericName",
       p.conversion_factor as "conversionFactor",
       pv.cost_price as "costPrice",
@@ -61,7 +64,7 @@ const PRODUCT_UOM_AGG = `
       ) as "productUoms"`;
 
 const PRODUCT_GROUP_BY = `p.id, p.product_number, p.sku, p.barcode, p.name, p.description, p.category,
-             p.generic_name, p.conversion_factor, pv.cost_price, pv.selling_price,
+             p.category_id, p.product_type, p.available_in_restaurant, p.generic_name, p.conversion_factor, pv.cost_price, pv.selling_price,
              p.is_taxable, p.tax_rate, pv.costing_method, pv.average_cost, pv.last_cost,
              pv.pricing_formula, pv.auto_update_price, pi.quantity_on_hand,
              pi.reorder_level, pi.reorder_quantity, p.track_expiry, p.min_days_before_expiry_sale, p.is_active,
@@ -222,11 +225,33 @@ export async function generateProductNumber(conn: pg.Pool | pg.PoolClient): Prom
   return `PROD-${seq.toString().padStart(6, '0')}`;
 }
 
+/** Resolve product_categories.id from free-text category name (restaurant menu joins on category_id). */
+async function resolveCategoryId(
+  pool: pg.Pool | pg.PoolClient,
+  categoryName: string | null | undefined,
+): Promise<string | null> {
+  const name = categoryName?.trim();
+  if (!name) return null;
+  const result = await pool.query<{ id: string }>(
+    `SELECT id
+     FROM product_categories
+     WHERE LOWER(TRIM(name)) = LOWER(TRIM($1))
+       AND COALESCE(is_active, TRUE) = TRUE
+     ORDER BY name
+     LIMIT 1`,
+    [name],
+  );
+  return result.rows[0]?.id ?? null;
+}
+
 export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Promise<Product> {
   const pool = dbPool || globalPool;
 
   // Generate product number in app layer (trigger removed — SAP/Odoo pattern)
   const productNumber = await generateProductNumber(pool);
+  const categoryId = await resolveCategoryId(pool, data.category);
+  const productType = data.productType || 'inventory';
+  const availableInRestaurant = data.availableInRestaurant ?? true;
 
   const params = [
     productNumber,
@@ -235,6 +260,9 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
     data.name,
     data.description || null,
     data.category || null,
+    categoryId,
+    productType,
+    availableInRestaurant,
     data.genericName || null,
     data.conversionFactor || 1.0,
     data.costPrice || 0,
@@ -252,12 +280,12 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   ];
 
   const sql = `INSERT INTO products (
-      product_number, sku, barcode, name, description, category, generic_name,
+      product_number, sku, barcode, name, description, category, category_id, product_type, available_in_restaurant, generic_name,
       conversion_factor,
       cost_price, selling_price, is_taxable, tax_rate,
       reorder_level, track_expiry, min_days_before_expiry_sale, is_active,
       preferred_supplier_id, supplier_product_code, purchase_uom_id, lead_time_days
-  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
     RETURNING id`;
 
   const result = await pool.query(sql, params);
@@ -321,6 +349,44 @@ export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg
   if (data.category !== undefined) {
     masterFields.push(`category = $${masterIdx++}`);
     masterValues.push(data.category);
+    const categoryId = await resolveCategoryId(pool, data.category);
+    masterFields.push(`category_id = $${masterIdx++}`);
+    masterValues.push(categoryId);
+  }
+  if (data.productType !== undefined) {
+    masterFields.push(`product_type = $${masterIdx++}`);
+    masterValues.push(data.productType);
+    if (data.productType === 'service') {
+      // Service/menu dishes: clear inventory & procurement that do not apply
+      masterFields.push(`track_expiry = $${masterIdx++}`);
+      masterValues.push(false);
+      masterFields.push(`min_days_before_expiry_sale = $${masterIdx++}`);
+      masterValues.push(0);
+      masterFields.push(`preferred_supplier_id = $${masterIdx++}`);
+      masterValues.push(null);
+      masterFields.push(`supplier_product_code = $${masterIdx++}`);
+      masterValues.push(null);
+      masterFields.push(`purchase_uom_id = $${masterIdx++}`);
+      masterValues.push(null);
+      masterFields.push(`lead_time_days = $${masterIdx++}`);
+      masterValues.push(0);
+      if (data.reorderLevel === undefined) {
+        invFields.push(`reorder_level = $${invIdx++}`);
+        invValues.push(0);
+      }
+      if (data.reorderQuantity === undefined) {
+        invFields.push(`reorder_quantity = $${invIdx++}`);
+        invValues.push(0);
+      }
+      if (data.autoUpdatePrice === undefined) {
+        valFields.push(`auto_update_price = $${valIdx++}`);
+        valValues.push(false);
+      }
+    }
+  }
+  if (data.availableInRestaurant !== undefined) {
+    masterFields.push(`available_in_restaurant = $${masterIdx++}`);
+    masterValues.push(data.availableInRestaurant);
   }
   if (data.genericName !== undefined) {
     masterFields.push(`generic_name = $${masterIdx++}`);

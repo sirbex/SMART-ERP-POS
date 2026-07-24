@@ -13,6 +13,8 @@ export interface CreateProductInput {
   name: string;
   description?: string | null;
   category?: string | null;
+  productType?: 'inventory' | 'consumable' | 'service';
+  availableInRestaurant?: boolean;
   unitOfMeasure?: string;
   conversionFactor?: number;
   costPrice: number | string;

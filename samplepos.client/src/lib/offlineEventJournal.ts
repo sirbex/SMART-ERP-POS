@@ -44,7 +44,15 @@ export interface EventLine {
     subtotal: number;
     taxAmount: number;
     discountAmount?: number;
+    /** Stable client line id (restaurant offline KOT tracking) */
+    lineId?: string;
+    lineNotes?: string | null;
+    /** ISO timestamp when KOT fired for this line */
+    kitchenSentAt?: string | null;
 }
+
+/** Optional restaurant fields on ORDER_* events (Phase 5.1) */
+export type RestaurantOrderChannel = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
 
 export interface EventPayment {
     paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT';
@@ -67,22 +75,50 @@ export type PosOfflineEvent =
         customerId?: string;
         notes?: string;
         ts: number;
+        /** Phase 5.1 restaurant */
+        channel?: RestaurantOrderChannel;
+        tableId?: string;
+        tableCode?: string;
+        tableName?: string;
+        waiterId?: string;
+        waiterName?: string;
+        guestName?: string | null;
+        guestPhone?: string | null;
+        deliveryAddress?: string | null;
+        pickupLabel?: string | null;
     }
     | {
         eventType: 'ORDER_UPDATED';
         key: string;
         orderId: string;
+        /** Present for restaurant checks so sync schema can validate */
+        offlineId?: string;
         lines: EventLine[];
         customerId?: string;
         notes?: string;
         ts: number;
+        channel?: RestaurantOrderChannel;
+        tableId?: string;
+        tableCode?: string;
+        tableName?: string;
+        waiterId?: string;
+        waiterName?: string;
+        guestName?: string | null;
+        guestPhone?: string | null;
+        deliveryAddress?: string | null;
+        pickupLabel?: string | null;
     }
     | {
         eventType: 'ORDER_CANCELLED';
         key: string;
         orderId: string;
+        /** Human-readable check id (OFF-R-…) for sync / UI */
+        offlineId?: string;
         reason?: string;
         ts: number;
+        /** Phase 5.3 — free floor on replay */
+        tableId?: string;
+        tableCode?: string;
     }
     | {
         eventType: 'PAYMENT_ADDED';
@@ -113,12 +149,94 @@ export type PosOfflineEvent =
         /** Track which products/quantities to restore if the sale is cancelled */
         stockDeductions: Array<{ productId: string; quantity: number }>;
         ts: number;
+        /** Phase 5.2 — restaurant table link for order complete + floor release on replay */
+        tableId?: string;
+        channel?: RestaurantOrderChannel;
+        tableCode?: string;
     }
     | {
         eventType: 'SALE_VOIDED';
         key: string;
         saleId: string;
         reason: string;
+        ts: number;
+    }
+    | {
+        /** Phase 5.1 — KOT printed locally; server kot insert deferred to sync handler */
+        eventType: 'RESTAURANT_KOT_FIRED';
+        key: string;
+        orderId: string;
+        kotOfflineId: string;
+        tableCode?: string;
+        tableName?: string;
+        waiterName?: string;
+        station?: string;
+        orderChannel?: string;
+        guestName?: string | null;
+        lines: Array<{
+            lineId: string;
+            productName: string;
+            quantity: number;
+            lineNotes?: string | null;
+        }>;
+        ts: number;
+    }
+    | {
+        /** Phase 5.4 — move entire check to another table */
+        eventType: 'RESTAURANT_CHECK_TRANSFERRED';
+        key: string;
+        orderId: string;
+        offlineId?: string;
+        fromTableId: string;
+        toTableId: string;
+        toTableCode?: string;
+        toTableName?: string;
+        channel?: RestaurantOrderChannel;
+        ts: number;
+    }
+    | {
+        /** Phase 5.4 — merge secondary check into primary (all lines) */
+        eventType: 'RESTAURANT_CHECK_MERGED';
+        key: string;
+        primaryOrderId: string;
+        secondaryOrderId: string;
+        primaryOfflineId?: string;
+        secondaryOfflineId?: string;
+        primaryTableId?: string;
+        secondaryTableId?: string;
+        ts: number;
+    }
+    | {
+        /** Phase 5.4 — split selected lines onto new check */
+        eventType: 'RESTAURANT_CHECK_SPLIT';
+        key: string;
+        sourceOrderId: string;
+        sourceOfflineId?: string;
+        newOrderId: string;
+        newOfflineId: string;
+        lineIds: string[];
+        movedLines: EventLine[];
+        sourceTableId: string;
+        targetTableId: string;
+        targetTableCode?: string;
+        targetTableName?: string;
+        sameTable: boolean;
+        channel?: RestaurantOrderChannel;
+        waiterId?: string;
+        waiterName?: string;
+        guestName?: string | null;
+        guestPhone?: string | null;
+        deliveryAddress?: string | null;
+        pickupLabel?: string | null;
+        ts: number;
+    }
+    | {
+        /** Phase 5.5 — KDS ticket status on LAN / same-device journal board */
+        eventType: 'RESTAURANT_KOT_STATUS';
+        key: string;
+        orderId: string;
+        kotOfflineId: string;
+        status: 'SENT' | 'PREPARING' | 'READY' | 'BUMPED';
         ts: number;
     };
 

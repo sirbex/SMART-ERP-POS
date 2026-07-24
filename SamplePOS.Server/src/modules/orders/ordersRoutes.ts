@@ -4,6 +4,7 @@ import { pool as globalPool } from '../../db/pool.js';
 import { ordersService, CreateOrderInput, OrderItemInput, buildOrderCompletionSaleTotals } from './ordersService.js';
 import { repriceSaleItemsForAtCostCustomer, isAtCostCustomer } from './orderAtCostPricing.js';
 import { salesService, CreateSaleInput, SaleItemInput } from '../sales/salesService.js';
+import { restaurantService } from '../restaurant/restaurantService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
@@ -296,6 +297,16 @@ router.post(
     // 3. Create the sale AND atomically mark order completed (single transaction)
     const result = await salesService.createSale(pool, saleInput);
 
+    // 4. Restaurant SSOT: free floor table after successful payment (no-op if flag off)
+    try {
+      await restaurantService.releaseTableForOrder(pool, orderId);
+    } catch (releaseErr) {
+      logger.error('Restaurant table release failed after order complete', {
+        orderId,
+        releaseErr,
+      });
+    }
+
     res.json({
       success: true,
       data: {
@@ -324,6 +335,16 @@ router.post(
     const userId = req.user!.id;
 
     const order = await ordersService.cancelOrder(pool, req.params.id, userId, reason);
+
+    try {
+      await restaurantService.releaseTableForOrder(pool, order.id);
+    } catch (releaseErr) {
+      logger.error('Restaurant table release failed after order cancel', {
+        orderId: order.id,
+        releaseErr,
+      });
+    }
+
     res.json({ success: true, data: order, message: `Order ${order.orderNumber} cancelled` });
   })
 );

@@ -47,6 +47,11 @@ import {
 } from '../pricing/atCostIssuePrice.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { warehouseSaleDeductionService } from '../inventory/warehouse/warehouseSaleDeductionService.js';
+import {
+  explodeActiveRecipe,
+  planSaleStockDeduction,
+  type RecipeExplosionLine,
+} from './saleRecipeExplosion.js';
 import { lotService } from '../inventory-lot/lotService.js';
 import { loadGlobalSelectableLots } from '../inventory-lot/postgresLotSelector.js';
 import { selectLots } from '@shared/inventory-lot/index.js';
@@ -342,6 +347,19 @@ export const salesService = {
         );
       }
 
+      // Phase 3: pre-resolve recipe BOM explosion per sale line (null = direct product stock)
+      const recipeExplosionByLine = new Map<number, RecipeExplosionLine[] | null>();
+      for (let lineIdx = 0; lineIdx < input.items.length; lineIdx++) {
+        const line = input.items[lineIdx];
+        if (line.productId?.startsWith('custom_')) continue;
+        const snap = saleUomSnapshots.get(lineIdx);
+        if (!snap) continue;
+        recipeExplosionByLine.set(
+          lineIdx,
+          await explodeActiveRecipe(client, line.productId, new Decimal(snap.baseQuantity)),
+        );
+      }
+
       // ========== PRICING ENGINE RESOLUTION ==========
       // Resolve prices through the full cascade (tier → rule → group discount → formula → base)
       // This ensures customer-group pricing, quantity breaks, and price rules are enforced server-side.
@@ -573,7 +591,32 @@ export const salesService = {
         }
 
         // BR-INV-001: Validate stock availability
-        if (multistoreEnabled && sellingStoreId) {
+        // Phase 3: recipe parents validate/consume ingredients; service with no recipe skips stock.
+        const recipeLines = recipeExplosionByLine.get(lineIdx) ?? null;
+        const productType = String(productData.product_type || 'inventory');
+        const stockPlan = planSaleStockDeduction(productType, Boolean(recipeLines?.length));
+        const isServiceNoRecipe = stockPlan.kind === 'skip';
+
+        if (stockPlan.kind === 'skip') {
+          // Pure service — no inventory
+        } else if (stockPlan.kind === 'ingredients' && recipeLines?.length) {
+          for (const rl of recipeLines) {
+            if (multistoreEnabled && sellingStoreId) {
+              await warehouseSaleDeductionService.validateSellableAtStore(
+                client,
+                sellingStoreId,
+                rl.componentProductId,
+                rl.baseQty.toNumber(),
+              );
+            } else {
+              await InventoryBusinessRules.validateStockAvailability(
+                client,
+                rl.componentProductId,
+                rl.baseQty.toNumber(),
+              );
+            }
+          }
+        } else if (multistoreEnabled && sellingStoreId) {
           await warehouseSaleDeductionService.validateSellableAtStore(
             client,
             sellingStoreId,
@@ -581,11 +624,11 @@ export const salesService = {
             baseQty.toNumber(),
           );
         } else {
-        await InventoryBusinessRules.validateStockAvailability(
-          client,
-          item.productId,
-          baseQty.toNumber()
-        );
+          await InventoryBusinessRules.validateStockAvailability(
+            client,
+            item.productId,
+            baseQty.toNumber(),
+          );
         }
 
         const expiryRuleRes = await client.query(
@@ -610,7 +653,67 @@ export const salesService = {
           costingMethod,
         };
         try {
-          if (multistoreEnabled && sellingStoreId) {
+          if (isServiceNoRecipe) {
+            itemCostDecimal = new Decimal(0);
+            unitCost = 0;
+          } else if (recipeLines?.length) {
+            // Phase 3: COGS preview = sum of ingredient FEFO costs
+            for (const rl of recipeLines) {
+              const compVal = await client.query(
+                `SELECT COALESCE(pv.cost_price, 0) AS cost_price,
+                        COALESCE(pv.average_cost, 0) AS average_cost
+                 FROM products p
+                 LEFT JOIN product_valuation pv ON pv.product_id = p.id
+                 WHERE p.id = $1`,
+                [rl.componentProductId],
+              );
+              const compMaster = Money.parseDb(String(compVal.rows[0]?.cost_price ?? '0'));
+              const compExpiry = await client.query(
+                `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days
+                 FROM products WHERE id = $1`,
+                [rl.componentProductId],
+              );
+              const compMinDays = parseInt(compExpiry.rows[0]?.min_days ?? '0', 10);
+
+              if (multistoreEnabled && sellingStoreId) {
+                const storePreview = await warehouseSaleDeductionService.previewSaleCostAtStore(
+                  client,
+                  sellingStoreId,
+                  rl.componentProductId,
+                  rl.baseQty,
+                  compMaster,
+                );
+                itemCostDecimal = itemCostDecimal.plus(storePreview.totalCost);
+                if (storePreview.shortfall.greaterThan(0.001)) {
+                  const avgCost = Money.parseDb(String(compVal.rows[0]?.average_cost ?? '0'));
+                  const shortfallUnit = avgCost.greaterThan(0) ? avgCost : compMaster;
+                  itemCostDecimal = itemCostDecimal.plus(storePreview.shortfall.times(shortfallUnit));
+                }
+              } else {
+                const { totalCost: batchTotal, shortfall } = await previewFefoIssueCostForBaseQty(
+                  client,
+                  rl.componentProductId,
+                  rl.baseQty,
+                  compMaster,
+                  { minDaysBeforeExpiry: compMinDays },
+                );
+                itemCostDecimal = itemCostDecimal.plus(batchTotal);
+                if (shortfall.greaterThan(0.001)) {
+                  const avgCost = Money.parseDb(String(compVal.rows[0]?.average_cost ?? '0'));
+                  const shortfallUnit = avgCost.greaterThan(0) ? avgCost : compMaster;
+                  itemCostDecimal = itemCostDecimal.plus(shortfall.times(shortfallUnit));
+                }
+              }
+            }
+            unitCost = baseQty.greaterThan(0)
+              ? Money.toNumber(Money.round(itemCostDecimal.dividedBy(baseQty), 2))
+              : 0;
+            logger.info(`Recipe BOM cost preview for product ${item.productId}`, {
+              ingredientCount: recipeLines.length,
+              totalBatchCost: itemCostDecimal.toFixed(2),
+              unitCostPerBase: unitCost,
+            });
+          } else if (multistoreEnabled && sellingStoreId) {
             const storePreview = await warehouseSaleDeductionService.previewSaleCostAtStore(
               client,
               sellingStoreId,
@@ -631,6 +734,9 @@ export const salesService = {
                 shortfall: storePreview.shortfall.toFixed(4),
               });
             }
+            unitCost = baseQty.greaterThan(0)
+              ? Money.toNumber(Money.round(itemCostDecimal.dividedBy(baseQty), 2))
+              : 0;
           } else {
           const { totalCost: batchTotal, shortfall } = await previewFefoIssueCostForBaseQty(
             client,
@@ -653,7 +759,6 @@ export const salesService = {
               shortfall: shortfall.toFixed(4),
             });
           }
-          }
 
           unitCost = baseQty.greaterThan(0)
             ? Money.toNumber(Money.round(itemCostDecimal.dividedBy(baseQty), 2))
@@ -665,7 +770,12 @@ export const salesService = {
             totalBatchCost: itemCostDecimal.toFixed(2),
             unitCostPerBase: unitCost,
           });
+          }
         } catch (error: unknown) {
+          if (isServiceNoRecipe) {
+            itemCostDecimal = new Decimal(0);
+            unitCost = 0;
+          } else {
           const avgCost = Money.parseDb(productData.average_cost);
           const costPriceDec = Money.parseDb(productData.cost_price);
           unitCost = Money.toNumber(avgCost.greaterThan(0) ? avgCost : costPriceDec);
@@ -676,6 +786,7 @@ export const salesService = {
             unitCost,
             error: error instanceof Error ? error.message : String(error),
           });
+          }
         }
 
         const itemCost = itemCostDecimal;
@@ -1178,31 +1289,78 @@ export const salesService = {
         const baseQty = new Decimal(uomSnapshot.baseQuantity);
         const deductConversionFactor = new Decimal(uomSnapshot.conversionFactor);
         const deductBaseUomId = uomSnapshot.baseUomId;
-        // Get product costing method again
-        const productResult = await client.query(
-          'SELECT costing_method FROM product_valuation WHERE product_id = $1',
-          [item.productId]
-        );
 
-        const costingMethod = productResult.rows[0]?.costing_method || 'FIFO';
-
-        // Collect cost layer deduction data - will be processed AFTER transaction commits
-        // This avoids nested transactions which cause connection pool exhaustion
-        if (costingMethod === 'FIFO') {
-          costLayerDeductions.push({
-            productId: item.productId,
-            quantity: baseQty.toNumber(),
-            costingMethod,
-          });
-        }
-
-        // 2. PHYSICAL: Deduct from inventory batches using FEFO (LotService.consumeLot)
-        const expiryRuleRes = await client.query(
-          `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days
-           FROM products WHERE id = $1`,
+        const recipeLines = recipeExplosionByLine.get(lineIdx) ?? null;
+        const parentTypeRes = await client.query(
+          `SELECT COALESCE(product_type, 'inventory') AS product_type FROM products WHERE id = $1`,
           [item.productId],
         );
-        const minDaysBeforeExpiry = parseInt(expiryRuleRes.rows[0]?.min_days ?? '0', 10);
+        const parentType = String(parentTypeRes.rows[0]?.product_type || 'inventory');
+        const deductPlan = planSaleStockDeduction(parentType, Boolean(recipeLines?.length));
+        if (deductPlan.kind === 'skip') {
+          logger.info('Skipping inventory deduction for service item', {
+            productId: item.productId,
+            productName: item.productName,
+          });
+          continue;
+        }
+
+        type DeductTarget = {
+          productId: string;
+          productName: string;
+          baseQty: Decimal;
+          enteredQty: number;
+          baseUomId: string;
+          conversionFactor: Decimal;
+        };
+
+        const deductTargets: DeductTarget[] = [];
+        if (deductPlan.kind === 'ingredients' && recipeLines?.length) {
+          for (const rl of recipeLines) {
+            const baseUomRes = await client.query(
+              `SELECT p.base_uom_id AS "baseUomId"
+               FROM products p
+               WHERE p.id = $1`,
+              [rl.componentProductId],
+            );
+            let baseUomId = baseUomRes.rows[0]?.baseUomId as string | undefined | null;
+            if (!baseUomId) {
+              const snap = await resolveSaleItemUom(
+                rl.componentProductId,
+                { quantity: 1 },
+                client,
+              );
+              baseUomId = snap.baseUomId;
+            }
+            if (!baseUomId) {
+              throw new ValidationError(
+                `Ingredient "${rl.componentName}" needs a base UoM before recipe consumption`,
+              );
+            }
+            deductTargets.push({
+              productId: rl.componentProductId,
+              productName: rl.componentName,
+              baseQty: rl.baseQty,
+              enteredQty: Number(rl.baseQty.toFixed(6)),
+              baseUomId,
+              conversionFactor: new Decimal(1),
+            });
+          }
+          logger.info('Recipe BOM inventory explosion', {
+            parentProductId: item.productId,
+            parentName: item.productName,
+            ingredientCount: deductTargets.length,
+          });
+        } else {
+          deductTargets.push({
+            productId: item.productId,
+            productName: item.productName,
+            baseQty,
+            enteredQty: item.quantity,
+            baseUomId: deductBaseUomId,
+            conversionFactor: deductConversionFactor,
+          });
+        }
 
         await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
         const movNumRes = await client.query(
@@ -1217,143 +1375,167 @@ export const salesService = {
         );
         let movementSeq = parseInt(movNumRes.rows[0]?.movement_number?.split('-')[2] || '1');
 
-        if (multistoreEnabled && sellingStoreId) {
-          const deductResult = await warehouseSaleDeductionService.deductForSaleLine(client, {
-            storeLocationId: sellingStoreId,
-            productId: item.productId,
-            productName: item.productName,
-            baseQty,
-            saleId: sale.id,
-            saleNumber: sale.saleNumber,
-            soldBy: input.soldBy ?? null,
-            enteredQty: item.quantity,
-            baseUomId: deductBaseUomId,
-            conversionFactor: deductConversionFactor.toFixed(6),
-            movementSeqStart: movementSeq,
+        let lineActualCost = new Decimal(0);
+
+        for (const target of deductTargets) {
+          const productResult = await client.query(
+            'SELECT costing_method FROM product_valuation WHERE product_id = $1',
+            [target.productId],
+          );
+          const costingMethod = productResult.rows[0]?.costing_method || 'FIFO';
+          if (costingMethod === 'FIFO') {
+            costLayerDeductions.push({
+              productId: target.productId,
+              quantity: target.baseQty.toNumber(),
+              costingMethod,
+            });
+          }
+
+          const expiryRuleRes = await client.query(
+            `SELECT COALESCE(min_days_before_expiry_sale, 0) AS min_days
+             FROM products WHERE id = $1`,
+            [target.productId],
+          );
+          const minDaysBeforeExpiry = parseInt(expiryRuleRes.rows[0]?.min_days ?? '0', 10);
+
+          if (multistoreEnabled && sellingStoreId) {
+            const deductResult = await warehouseSaleDeductionService.deductForSaleLine(client, {
+              storeLocationId: sellingStoreId,
+              productId: target.productId,
+              productName: target.productName,
+              baseQty: target.baseQty,
+              saleId: sale.id,
+              saleNumber: sale.saleNumber,
+              soldBy: input.soldBy ?? null,
+              enteredQty: target.enteredQty,
+              baseUomId: target.baseUomId,
+              conversionFactor: target.conversionFactor.toFixed(6),
+              movementSeqStart: movementSeq,
+            });
+            movementSeq = deductResult.nextMovementSeq;
+            lineActualCost = lineActualCost.plus(deductResult.actualBatchCost);
+            if (!warehouseTraces.has(lineIdx)) {
+              warehouseTraces.set(lineIdx, {
+                storeLocationId: deductResult.storeLocationId,
+                productLotId: deductResult.primaryProductLotId,
+                batchId: deductResult.primaryBatchId,
+              });
+            }
+            continue;
+          }
+
+          const selectableLots = await loadGlobalSelectableLots(client, target.productId, {
+            forUpdate: true,
+            minDaysBeforeExpiry,
+          });
+          const consumptionPlan = selectLots({
+            policy: 'FEFO',
+            lots: selectableLots,
+            quantity: target.baseQty.toNumber(),
+            businessDate: getBusinessDate(),
+            minDaysBeforeExpirySale: minDaysBeforeExpiry,
           });
 
-          const prevActual = actualBatchCostMap.get(item.productId) ?? new Decimal(0);
-          actualBatchCostMap.set(
-            item.productId,
-            prevActual.plus(deductResult.actualBatchCost),
-          );
+          if (consumptionPlan.shortfall > 0.001) {
+            const remainingQty = new Decimal(consumptionPlan.shortfall);
+            const nearestExpiry = selectableLots[0]?.expiryDate ?? null;
+            const totalAvailable = new Decimal(consumptionPlan.totalAllocated);
+            const isExpiryBlock = minDaysBeforeExpiry > 0 && nearestExpiry;
+            const errorCode =
+              selectableLots.length === 0
+                ? 'ERR_STOCK_001'
+                : isExpiryBlock
+                  ? 'ERR_EXPIRY_001'
+                  : 'ERR_STOCK_001';
 
-          warehouseTraces.set(lineIdx, {
-            storeLocationId: deductResult.storeLocationId,
-            productLotId: deductResult.primaryProductLotId,
-            batchId: deductResult.primaryBatchId,
+            throw new BusinessError(
+              `Not enough stock for "${target.productName}"` +
+                (recipeLines?.length ? ` (recipe ingredient for "${item.productName}")` : '') +
+                `. Requested: ${target.baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
+                `Short by: ${remainingQty.toFixed(2)}.`,
+              errorCode,
+              {
+                product: target.productName,
+                productId: target.productId,
+                parentProductId: item.productId,
+                requested: Money.toNumber(target.baseQty),
+                available: Money.toNumber(totalAvailable),
+                shortBy: Money.toNumber(remainingQty),
+                expiryDate: nearestExpiry,
+                minDaysBeforeExpiry: minDaysBeforeExpiry > 0 ? minDaysBeforeExpiry : undefined,
+                batchCount: selectableLots.length,
+              },
+            );
+          }
+
+          const consumeResult = await lotService.consumeLot(client, {
+            productId: target.productId,
+            quantity: target.baseQty.toNumber(),
+            selectionPolicy: 'FEFO',
+            minDaysBeforeExpiry,
+            referenceType: 'SALE',
+            referenceId: sale.id,
+            userId: input.soldBy ?? 'system',
+            productName: target.productName,
+            recordMovement: false,
+            syncProduct: false,
           });
 
-          continue;
+          for (const layer of consumeResult.layers) {
+            const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
+            movementSeq++;
+
+            const batchCostDec = Money.parseDb(layer.costPrice);
+            const qtyToDeduct = new Decimal(layer.quantity);
+            const batchUnitCost = Money.toNumber(Money.round(batchCostDec));
+
+            await client.query(
+              `INSERT INTO stock_movements (
+                movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
+                reference_type, reference_id, notes, created_by_id,
+                entered_qty, base_uom_id, conversion_factor
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+              [
+                movementNumber,
+                target.productId,
+                layer.lotId,
+                'SALE',
+                qtyToDeduct.abs().toFixed(4),
+                batchUnitCost,
+                'SALE',
+                sale.id,
+                recipeLines?.length
+                  ? `Sale ${sale.saleNumber} - recipe ingredient for ${item.productName}`
+                  : `Sale ${sale.saleNumber} - FEFO batch deduction`,
+                input.soldBy || null,
+                target.enteredQty,
+                target.baseUomId,
+                target.conversionFactor.toFixed(6),
+              ],
+            );
+
+            logger.info(`Inventory batch deducted for product ${target.productId}`, {
+              batchId: layer.lotId,
+              quantity: qtyToDeduct.toFixed(4),
+            });
+          }
+
+          lineActualCost = lineActualCost.plus(Money.parseDb(consumeResult.totalCost));
+
+          if (!warehouseTraces.has(lineIdx) && consumeResult.layers[0]) {
+            warehouseTraces.set(lineIdx, {
+              storeLocationId: null,
+              productLotId: null,
+              batchId: consumeResult.layers[0].lotId,
+            });
+          }
+
+          await syncProductQuantity(client, target.productId);
         }
 
-        const selectableLots = await loadGlobalSelectableLots(client, item.productId, {
-          forUpdate: true,
-          minDaysBeforeExpiry,
-        });
-        const consumptionPlan = selectLots({
-          policy: 'FEFO',
-          lots: selectableLots,
-          quantity: baseQty.toNumber(),
-          businessDate: getBusinessDate(),
-          minDaysBeforeExpirySale: minDaysBeforeExpiry,
-        });
-
-        if (consumptionPlan.shortfall > 0.001) {
-          const remainingQty = new Decimal(consumptionPlan.shortfall);
-          const nearestExpiry = selectableLots[0]?.expiryDate ?? null;
-          const totalAvailable = new Decimal(consumptionPlan.totalAllocated);
-          const isExpiryBlock = minDaysBeforeExpiry > 0 && nearestExpiry;
-          const errorCode =
-            selectableLots.length === 0
-              ? 'ERR_STOCK_001'
-              : isExpiryBlock
-                ? 'ERR_EXPIRY_001'
-                : 'ERR_STOCK_001';
-
-          throw new BusinessError(
-            `Not enough stock for "${item.productName}". ` +
-            `Requested: ${baseQty.toFixed(2)}, Available: ${totalAvailable.toFixed(2)}, ` +
-            `Short by: ${remainingQty.toFixed(2)}.`,
-            errorCode,
-            {
-              product: item.productName,
-              productId: item.productId,
-              requested: Money.toNumber(baseQty),
-              available: Money.toNumber(totalAvailable),
-              shortBy: Money.toNumber(remainingQty),
-              expiryDate: nearestExpiry,
-              minDaysBeforeExpiry: minDaysBeforeExpiry > 0 ? minDaysBeforeExpiry : undefined,
-              batchCount: selectableLots.length,
-            },
-          );
-        }
-
-        const consumeResult = await lotService.consumeLot(client, {
-          productId: item.productId,
-          quantity: baseQty.toNumber(),
-          selectionPolicy: 'FEFO',
-          minDaysBeforeExpiry,
-          referenceType: 'SALE',
-          referenceId: sale.id,
-          userId: input.soldBy ?? 'system',
-          productName: item.productName,
-          recordMovement: false,
-          syncProduct: false,
-        });
-
-        for (const layer of consumeResult.layers) {
-          const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
-          movementSeq++;
-
-          const batchCostDec = Money.parseDb(layer.costPrice);
-          const qtyToDeduct = new Decimal(layer.quantity);
-          const batchUnitCost = Money.toNumber(Money.round(batchCostDec));
-
-          await client.query(
-            `INSERT INTO stock_movements (
-              movement_number, product_id, batch_id, movement_type, quantity, unit_cost,
-              reference_type, reference_id, notes, created_by_id,
-              entered_qty, base_uom_id, conversion_factor
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-            [
-              movementNumber,
-              item.productId,
-              layer.lotId,
-              'SALE',
-              qtyToDeduct.abs().toFixed(4),
-              batchUnitCost,
-              'SALE',
-              sale.id,
-              `Sale ${sale.saleNumber} - FEFO batch deduction`,
-              input.soldBy || null,
-              item.quantity,
-              deductBaseUomId,
-              deductConversionFactor.toFixed(6),
-            ],
-          );
-
-          logger.info(`Inventory batch deducted for product ${item.productId}`, {
-            batchId: layer.lotId,
-            quantity: qtyToDeduct.toFixed(4),
-          });
-        }
-
+        // Attribute total ingredient cost to parent sale line for COGS reconcile
         const prevActual = actualBatchCostMap.get(item.productId) ?? new Decimal(0);
-        actualBatchCostMap.set(
-          item.productId,
-          prevActual.plus(Money.parseDb(consumeResult.totalCost)),
-        );
-
-        if (consumeResult.layers[0]) {
-          warehouseTraces.set(lineIdx, {
-            storeLocationId: null,
-            productLotId: null,
-            batchId: consumeResult.layers[0].lotId,
-          });
-        }
-
-        await syncProductQuantity(client, item.productId);
+        actualBatchCostMap.set(item.productId, prevActual.plus(lineActualCost));
       }
 
       const couplingAfterDeduction = await captureInventoryCoupling(client);

@@ -1,0 +1,2015 @@
+/**
+ * SambaPOS-style Restaurant POS — tables → categories → products → order → KOT / Bill / Pay.
+ * Payment reuses existing Order Payment page → createSale SSOT.
+ */
+
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Search, X } from 'lucide-react';
+import Layout from '../../components/Layout';
+import { api } from '../../utils/api';
+import { formatCurrency } from '../../utils/currency';
+import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
+import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
+import { printReceipt } from '../../lib/print';
+import { toast } from 'react-hot-toast';
+import { useTenant } from '../../contexts/TenantContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useOfflineContext } from '../../contexts/OfflineContext';
+import { useCanAccess } from '../../authorization/useAuthorization';
+import { getAllEvents, getAllSyncState } from '../../lib/offlineEventJournal';
+import {
+  deriveRestaurantCheckForTable,
+  deriveRestaurantFloorOccupancy,
+  deriveRestaurantOpenChecks,
+  deriveRestaurantSiblingChecks,
+  type DerivedOrder,
+} from '../../lib/offlineEventSelectors';
+import {
+  appendRestaurantItemOffline,
+  assignRestaurantWaiterOffline,
+  cancelRestaurantCheckOffline,
+  fireRestaurantKotOffline,
+  mergeRestaurantChecksOffline,
+  payRestaurantCheckOffline,
+  splitRestaurantCheckOffline,
+  transferRestaurantCheckOffline,
+  totalsFromLines,
+} from '../../lib/restaurantOfflineOps';
+import {
+  getCachedRestaurantTables,
+  getCachedRestaurantMenu,
+  getCachedRestaurantCategories,
+  getCachedRestaurantWaiters,
+  cacheRestaurantMenu,
+  refreshRestaurantOfflineCache,
+} from '../../lib/restaurantOfflineCache';
+import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
+import { publishLanKdsBoardChanged } from '../../lib/restaurantLanKds';
+import axios from 'axios';
+
+interface RestaurantTable {
+  id: string;
+  code: string;
+  name: string;
+  zone: string;
+  seats: number;
+  status: 'FREE' | 'OCCUPIED' | 'BILLING';
+  currentOrderId: string | null;
+  orderNumber?: string | null;
+  orderTotal?: string | null;
+  guestName?: string | null;
+  orderChannel?: string | null;
+  waiterId?: string | null;
+  waiterName?: string | null;
+}
+
+interface RestaurantWaiter {
+  id: string;
+  fullName: string;
+  email: string;
+  role: string;
+}
+
+interface MenuCategory {
+  id: string;
+  name: string;
+  productCount: number;
+}
+
+interface MenuProduct {
+  id: string;
+  name: string;
+  sellingPrice: string;
+  categoryId: string | null;
+  categoryName: string | null;
+  kitchenStation: string | null;
+}
+
+interface OrderItem {
+  id: string;
+  productId: string | null;
+  productName: string;
+  quantity: string;
+  unitPrice: string;
+  lineTotal: string;
+  discountAmount: string;
+  kitchenSentAt?: string | null;
+}
+
+interface OrderDetail {
+  id: string;
+  orderNumber: string;
+  subtotal: string;
+  discountAmount: string;
+  taxAmount: string;
+  totalAmount: string;
+  status: string;
+  items: OrderItem[];
+}
+
+interface CheckMeta {
+  tableCode: string | null;
+  tableName: string | null;
+  waiterId: string | null;
+  waiterName: string | null;
+  kitchenStatus: string;
+  orderChannel: string;
+  guestName?: string | null;
+  guestPhone?: string | null;
+  deliveryAddress?: string | null;
+  pickupLabel?: string | null;
+}
+
+/** Touch-first POS controls — 44–48px targets, no 300ms delay, press feedback. */
+const TOUCH =
+  'touch-manipulation select-none [-webkit-tap-highlight-color:transparent] transition-[transform,background-color,border-color,box-shadow] duration-100 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 disabled:active:scale-100';
+const touchBtn = `${TOUCH} min-h-12 px-4 inline-flex items-center justify-center gap-1 rounded-xl text-sm font-semibold`;
+const touchBtnGhost = `${touchBtn} border border-stone-300 bg-white text-stone-800 active:bg-stone-100`;
+const touchBtnDark = `${touchBtn} bg-stone-900 text-white active:bg-stone-800`;
+const touchBtnDanger = `${touchBtn} border border-red-300 text-red-700 bg-white active:bg-red-50`;
+const touchChip = `${TOUCH} min-h-11 px-4 py-2.5 rounded-xl text-sm font-semibold whitespace-nowrap`;
+const touchField =
+  'touch-manipulation min-h-12 w-full border border-stone-300 rounded-xl px-3 py-2.5 text-base bg-white';
+const touchTile = `${TOUCH} active:brightness-[0.97]`;
+
+function isServiceChannelTable(table: RestaurantTable | null | undefined): boolean {
+  if (!table) return false;
+  const code = table.code.toUpperCase();
+  return (
+    code === 'TA' ||
+    code === 'DL' ||
+    table.zone === 'SERVICE' ||
+    /take\s*away/i.test(table.name) ||
+    /delivery/i.test(table.name)
+  );
+}
+
+function channelHint(table: RestaurantTable | null | undefined): 'TAKEAWAY' | 'DELIVERY' | 'DINE_IN' {
+  if (!table) return 'DINE_IN';
+  const code = table.code.toUpperCase();
+  if (code === 'DL' || /delivery/i.test(table.name)) return 'DELIVERY';
+  if (code === 'TA' || table.zone === 'SERVICE' || /take\s*away/i.test(table.name)) return 'TAKEAWAY';
+  return 'DINE_IN';
+}
+
+function apiErr(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) {
+    const data = err.response?.data as { error?: string; message?: string } | undefined;
+    return data?.error || data?.message || err.message || fallback;
+  }
+  if (err instanceof Error) return err.message;
+  return fallback;
+}
+
+/** Map journal-derived check → UI shape (offline + crash restore). */
+function uiFromDerivedCheck(
+  derived: DerivedOrder,
+  table: RestaurantTable | { id: string },
+): {
+  table: RestaurantTable;
+  order: OrderDetail;
+  meta: CheckMeta;
+  siblingChecks: [];
+} {
+  const totals = totalsFromLines(derived.lines);
+  return {
+    table: {
+      ...(table as RestaurantTable),
+      status: 'OCCUPIED',
+      currentOrderId: derived.orderId,
+      orderNumber: derived.offlineId,
+      orderTotal: String(totals.totalAmount),
+      waiterId: derived.waiterId,
+      waiterName: derived.waiterName,
+      guestName: derived.guestName,
+      orderChannel: derived.channel,
+    },
+    order: {
+      id: derived.orderId,
+      orderNumber: derived.offlineId,
+      subtotal: String(totals.subtotal),
+      discountAmount: '0',
+      taxAmount: String(totals.taxAmount),
+      totalAmount: String(totals.totalAmount),
+      status: 'PENDING',
+      items: derived.lines.map((l) => ({
+        id: l.lineId || `${derived.orderId}-${l.productId}`,
+        productId: l.productId,
+        productName: l.productName,
+        quantity: String(l.quantity),
+        unitPrice: String(l.unitPrice),
+        lineTotal: String(l.subtotal),
+        discountAmount: String(l.discountAmount || 0),
+        kitchenSentAt: l.kitchenSentAt,
+      })),
+    } as OrderDetail,
+    meta: {
+      tableCode: derived.tableCode || null,
+      tableName: derived.tableName || null,
+      waiterId: derived.waiterId || null,
+      waiterName: derived.waiterName || null,
+      kitchenStatus: derived.kotPrinted ? 'SENT' : 'NONE',
+      orderChannel: derived.channel || 'DINE_IN',
+      guestName: derived.guestName,
+      guestPhone: derived.guestPhone,
+      deliveryAddress: derived.deliveryAddress,
+      pickupLabel: derived.pickupLabel,
+    },
+    siblingChecks: [],
+  };
+}
+
+export default function RestaurantPosPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { config } = useTenant();
+  const { user } = useAuth();
+  const { isOnline } = useOfflineContext();
+  const { data: restaurantEnabled, isLoading: flagLoading } = useRestaurantEnabled();
+  const canManage = useCanAccess(undefined, ['restaurant.manage']);
+  /** Pay is cashier / accountant / admin only — waiters and managers order but do not settle. */
+  const canRestaurantPay = useCanAccess(undefined, ['restaurant.pay']);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [menuSearch, setMenuSearch] = useState('');
+  const deferredMenuSearch = useDeferredValue(menuSearch);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [showAddTable, setShowAddTable] = useState(false);
+  const [newTable, setNewTable] = useState({ code: '', name: '', zone: 'MAIN', seats: 4 });
+  const [guestDraft, setGuestDraft] = useState({
+    guestName: '',
+    guestPhone: '',
+    deliveryAddress: '',
+    pickupLabel: '',
+  });
+  const [selectedWaiterId, setSelectedWaiterId] = useState<string>('');
+  const [myTablesOnly, setMyTablesOnly] = useState(false);
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
+  const [opsMode, setOpsMode] = useState<null | 'transfer' | 'merge' | 'split'>(null);
+  const [opsTargetTableId, setOpsTargetTableId] = useState('');
+  const [opsSecondaryOrderId, setOpsSecondaryOrderId] = useState('');
+  const [splitSameTable, setSplitSameTable] = useState(true);
+  /** Bump to re-read journal-derived offline checks */
+  const [journalTick, setJournalTick] = useState(0);
+  const bumpJournal = () => setJournalTick((n) => n + 1);
+
+  useEffect(() => {
+    if (!restaurantEnabled || !isOnline) return;
+    void refreshRestaurantOfflineCache(api.restaurant).catch((err: unknown) => {
+      console.warn(
+        '[RestaurantPOS] Offline cache warm failed',
+        err instanceof Error ? err.message : err,
+      );
+    });
+  }, [restaurantEnabled, isOnline]);
+
+  // Phase 5.3 — crash restore: announce local open checks after reload
+  useEffect(() => {
+    if (!restaurantEnabled) return;
+    const open = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState());
+    if (open.length > 0) {
+      toast.success(`Restored ${open.length} open check(s) from local journal`, {
+        id: 'restaurant-journal-restore',
+      });
+    }
+  }, [restaurantEnabled]);
+
+  const tablesQuery = useQuery({
+    queryKey: ['restaurant', 'tables', isOnline],
+    queryFn: async () => {
+      if (!isOnline) {
+        return getCachedRestaurantTables() as RestaurantTable[];
+      }
+      const res = await api.restaurant.listTables();
+      const tables = (res.data.data || []) as RestaurantTable[];
+      // keep cache warm
+      const { cacheRestaurantTables } = await import('../../lib/restaurantOfflineCache');
+      cacheRestaurantTables(tables);
+      return tables;
+    },
+    enabled: !!restaurantEnabled,
+    refetchInterval: isOnline ? 15_000 : false,
+  });
+
+  const waitersQuery = useQuery({
+    queryKey: ['restaurant', 'waiters', isOnline],
+    queryFn: async () => {
+      if (!isOnline) return getCachedRestaurantWaiters() as RestaurantWaiter[];
+      const res = await api.restaurant.listWaiters();
+      const waiters = (res.data.data || []) as RestaurantWaiter[];
+      const { cacheRestaurantWaiters } = await import('../../lib/restaurantOfflineCache');
+      cacheRestaurantWaiters(waiters);
+      return waiters;
+    },
+    enabled: !!restaurantEnabled,
+  });
+
+  const checkQuery = useQuery({
+    queryKey: ['restaurant', 'check', selectedTableId, activeOrderId, isOnline, journalTick],
+    queryFn: async () => {
+      const events = getAllEvents();
+      const syncState = getAllSyncState();
+      const derived = selectedTableId
+        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, activeOrderId)
+        : null;
+      const siblings = selectedTableId
+        ? deriveRestaurantSiblingChecks(selectedTableId, events, syncState, derived?.orderId)
+        : [];
+      const cachedTable =
+        getCachedRestaurantTables().find((t) => t.id === selectedTableId) ||
+        tablesQuery.data?.find((t) => t.id === selectedTableId);
+
+      const withSiblings = (base: ReturnType<typeof uiFromDerivedCheck>) => ({
+        ...base,
+        siblingChecks: siblings.map((s) => {
+          const tot = totalsFromLines(s.lines);
+          return {
+            id: s.orderId,
+            orderNumber: s.offlineId,
+            totalAmount: String(tot.totalAmount),
+            createdAt: new Date(s.createdTs).toISOString(),
+          };
+        }),
+      });
+
+      // Offline always uses journal
+      if (!isOnline && selectedTableId) {
+        if (!derived) {
+          return {
+            table: (cachedTable || { id: selectedTableId }) as RestaurantTable,
+            order: null,
+            meta: null,
+            siblingChecks: [],
+          };
+        }
+        return withSiblings(uiFromDerivedCheck(derived, cachedTable || { id: selectedTableId }));
+      }
+
+      const res = await api.restaurant.getTableCheck(
+        selectedTableId!,
+        activeOrderId ? { orderId: activeOrderId } : undefined,
+      );
+      const data = res.data.data as {
+        table: RestaurantTable;
+        order: OrderDetail | null;
+        meta: CheckMeta | null;
+        siblingChecks?: Array<{
+          id: string;
+          orderNumber: string;
+          totalAmount: string;
+          createdAt: string;
+        }>;
+      };
+
+      // Phase 5.3 crash restore: server empty but journal still has open check
+      if ((!data.order || !data.order.id) && derived) {
+        return withSiblings(
+          uiFromDerivedCheck(derived, cachedTable || data.table || { id: selectedTableId! }),
+        );
+      }
+
+      return data;
+    },
+    enabled: !!restaurantEnabled && !!selectedTableId,
+  });
+
+  const categoriesQuery = useQuery({
+    queryKey: ['restaurant', 'menu', 'categories', isOnline],
+    queryFn: async () => {
+      if (!isOnline) return getCachedRestaurantCategories() as MenuCategory[];
+      const res = await api.restaurant.menuCategories();
+      const cats = (res.data.data || []) as MenuCategory[];
+      const { cacheRestaurantCategories } = await import('../../lib/restaurantOfflineCache');
+      cacheRestaurantCategories(cats);
+      return cats;
+    },
+    enabled: !!restaurantEnabled && !!selectedTableId,
+  });
+
+  // Load full menu once; category + search filter client-side (SambaPOS-style type-to-find).
+  const productsQuery = useQuery({
+    queryKey: ['restaurant', 'menu', 'products', 'all', isOnline],
+    queryFn: async () => {
+      if (!isOnline) return getCachedRestaurantMenu() as MenuProduct[];
+      const res = await api.restaurant.menuProducts();
+      const products = (res.data.data || []) as MenuProduct[];
+      cacheRestaurantMenu(products);
+      return products;
+    },
+    enabled: !!restaurantEnabled && !!selectedTableId,
+  });
+
+  const visibleProducts = useMemo(() => {
+    const all = productsQuery.data || [];
+    const q = deferredMenuSearch.trim().toLowerCase();
+    if (q) {
+      return all.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          (p.categoryName || '').toLowerCase().includes(q) ||
+          (p.kitchenStation || '').toLowerCase().includes(q),
+      );
+    }
+    if (selectedCategoryId) {
+      return all.filter((p) => p.categoryId === selectedCategoryId);
+    }
+    return all;
+  }, [productsQuery.data, deferredMenuSearch, selectedCategoryId]);
+
+  /** Enter / quick-add: unique result, or exact name match when several remain. */
+  const quickAddProduct = useMemo(() => {
+    const q = deferredMenuSearch.trim().toLowerCase();
+    if (!q || visibleProducts.length === 0) return null;
+    if (visibleProducts.length === 1) return visibleProducts[0];
+    const exact = visibleProducts.find((p) => p.name.toLowerCase() === q);
+    return exact ?? null;
+  }, [deferredMenuSearch, visibleProducts]);
+
+  useEffect(() => {
+    if (!selectedTableId) {
+      setSelectedCategoryId(null);
+      setMenuSearch('');
+    }
+  }, [selectedTableId]);
+
+  // Hardware keyboard: type anywhere on the order screen → focus search (Toast / Square / SambaPOS).
+  useEffect(() => {
+    if (!selectedTableId || opsMode) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) {
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'Escape') {
+        setMenuSearch('');
+        searchInputRef.current?.blur();
+        return;
+      }
+      if (e.key === 'F3') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      if (e.key.length === 1 && /[\w\-./+]/.test(e.key)) {
+        e.preventDefault();
+        setMenuSearch((prev) => prev + e.key);
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedTableId, opsMode]);
+
+  const addItemMutation = useMutation({
+    mutationFn: async (product: MenuProduct) => {
+      if (!selectedTableId) throw new Error('Select a table first');
+      if (!selectedWaiterId) throw new Error('Select a waiter first');
+      const table =
+        tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
+      const channel = channelHint(table);
+      const opening = !order;
+      if (opening && (channel === 'TAKEAWAY' || channel === 'DELIVERY')) {
+        if (!guestDraft.guestName.trim()) {
+          throw new Error(
+            channel === 'DELIVERY'
+              ? 'Enter guest name for delivery'
+              : 'Enter guest name for takeaway',
+          );
+        }
+        if (channel === 'DELIVERY' && !guestDraft.deliveryAddress.trim()) {
+          throw new Error('Enter delivery address');
+        }
+      }
+
+      if (!isOnline) {
+        if (!table) throw new Error('Table not in offline cache — connect once to sync floor');
+        const waiter = waiters.find((w) => w.id === selectedWaiterId);
+        appendRestaurantItemOffline({
+          tableId: selectedTableId,
+          tableCode: table.code,
+          tableName: table.name,
+          channel,
+          waiterId: selectedWaiterId,
+          waiterName: waiter?.fullName,
+          guestName: guestDraft.guestName.trim() || null,
+          guestPhone: guestDraft.guestPhone.trim() || null,
+          deliveryAddress: guestDraft.deliveryAddress.trim() || null,
+          pickupLabel: guestDraft.pickupLabel.trim() || null,
+          productId: product.id,
+          productName: product.name,
+          unitPrice: Number(product.sellingPrice) || 0,
+          quantity: 1,
+        });
+        bumpJournal();
+        return { offline: true };
+      }
+
+      const res = await api.restaurant.addItems({
+        tableId: selectedTableId,
+        waiterId: selectedWaiterId,
+        items: [{ productId: product.id, quantity: 1 }],
+        ...(opening
+          ? {
+              guestName: guestDraft.guestName.trim() || null,
+              guestPhone: guestDraft.guestPhone.trim() || null,
+              deliveryAddress: guestDraft.deliveryAddress.trim() || null,
+              pickupLabel: guestDraft.pickupLabel.trim() || null,
+            }
+          : {}),
+      });
+      return res.data.data;
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+      bumpJournal();
+    },
+    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to add item')),
+  });
+
+  const saveGuestMutation = useMutation({
+    mutationFn: async () => {
+      if (!order) throw new Error('No open check');
+      const res = await api.restaurant.updateGuest(order.id, {
+        guestName: guestDraft.guestName.trim() || null,
+        guestPhone: guestDraft.guestPhone.trim() || null,
+        deliveryAddress: guestDraft.deliveryAddress.trim() || null,
+        pickupLabel: guestDraft.pickupLabel.trim() || null,
+      });
+      return res.data.data;
+    },
+    onSuccess: () => {
+      toast.success('Guest details saved');
+      invalidateCheck();
+    },
+    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to save guest')),
+  });
+
+  const assignWaiterMutation = useMutation({
+    mutationFn: async (waiterId: string) => {
+      if (!order) throw new Error('No open check');
+      const res = await api.restaurant.assignWaiter(order.id, { waiterId });
+      return res.data.data;
+    },
+    onSuccess: () => {
+      toast.success('Waiter assigned');
+      invalidateCheck();
+    },
+    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to assign waiter')),
+  });
+
+  const createTableMutation = useMutation({
+    mutationFn: async () => {
+      const res = await api.restaurant.createTable({
+        code: newTable.code.trim(),
+        name: newTable.name.trim() || newTable.code.trim(),
+        zone: newTable.zone.trim() || 'MAIN',
+        seats: Number(newTable.seats) || 0,
+      });
+      return res.data.data;
+    },
+    onSuccess: () => {
+      toast.success('Table created');
+      setShowAddTable(false);
+      setNewTable({ code: '', name: '', zone: 'MAIN', seats: 4 });
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+    },
+    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to create table')),
+  });
+
+  const order = checkQuery.data?.order ?? null;
+  const meta = checkQuery.data?.meta ?? null;
+  const siblingChecks = checkQuery.data?.siblingChecks ?? [];
+  const selectedTable =
+    tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
+
+  const orderLines = useMemo(() => order?.items ?? [], [order]);
+  const serviceChannel = isServiceChannelTable(selectedTable);
+  const channel = meta?.orderChannel || channelHint(selectedTable);
+
+  const waiters = waitersQuery.data || [];
+  const floorOccupancy = useMemo(
+    () => deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()),
+    [journalTick],
+  );
+
+  const floorTables = useMemo(() => {
+    const all = (tablesQuery.data || []).map((t) => {
+      const check = floorOccupancy.get(t.id);
+      if (check) {
+        // Journal open check wins (offline + crash restore overlay)
+        const totals = totalsFromLines(check.lines);
+        return {
+          ...t,
+          status: 'OCCUPIED' as const,
+          currentOrderId: check.orderId,
+          orderNumber: check.offlineId,
+          orderTotal: String(totals.totalAmount),
+          waiterId: check.waiterId,
+          waiterName: check.waiterName,
+          guestName: check.guestName,
+          orderChannel: check.channel,
+        };
+      }
+      if (!isOnline) {
+        // Offline: no journal check → free locally
+        return { ...t, status: 'FREE' as const, currentOrderId: null };
+      }
+      return t;
+    });
+    if (!myTablesOnly || !user?.id) return all;
+    return all.filter((t) => t.status === 'FREE' || t.waiterId === user.id);
+  }, [tablesQuery.data, myTablesOnly, user?.id, isOnline, floorOccupancy]);
+
+  const freeTables = useMemo(() => {
+    return (tablesQuery.data || []).filter((t) => {
+      if (t.id === selectedTableId) return false;
+      if (floorOccupancy.has(t.id)) return false;
+      if (!isOnline) return true;
+      return t.status === 'FREE';
+    });
+  }, [tablesQuery.data, selectedTableId, floorOccupancy, isOnline]);
+
+  const mergeCandidates = useMemo(() => {
+    const out: Array<{ orderId: string; label: string }> = [];
+    for (const s of siblingChecks) {
+      if (order && s.id === order.id) continue;
+      out.push({
+        orderId: s.id,
+        label: `${s.orderNumber} · ${formatCurrency(Number(s.totalAmount))} (same table)`,
+      });
+    }
+    // Other tables: prefer journal occupancy when present
+    for (const t of tablesQuery.data || []) {
+      if (t.id === selectedTableId) continue;
+      const local = floorOccupancy.get(t.id);
+      if (local) {
+        if (order && local.orderId === order.id) continue;
+        const tot = totalsFromLines(local.lines);
+        out.push({
+          orderId: local.orderId,
+          label: `${t.code} ${t.name} · ${local.offlineId} · ${formatCurrency(tot.totalAmount)}`,
+        });
+        continue;
+      }
+      if (isOnline && t.currentOrderId && t.status !== 'FREE') {
+        out.push({
+          orderId: t.currentOrderId,
+          label: `${t.code} ${t.name}${t.orderNumber ? ` · ${t.orderNumber}` : ''}`,
+        });
+      }
+    }
+    return out;
+  }, [siblingChecks, order, tablesQuery.data, selectedTableId, floorOccupancy, isOnline]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (waiters.length === 0) {
+      setSelectedWaiterId(user.id);
+      return;
+    }
+    if (!selectedWaiterId || !waiters.some((w) => w.id === selectedWaiterId)) {
+      const mine = waiters.find((w) => w.id === user.id);
+      setSelectedWaiterId(mine?.id || waiters[0].id);
+    }
+  }, [user?.id, waiters, selectedWaiterId]);
+
+  useEffect(() => {
+    if (!selectedTableId) {
+      setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
+      setActiveOrderId(null);
+      setSelectedLineIds([]);
+      setOpsMode(null);
+      return;
+    }
+    if (meta) {
+      setGuestDraft({
+        guestName: meta.guestName || '',
+        guestPhone: meta.guestPhone || '',
+        deliveryAddress: meta.deliveryAddress || '',
+        pickupLabel: meta.pickupLabel || '',
+      });
+      if (meta.waiterId) setSelectedWaiterId(meta.waiterId);
+    }
+    if (order?.id) setActiveOrderId(order.id);
+  }, [selectedTableId, meta?.guestName, meta?.guestPhone, meta?.deliveryAddress, meta?.pickupLabel, meta?.waiterId, order?.id]);
+
+  useEffect(() => {
+    setSelectedLineIds([]);
+  }, [order?.id]);
+
+  const invalidateCheck = () => {
+    void queryClient.invalidateQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+    void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+  };
+
+  const handleWaiterChange = (waiterId: string) => {
+    setSelectedWaiterId(waiterId);
+    if (!order) return;
+
+    if (!isOnline) {
+      const events = getAllEvents();
+      const syncState = getAllSyncState();
+      const derived = selectedTableId
+        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState)
+        : null;
+      if (!derived) {
+        toast.error('Open a check offline before assigning a waiter');
+        return;
+      }
+      const waiter = waiters.find((w) => w.id === waiterId);
+      if (!waiterId || !waiter) {
+        toast.error('Select a waiter');
+        return;
+      }
+      try {
+        assignRestaurantWaiterOffline(derived, { id: waiter.id, fullName: waiter.fullName });
+        toast.success('Waiter assigned (offline — will sync)');
+        bumpJournal();
+        invalidateCheck();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Waiter assign failed');
+      }
+      return;
+    }
+
+    if (waiterId && waiterId !== meta?.waiterId) {
+      assignWaiterMutation.mutate(waiterId);
+    }
+  };
+
+  const returnToFloor = () => {
+    setSelectedTableId(null);
+    setMenuSearch('');
+    setSelectedCategoryId(null);
+    setBusy(false);
+  };
+
+  /**
+   * Expert POS rule: kitchen commit is SSOT; print is best-effort.
+   * After a successful fire, always return to the floor — never leave the waiter
+   * stuck on a check (print failure must not look like KOT failure / invite double-fire).
+   */
+  const handleSendKot = async () => {
+    if (!order) return;
+    setBusy(true);
+    try {
+      if (!isOnline) {
+        const events = getAllEvents();
+        const syncState = getAllSyncState();
+        const derived = selectedTableId
+          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState)
+          : null;
+        if (!derived) throw new Error('Offline check not found');
+        const { kotOfflineId, lines } = fireRestaurantKotOffline(derived);
+        bumpJournal();
+        invalidateCheck();
+
+        let printOk = true;
+        try {
+          await printKitchenTicket({
+            kotNumber: kotOfflineId,
+            station: 'KITCHEN',
+            tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
+            waiterName: derived.waiterName || null,
+            firedAt: new Date().toLocaleString(),
+            orderChannel: derived.channel,
+            guestName: derived.guestName,
+            guestPhone: derived.guestPhone,
+            deliveryAddress: derived.deliveryAddress,
+            pickupLabel: derived.pickupLabel,
+            items: lines.map((it) => ({
+              productName: it.productName,
+              quantity: it.quantity,
+              lineNotes: it.lineNotes ?? null,
+            })),
+          });
+        } catch {
+          printOk = false;
+        }
+
+        toast.success(
+          printOk
+            ? 'KOT sent (offline — will sync)'
+            : 'KOT sent to kitchen (offline) — printer unavailable; ticket is on KDS when online',
+        );
+        returnToFloor();
+        return;
+      }
+
+      const res = await api.restaurant.sendKot(order.id);
+      const kots = (res.data.data || []) as Array<{
+        kotNumber: string;
+        station: string;
+        printerName?: string | null;
+        tableCode: string | null;
+        tableName: string | null;
+        waiterName: string | null;
+        firedAt: string;
+        orderChannel?: string | null;
+        guestName?: string | null;
+        guestPhone?: string | null;
+        deliveryAddress?: string | null;
+        pickupLabel?: string | null;
+        items: Array<{ productName: string; quantity: string; lineNotes: string | null }>;
+      }>;
+
+      // Kitchen rows are committed — print must not undo success or block floor return.
+      let printFailures = 0;
+      for (const kot of kots) {
+        try {
+          await printKitchenTicket({
+            kotNumber: kot.kotNumber,
+            station: kot.station,
+            printerName: kot.printerName,
+            tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
+            waiterName: kot.waiterName,
+            firedAt: new Date(kot.firedAt).toLocaleString(),
+            orderChannel: meta?.orderChannel || kot.orderChannel,
+            guestName: meta?.guestName || kot.guestName,
+            guestPhone: meta?.guestPhone || kot.guestPhone,
+            deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
+            pickupLabel: meta?.pickupLabel || kot.pickupLabel,
+            items: kot.items.map((it) => ({
+              productName: it.productName,
+              quantity: Number(it.quantity),
+              lineNotes: it.lineNotes,
+            })),
+          });
+        } catch {
+          printFailures += 1;
+        }
+      }
+
+      publishLanKdsBoardChanged('KOT_FIRED_ONLINE');
+      invalidateCheck();
+
+      if (printFailures === 0) {
+        toast.success(
+          `Sent ${kots.length} KOT ticket(s)` +
+            (kots.length > 1 ? ` → ${kots.map((k) => k.station).join(', ')}` : ''),
+        );
+      } else {
+        toast.success(
+          `KOT sent to kitchen (${kots.length}) — ${printFailures} print(s) failed; use KDS / reprint`,
+          { duration: 5000 },
+        );
+      }
+      returnToFloor();
+    } catch (err) {
+      toast.error(apiErr(err, 'KOT failed'));
+      setBusy(false);
+    }
+  };
+
+  const handlePrintBill = async () => {
+    if (!order) return;
+    setBusy(true);
+    try {
+      if (!isOnline) {
+        await printRestaurantBill({
+          orderNumber: order.orderNumber,
+          tableLabel: meta?.tableName || meta?.tableCode || selectedTable?.name || 'Table',
+          waiterName: meta?.waiterName || null,
+          currencySymbol: config.currency?.symbol,
+          orderChannel: meta?.orderChannel,
+          guestName: meta?.guestName,
+          guestPhone: meta?.guestPhone,
+          deliveryAddress: meta?.deliveryAddress,
+          pickupLabel: meta?.pickupLabel,
+          items: (order.items || []).map((it) => ({
+            productName: it.productName,
+            quantity: Number(it.quantity),
+            unitPrice: Number(it.unitPrice),
+            lineTotal: Number(it.lineTotal),
+          })),
+          subtotal: Number(order.subtotal),
+          discountAmount: Number(order.discountAmount),
+          taxAmount: Number(order.taxAmount),
+          taxName: 'VAT',
+          totalAmount: Number(order.totalAmount),
+        });
+        toast.success('Bill printed (offline)');
+        return;
+      }
+
+      const res = await api.restaurant.getBill(order.id);
+      const bill = res.data.data as { order: OrderDetail; meta: CheckMeta };
+      await printRestaurantBill({
+        orderNumber: bill.order.orderNumber,
+        tableLabel: bill.meta.tableName || bill.meta.tableCode || selectedTable?.name || 'Table',
+        waiterName: bill.meta.waiterName,
+        currencySymbol: config.currency?.symbol,
+        orderChannel: bill.meta.orderChannel,
+        guestName: bill.meta.guestName,
+        guestPhone: bill.meta.guestPhone,
+        deliveryAddress: bill.meta.deliveryAddress,
+        pickupLabel: bill.meta.pickupLabel,
+        items: (bill.order.items || []).map((it) => ({
+          productName: it.productName,
+          quantity: Number(it.quantity),
+          unitPrice: Number(it.unitPrice),
+          lineTotal: Number(it.lineTotal),
+        })),
+        subtotal: Number(bill.order.subtotal),
+        discountAmount: Number(bill.order.discountAmount),
+        taxAmount: Number(bill.order.taxAmount),
+        taxName: 'VAT',
+        totalAmount: Number(bill.order.totalAmount),
+      });
+      toast.success('Bill printed');
+      invalidateCheck();
+    } catch (err) {
+      toast.error(apiErr(err, 'Bill failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const activateSibling = async (orderId: string) => {
+    if (!selectedTableId) return;
+    if (!isOnline || orderId.startsWith('ofl_ord_')) {
+      setActiveOrderId(orderId);
+      bumpJournal();
+      invalidateCheck();
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.restaurant.activateCheck(selectedTableId, { orderId });
+      setActiveOrderId(orderId);
+      invalidateCheck();
+    } catch (err) {
+      toast.error(apiErr(err, 'Failed to switch check'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runTransfer = async () => {
+    if (!order || !opsTargetTableId) return;
+    setBusy(true);
+    try {
+      if (!isOnline) {
+        const events = getAllEvents();
+        const syncState = getAllSyncState();
+        const derived = selectedTableId
+          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+          : null;
+        if (!derived) throw new Error('Offline check not found');
+        const target = (tablesQuery.data || []).find((t) => t.id === opsTargetTableId);
+        if (!target) throw new Error('Target table not found');
+        transferRestaurantCheckOffline(derived, {
+          tableId: target.id,
+          tableCode: target.code,
+          tableName: target.name,
+          channel: channelHint(target),
+        });
+        toast.success('Check transferred (offline — will sync)');
+        setOpsMode(null);
+        setSelectedTableId(opsTargetTableId);
+        setActiveOrderId(order.id);
+        bumpJournal();
+        invalidateCheck();
+        return;
+      }
+      await api.restaurant.transferCheck(order.id, { toTableId: opsTargetTableId });
+      toast.success('Check transferred');
+      setOpsMode(null);
+      setSelectedTableId(opsTargetTableId);
+      setActiveOrderId(order.id);
+      invalidateCheck();
+    } catch (err) {
+      toast.error(isOnline ? apiErr(err, 'Transfer failed') : err instanceof Error ? err.message : 'Transfer failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runMerge = async () => {
+    if (!order || !opsSecondaryOrderId) return;
+    setBusy(true);
+    try {
+      if (!isOnline) {
+        const events = getAllEvents();
+        const syncState = getAllSyncState();
+        const primary = selectedTableId
+          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+          : null;
+        const open = deriveRestaurantOpenChecks(events, syncState);
+        const secondary = open.find((o) => o.orderId === opsSecondaryOrderId) ?? null;
+        if (!primary || !secondary) throw new Error('Both checks must be open offline');
+        mergeRestaurantChecksOffline(primary, secondary);
+        toast.success('Checks merged (offline — will sync)');
+        setOpsMode(null);
+        setOpsSecondaryOrderId('');
+        bumpJournal();
+        invalidateCheck();
+        return;
+      }
+      await api.restaurant.mergeChecks(order.id, { secondaryOrderId: opsSecondaryOrderId });
+      toast.success('Checks merged');
+      setOpsMode(null);
+      setOpsSecondaryOrderId('');
+      invalidateCheck();
+    } catch (err) {
+      toast.error(isOnline ? apiErr(err, 'Merge failed') : err instanceof Error ? err.message : 'Merge failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runSplit = async () => {
+    if (!order || selectedLineIds.length === 0) return;
+    const targetTableId = splitSameTable ? selectedTableId! : opsTargetTableId;
+    if (!targetTableId) {
+      toast.error('Pick a target table');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (!isOnline) {
+        const events = getAllEvents();
+        const syncState = getAllSyncState();
+        const derived = selectedTableId
+          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+          : null;
+        if (!derived) throw new Error('Offline check not found');
+        const target = (tablesQuery.data || []).find((t) => t.id === targetTableId);
+        if (!target) throw new Error('Target table not found');
+        const { split } = splitRestaurantCheckOffline(derived, {
+          lineIds: selectedLineIds,
+          targetTableId: target.id,
+          targetTableCode: target.code,
+          targetTableName: target.name,
+          sameTable: splitSameTable,
+          channel: channelHint(target),
+        });
+        toast.success('Check split (offline — will sync)');
+        setOpsMode(null);
+        setSelectedLineIds([]);
+        if (!splitSameTable) {
+          setSelectedTableId(targetTableId);
+          setActiveOrderId(split.orderId);
+        } else {
+          setActiveOrderId(order.id);
+        }
+        bumpJournal();
+        invalidateCheck();
+        return;
+      }
+      await api.restaurant.splitCheck(order.id, {
+        itemIds: selectedLineIds,
+        targetTableId,
+        sameTable: splitSameTable,
+      });
+      toast.success('Check split');
+      setOpsMode(null);
+      setSelectedLineIds([]);
+      if (!splitSameTable) {
+        setSelectedTableId(targetTableId);
+      }
+      invalidateCheck();
+    } catch (err) {
+      toast.error(isOnline ? apiErr(err, 'Split failed') : err instanceof Error ? err.message : 'Split failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleLine = (id: string) => {
+    setSelectedLineIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  type VoidKotPrint = {
+    kotNumber: string;
+    station: string;
+    printerName?: string | null;
+    tableCode: string | null;
+    tableName: string | null;
+    waiterName: string | null;
+    firedAt: string;
+    ticketKind?: 'FIRE' | 'VOID';
+    orderChannel?: string | null;
+    guestName?: string | null;
+    guestPhone?: string | null;
+    deliveryAddress?: string | null;
+    pickupLabel?: string | null;
+    items: Array<{ productName: string; quantity: string; lineNotes: string | null }>;
+  };
+
+  const printVoidTickets = async (voidKots: VoidKotPrint[], reason?: string) => {
+    for (const kot of voidKots) {
+      try {
+        await printKitchenTicket({
+          kotNumber: kot.kotNumber,
+          station: kot.station,
+          printerName: kot.printerName,
+          tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
+          waiterName: kot.waiterName,
+          firedAt: new Date(kot.firedAt).toLocaleString(),
+          ticketKind: 'VOID',
+          voidReason: reason || null,
+          orderChannel: meta?.orderChannel || kot.orderChannel,
+          guestName: meta?.guestName || kot.guestName,
+          guestPhone: meta?.guestPhone || kot.guestPhone,
+          deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
+          pickupLabel: meta?.pickupLabel || kot.pickupLabel,
+          items: kot.items.map((it) => ({
+            productName: it.productName,
+            quantity: Number(it.quantity),
+            lineNotes: it.lineNotes,
+          })),
+        });
+      } catch {
+        // best-effort — kitchen still has VOID on KDS
+      }
+    }
+  };
+
+  const handleVoidLines = async (itemIds: string[]) => {
+    if (!order || itemIds.length === 0) return;
+    if (!isOnline) {
+      toast.error('Void requires online connection (kitchen must be notified)');
+      return;
+    }
+    const hasKot = orderLines.some((l) => itemIds.includes(l.id) && l.kitchenSentAt);
+    const reason = window.prompt(
+      hasKot
+        ? 'Void reason (kitchen will get a VOID ticket):'
+        : 'Void reason:',
+      'Customer changed mind',
+    );
+    if (reason == null) return;
+    if (!reason.trim()) {
+      toast.error('Void reason is required');
+      return;
+    }
+    if (
+      !window.confirm(
+        hasKot
+          ? `Void ${itemIds.length} line(s)? Kitchen will be notified to stop/discard.`
+          : `Void ${itemIds.length} line(s)?`,
+      )
+    ) {
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await api.restaurant.voidItems(order.id, {
+        itemIds,
+        reason: reason.trim(),
+      });
+      const data = res.data.data as {
+        voidKots?: VoidKotPrint[];
+        checkCancelled?: boolean;
+      };
+      await printVoidTickets(data.voidKots || [], reason.trim());
+      publishLanKdsBoardChanged('KOT_VOIDED');
+      if (data.checkCancelled) {
+        toast.success('Check voided — table freed');
+        setSelectedTableId(null);
+      } else {
+        toast.success(
+          (data.voidKots?.length || 0) > 0
+            ? `Voided — ${data.voidKots!.length} VOID ticket(s) to kitchen`
+            : 'Line(s) voided',
+        );
+      }
+      setSelectedLineIds([]);
+      invalidateCheck();
+    } catch (err) {
+      toast.error(apiErr(err, 'Void failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCancelCheck = async () => {
+    if (!order) return;
+    const hasKot = orderLines.some((l) => l.kitchenSentAt);
+    const reasonDefault = 'Cancelled from restaurant POS';
+    const reason = window.prompt(
+      hasKot
+        ? 'Cancel reason (kitchen will get VOID tickets for fired items):'
+        : 'Cancel reason:',
+      reasonDefault,
+    );
+    if (reason == null) return;
+    if (!reason.trim()) {
+      toast.error('Cancel reason is required');
+      return;
+    }
+    if (!window.confirm(`Cancel check ${order.orderNumber}? The table will be freed.`)) return;
+
+    if (!isOnline) {
+      const events = getAllEvents();
+      const syncState = getAllSyncState();
+      const derived = selectedTableId
+        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState)
+        : null;
+      if (!derived) {
+        toast.error('Offline check not found in journal');
+        return;
+      }
+      setBusy(true);
+      try {
+        cancelRestaurantCheckOffline(derived);
+        toast.success('Check cancelled (offline — will sync)');
+        bumpJournal();
+        setSelectedTableId(null);
+        invalidateCheck();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Cancel failed');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await api.restaurant.cancelCheck(order.id, { reason: reason.trim() });
+      const data = res.data.data as { voidKots?: VoidKotPrint[] };
+      await printVoidTickets(data.voidKots || [], reason.trim());
+      publishLanKdsBoardChanged('KOT_VOIDED');
+      toast.success(
+        (data.voidKots?.length || 0) > 0
+          ? `Check cancelled — ${data.voidKots!.length} VOID ticket(s) sent`
+          : 'Check cancelled',
+      );
+      setSelectedTableId(null);
+      invalidateCheck();
+    } catch (err) {
+      toast.error(apiErr(err, 'Cancel failed'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePay = async () => {
+    if (!order) return;
+    if (!canRestaurantPay) {
+      toast.error('Only cashiers, accountants, or admins can take payment');
+      return;
+    }
+    if (!isOnline) {
+      const events = getAllEvents();
+      const syncState = getAllSyncState();
+      const derived = selectedTableId
+        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState)
+        : null;
+      if (!derived) {
+        toast.error('Offline check not found in journal');
+        return;
+      }
+      const totalLabel = formatCurrency(Number(order.totalAmount));
+      if (
+        !window.confirm(
+          `Offline cash pay ${totalLabel} for ${derived.tableName || derived.tableCode || 'table'}?\n\nReceipt prints now; sale syncs when online.`,
+        )
+      ) {
+        return;
+      }
+      setBusy(true);
+      try {
+        const paid = payRestaurantCheckOffline(derived);
+        await printReceipt({
+          saleNumber: paid.offlineId,
+          saleDate: new Date().toLocaleString(),
+          subtotal: paid.subtotal,
+          discountAmount: paid.discountAmount,
+          taxAmount: paid.taxAmount,
+          totalAmount: paid.totalAmount,
+          paymentMethod: 'CASH',
+          amountPaid: paid.tenderedAmount,
+          changeAmount: paid.changeAmount,
+          changeGiven: paid.changeAmount,
+          payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
+          cashierName: user?.fullName || user?.email || undefined,
+          companyName: config.companyName,
+          companyAddress: config.companyAddress,
+          companyPhone: config.companyPhone,
+          items: paid.lines.map((l) => ({
+            name: l.productName,
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            subtotal: l.subtotal,
+            uom: l.uom,
+          })),
+          customReceiptNote: `Table ${paid.tableLabel} (offline)`,
+        });
+        toast.success(`Paid offline (${paid.offlineId}) — will sync when online`);
+        bumpJournal();
+        setSelectedTableId(null);
+        invalidateCheck();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Offline pay failed');
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+    navigate(`/orders/${order.id}/pay`);
+  };
+
+  if (flagLoading) {
+    return (
+      <Layout>
+        <div className="p-6 text-gray-600">Loading restaurant module…</div>
+      </Layout>
+    );
+  }
+
+  if (!restaurantEnabled) {
+    return (
+      <Layout>
+        <div className="p-6 max-w-xl">
+          <h1 className="text-xl font-semibold text-gray-900 mb-2">Restaurant Module</h1>
+          <p className="text-gray-600 mb-4">
+            Restaurant mode is off. Enable it under Settings → Tax &amp; Modules → Enable Restaurant
+            Module. Retail POS is unchanged.
+          </p>
+        </div>
+      </Layout>
+    );
+  }
+
+  return (
+    <Layout>
+      <div className="h-[calc(100vh-3rem)] flex flex-col bg-stone-100">
+        <div className="px-4 py-3 bg-white border-b border-stone-200 flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold text-stone-900">Restaurant POS</h1>
+            <p className="text-xs text-stone-500">
+              {selectedTable
+                ? `${selectedTable.name} (${selectedTable.status})`
+                : 'Select a table to begin'}
+              {order ? ` · ${order.orderNumber}` : ''}
+              {meta?.kitchenStatus && meta.kitchenStatus !== 'NONE'
+                ? ` · Kitchen: ${
+                    meta.kitchenStatus === 'SENT'
+                      ? 'New'
+                      : meta.kitchenStatus === 'PREPARING'
+                        ? 'Preparing'
+                        : meta.kitchenStatus === 'READY'
+                          ? 'Ready'
+                          : meta.kitchenStatus === 'SERVED'
+                            ? 'Served'
+                            : meta.kitchenStatus
+                  }`
+                : ''}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-xs px-2 py-1 rounded ${
+                isOnline ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
+              }`}
+            >
+              {isOnline ? 'Online' : 'Offline — local journal'}
+            </span>
+            {!selectedTableId && canManage && (
+              <button
+                type="button"
+                onClick={() => setShowAddTable((v) => !v)}
+                className={touchBtnGhost}
+              >
+                {showAddTable ? 'Close' : 'Add table'}
+              </button>
+            )}
+            {selectedTableId && (
+              <button
+                type="button"
+                onClick={() => setSelectedTableId(null)}
+                className={touchBtnGhost}
+              >
+                Change table
+              </button>
+            )}
+          </div>
+        </div>
+
+        {!selectedTableId ? (
+          <div className="flex-1 overflow-auto p-4 space-y-4">
+            <OfflineSyncStatusPanel compact />
+            {showAddTable && canManage && (
+              <div className="bg-white border border-stone-200 rounded-lg p-4 max-w-xl space-y-3">
+                <h2 className="text-sm font-semibold text-stone-800">New table</h2>
+                <div className="grid grid-cols-2 gap-3">
+                  <input
+                    className={touchField}
+                    placeholder="Code (e.g. T5)"
+                    value={newTable.code}
+                    onChange={(e) => setNewTable({ ...newTable, code: e.target.value })}
+                  />
+                  <input
+                    className={touchField}
+                    placeholder="Name"
+                    value={newTable.name}
+                    onChange={(e) => setNewTable({ ...newTable, name: e.target.value })}
+                  />
+                  <input
+                    className={touchField}
+                    placeholder="Zone"
+                    value={newTable.zone}
+                    onChange={(e) => setNewTable({ ...newTable, zone: e.target.value })}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    className={touchField}
+                    placeholder="Seats"
+                    value={newTable.seats}
+                    onChange={(e) =>
+                      setNewTable({ ...newTable, seats: Number(e.target.value) || 0 })
+                    }
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={!newTable.code.trim() || createTableMutation.isPending}
+                  onClick={() => createTableMutation.mutate()}
+                  className={touchBtnDark}
+                >
+                  Save table
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide">Tables</h2>
+              <label className={`${TOUCH} min-h-11 px-3 inline-flex items-center gap-3 text-sm text-stone-700 rounded-xl active:bg-stone-200/60`}>
+                <input
+                  type="checkbox"
+                  checked={myTablesOnly}
+                  onChange={(e) => setMyTablesOnly(e.target.checked)}
+                  className="h-5 w-5 rounded border-stone-300"
+                />
+                My tables
+              </label>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+              {floorTables.map((table) => {
+                const occupied = table.status !== 'FREE';
+                const service = isServiceChannelTable(table);
+                return (
+                  <button
+                    key={table.id}
+                    type="button"
+                    onClick={() => setSelectedTableId(table.id)}
+                    className={`${touchTile} min-h-[96px] rounded-xl border-2 px-3 py-3 text-left shadow-sm ${
+                      occupied
+                        ? service
+                          ? 'border-violet-500 bg-violet-50'
+                          : 'border-amber-500 bg-amber-50'
+                        : service
+                          ? 'border-violet-300 bg-white active:border-violet-500'
+                          : 'border-stone-300 bg-white active:border-emerald-500'
+                    }`}
+                  >
+                    <div className="text-lg font-bold text-stone-900">{table.code}</div>
+                    <div className="text-sm text-stone-600">{table.name}</div>
+                    <div className="text-xs mt-1 text-stone-500">
+                      {occupied
+                        ? table.guestName
+                          ? table.guestName
+                          : table.orderTotal
+                            ? formatCurrency(Number(table.orderTotal))
+                            : table.status
+                        : service
+                          ? 'Service'
+                          : 'Free'}
+                    </div>
+                    {occupied && table.waiterName ? (
+                      <div className="text-[11px] text-stone-600 mt-0.5 truncate">
+                        Waiter: {table.waiterName}
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+            {tablesQuery.isLoading && <p className="text-stone-500 mt-4">Loading tables…</p>}
+            {tablesQuery.isError && (
+              <p className="text-red-600 text-sm">
+                {apiErr(tablesQuery.error, 'Failed to load tables. Apply migration 560 and enable the module.')}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12">
+            <div className="lg:col-span-8 flex flex-col min-h-0 border-r border-stone-200 bg-white">
+              <div className="sticky top-0 z-10 bg-white border-b border-stone-100 shadow-sm">
+                <div className="p-3 pb-2">
+                  <label className="relative block">
+                    <span className="sr-only">Search products</span>
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-stone-400"
+                      aria-hidden
+                    />
+                    <input
+                      ref={searchInputRef}
+                      type="search"
+                      inputMode="search"
+                      enterKeyHint="search"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      value={menuSearch}
+                      onChange={(e) => setMenuSearch(e.target.value)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && quickAddProduct) {
+                          e.preventDefault();
+                          addItemMutation.mutate(quickAddProduct, {
+                            onSuccess: () => setMenuSearch(''),
+                          });
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setMenuSearch('');
+                          (e.target as HTMLInputElement).blur();
+                        }
+                      }}
+                      placeholder="Search menu — name, category, station"
+                      className="w-full min-h-12 h-12 pl-11 pr-12 rounded-xl border border-stone-300 bg-stone-50 text-base text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 focus:bg-white touch-manipulation"
+                    />
+                    {menuSearch ? (
+                      <button
+                        type="button"
+                        aria-label="Clear search"
+                        onClick={() => {
+                          setMenuSearch('');
+                          searchInputRef.current?.focus();
+                        }}
+                        className={`${TOUCH} absolute right-1.5 top-1/2 -translate-y-1/2 h-10 w-10 inline-flex items-center justify-center rounded-xl text-stone-500 active:bg-stone-200`}
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    ) : null}
+                  </label>
+                  {deferredMenuSearch.trim() ? (
+                    <p className="mt-1.5 text-xs text-stone-500">
+                      {visibleProducts.length === 0
+                        ? 'No matches'
+                        : `${visibleProducts.length} match${visibleProducts.length === 1 ? '' : 'es'}`}
+                      {quickAddProduct ? ' · Enter to add' : ''}
+                      {selectedCategoryId ? ' · across all categories' : ''}
+                    </p>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-stone-400">
+                      Tap to open keyboard · type anywhere with a physical keyboard · F3 focuses search
+                    </p>
+                  )}
+                </div>
+                <div className="px-3 pb-3 overflow-x-auto">
+                  <div className="flex gap-2 min-w-max">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategoryId(null);
+                        setMenuSearch('');
+                      }}
+                      className={`${touchChip} ${
+                        !selectedCategoryId && !deferredMenuSearch.trim()
+                          ? 'bg-stone-900 text-white'
+                          : 'bg-stone-100 text-stone-800 active:bg-stone-200'
+                      }`}
+                    >
+                      All
+                    </button>
+                    {(categoriesQuery.data || []).map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCategoryId(cat.id);
+                          setMenuSearch('');
+                        }}
+                        className={`${touchChip} ${
+                          selectedCategoryId === cat.id && !deferredMenuSearch.trim()
+                            ? 'bg-stone-900 text-white'
+                            : 'bg-stone-100 text-stone-800 active:bg-stone-200'
+                        }`}
+                      >
+                        {cat.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                  {visibleProducts.map((product) => (
+                    <button
+                      key={product.id}
+                      type="button"
+                      disabled={addItemMutation.isPending}
+                      onClick={() =>
+                        addItemMutation.mutate(product, {
+                          onSuccess: () => {
+                            if (menuSearch.trim()) setMenuSearch('');
+                          },
+                        })
+                      }
+                      className={`${touchTile} min-h-[84px] rounded-xl border border-stone-300 bg-stone-50 px-3 py-3 text-left active:bg-emerald-50 active:border-emerald-500`}
+                    >
+                      <div className="text-sm font-semibold text-stone-900 leading-tight">
+                        {product.name}
+                      </div>
+                      {deferredMenuSearch.trim() && product.categoryName ? (
+                        <div className="text-[11px] text-stone-500 mt-0.5 truncate">
+                          {product.categoryName}
+                        </div>
+                      ) : null}
+                      <div className="text-xs text-stone-600 mt-1">
+                        {formatCurrency(Number(product.sellingPrice))}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                {!productsQuery.isLoading && visibleProducts.length === 0 && (
+                  <p className="text-sm text-stone-500 p-4">
+                    {deferredMenuSearch.trim()
+                      ? 'No products match that search.'
+                      : 'No menu products. Ensure active products exist (all show until any are flagged Available in Restaurant).'}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="lg:col-span-4 flex flex-col min-h-0 bg-stone-50">
+              <div className="px-4 py-3 border-b border-stone-200 bg-white">
+                <h2 className="font-semibold text-stone-900">Order</h2>
+                {order?.orderNumber ? (
+                  <p className="text-xs text-stone-500 mt-0.5">{order.orderNumber}</p>
+                ) : null}
+                {serviceChannel && (
+                  <p className="text-xs text-violet-700 mt-0.5">
+                    {channel === 'DELIVERY' ? 'Delivery' : 'Take Away'} — enter guest before adding items
+                  </p>
+                )}
+                {siblingChecks.length > 1 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {siblingChecks.map((s) => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        disabled={busy || s.id === order?.id}
+                        onClick={() => void activateSibling(s.id)}
+                        className={`${touchChip} border text-xs ${
+                          s.id === order?.id
+                            ? 'bg-stone-900 text-white border-stone-900'
+                            : 'bg-white text-stone-700 border-stone-300 active:border-stone-500'
+                        }`}
+                      >
+                        {s.orderNumber}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="px-3 py-2.5 border-b border-stone-200 bg-white space-y-1.5">
+                <label className="text-xs font-medium text-stone-600 uppercase tracking-wide">
+                  Waiter
+                </label>
+                <select
+                  className={touchField}
+                  value={selectedWaiterId}
+                  disabled={assignWaiterMutation.isPending}
+                  onChange={(e) => handleWaiterChange(e.target.value)}
+                >
+                  {waiters.length === 0 && user ? (
+                    <option value={user.id}>{user.fullName || user.email}</option>
+                  ) : (
+                    waiters.map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.fullName || w.email}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+              {serviceChannel && (
+                <div className="px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2">
+                  <input
+                    className={touchField}
+                    placeholder="Guest name *"
+                    value={guestDraft.guestName}
+                    onChange={(e) => setGuestDraft({ ...guestDraft, guestName: e.target.value })}
+                  />
+                  <input
+                    className={touchField}
+                    placeholder="Phone"
+                    value={guestDraft.guestPhone}
+                    onChange={(e) => setGuestDraft({ ...guestDraft, guestPhone: e.target.value })}
+                  />
+                  {channel === 'TAKEAWAY' && (
+                    <input
+                      className={touchField}
+                      placeholder="Pickup label (e.g. Car 4)"
+                      value={guestDraft.pickupLabel}
+                      onChange={(e) => setGuestDraft({ ...guestDraft, pickupLabel: e.target.value })}
+                    />
+                  )}
+                  {channel === 'DELIVERY' && (
+                    <textarea
+                      className={`${touchField} min-h-[88px]`}
+                      placeholder="Delivery address *"
+                      rows={2}
+                      value={guestDraft.deliveryAddress}
+                      onChange={(e) =>
+                        setGuestDraft({ ...guestDraft, deliveryAddress: e.target.value })
+                      }
+                    />
+                  )}
+                  {order && (
+                    <button
+                      type="button"
+                      disabled={saveGuestMutation.isPending}
+                      onClick={() => saveGuestMutation.mutate()}
+                      className={`${touchBtnGhost} w-full border-violet-400 text-violet-900`}
+                    >
+                      Save guest details
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="flex-1 overflow-auto px-4 py-2">
+                {orderLines.length === 0 ? (
+                  <p className="text-sm text-stone-500 py-6 text-center">
+                    Press products to build the order
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {orderLines.map((line) => (
+                      <li
+                        key={line.id}
+                        className="flex justify-between gap-2 text-sm border-b border-stone-200 pb-2.5"
+                      >
+                        <div className="flex gap-3 items-start min-w-0 flex-1">
+                          {opsMode === 'split' && (
+                            <label className={`${TOUCH} min-h-11 min-w-11 inline-flex items-center justify-center -ml-1`}>
+                              <input
+                                type="checkbox"
+                                className="h-5 w-5"
+                                checked={selectedLineIds.includes(line.id)}
+                                onChange={() => toggleLine(line.id)}
+                              />
+                            </label>
+                          )}
+                          <div className="min-w-0">
+                            <span className="font-medium text-stone-900">
+                              {Number(line.quantity)} × {line.productName}
+                            </span>
+                            {line.kitchenSentAt ? (
+                              <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700">
+                                KOT
+                              </span>
+                            ) : (
+                              <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-700">
+                                New
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <div className="text-stone-700 whitespace-nowrap">
+                            {formatCurrency(Number(line.lineTotal))}
+                          </div>
+                          {!opsMode && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void handleVoidLines([line.id])}
+                              className={`${TOUCH} min-h-9 px-3 rounded-lg text-xs font-semibold border border-red-300 text-red-700 bg-white active:bg-red-50`}
+                            >
+                              Void
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {opsMode && order && (
+                <div className="px-3 py-3 border-t border-stone-200 bg-amber-50 space-y-2.5">
+                  {opsMode === 'transfer' && (
+                    <>
+                      <p className="text-xs font-medium text-stone-700">Transfer to free table</p>
+                      <select
+                        className={touchField}
+                        value={opsTargetTableId}
+                        onChange={(e) => setOpsTargetTableId(e.target.value)}
+                      >
+                        <option value="">Select table…</option>
+                        {freeTables.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.code} · {t.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={busy || !opsTargetTableId}
+                        onClick={() => void runTransfer()}
+                        className={`${touchBtnDark} w-full`}
+                      >
+                        Confirm transfer
+                      </button>
+                    </>
+                  )}
+                  {opsMode === 'merge' && (
+                    <>
+                      <p className="text-xs font-medium text-stone-700">
+                        Merge another check into this one
+                      </p>
+                      <select
+                        className={touchField}
+                        value={opsSecondaryOrderId}
+                        onChange={(e) => setOpsSecondaryOrderId(e.target.value)}
+                      >
+                        <option value="">Select check…</option>
+                        {mergeCandidates.map((c) => (
+                          <option key={c.orderId} value={c.orderId}>
+                            {c.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={busy || !opsSecondaryOrderId}
+                        onClick={() => void runMerge()}
+                        className={`${touchBtnDark} w-full`}
+                      >
+                        Confirm merge
+                      </button>
+                    </>
+                  )}
+                  {opsMode === 'split' && (
+                    <>
+                      <p className="text-xs font-medium text-stone-700">
+                        Split selected lines ({selectedLineIds.length}) — leave ≥1 on this check
+                      </p>
+                      <label className={`${TOUCH} min-h-11 px-2 inline-flex items-center gap-3 text-sm text-stone-700 rounded-xl active:bg-amber-100/80`}>
+                        <input
+                          type="checkbox"
+                          checked={splitSameTable}
+                          onChange={(e) => setSplitSameTable(e.target.checked)}
+                          className="h-5 w-5"
+                        />
+                        New bill on same table
+                      </label>
+                      {!splitSameTable && (
+                        <select
+                          className={touchField}
+                          value={opsTargetTableId}
+                          onChange={(e) => setOpsTargetTableId(e.target.value)}
+                        >
+                          <option value="">Free table…</option>
+                          {freeTables.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.code} · {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      <button
+                        type="button"
+                        disabled={
+                          busy ||
+                          selectedLineIds.length === 0 ||
+                          selectedLineIds.length >= orderLines.length ||
+                          (!splitSameTable && !opsTargetTableId)
+                        }
+                        onClick={() => void runSplit()}
+                        className={`${touchBtnDark} w-full`}
+                      >
+                        Confirm split
+                      </button>
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    className={`${touchBtnGhost} w-full text-stone-600`}
+                    onClick={() => {
+                      setOpsMode(null);
+                      setSelectedLineIds([]);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+              <div className="border-t border-stone-200 bg-white p-4 space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-stone-600">Subtotal</span>
+                  <span>{formatCurrency(Number(order?.subtotal || 0))}</span>
+                </div>
+                {Number(order?.taxAmount || 0) > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-stone-600">Tax</span>
+                    <span>{formatCurrency(Number(order?.taxAmount || 0))}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-base font-semibold">
+                  <span>Total</span>
+                  <span>{formatCurrency(Number(order?.totalAmount || 0))}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    disabled={!order || busy}
+                    onClick={() => {
+                      setOpsMode('split');
+                      setSplitSameTable(true);
+                    }}
+                    className={`${touchBtnGhost} px-2 text-xs`}
+                  >
+                    Split
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!order || busy || mergeCandidates.length === 0}
+                    onClick={() => setOpsMode('merge')}
+                    className={`${touchBtnGhost} px-2 text-xs`}
+                  >
+                    Merge
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!order || busy || freeTables.length === 0}
+                    onClick={() => {
+                      setOpsMode('transfer');
+                      setOpsTargetTableId('');
+                    }}
+                    className={`${touchBtnGhost} px-2 text-xs`}
+                  >
+                    Transfer
+                  </button>
+                </div>
+                {selectedLineIds.length > 0 && !opsMode ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void handleVoidLines(selectedLineIds)}
+                    className={`${touchBtnDanger} w-full`}
+                  >
+                    Void selected ({selectedLineIds.length})
+                  </button>
+                ) : null}
+                <div className="grid grid-cols-1 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    disabled={!order || busy}
+                    onClick={() => void handleSendKot()}
+                    className={`${TOUCH} min-h-14 w-full rounded-xl bg-orange-600 text-white text-base font-bold active:bg-orange-700`}
+                  >
+                    Send KOT
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!order || busy}
+                    onClick={() => void handlePrintBill()}
+                    className={`${TOUCH} min-h-14 w-full rounded-xl bg-stone-800 text-white text-base font-bold active:bg-stone-950`}
+                  >
+                    Print Bill
+                  </button>
+                  {canRestaurantPay ? (
+                    <button
+                      type="button"
+                      disabled={!order || busy}
+                      onClick={() => void handlePay()}
+                      className={`${TOUCH} min-h-14 w-full rounded-xl bg-emerald-600 text-white text-base font-bold active:bg-emerald-700`}
+                    >
+                      Pay{!isOnline ? ' (cash offline)' : ''}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={!order || busy}
+                    onClick={() => void handleCancelCheck()}
+                    className={`${touchBtnDanger} w-full`}
+                  >
+                    Cancel check
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </Layout>
+  );
+}

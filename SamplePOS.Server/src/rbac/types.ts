@@ -5,6 +5,7 @@ export type PermissionModule =
   | 'admin'
   | 'pos'
   | 'orders'
+  | 'restaurant'
   | 'purchasing'
   | 'customers'
   | 'suppliers'

@@ -113,6 +113,7 @@ const ROUTE_TO_FEATURE_MAP: Record<string, string> = {
     // POS (FREE+)
     '/api/sales': 'pos',
     '/api/orders': 'pos',
+    '/api/restaurant': 'pos',
     '/api/pos/hold': 'pos',
     '/api/pos/sync-offline-sales': 'pos',
     '/api/cash-registers': 'pos',

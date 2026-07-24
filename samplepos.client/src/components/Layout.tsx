@@ -7,6 +7,7 @@ import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
 import ServerClock from './ServerClock';
 import { CASHIER_NAV_ITEMS, isCashierRole } from '../utils/cashierLockdown';
 import { createClientAuthorization } from '../authorization/authorizationService';
+import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
 interface LayoutProps {
   children: React.ReactNode;
 }
@@ -18,6 +19,8 @@ interface NavItem {
   color: string;
   permissions?: string[];  // RBAC permission keys — user needs ANY
   feature?: string;        // Plan feature key — hidden if plan lacks it
+  /** When set, item only shows if the tenant module flag is enabled */
+  requiresRestaurant?: boolean;
 }
 
 export default function Layout({ children }: LayoutProps) {
@@ -28,10 +31,47 @@ export default function Layout({ children }: LayoutProps) {
   const isDesktop = useMediaQuery('(min-width: 1024px)');
   const { config, loading: tenantLoading } = useTenant();
   const brandName = config.branding.companyName || config.name || 'SMART ERP';
+  const { data: restaurantEnabled = false } = useRestaurantEnabled();
 
   const navItems: NavItem[] = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊', color: 'text-blue-600' },
     { name: 'Point of Sale', path: '/pos', icon: '🛒', color: 'text-green-600', permissions: ['pos.read', 'pos.create'], feature: 'pos' },
+    {
+      name: 'Restaurant',
+      path: '/restaurant',
+      icon: '🍽️',
+      color: 'text-amber-700',
+      permissions: ['restaurant.read', 'restaurant.order'],
+      feature: 'pos',
+      requiresRestaurant: true,
+    },
+    {
+      name: 'Kitchen',
+      path: '/restaurant/kitchen',
+      icon: '👨‍🍳',
+      color: 'text-orange-700',
+      permissions: ['restaurant.kitchen'],
+      feature: 'pos',
+      requiresRestaurant: true,
+    },
+    {
+      name: 'Stations',
+      path: '/restaurant/stations',
+      icon: '🖨️',
+      color: 'text-stone-700',
+      permissions: ['restaurant.manage'],
+      feature: 'pos',
+      requiresRestaurant: true,
+    },
+    {
+      name: 'Recipes',
+      path: '/restaurant/recipes',
+      icon: '🥗',
+      color: 'text-lime-700',
+      permissions: ['restaurant.manage'],
+      feature: 'pos',
+      requiresRestaurant: true,
+    },
     { name: 'Orders Queue', path: '/orders-queue', icon: '📋', color: 'text-orange-600', permissions: ['orders.read', 'orders.pay'], feature: 'pos' },
     { name: 'Inventory', path: '/inventory', icon: '📦', color: 'text-purple-600', permissions: ['inventory.read'], feature: 'inventory' },
     { name: 'Customers', path: '/customers', icon: '👥', color: 'text-yellow-600', permissions: ['customers.read'], feature: 'customers' },
@@ -71,6 +111,7 @@ export default function Layout({ children }: LayoutProps) {
     // legacy role fallback only when the permission set is empty.
     const authz = createClientAuthorization(user, permissions);
     return items.filter((item) => {
+      if (item.requiresRestaurant && !restaurantEnabled) return false;
       if (item.feature) {
         if (tenantLoading) return false;
         if (planFeatures.length > 0 && !planFeatures.includes(item.feature)) return false;
@@ -79,7 +120,7 @@ export default function Layout({ children }: LayoutProps) {
       if (!authz) return false;
       return item.permissions.some((p) => authz.hasPermission(p));
     });
-  }, [user, permissions, planFeatures, tenantLoading]);
+  }, [user, permissions, planFeatures, tenantLoading, restaurantEnabled]);
   const handleLogout = () => {
     logout();
     navigate('/login');
@@ -88,6 +129,10 @@ export default function Layout({ children }: LayoutProps) {
   const isActive = (path: string) => {
     if (path === '/settings/invoice') {
       return location.pathname.startsWith('/settings');
+    }
+    // Keep Restaurant POS distinct from Kitchen Display
+    if (path === '/restaurant') {
+      return location.pathname === '/restaurant';
     }
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };

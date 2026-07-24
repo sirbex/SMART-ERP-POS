@@ -40,6 +40,12 @@ export const PERMISSIONS: Record<string, Permission> = {
   ORDERS_PAY: p('orders.pay', 'orders', 'pay', 'Complete POS orders with payment (cashier)'),
   ORDERS_CANCEL: p('orders.cancel', 'orders', 'cancel', 'Cancel pending POS orders'),
 
+  RESTAURANT_READ: p('restaurant.read', 'restaurant', 'read', 'View restaurant floor, open checks, and menu'),
+  RESTAURANT_ORDER: p('restaurant.order', 'restaurant', 'create', 'Create and edit restaurant orders (waiter)'),
+  RESTAURANT_KITCHEN: p('restaurant.kitchen', 'restaurant', 'update', 'Send and manage kitchen tickets'),
+  RESTAURANT_PAY: p('restaurant.pay', 'restaurant', 'pay', 'Print bill and complete restaurant payment'),
+  RESTAURANT_MANAGE: p('restaurant.manage', 'restaurant', 'manage', 'Manage restaurant tables and module settings'),
+
   PURCHASING_READ: p('purchasing.read', 'purchasing', 'read', 'View purchase orders'),
   PURCHASING_CREATE: p('purchasing.create', 'purchasing', 'create', 'Create purchase orders'),
   PURCHASING_UPDATE: p('purchasing.update', 'purchasing', 'update', 'Modify purchase orders'),

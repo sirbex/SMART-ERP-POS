@@ -25,6 +25,15 @@ describe('shared authorization — legacyRoleFallback', () => {
       expect(legacyRoleGrantsPermission('CASHIER', key)).toBe(true);
     }
   });
+
+  it('restaurant.pay: ADMIN + CASHIER yes; MANAGER + STAFF no', () => {
+    expect(legacyRoleGrantsPermission('ADMIN', 'restaurant.pay')).toBe(true);
+    expect(legacyRoleGrantsPermission('CASHIER', 'restaurant.pay')).toBe(true);
+    expect(legacyRoleGrantsPermission('MANAGER', 'restaurant.pay')).toBe(false);
+    expect(legacyRoleGrantsPermission('MANAGER', 'restaurant.order')).toBe(true);
+    expect(legacyRoleGrantsPermission('STAFF', 'restaurant.pay')).toBe(false);
+    expect(legacyRoleGrantsPermission('STAFF', 'restaurant.order')).toBe(true);
+  });
 });
 
 describe('shared authorization — permissionEvaluation', () => {

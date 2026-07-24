@@ -47,4 +47,17 @@ describe('systemRoleGrants SSOT', () => {
       isSystemAccountantPermission({ key: 'accounting.read', module: 'accounting' })
     ).toBe(true);
   });
+
+  it('restaurant.pay is accountant/cashier/admin — not Manager', () => {
+    expect(SYSTEM_ACCOUNTANT_EXTRA_KEYS).toContain('restaurant.pay');
+    expect(
+      isSystemAccountantPermission({ key: 'restaurant.pay', module: 'restaurant' }),
+    ).toBe(true);
+    expect(
+      isSystemManagerPermission({ key: 'restaurant.pay', module: 'restaurant' }),
+    ).toBe(false);
+    expect(
+      isSystemManagerPermission({ key: 'restaurant.order', module: 'restaurant' }),
+    ).toBe(true);
+  });
 });

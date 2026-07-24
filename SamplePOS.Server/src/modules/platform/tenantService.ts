@@ -947,6 +947,8 @@ export const tenantService = {
               'delivery.read',
               'settings.read',
               'quotations.read', 'quotations.create',
+              'orders.read', 'orders.pay', 'orders.cancel',
+              'restaurant.read', 'restaurant.order', 'restaurant.kitchen', 'restaurant.pay',
               'reports.sales_view',
             ].includes(_p.key),
         },

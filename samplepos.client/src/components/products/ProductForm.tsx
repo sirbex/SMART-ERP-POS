@@ -2,6 +2,12 @@
 import { useMemo } from 'react';
 import CategoryCombobox from './CategoryCombobox';
 import { buildPurchaseUomOptions } from '@/validation/product';
+import {
+  productFormSectionVisibility,
+  serviceInventoryClearsForm,
+} from '@shared/utils/productTypeRules';
+import { useRestaurantEnabled } from '@/hooks/useRestaurantEnabled';
+import { useRestaurantEnabled } from '@/hooks/useRestaurantEnabled';
 
 /**
  * SAP/Odoo formula preview: safely evaluates the pricing formula in the browser
@@ -28,6 +34,8 @@ export interface ProductFormValues {
   barcode: string;
   description: string;
   category: string;
+  /** inventory = stocked SKU; consumable = stocked; service = no parent stock (pair with recipe for prepared food) */
+  productType: 'inventory' | 'consumable' | 'service';
   genericName: string;
   costPrice: string;
   sellingPrice: string;
@@ -40,6 +48,8 @@ export interface ProductFormValues {
   trackExpiry: boolean;
   minDaysBeforeExpirySale: string;
   isActive: boolean;
+  /** When restaurant module is on: show this product on Restaurant POS */
+  availableInRestaurant: boolean;
   // Procurement fields (Part 9)
   preferredSupplierId: string;
   supplierProductCode: string;
@@ -78,6 +88,10 @@ export default function ProductForm({
   restrictPurchaseUomToConfigured = false,
   lastPurchasePrice,
 }: ProductFormProps) {
+  const { data: restaurantEnabled = false } = useRestaurantEnabled();
+  const isService = values.productType === 'service';
+  const sections = productFormSectionVisibility(values.productType);
+  const inventoryDisabled = disabled || isService;
   const costNum = parseFloat(values.costPrice) || 0;
   const formulaPreviewPrice = useMemo(
     () => values.autoUpdatePrice ? evalFormulaPreview(values.pricingFormula, costNum) : null,
@@ -94,6 +108,23 @@ export default function ProductForm({
       }),
     [restrictPurchaseUomToConfigured, configuredProductUoms, masterUoms, values.purchaseUomId],
   );
+
+  const handleProductTypeChange = (next: 'inventory' | 'consumable' | 'service') => {
+    onChange('productType', next);
+    if (next === 'service') {
+      const clears = serviceInventoryClearsForm();
+      onChange('trackExpiry', clears.trackExpiry);
+      onChange('minDaysBeforeExpirySale', clears.minDaysBeforeExpirySale);
+      onChange('reorderLevel', clears.reorderLevel);
+      onChange('reorderQuantity', clears.reorderQuantity);
+      onChange('preferredSupplierId', clears.preferredSupplierId);
+      onChange('supplierProductCode', clears.supplierProductCode);
+      onChange('purchaseUomId', clears.purchaseUomId);
+      onChange('leadTimeDays', clears.leadTimeDays);
+      onChange('autoUpdatePrice', clears.autoUpdatePrice);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Basic Information */}
@@ -160,6 +191,32 @@ export default function ProductForm({
             onChange={(val) => onChange("category", val)}
             disabled={disabled}
           />
+        </div>
+
+        <div>
+          <label htmlFor="product-type" className="block text-sm font-medium text-gray-700 mb-1">
+            Product type
+          </label>
+          <select
+            id="product-type"
+            value={values.productType || 'inventory'}
+            onChange={(e) =>
+              handleProductTypeChange(e.target.value as 'inventory' | 'consumable' | 'service')
+            }
+            disabled={disabled}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="inventory">Inventory — stocked item (e.g. Coke bottle)</option>
+            <option value="consumable">Consumable — stocked, then expensed</option>
+            <option value="service">Service — no parent stock (e.g. Pizza + recipe)</option>
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            {isService
+              ? 'Prepared dishes: sell as service and link ingredients on Restaurant → Recipes. Stock, supplier, and expiry do not apply to this product.'
+              : values.productType === 'consumable'
+                ? 'Tracked in stock like inventory; typically expensed when used.'
+                : 'Selling this product deducts its own stock (unless a recipe overrides to ingredients).'}
+          </p>
         </div>
 
         <div>
@@ -250,13 +307,18 @@ export default function ProductForm({
               id="costing-method"
               value={values.costingMethod}
               onChange={(e) => onChange("costingMethod", e.target.value)}
-              disabled={disabled}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              disabled={inventoryDisabled}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
             >
               <option value="FIFO">FIFO (First In, First Out)</option>
               <option value="AVCO">AVCO (Average Cost)</option>
               <option value="STANDARD">Standard Cost</option>
             </select>
+            {isService && (
+              <p className="text-xs text-gray-500 mt-1">
+                Not used for service dishes — COGS comes from recipe ingredients on payment.
+              </p>
+            )}
           </div>
         </div>
 
@@ -309,7 +371,8 @@ export default function ProductForm({
           )}
         </div>
 
-        {/* Pricing Formula & Auto-Update */}
+        {/* Pricing Formula & Auto-Update — stocked products only */}
+        {sections.showPricingFormula && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <div>
             <label htmlFor="pricing-formula" className="block text-sm font-medium text-gray-700 mb-1">
@@ -348,11 +411,59 @@ export default function ProductForm({
             </div>
           </div>
         </div>
+        )}
       </div>
 
-      {/* Stock Levels */}
+      {/* Stock Levels — not applicable to service/menu dishes */}
       <div className="border-t pt-4">
-        <h4 className="font-medium text-gray-900 mb-3">Stock Level Settings</h4>
+        <h4 className="font-medium text-gray-900 mb-3">
+          {isService ? 'Availability' : 'Stock Level Settings'}
+        </h4>
+        {isService ? (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2">
+              Service products do not hold stock, track expiry, or use suppliers. Link a recipe for
+              ingredient consumption, or leave without a recipe for pure fees (hall hire, delivery).
+            </p>
+            <div className="flex items-start gap-2">
+              <input
+                id="is-active"
+                type="checkbox"
+                checked={values.isActive}
+                onChange={(e) => onChange("isActive", e.target.checked)}
+                disabled={disabled}
+                className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <div>
+                <label htmlFor="is-active" className="text-sm font-medium text-gray-700">
+                  Active Product
+                </label>
+                <p className="text-xs text-gray-500">Inactive products won&apos;t appear in sales</p>
+              </div>
+            </div>
+            {restaurantEnabled && (
+              <div className="flex items-start gap-2">
+                <input
+                  id="available-in-restaurant"
+                  type="checkbox"
+                  checked={values.availableInRestaurant !== false}
+                  onChange={(e) => onChange('availableInRestaurant', e.target.checked)}
+                  disabled={disabled}
+                  className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <div>
+                  <label htmlFor="available-in-restaurant" className="text-sm font-medium text-gray-700">
+                    Available in Restaurant
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Show on Restaurant POS category buttons. Uncheck to hide from the floor.
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+        <>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label htmlFor="reorder-level" className="block text-sm font-medium text-gray-700 mb-1">
@@ -402,10 +513,31 @@ export default function ProductForm({
               <label htmlFor="is-active" className="text-sm font-medium text-gray-700">
                 Active Product
               </label>
-              <p className="text-xs text-gray-500">Inactive products won't appear in sales or inventory operations</p>
+              <p className="text-xs text-gray-500">Inactive products won&apos;t appear in sales or inventory operations</p>
             </div>
           </div>
         </div>
+
+        {restaurantEnabled && (
+          <div className="mt-3 flex items-start gap-2">
+            <input
+              id="available-in-restaurant-inv"
+              type="checkbox"
+              checked={values.availableInRestaurant !== false}
+              onChange={(e) => onChange('availableInRestaurant', e.target.checked)}
+              disabled={disabled}
+              className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <div>
+              <label htmlFor="available-in-restaurant-inv" className="text-sm font-medium text-gray-700">
+                Available in Restaurant
+              </label>
+              <p className="text-xs text-gray-500">
+                Show on Restaurant POS. Needs a Category so it appears under the right button.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Expiry Enforcement (shown when Track Expiry is enabled) */}
         {values.trackExpiry && (
@@ -429,10 +561,12 @@ export default function ProductForm({
             </p>
           </div>
         )}
+        </>
+        )}
       </div>
 
-      {/* Procurement Tab (Part 9) - only shown when suppliers prop is provided */}
-      {suppliers && (
+      {/* Procurement — stocked products only */}
+      {suppliers && sections.showProcurement && (
         <div className="border-t pt-4">
           <h4 className="font-medium text-gray-900 mb-3">Procurement</h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

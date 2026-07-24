@@ -1213,6 +1213,123 @@ export const api = {
       apiClient.post<ApiResponse<{ documentNumber?: string }>>('treasury/petty-cash', data),
   },
 
+  restaurant: {
+    getEnabled: () => apiClient.get<ApiResponse<{ enabled: boolean }>>('restaurant/enabled'),
+    listTables: (params?: { includeInactive?: boolean }) =>
+      apiClient.get<ApiResponse>('restaurant/tables', { params }),
+    createTable: (data: {
+      code: string;
+      name: string;
+      zone?: string;
+      seats?: number;
+      sortOrder?: number;
+    }) => apiClient.post<ApiResponse>('restaurant/tables', data),
+    updateTable: (
+      id: string,
+      data: Partial<{
+        code: string;
+        name: string;
+        zone: string;
+        seats: number;
+        sortOrder: number;
+        isActive: boolean;
+      }>,
+    ) => apiClient.patch<ApiResponse>(`restaurant/tables/${id}`, data),
+    getTableCheck: (tableId: string, params?: { orderId?: string }) =>
+      apiClient.get<ApiResponse>(`restaurant/tables/${tableId}/check`, { params }),
+    activateCheck: (tableId: string, data: { orderId: string }) =>
+      apiClient.post<ApiResponse>(`restaurant/tables/${tableId}/activate-check`, data),
+    menuCategories: () => apiClient.get<ApiResponse>('restaurant/menu/categories'),
+    menuProducts: (params?: { categoryId?: string }) =>
+      apiClient.get<ApiResponse>('restaurant/menu/products', { params }),
+    setProductFlags: (
+      id: string,
+      data: { availableInRestaurant?: boolean; kitchenStation?: string | null },
+    ) => apiClient.patch<ApiResponse>(`restaurant/menu/products/${id}`, data),
+    addItems: (data: {
+      tableId: string;
+      customerId?: string | null;
+      taxAmount?: number;
+      waiterId?: string;
+      guestName?: string | null;
+      guestPhone?: string | null;
+      deliveryAddress?: string | null;
+      pickupLabel?: string | null;
+      items: Array<{
+        productId: string;
+        productName?: string;
+        quantity: number;
+        unitPrice?: number;
+        discountAmount?: number;
+        lineNotes?: string | null;
+        uomId?: string | null;
+      }>;
+    }) => apiClient.post<ApiResponse>('restaurant/checks/items', data),
+    updateGuest: (
+      orderId: string,
+      data: {
+        guestName?: string | null;
+        guestPhone?: string | null;
+        deliveryAddress?: string | null;
+        pickupLabel?: string | null;
+      },
+    ) => apiClient.patch<ApiResponse>(`restaurant/checks/${orderId}/guest`, data),
+    listWaiters: () => apiClient.get<ApiResponse>('restaurant/waiters'),
+    assignWaiter: (orderId: string, data: { waiterId: string }) =>
+      apiClient.patch<ApiResponse>(`restaurant/checks/${orderId}/waiter`, data),
+    transferCheck: (orderId: string, data: { toTableId: string }) =>
+      apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/transfer`, data),
+    mergeChecks: (orderId: string, data: { secondaryOrderId: string }) =>
+      apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/merge`, data),
+    splitCheck: (
+      orderId: string,
+      data: { itemIds: string[]; targetTableId: string; sameTable?: boolean },
+    ) => apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/split`, data),
+    sendKot: (orderId: string) =>
+      apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/kot`),
+    voidItems: (orderId: string, data: { itemIds: string[]; reason: string }) =>
+      apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/void-items`, data),
+    getBill: (orderId: string) =>
+      apiClient.get<ApiResponse>(`restaurant/checks/${orderId}/bill`),
+    cancelCheck: (orderId: string, data?: { reason?: string }) =>
+      apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/cancel`, data ?? {}),
+    kitchenBoard: (params?: { station?: string }) =>
+      apiClient.get<ApiResponse>('restaurant/kitchen/board', { params }),
+    advanceKot: (kotId: string, data?: { status?: 'SENT' | 'PREPARING' | 'READY' | 'BUMPED' }) =>
+      apiClient.post<ApiResponse>(`restaurant/kitchen/tickets/${kotId}/advance`, data ?? {}),
+    listStations: (params?: { includeInactive?: boolean }) =>
+      apiClient.get<ApiResponse>('restaurant/stations', { params }),
+    createStation: (data: {
+      code: string;
+      name: string;
+      printerName?: string | null;
+      sortOrder?: number;
+      isDefault?: boolean;
+    }) => apiClient.post<ApiResponse>('restaurant/stations', data),
+    updateStation: (
+      id: string,
+      data: Partial<{
+        code: string;
+        name: string;
+        printerName: string | null;
+        sortOrder: number;
+        isActive: boolean;
+        isDefault: boolean;
+      }>,
+    ) => apiClient.patch<ApiResponse>(`restaurant/stations/${id}`, data),
+    listRecipes: () => apiClient.get<ApiResponse>('restaurant/recipes'),
+    getRecipeByProduct: (productId: string) =>
+      apiClient.get<ApiResponse>(`restaurant/recipes/by-product/${productId}`),
+    upsertRecipe: (data: {
+      parentProductId: string;
+      name: string;
+      isActive?: boolean;
+      notes?: string | null;
+      lines: Array<{ componentProductId: string; quantityBase: number; sortOrder?: number }>;
+    }) => apiClient.put<ApiResponse>('restaurant/recipes', data),
+    deleteRecipe: (id: string) => apiClient.delete<ApiResponse>(`restaurant/recipes/${id}`),
+  },
+
   assets: {
     getCategories: () => apiClient.get<ApiResponse>('assets/categories'),
     createCategory: (data: {

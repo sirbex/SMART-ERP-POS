@@ -63,6 +63,9 @@ export interface SystemSettings {
     /** ADR-003 Phase 1A — Treasury Document domain (default false) */
     treasuryDocumentEnabled: boolean;
 
+    /** Restaurant module FOH/KOT (default false — retail unchanged) */
+    restaurantModeEnabled: boolean;
+
     /** ADR-004 Phase 2A — Loss & Quarantine disposal documents (default false) */
     lossQuarantineDocumentEnabled: boolean;
 
@@ -122,6 +125,7 @@ export interface SystemSettingsDbRow {
     low_stock_threshold: number;
     is_multistore_enabled: boolean;
     treasury_document_enabled?: boolean;
+    restaurant_mode_enabled?: boolean;
     loss_quarantine_document_enabled?: boolean;
     transfer_policy_require_approval_all: boolean;
     transfer_policy_allow_direct: boolean;
@@ -171,6 +175,7 @@ export interface UpdateSystemSettingsDto {
     lowStockThreshold?: number;
     isMultistoreEnabled?: boolean;
     treasuryDocumentEnabled?: boolean;
+    restaurantModeEnabled?: boolean;
     lossQuarantineDocumentEnabled?: boolean;
     transferPolicyRequireApprovalAll?: boolean;
     transferPolicyAllowDirect?: boolean;
@@ -220,6 +225,7 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
         lowStockThreshold: dbRow.low_stock_threshold,
         isMultistoreEnabled: dbRow.is_multistore_enabled ?? false,
         treasuryDocumentEnabled: dbRow.treasury_document_enabled ?? false,
+        restaurantModeEnabled: dbRow.restaurant_mode_enabled ?? false,
         lossQuarantineDocumentEnabled: dbRow.loss_quarantine_document_enabled ?? false,
         transferPolicyRequireApprovalAll: dbRow.transfer_policy_require_approval_all ?? true,
         transferPolicyAllowDirect: dbRow.transfer_policy_allow_direct ?? true,

@@ -1,6 +1,7 @@
 import { Pool, PoolClient } from 'pg';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 import { convertKeysToCamelCase } from '../../utils/caseConverter.js';
+import { tableHasColumn } from '../../db/schemaColumnCache.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -45,6 +46,9 @@ export interface OrderItemRecord {
   baseQty: string | null;
   baseUomId: string | null;
   conversionFactor: string | null;
+  kitchenSentAt?: string | null;
+  lineNotes?: string | null;
+  kitchenStation?: string | null;
 }
 
 export interface CreateOrderData {
@@ -280,7 +284,12 @@ export const ordersRepository = {
 
     const order: OrderRecord = convertKeysToCamelCase(orderResult.rows[0]) as OrderRecord;
 
-    // Fetch items
+    // Fetch items (kitchen_* columns exist after migration 560 — keep SELECT resilient)
+    const hasKitchenCols = await tableHasColumn(pool, 'pos_order_items', 'kitchen_sent_at');
+    const kitchenSelect = hasKitchenCols
+      ? `, kitchen_sent_at, line_notes, kitchen_station`
+      : ``;
+
     const itemsResult = await pool.query(
       `SELECT
         id,
@@ -295,6 +304,7 @@ export const ordersRepository = {
         base_qty,
         base_uom_id,
         conversion_factor
+        ${kitchenSelect}
       FROM pos_order_items
       WHERE order_id = $1
       ORDER BY product_name`,

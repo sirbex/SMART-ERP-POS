@@ -114,6 +114,10 @@ const BadDebtWriteoffPage = lazyWithRetry(() => import('./pages/accounting/BadDe
 const AssetAccountingPage = lazyWithRetry(() => import('./pages/accounting/AssetAccountingPage'));
 const OrdersQueuePage = lazyWithRetry(() => import('./pages/orders/OrdersQueuePage'));
 const OrderPaymentPage = lazyWithRetry(() => import('./pages/orders/OrderPaymentPage'));
+const RestaurantPosPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantPosPage'));
+const KitchenDisplayPage = lazyWithRetry(() => import('./pages/restaurant/KitchenDisplayPage'));
+const RestaurantStationsPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantStationsPage'));
+const RestaurantRecipesPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantRecipesPage'));
 const JeApprovalPage = lazyWithRetry(() => import('./pages/accounting/JeApprovalPage'));
 const PaymentProgramPage = lazyWithRetry(() => import('./pages/accounting/PaymentProgramPage'));
 const MultiCurrencyPage = lazyWithRetry(() => import('./pages/accounting/MultiCurrencyPage'));
@@ -372,6 +376,55 @@ function App() {
                     element={
                       <ProtectedRoute requiredPermissions={['pos.read', 'pos.create']} requiredFeature="pos">
                         <POSPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  {/* Restaurant POS (optional module — flag checked inside page + nav) */}
+                  <Route
+                    path="/restaurant"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={['restaurant.read', 'restaurant.order']}
+                        requiredFeature="pos"
+                      >
+                        <RestaurantPosPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/restaurant/kitchen"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={['restaurant.kitchen']}
+                        requiredFeature="pos"
+                      >
+                        <KitchenDisplayPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/restaurant/stations"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={['restaurant.manage']}
+                        requiredFeature="pos"
+                      >
+                        <RestaurantStationsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/restaurant/recipes"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={['restaurant.manage']}
+                        requiredFeature="pos"
+                      >
+                        <RestaurantRecipesPage />
                       </ProtectedRoute>
                     }
                   />

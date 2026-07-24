@@ -63,6 +63,8 @@ interface SystemSettings {
     expiryAutomationEnabled?: boolean;
     /** ADR-003 — Treasury Document domain (cash/bank liquidity documents) */
     treasuryDocumentEnabled?: boolean;
+    /** Restaurant FOH module (tables, KOT, SambaPOS-style ordering) */
+    restaurantModeEnabled?: boolean;
 }
 
 async function fetchSettings(): Promise<SystemSettings> {
@@ -126,6 +128,9 @@ export default function SystemSettingsTab() {
             }
             if (variables.treasuryDocumentEnabled !== undefined) {
                 void queryClient.invalidateQueries({ queryKey: ['treasury', 'enabled'] });
+            }
+            if (variables.restaurantModeEnabled !== undefined) {
+                void queryClient.invalidateQueries({ queryKey: ['restaurant', 'enabled'] });
             }
             // Immediately write transaction mode to localStorage so that:
             // 1. Same-tab POS page picks it up on next render (via cache read)
@@ -412,6 +417,7 @@ function TaxSettings({
         taxInclusive: settings.taxInclusive,
         taxRates: settings.taxRates || [],
         treasuryDocumentEnabled: settings.treasuryDocumentEnabled ?? false,
+        restaurantModeEnabled: settings.restaurantModeEnabled ?? false,
     });
 
     const [newRate, setNewRate] = useState({ name: '', rate: 0, description: '' });
@@ -482,6 +488,35 @@ function TaxSettings({
                                     Authorize cash and bank liquidity movements through treasury
                                     documents. Existing cash and banking workflows stay available
                                     until you switch over.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-3">
+                        <div className="flex items-start">
+                            <input
+                                type="checkbox"
+                                id="restaurantModeEnabled"
+                                checked={formData.restaurantModeEnabled}
+                                onChange={(e) =>
+                                    setFormData({
+                                        ...formData,
+                                        restaurantModeEnabled: e.target.checked,
+                                    })
+                                }
+                                className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <div className="ml-2">
+                                <label
+                                    htmlFor="restaurantModeEnabled"
+                                    className="block text-sm font-medium text-gray-900"
+                                >
+                                    Enable Restaurant Module
+                                </label>
+                                <p className="mt-0.5 text-xs text-gray-600">
+                                    Tables, kitchen tickets (KOT), and SambaPOS-style restaurant POS.
+                                    Retail and wholesale POS stay unchanged when this is off.
                                 </p>
                             </div>
                         </div>

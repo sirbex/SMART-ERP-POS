@@ -10,6 +10,10 @@ export const UnitOfMeasureEnum = z
 export const CostingMethodEnum = z.enum(["FIFO", "AVCO", "STANDARD"]);
 export type CostingMethod = z.infer<typeof CostingMethodEnum>;
 
+/** Inventory = stocked SKU; consumable = stocked then expensed; service = sellable with no parent stock (use recipe for prepared food). */
+export const ProductTypeEnum = z.enum(["inventory", "consumable", "service"]);
+export type ProductType = z.infer<typeof ProductTypeEnum>;
+
 // Core product fields used for create/edit from UI
 export const ProductCoreObject = z.object({
   name: z.string().min(1, "Product name is required").max(255),
@@ -38,6 +42,8 @@ export const ProductCoreObject = z.object({
     .optional()
     .or(z.literal(""))
     .transform((v) => (v === "" ? undefined : v)),
+  productType: ProductTypeEnum.default("inventory"),
+  availableInRestaurant: z.boolean().default(true),
   genericName: z
     .string()
     .trim()
@@ -182,6 +188,7 @@ export const ProductSchema = z
     barcode: z.string().optional(),
     description: z.string().optional(),
     category: z.string().optional(),
+    productType: ProductTypeEnum.optional(),
     genericName: z.string().optional(),
     unitOfMeasure: z.string().min(1).max(100),
     conversionFactor: z.number(),

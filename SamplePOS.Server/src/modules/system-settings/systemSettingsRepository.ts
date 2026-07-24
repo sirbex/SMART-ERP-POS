@@ -174,6 +174,10 @@ export const systemSettingsRepository = {
             setClauses.push(`treasury_document_enabled = $${paramIndex++}`);
             values.push(updates.treasuryDocumentEnabled);
         }
+        if (updates.restaurantModeEnabled !== undefined) {
+            setClauses.push(`restaurant_mode_enabled = $${paramIndex++}`);
+            values.push(updates.restaurantModeEnabled);
+        }
         if (updates.lossQuarantineDocumentEnabled !== undefined) {
             setClauses.push(`loss_quarantine_document_enabled = $${paramIndex++}`);
             values.push(updates.lossQuarantineDocumentEnabled);

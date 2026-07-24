@@ -37,6 +37,9 @@ export interface ReplayEventLine {
     subtotal: number;
     taxAmount: number;
     discountAmount?: number;
+    lineId?: string;
+    kitchenSentAt?: string | null;
+    lineNotes?: string | null;
 }
 
 export interface ReplayEventPayment {
@@ -58,6 +61,10 @@ export interface SaleCompletedEvent {
     taxAmount: number;
     totalAmount: number;
     ts: number;
+    /** Phase 5.2 — when set, complete linked restaurant check + release table */
+    tableId?: string;
+    channel?: 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
+    tableCode?: string;
 }
 
 export interface OrderCreatedEvent {
@@ -69,21 +76,91 @@ export interface OrderCreatedEvent {
     notes?: string | null;
     lines: ReplayEventLine[];
     ts: number;
+    channel?: 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
+    tableId?: string;
+    tableCode?: string;
+    waiterId?: string;
+}
+
+export interface RestaurantKotFiredEvent {
+    eventType: 'RESTAURANT_KOT_FIRED';
+    key: string;
+    orderId: string;
+    kotOfflineId: string;
+    ts: number;
+    [extra: string]: unknown;
+}
+
+export interface RestaurantCheckTransferredEvent {
+    eventType: 'RESTAURANT_CHECK_TRANSFERRED';
+    key: string;
+    orderId: string;
+    offlineId?: string;
+    fromTableId: string;
+    toTableId: string;
+    toTableCode?: string;
+    toTableName?: string;
+    channel?: 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
+    ts: number;
+}
+
+export interface RestaurantCheckMergedEvent {
+    eventType: 'RESTAURANT_CHECK_MERGED';
+    key: string;
+    primaryOrderId: string;
+    secondaryOrderId: string;
+    primaryOfflineId?: string;
+    secondaryOfflineId?: string;
+    primaryTableId?: string;
+    secondaryTableId?: string;
+    ts: number;
+}
+
+export interface RestaurantCheckSplitEvent {
+    eventType: 'RESTAURANT_CHECK_SPLIT';
+    key: string;
+    sourceOrderId: string;
+    sourceOfflineId?: string;
+    newOrderId: string;
+    newOfflineId: string;
+    lineIds: string[];
+    movedLines: ReplayEventLine[];
+    sourceTableId: string;
+    targetTableId: string;
+    targetTableCode?: string;
+    targetTableName?: string;
+    sameTable: boolean;
+    channel?: 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
+    waiterId?: string;
+    waiterName?: string;
+    ts: number;
+}
+
+export interface RestaurantKotStatusEvent {
+    eventType: 'RESTAURANT_KOT_STATUS';
+    key: string;
+    orderId: string;
+    kotOfflineId: string;
+    status: 'SENT' | 'PREPARING' | 'READY' | 'BUMPED';
+    ts: number;
 }
 
 export interface OrderCancelledEvent {
     eventType: 'ORDER_CANCELLED';
     key: string;
     orderId: string;
-    offlineId: string;
+    offlineId?: string;
+    reason?: string;
     ts: number;
+    tableId?: string;
+    tableCode?: string;
 }
 
 export interface OrderUpdatedEvent {
     eventType: 'ORDER_UPDATED';
     key: string;
     orderId: string;
-    offlineId: string;
+    offlineId?: string;
     ts: number;
     [extra: string]: unknown;
 }
@@ -113,7 +190,12 @@ export type ReplayableEvent =
     | OrderCancelledEvent
     | OrderUpdatedEvent
     | PaymentAddedEvent
-    | SaleVoidedEvent;
+    | SaleVoidedEvent
+    | RestaurantKotFiredEvent
+    | RestaurantCheckTransferredEvent
+    | RestaurantCheckMergedEvent
+    | RestaurantCheckSplitEvent
+    | RestaurantKotStatusEvent;
 
 // ── Result types ──────────────────────────────────────────────
 
@@ -149,16 +231,79 @@ export type ReplayResult =
     | ReplayFailed
     | ReplayAcknowledged;
 
+/** Resolve PENDING restaurant check for a floor table. */
+async function resolvePendingOrderIdForTable(
+    pool: Pool,
+    tableId: string
+): Promise<string | null> {
+    const byCurrent = await pool.query(
+        `SELECT current_order_id AS id FROM restaurant_tables
+         WHERE id = $1 AND current_order_id IS NOT NULL`,
+        [tableId]
+    );
+    if (byCurrent.rows[0]?.id) {
+        const st = await pool.query(`SELECT status FROM pos_orders WHERE id = $1`, [
+            byCurrent.rows[0].id,
+        ]);
+        if (st.rows[0]?.status === 'PENDING') {
+            return byCurrent.rows[0].id as string;
+        }
+    }
+    const byTable = await pool.query(
+        `SELECT id FROM pos_orders
+         WHERE table_id = $1 AND status = 'PENDING'
+         ORDER BY created_at DESC LIMIT 1`,
+        [tableId]
+    );
+    return (byTable.rows[0]?.id as string) ?? null;
+}
+
+/**
+ * Free restaurant floor after offline pay. Errors are returned — never swallowed as silent success.
+ */
+async function releaseRestaurantFloorAfterSale(
+    pool: Pool | PoolClient,
+    event: SaleCompletedEvent,
+    knownFromOrderId?: string
+): Promise<{ fromOrderId: string | null; error: string | null }> {
+    if (!event.tableId) {
+        return { fromOrderId: knownFromOrderId ?? null, error: null };
+    }
+
+    try {
+        const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+        if (!(await isRestaurantModeEnabled(pool))) {
+            return { fromOrderId: knownFromOrderId ?? null, error: null };
+        }
+
+        let fromOrderId = knownFromOrderId ?? null;
+        if (!fromOrderId) {
+            fromOrderId = await resolvePendingOrderIdForTable(pool as Pool, event.tableId);
+        }
+
+        if (fromOrderId) {
+            const { restaurantService } = await import('../restaurant/restaurantService.js');
+            await restaurantService.releaseTableForOrder(pool, fromOrderId);
+            return { fromOrderId, error: null };
+        }
+
+        const { restaurantRepository } = await import('../restaurant/restaurantRepository.js');
+        await restaurantRepository.releaseTable(pool, event.tableId);
+        return { fromOrderId: null, error: null };
+    } catch (err: unknown) {
+        return {
+            fromOrderId: knownFromOrderId ?? null,
+            error: err instanceof Error ? err.message : String(err),
+        };
+    }
+}
+
 // ── Event Replayer ────────────────────────────────────────────
 
 export const posEventReplayer = {
     /**
      * Dispatch a single offline event to its handler.
      * This is the sole entry point — the route calls only this.
-     *
-     * @param pool   - Active DB pool (tenant pool when applicable)
-     * @param event  - The offline event to process
-     * @param userId - Authenticated user ID performing the sync
      */
     async replay(pool: Pool | PoolClient, event: ReplayableEvent, userId: string): Promise<ReplayResult> {
         logger.debug(`[EventReplayer] Processing ${event.eventType} key=${event.key}`);
@@ -171,17 +316,29 @@ export const posEventReplayer = {
                 return posEventReplayer.finalizeSale(pool, event, userId);
 
             case 'ORDER_CANCELLED':
-                return posEventReplayer.cancelOrder(pool, event);
+                return posEventReplayer.cancelOrder(pool, event, userId);
 
             case 'ORDER_UPDATED':
+                return posEventReplayer.updateOrder(pool, event);
+
+            case 'RESTAURANT_CHECK_TRANSFERRED':
+                return posEventReplayer.transferRestaurantCheck(pool, event, userId);
+
+            case 'RESTAURANT_CHECK_MERGED':
+                return posEventReplayer.mergeRestaurantChecks(pool, event, userId);
+
+            case 'RESTAURANT_CHECK_SPLIT':
+                return posEventReplayer.splitRestaurantCheck(pool, event, userId);
+
             case 'PAYMENT_ADDED':
             case 'SALE_VOIDED':
-                // Acknowledged — full implementation added as needed per event type
+            case 'RESTAURANT_KOT_FIRED':
+            case 'RESTAURANT_KOT_STATUS':
+                // KOT fire/status are local-first; server kot rows land with ORDER sync / later phases
                 logger.debug(`[EventReplayer] ${event.eventType} acknowledged (no-op)`);
                 return { status: 'ACKNOWLEDGED', eventType: event.eventType };
 
             default: {
-                // TypeScript exhaustiveness guard
                 const _unreachable: never = event;
                 logger.warn(`[EventReplayer] Unknown eventType: ${(_unreachable as ReplayableEvent).eventType}`);
                 return { status: 'FAILED', error: `Unknown eventType` };
@@ -191,15 +348,12 @@ export const posEventReplayer = {
 
     /**
      * ORDER_CREATED → create a draft order.
-     * All order state lives in the orders table.
-     * No stock deduction. No GL. No invoice.
      */
     async createOrderDraft(
         pool: Pool | PoolClient,
         event: OrderCreatedEvent,
         userId: string
     ): Promise<ReplayResult> {
-        // Guard: unresolved offline customer
         if (event.customerId?.startsWith('offline_cust_')) {
             return {
                 status: 'REVIEW',
@@ -210,7 +364,9 @@ export const posEventReplayer = {
         try {
             const order = await ordersService.createOrder(pool as Pool, {
                 customerId: event.customerId ?? null,
-                notes: event.notes ?? null,
+                notes:
+                    event.notes ??
+                    (event.tableCode ? `Restaurant ${event.tableCode}` : null),
                 createdBy: userId,
                 idempotencyKey: event.key,
                 items: event.lines.map((line) => ({
@@ -222,6 +378,35 @@ export const posEventReplayer = {
                 })),
             });
 
+            // Phase 5.1: restaurant table link when present — do not swallow floor failures
+            if (event.tableId && event.channel) {
+                try {
+                    const { restaurantRepository } = await import('../restaurant/restaurantRepository.js');
+                    const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+                    if (await isRestaurantModeEnabled(pool)) {
+                        await restaurantRepository.patchOrderRestaurantFields(pool, order.id, {
+                            tableId: event.tableId,
+                            orderChannel: event.channel,
+                            waiterId: event.waiterId ?? null,
+                            kitchenStatus: 'NONE',
+                        });
+                        await restaurantRepository.occupyTable(pool, event.tableId, order.id);
+                    }
+                } catch (restErr) {
+                    const errMsg = restErr instanceof Error ? restErr.message : String(restErr);
+                    logger.error('[EventReplayer] Restaurant table link failed on ORDER_CREATED', {
+                        offlineId: event.offlineId,
+                        orderId: order.id,
+                        tableId: event.tableId,
+                        error: errMsg,
+                    });
+                    return {
+                        status: 'REVIEW',
+                        error: `Order created but restaurant table link failed: ${errMsg}`,
+                    };
+                }
+            }
+
             logger.info(`[EventReplayer] ORDER_CREATED ${event.offlineId} → ${order.orderNumber}`);
             return {
                 status: 'SYNCED',
@@ -230,7 +415,6 @@ export const posEventReplayer = {
         } catch (err: unknown) {
             const pgErr = err as { code?: string };
             if (pgErr.code === '23505') {
-                // Idempotency hit — order already exists
                 return { status: 'DUPLICATE', data: { alreadySynced: true } };
             }
             const errMsg = err instanceof Error ? err.message : String(err);
@@ -240,24 +424,14 @@ export const posEventReplayer = {
     },
 
     /**
-     * SALE_COMPLETED → finalize the sale.
-     *
-     * All effects happen here inside one transaction (via salesService.createSale):
-     *   1. Validate stock
-     *   2. Deduct inventory
-     *   3. Create sale record + line items
-     *   4. Attach payments
-     *   5. Post GL entries
-     *   6. Mark order completed (if linked)
-     *
-     * This is the ONLY place these effects are allowed to happen.
+     * SALE_COMPLETED → finalize the sale (createSale SSOT).
+     * Phase 5.2: restaurant tableId → fromOrderId + release floor.
      */
     async finalizeSale(
         pool: Pool | PoolClient,
         event: SaleCompletedEvent,
         userId: string
     ): Promise<ReplayResult> {
-        // Guard: unresolved offline customer
         if (event.customerId?.startsWith('offline_cust_')) {
             return {
                 status: 'REVIEW',
@@ -265,24 +439,31 @@ export const posEventReplayer = {
             };
         }
 
-        // Idempotency check
         const existing = await (pool as Pool).query(
             `SELECT id, sale_number FROM sales WHERE idempotency_key = $1`,
             [event.key]
         );
         if (existing.rows.length > 0) {
             logger.info(`[EventReplayer] SALE_COMPLETED duplicate key=${event.key}, returning existing`);
+            // Idempotent retry must still free the floor if prior sync sold but failed release
+            const releaseDup = await releaseRestaurantFloorAfterSale(pool, event, undefined);
+            if (releaseDup.error) {
+                return {
+                    status: 'REVIEW',
+                    error: `Sale already synced but table release failed: ${releaseDup.error}`,
+                };
+            }
             return {
                 status: 'DUPLICATE',
                 data: {
                     saleId: existing.rows[0].id,
                     saleNumber: existing.rows[0].sale_number,
                     alreadySynced: true,
+                    fromOrderId: releaseDup.fromOrderId ?? null,
                 },
             };
         }
 
-        // Resolve open cash register session for this user
         let cashRegisterSessionId: string | null = null;
         const sessionRes = await (pool as Pool).query(
             `SELECT id FROM cash_register_sessions
@@ -292,6 +473,22 @@ export const posEventReplayer = {
         );
         if (sessionRes.rows.length > 0) {
             cashRegisterSessionId = sessionRes.rows[0].id;
+        }
+
+        let fromOrderId: string | undefined;
+        if (event.tableId) {
+            try {
+                const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+                if (await isRestaurantModeEnabled(pool)) {
+                    const resolved = await resolvePendingOrderIdForTable(pool as Pool, event.tableId);
+                    if (resolved) fromOrderId = resolved;
+                }
+            } catch (linkErr) {
+                logger.warn('[EventReplayer] Restaurant fromOrderId resolve skipped', {
+                    offlineId: event.offlineId,
+                    error: linkErr instanceof Error ? linkErr.message : String(linkErr),
+                });
+            }
         }
 
         const serviceInput: CreateSaleInput = {
@@ -315,10 +512,25 @@ export const posEventReplayer = {
             paymentLines: event.payments,
             idempotencyKey: event.key,
             offlineId: event.offlineId,
+            fromOrderId,
         };
 
         try {
             const result = await salesService.createSale(pool as Pool, serviceInput);
+
+            const release = await releaseRestaurantFloorAfterSale(pool, event, fromOrderId);
+            if (release.error) {
+                logger.error('[EventReplayer] Restaurant table release failed after SALE_COMPLETED', {
+                    offlineId: event.offlineId,
+                    fromOrderId: release.fromOrderId,
+                    error: release.error,
+                });
+                return {
+                    status: 'REVIEW',
+                    error: `Sale created (${result.sale.saleNumber}) but table release failed: ${release.error}`,
+                };
+            }
+
             logger.info(`[EventReplayer] SALE_COMPLETED ${event.offlineId} → ${result.sale.saleNumber}`);
             return {
                 status: 'SYNCED',
@@ -326,27 +538,38 @@ export const posEventReplayer = {
                     saleId: result.sale.id,
                     saleNumber: result.sale.saleNumber,
                     offlineId: event.offlineId,
+                    fromOrderId: release.fromOrderId ?? fromOrderId ?? null,
                 },
             };
         } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
             const pgErr = err as { code?: string; constraint?: string };
 
-            // Concurrent duplicate (race condition on unique constraint)
             if (pgErr.code === '23505' && String(pgErr.constraint ?? errMsg).includes('idempotency_key')) {
                 const dup = await (pool as Pool).query(
                     `SELECT id, sale_number FROM sales WHERE idempotency_key = $1`,
                     [event.key]
                 );
                 if (dup.rows.length > 0) {
+                    const releaseDup = await releaseRestaurantFloorAfterSale(pool, event, fromOrderId);
+                    if (releaseDup.error) {
+                        return {
+                            status: 'REVIEW',
+                            error: `Sale already synced but table release failed: ${releaseDup.error}`,
+                        };
+                    }
                     return {
                         status: 'DUPLICATE',
-                        data: { saleId: dup.rows[0].id, saleNumber: dup.rows[0].sale_number, alreadySynced: true },
+                        data: {
+                            saleId: dup.rows[0].id,
+                            saleNumber: dup.rows[0].sale_number,
+                            alreadySynced: true,
+                            fromOrderId: releaseDup.fromOrderId ?? fromOrderId ?? null,
+                        },
                     };
                 }
             }
 
-            // Stock / inventory conflict → manual review
             if (
                 errMsg.includes('Insufficient') ||
                 errMsg.includes('stock') ||
@@ -363,42 +586,326 @@ export const posEventReplayer = {
     },
 
     /**
-     * ORDER_CANCELLED → mark the order cancelled.
-     * No GL. No stock change. Order moves to terminal state.
+     * ORDER_UPDATED → Phase 5.3: apply waiter when table-linked.
+     */
+    async updateOrder(
+        pool: Pool | PoolClient,
+        event: OrderUpdatedEvent
+    ): Promise<ReplayResult> {
+        const waiterId = typeof event.waiterId === 'string' ? event.waiterId : undefined;
+        const tableId = typeof event.tableId === 'string' ? event.tableId : undefined;
+        if (!waiterId || !tableId) {
+            return { status: 'ACKNOWLEDGED', eventType: 'ORDER_UPDATED' };
+        }
+
+        try {
+            const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+            if (!(await isRestaurantModeEnabled(pool))) {
+                return { status: 'ACKNOWLEDGED', eventType: 'ORDER_UPDATED' };
+            }
+
+            const orderId = await resolvePendingOrderIdForTable(pool as Pool, tableId);
+            if (!orderId) {
+                logger.warn('[EventReplayer] ORDER_UPDATED waiter: no PENDING order for table', {
+                    tableId,
+                    key: event.key,
+                });
+                return { status: 'ACKNOWLEDGED', eventType: 'ORDER_UPDATED' };
+            }
+
+            const { restaurantRepository } = await import('../restaurant/restaurantRepository.js');
+            await restaurantRepository.patchOrderRestaurantFields(pool, orderId, { waiterId });
+            logger.info(`[EventReplayer] ORDER_UPDATED waiter → order ${orderId}`);
+            return { status: 'SYNCED', data: { orderId, waiterId } };
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error(`[EventReplayer] ORDER_UPDATED failed key=${event.key}: ${errMsg}`);
+            return { status: 'FAILED', error: errMsg };
+        }
+    },
+
+    /**
+     * ORDER_CANCELLED → cancel PENDING pos_orders + release restaurant table (Phase 5.3).
      */
     async cancelOrder(
         pool: Pool | PoolClient,
-        event: OrderCancelledEvent
+        event: OrderCancelledEvent,
+        userId: string
     ): Promise<ReplayResult> {
         try {
-            // Find the order by idempotency key stored in the offline_id column or orders table
-            const orderRes = await (pool as Pool).query(
-                `SELECT id, status FROM orders WHERE offline_id = $1 OR idempotency_key = $2 LIMIT 1`,
-                [event.offlineId, event.key]
-            );
+            let orderId: string | null = null;
 
-            if (orderRes.rows.length === 0) {
-                // Order not found — may not have synced yet; acknowledge to avoid blocking the journal
-                logger.warn(`[EventReplayer] ORDER_CANCELLED: order not found for offlineId=${event.offlineId}`);
+            if (event.tableId) {
+                orderId = await resolvePendingOrderIdForTable(pool as Pool, event.tableId);
+            }
+
+            if (!orderId) {
+                if (event.tableId) {
+                    try {
+                        const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+                        const { restaurantRepository } = await import('../restaurant/restaurantRepository.js');
+                        if (await isRestaurantModeEnabled(pool)) {
+                            await restaurantRepository.releaseTable(pool, event.tableId);
+                        }
+                    } catch {
+                        /* best-effort */
+                    }
+                }
+                logger.warn(
+                    `[EventReplayer] ORDER_CANCELLED: order not found offlineId=${event.offlineId ?? 'n/a'} — ACK + table free`
+                );
                 return { status: 'ACKNOWLEDGED', eventType: 'ORDER_CANCELLED' };
             }
 
-            const order = orderRes.rows[0] as { id: string; status: string };
-            if (order.status === 'CANCELLED') {
-                return { status: 'DUPLICATE', data: { alreadySynced: true } };
+            const statusRes = await (pool as Pool).query(
+                `SELECT status FROM pos_orders WHERE id = $1`,
+                [orderId]
+            );
+            const status = statusRes.rows[0]?.status as string | undefined;
+            if (status === 'CANCELLED') {
+                try {
+                    const { restaurantService } = await import('../restaurant/restaurantService.js');
+                    await restaurantService.releaseTableForOrder(pool, orderId);
+                } catch {
+                    /* already cancelled */
+                }
+                return { status: 'DUPLICATE', data: { alreadySynced: true, orderId } };
             }
 
-            await (pool as Pool).query(
-                `UPDATE orders SET status = 'CANCELLED', updated_at = NOW() WHERE id = $1`,
-                [order.id]
+            if (status !== 'PENDING') {
+                return {
+                    status: 'REVIEW',
+                    error: `Cannot cancel order in status ${status ?? 'unknown'}`,
+                };
+            }
+
+            await ordersService.cancelOrder(
+                pool as Pool,
+                orderId,
+                userId,
+                event.reason?.trim() || 'Cancelled offline (restaurant)',
             );
 
-            logger.info(`[EventReplayer] ORDER_CANCELLED ${event.offlineId} → order ${order.id}`);
-            return { status: 'SYNCED', data: { orderId: order.id, offlineId: event.offlineId } };
+            try {
+                const { restaurantService } = await import('../restaurant/restaurantService.js');
+                await restaurantService.releaseTableForOrder(pool, orderId);
+            } catch (releaseErr) {
+                logger.error('[EventReplayer] Table release after cancel failed', {
+                    orderId,
+                    error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+                });
+            }
+
+            logger.info(
+                `[EventReplayer] ORDER_CANCELLED ${event.offlineId ?? event.orderId} → order ${orderId}`
+            );
+            return {
+                status: 'SYNCED',
+                data: { orderId, offlineId: event.offlineId ?? null },
+            };
         } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
-            logger.error(`[EventReplayer] ORDER_CANCELLED failed ${event.offlineId}: ${errMsg}`);
+            logger.error(
+                `[EventReplayer] ORDER_CANCELLED failed ${event.offlineId ?? event.orderId}: ${errMsg}`
+            );
+            return { status: 'FAILED', error: errMsg };
+        }
+    },
+
+    /**
+     * Phase 5.4 — transfer via restaurantService SSOT.
+     */
+    async transferRestaurantCheck(
+        pool: Pool | PoolClient,
+        event: RestaurantCheckTransferredEvent,
+        userId: string
+    ): Promise<ReplayResult> {
+        try {
+            const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+            if (!(await isRestaurantModeEnabled(pool))) {
+                return { status: 'ACKNOWLEDGED', eventType: 'RESTAURANT_CHECK_TRANSFERRED' };
+            }
+            const orderId = await resolvePendingOrderIdForTable(pool as Pool, event.fromTableId);
+            if (!orderId) {
+                return {
+                    status: 'REVIEW',
+                    error: 'Source check not found on server for offline transfer (sync ORDER_CREATED first)',
+                };
+            }
+            const { restaurantService } = await import('../restaurant/restaurantService.js');
+            const result = await restaurantService.transferCheck(
+                pool as Pool,
+                orderId,
+                event.toTableId,
+                userId,
+            );
+            logger.info(`[EventReplayer] RESTAURANT_CHECK_TRANSFERRED → ${orderId}`);
+            return {
+                status: 'SYNCED',
+                data: { orderId, fromTableId: result.fromTableId, toTableId: result.toTableId },
+            };
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            if (errMsg.includes('already on that table') || errMsg.includes('Target table must be free')) {
+                return { status: 'REVIEW', error: errMsg };
+            }
+            logger.error(`[EventReplayer] TRANSFER failed: ${errMsg}`);
+            return { status: 'FAILED', error: errMsg };
+        }
+    },
+
+    /**
+     * Phase 5.4 — merge via restaurantService SSOT.
+     */
+    async mergeRestaurantChecks(
+        pool: Pool | PoolClient,
+        event: RestaurantCheckMergedEvent,
+        userId: string
+    ): Promise<ReplayResult> {
+        try {
+            const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+            if (!(await isRestaurantModeEnabled(pool))) {
+                return { status: 'ACKNOWLEDGED', eventType: 'RESTAURANT_CHECK_MERGED' };
+            }
+            if (!event.primaryTableId || !event.secondaryTableId) {
+                return { status: 'REVIEW', error: 'Merge event missing table ids' };
+            }
+            let primaryId: string | null = null;
+            let secondaryId: string | null = null;
+            if (event.primaryTableId === event.secondaryTableId) {
+                const tableRes = await (pool as Pool).query(
+                    `SELECT current_order_id FROM restaurant_tables WHERE id = $1`,
+                    [event.primaryTableId]
+                );
+                const currentId = tableRes.rows[0]?.current_order_id as string | null;
+                const sibs = await (pool as Pool).query(
+                    `SELECT id FROM pos_orders
+                     WHERE table_id = $1 AND status = 'PENDING'
+                     ORDER BY created_at ASC`,
+                    [event.primaryTableId]
+                );
+                const ids = sibs.rows.map((r: { id: string }) => r.id);
+                if (ids.length < 2) {
+                    return {
+                        status: 'REVIEW',
+                        error: 'Need two open sibling checks on table for offline merge',
+                    };
+                }
+                primaryId = currentId && ids.includes(currentId) ? currentId : ids[0];
+                secondaryId = ids.find((id: string) => id !== primaryId) ?? null;
+            } else {
+                primaryId = await resolvePendingOrderIdForTable(pool as Pool, event.primaryTableId);
+                secondaryId = await resolvePendingOrderIdForTable(pool as Pool, event.secondaryTableId);
+            }
+            if (!primaryId || !secondaryId) {
+                return {
+                    status: 'REVIEW',
+                    error: 'One or both checks not found on server for offline merge',
+                };
+            }
+            const { restaurantService } = await import('../restaurant/restaurantService.js');
+            const result = await restaurantService.mergeChecks(
+                pool as Pool,
+                primaryId,
+                secondaryId,
+                userId,
+            );
+            logger.info(`[EventReplayer] RESTAURANT_CHECK_MERGED ${secondaryId} → ${primaryId}`);
+            return {
+                status: 'SYNCED',
+                data: { primaryOrderId: primaryId, cancelledOrderId: result.cancelledOrderId },
+            };
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error(`[EventReplayer] MERGE failed: ${errMsg}`);
+            return { status: 'FAILED', error: errMsg };
+        }
+    },
+
+    /**
+     * Phase 5.4 — split via restaurantService SSOT (match lines by id or product/qty).
+     */
+    async splitRestaurantCheck(
+        pool: Pool | PoolClient,
+        event: RestaurantCheckSplitEvent,
+        userId: string
+    ): Promise<ReplayResult> {
+        try {
+            const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+            if (!(await isRestaurantModeEnabled(pool))) {
+                return { status: 'ACKNOWLEDGED', eventType: 'RESTAURANT_CHECK_SPLIT' };
+            }
+            const sourceId = await resolvePendingOrderIdForTable(pool as Pool, event.sourceTableId);
+            if (!sourceId) {
+                return {
+                    status: 'REVIEW',
+                    error: 'Source check not found on server for offline split',
+                };
+            }
+
+            const itemIds = await resolveSplitItemIds(pool as Pool, sourceId, event);
+            if (itemIds.length !== event.lineIds.length) {
+                return {
+                    status: 'REVIEW',
+                    error: `Could not match split lines on server (${itemIds.length}/${event.lineIds.length})`,
+                };
+            }
+
+            const { restaurantService } = await import('../restaurant/restaurantService.js');
+            const result = await restaurantService.splitCheck(pool as Pool, sourceId, {
+                itemIds,
+                targetTableId: event.targetTableId,
+                actorId: userId,
+                sameTable: event.sameTable,
+            });
+            logger.info(`[EventReplayer] RESTAURANT_CHECK_SPLIT ${sourceId} → ${result.split.order.id}`);
+            return {
+                status: 'SYNCED',
+                data: {
+                    sourceOrderId: sourceId,
+                    newOrderId: result.split.order.id,
+                    offlineNewOrderId: event.newOrderId,
+                },
+            };
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error(`[EventReplayer] SPLIT failed: ${errMsg}`);
             return { status: 'FAILED', error: errMsg };
         }
     },
 };
+
+/** Match offline split lineIds to server pos_order_items (UUID or product+qty). */
+async function resolveSplitItemIds(
+    pool: Pool,
+    sourceOrderId: string,
+    event: RestaurantCheckSplitEvent
+): Promise<string[]> {
+    const order = await ordersService.getOrder(pool, sourceOrderId);
+    const items = [...(order.items || [])];
+    const used = new Set<string>();
+    const resolved: string[] = [];
+
+    for (const lineId of event.lineIds) {
+        const byId = items.find((i) => i.id === lineId && !used.has(i.id));
+        if (byId) {
+            used.add(byId.id);
+            resolved.push(byId.id);
+            continue;
+        }
+        const moved = event.movedLines.find((l) => l.lineId === lineId)
+            ?? event.movedLines[resolved.length];
+        if (!moved) continue;
+        const match = items.find(
+            (i) =>
+                !used.has(i.id) &&
+                i.productId === moved.productId &&
+                Number(i.quantity) === Number(moved.quantity)
+        );
+        if (match) {
+            used.add(match.id);
+            resolved.push(match.id);
+        }
+    }
+    return resolved;
+}

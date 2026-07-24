@@ -6,6 +6,7 @@ import { useState, useMemo, useEffect } from 'react';
 import ProductForm, { ProductFormField } from '@/components/products/ProductForm';
 import { formatCurrency, parseCurrency } from '../../utils/currency';
 import { BUSINESS_RULES } from '../../utils/constants';
+import { normalizeProductSaveForType } from '@shared/utils/productTypeRules';
 // Zod-based form validation
 import { validateProductValues } from '@/validation/product';
 import { useCreateProduct, useUpdateProduct, useDeleteProduct, productKeys } from '../../hooks/useProducts';
@@ -100,6 +101,7 @@ interface ProductFormData {
   barcode: string;
   description: string;
   category: string;
+  productType: 'inventory' | 'consumable' | 'service';
   genericName: string;
   conversionFactor: string;
   costPrice: string;
@@ -114,6 +116,7 @@ interface ProductFormData {
   isTaxable: boolean;
   taxRate: string;
   isActive: boolean;
+  availableInRestaurant: boolean;
   trackExpiry: boolean;
   minDaysBeforeExpirySale: string;
   // Procurement fields
@@ -148,6 +151,7 @@ const initialFormData: ProductFormData = {
   barcode: '',
   description: '',
   category: '',
+  productType: 'inventory',
   genericName: '',
   conversionFactor: '1',
   costPrice: '',
@@ -162,6 +166,7 @@ const initialFormData: ProductFormData = {
   isTaxable: false,
   taxRate: '18',
   isActive: true,
+  availableInRestaurant: true,
   trackExpiry: false,
   minDaysBeforeExpirySale: '0',
   preferredSupplierId: '',
@@ -595,6 +600,7 @@ export default function ProductsPage() {
       barcode: formData.barcode,
       description: formData.description,
       category: formData.category,
+      productType: formData.productType,
       costPrice: formData.costPrice,
       sellingPrice: formData.sellingPrice,
       costingMethod: formData.costingMethod,
@@ -657,6 +663,10 @@ export default function ProductsPage() {
       barcode: String(product.barcode ?? ''),
       description: String(product.description ?? ''),
       category: String(product.category ?? ''),
+      productType:
+        product.productType === 'service' || product.productType === 'consumable'
+          ? product.productType
+          : 'inventory',
       genericName: String(product.genericName ?? ''),
       conversionFactor: String(product.conversionFactor ?? initialFormData.conversionFactor),
       costPrice: String(product.costPrice ?? ''),
@@ -671,6 +681,7 @@ export default function ProductsPage() {
       isTaxable: product.isTaxable ?? false,
       taxRate: String(product.taxRate ?? initialFormData.taxRate),
       isActive: product.isActive ?? true,
+      availableInRestaurant: product.availableInRestaurant !== false,
       trackExpiry: product.trackExpiry ?? false,
       minDaysBeforeExpirySale: String(product.minDaysBeforeExpirySale ?? '0'),
       preferredSupplierId: String(product.preferredSupplierId ?? ''),
@@ -700,14 +711,18 @@ export default function ProductsPage() {
 
       const baseFormUom = productUoms.find((u) => u.isDefault) ?? productUoms[0];
 
+      const isService = formData.productType === 'service';
+
       // Convert form data to API format matching backend schema
-      const productData = {
+      const productData = normalizeProductSaveForType({
         name: formData.name,
         sku: formData.sku,
         unitOfMeasure: baseFormUom?.uomName || undefined,
         barcode: formData.barcode || undefined,
         description: formData.description || undefined,
         category: formData.category || undefined,
+        productType: formData.productType || 'inventory',
+        availableInRestaurant: formData.availableInRestaurant !== false,
         conversionFactor: parseFloat(formData.conversionFactor) || 1.0,
         costPrice: parseFloat(formData.costPrice) || 0,
         sellingPrice: parseFloat(formData.sellingPrice) || 0,
@@ -728,7 +743,15 @@ export default function ProductsPage() {
         purchaseUomId: formData.purchaseUomId || undefined,
         leadTimeDays: parseInt(formData.leadTimeDays) || 0,
         reorderQuantity: parseFloat(formData.reorderQuantity) || 0,
-      };
+      });
+
+      // API expects undefined (omit) rather than null for optional UUID clears on create
+      if (isService) {
+        (productData as { preferredSupplierId?: string | null }).preferredSupplierId = undefined;
+        (productData as { supplierProductCode?: string | null }).supplierProductCode = undefined;
+        (productData as { purchaseUomId?: string | null }).purchaseUomId = undefined;
+        (productData as { pricingFormula?: string | null }).pricingFormula = undefined;
+      }
 
       let productId: string;
 
@@ -894,10 +917,10 @@ export default function ProductsPage() {
 
   // Handle form field change
   const handleFieldChange = (field: keyof ProductFormData, value: string | boolean) => {
-    setFormData({ ...formData, [field]: value });
+    setFormData((prev) => ({ ...prev, [field]: value }));
     // Clear validation error for this field
     if (validationErrors[field]) {
-      setValidationErrors({ ...validationErrors, [field]: '' });
+      setValidationErrors((prev) => ({ ...prev, [field]: '' }));
     }
   };
 
@@ -1515,6 +1538,7 @@ export default function ProductsPage() {
                   barcode: formData.barcode,
                   description: formData.description,
                   category: formData.category,
+                  productType: formData.productType,
                   costPrice: formData.costPrice,
                   sellingPrice: formData.sellingPrice,
                   costingMethod: formData.costingMethod,
@@ -1525,6 +1549,7 @@ export default function ProductsPage() {
                   reorderLevel: formData.reorderLevel,
                   trackExpiry: formData.trackExpiry,
                   isActive: formData.isActive,
+                  availableInRestaurant: formData.availableInRestaurant,
                   genericName: formData.genericName,
                   minDaysBeforeExpirySale: formData.minDaysBeforeExpirySale,
                   preferredSupplierId: formData.preferredSupplierId,
@@ -1552,7 +1577,8 @@ export default function ProductsPage() {
                 <ProductDistributionPolicySection productId={formData.id} />
               )}
 
-              {/* Cost Tracking (Read-only for AVCO/FIFO) */}
+              {/* Cost Tracking (Read-only) — inventory products only */}
+              {formData.productType !== 'service' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div>
                   <label htmlFor="average-cost" className="block text-sm font-medium text-gray-700 mb-1">
@@ -1586,6 +1612,7 @@ export default function ProductsPage() {
                   <p className="text-xs text-gray-500 mt-1">Last purchase cost from goods receipt</p>
                 </div>
               </div>
+              )}
 
               {/* Margin Display */}
               {formData.costPrice && formData.sellingPrice && (
@@ -1599,14 +1626,23 @@ export default function ProductsPage() {
                 </div>
               )}
 
-              {/* BR-PRC-001 Warning */}
-              <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
-                <p className="text-xs text-yellow-800">
-                  <strong>⚠️ {BUSINESS_RULES.PRC_001}</strong>: Selling price must be greater than cost price
-                </p>
-              </div>
+              {/* BR-PRC-001 — only when selling is below cost */}
+              {(() => {
+                const cost = parseFloat(formData.costPrice || '0') || 0;
+                const sell = parseFloat(formData.sellingPrice || '0') || 0;
+                if (sell >= cost) return null;
+                return (
+                  <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                    <p className="text-xs text-yellow-800">
+                      <strong>⚠️ {BUSINESS_RULES.PRC_001}</strong>: Selling price must be greater than or
+                      equal to cost price
+                    </p>
+                  </div>
+                );
+              })()}
 
-              {/* Inventory Snapshot */}
+              {/* Inventory Snapshot — not for service dishes */}
+              {formData.productType !== 'service' && (
               <div className="border-t pt-4">
                 <h4 className="font-medium text-gray-900 mb-3">Inventory Snapshot</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1627,6 +1663,7 @@ export default function ProductsPage() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Multi-Unit of Measure */}
               <div className="border-t pt-4">

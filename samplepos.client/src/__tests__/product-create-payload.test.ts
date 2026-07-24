@@ -13,6 +13,7 @@ const baseValues: ProductFormValues = {
   barcode: '',
   description: '',
   category: '',
+  productType: 'inventory',
   genericName: '',
   costPrice: '10',
   sellingPrice: '15',
@@ -25,6 +26,7 @@ const baseValues: ProductFormValues = {
   trackExpiry: false,
   minDaysBeforeExpirySale: '0',
   isActive: true,
+  availableInRestaurant: true,
   preferredSupplierId: '',
   supplierProductCode: '',
   purchaseUomId: '',
@@ -44,6 +46,22 @@ describe('buildCreateProductInput', () => {
     if (result.ok) {
       expect(result.data.unitOfMeasure).toBe('EACH');
       expect(result.data.conversionFactor).toBe(1);
+      expect(result.data.productType).toBe('inventory');
+    }
+  });
+
+  it('passes through service productType for prepared menu items', () => {
+    const result = buildCreateProductInput(
+      { ...baseValues, productType: 'service', name: 'Pizza', sku: 'MENU-PIZZA' },
+      {
+        stockUomId: '11111111-1111-4111-8111-111111111111',
+        masterUoms,
+        purchaseConversionFactor: 1,
+      },
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.productType).toBe('service');
     }
   });
 

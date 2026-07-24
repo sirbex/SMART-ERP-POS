@@ -1,0 +1,285 @@
+{
+  "when": "2026-07-24T18:45:49.757Z",
+  "suite": "restaurant-module-phases-1-through-5.5-structural",
+  "total": 55,
+  "passed": 55,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "P1: 560 foundation flag DEFAULT FALSE",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P1: 560 no restaurant_orders table",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P2.1: 562 KDS migration",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P2.2: 563 stations migration",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P2.3: 564 takeaway guest_name",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: 565 recipes tables",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P4: 566 split/merge index",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P1: restaurantService does not call createSale",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P1: assertRestaurantEnabled",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P2.4: assignWaiter",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: upsertRecipe",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P4: transferCheck",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P4: mergeChecks",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P4: splitCheck",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: createSale explodes recipes",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "route /transfer",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "route /merge",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "route /split",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "route /recipes",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "route /waiters",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "route kitchen/board",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.1: journal key pos_offline_events",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.1: no restaurant_offline_events",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.1: RESTAURANT_KOT_FIRED",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.2: SALE_COMPLETED tableId",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.4: TRANSFERRED/MERGED/SPLIT",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.5: RESTAURANT_KOT_STATUS",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.1: appendRestaurantItemOffline",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.1: fireRestaurantKotOffline",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.2: payRestaurantCheckOffline",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.3: cancelRestaurantCheckOffline",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.3: assignRestaurantWaiterOffline",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.4: transfer/merge/split offline",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.5: advanceRestaurantKotOffline",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.1: deriveRestaurantOpenChecks",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.5: deriveRestaurantKitchenBoard",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.5: BroadcastChannel LAN bus",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.2: releaseTableForOrder on pay",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.2: fromOrderId on SALE_COMPLETED",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.3: cancelOrder + updateOrder",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.4: transfer/merge/split replay",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: no silent table-link skip",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: release helper returns error",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: REVIEW on release failure",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.4: sync schema TRANSFERRED",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.5: sync schema KOT_STATUS",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "UI RestaurantPosPage",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "UI KitchenDisplayPage",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "UI RestaurantStationsPage",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "UI RestaurantRecipesPage",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "hook useRestaurantEnabled",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.5 KDS uses journal board",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.5 KDS surfaces API fallback error",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x POS cache warm logs failure",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "ADR offline doc",
+      "pass": true,
+      "detail": "ok"
+    }
+  ],
+  "failedChecks": []
+}
