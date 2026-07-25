@@ -465,7 +465,7 @@ export default function RestaurantPosPage() {
           tableId: selectedTableId,
           tableCode: data.meta?.tableCode || data.table?.code,
           tableName: data.meta?.tableName || data.table?.name,
-          channel: data.meta?.orderChannel,
+          channel: (data.meta?.orderChannel as 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | null | undefined) || null,
           waiterId: data.meta?.waiterId,
           waiterName: data.meta?.waiterName,
           guestName: data.meta?.guestName,
