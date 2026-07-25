@@ -1697,8 +1697,8 @@ export default function RestaurantPosPage() {
         const paid = payRestaurantCheckOffline(derived);
         if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
         paintJournalCheck(selectedTableId, order.id);
-        setSelectedTableId(null);
         setActiveOrderId(null);
+        returnToFloor();
         toast.success(`Paid (${paid.offlineId}) — syncs when online`);
         // Print after UI frees the table — never block FOH on the printer.
         void printReceipt({
@@ -1738,8 +1738,8 @@ export default function RestaurantPosPage() {
       toast.error('Check not in local journal — open it once while online, then pay offline');
       return;
     }
-    // Online-only card/multi-tender flow for checks not yet hydrated.
-    navigate(`/orders/${order.id}/pay`);
+    // Online multi-tender: after pay, OrderPaymentPage returns to restaurant floor.
+    navigate(`/orders/${order.id}/pay?returnTo=${encodeURIComponent('/restaurant')}`);
   };
 
   if (flagLoading) {

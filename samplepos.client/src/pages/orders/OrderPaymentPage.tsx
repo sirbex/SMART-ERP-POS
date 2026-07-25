@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
 import CustomerSelector from '../../components/pos/CustomerSelector';
@@ -68,7 +68,16 @@ type PaymentMethod = 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT' | '
 export default function OrderPaymentPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+
+  /** Restaurant FOH passes ?returnTo=/restaurant so pay lands back on the floor. */
+  const returnToPath = (() => {
+    const raw = searchParams.get('returnTo');
+    if (raw === '/restaurant' || raw === '/orders-queue') return raw;
+    return '/orders-queue';
+  })();
+  const returnToLabel = returnToPath === '/restaurant' ? 'Back to Tables' : 'Back to Queue';
 
   const {
     data: currentSession,
@@ -314,7 +323,10 @@ export default function OrderPaymentPage() {
       queryClient.invalidateQueries({ queryKey: ['orders'] });
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
-      navigate('/orders-queue');
+      if (returnToPath === '/restaurant') {
+        void queryClient.invalidateQueries({ queryKey: ['restaurant'] });
+      }
+      navigate(returnToPath);
     },
     onError: (err: Error & { response?: { data?: { error?: string; error_code?: string; code?: string } } }) => {
       const body = err.response?.data;
@@ -377,8 +389,8 @@ export default function OrderPaymentPage() {
           <div className="text-5xl mb-4">⚠️</div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">Order Not Found</h2>
           <p className="text-gray-500 mb-4">This order may have been completed or cancelled.</p>
-          <button onClick={() => navigate('/orders-queue')} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">
-            Back to Queue
+          <button onClick={() => navigate(returnToPath)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">
+            {returnToLabel}
           </button>
         </div>
       </Layout>
@@ -392,8 +404,8 @@ export default function OrderPaymentPage() {
           <div className="text-5xl mb-4">{order.status === 'COMPLETED' ? '✅' : '❌'}</div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">Order {order.orderNumber}</h2>
           <p className="text-gray-500 mb-4">This order is already {order.status.toLowerCase()}.</p>
-          <button onClick={() => navigate('/orders-queue')} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">
-            Back to Queue
+          <button onClick={() => navigate(returnToPath)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">
+            {returnToLabel}
           </button>
         </div>
       </Layout>
@@ -406,8 +418,8 @@ export default function OrderPaymentPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <button onClick={() => navigate('/orders-queue')} className="text-sm text-blue-600 hover:text-blue-800 mb-2 flex items-center gap-1">
-              ← Back to Queue
+            <button onClick={() => navigate(returnToPath)} className="text-sm text-blue-600 hover:text-blue-800 mb-2 flex items-center gap-1">
+              ← {returnToLabel}
             </button>
             <h1 className="text-2xl font-bold text-gray-900">Complete Order {order.orderNumber}</h1>
             <p className="text-sm text-gray-500 mt-1">

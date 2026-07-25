@@ -278,6 +278,14 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/canRestaurantPay/);
     expect(pos).toMatch(/restaurant\.pay/);
     expect(pos).toMatch(/canRestaurantPay \? \(/);
+    // After payment: return to restaurant tables floor (not orders-queue only).
+    const payHandler = pos.slice(pos.indexOf('const handlePay'), pos.indexOf('if (flagLoading)'));
+    expect(payHandler).toMatch(/returnToFloor/);
+    expect(payHandler).toMatch(/returnTo=.*restaurant|pay\?returnTo/);
+
+    const payPage = readRepo('samplepos.client/src/pages/orders/OrderPaymentPage.tsx');
+    expect(payPage).toMatch(/returnToPath/);
+    expect(payPage).toMatch(/\/restaurant/);
 
     const grants = readRepo('shared/authorization/systemRoleGrants.ts');
     expect(grants).toMatch(/restaurant\.pay/);

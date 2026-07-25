@@ -1,6 +1,6 @@
 # Restaurant Offline-First — Tested Proof Evidence
 
-**When:** 2026-07-25T07:12:09Z  
+**When:** 2026-07-25T07:50:47Z  
 **Rule:** Untested code is **not accepted**. Only gates that ran and passed count.
 
 **Verdict:** **PASS**
@@ -33,11 +33,9 @@ File: `samplepos.client/src/lib/restaurantOfflineOps.proof.test.ts`
 
 Also proven by #9: `shouldUseLocalRestaurantMutation(true, ofl_ord_*) === true` (online badge must not POST `/kot` for local ids).
 
----
+## Architecture (pay → tables)
 
-## Architecture gate (requires behavioral coverage)
-
-Jest **Phase 5.x offline-first requires behavioral proof (not structure-only)** asserts the proof file covers KOT + guest + `shouldUseLocalRestaurantMutation`, and POS uses `CustomerSelector` + local mutation helper.
+Jest **Restaurant POS Pay is gated…** asserts `handlePay` uses `returnToFloor` and navigates with `?returnTo=/restaurant`; `OrderPaymentPage` uses `returnToPath`.
 
 ---
 
