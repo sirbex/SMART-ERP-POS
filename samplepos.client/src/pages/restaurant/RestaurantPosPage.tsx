@@ -18,7 +18,11 @@ import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { useCanAccess } from '../../authorization/useAuthorization';
-import { getAllEvents, getAllSyncState } from '../../lib/offlineEventJournal';
+import {
+  getAllEvents,
+  getAllSyncState,
+  invalidateJournalMemoryCache,
+} from '../../lib/offlineEventJournal';
 import {
   deriveRestaurantCheckForTable,
   deriveRestaurantFloorOccupancy,
@@ -33,10 +37,17 @@ import {
   fireRestaurantKotOffline,
   mergeRestaurantChecksOffline,
   payRestaurantCheckOffline,
+  removeRestaurantLinesOffline,
+  seedRestaurantCheckFromServer,
+  shouldUseLocalRestaurantMutation,
   splitRestaurantCheckOffline,
   transferRestaurantCheckOffline,
+  updateRestaurantGuestOffline,
   totalsFromLines,
 } from '../../lib/restaurantOfflineOps';
+import { publishLanKdsBoardChanged, subscribeLanKds } from '../../lib/restaurantLanKds';
+import CustomerSelector from '../../components/pos/CustomerSelector';
+import type { Customer } from '@shared/zod/customer';
 import {
   getCachedRestaurantTables,
   getCachedRestaurantMenu,
@@ -49,7 +60,6 @@ import {
   getRestaurantBillRequestedOffline,
 } from '../../lib/restaurantOfflineCache';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
-import { publishLanKdsBoardChanged } from '../../lib/restaurantLanKds';
 import axios from 'axios';
 
 interface RestaurantTable {
@@ -268,6 +278,46 @@ function uiFromDerivedCheck(
   };
 }
 
+type CheckUiPayload = {
+  table: RestaurantTable;
+  order: OrderDetail | null;
+  meta: CheckMeta | null;
+  siblingChecks: Array<{
+    id: string;
+    orderNumber: string;
+    totalAmount: string;
+    createdAt: string;
+  }>;
+};
+
+function buildCheckUiFromJournal(
+  tableId: string,
+  orderId: string | null | undefined,
+  cachedTable: RestaurantTable | { id: string } | undefined,
+): CheckUiPayload {
+  const events = getAllEvents();
+  const syncState = getAllSyncState();
+  const derived = deriveRestaurantCheckForTable(tableId, events, syncState, orderId);
+  const siblings = deriveRestaurantSiblingChecks(tableId, events, syncState, derived?.orderId);
+  const table = (cachedTable || { id: tableId }) as RestaurantTable;
+  if (!derived) {
+    return { table, order: null, meta: null, siblingChecks: [] };
+  }
+  const base = uiFromDerivedCheck(derived, table);
+  return {
+    ...base,
+    siblingChecks: siblings.map((s) => {
+      const tot = totalsFromLines(s.lines);
+      return {
+        id: s.orderId,
+        orderNumber: s.offlineId,
+        totalAmount: String(tot.totalAmount),
+        createdAt: new Date(s.createdTs).toISOString(),
+      };
+    }),
+  };
+}
+
 export default function RestaurantPosPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -292,6 +342,8 @@ export default function RestaurantPosPage() {
     deliveryAddress: '',
     pickupLabel: '',
   });
+  /** Customers SSOT — takeaway/delivery must pick from existing customer list. */
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedWaiterId, setSelectedWaiterId] = useState<string>('');
   const [myTablesOnly, setMyTablesOnly] = useState(false);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
@@ -321,6 +373,17 @@ export default function RestaurantPosPage() {
       );
     });
   }, [restaurantEnabled, isOnline]);
+
+  // Same-origin tabs (POS + KDS): refresh floor when journal changes elsewhere.
+  useEffect(() => {
+    if (!restaurantEnabled) return;
+    return subscribeLanKds((msg) => {
+      if (msg.type === 'JOURNAL_CHANGED' || msg.type === 'BOARD_CHANGED') {
+        invalidateJournalMemoryCache();
+        bumpJournal();
+      }
+    });
+  }, [restaurantEnabled]);
 
   // Phase 5.3 — crash restore: announce local open checks after reload
   useEffect(() => {
@@ -364,67 +427,53 @@ export default function RestaurantPosPage() {
   });
 
   const checkQuery = useQuery({
-    queryKey: ['restaurant', 'check', selectedTableId, activeOrderId, isOnline, journalTick],
+    // journalTick is NOT in the key — local writes paint via setQueryData for instant FOH.
+    queryKey: ['restaurant', 'check', selectedTableId, activeOrderId, isOnline],
     queryFn: async () => {
-      const events = getAllEvents();
-      const syncState = getAllSyncState();
-      const derived = selectedTableId
-        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, activeOrderId)
-        : null;
-      const siblings = selectedTableId
-        ? deriveRestaurantSiblingChecks(selectedTableId, events, syncState, derived?.orderId)
-        : [];
       const cachedTable =
         getCachedRestaurantTables().find((t) => t.id === selectedTableId) ||
         tablesQuery.data?.find((t) => t.id === selectedTableId);
 
-      const withSiblings = (base: ReturnType<typeof uiFromDerivedCheck>) => ({
-        ...base,
-        siblingChecks: siblings.map((s) => {
-          const tot = totalsFromLines(s.lines);
-          return {
-            id: s.orderId,
-            orderNumber: s.offlineId,
-            totalAmount: String(tot.totalAmount),
-            createdAt: new Date(s.createdTs).toISOString(),
-          };
-        }),
-      });
-
-      // Offline always uses journal
-      if (!isOnline && selectedTableId) {
-        if (!derived) {
-          return {
-            table: (cachedTable || { id: selectedTableId }) as RestaurantTable,
-            order: null,
-            meta: null,
-            siblingChecks: [],
-          };
+      // Offline-first: journal wins immediately (no API wait for local open checks).
+      if (selectedTableId) {
+        const local = buildCheckUiFromJournal(selectedTableId, activeOrderId, cachedTable);
+        if (local.order || !isOnline) {
+          return local;
         }
-        return withSiblings(uiFromDerivedCheck(derived, cachedTable || { id: selectedTableId }));
+      }
+
+      if (!isOnline || !selectedTableId) {
+        return {
+          table: (cachedTable || { id: selectedTableId! }) as RestaurantTable,
+          order: null,
+          meta: null,
+          siblingChecks: [],
+        };
       }
 
       const res = await api.restaurant.getTableCheck(
-        selectedTableId!,
+        selectedTableId,
         activeOrderId ? { orderId: activeOrderId } : undefined,
       );
-      const data = res.data.data as {
-        table: RestaurantTable;
-        order: OrderDetail | null;
-        meta: CheckMeta | null;
-        siblingChecks?: Array<{
-          id: string;
-          orderNumber: string;
-          totalAmount: string;
-          createdAt: string;
-        }>;
-      };
+      const data = res.data.data as CheckUiPayload;
 
-      // Phase 5.3 crash restore: server empty but journal still has open check
-      if ((!data.order || !data.order.id) && derived) {
-        return withSiblings(
-          uiFromDerivedCheck(derived, cachedTable || data.table || { id: selectedTableId! }),
-        );
+      // Hydrate into journal so this device can keep serving if internet drops.
+      if (data.order?.id && data.order.items?.length) {
+        seedRestaurantCheckFromServer({
+          orderId: data.order.id,
+          orderNumber: data.order.orderNumber,
+          tableId: selectedTableId,
+          tableCode: data.meta?.tableCode || data.table?.code,
+          tableName: data.meta?.tableName || data.table?.name,
+          channel: data.meta?.orderChannel,
+          waiterId: data.meta?.waiterId,
+          waiterName: data.meta?.waiterName,
+          guestName: data.meta?.guestName,
+          guestPhone: data.meta?.guestPhone,
+          deliveryAddress: data.meta?.deliveryAddress,
+          pickupLabel: data.meta?.pickupLabel,
+          items: data.order.items,
+        });
       }
 
       return data;
@@ -554,6 +603,24 @@ export default function RestaurantPosPage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [selectedTableId, opsMode]);
 
+  /** Instant FOH paint from journal — no React Query refetch / no network. */
+  const paintJournalCheck = (tableId: string | null, orderId?: string | null) => {
+    bumpJournal();
+    if (!tableId) return;
+    const oid = orderId === undefined ? activeOrderId : orderId;
+    const cachedTable =
+      getCachedRestaurantTables().find((t) => t.id === tableId) ||
+      tablesQuery.data?.find((t) => t.id === tableId);
+    const data = buildCheckUiFromJournal(tableId, oid, cachedTable);
+    queryClient.setQueryData(['restaurant', 'check', tableId, oid, isOnline], data);
+    if (oid) {
+      queryClient.setQueryData(['restaurant', 'check', tableId, null, isOnline], data);
+    }
+  };
+
+  /** Always journal-first on every device — never wait on the API for FOH taps. */
+  const preferLocalRestaurantWrites = (_orderId?: string | null) => true;
+
   const addItemMutation = useMutation({
     mutationFn: async (product: MenuProduct) => {
       if (!selectedTableId) throw new Error('Select a table first');
@@ -563,62 +630,50 @@ export default function RestaurantPosPage() {
       const channel = channelHint(table);
       const opening = !order;
       if (opening && (channel === 'TAKEAWAY' || channel === 'DELIVERY')) {
-        if (!guestDraft.guestName.trim()) {
+        if (!selectedCustomer?.id) {
           throw new Error(
             channel === 'DELIVERY'
-              ? 'Enter guest name for delivery'
-              : 'Enter guest name for takeaway',
+              ? 'Select a customer for delivery (customers SSOT)'
+              : 'Select a customer for takeaway (customers SSOT)',
           );
         }
-        if (channel === 'DELIVERY' && !guestDraft.deliveryAddress.trim()) {
+        if (channel === 'DELIVERY' && !guestDraft.deliveryAddress.trim() && !selectedCustomer.address) {
           throw new Error('Enter delivery address');
         }
       }
 
-      if (!isOnline) {
-        if (!table) throw new Error('Table not in offline cache — connect once to sync floor');
-        const waiter = waiters.find((w) => w.id === selectedWaiterId);
-        appendRestaurantItemOffline({
-          tableId: selectedTableId,
-          tableCode: table.code,
-          tableName: table.name,
-          channel,
-          waiterId: selectedWaiterId,
-          waiterName: waiter?.fullName,
-          guestName: guestDraft.guestName.trim() || null,
-          guestPhone: guestDraft.guestPhone.trim() || null,
-          deliveryAddress: guestDraft.deliveryAddress.trim() || null,
-          pickupLabel: guestDraft.pickupLabel.trim() || null,
-          productId: product.id,
-          productName: product.name,
-          unitPrice: Number(product.sellingPrice) || 0,
-          quantity: 1,
-        });
-        bumpJournal();
-        return { offline: true };
-      }
-
-      const res = await api.restaurant.addItems({
+      if (!table) throw new Error('Table not in offline cache — connect once to sync floor/menu');
+      const waiter = waiters.find((w) => w.id === selectedWaiterId);
+      const guestName =
+        guestDraft.guestName.trim() || selectedCustomer?.name?.trim() || null;
+      const guestPhone =
+        guestDraft.guestPhone.trim() || selectedCustomer?.phone?.trim() || null;
+      const deliveryAddress =
+        guestDraft.deliveryAddress.trim() || selectedCustomer?.address?.trim() || null;
+      const derived = appendRestaurantItemOffline({
         tableId: selectedTableId,
+        tableCode: table.code,
+        tableName: table.name,
+        channel,
+        customerId: selectedCustomer?.id || null,
         waiterId: selectedWaiterId,
-        items: [{ productId: product.id, quantity: 1 }],
-        ...(opening
-          ? {
-              guestName: guestDraft.guestName.trim() || null,
-              guestPhone: guestDraft.guestPhone.trim() || null,
-              deliveryAddress: guestDraft.deliveryAddress.trim() || null,
-              pickupLabel: guestDraft.pickupLabel.trim() || null,
-            }
-          : {}),
+        waiterName: waiter?.fullName,
+        guestName,
+        guestPhone,
+        deliveryAddress,
+        pickupLabel: guestDraft.pickupLabel.trim() || null,
+        productId: product.id,
+        productName: product.name,
+        unitPrice: Number(product.sellingPrice) || 0,
+        quantity: 1,
       });
-      return res.data.data;
+      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+      paintJournalCheck(selectedTableId, derived.orderId);
+      if (derived.orderId) setActiveOrderId(derived.orderId);
+      return { offline: true as const, orderId: derived.orderId };
     },
     onSuccess: () => {
-      // New items unlock Bill Requested → OCCUPIED (SambaPOS unlock on new order)
-      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
-      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
-      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
-      bumpJournal();
+      // Already painted from journal — do not invalidate (that reintroduces lag).
     },
     onError: (err: unknown) => toast.error(apiErr(err, 'Failed to add item')),
   });
@@ -626,16 +681,43 @@ export default function RestaurantPosPage() {
   const saveGuestMutation = useMutation({
     mutationFn: async () => {
       if (!order) throw new Error('No open check');
+      const guestName =
+        guestDraft.guestName.trim() || selectedCustomer?.name?.trim() || null;
+      const guestPhone =
+        guestDraft.guestPhone.trim() || selectedCustomer?.phone?.trim() || null;
+      const deliveryAddress =
+        guestDraft.deliveryAddress.trim() || selectedCustomer?.address?.trim() || null;
+      const pickupLabel = guestDraft.pickupLabel.trim() || null;
+
+      if (shouldUseLocalRestaurantMutation(isOnline, order.id)) {
+        const events = getAllEvents();
+        const syncState = getAllSyncState();
+        const derived = selectedTableId
+          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+          : null;
+        if (!derived) throw new Error('Local check not found in journal');
+        const next = updateRestaurantGuestOffline(derived, {
+          customerId: selectedCustomer?.id || null,
+          guestName,
+          guestPhone,
+          deliveryAddress,
+          pickupLabel,
+        });
+        paintJournalCheck(selectedTableId, next.orderId);
+        return { offline: true as const };
+      }
+
       const res = await api.restaurant.updateGuest(order.id, {
-        guestName: guestDraft.guestName.trim() || null,
-        guestPhone: guestDraft.guestPhone.trim() || null,
-        deliveryAddress: guestDraft.deliveryAddress.trim() || null,
-        pickupLabel: guestDraft.pickupLabel.trim() || null,
+        guestName,
+        guestPhone,
+        deliveryAddress,
+        pickupLabel,
       });
       return res.data.data;
     },
-    onSuccess: () => {
-      toast.success('Guest details saved');
+    onSuccess: (data) => {
+      toast.success('Customer / guest saved');
+      if (data && typeof data === 'object' && 'offline' in data) return;
       invalidateCheck();
     },
     onError: (err: unknown) => toast.error(apiErr(err, 'Failed to save guest')),
@@ -712,10 +794,8 @@ export default function RestaurantPosPage() {
           orderChannel: check.channel,
         };
       }
-      if (!isOnline) {
-        // Offline: no journal check → free locally
-        return { ...t, status: 'FREE' as const, currentOrderId: null };
-      }
+      // Offline: keep last-known occupancy from cache (other device / pre-drop).
+      // Never force FREE — that caused double-booking and "lost" tables.
       return t;
     });
     if (!myTablesOnly || !user?.id) return all;
@@ -726,10 +806,9 @@ export default function RestaurantPosPage() {
     return (tablesQuery.data || []).filter((t) => {
       if (t.id === selectedTableId) return false;
       if (floorOccupancy.has(t.id)) return false;
-      if (!isOnline) return true;
       return t.status === 'FREE';
     });
-  }, [tablesQuery.data, selectedTableId, floorOccupancy, isOnline]);
+  }, [tablesQuery.data, selectedTableId, floorOccupancy]);
 
   const mergeCandidates = useMemo(() => {
     const out: Array<{ orderId: string; label: string }> = [];
@@ -778,6 +857,7 @@ export default function RestaurantPosPage() {
   useEffect(() => {
     if (!selectedTableId) {
       setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
+      setSelectedCustomer(null);
       setActiveOrderId(null);
       setSelectedLineIds([]);
       setOpsMode(null);
@@ -808,11 +888,11 @@ export default function RestaurantPosPage() {
     setSelectedWaiterId(waiterId);
     if (!order) return;
 
-    if (!isOnline) {
+    if (preferLocalRestaurantWrites(order.id)) {
       const events = getAllEvents();
       const syncState = getAllSyncState();
       const derived = selectedTableId
-        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState)
+        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
         : null;
       if (!derived) {
         toast.error('Open a check offline before assigning a waiter');
@@ -825,9 +905,10 @@ export default function RestaurantPosPage() {
       }
       try {
         assignRestaurantWaiterOffline(derived, { id: waiter.id, fullName: waiter.fullName });
-        toast.success('Waiter assigned (offline — will sync)');
-        bumpJournal();
-        invalidateCheck();
+        paintJournalCheck(selectedTableId, order.id);
+        toast.success(
+          isOnline ? 'Waiter assigned (will sync)' : 'Waiter assigned (offline — will sync)',
+        );
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Waiter assign failed');
       }
@@ -860,7 +941,9 @@ export default function RestaurantPosPage() {
     try {
       const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
 
-      if (!isOnline) {
+      // Journal-local checks are not on the server — always fire KOT offline-first.
+      const useLocalKot = shouldUseLocalRestaurantMutation(isOnline, order.id);
+      if (useLocalKot) {
         if (unsentCount === 0) {
           toast.success('Nothing new for kitchen — back to tables');
           returnToFloor();
@@ -869,12 +952,11 @@ export default function RestaurantPosPage() {
         const events = getAllEvents();
         const syncState = getAllSyncState();
         const derived = selectedTableId
-          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState)
+          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
           : null;
         if (!derived) throw new Error('Offline check not found');
         const { kotOfflineId, lines } = fireRestaurantKotOffline(derived);
-        bumpJournal();
-        invalidateCheck();
+        paintJournalCheck(selectedTableId, derived.orderId);
 
         let printOk = true;
         try {
@@ -901,8 +983,10 @@ export default function RestaurantPosPage() {
 
         toast.success(
           printOk
-            ? 'KOT sent (offline — will sync)'
-            : 'KOT sent to kitchen (offline) — printer unavailable; ticket is on KDS when online',
+            ? isOnline
+              ? 'KOT sent (local — will sync)'
+              : 'KOT sent (offline — will sync)'
+            : 'KOT sent to kitchen — printer unavailable; ticket is on local KDS',
         );
         returnToFloor();
         return;
@@ -1022,10 +1106,10 @@ export default function RestaurantPosPage() {
         totalAmount: Number(order.totalAmount),
       };
 
-      if (!isOnline) {
+      if (shouldUseLocalRestaurantMutation(isOnline, order.id)) {
         if (selectedTableId) {
           markRestaurantBillRequestedOffline(selectedTableId, order.id);
-          bumpJournal();
+          paintJournalCheck(selectedTableId, order.id);
         }
         let printOk = true;
         try {
@@ -1297,13 +1381,52 @@ export default function RestaurantPosPage() {
     opts?: { reason?: string; skipConfirm?: boolean },
   ) => {
     if (!order || itemIds.length === 0) return;
-    if (!isOnline) {
-      toast.error('Void requires online connection (kitchen must be notified)');
+    // Void (reason + VOID ticket) only for kitchen-sent/printed lines.
+    // New/unsent lines are removed quietly — journal-first, no reason, no print.
+    const hasKot = orderLines.some((l) => itemIds.includes(l.id) && l.kitchenSentAt);
+
+    if (!hasKot && preferLocalRestaurantWrites(order.id)) {
+      if (!opts?.skipConfirm && !window.confirm(`Remove ${itemIds.length} unsent line(s)?`)) {
+        return;
+      }
+      const events = getAllEvents();
+      const syncState = getAllSyncState();
+      const derived = selectedTableId
+        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+        : null;
+      if (!derived) {
+        toast.error('Local check not found in journal');
+        return;
+      }
+      try {
+        const next = removeRestaurantLinesOffline(derived, itemIds);
+        setLineSheet(null);
+        setSelectedLineIds([]);
+        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+        if (next.lines.length === 0) {
+          paintJournalCheck(selectedTableId, order.id);
+          setSelectedTableId(null);
+          setActiveOrderId(null);
+          toast.success('Check cancelled — table freed');
+        } else {
+          paintJournalCheck(selectedTableId, next.orderId);
+          toast.success('Line(s) removed');
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Remove failed');
+      }
       return;
     }
-    // Void (reason + VOID ticket) only for kitchen-sent/printed lines.
-    // New/unsent lines are removed quietly — no reason, no print.
-    const hasKot = orderLines.some((l) => itemIds.includes(l.id) && l.kitchenSentAt);
+
+    if (!isOnline) {
+      toast.error(
+        hasKot
+          ? 'Void requires online connection (kitchen must be notified)'
+          : 'Cannot remove lines offline — open check missing from journal',
+      );
+      return;
+    }
+
     let reason = opts?.reason?.trim() || '';
     if (hasKot) {
       if (!reason) {
@@ -1380,35 +1503,43 @@ export default function RestaurantPosPage() {
       toast.error('Cannot change quantity for this line');
       return;
     }
-    setBusy(true);
-    try {
-      if (!isOnline) {
+    if (preferLocalRestaurantWrites(order?.id)) {
+      try {
         const table =
           tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
         if (!table) throw new Error('Table not available offline');
         const waiter = waiters.find((w) => w.id === selectedWaiterId);
-        appendRestaurantItemOffline({
+        const derived = appendRestaurantItemOffline({
           tableId: selectedTableId,
           tableCode: table.code,
           tableName: table.name,
           channel: channelHint(table),
+          customerId: selectedCustomer?.id || null,
           waiterId: selectedWaiterId,
           waiterName: waiter?.fullName,
-          guestName: guestDraft.guestName.trim() || null,
-          guestPhone: guestDraft.guestPhone.trim() || null,
-          deliveryAddress: guestDraft.deliveryAddress.trim() || null,
+          guestName: guestDraft.guestName.trim() || selectedCustomer?.name || null,
+          guestPhone: guestDraft.guestPhone.trim() || selectedCustomer?.phone || null,
+          deliveryAddress:
+            guestDraft.deliveryAddress.trim() || selectedCustomer?.address || null,
           pickupLabel: guestDraft.pickupLabel.trim() || null,
           productId: group.productId,
           productName: group.productName,
           unitPrice: group.unitPrice,
           quantity: 1,
         });
-        bumpJournal();
-        invalidateCheck();
+        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+        paintJournalCheck(selectedTableId, derived.orderId);
+        if (derived.orderId) setActiveOrderId(derived.orderId);
         setLineSheet(null);
         toast.success('+1 added');
-        return;
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to add');
       }
+      return;
+    }
+
+    setBusy(true);
+    try {
       await api.restaurant.addItems({
         tableId: selectedTableId,
         waiterId: selectedWaiterId,
@@ -1480,29 +1611,38 @@ export default function RestaurantPosPage() {
       return;
     }
 
-    if (!isOnline) {
+    // Local journal checks: cancel instantly (no busy spinner, no API round-trip).
+    if (preferLocalRestaurantWrites(order.id) || !isOnline) {
       const events = getAllEvents();
       const syncState = getAllSyncState();
       const derived = selectedTableId
-        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState)
+        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
         : null;
       if (!derived) {
-        toast.error('Offline check not found in journal');
+        if (!isOnline) {
+          toast.error('Offline check not found in journal');
+          return;
+        }
+        // Fall through to online cancel for server-backed checks
+      } else {
+        try {
+          cancelRestaurantCheckOffline(derived, reason);
+          if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+          paintJournalCheck(selectedTableId, order.id);
+          setSelectedTableId(null);
+          setActiveOrderId(null);
+          toast.success(
+            isOnline ? 'Check cancelled (will sync)' : 'Check cancelled (offline — will sync)',
+          );
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : 'Cancel failed');
+        }
         return;
       }
-      setBusy(true);
-      try {
-        cancelRestaurantCheckOffline(derived);
-        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
-        toast.success('Check cancelled (offline — will sync)');
-        bumpJournal();
-        setSelectedTableId(null);
-        invalidateCheck();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Cancel failed');
-      } finally {
-        setBusy(false);
-      }
+    }
+
+    if (!isOnline) {
+      toast.error('Offline check not found in journal');
       return;
     }
 
@@ -1521,6 +1661,7 @@ export default function RestaurantPosPage() {
           : 'Check cancelled',
       );
       setSelectedTableId(null);
+      setActiveOrderId(null);
       invalidateCheck();
     } catch (err) {
       toast.error(apiErr(err, 'Cancel failed'));
@@ -1535,28 +1676,32 @@ export default function RestaurantPosPage() {
       toast.error('Only cashiers, accountants, or admins can take payment');
       return;
     }
-    if (!isOnline) {
-      const events = getAllEvents();
-      const syncState = getAllSyncState();
-      const derived = selectedTableId
-        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState)
-        : null;
-      if (!derived) {
-        toast.error('Offline check not found in journal');
-        return;
-      }
+
+    // Journal-first cash pay on every device (works with internet off).
+    const events = getAllEvents();
+    const syncState = getAllSyncState();
+    const derived = selectedTableId
+      ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+      : null;
+
+    if (derived) {
       const totalLabel = formatCurrency(Number(order.totalAmount));
       if (
         !window.confirm(
-          `Offline cash pay ${totalLabel} for ${derived.tableName || derived.tableCode || 'table'}?\n\nReceipt prints now; sale syncs when online.`,
+          `Cash pay ${totalLabel} for ${derived.tableName || derived.tableCode || 'table'}?\n\nReceipt prints now; sale syncs when online.`,
         )
       ) {
         return;
       }
-      setBusy(true);
       try {
         const paid = payRestaurantCheckOffline(derived);
-        await printReceipt({
+        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+        paintJournalCheck(selectedTableId, order.id);
+        setSelectedTableId(null);
+        setActiveOrderId(null);
+        toast.success(`Paid (${paid.offlineId}) — syncs when online`);
+        // Print after UI frees the table — never block FOH on the printer.
+        void printReceipt({
           saleNumber: paid.offlineId,
           saleDate: new Date().toLocaleString(),
           subtotal: paid.subtotal,
@@ -1579,20 +1724,21 @@ export default function RestaurantPosPage() {
             subtotal: l.subtotal,
             uom: l.uom,
           })),
-          customReceiptNote: `Table ${paid.tableLabel} (offline)`,
+          customReceiptNote: `Table ${paid.tableLabel} (offline-first)`,
+        }).catch(() => {
+          toast.error('Receipt print failed — sale is saved locally');
         });
-        toast.success(`Paid offline (${paid.offlineId}) — will sync when online`);
-        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
-        bumpJournal();
-        setSelectedTableId(null);
-        invalidateCheck();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Offline pay failed');
-      } finally {
-        setBusy(false);
+        toast.error(err instanceof Error ? err.message : 'Pay failed');
       }
       return;
     }
+
+    if (!isOnline) {
+      toast.error('Check not in local journal — open it once while online, then pay offline');
+      return;
+    }
+    // Online-only card/multi-tender flow for checks not yet hydrated.
     navigate(`/orders/${order.id}/pay`);
   };
 
@@ -1650,7 +1796,7 @@ export default function RestaurantPosPage() {
                 isOnline ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
               }`}
             >
-              {isOnline ? 'Online' : 'Offline — local journal'}
+              {isOnline ? 'Online · syncing' : 'Offline · local journal'}
             </span>
             {!selectedTableId && canManage && (
               <button
@@ -2119,11 +2265,29 @@ export default function RestaurantPosPage() {
                 {serviceChannel && (
                   <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50/80 p-3">
                     <p className="text-xs text-violet-800 font-medium">
-                      {channel === 'DELIVERY' ? 'Delivery guest' : 'Takeaway guest'}
+                      {channel === 'DELIVERY' ? 'Delivery customer' : 'Takeaway customer'}
                     </p>
+                    <CustomerSelector
+                      selectedCustomer={selectedCustomer}
+                      saleTotal={Number(order?.totalAmount || 0)}
+                      onSelectCustomer={(c) => {
+                        setSelectedCustomer(c);
+                        if (c) {
+                          setGuestDraft((prev) => ({
+                            guestName: c.name || prev.guestName,
+                            guestPhone: c.phone || prev.guestPhone,
+                            deliveryAddress:
+                              channel === 'DELIVERY'
+                                ? c.address || prev.deliveryAddress
+                                : prev.deliveryAddress,
+                            pickupLabel: prev.pickupLabel,
+                          }));
+                        }
+                      }}
+                    />
                     <input
                       className={touchField}
-                      placeholder="Guest name *"
+                      placeholder="Guest name (from customer)"
                       value={guestDraft.guestName}
                       onChange={(e) => setGuestDraft({ ...guestDraft, guestName: e.target.value })}
                     />
@@ -2159,7 +2323,7 @@ export default function RestaurantPosPage() {
                         onClick={() => saveGuestMutation.mutate()}
                         className={`${touchBtnGhost} w-full border-violet-400 text-violet-900`}
                       >
-                        Save guest details
+                        Save customer / guest
                       </button>
                     )}
                   </div>
@@ -2175,9 +2339,30 @@ export default function RestaurantPosPage() {
 
               {serviceChannel && (
                 <div className="hidden lg:block px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2">
+                  <p className="text-xs text-violet-800 font-medium">
+                    {channel === 'DELIVERY' ? 'Delivery customer' : 'Takeaway customer'}
+                  </p>
+                  <CustomerSelector
+                    selectedCustomer={selectedCustomer}
+                    saleTotal={Number(order?.totalAmount || 0)}
+                    onSelectCustomer={(c) => {
+                      setSelectedCustomer(c);
+                      if (c) {
+                        setGuestDraft((prev) => ({
+                          guestName: c.name || prev.guestName,
+                          guestPhone: c.phone || prev.guestPhone,
+                          deliveryAddress:
+                            channel === 'DELIVERY'
+                              ? c.address || prev.deliveryAddress
+                              : prev.deliveryAddress,
+                          pickupLabel: prev.pickupLabel,
+                        }));
+                      }
+                    }}
+                  />
                   <input
                     className={touchField}
-                    placeholder="Guest name *"
+                    placeholder="Guest name (from customer)"
                     value={guestDraft.guestName}
                     onChange={(e) => setGuestDraft({ ...guestDraft, guestName: e.target.value })}
                   />
@@ -2213,7 +2398,7 @@ export default function RestaurantPosPage() {
                       onClick={() => saveGuestMutation.mutate()}
                       className={`${touchBtnGhost} w-full border-violet-400 text-violet-900`}
                     >
-                      Save guest details
+                      Save customer / guest
                     </button>
                   )}
                 </div>
@@ -2631,7 +2816,7 @@ export default function RestaurantPosPage() {
                       onClick={() => void handlePay()}
                       className={`${TOUCH} min-h-14 col-span-2 rounded-xl bg-emerald-600 text-white text-base font-bold active:bg-emerald-700`}
                     >
-                      Pay{!isOnline ? ' (cash offline)' : ''}
+                      Pay (cash · offline-first)
                     </button>
                   ) : null}
                   <button

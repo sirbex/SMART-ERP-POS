@@ -13,7 +13,7 @@ import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { toast } from 'react-hot-toast';
 import axios from 'axios';
-import { getAllEvents, getAllSyncState } from '../../lib/offlineEventJournal';
+import { getAllEvents, getAllSyncState, invalidateJournalMemoryCache } from '../../lib/offlineEventJournal';
 import { deriveRestaurantKitchenBoard } from '../../lib/offlineEventSelectors';
 import { advanceRestaurantKotOffline } from '../../lib/restaurantOfflineOps';
 import { getCachedRestaurantStations } from '../../lib/restaurantOfflineCache';
@@ -85,6 +85,7 @@ export default function KitchenDisplayPage() {
 
   useEffect(() => {
     return subscribeLanKds(() => {
+      invalidateJournalMemoryCache();
       bumpJournal();
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'kitchen', 'board'] });
     });

@@ -121,6 +121,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const service = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
     expect(service).toMatch(/updateCheckGuest/);
     expect(service).toMatch(/assertChannelGuest/);
+    expect(service).toMatch(/customerId/);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/checks\/:orderId\/guest/);
@@ -128,6 +129,13 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
     expect(print).toMatch(/TAKE AWAY|DELIVERY/);
     expect(print).toMatch(/guestName/);
+
+    // Guest must use customers SSOT (CustomerSelector), not free-text-only.
+    const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
+    expect(pos).toMatch(/CustomerSelector/);
+    expect(pos).toMatch(/selectedCustomer/);
+    expect(pos).toMatch(/Select a customer/);
+    expect(pos).toMatch(/updateRestaurantGuestOffline/);
   });
 
   it('Phase 2.4 waiter assignment uses pos_orders.waiter_id', () => {
@@ -208,6 +216,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(sendKotHandler).toMatch(/returnToFloor/);
     expect(sendKotHandler).toMatch(/api\.restaurant\.sendKot/);
     expect(sendKotHandler).toMatch(/fireRestaurantKotOffline/);
+    // Local ofl_ord_* checks must never hit the server KOT route.
+    expect(sendKotHandler).toMatch(/shouldUseLocalRestaurantMutation|isJournalLocalOrderId/);
+    expect(sendKotHandler).toMatch(/useLocalKot/);
     // Empty / no-new-items still leaves the ticket (FOH close).
     expect(sendKotHandler).toMatch(/Nothing new for kitchen/);
     // Print failures must not abort the success path (no bare await print as sole post-commit gate).
@@ -234,6 +245,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(billHandler).toMatch(/returnToFloor/);
     expect(billHandler).toMatch(/Bill requested/);
     expect(billHandler).toMatch(/printOk/);
+    expect(billHandler).toMatch(/shouldUseLocalRestaurantMutation|isJournalLocalOrderId/);
 
     const svc = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
     expect(svc).toMatch(/async requestBill\(/);
@@ -380,11 +392,47 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/printReceipt/);
   });
 
+  it('Phase 5.x offline-first requires behavioral proof (not structure-only)', () => {
+    const proof = readRepo('samplepos.client/src/lib/restaurantOfflineOps.proof.test.ts');
+    expect(proof).toMatch(/Restaurant offline-first ops \(behavioral proof\)/);
+    expect(proof).toMatch(/appendRestaurantItemOffline/);
+    expect(proof).toMatch(/cancelRestaurantCheckOffline/);
+    expect(proof).toMatch(/payRestaurantCheckOffline/);
+    expect(proof).toMatch(/seedRestaurantCheckFromServer/);
+    expect(proof).toMatch(/removeRestaurantLinesOffline/);
+    expect(proof).toMatch(/fireRestaurantKotOffline/);
+    expect(proof).toMatch(/updateRestaurantGuestOffline/);
+    expect(proof).toMatch(/shouldUseLocalRestaurantMutation/);
+    expect(proof).toMatch(/ofl_ord_\* KOT fires locally/);
+    expect(proof).toMatch(/getUnsyncedEvents/);
+    expect(proof).toMatch(/installMemoryLocalStorage|localStorage/);
+
+    const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
+    expect(ops).toMatch(/export function shouldUseLocalRestaurantMutation/);
+    expect(ops).toMatch(/export function isJournalLocalOrderId/);
+
+    const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
+    expect(pos).toMatch(/preferLocalRestaurantWrites/);
+    expect(pos).toMatch(/paintJournalCheck/);
+    expect(pos).toMatch(/seedRestaurantCheckFromServer/);
+    expect(pos).toMatch(/shouldUseLocalRestaurantMutation/);
+    expect(pos).toMatch(/CustomerSelector/);
+    // Always journal-first: preferLocal returns true (no API wait on add).
+    expect(pos).toMatch(/preferLocalRestaurantWrites = \(_orderId\?: string \| null\) => true/);
+  });
+
   it('Phase 5.3 offline cancel, waiter assign, crash restore from journal', () => {
     const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
     expect(ops).toMatch(/cancelRestaurantCheckOffline/);
     expect(ops).toMatch(/assignRestaurantWaiterOffline/);
+    expect(ops).toMatch(/removeRestaurantLinesOffline/);
+    expect(ops).toMatch(/seedRestaurantCheckFromServer/);
     expect(ops).toMatch(/ORDER_CANCELLED/);
+
+    const journal = readRepo('samplepos.client/src/lib/offlineEventJournal.ts');
+    expect(journal).toMatch(/journalCache/);
+    expect(journal).toMatch(/invalidateJournalMemoryCache/);
+    expect(journal).toMatch(/appendSyncedEvent/);
 
     const replayer = readRepo('SamplePOS.Server/src/modules/pos/posEventReplayer.ts');
     expect(replayer).toMatch(/updateOrder/);
@@ -395,6 +443,10 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/cancelRestaurantCheckOffline/);
     expect(pos).toMatch(/assignRestaurantWaiterOffline/);
+    expect(pos).toMatch(/paintJournalCheck/);
+    expect(pos).toMatch(/preferLocalRestaurantWrites/);
+    expect(pos).toMatch(/seedRestaurantCheckFromServer/);
+    expect(pos).toMatch(/payRestaurantCheckOffline/);
     expect(pos).toMatch(/deriveRestaurantOpenChecks/);
     expect(pos).toMatch(/Restored .* open check/);
   });

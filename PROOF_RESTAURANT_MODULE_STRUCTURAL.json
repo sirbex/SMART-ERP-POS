@@ -1,8 +1,8 @@
 {
-  "when": "2026-07-24T18:45:49.757Z",
+  "when": "2026-07-25T07:12:09.070Z",
   "suite": "restaurant-module-phases-1-through-5.5-structural",
-  "total": 55,
-  "passed": 55,
+  "total": 69,
+  "passed": 69,
   "failed": 0,
   "checks": [
     {
@@ -77,6 +77,36 @@
     },
     {
       "name": "P3: createSale explodes recipes",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: createSale uses stock plan matrix",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: service without recipe skips stock",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: planSaleStockDeduction matrix",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: recipe Jest covers inventory×service",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: sendKot never consumes stock",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P3: recipe upsert blocks service ingredients",
       "pass": true,
       "detail": "ok"
     },
@@ -261,12 +291,52 @@
       "detail": "ok"
     },
     {
+      "name": "P5.x: offline-first behavioral proof test exists",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: proof covers add/cancel/pay/seed/kot/guest",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: journal appendSyncedEvent + cache invalidate",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: shouldUseLocalRestaurantMutation exported",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
       "name": "P5.5 KDS uses journal board",
       "pass": true,
       "detail": "ok"
     },
     {
       "name": "P5.5 KDS surfaces API fallback error",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: POS paintJournalCheck (instant UI)",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: POS preferLocalRestaurantWrites",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: POS seeds server checks for offline continue",
+      "pass": true,
+      "detail": "ok"
+    },
+    {
+      "name": "P5.x: POS pay uses journal cash path",
       "pass": true,
       "detail": "ok"
     },

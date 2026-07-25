@@ -1,15 +1,17 @@
 /**
- * Phase 5.5 — LAN / same-origin KDS notification bus.
+ * Phase 5.5 — LAN / same-origin KDS + journal notification bus.
  *
  * BroadcastChannel reaches other tabs on the same origin (waiter POS + kitchen
- * browser on one device, or multiple windows). Cross-device LAN without cloud
- * still uses paper KOT; this projection shares the journal on the kitchen tab.
+ * browser on one device, or multiple windows). Each device keeps its own
+ * journal; when online, OfflineAutoSync merges to the server so other devices
+ * see the floor. Cross-device LAN without cloud still uses paper KOT (ADR Phase B).
  */
 
 const CHANNEL = 'samplepos-restaurant-lan-kds';
 
 export type LanKdsMessage =
   | { type: 'BOARD_CHANGED'; ts: number; reason?: string }
+  | { type: 'JOURNAL_CHANGED'; ts: number; reason?: string }
   | { type: 'KOT_FIRED'; ts: number; kotOfflineId: string }
   | { type: 'KOT_STATUS'; ts: number; kotOfflineId: string; status: string };
 
@@ -37,6 +39,7 @@ export function publishLanKds(message: LanKdsMessage): void {
 
 export function publishLanKdsBoardChanged(reason?: string): void {
   publishLanKds({ type: 'BOARD_CHANGED', ts: Date.now(), reason });
+  publishLanKds({ type: 'JOURNAL_CHANGED', ts: Date.now(), reason });
 }
 
 export function subscribeLanKds(handler: (msg: LanKdsMessage) => void): () => void {

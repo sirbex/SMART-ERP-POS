@@ -4,6 +4,7 @@
 
 import {
   appendEvent,
+  appendSyncedEvent,
   generateEventKey,
   getAllEvents,
   getAllSyncState,
@@ -34,6 +35,95 @@ export function newOfflineLineId(): string {
 
 export function newKotOfflineId(): string {
   return `KOT-OFF-${Date.now().toString(36).toUpperCase()}`;
+}
+
+/** Local journal order ids are not on the server — never call restaurant checks APIs with ofl_ord_ ids. */
+export function isJournalLocalOrderId(id: string | null | undefined): boolean {
+  return !!id && id.startsWith('ofl_ord_');
+}
+
+/**
+ * KOT / Bill for journal-local checks must stay offline-first even when the
+ * browser reports online (server has no ofl_ord_* row).
+ */
+export function shouldUseLocalRestaurantMutation(
+  isOnline: boolean,
+  orderId: string | null | undefined,
+): boolean {
+  return !isOnline || isJournalLocalOrderId(orderId);
+}
+
+/**
+ * Hydrate a server-open check into the local journal (SYNCED) so this device can
+ * keep ordering / cash-paying if the network drops mid-service.
+ * Returns true when a seed was written (or already present).
+ */
+export function seedRestaurantCheckFromServer(input: {
+  orderId: string;
+  orderNumber: string;
+  tableId: string;
+  tableCode?: string | null;
+  tableName?: string | null;
+  channel?: RestaurantOrderChannel | null;
+  waiterId?: string | null;
+  waiterName?: string | null;
+  guestName?: string | null;
+  guestPhone?: string | null;
+  deliveryAddress?: string | null;
+  pickupLabel?: string | null;
+  items: Array<{
+    id: string;
+    productId?: string | null;
+    productName: string;
+    quantity: number | string;
+    unitPrice: number | string;
+    lineNotes?: string | null;
+    kitchenSentAt?: string | null;
+  }>;
+}): boolean {
+  if (!input.orderId || !input.tableId || !input.items?.length) return false;
+  const existing = deriveRestaurantCheckForTable(
+    input.tableId,
+    getAllEvents(),
+    getAllSyncState(),
+    input.orderId,
+  );
+  if (existing) return true;
+
+  const lines: EventLine[] = input.items.map((it) => {
+    const qty = Number(it.quantity) || 0;
+    const unitPrice = Number(it.unitPrice) || 0;
+    return toEventLine({
+      lineId: it.id,
+      productId: it.productId || `custom_${it.id}`,
+      productName: it.productName,
+      quantity: qty,
+      unitPrice,
+      lineNotes: it.lineNotes,
+      kitchenSentAt: it.kitchenSentAt,
+    });
+  });
+
+  appendSyncedEvent({
+    eventType: 'ORDER_CREATED',
+    key: `seed_${input.orderId}`,
+    orderId: input.orderId,
+    offlineId: input.orderNumber || input.orderId,
+    lines,
+    notes: `Hydrated ${input.tableCode || input.tableId}`,
+    ts: Date.now(),
+    channel: input.channel || 'DINE_IN',
+    tableId: input.tableId,
+    tableCode: input.tableCode || undefined,
+    tableName: input.tableName || undefined,
+    waiterId: input.waiterId || undefined,
+    waiterName: input.waiterName || undefined,
+    guestName: input.guestName,
+    guestPhone: input.guestPhone,
+    deliveryAddress: input.deliveryAddress,
+    pickupLabel: input.pickupLabel,
+  });
+  return true;
 }
 
 function toEventLine(input: {
@@ -67,6 +157,7 @@ export interface OpenOrAddRestaurantItemInput {
   tableCode: string;
   tableName: string;
   channel: RestaurantOrderChannel;
+  customerId?: string | null;
   waiterId?: string;
   waiterName?: string;
   guestName?: string | null;
@@ -106,6 +197,7 @@ export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput)
       lines: [line],
       notes: `Restaurant ${input.tableCode}`,
       ts: Date.now(),
+      customerId: input.customerId || undefined,
       channel: input.channel,
       tableId: input.tableId,
       tableCode: input.tableCode,
@@ -125,6 +217,7 @@ export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput)
       offlineId: existing.offlineId,
       lines: [...existing.lines, line],
       ts: Date.now(),
+      customerId: existing.customerId ?? input.customerId ?? undefined,
       channel: existing.channel ?? input.channel,
       tableId: existing.tableId ?? input.tableId,
       tableCode: existing.tableCode ?? input.tableCode,
@@ -140,6 +233,50 @@ export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput)
 
   const next = deriveRestaurantCheckForTable(input.tableId, getAllEvents(), getAllSyncState());
   if (!next) throw new Error('Failed to derive offline restaurant check');
+  return next;
+}
+
+/**
+ * Update guest / customer on an open local check (customers SSOT link).
+ */
+export function updateRestaurantGuestOffline(
+  order: DerivedOrder,
+  guest: {
+    customerId?: string | null;
+    guestName?: string | null;
+    guestPhone?: string | null;
+    deliveryAddress?: string | null;
+    pickupLabel?: string | null;
+  },
+): DerivedOrder {
+  if (!order.tableId) throw new Error('Restaurant check missing table');
+  appendEvent({
+    eventType: 'ORDER_UPDATED',
+    key: generateEventKey(),
+    orderId: order.orderId,
+    offlineId: order.offlineId,
+    lines: order.lines,
+    ts: Date.now(),
+    customerId: guest.customerId ?? order.customerId ?? undefined,
+    channel: order.channel,
+    tableId: order.tableId,
+    tableCode: order.tableCode,
+    tableName: order.tableName,
+    waiterId: order.waiterId,
+    waiterName: order.waiterName,
+    guestName: guest.guestName !== undefined ? guest.guestName : order.guestName,
+    guestPhone: guest.guestPhone !== undefined ? guest.guestPhone : order.guestPhone,
+    deliveryAddress:
+      guest.deliveryAddress !== undefined ? guest.deliveryAddress : order.deliveryAddress,
+    pickupLabel: guest.pickupLabel !== undefined ? guest.pickupLabel : order.pickupLabel,
+  });
+  const next = deriveRestaurantCheckForTable(
+    order.tableId,
+    getAllEvents(),
+    getAllSyncState(),
+    order.orderId,
+  );
+  if (!next) throw new Error('Failed to derive check after guest update');
   return next;
 }
 
@@ -286,6 +423,7 @@ export function payRestaurantCheckOffline(
     totalAmount,
     stockDeductions,
     ts: Date.now(),
+    customerId: order.customerId,
     tableId: order.tableId,
     channel: order.channel,
     tableCode: order.tableCode,
@@ -325,6 +463,64 @@ export function cancelRestaurantCheckOffline(
     ts: Date.now(),
   });
   publishLanKdsBoardChanged('ORDER_CANCELLED');
+}
+
+/**
+ * Remove unsent (New) lines locally — no VOID ticket / no reason ceremony.
+ * Kitchen-sent lines must use online void (VOID KOT).
+ */
+export function removeRestaurantLinesOffline(
+  order: DerivedOrder,
+  lineIds: string[],
+): DerivedOrder {
+  if (!order.tableId) throw new Error('Restaurant check missing table');
+  const idSet = new Set(lineIds);
+  const removing = order.lines.filter((l) => l.lineId && idSet.has(l.lineId));
+  if (removing.length === 0) throw new Error('No matching lines to remove');
+  if (removing.some((l) => !!l.kitchenSentAt)) {
+    throw new Error('Kitchen-sent lines require online Void (VOID ticket)');
+  }
+
+  const remaining = order.lines.filter((l) => !l.lineId || !idSet.has(l.lineId));
+  if (remaining.length === 0) {
+    cancelRestaurantCheckOffline(order, 'Removed last unsent lines');
+    const gone = deriveRestaurantCheckForTable(
+      order.tableId,
+      getAllEvents(),
+      getAllSyncState(),
+      order.orderId,
+    );
+    if (gone) throw new Error('Failed to cancel check after removing all lines');
+    return { ...order, lines: [] };
+  }
+
+  appendEvent({
+    eventType: 'ORDER_UPDATED',
+    key: generateEventKey(),
+    orderId: order.orderId,
+    offlineId: order.offlineId,
+    lines: remaining,
+    ts: Date.now(),
+    channel: order.channel,
+    tableId: order.tableId,
+    tableCode: order.tableCode,
+    tableName: order.tableName,
+    waiterId: order.waiterId,
+    waiterName: order.waiterName,
+    guestName: order.guestName,
+    guestPhone: order.guestPhone,
+    deliveryAddress: order.deliveryAddress,
+    pickupLabel: order.pickupLabel,
+  });
+
+  const next = deriveRestaurantCheckForTable(
+    order.tableId,
+    getAllEvents(),
+    getAllSyncState(),
+    order.orderId,
+  );
+  if (!next) throw new Error('Failed to derive check after line remove');
+  return next;
 }
 
 /**

@@ -241,37 +241,68 @@ export type PosOfflineEvent =
     };
 
 // ── Internal Helpers ──────────────────────────────────────────
+/** In-memory mirrors so FOH taps don't JSON.parse localStorage on every derive. */
+let journalCache: PosOfflineEvent[] | null = null;
+let syncStateCache: SyncStateMap | null = null;
 
 function readJournal(): PosOfflineEvent[] {
+    if (journalCache) return journalCache;
     try {
         const raw = localStorage.getItem(JOURNAL_KEY);
-        if (!raw) return [];
+        if (!raw) {
+            journalCache = [];
+            return journalCache;
+        }
         const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? (parsed as PosOfflineEvent[]) : [];
+        journalCache = Array.isArray(parsed) ? (parsed as PosOfflineEvent[]) : [];
+        return journalCache;
     } catch {
-        return [];
+        journalCache = [];
+        return journalCache;
     }
 }
 
 function writeJournal(events: PosOfflineEvent[]): void {
+    journalCache = events;
     localStorage.setItem(JOURNAL_KEY, JSON.stringify(events));
 }
 
 function readSyncState(): SyncStateMap {
+    if (syncStateCache) return syncStateCache;
     try {
         const raw = localStorage.getItem(SYNC_STATE_KEY);
-        if (!raw) return {};
+        if (!raw) {
+            syncStateCache = {};
+            return syncStateCache;
+        }
         const parsed = JSON.parse(raw);
-        return typeof parsed === 'object' && parsed !== null
-            ? (parsed as SyncStateMap)
-            : {};
+        syncStateCache =
+            typeof parsed === 'object' && parsed !== null ? (parsed as SyncStateMap) : {};
+        return syncStateCache;
     } catch {
-        return {};
+        syncStateCache = {};
+        return syncStateCache;
     }
 }
 
 function writeSyncState(state: SyncStateMap): void {
+    syncStateCache = state;
     localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(state));
+}
+
+/** Drop in-memory mirrors so other tabs / devices re-read localStorage. */
+export function invalidateJournalMemoryCache(): void {
+    journalCache = null;
+    syncStateCache = null;
+}
+
+// Cross-tab: Tab A writes journal → Tab B storage event clears stale memory cache.
+if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+        if (e.key === JOURNAL_KEY || e.key === SYNC_STATE_KEY || e.key === null) {
+            invalidateJournalMemoryCache();
+        }
+    });
 }
 
 // ── Public API ────────────────────────────────────────────────
@@ -318,6 +349,32 @@ export function markSynced(key: string): void {
     const state = readSyncState();
     state[key] = { status: 'SYNCED' };
     writeSyncState(state);
+}
+
+/**
+ * Append an event already known to the server (hydration) — marked SYNCED so
+ * OfflineAutoSync will not re-POST it. Idempotent on event.key.
+ */
+export function appendSyncedEvent(event: PosOfflineEvent): void {
+    const journal = readJournal();
+    if (journal.some((e) => e.key === event.key)) {
+        markSynced(event.key);
+        return;
+    }
+    // Also skip if this orderId already has an ORDER_CREATED (avoid duplicates).
+    if (
+        event.eventType === 'ORDER_CREATED' &&
+        journal.some(
+            (e) =>
+                e.eventType === 'ORDER_CREATED' &&
+                'orderId' in e &&
+                e.orderId === event.orderId,
+        )
+    ) {
+        return;
+    }
+    writeJournal([...journal, event]);
+    markSynced(event.key);
 }
 
 /** Mark an event as requiring manual review (e.g. stock conflict). */

@@ -94,6 +94,8 @@ KDS options (pick in implementation phase):
 
 **Phase 5.5 shipped:** same-origin multi-tab KDS via journal selectors (`deriveRestaurantKitchenBoard`) + `BroadcastChannel` (`restaurantLanKds`). Kitchen Display works offline from the shared journal; cross-device LAN without cloud still relies on paper KOT (or online API when available).
 
+**All-device offline-first (2026-07-25):** Every tablet/phone writes FOH to its local journal first (add / cancel / cash pay) with instant UI paint — never waits on the API. Open server checks are hydrated into the journal when viewed online so the same device can keep ordering and cash-paying if the network drops. When internet returns, `OfflineAutoSync` pushes PENDING events so other devices see the floor. Cross-device live journal peer (ADR Phase B) is still optional for outage multi-waiter on one table.
+
 Kitchen must not depend on internet for MVP paper path.
 
 ---

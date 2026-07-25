@@ -134,11 +134,21 @@ ok('UI RestaurantStationsPage', exists('samplepos.client/src/pages/restaurant/Re
 ok('UI RestaurantRecipesPage', exists('samplepos.client/src/pages/restaurant/RestaurantRecipesPage.tsx'));
 ok('hook useRestaurantEnabled', exists('samplepos.client/src/hooks/useRestaurantEnabled.ts'));
 
+    ok('P5.x: offline-first behavioral proof test exists', exists('samplepos.client/src/lib/restaurantOfflineOps.proof.test.ts'));
+    const opsProof = read('samplepos.client/src/lib/restaurantOfflineOps.proof.test.ts');
+ok('P5.x: proof covers add/cancel/pay/seed/kot/guest', /appendRestaurantItemOffline/.test(opsProof) && /cancelRestaurantCheckOffline/.test(opsProof) && /payRestaurantCheckOffline/.test(opsProof) && /seedRestaurantCheckFromServer/.test(opsProof) && /fireRestaurantKotOffline/.test(opsProof) && /updateRestaurantGuestOffline/.test(opsProof) && /shouldUseLocalRestaurantMutation/.test(opsProof));
+ok('P5.x: journal appendSyncedEvent + cache invalidate', /appendSyncedEvent/.test(journal) && /invalidateJournalMemoryCache/.test(journal));
+ok('P5.x: shouldUseLocalRestaurantMutation exported', /export function shouldUseLocalRestaurantMutation/.test(ops));
+
 const kdsPage = read('samplepos.client/src/pages/restaurant/KitchenDisplayPage.tsx');
 ok('P5.5 KDS uses journal board', /deriveRestaurantKitchenBoard/.test(kdsPage));
 ok('P5.5 KDS surfaces API fallback error', /console\.error/.test(kdsPage) && /toast\.error/.test(kdsPage));
 
 const posPage = read('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
+ok('P5.x: POS paintJournalCheck (instant UI)', /paintJournalCheck/.test(posPage));
+ok('P5.x: POS preferLocalRestaurantWrites', /preferLocalRestaurantWrites/.test(posPage));
+ok('P5.x: POS seeds server checks for offline continue', /seedRestaurantCheckFromServer/.test(posPage));
+ok('P5.x: POS pay uses journal cash path', /payRestaurantCheckOffline/.test(posPage));
 ok('P5.x POS cache warm logs failure', /Offline cache warm failed/.test(posPage));
 ok('ADR offline doc', exists('docs/architecture/RESTAURANT_OFFLINE_ADR.md'));
 
