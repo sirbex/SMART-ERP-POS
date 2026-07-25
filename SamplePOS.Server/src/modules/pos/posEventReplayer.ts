@@ -498,7 +498,7 @@ export const posEventReplayer = {
             items: event.lines.map((line) => ({
                 productId: line.productId,
                 productName: line.productName,
-                uom: line.uom,
+                uom: line.uomId ? line.uom : undefined,
                 uomId: line.uomId,
                 quantity: line.quantity,
                 unitPrice: line.unitPrice,

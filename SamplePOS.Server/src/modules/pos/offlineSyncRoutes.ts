@@ -43,7 +43,7 @@ const SyncPayloadSchema = z.object({
                 productId: z.string().min(1),
                 productName: z.string().min(1),
                 sku: z.string().optional().default(''),
-                uom: z.string().optional().default('PIECE'),
+                uom: z.string().optional().default(''),
                 uomId: z.string().optional(),
                 quantity: z.number().positive(),
                 unitPrice: z.number().nonnegative(),

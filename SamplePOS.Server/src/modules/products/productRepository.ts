@@ -312,153 +312,121 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   return (await findProductById(product.id, pool))!;
 }
 
+/**
+ * Pure plan for product UPDATE SET clauses.
+ * Uses Maps so each column is assigned at most once (Postgres 42601 otherwise).
+ * Service type overrides win last so form clears + productType:'service' cannot double-set.
+ */
+export function planProductUpdateAssignments(
+  data: UpdateProduct,
+  opts?: { categoryId?: string | null },
+): {
+  master: Array<{ column: string; value: unknown }>;
+  valuation: Array<{ column: string; value: unknown }>;
+  inventory: Array<{ column: string; value: unknown }>;
+} {
+  const master = new Map<string, unknown>();
+  const valuation = new Map<string, unknown>();
+  const inventory = new Map<string, unknown>();
+  const set = (target: Map<string, unknown>, column: string, value: unknown) => {
+    target.set(column, value);
+  };
+
+  if (data.sku !== undefined) set(master, 'sku', data.sku);
+  if (data.barcode !== undefined) set(master, 'barcode', data.barcode);
+  if (data.name !== undefined) set(master, 'name', data.name);
+  if (data.description !== undefined) set(master, 'description', data.description);
+  if (data.category !== undefined) {
+    set(master, 'category', data.category);
+    set(master, 'category_id', opts?.categoryId ?? null);
+  }
+  if (data.productType !== undefined) set(master, 'product_type', data.productType);
+  if (data.availableInRestaurant !== undefined) {
+    set(master, 'available_in_restaurant', data.availableInRestaurant);
+  }
+  if (data.genericName !== undefined) set(master, 'generic_name', data.genericName || null);
+  if (data.isTaxable !== undefined) set(master, 'is_taxable', data.isTaxable);
+  if (data.taxRate !== undefined) set(master, 'tax_rate', data.taxRate);
+  if (data.trackExpiry !== undefined) set(master, 'track_expiry', data.trackExpiry);
+  if (data.minDaysBeforeExpirySale !== undefined) {
+    set(master, 'min_days_before_expiry_sale', data.minDaysBeforeExpirySale);
+  }
+  if (data.isActive !== undefined) set(master, 'is_active', data.isActive);
+  if (data.preferredSupplierId !== undefined) {
+    set(master, 'preferred_supplier_id', data.preferredSupplierId || null);
+  }
+  if (data.supplierProductCode !== undefined) {
+    set(master, 'supplier_product_code', data.supplierProductCode || null);
+  }
+  if (data.purchaseUomId !== undefined) {
+    set(master, 'purchase_uom_id', data.purchaseUomId || null);
+  }
+  if (data.leadTimeDays !== undefined) set(master, 'lead_time_days', data.leadTimeDays);
+
+  if (data.costPrice !== undefined) set(valuation, 'cost_price', data.costPrice);
+  if (data.sellingPrice !== undefined) set(valuation, 'selling_price', data.sellingPrice);
+  if (data.pricingFormula !== undefined) {
+    set(valuation, 'pricing_formula', data.pricingFormula || null);
+  }
+  if (data.autoUpdatePrice !== undefined) set(valuation, 'auto_update_price', data.autoUpdatePrice);
+  if (data.costingMethod !== undefined) set(valuation, 'costing_method', data.costingMethod);
+
+  if (data.reorderLevel !== undefined) set(inventory, 'reorder_level', data.reorderLevel);
+  if (data.reorderQuantity !== undefined) set(inventory, 'reorder_quantity', data.reorderQuantity);
+
+  // Service/menu dishes: force-clear inventory & procurement (overrides any payload values)
+  if (data.productType === 'service') {
+    set(master, 'track_expiry', false);
+    set(master, 'min_days_before_expiry_sale', 0);
+    set(master, 'preferred_supplier_id', null);
+    set(master, 'supplier_product_code', null);
+    set(master, 'purchase_uom_id', null);
+    set(master, 'lead_time_days', 0);
+    if (data.reorderLevel === undefined) set(inventory, 'reorder_level', 0);
+    if (data.reorderQuantity === undefined) set(inventory, 'reorder_quantity', 0);
+    if (data.autoUpdatePrice === undefined) set(valuation, 'auto_update_price', false);
+  }
+
+  const toList = (m: Map<string, unknown>) =>
+    Array.from(m.entries()).map(([column, value]) => ({ column, value }));
+
+  return {
+    master: toList(master),
+    valuation: toList(valuation),
+    inventory: toList(inventory),
+  };
+}
+
 export async function updateProduct(id: string, data: UpdateProduct, dbPool?: pg.Pool): Promise<Product | null> {
   const pool = dbPool || globalPool;
   const clientVersion = data.version; // OCC: version from the caller
 
-  // Separate fields into their target tables
+  const categoryId =
+    data.category !== undefined ? await resolveCategoryId(pool, data.category) : undefined;
+  const plan = planProductUpdateAssignments(data, { categoryId });
+
   const masterFields: string[] = [];
   const masterValues: unknown[] = [];
   let masterIdx = 1;
+  for (const { column, value } of plan.master) {
+    masterFields.push(`${column} = $${masterIdx++}`);
+    masterValues.push(value);
+  }
 
   const valFields: string[] = [];
   const valValues: unknown[] = [];
   let valIdx = 1;
+  for (const { column, value } of plan.valuation) {
+    valFields.push(`${column} = $${valIdx++}`);
+    valValues.push(value);
+  }
 
   const invFields: string[] = [];
   const invValues: unknown[] = [];
   let invIdx = 1;
-
-  // ── Master (products table) ──
-  if (data.sku !== undefined) {
-    masterFields.push(`sku = $${masterIdx++}`);
-    masterValues.push(data.sku);
-  }
-  if (data.barcode !== undefined) {
-    masterFields.push(`barcode = $${masterIdx++}`);
-    masterValues.push(data.barcode);
-  }
-  if (data.name !== undefined) {
-    masterFields.push(`name = $${masterIdx++}`);
-    masterValues.push(data.name);
-  }
-  if (data.description !== undefined) {
-    masterFields.push(`description = $${masterIdx++}`);
-    masterValues.push(data.description);
-  }
-  if (data.category !== undefined) {
-    masterFields.push(`category = $${masterIdx++}`);
-    masterValues.push(data.category);
-    const categoryId = await resolveCategoryId(pool, data.category);
-    masterFields.push(`category_id = $${masterIdx++}`);
-    masterValues.push(categoryId);
-  }
-  if (data.productType !== undefined) {
-    masterFields.push(`product_type = $${masterIdx++}`);
-    masterValues.push(data.productType);
-    if (data.productType === 'service') {
-      // Service/menu dishes: clear inventory & procurement that do not apply
-      masterFields.push(`track_expiry = $${masterIdx++}`);
-      masterValues.push(false);
-      masterFields.push(`min_days_before_expiry_sale = $${masterIdx++}`);
-      masterValues.push(0);
-      masterFields.push(`preferred_supplier_id = $${masterIdx++}`);
-      masterValues.push(null);
-      masterFields.push(`supplier_product_code = $${masterIdx++}`);
-      masterValues.push(null);
-      masterFields.push(`purchase_uom_id = $${masterIdx++}`);
-      masterValues.push(null);
-      masterFields.push(`lead_time_days = $${masterIdx++}`);
-      masterValues.push(0);
-      if (data.reorderLevel === undefined) {
-        invFields.push(`reorder_level = $${invIdx++}`);
-        invValues.push(0);
-      }
-      if (data.reorderQuantity === undefined) {
-        invFields.push(`reorder_quantity = $${invIdx++}`);
-        invValues.push(0);
-      }
-      if (data.autoUpdatePrice === undefined) {
-        valFields.push(`auto_update_price = $${valIdx++}`);
-        valValues.push(false);
-      }
-    }
-  }
-  if (data.availableInRestaurant !== undefined) {
-    masterFields.push(`available_in_restaurant = $${masterIdx++}`);
-    masterValues.push(data.availableInRestaurant);
-  }
-  if (data.genericName !== undefined) {
-    masterFields.push(`generic_name = $${masterIdx++}`);
-    masterValues.push(data.genericName || null);
-  }
-  if (data.isTaxable !== undefined) {
-    masterFields.push(`is_taxable = $${masterIdx++}`);
-    masterValues.push(data.isTaxable);
-  }
-  if (data.taxRate !== undefined) {
-    masterFields.push(`tax_rate = $${masterIdx++}`);
-    masterValues.push(data.taxRate);
-  }
-  if (data.trackExpiry !== undefined) {
-    masterFields.push(`track_expiry = $${masterIdx++}`);
-    masterValues.push(data.trackExpiry);
-  }
-  if (data.minDaysBeforeExpirySale !== undefined) {
-    masterFields.push(`min_days_before_expiry_sale = $${masterIdx++}`);
-    masterValues.push(data.minDaysBeforeExpirySale);
-  }
-  if (data.isActive !== undefined) {
-    masterFields.push(`is_active = $${masterIdx++}`);
-    masterValues.push(data.isActive);
-  }
-  if (data.preferredSupplierId !== undefined) {
-    masterFields.push(`preferred_supplier_id = $${masterIdx++}`);
-    masterValues.push(data.preferredSupplierId || null);
-  }
-  if (data.supplierProductCode !== undefined) {
-    masterFields.push(`supplier_product_code = $${masterIdx++}`);
-    masterValues.push(data.supplierProductCode || null);
-  }
-  if (data.purchaseUomId !== undefined) {
-    masterFields.push(`purchase_uom_id = $${masterIdx++}`);
-    masterValues.push(data.purchaseUomId || null);
-  }
-  if (data.leadTimeDays !== undefined) {
-    masterFields.push(`lead_time_days = $${masterIdx++}`);
-    masterValues.push(data.leadTimeDays);
-  }
-
-  // ── Valuation (product_valuation table) ──
-  if (data.costPrice !== undefined) {
-    valFields.push(`cost_price = $${valIdx++}`);
-    valValues.push(data.costPrice);
-  }
-  if (data.sellingPrice !== undefined) {
-    valFields.push(`selling_price = $${valIdx++}`);
-    valValues.push(data.sellingPrice);
-  }
-  if (data.pricingFormula !== undefined) {
-    valFields.push(`pricing_formula = $${valIdx++}`);
-    valValues.push(data.pricingFormula || null);
-  }
-  if (data.autoUpdatePrice !== undefined) {
-    valFields.push(`auto_update_price = $${valIdx++}`);
-    valValues.push(data.autoUpdatePrice);
-  }
-  if (data.costingMethod !== undefined) {
-    valFields.push(`costing_method = $${valIdx++}`);
-    valValues.push(data.costingMethod);
-  }
-
-  // ── Inventory (product_inventory table) ──
-  if (data.reorderLevel !== undefined) {
-    invFields.push(`reorder_level = $${invIdx++}`);
-    invValues.push(data.reorderLevel);
-  }
-  if (data.reorderQuantity !== undefined) {
-    invFields.push(`reorder_quantity = $${invIdx++}`);
-    invValues.push(data.reorderQuantity);
+  for (const { column, value } of plan.inventory) {
+    invFields.push(`${column} = $${invIdx++}`);
+    invValues.push(value);
   }
 
   const hasChanges = masterFields.length > 0 || valFields.length > 0 || invFields.length > 0;

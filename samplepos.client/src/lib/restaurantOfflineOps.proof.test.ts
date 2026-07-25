@@ -320,4 +320,41 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(next.guestName).toBe('Ada');
     expect(next.deliveryAddress).toBe('12 Main St');
   });
+
+  it('service dish offline pay skips parent stock even at zero qty', () => {
+    localStorage.setItem('pos_local_stock', JSON.stringify({ 'svc-dish': 0 }));
+    const open = appendRestaurantItemOffline({
+      tableId: 't-svc',
+      tableCode: 'S1',
+      tableName: 'Service Table',
+      channel: 'DINE_IN',
+      productId: 'svc-dish',
+      productName: 'Matooke',
+      unitPrice: 15,
+      productType: 'service',
+    });
+    expect(open.lines[0]?.productType).toBe('service');
+
+    const paid = payRestaurantCheckOffline(open);
+    expect(paid.totalAmount).toBe(15);
+    expect(JSON.parse(localStorage.getItem('pos_local_stock') || '{}')['svc-dish']).toBe(0);
+
+    const sale = getUnsyncedEvents().find((e) => e.eventType === 'SALE_COMPLETED');
+    expect(sale && sale.eventType === 'SALE_COMPLETED' && sale.stockDeductions).toEqual([]);
+  });
+
+  it('inventory dish still blocks offline pay when local stock is zero', () => {
+    localStorage.setItem('pos_local_stock', JSON.stringify({ inv1: 0 }));
+    const open = appendRestaurantItemOffline({
+      tableId: 't-inv',
+      tableCode: 'I1',
+      tableName: 'Inv Table',
+      channel: 'DINE_IN',
+      productId: 'inv1',
+      productName: 'Bottled Water',
+      unitPrice: 2,
+      productType: 'inventory',
+    });
+    expect(() => payRestaurantCheckOffline(open)).toThrow(/Insufficient offline stock/i);
+  });
 });

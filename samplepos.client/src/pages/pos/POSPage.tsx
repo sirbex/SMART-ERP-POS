@@ -3027,6 +3027,7 @@ export default function POSPage() {
           subtotal: item.subtotal,
           discountAmount: item.discount?.amount || undefined, // Per-item discount
           taxAmount: itemTax,
+          productType: item.productType || 'inventory',
         };
       }),
       subtotal,

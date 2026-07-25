@@ -608,19 +608,30 @@ async function resolveSaleLineSelectedMasterUomId(
 
   const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
   const defaultUom = productUoms.find((uom) => uom.isDefault) ?? productUoms[0];
-  const baseLabel = (defaultUom?.uomSymbol || defaultUom?.uomName || '').toUpperCase();
-  if (selectedUom.toUpperCase() === baseLabel) {
+  const want = canonicalizeUomName(selectedUom);
+  const baseCanonical = canonicalizeUomName(
+    defaultUom?.uomSymbol || defaultUom?.uomName || '',
+  );
+  if (baseCanonical && want === baseCanonical) {
     return null;
   }
 
   const match = productUoms.find((row) => {
-    const name = (row.uomName || '').toUpperCase();
-    const symbol = (row.uomSymbol || '').toUpperCase();
-    const want = selectedUom.toUpperCase();
+    const name = canonicalizeUomName(row.uomName || '');
+    const symbol = row.uomSymbol ? canonicalizeUomName(row.uomSymbol) : '';
     return name === want || (symbol && symbol === want);
   });
 
   return match?.uomId ?? null;
+}
+
+/**
+ * Offline/restaurant often send a generic "PIECE" label without uomId.
+ * When that label is a countable base alias (EACH/PIECE/…) and not configured
+ * as a distinct sell UoM, fall through to the product base unit instead of 400.
+ */
+function isCountableBaseUomPlaceholder(label: string): boolean {
+  return canonicalizeUomName(label) === 'EACH';
 }
 
 async function assertResolvableSaleLineUom(
@@ -640,12 +651,19 @@ async function assertResolvableSaleLineUom(
 
   const productUoms = await repo.listProductUoms(productId, db as pg.Pool);
   const defaultUom = productUoms.find((uom) => uom.isDefault) ?? productUoms[0];
-  const baseLabel = (defaultUom?.uomSymbol || defaultUom?.uomName || 'base unit').toUpperCase();
-  if (selectedUom.toUpperCase() === baseLabel) {
+  const want = canonicalizeUomName(selectedUom);
+  const baseCanonical = canonicalizeUomName(
+    defaultUom?.uomSymbol || defaultUom?.uomName || '',
+  );
+  if (baseCanonical && want === baseCanonical) {
     return;
   }
 
   if (!selectedMasterUomId) {
+    // Generic sell-unit placeholders → product base (service dishes / offline journal)
+    if (isCountableBaseUomPlaceholder(selectedUom) && productUoms.length > 0) {
+      return;
+    }
     const productRes = await db.query<{ name: string }>(
       `SELECT name FROM products WHERE id = $1`,
       [productId],

@@ -98,6 +98,7 @@ interface MenuProduct {
   categoryId: string | null;
   categoryName: string | null;
   kitchenStation: string | null;
+  productType?: 'inventory' | 'consumable' | 'service' | string;
 }
 
 interface OrderItem {
@@ -666,6 +667,7 @@ export default function RestaurantPosPage() {
         productName: product.name,
         unitPrice: Number(product.sellingPrice) || 0,
         quantity: 1,
+        productType: product.productType,
       });
       if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
       paintJournalCheck(selectedTableId, derived.orderId);

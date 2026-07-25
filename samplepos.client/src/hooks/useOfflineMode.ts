@@ -9,8 +9,9 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useOfflineContext } from '../contexts/OfflineContext';
-import { decrementLocalStock, restoreLocalStock } from '../services/offlineCatalogService';
+import { decrementLocalStock, getCachedCatalog, restoreLocalStock } from '../services/offlineCatalogService';
 import { syncOfflineCustomers, acquireSyncLock, releaseSyncLock } from '../services/offlineSyncEngine';
+import { isServiceProductType } from '@shared/utils/productTypeRules';
 import {
   appendEvent,
   getAllEvents,
@@ -52,6 +53,7 @@ export interface OfflineSaleLineItem {
   costPrice: number;
   subtotal: number;
   taxAmount: number;
+  productType?: string;
 }
 
 export interface OfflineSalePaymentLine {
@@ -227,10 +229,13 @@ export function useOfflineMode() {
       const orderId = `ofl_ord_${Date.now().toString(36)}`;
       const offlineId = `OFFLINE-${Date.now().toString(36).toUpperCase()}`;
 
-      // Decrement local stock for inventory items
+      // Decrement local stock for inventory items (never for service parents)
       const stockDeductions: Array<{ productId: string; quantity: number }> = [];
       for (const item of saleData.lineItems) {
         if (item.productId.startsWith('custom_')) continue;
+        const catalogType = getCachedCatalog().find((p) => p.id === item.productId)?.productType;
+        const productType = item.productType || catalogType || 'inventory';
+        if (isServiceProductType(productType)) continue;
         const ok = decrementLocalStock(item.productId, item.quantity);
         if (!ok) {
           for (const d of stockDeductions) restoreLocalStock(d.productId, d.quantity);

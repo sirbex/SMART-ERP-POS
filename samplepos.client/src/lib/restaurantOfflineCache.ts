@@ -46,6 +46,8 @@ export interface CachedMenuProduct {
   categoryName: string | null;
   kitchenStation: string | null;
   sku?: string | null;
+  /** From products.product_type — service dishes must not consume parent stock offline */
+  productType?: 'inventory' | 'consumable' | 'service' | string;
 }
 
 export interface CachedCategory {

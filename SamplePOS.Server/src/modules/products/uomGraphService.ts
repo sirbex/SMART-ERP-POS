@@ -31,9 +31,15 @@ const CANONICAL_UOM_ALIASES: Record<string, string> = {
     PKT: 'PACKET',
     PACKS: 'PACK',
     PACKETS: 'PACKET',
-    PCS: 'PIECE',
+    // Countable sell-unit family: offline/restaurant lines often say PIECE while create bootstraps EACH
+    PCS: 'EACH',
+    PC: 'EACH',
+    PIECE: 'EACH',
+    PIECES: 'EACH',
     EA: 'EACH',
     EACHES: 'EACH',
+    UNIT: 'EACH',
+    UNITS: 'EACH',
 };
 
 function parseFactor(value: number | string): Decimal {

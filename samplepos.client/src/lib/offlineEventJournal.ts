@@ -44,6 +44,8 @@ export interface EventLine {
     subtotal: number;
     taxAmount: number;
     discountAmount?: number;
+    /** inventory | consumable | service — drives offline stock skip for services */
+    productType?: string;
     /** Stable client line id (restaurant offline KOT tracking) */
     lineId?: string;
     lineNotes?: string | null;

@@ -20,8 +20,23 @@ import {
   type DerivedOrder,
   type DerivedKotStatus,
 } from './offlineEventSelectors';
-import { decrementLocalStock, restoreLocalStock } from '../services/offlineCatalogService';
+import { isServiceProductType } from '@shared/utils/productTypeRules';
+import { decrementLocalStock, getCachedCatalog, restoreLocalStock } from '../services/offlineCatalogService';
+import { getCachedRestaurantMenu } from './restaurantOfflineCache';
 import { publishLanKdsBoardChanged } from './restaurantLanKds';
+
+/** Resolve product type for offline stock rules (line → menu cache → POS catalog). */
+export function resolveOfflineProductType(
+  productId: string,
+  lineProductType?: string | null,
+): string {
+  if (lineProductType) return String(lineProductType);
+  const menuHit = getCachedRestaurantMenu().find((p) => p.id === productId);
+  if (menuHit?.productType) return String(menuHit.productType);
+  const catalogHit = getCachedCatalog().find((p) => p.id === productId);
+  if (catalogHit?.productType) return String(catalogHit.productType);
+  return 'inventory';
+}
 
 export type { DerivedKotStatus };
 
@@ -132,6 +147,7 @@ function toEventLine(input: {
   productName: string;
   quantity: number;
   unitPrice: number;
+  productType?: string;
   lineNotes?: string | null;
   kitchenSentAt?: string | null;
 }): EventLine {
@@ -141,12 +157,13 @@ function toEventLine(input: {
     productId: input.productId,
     productName: input.productName,
     sku: '',
-    uom: 'PIECE',
+    uom: '',
     quantity: input.quantity,
     unitPrice: input.unitPrice,
     costPrice: 0,
     subtotal,
     taxAmount: 0,
+    productType: input.productType,
     lineNotes: input.lineNotes ?? null,
     kitchenSentAt: input.kitchenSentAt ?? null,
   };
@@ -168,6 +185,7 @@ export interface OpenOrAddRestaurantItemInput {
   productName: string;
   unitPrice: number;
   quantity?: number;
+  productType?: string;
 }
 
 /**
@@ -184,6 +202,7 @@ export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput)
     productName: input.productName,
     quantity: qty,
     unitPrice: input.unitPrice,
+    productType: input.productType ?? resolveOfflineProductType(input.productId),
   });
 
   if (!existing) {
@@ -369,6 +388,7 @@ export function advanceRestaurantKotOffline(kotOfflineId: string): DerivedKotSta
 
 /**
  * Phase 5.2 — Offline cash pay: append SALE_COMPLETED (same orderId), optimistic parent stock.
+ * Service parents never consume parent stock (ingredients FEFO runs on server replay).
  * Recipe/BOM FEFO still runs on server replay via createSale — not locally.
  */
 export function payRestaurantCheckOffline(
@@ -399,6 +419,9 @@ export function payRestaurantCheckOffline(
   const stockDeductions: Array<{ productId: string; quantity: number }> = [];
   for (const line of order.lines) {
     if (!line.productId || line.productId.startsWith('custom_')) continue;
+    const productType = resolveOfflineProductType(line.productId, line.productType);
+    // Service dishes: no parent stock. Ingredients deducted on sync/createSale.
+    if (isServiceProductType(productType)) continue;
     const ok = decrementLocalStock(line.productId, line.quantity);
     if (!ok) {
       for (const d of stockDeductions) restoreLocalStock(d.productId, d.quantity);

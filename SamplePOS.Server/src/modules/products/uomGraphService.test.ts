@@ -66,6 +66,8 @@ describe('uomGraphService', () => {
     it('canonicalizes common aliases and formats human-readable labels', () => {
         expect(canonicalizeUomName(' tabs ')).toBe('TABLET');
         expect(canonicalizeUomName('pkt')).toBe('PACKET');
+        expect(canonicalizeUomName('PIECE')).toBe('EACH');
+        expect(canonicalizeUomName('pcs')).toBe('EACH');
         expect(formatCanonicalConversionLabel('PKT', 'TAB', 12)).toBe('1 PKT = 12 TAB');
     });
 });

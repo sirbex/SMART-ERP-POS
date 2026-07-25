@@ -389,4 +389,28 @@ describe('resolveSaleItemUom — Wave 4 MUoM hardening', () => {
       resolveSaleItemUom(productId, { quantity: 1, uom: 'CARTON' }, mockDb as unknown as Pool),
     ).rejects.toThrow(/not configured/i);
   });
+
+  it('accepts offline PIECE placeholder when product base is EACH', async () => {
+    mockRepo.listProductUoms.mockResolvedValue([
+      {
+        id: 'pu-base',
+        productId,
+        uomId: baseUomId,
+        uomName: 'Each',
+        uomSymbol: 'ea',
+        conversionFactor: '1',
+        isDefault: true,
+      },
+    ]);
+    mockRepo.getUomById.mockResolvedValue({ id: baseUomId, name: 'Each' });
+
+    const result = await resolveSaleItemUom(
+      productId,
+      { quantity: 2, uom: 'PIECE' },
+      mockDb as unknown as Pool,
+    );
+    expect(result.baseUomId).toBe(baseUomId);
+    expect(result.baseQuantity).toBe(2);
+    expect(result.conversionFactor).toBe(1);
+  });
 });

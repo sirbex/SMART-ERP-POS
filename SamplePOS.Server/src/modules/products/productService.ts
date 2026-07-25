@@ -16,6 +16,7 @@ import type { BulkImportProductRow, BulkUpsertResult } from './productRepository
 import type { DuplicateStrategy } from '../../../../shared/zod/importSchemas.js';
 import * as pricingService from '../../services/pricingService.js';
 import { bootstrapProductUomsFromCreateInput, validateProductPurchaseUomIntegrity, checkProductPurchaseUomIntegrity, assertPurchaseUomConfiguredInProductUoms } from './uomService.js';
+import { normalizeProductSaveForType } from '../../../../shared/utils/productTypeRules.js';
 
 // Server-side limit cap — safe with lightweight flat query (no json_agg/GROUP BY).
 // 1800 products + batch UOM = ~25ms total. Cap at 5000 for safety.
@@ -192,12 +193,13 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   // Purchase-pack factor belongs in product_uoms only; legacy products.conversion_factor stays 1.
   const purchaseConversionFactor = data.conversionFactor ?? 1;
 
-  // Use Decimal for bank-grade precision
+  // Use Decimal for bank-grade precision; service type clears inventory fields
+  const normalized = normalizeProductSaveForType(data);
   const productData = {
-    ...data,
+    ...normalized,
     conversionFactor: 1,
-    costPrice: data.costPrice ? new Decimal(data.costPrice).toNumber() : data.costPrice,
-    sellingPrice: data.sellingPrice ? new Decimal(data.sellingPrice).toNumber() : data.sellingPrice,
+    costPrice: normalized.costPrice ? new Decimal(normalized.costPrice).toNumber() : normalized.costPrice,
+    sellingPrice: normalized.sellingPrice ? new Decimal(normalized.sellingPrice).toNumber() : normalized.sellingPrice,
   };
 
   // Transaction: Create product atomically
@@ -308,11 +310,12 @@ export async function updateProduct(
     });
   }
 
-  // Use Decimal for bank-grade precision
+  // Use Decimal for bank-grade precision; service type clears inventory fields
+  const normalized = normalizeProductSaveForType(data);
   const updateData = {
-    ...data,
-    costPrice: data.costPrice ? new Decimal(data.costPrice).toNumber() : data.costPrice,
-    sellingPrice: data.sellingPrice ? new Decimal(data.sellingPrice).toNumber() : data.sellingPrice,
+    ...normalized,
+    costPrice: normalized.costPrice ? new Decimal(normalized.costPrice).toNumber() : normalized.costPrice,
+    sellingPrice: normalized.sellingPrice ? new Decimal(normalized.sellingPrice).toNumber() : normalized.sellingPrice,
   };
 
   // Transaction: Update product atomically
