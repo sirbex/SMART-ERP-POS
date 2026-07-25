@@ -305,14 +305,18 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const service = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
     expect(service).toMatch(/async voidCheckItems\(/);
     expect(service).toMatch(/ticketKind: 'VOID'/);
+    expect(service).toMatch(/reduceOrderItemQuantity/);
     expect(service).toMatch(/cancelCheck[\s\S]*ticketKind: 'VOID'/s);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/checks\/:orderId\/void-items/);
+    expect(routes).toMatch(/quantity/);
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/handleVoidLines/);
     expect(pos).toMatch(/voidItems/);
+    expect(pos).toMatch(/allocateVoidQuantity/);
+    expect(pos).toMatch(/How many to void/);
     expect(pos).toMatch(/ticketKind: 'VOID'/);
     // New/unsent: cancel/remove without reason or VOID print; Void only after KOT.
     expect(pos).toMatch(/Removed before kitchen send/);
@@ -422,11 +426,13 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/preferLocalRestaurantWrites/);
     expect(pos).toMatch(/paintJournalCheck/);
-    expect(pos).toMatch(/seedRestaurantCheckFromServer/);
+    expect(pos).toMatch(/refreshRestaurantCheckSeedFromServer/);
     expect(pos).toMatch(/shouldUseLocalRestaurantMutation/);
     expect(pos).toMatch(/CustomerSelector/);
-    // Always journal-first: preferLocal returns true (no API wait on add).
-    expect(pos).toMatch(/preferLocalRestaurantWrites = \(_orderId\?: string \| null\) => true/);
+    // ofl_ord_* journal-first; server UUID checks use API online (void needs real line UUIDs).
+    expect(pos).toMatch(
+      /preferLocalRestaurantWrites = \(orderId\?: string \| null\) =>\s*shouldUseLocalRestaurantMutation\(isOnline, orderId\)/,
+    );
   });
 
   it('Phase 5.3 offline cancel, waiter assign, crash restore from journal', () => {
@@ -453,7 +459,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/assignRestaurantWaiterOffline/);
     expect(pos).toMatch(/paintJournalCheck/);
     expect(pos).toMatch(/preferLocalRestaurantWrites/);
-    expect(pos).toMatch(/seedRestaurantCheckFromServer/);
+    expect(pos).toMatch(/refreshRestaurantCheckSeedFromServer/);
     expect(pos).toMatch(/payRestaurantCheckOffline/);
     expect(pos).toMatch(/deriveRestaurantOpenChecks/);
     expect(pos).toMatch(/Restored .* open check/);

@@ -141,6 +141,56 @@ export function seedRestaurantCheckFromServer(input: {
   return true;
 }
 
+/**
+ * Replace journal snapshot for a server check with fresh API lines (avoids stale void IDs).
+ */
+export function refreshRestaurantCheckSeedFromServer(
+  input: Parameters<typeof seedRestaurantCheckFromServer>[0],
+): void {
+  if (!input.orderId || !input.tableId) return;
+  const lines: EventLine[] = (input.items || []).map((it) => {
+    const qty = Number(it.quantity) || 0;
+    const unitPrice = Number(it.unitPrice) || 0;
+    return toEventLine({
+      lineId: it.id,
+      productId: it.productId || `custom_${it.id}`,
+      productName: it.productName,
+      quantity: qty,
+      unitPrice,
+      lineNotes: it.lineNotes,
+      kitchenSentAt: it.kitchenSentAt,
+    });
+  });
+  const existing = deriveRestaurantCheckForTable(
+    input.tableId,
+    getAllEvents(),
+    getAllSyncState(),
+    input.orderId,
+  );
+  if (!existing) {
+    seedRestaurantCheckFromServer(input);
+    return;
+  }
+  appendSyncedEvent({
+    eventType: 'ORDER_UPDATED',
+    key: `seed_refresh_${input.orderId}_${Date.now()}`,
+    orderId: input.orderId,
+    offlineId: input.orderNumber || existing.offlineId,
+    lines,
+    ts: Date.now(),
+    channel: input.channel || existing.channel || 'DINE_IN',
+    tableId: input.tableId,
+    tableCode: input.tableCode || existing.tableCode,
+    tableName: input.tableName || existing.tableName,
+    waiterId: input.waiterId || existing.waiterId,
+    waiterName: input.waiterName || existing.waiterName,
+    guestName: input.guestName ?? existing.guestName,
+    guestPhone: input.guestPhone ?? existing.guestPhone,
+    deliveryAddress: input.deliveryAddress ?? existing.deliveryAddress,
+    pickupLabel: input.pickupLabel ?? existing.pickupLabel,
+  });
+}
+
 function toEventLine(input: {
   lineId: string;
   productId: string;
@@ -489,23 +539,44 @@ export function cancelRestaurantCheckOffline(
 }
 
 /**
- * Remove unsent (New) lines locally — no VOID ticket / no reason ceremony.
+ * Remove or reduce unsent (New) lines locally — no VOID ticket / no reason ceremony.
  * Kitchen-sent lines must use online void (VOID KOT).
+ * `quantityByLineId` voids/reduces only that many units (Toast/Samba −1).
  */
 export function removeRestaurantLinesOffline(
   order: DerivedOrder,
   lineIds: string[],
+  quantityByLineId?: Record<string, number>,
 ): DerivedOrder {
   if (!order.tableId) throw new Error('Restaurant check missing table');
   const idSet = new Set(lineIds);
-  const removing = order.lines.filter((l) => l.lineId && idSet.has(l.lineId));
-  if (removing.length === 0) throw new Error('No matching lines to remove');
-  if (removing.some((l) => !!l.kitchenSentAt)) {
+  const touching = order.lines.filter((l) => l.lineId && idSet.has(l.lineId));
+  if (touching.length === 0) throw new Error('No matching lines to remove');
+  if (touching.some((l) => !!l.kitchenSentAt)) {
     throw new Error('Kitchen-sent lines require online Void (VOID ticket)');
   }
 
-  const remaining = order.lines.filter((l) => !l.lineId || !idSet.has(l.lineId));
-  if (remaining.length === 0) {
+  const nextLines: typeof order.lines = [];
+  for (const line of order.lines) {
+    if (!line.lineId || !idSet.has(line.lineId)) {
+      nextLines.push(line);
+      continue;
+    }
+    const voidQty = quantityByLineId?.[line.lineId];
+    if (voidQty === undefined || voidQty >= line.quantity) {
+      continue; // drop entire line
+    }
+    if (voidQty > 0) {
+      const qty = line.quantity - voidQty;
+      nextLines.push({
+        ...line,
+        quantity: qty,
+        subtotal: qty * line.unitPrice,
+      });
+    }
+  }
+
+  if (nextLines.length === 0) {
     cancelRestaurantCheckOffline(order, 'Removed last unsent lines');
     const gone = deriveRestaurantCheckForTable(
       order.tableId,
@@ -522,7 +593,7 @@ export function removeRestaurantLinesOffline(
     key: generateEventKey(),
     orderId: order.orderId,
     offlineId: order.offlineId,
-    lines: remaining,
+    lines: nextLines,
     ts: Date.now(),
     channel: order.channel,
     tableId: order.tableId,

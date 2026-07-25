@@ -614,14 +614,19 @@ export const restaurantService = {
   },
 
   /**
-   * Void check lines. Unsent lines are removed quietly; kitchen-sent lines
-   * produce VOID KOT tickets (no prices) so the kitchen stops / discards.
+   * Void check lines (Toast/Samba style).
+   * Pass quantity per line to void only part of a multi-qty row; remainder stays on the check.
+   * Kitchen-sent qty produces VOID KOT tickets (no prices). Unsent qty is removed quietly.
    * If no lines remain, the check is cancelled and the table is freed.
    */
   async voidCheckItems(
     pool: Pool,
     orderId: string,
-    input: { itemIds: string[]; reason: string; voidedBy: string },
+    input: {
+      items: Array<{ itemId: string; quantity?: number }>;
+      reason: string;
+      voidedBy: string;
+    },
   ): Promise<{
     voidKots: KotRecord[];
     checkCancelled: boolean;
@@ -631,7 +636,22 @@ export const restaurantService = {
     await assertRestaurantEnabled(pool);
     const reason = input.reason?.trim();
     if (!reason) throw new ValidationError('Void reason is required');
-    if (!input.itemIds?.length) throw new ValidationError('Select at least one line to void');
+    if (!input.items?.length) throw new ValidationError('Select at least one line to void');
+
+    const voidRequests = new Map<string, number | 'FULL'>();
+    for (const row of input.items) {
+      if (row.quantity === undefined) {
+        voidRequests.set(row.itemId, 'FULL');
+        continue;
+      }
+      if (!(row.quantity > 0)) {
+        throw new ValidationError('Void quantity must be positive');
+      }
+      const prev = voidRequests.get(row.itemId);
+      if (prev === 'FULL') continue;
+      voidRequests.set(row.itemId, (typeof prev === 'number' ? prev : 0) + row.quantity);
+    }
+    const uniqueIds = [...voidRequests.keys()];
 
     const result = await UnitOfWork.run(pool, async (client: PoolClient) => {
       const order = await ordersRepository.getById(client, orderId);
@@ -643,21 +663,34 @@ export const restaurantService = {
         throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
       }
 
-      const uniqueIds = [...new Set(input.itemIds)];
       const rows = await restaurantRepository.listOrderItemsForVoid(client, orderId, uniqueIds);
       if (rows.length !== uniqueIds.length) {
         throw new ValidationError('One or more lines are missing from this check');
       }
 
-      const sent = rows.filter((r) => !!r.kitchenSentAt);
+      type VoidSlice = (typeof rows)[number] & { voidQuantity: number };
+      const slices: VoidSlice[] = [];
+      for (const row of rows) {
+        const onHand = Money.toNumber(Money.parseDb(row.quantity));
+        const req = voidRequests.get(row.id);
+        const want = req === 'FULL' || req === undefined ? onHand : req;
+        if (want > onHand + 1e-9) {
+          throw new ValidationError(
+            `Cannot void ${want} of "${row.productName}" — only ${onHand} on the check`,
+          );
+        }
+        slices.push({ ...row, voidQuantity: want });
+      }
+
+      const sentSlices = slices.filter((r) => !!r.kitchenSentAt);
       const voidKots: KotRecord[] = [];
 
-      if (sent.length > 0) {
+      if (sentSlices.length > 0) {
         const byStation = new Map<
           string,
-          { station: RestaurantStationRecord; items: typeof sent }
+          { station: RestaurantStationRecord; items: VoidSlice[] }
         >();
-        for (const item of sent) {
+        for (const item of sentSlices) {
           const resolved = await restaurantRepository.resolveStation(client, item.kitchenStation);
           const key = resolved.code.toUpperCase();
           const bucket = byStation.get(key) || { station: resolved, items: [] };
@@ -677,7 +710,7 @@ export const restaurantService = {
             items: items.map((it) => ({
               orderItemId: it.id,
               productName: it.productName,
-              quantity: Money.toNumber(Money.parseDb(it.quantity)),
+              quantity: it.voidQuantity,
               lineNotes: it.lineNotes,
             })),
           });
@@ -686,18 +719,38 @@ export const restaurantService = {
         }
       }
 
-      const deleted = await restaurantRepository.deleteOrderItems(client, orderId, uniqueIds);
-      if (deleted !== uniqueIds.length) {
-        throw new BusinessError('Failed to void all selected lines', 'ERR_RESTAURANT_VOID');
+      const deleteIds: string[] = [];
+      for (const slice of slices) {
+        const onHand = Money.toNumber(Money.parseDb(slice.quantity));
+        const remaining = new Decimal(onHand).minus(slice.voidQuantity);
+        if (remaining.lte(0)) {
+          deleteIds.push(slice.id);
+        } else {
+          const ok = await restaurantRepository.reduceOrderItemQuantity(
+            client,
+            orderId,
+            slice.id,
+            remaining.toNumber(),
+          );
+          if (!ok) {
+            throw new BusinessError('Failed to reduce voided line quantity', 'ERR_RESTAURANT_VOID');
+          }
+        }
+      }
+      if (deleteIds.length > 0) {
+        const deleted = await restaurantRepository.deleteOrderItems(client, orderId, deleteIds);
+        if (deleted !== deleteIds.length) {
+          throw new BusinessError('Failed to void all selected lines', 'ERR_RESTAURANT_VOID');
+        }
       }
 
       const fresh = await ordersRepository.getById(client, orderId);
-      const remaining = fresh?.items || [];
-      if (remaining.length === 0) {
+      const remainingLines = fresh?.items || [];
+      if (remainingLines.length === 0) {
         return { voidKots, checkCancelled: true as const, meta };
       }
 
-      const net = remaining.reduce((s, it) => {
+      const net = remainingLines.reduce((s, it) => {
         return s.plus(
           Money.parseDb(String(it.quantity))
             .times(Money.parseDb(String(it.unitPrice)))
@@ -705,9 +758,13 @@ export const restaurantService = {
         );
       }, new Decimal(0));
       const tax = await computeTaxAmount(client, net);
-      await restaurantRepository.updateOrderTotals(client, orderId, recalcFromItems(remaining, tax));
+      await restaurantRepository.updateOrderTotals(
+        client,
+        orderId,
+        recalcFromItems(remainingLines, tax),
+      );
 
-      const stillSent = remaining.some((it) => !!it.kitchenSentAt);
+      const stillSent = remainingLines.some((it) => !!it.kitchenSentAt);
       if (!stillSent) {
         await restaurantRepository.patchOrderRestaurantFields(client, orderId, {
           kitchenStatus: 'NONE',
@@ -731,7 +788,7 @@ export const restaurantService = {
 
     logger.info('Restaurant lines voided', {
       orderId,
-      itemCount: input.itemIds.length,
+      itemCount: input.items.length,
       voidKotCount: result.voidKots.length,
       reason,
     });

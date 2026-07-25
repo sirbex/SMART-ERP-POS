@@ -38,13 +38,15 @@ import {
   mergeRestaurantChecksOffline,
   payRestaurantCheckOffline,
   removeRestaurantLinesOffline,
-  seedRestaurantCheckFromServer,
+  refreshRestaurantCheckSeedFromServer,
   shouldUseLocalRestaurantMutation,
+  isJournalLocalOrderId,
   splitRestaurantCheckOffline,
   transferRestaurantCheckOffline,
   updateRestaurantGuestOffline,
   totalsFromLines,
 } from '../../lib/restaurantOfflineOps';
+import { allocateVoidQuantity, isServerOrderItemId } from '../../lib/restaurantVoidQuantity';
 import { publishLanKdsBoardChanged, subscribeLanKds } from '../../lib/restaurantLanKds';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import type { Customer } from '@shared/zod/customer';
@@ -435,17 +437,29 @@ export default function RestaurantPosPage() {
         getCachedRestaurantTables().find((t) => t.id === selectedTableId) ||
         tablesQuery.data?.find((t) => t.id === selectedTableId);
 
-      // Offline-first: journal wins immediately (no API wait for local open checks).
-      if (selectedTableId) {
-        const local = buildCheckUiFromJournal(selectedTableId, activeOrderId, cachedTable);
-        if (local.order || !isOnline) {
-          return local;
-        }
+      const local = selectedTableId
+        ? buildCheckUiFromJournal(selectedTableId, activeOrderId, cachedTable)
+        : null;
+
+      // Journal-local ofl_ord_* checks: always journal-first (server has no row).
+      if (local?.order && isJournalLocalOrderId(local.order.id)) {
+        return local;
+      }
+      // Offline with a seeded server check: serve from journal.
+      if (!isOnline) {
+        return (
+          local || {
+            table: (cachedTable || { id: selectedTableId! }) as RestaurantTable,
+            order: null,
+            meta: null,
+            siblingChecks: [],
+          }
+        );
       }
 
-      if (!isOnline || !selectedTableId) {
+      if (!selectedTableId) {
         return {
-          table: (cachedTable || { id: selectedTableId! }) as RestaurantTable,
+          table: { id: selectedTableId! } as RestaurantTable,
           order: null,
           meta: null,
           siblingChecks: [],
@@ -458,15 +472,17 @@ export default function RestaurantPosPage() {
       );
       const data = res.data.data as CheckUiPayload;
 
-      // Hydrate into journal so this device can keep serving if internet drops.
-      if (data.order?.id && data.order.items?.length) {
-        seedRestaurantCheckFromServer({
+      // Keep journal in sync with server line UUIDs (void/KOT must not use stale ofl ids).
+      if (data.order?.id && data.order.items) {
+        refreshRestaurantCheckSeedFromServer({
           orderId: data.order.id,
           orderNumber: data.order.orderNumber,
           tableId: selectedTableId,
           tableCode: data.meta?.tableCode || data.table?.code,
           tableName: data.meta?.tableName || data.table?.name,
-          channel: (data.meta?.orderChannel as 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | null | undefined) || null,
+          channel:
+            (data.meta?.orderChannel as 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | null | undefined) ||
+            null,
           waiterId: data.meta?.waiterId,
           waiterName: data.meta?.waiterName,
           guestName: data.meta?.guestName,
@@ -619,8 +635,9 @@ export default function RestaurantPosPage() {
     }
   };
 
-  /** Always journal-first on every device — never wait on the API for FOH taps. */
-  const preferLocalRestaurantWrites = (_orderId?: string | null) => true;
+  /** Always journal-first for ofl_ord_*; server UUID checks use API while online. */
+  const preferLocalRestaurantWrites = (orderId?: string | null) =>
+    shouldUseLocalRestaurantMutation(isOnline, orderId);
 
   const addItemMutation = useMutation({
     mutationFn: async (product: MenuProduct) => {
@@ -1380,15 +1397,72 @@ export default function RestaurantPosPage() {
 
   const handleVoidLines = async (
     itemIds: string[],
-    opts?: { reason?: string; skipConfirm?: boolean },
+    opts?: {
+      reason?: string;
+      skipConfirm?: boolean;
+      /** Toast/Samba: void this many units across the selected lines (default = all). */
+      voidQuantity?: number;
+      lines?: OrderItem[];
+    },
   ) => {
     if (!order || itemIds.length === 0) return;
-    // Void (reason + VOID ticket) only for kitchen-sent/printed lines.
-    // New/unsent lines are removed quietly — journal-first, no reason, no print.
-    const hasKot = orderLines.some((l) => itemIds.includes(l.id) && l.kitchenSentAt);
+    const targetLines = (opts?.lines || orderLines).filter((l) => itemIds.includes(l.id));
+    if (targetLines.length === 0) {
+      toast.error('Line not found on this check — refresh and try again');
+      invalidateCheck();
+      return;
+    }
 
+    const totalQty = targetLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+    let voidQty = opts?.voidQuantity;
+    if (voidQty === undefined) {
+      voidQty = totalQty;
+      if (totalQty > 1 && !opts?.skipConfirm) {
+        const prompted = window.prompt(
+          `How many to void? (1–${totalQty})`,
+          '1',
+        );
+        if (prompted == null) return;
+        const n = Number(prompted);
+        if (!Number.isFinite(n) || n <= 0 || n > totalQty) {
+          toast.error(`Enter a quantity between 1 and ${totalQty}`);
+          return;
+        }
+        voidQty = n;
+      }
+    }
+    if (!(voidQty > 0) || voidQty > totalQty) {
+      toast.error(`Cannot void ${voidQty} — only ${totalQty} on the check`);
+      return;
+    }
+
+    let voidItems: Array<{ itemId: string; quantity: number }>;
+    try {
+      voidItems = allocateVoidQuantity(
+        targetLines.map((l) => ({ id: l.id, quantity: Number(l.quantity) || 0 })),
+        voidQty,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Invalid void quantity');
+      return;
+    }
+
+    const hasKot = targetLines.some(
+      (l) => voidItems.some((v) => v.itemId === l.id) && l.kitchenSentAt,
+    );
+    const voidLineIds = voidItems.map((v) => v.itemId);
+    const qtyMap = Object.fromEntries(voidItems.map((v) => [v.itemId, v.quantity]));
+
+    // Unsent only → journal remove/reduce (no reason / no VOID print).
     if (!hasKot && preferLocalRestaurantWrites(order.id)) {
-      if (!opts?.skipConfirm && !window.confirm(`Remove ${itemIds.length} unsent line(s)?`)) {
+      if (
+        !opts?.skipConfirm &&
+        !window.confirm(
+          voidQty < totalQty
+            ? `Remove ${voidQty} of ${totalQty} unsent?`
+            : `Remove ${voidQty} unsent unit(s)?`,
+        )
+      ) {
         return;
       }
       const events = getAllEvents();
@@ -1401,7 +1475,7 @@ export default function RestaurantPosPage() {
         return;
       }
       try {
-        const next = removeRestaurantLinesOffline(derived, itemIds);
+        const next = removeRestaurantLinesOffline(derived, voidLineIds, qtyMap);
         setLineSheet(null);
         setSelectedLineIds([]);
         if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
@@ -1412,7 +1486,7 @@ export default function RestaurantPosPage() {
           toast.success('Check cancelled — table freed');
         } else {
           paintJournalCheck(selectedTableId, next.orderId);
-          toast.success('Line(s) removed');
+          toast.success(voidQty < totalQty ? `Removed ${voidQty}` : 'Line(s) removed');
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Remove failed');
@@ -1426,6 +1500,13 @@ export default function RestaurantPosPage() {
           ? 'Void requires online connection (kitchen must be notified)'
           : 'Cannot remove lines offline — open check missing from journal',
       );
+      return;
+    }
+
+    // Server void requires real pos_order_items UUIDs (not ofl_line_*).
+    if (voidItems.some((v) => !isServerOrderItemId(v.itemId))) {
+      toast.error('Check is out of sync — refreshing…');
+      invalidateCheck();
       return;
     }
 
@@ -1446,7 +1527,9 @@ export default function RestaurantPosPage() {
       if (
         !opts?.skipConfirm &&
         !window.confirm(
-          `Void ${itemIds.length} line(s)? Kitchen will be notified to stop/discard.`,
+          voidQty < totalQty
+            ? `Void ${voidQty} of ${totalQty}? Kitchen will be notified.`
+            : `Void ${voidQty} unit(s)? Kitchen will be notified to stop/discard.`,
         )
       ) {
         return;
@@ -1455,7 +1538,11 @@ export default function RestaurantPosPage() {
       reason = reason || 'Removed before kitchen send';
       if (
         !opts?.skipConfirm &&
-        !window.confirm(`Remove ${itemIds.length} unsent line(s)?`)
+        !window.confirm(
+          voidQty < totalQty
+            ? `Remove ${voidQty} of ${totalQty} unsent?`
+            : `Remove ${voidQty} unsent unit(s)?`,
+        )
       ) {
         return;
       }
@@ -1464,7 +1551,7 @@ export default function RestaurantPosPage() {
     setBusy(true);
     try {
       const res = await api.restaurant.voidItems(order.id, {
-        itemIds,
+        items: voidItems,
         reason,
       });
       const data = res.data.data as {
@@ -1483,16 +1570,17 @@ export default function RestaurantPosPage() {
       } else {
         toast.success(
           hasKot && (data.voidKots?.length || 0) > 0
-            ? `Voided — ${data.voidKots!.length} VOID ticket(s) to kitchen`
+            ? `Voided ${voidQty} — ${data.voidKots!.length} VOID ticket(s) to kitchen`
             : hasKot
-              ? 'Line(s) voided'
-              : 'Line(s) removed',
+              ? `Voided ${voidQty}`
+              : `Removed ${voidQty}`,
         );
       }
       setSelectedLineIds([]);
       invalidateCheck();
     } catch (err) {
       toast.error(apiErr(err, hasKot ? 'Void failed' : 'Remove failed'));
+      invalidateCheck();
     } finally {
       setBusy(false);
     }
@@ -1560,28 +1648,15 @@ export default function RestaurantPosPage() {
   };
 
   /**
-   * −1 on New lines only (SambaPOS: submitted lines use Void, not qty edit).
-   * Prefer voiding a qty=1 row; if only multi-qty rows exist, void that whole row.
+   * SambaPOS/Toast: −1 voids or removes one unit (works on New and kitchen-sent).
+   * Sent lines require void reason + VOID ticket for that one unit.
    */
   const handleLineMinusOne = async (group: TicketLineGroup) => {
-    if (group.kitchenSent) {
-      toast.error('Kitchen-sent lines: use Void (sends VOID ticket)');
-      return;
-    }
-    if (group.quantity <= 1) {
-      await handleVoidLines(group.itemIds, {
-        reason: 'Quantity cleared',
-        skipConfirm: true,
-      });
-      return;
-    }
-    const sorted = [...group.lines].sort(
-      (a, b) => (Number(a.quantity) || 0) - (Number(b.quantity) || 0),
-    );
-    const unit = sorted.find((l) => Number(l.quantity) === 1) || sorted[0];
-    await handleVoidLines([unit.id], {
-      reason: 'Quantity decreased',
-      skipConfirm: true,
+    await handleVoidLines(group.itemIds, {
+      voidQuantity: 1,
+      lines: group.lines,
+      reason: group.kitchenSent ? undefined : 'Quantity decreased',
+      skipConfirm: !group.kitchenSent,
     });
   };
 
@@ -2538,7 +2613,7 @@ export default function RestaurantPosPage() {
                         <X className="h-5 w-5" />
                       </button>
                     </div>
-                    {!lineSheet.kitchenSent && lineSheet.productId ? (
+                    {lineSheet.productId ? (
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
@@ -2561,11 +2636,15 @@ export default function RestaurantPosPage() {
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => void handleVoidLines(lineSheet.itemIds)}
+                      onClick={() =>
+                        void handleVoidLines(lineSheet.itemIds, { lines: lineSheet.lines })
+                      }
                       className={`${touchBtnDanger} w-full min-h-14`}
                     >
                       {lineSheet.kitchenSent
-                        ? 'Void (kitchen VOID ticket)'
+                        ? lineSheet.quantity > 1
+                          ? 'Void qty… (kitchen VOID ticket)'
+                          : 'Void (kitchen VOID ticket)'
                         : 'Remove (not sent)'}
                     </button>
                   </div>

@@ -757,6 +757,32 @@ export const restaurantRepository = {
     return result.rowCount ?? 0;
   },
 
+  /**
+   * Reduce line quantity after a partial void (Toast/Samba: void N of M).
+   * Updates quantity + line_total; caller recalculates order totals.
+   */
+  async reduceOrderItemQuantity(
+    conn: DbConn,
+    orderId: string,
+    itemId: string,
+    newQuantity: number,
+  ): Promise<boolean> {
+    if (!(newQuantity > 0)) return false;
+    const result = await conn.query(
+      `UPDATE pos_order_items
+       SET quantity = $3,
+           line_total = ROUND(($3::numeric * unit_price) - COALESCE(discount_amount, 0), 2),
+           base_qty = CASE
+             WHEN conversion_factor IS NOT NULL AND conversion_factor > 0
+               THEN ROUND(($3::numeric * conversion_factor), 6)
+             ELSE base_qty
+           END
+       WHERE order_id = $1 AND id = $2`,
+      [orderId, itemId, newQuantity],
+    );
+    return (result.rowCount ?? 0) > 0;
+  },
+
   async markItemsKitchenSent(conn: DbConn, itemIds: string[]): Promise<void> {
     if (itemIds.length === 0) return;
     await conn.query(

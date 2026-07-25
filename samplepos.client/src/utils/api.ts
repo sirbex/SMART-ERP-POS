@@ -1287,8 +1287,14 @@ export const api = {
     ) => apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/split`, data),
     sendKot: (orderId: string) =>
       apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/kot`),
-    voidItems: (orderId: string, data: { itemIds: string[]; reason: string }) =>
-      apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/void-items`, data),
+    voidItems: (
+      orderId: string,
+      data: {
+        reason: string;
+        items?: Array<{ itemId: string; quantity?: number }>;
+        itemIds?: string[];
+      },
+    ) => apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/void-items`, data),
     /** Marks table BILLING (Bill Requested); print is client best-effort. */
     requestBill: (orderId: string) =>
       apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/bill`),

@@ -285,14 +285,29 @@ router.post(
   }),
 );
 
-const VoidItemsSchema = z.object({
-  itemIds: z.array(z.string().uuid()).min(1),
-  reason: z.string().min(1).max(500),
-});
+const VoidItemsSchema = z
+  .object({
+    reason: z.string().min(1).max(500),
+    /** Toast/Samba: void this many units per line (omit quantity = full line). */
+    items: z
+      .array(
+        z.object({
+          itemId: z.string().uuid(),
+          quantity: z.number().positive().optional(),
+        }),
+      )
+      .min(1)
+      .optional(),
+    /** Legacy: void entire line(s). Prefer `items` with quantity. */
+    itemIds: z.array(z.string().uuid()).min(1).optional(),
+  })
+  .refine((b) => (b.items?.length || 0) > 0 || (b.itemIds?.length || 0) > 0, {
+    message: 'Select at least one line to void',
+  });
 
 /**
  * POST /api/restaurant/checks/:orderId/void-items
- * Void selected lines. Kitchen-sent lines emit VOID KOT tickets (no prices).
+ * Void selected lines (optional partial quantity). Kitchen-sent qty emits VOID KOT tickets.
  */
 router.post(
   '/checks/:orderId/void-items',
@@ -300,8 +315,12 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const body = VoidItemsSchema.parse(req.body);
+    const items =
+      body.items && body.items.length > 0
+        ? body.items
+        : (body.itemIds || []).map((itemId) => ({ itemId }));
     const result = await restaurantService.voidCheckItems(pool, req.params.orderId, {
-      itemIds: body.itemIds,
+      items,
       reason: body.reason,
       voidedBy: req.user!.id,
     });
@@ -310,7 +329,7 @@ router.post(
       data: result,
       message: result.checkCancelled
         ? 'Check voided — table freed'
-        : `Voided ${body.itemIds.length} line(s)`,
+        : `Voided ${items.length} line(s)`,
     });
   }),
 );
