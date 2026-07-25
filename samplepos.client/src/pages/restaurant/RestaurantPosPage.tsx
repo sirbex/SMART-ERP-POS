@@ -101,6 +101,50 @@ interface OrderItem {
   kitchenSentAt?: string | null;
 }
 
+/** Toast/Samba-style: identical lines collapse to one row on the ticket. */
+interface TicketLineGroup {
+  key: string;
+  productId: string | null;
+  productName: string;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+  kitchenSent: boolean;
+  itemIds: string[];
+  lines: OrderItem[];
+}
+
+function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
+  const map = new Map<string, TicketLineGroup>();
+  for (const it of items) {
+    const kitchenSent = !!it.kitchenSentAt;
+    const unitPrice = Number(it.unitPrice) || 0;
+    const key = `${it.productId ?? 'name:' + it.productName}|${unitPrice}|${kitchenSent ? 'S' : 'N'}`;
+    const qty = Number(it.quantity) || 0;
+    const lineTotal = Number(it.lineTotal) || 0;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, {
+        key,
+        productId: it.productId,
+        productName: it.productName,
+        unitPrice,
+        quantity: qty,
+        lineTotal,
+        kitchenSent,
+        itemIds: [it.id],
+        lines: [it],
+      });
+    } else {
+      existing.quantity += qty;
+      existing.lineTotal += lineTotal;
+      existing.itemIds.push(it.id);
+      existing.lines.push(it);
+    }
+  }
+  return Array.from(map.values());
+}
+
 interface OrderDetail {
   id: string;
   orderNumber: string;
@@ -256,6 +300,14 @@ export default function RestaurantPosPage() {
   const [opsTargetTableId, setOpsTargetTableId] = useState('');
   const [opsSecondaryOrderId, setOpsSecondaryOrderId] = useState('');
   const [splitSameTable, setSplitSameTable] = useState(true);
+  /**
+   * Phones: menu is the only always-on view. Order / details / more open as
+   * full-screen sheets when the user presses those buttons (not stacked).
+   */
+  const [mobileSheet, setMobileSheet] = useState<null | 'order' | 'details' | 'more'>(null);
+  /** SambaPOS-style: long-press / ⋯ opens line actions (void, ± qty) */
+  const [lineSheet, setLineSheet] = useState<TicketLineGroup | null>(null);
+  const linePressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Bump to re-read journal-derived offline checks */
   const [journalTick, setJournalTick] = useState(0);
   const bumpJournal = () => setJournalTick((n) => n + 1);
@@ -436,8 +488,40 @@ export default function RestaurantPosPage() {
     if (!selectedTableId) {
       setSelectedCategoryId(null);
       setMenuSearch('');
+      setMobileSheet(null);
+      setOpsMode(null);
+      setSelectedLineIds([]);
+    } else {
+      setMobileSheet(null);
     }
   }, [selectedTableId]);
+
+  const openMobileOrder = () => setMobileSheet('order');
+  const closeMobileSheets = () => {
+    setMobileSheet(null);
+    setOpsMode(null);
+    setSelectedLineIds([]);
+    setLineSheet(null);
+    if (linePressTimer.current) {
+      clearTimeout(linePressTimer.current);
+      linePressTimer.current = null;
+    }
+  };
+
+  const clearLinePressTimer = () => {
+    if (linePressTimer.current) {
+      clearTimeout(linePressTimer.current);
+      linePressTimer.current = null;
+    }
+  };
+
+  const startLineLongPress = (group: TicketLineGroup) => {
+    clearLinePressTimer();
+    linePressTimer.current = setTimeout(() => {
+      setLineSheet(group);
+      linePressTimer.current = null;
+    }, 420);
+  };
 
   // Hardware keyboard: type anywhere on the order screen → focus search (Toast / Square / SambaPOS).
   useEffect(() => {
@@ -596,6 +680,7 @@ export default function RestaurantPosPage() {
     tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
 
   const orderLines = useMemo(() => order?.items ?? [], [order]);
+  const ticketGroups = useMemo(() => consolidateTicketLines(orderLines), [orderLines]);
   const serviceChannel = isServiceChannelTable(selectedTable);
   const channel = meta?.orderChannel || channelHint(selectedTable);
 
@@ -758,6 +843,9 @@ export default function RestaurantPosPage() {
     setSelectedTableId(null);
     setMenuSearch('');
     setSelectedCategoryId(null);
+    setMobileSheet(null);
+    setOpsMode(null);
+    setSelectedLineIds([]);
     setBusy(false);
   };
 
@@ -1204,82 +1292,193 @@ export default function RestaurantPosPage() {
     }
   };
 
-  const handleVoidLines = async (itemIds: string[]) => {
+  const handleVoidLines = async (
+    itemIds: string[],
+    opts?: { reason?: string; skipConfirm?: boolean },
+  ) => {
     if (!order || itemIds.length === 0) return;
     if (!isOnline) {
       toast.error('Void requires online connection (kitchen must be notified)');
       return;
     }
+    // Void (reason + VOID ticket) only for kitchen-sent/printed lines.
+    // New/unsent lines are removed quietly — no reason, no print.
     const hasKot = orderLines.some((l) => itemIds.includes(l.id) && l.kitchenSentAt);
-    const reason = window.prompt(
-      hasKot
-        ? 'Void reason (kitchen will get a VOID ticket):'
-        : 'Void reason:',
-      'Customer changed mind',
-    );
-    if (reason == null) return;
-    if (!reason.trim()) {
-      toast.error('Void reason is required');
-      return;
-    }
-    if (
-      !window.confirm(
-        hasKot
-          ? `Void ${itemIds.length} line(s)? Kitchen will be notified to stop/discard.`
-          : `Void ${itemIds.length} line(s)?`,
-      )
-    ) {
-      return;
+    let reason = opts?.reason?.trim() || '';
+    if (hasKot) {
+      if (!reason) {
+        const prompted = window.prompt(
+          'Void reason (kitchen will get a VOID ticket):',
+          'Customer changed mind',
+        );
+        if (prompted == null) return;
+        reason = prompted.trim();
+      }
+      if (!reason) {
+        toast.error('Void reason is required');
+        return;
+      }
+      if (
+        !opts?.skipConfirm &&
+        !window.confirm(
+          `Void ${itemIds.length} line(s)? Kitchen will be notified to stop/discard.`,
+        )
+      ) {
+        return;
+      }
+    } else {
+      reason = reason || 'Removed before kitchen send';
+      if (
+        !opts?.skipConfirm &&
+        !window.confirm(`Remove ${itemIds.length} unsent line(s)?`)
+      ) {
+        return;
+      }
     }
 
     setBusy(true);
     try {
       const res = await api.restaurant.voidItems(order.id, {
         itemIds,
-        reason: reason.trim(),
+        reason,
       });
       const data = res.data.data as {
         voidKots?: VoidKotPrint[];
         checkCancelled?: boolean;
       };
-      await printVoidTickets(data.voidKots || [], reason.trim());
-      publishLanKdsBoardChanged('KOT_VOIDED');
+      if (hasKot && (data.voidKots?.length || 0) > 0) {
+        await printVoidTickets(data.voidKots || [], reason);
+        publishLanKdsBoardChanged('KOT_VOIDED');
+      }
+      setLineSheet(null);
       if (data.checkCancelled) {
         if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
-        toast.success('Check voided — table freed');
+        toast.success(hasKot ? 'Check voided — table freed' : 'Check cancelled — table freed');
         setSelectedTableId(null);
       } else {
         toast.success(
-          (data.voidKots?.length || 0) > 0
+          hasKot && (data.voidKots?.length || 0) > 0
             ? `Voided — ${data.voidKots!.length} VOID ticket(s) to kitchen`
-            : 'Line(s) voided',
+            : hasKot
+              ? 'Line(s) voided'
+              : 'Line(s) removed',
         );
       }
       setSelectedLineIds([]);
       invalidateCheck();
     } catch (err) {
-      toast.error(apiErr(err, 'Void failed'));
+      toast.error(apiErr(err, hasKot ? 'Void failed' : 'Remove failed'));
     } finally {
       setBusy(false);
     }
   };
 
-  const handleCancelCheck = async () => {
-    if (!order) return;
-    const hasKot = orderLines.some((l) => l.kitchenSentAt);
-    const reasonDefault = 'Cancelled from restaurant POS';
-    const reason = window.prompt(
-      hasKot
-        ? 'Cancel reason (kitchen will get VOID tickets for fired items):'
-        : 'Cancel reason:',
-      reasonDefault,
-    );
-    if (reason == null) return;
-    if (!reason.trim()) {
-      toast.error('Cancel reason is required');
+  /** +1 same product (always adds as New / unsent). */
+  const handleLinePlusOne = async (group: TicketLineGroup) => {
+    if (!selectedTableId || !selectedWaiterId) return;
+    if (!group.productId) {
+      toast.error('Cannot change quantity for this line');
       return;
     }
-    if (!window.confirm(`Cancel check ${order.orderNumber}? The table will be freed.`)) return;
+    setBusy(true);
+    try {
+      if (!isOnline) {
+        const table =
+          tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
+        if (!table) throw new Error('Table not available offline');
+        const waiter = waiters.find((w) => w.id === selectedWaiterId);
+        appendRestaurantItemOffline({
+          tableId: selectedTableId,
+          tableCode: table.code,
+          tableName: table.name,
+          channel: channelHint(table),
+          waiterId: selectedWaiterId,
+          waiterName: waiter?.fullName,
+          guestName: guestDraft.guestName.trim() || null,
+          guestPhone: guestDraft.guestPhone.trim() || null,
+          deliveryAddress: guestDraft.deliveryAddress.trim() || null,
+          pickupLabel: guestDraft.pickupLabel.trim() || null,
+          productId: group.productId,
+          productName: group.productName,
+          unitPrice: group.unitPrice,
+          quantity: 1,
+        });
+        bumpJournal();
+        invalidateCheck();
+        setLineSheet(null);
+        toast.success('+1 added');
+        return;
+      }
+      await api.restaurant.addItems({
+        tableId: selectedTableId,
+        waiterId: selectedWaiterId,
+        items: [{ productId: group.productId, quantity: 1 }],
+      });
+      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+      invalidateCheck();
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+      setLineSheet(null);
+      toast.success('+1 added');
+    } catch (err) {
+      toast.error(apiErr(err, 'Failed to add'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * −1 on New lines only (SambaPOS: submitted lines use Void, not qty edit).
+   * Prefer voiding a qty=1 row; if only multi-qty rows exist, void that whole row.
+   */
+  const handleLineMinusOne = async (group: TicketLineGroup) => {
+    if (group.kitchenSent) {
+      toast.error('Kitchen-sent lines: use Void (sends VOID ticket)');
+      return;
+    }
+    if (group.quantity <= 1) {
+      await handleVoidLines(group.itemIds, {
+        reason: 'Quantity cleared',
+        skipConfirm: true,
+      });
+      return;
+    }
+    const sorted = [...group.lines].sort(
+      (a, b) => (Number(a.quantity) || 0) - (Number(b.quantity) || 0),
+    );
+    const unit = sorted.find((l) => Number(l.quantity) === 1) || sorted[0];
+    await handleVoidLines([unit.id], {
+      reason: 'Quantity decreased',
+      skipConfirm: true,
+    });
+  };
+
+  const handleCancelCheck = async () => {
+    if (!order) return;
+    // New/unsent checks: cancel with confirm only (no reason, no VOID print).
+    // Sent/printed lines: void reason + VOID tickets to kitchen.
+    const hasKot = orderLines.some((l) => l.kitchenSentAt);
+    let reason = 'Cancelled from restaurant POS';
+    if (hasKot) {
+      const prompted = window.prompt(
+        'Cancel reason (kitchen will get VOID tickets for fired items):',
+        reason,
+      );
+      if (prompted == null) return;
+      if (!prompted.trim()) {
+        toast.error('Cancel reason is required when kitchen has been notified');
+        return;
+      }
+      reason = prompted.trim();
+    }
+    if (
+      !window.confirm(
+        hasKot
+          ? `Cancel check ${order.orderNumber}? Kitchen will get VOID tickets. Table will be freed.`
+          : `Cancel check ${order.orderNumber}? The table will be freed.`,
+      )
+    ) {
+      return;
+    }
 
     if (!isOnline) {
       const events = getAllEvents();
@@ -1309,13 +1508,15 @@ export default function RestaurantPosPage() {
 
     setBusy(true);
     try {
-      const res = await api.restaurant.cancelCheck(order.id, { reason: reason.trim() });
+      const res = await api.restaurant.cancelCheck(order.id, { reason });
       const data = res.data.data as { voidKots?: VoidKotPrint[] };
-      await printVoidTickets(data.voidKots || [], reason.trim());
-      publishLanKdsBoardChanged('KOT_VOIDED');
+      if (hasKot && (data.voidKots?.length || 0) > 0) {
+        await printVoidTickets(data.voidKots || [], reason);
+        publishLanKdsBoardChanged('KOT_VOIDED');
+      }
       if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
       toast.success(
-        (data.voidKots?.length || 0) > 0
+        hasKot && (data.voidKots?.length || 0) > 0
           ? `Check cancelled — ${data.voidKots!.length} VOID ticket(s) sent`
           : 'Check cancelled',
       );
@@ -1585,9 +1786,9 @@ export default function RestaurantPosPage() {
             )}
           </div>
         ) : (
-          <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 overflow-hidden">
-            {/* Menu — below ticket on phones so actions stay reachable */}
-            <div className="lg:col-span-8 order-2 lg:order-1 flex flex-col min-h-0 flex-1 border-t lg:border-t-0 lg:border-r border-stone-200 bg-white">
+          <div className="relative flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 overflow-hidden">
+            {/* Menu — always the working surface on phones */}
+            <div className="lg:col-span-8 flex flex-col min-h-0 flex-1 lg:border-r border-stone-200 bg-white">
               <div className="sticky top-0 z-10 bg-white border-b border-stone-100 shadow-sm">
                 <div className="p-3 pb-2">
                   <label className="relative block">
@@ -1645,7 +1846,7 @@ export default function RestaurantPosPage() {
                       {selectedCategoryId ? ' · across all categories' : ''}
                     </p>
                   ) : (
-                    <p className="mt-1.5 text-xs text-stone-400">
+                    <p className="mt-1.5 text-xs text-stone-400 hidden lg:block">
                       Tap to open keyboard · type anywhere with a physical keyboard · F3 focuses search
                     </p>
                   )}
@@ -1686,7 +1887,7 @@ export default function RestaurantPosPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto p-3">
+              <div className="flex-1 overflow-auto p-3 pb-28 lg:pb-3">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                   {visibleProducts.map((product) => (
                     <button
@@ -1726,14 +1927,88 @@ export default function RestaurantPosPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-4 order-1 lg:order-2 flex flex-col min-h-0 max-h-[52vh] lg:max-h-none bg-stone-50 border-b lg:border-b-0 border-stone-200 shrink-0 lg:shrink">
-              <div className="px-3 sm:px-4 py-2.5 sm:py-3 border-b border-stone-200 bg-white shrink-0">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h2 className="font-semibold text-stone-900">Order</h2>
-                    {order?.orderNumber ? (
-                      <p className="text-xs text-stone-500 mt-0.5 truncate">{order.orderNumber}</p>
-                    ) : null}
+            {/* Mobile dock — open sheets on demand; do not stack every pane */}
+            <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-stone-200 bg-white/95 backdrop-blur-sm p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] space-y-2 shadow-[0_-4px_24px_rgba(0,0,0,0.08)]">
+              <button
+                type="button"
+                onClick={openMobileOrder}
+                className={`${TOUCH} min-h-12 w-full rounded-xl bg-stone-900 text-white px-4 flex items-center justify-between gap-2 text-sm font-bold`}
+              >
+                <span>
+                  Order
+                  {orderLines.length > 0 ? ` · ${orderLines.length}` : ''}
+                </span>
+                <span>{formatCurrency(Number(order?.totalAmount || 0))}</span>
+              </button>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  disabled={!order || busy}
+                  onClick={() => void handleSendKot()}
+                  className={`${TOUCH} min-h-12 rounded-xl bg-orange-600 text-white text-sm font-bold active:bg-orange-700`}
+                >
+                  KOT
+                </button>
+                <button
+                  type="button"
+                  disabled={!order || busy || orderLines.length === 0}
+                  onClick={() => void handleBill()}
+                  className={`${TOUCH} min-h-12 rounded-xl bg-rose-800 text-white text-sm font-bold active:bg-rose-950`}
+                >
+                  Bill
+                </button>
+                {canRestaurantPay ? (
+                  <button
+                    type="button"
+                    disabled={!order || busy}
+                    onClick={() => void handlePay()}
+                    className={`${TOUCH} min-h-12 rounded-xl bg-emerald-600 text-white text-sm font-bold active:bg-emerald-700`}
+                  >
+                    Pay
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openMobileOrder}
+                    className={`${touchBtnGhost} min-h-12`}
+                  >
+                    More
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Order sheet: desktop sidebar always; phone full-screen only when opened */}
+            <div
+              className={`lg:col-span-4 flex-col min-h-0 bg-stone-50 ${
+                mobileSheet
+                  ? 'fixed inset-0 z-40 flex'
+                  : 'hidden lg:relative lg:flex'
+              }`}
+            >
+              <div className="px-3 sm:px-4 py-2 border-b border-stone-200 bg-white shrink-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      className={`${touchBtnGhost} lg:hidden min-h-10 px-3 shrink-0`}
+                      onClick={closeMobileSheets}
+                      aria-label="Close order"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                    <div className="min-w-0">
+                      <h2 className="font-semibold text-stone-900 text-sm sm:text-base">
+                        {mobileSheet === 'details'
+                          ? 'Details'
+                          : mobileSheet === 'more'
+                            ? 'More'
+                            : 'Order'}
+                      </h2>
+                      {order?.orderNumber && mobileSheet !== 'details' && mobileSheet !== 'more' ? (
+                        <p className="text-xs text-stone-500 truncate">{order.orderNumber}</p>
+                      ) : null}
+                    </div>
                   </div>
                   {selectedTable?.status === 'BILLING' ||
                   (selectedTableId &&
@@ -1743,12 +2018,36 @@ export default function RestaurantPosPage() {
                     </span>
                   ) : null}
                 </div>
-                {serviceChannel && (
-                  <p className="text-xs text-violet-700 mt-0.5">
-                    {channel === 'DELIVERY' ? 'Delivery' : 'Take Away'} — enter guest before adding items
-                  </p>
+
+                {(mobileSheet === 'order' || mobileSheet === null) && (
+                  <div className="lg:hidden mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMobileSheet('details')}
+                      className={`${touchBtnGhost} min-h-11 text-xs`}
+                    >
+                      Waiter / Guest
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMobileSheet('more')}
+                      className={`${touchBtnGhost} min-h-11 text-xs`}
+                    >
+                      Split / Merge / …
+                    </button>
+                  </div>
                 )}
-                {siblingChecks.length > 1 && (
+                {mobileSheet === 'details' || mobileSheet === 'more' ? (
+                  <button
+                    type="button"
+                    className={`${touchBtnGhost} lg:hidden mt-2 w-full min-h-11 text-xs`}
+                    onClick={() => setMobileSheet('order')}
+                  >
+                    ← Back to order lines
+                  </button>
+                ) : null}
+
+                {siblingChecks.length > 1 && (mobileSheet === 'order' || !mobileSheet) && (
                   <div className="mt-2 flex flex-wrap gap-2">
                     {siblingChecks.map((s) => (
                       <button
@@ -1767,30 +2066,115 @@ export default function RestaurantPosPage() {
                     ))}
                   </div>
                 )}
+
+                <div className="hidden lg:flex mt-2 items-center gap-2">
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-stone-500 shrink-0">
+                    Waiter
+                  </label>
+                  <select
+                    className={`${touchField} min-h-10 py-1.5 text-sm`}
+                    value={selectedWaiterId}
+                    disabled={assignWaiterMutation.isPending}
+                    onChange={(e) => handleWaiterChange(e.target.value)}
+                  >
+                    {waiters.length === 0 && user ? (
+                      <option value={user.id}>{user.fullName || user.email}</option>
+                    ) : (
+                      waiters.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.fullName || w.email}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
               </div>
-              <div className="px-3 py-2.5 border-b border-stone-200 bg-white space-y-1.5">
-                <label className="text-xs font-medium text-stone-600 uppercase tracking-wide">
-                  Waiter
-                </label>
-                <select
-                  className={touchField}
-                  value={selectedWaiterId}
-                  disabled={assignWaiterMutation.isPending}
-                  onChange={(e) => handleWaiterChange(e.target.value)}
+
+              <div
+                className={`${
+                  mobileSheet === 'details' ? 'flex' : 'hidden'
+                } lg:hidden flex-1 flex-col min-h-0 overflow-y-auto px-3 py-3 space-y-3 bg-white`}
+              >
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-stone-600 uppercase tracking-wide">
+                    Waiter
+                  </label>
+                  <select
+                    className={touchField}
+                    value={selectedWaiterId}
+                    disabled={assignWaiterMutation.isPending}
+                    onChange={(e) => handleWaiterChange(e.target.value)}
+                  >
+                    {waiters.length === 0 && user ? (
+                      <option value={user.id}>{user.fullName || user.email}</option>
+                    ) : (
+                      waiters.map((w) => (
+                        <option key={w.id} value={w.id}>
+                          {w.fullName || w.email}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                {serviceChannel && (
+                  <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50/80 p-3">
+                    <p className="text-xs text-violet-800 font-medium">
+                      {channel === 'DELIVERY' ? 'Delivery guest' : 'Takeaway guest'}
+                    </p>
+                    <input
+                      className={touchField}
+                      placeholder="Guest name *"
+                      value={guestDraft.guestName}
+                      onChange={(e) => setGuestDraft({ ...guestDraft, guestName: e.target.value })}
+                    />
+                    <input
+                      className={touchField}
+                      placeholder="Phone"
+                      value={guestDraft.guestPhone}
+                      onChange={(e) => setGuestDraft({ ...guestDraft, guestPhone: e.target.value })}
+                    />
+                    {channel === 'TAKEAWAY' && (
+                      <input
+                        className={touchField}
+                        placeholder="Pickup label (e.g. Car 4)"
+                        value={guestDraft.pickupLabel}
+                        onChange={(e) => setGuestDraft({ ...guestDraft, pickupLabel: e.target.value })}
+                      />
+                    )}
+                    {channel === 'DELIVERY' && (
+                      <textarea
+                        className={`${touchField} min-h-[88px]`}
+                        placeholder="Delivery address *"
+                        rows={2}
+                        value={guestDraft.deliveryAddress}
+                        onChange={(e) =>
+                          setGuestDraft({ ...guestDraft, deliveryAddress: e.target.value })
+                        }
+                      />
+                    )}
+                    {order && (
+                      <button
+                        type="button"
+                        disabled={saveGuestMutation.isPending}
+                        onClick={() => saveGuestMutation.mutate()}
+                        className={`${touchBtnGhost} w-full border-violet-400 text-violet-900`}
+                      >
+                        Save guest details
+                      </button>
+                    )}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className={`${touchBtnDark} w-full`}
+                  onClick={() => setMobileSheet('order')}
                 >
-                  {waiters.length === 0 && user ? (
-                    <option value={user.id}>{user.fullName || user.email}</option>
-                  ) : (
-                    waiters.map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.fullName || w.email}
-                      </option>
-                    ))
-                  )}
-                </select>
+                  Done
+                </button>
               </div>
+
               {serviceChannel && (
-                <div className="px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2">
+                <div className="hidden lg:block px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2">
                   <input
                     className={touchField}
                     placeholder="Guest name *"
@@ -1834,29 +2218,32 @@ export default function RestaurantPosPage() {
                   )}
                 </div>
               )}
-              <div className="flex-1 min-h-0 overflow-auto px-3 sm:px-4 py-2">
+
+              <div
+                className={`flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-4 py-2 ${
+                  mobileSheet === 'details' || mobileSheet === 'more' ? 'hidden lg:block' : 'block'
+                }`}
+              >
                 {orderLines.length === 0 ? (
-                  <p className="text-sm text-stone-500 py-6 text-center">
-                    Press products to build the order
+                  <p className="text-sm text-stone-500 py-8 text-center">
+                    Add products from the menu
                   </p>
-                ) : (
+                ) : opsMode === 'split' ? (
                   <ul className="space-y-2">
                     {orderLines.map((line) => (
                       <li
                         key={line.id}
-                        className="flex justify-between gap-2 text-sm border-b border-stone-200 pb-2.5"
+                        className="flex justify-between gap-2 text-sm border border-stone-200 rounded-xl bg-white px-3 py-3"
                       >
                         <div className="flex gap-3 items-start min-w-0 flex-1">
-                          {opsMode === 'split' && (
-                            <label className={`${TOUCH} min-h-11 min-w-11 inline-flex items-center justify-center -ml-1`}>
-                              <input
-                                type="checkbox"
-                                className="h-5 w-5"
-                                checked={selectedLineIds.includes(line.id)}
-                                onChange={() => toggleLine(line.id)}
-                              />
-                            </label>
-                          )}
+                          <label className={`${TOUCH} min-h-11 min-w-11 inline-flex items-center justify-center -ml-1`}>
+                            <input
+                              type="checkbox"
+                              className="h-5 w-5"
+                              checked={selectedLineIds.includes(line.id)}
+                              onChange={() => toggleLine(line.id)}
+                            />
+                          </label>
                           <div className="min-w-0">
                             <span className="font-medium text-stone-900">
                               {Number(line.quantity)} × {line.productName}
@@ -1872,28 +2259,184 @@ export default function RestaurantPosPage() {
                             )}
                           </div>
                         </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <div className="text-stone-700 whitespace-nowrap">
-                            {formatCurrency(Number(line.lineTotal))}
+                        <div className="text-stone-700 whitespace-nowrap shrink-0">
+                          {formatCurrency(Number(line.lineTotal))}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <ul className="space-y-2">
+                    {ticketGroups.map((group) => (
+                      <li
+                        key={group.key}
+                        className="flex justify-between gap-2 text-sm border border-stone-200 rounded-xl bg-white px-3 py-3 active:bg-stone-50"
+                        onPointerDown={() => startLineLongPress(group)}
+                        onPointerUp={clearLinePressTimer}
+                        onPointerLeave={clearLinePressTimer}
+                        onPointerCancel={clearLinePressTimer}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          clearLinePressTimer();
+                          setLineSheet(group);
+                        }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-stone-900">
+                            {group.quantity} × {group.productName}
                           </div>
-                          {!opsMode && (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void handleVoidLines([line.id])}
-                              className={`${TOUCH} min-h-9 px-3 rounded-lg text-xs font-semibold border border-red-300 text-red-700 bg-white active:bg-red-50`}
-                            >
-                              Void
-                            </button>
-                          )}
+                          <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                            {group.kitchenSent ? (
+                              <span className="text-[10px] uppercase tracking-wide text-emerald-700 font-semibold">
+                                KOT
+                              </span>
+                            ) : (
+                              <span className="text-[10px] uppercase tracking-wide text-amber-700 font-semibold">
+                                New
+                              </span>
+                            )}
+                            <span className="text-[11px] text-stone-400">Hold for actions</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <div className="text-stone-700 whitespace-nowrap font-medium">
+                            {formatCurrency(group.lineTotal)}
+                          </div>
+                          <button
+                            type="button"
+                            aria-label="Line actions"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              clearLinePressTimer();
+                              setLineSheet(group);
+                            }}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            className={`${TOUCH} min-h-9 min-w-9 px-2 rounded-lg text-sm font-bold border border-stone-300 bg-stone-50 text-stone-700`}
+                          >
+                            ···
+                          </button>
                         </div>
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
-              {opsMode && order && (
-                <div className="px-3 py-3 border-t border-stone-200 bg-amber-50 space-y-2.5">
+
+              {/* Line action sheet (SambaPOS long-press / Toast edit line) */}
+              {lineSheet && (
+                <div className="fixed inset-0 z-50 flex flex-col justify-end lg:justify-center lg:items-center bg-black/40">
+                  <button
+                    type="button"
+                    className="flex-1 w-full lg:absolute lg:inset-0 cursor-default"
+                    aria-label="Dismiss"
+                    onClick={() => setLineSheet(null)}
+                  />
+                  <div className="relative w-full lg:max-w-md bg-white rounded-t-2xl lg:rounded-2xl p-4 space-y-3 shadow-xl pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-stone-900 truncate">
+                          {lineSheet.quantity} × {lineSheet.productName}
+                        </p>
+                        <p className="text-sm text-stone-500">
+                          {formatCurrency(lineSheet.lineTotal)}
+                          {lineSheet.kitchenSent ? ' · Sent to kitchen' : ' · Not sent'}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`${touchBtnGhost} min-h-10 px-3`}
+                        onClick={() => setLineSheet(null)}
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+                    {!lineSheet.kitchenSent && lineSheet.productId ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void handleLineMinusOne(lineSheet)}
+                          className={`${touchBtnGhost} min-h-14 text-lg font-bold`}
+                        >
+                          −1
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void handleLinePlusOne(lineSheet)}
+                          className={`${touchBtnGhost} min-h-14 text-lg font-bold`}
+                        >
+                          +1
+                        </button>
+                      </div>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleVoidLines(lineSheet.itemIds)}
+                      className={`${touchBtnDanger} w-full min-h-14`}
+                    >
+                      {lineSheet.kitchenSent
+                        ? 'Void (kitchen VOID ticket)'
+                        : 'Remove (not sent)'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div
+                className={`${
+                  mobileSheet === 'more' ? 'flex' : 'hidden'
+                } lg:hidden flex-1 flex-col min-h-0 overflow-y-auto px-3 py-3 space-y-2 bg-amber-50`}
+              >
+                <button
+                  type="button"
+                  disabled={!order || busy}
+                  onClick={() => {
+                    setOpsMode('split');
+                    setSplitSameTable(true);
+                    setMobileSheet('order');
+                  }}
+                  className={`${touchBtnGhost} w-full`}
+                >
+                  Split check
+                </button>
+                <button
+                  type="button"
+                  disabled={!order || busy || mergeCandidates.length === 0}
+                  onClick={() => {
+                    setOpsMode('merge');
+                    setMobileSheet('order');
+                  }}
+                  className={`${touchBtnGhost} w-full`}
+                >
+                  Merge check
+                </button>
+                <button
+                  type="button"
+                  disabled={!order || busy || freeTables.length === 0}
+                  onClick={() => {
+                    setOpsMode('transfer');
+                    setOpsTargetTableId('');
+                    setMobileSheet('order');
+                  }}
+                  className={`${touchBtnGhost} w-full`}
+                >
+                  Transfer table
+                </button>
+                <button
+                  type="button"
+                  disabled={!order || busy}
+                  onClick={() => void handleCancelCheck()}
+                  className={`${touchBtnDanger} w-full`}
+                >
+                  Cancel check
+                </button>
+              </div>
+
+              {opsMode && order && (mobileSheet === 'order' || !mobileSheet) && (
+                <div className="px-3 py-3 border-t border-stone-200 bg-amber-50 space-y-2.5 shrink-0">
                   {opsMode === 'transfer' && (
                     <>
                       <p className="text-xs font-medium text-stone-700">Transfer to free table</p>
@@ -2001,22 +2544,24 @@ export default function RestaurantPosPage() {
                   </button>
                 </div>
               )}
-              <div className="border-t border-stone-200 bg-white p-3 sm:p-4 space-y-2.5 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-                <div className="flex justify-between text-sm">
-                  <span className="text-stone-600">Subtotal</span>
-                  <span>{formatCurrency(Number(order?.subtotal || 0))}</span>
+
+              <div
+                className={`border-t border-stone-200 bg-white p-3 space-y-2 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${
+                  mobileSheet === 'order' || !mobileSheet ? 'flex flex-col' : 'hidden'
+                } lg:flex`}
+              >
+                <div className="flex justify-between items-baseline gap-2">
+                  <span className="text-sm text-stone-600">
+                    {orderLines.length} item{orderLines.length === 1 ? '' : 's'}
+                    {Number(order?.taxAmount || 0) > 0
+                      ? ` · Tax ${formatCurrency(Number(order?.taxAmount || 0))}`
+                      : ''}
+                  </span>
+                  <span className="text-base font-bold text-stone-900">
+                    {formatCurrency(Number(order?.totalAmount || 0))}
+                  </span>
                 </div>
-                {Number(order?.taxAmount || 0) > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-stone-600">Tax</span>
-                    <span>{formatCurrency(Number(order?.taxAmount || 0))}</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-base font-semibold">
-                  <span>Total</span>
-                  <span>{formatCurrency(Number(order?.totalAmount || 0))}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="hidden lg:grid grid-cols-3 gap-2">
                   <button
                     type="button"
                     disabled={!order || busy}
@@ -2024,7 +2569,7 @@ export default function RestaurantPosPage() {
                       setOpsMode('split');
                       setSplitSameTable(true);
                     }}
-                    className={`${touchBtnGhost} px-2 text-xs`}
+                    className={`${touchBtnGhost} min-h-10 px-2 text-xs`}
                   >
                     Split
                   </button>
@@ -2032,7 +2577,7 @@ export default function RestaurantPosPage() {
                     type="button"
                     disabled={!order || busy || mergeCandidates.length === 0}
                     onClick={() => setOpsMode('merge')}
-                    className={`${touchBtnGhost} px-2 text-xs`}
+                    className={`${touchBtnGhost} min-h-10 px-2 text-xs`}
                   >
                     Merge
                   </button>
@@ -2043,7 +2588,7 @@ export default function RestaurantPosPage() {
                       setOpsMode('transfer');
                       setOpsTargetTableId('');
                     }}
-                    className={`${touchBtnGhost} px-2 text-xs`}
+                    className={`${touchBtnGhost} min-h-10 px-2 text-xs`}
                   >
                     Transfer
                   </button>
@@ -2055,10 +2600,14 @@ export default function RestaurantPosPage() {
                     onClick={() => void handleVoidLines(selectedLineIds)}
                     className={`${touchBtnDanger} w-full`}
                   >
-                    Void selected ({selectedLineIds.length})
+                    {selectedLineIds.some((id) =>
+                      orderLines.some((l) => l.id === id && l.kitchenSentAt),
+                    )
+                      ? `Void selected (${selectedLineIds.length})`
+                      : `Remove selected (${selectedLineIds.length})`}
                   </button>
                 ) : null}
-                <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     disabled={!order || busy}
@@ -2089,7 +2638,7 @@ export default function RestaurantPosPage() {
                     type="button"
                     disabled={!order || busy}
                     onClick={() => void handleCancelCheck()}
-                    className={`${touchBtnDanger} col-span-2 w-full`}
+                    className={`${touchBtnDanger} col-span-2 w-full min-h-11 hidden lg:inline-flex`}
                   >
                     Cancel check
                   </button>

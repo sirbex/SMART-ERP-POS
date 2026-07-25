@@ -249,6 +249,16 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/min-h-12/);
     expect(pos).toMatch(/min-h-14/);
     expect(pos).toMatch(/active:scale-\[0\.98\]/);
+    // Phones: menu always on; Order/Details/More open as sheets on button press
+    expect(pos).toMatch(/mobileSheet/);
+    expect(pos).toMatch(/openMobileOrder/);
+    expect(pos).not.toMatch(/max-h-\[52vh\]/);
+    expect(pos).not.toMatch(/mobilePane/);
+    // SambaPOS/Toast: consolidate identical lines + long-press / ··· line actions
+    expect(pos).toMatch(/consolidateTicketLines/);
+    expect(pos).toMatch(/startLineLongPress/);
+    expect(pos).toMatch(/handleLinePlusOne/);
+    expect(pos).toMatch(/handleLineMinusOne/);
   });
 
   it('Restaurant POS Pay is gated by restaurant.pay (cashier/accountant/admin)', () => {
@@ -284,6 +294,10 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/handleVoidLines/);
     expect(pos).toMatch(/voidItems/);
     expect(pos).toMatch(/ticketKind: 'VOID'/);
+    // New/unsent: cancel/remove without reason or VOID print; Void only after KOT.
+    expect(pos).toMatch(/Removed before kitchen send/);
+    expect(pos).toMatch(/Cancel reason is required when kitchen has been notified/);
+    expect(pos).toMatch(/Remove \(not sent\)/);
 
     const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
     expect(print).toMatch(/STOP \/ DO NOT PREPARE|VOID/);
