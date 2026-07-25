@@ -202,12 +202,14 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     const sendKotHandler = pos.slice(
       pos.indexOf('const handleSendKot'),
-      pos.indexOf('const handlePrintBill'),
+      pos.indexOf('const handleBill'),
     );
     // Floor return is mandatory after successful fire (online + offline).
     expect(sendKotHandler).toMatch(/returnToFloor/);
     expect(sendKotHandler).toMatch(/api\.restaurant\.sendKot/);
     expect(sendKotHandler).toMatch(/fireRestaurantKotOffline/);
+    // Empty / no-new-items still leaves the ticket (FOH close).
+    expect(sendKotHandler).toMatch(/Nothing new for kitchen/);
     // Print failures must not abort the success path (no bare await print as sole post-commit gate).
     expect(sendKotHandler).toMatch(/printFailures|printOk/);
     expect(sendKotHandler).toMatch(/printKitchenTicket/);
@@ -215,6 +217,29 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     const createKot = repo.slice(repo.indexOf('async createKot('), repo.indexOf('async getOrderRestaurantMeta('));
     expect(createKot).toMatch(/const hasStatus = await tableHasColumn/);
+
+    const svc = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
+    const sendKot = svc.slice(svc.indexOf('async sendKot('), svc.indexOf('async voidCheckItems('));
+    expect(sendKot).toMatch(/no unsent items/);
+    expect(sendKot).not.toMatch(/ERR_RESTAURANT_KOT_EMPTY/);
+  });
+
+  it('Expert Bill flow: mark BILLING then return to floor; print is best-effort', () => {
+    const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
+    const billHandler = pos.slice(
+      pos.indexOf('const handleBill'),
+      pos.indexOf('const activateSibling'),
+    );
+    expect(billHandler).toMatch(/requestBill|markRestaurantBillRequestedOffline/);
+    expect(billHandler).toMatch(/returnToFloor/);
+    expect(billHandler).toMatch(/Bill requested/);
+    expect(billHandler).toMatch(/printOk/);
+
+    const svc = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
+    expect(svc).toMatch(/async requestBill\(/);
+    expect(svc).toMatch(/markBilling/);
+    const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
+    expect(routes).toMatch(/router\.post\(\s*'\/checks\/:orderId\/bill'/);
   });
 
   it('Restaurant POS buttons are touch-first (44px+ targets, touch-manipulation)', () => {

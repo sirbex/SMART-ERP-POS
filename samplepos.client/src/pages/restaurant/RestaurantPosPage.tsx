@@ -44,6 +44,9 @@ import {
   getCachedRestaurantWaiters,
   cacheRestaurantMenu,
   refreshRestaurantOfflineCache,
+  markRestaurantBillRequestedOffline,
+  clearRestaurantBillRequestedOffline,
+  getRestaurantBillRequestedOffline,
 } from '../../lib/restaurantOfflineCache';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
 import { publishLanKdsBoardChanged } from '../../lib/restaurantLanKds';
@@ -527,6 +530,8 @@ export default function RestaurantPosPage() {
       return res.data.data;
     },
     onSuccess: () => {
+      // New items unlock Bill Requested → OCCUPIED (SambaPOS unlock on new order)
+      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
       bumpJournal();
@@ -601,14 +606,18 @@ export default function RestaurantPosPage() {
   );
 
   const floorTables = useMemo(() => {
+    const billRequested = getRestaurantBillRequestedOffline();
     const all = (tablesQuery.data || []).map((t) => {
       const check = floorOccupancy.get(t.id);
       if (check) {
         // Journal open check wins (offline + crash restore overlay)
         const totals = totalsFromLines(check.lines);
+        const billed =
+          billRequested[t.id] === check.orderId ||
+          (!isOnline && billRequested[t.id] != null);
         return {
           ...t,
-          status: 'OCCUPIED' as const,
+          status: (billed ? 'BILLING' : 'OCCUPIED') as RestaurantTable['status'],
           currentOrderId: check.orderId,
           orderNumber: check.offlineId,
           orderTotal: String(totals.totalAmount),
@@ -626,7 +635,7 @@ export default function RestaurantPosPage() {
     });
     if (!myTablesOnly || !user?.id) return all;
     return all.filter((t) => t.status === 'FREE' || t.waiterId === user.id);
-  }, [tablesQuery.data, myTablesOnly, user?.id, isOnline, floorOccupancy]);
+  }, [tablesQuery.data, myTablesOnly, user?.id, isOnline, floorOccupancy, journalTick]);
 
   const freeTables = useMemo(() => {
     return (tablesQuery.data || []).filter((t) => {
@@ -754,14 +763,21 @@ export default function RestaurantPosPage() {
 
   /**
    * Expert POS rule: kitchen commit is SSOT; print is best-effort.
-   * After a successful fire, always return to the floor — never leave the waiter
-   * stuck on a check (print failure must not look like KOT failure / invite double-fire).
+   * After KOT (including no new items), always return to the floor — never leave
+   * the waiter stuck on a check.
    */
   const handleSendKot = async () => {
     if (!order) return;
     setBusy(true);
     try {
+      const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
+
       if (!isOnline) {
+        if (unsentCount === 0) {
+          toast.success('Nothing new for kitchen — back to tables');
+          returnToFloor();
+          return;
+        }
         const events = getAllEvents();
         const syncState = getAllSyncState();
         const derived = selectedTableId
@@ -804,6 +820,12 @@ export default function RestaurantPosPage() {
         return;
       }
 
+      if (unsentCount === 0) {
+        toast.success('Nothing new for kitchen — back to tables');
+        returnToFloor();
+        return;
+      }
+
       const res = await api.restaurant.sendKot(order.id);
       const kots = (res.data.data || []) as Array<{
         kotNumber: string;
@@ -820,6 +842,12 @@ export default function RestaurantPosPage() {
         pickupLabel?: string | null;
         items: Array<{ productName: string; quantity: string; lineNotes: string | null }>;
       }>;
+
+      if (kots.length === 0) {
+        toast.success('Nothing new for kitchen — back to tables');
+        returnToFloor();
+        return;
+      }
 
       // Kitchen rows are committed — print must not undo success or block floor return.
       let printFailures = 0;
@@ -869,66 +897,106 @@ export default function RestaurantPosPage() {
     }
   };
 
-  const handlePrintBill = async () => {
+  /**
+   * SambaPOS Print Bill rule:
+   * 1) Mark table BILLING (Bill Requested) — primary outcome
+   * 2) Print guest check best-effort
+   * 3) Close ticket UI → return to floor (order stays open until Pay)
+   */
+  const handleBill = async () => {
     if (!order) return;
+    if (orderLines.length === 0) {
+      toast.error('Cannot bill an empty check');
+      return;
+    }
     setBusy(true);
     try {
-      if (!isOnline) {
-        await printRestaurantBill({
-          orderNumber: order.orderNumber,
-          tableLabel: meta?.tableName || meta?.tableCode || selectedTable?.name || 'Table',
-          waiterName: meta?.waiterName || null,
-          currencySymbol: config.currency?.symbol,
-          orderChannel: meta?.orderChannel,
-          guestName: meta?.guestName,
-          guestPhone: meta?.guestPhone,
-          deliveryAddress: meta?.deliveryAddress,
-          pickupLabel: meta?.pickupLabel,
-          items: (order.items || []).map((it) => ({
-            productName: it.productName,
-            quantity: Number(it.quantity),
-            unitPrice: Number(it.unitPrice),
-            lineTotal: Number(it.lineTotal),
-          })),
-          subtotal: Number(order.subtotal),
-          discountAmount: Number(order.discountAmount),
-          taxAmount: Number(order.taxAmount),
-          taxName: 'VAT',
-          totalAmount: Number(order.totalAmount),
-        });
-        toast.success('Bill printed (offline)');
-        return;
-      }
-
-      const res = await api.restaurant.getBill(order.id);
-      const bill = res.data.data as { order: OrderDetail; meta: CheckMeta };
-      await printRestaurantBill({
-        orderNumber: bill.order.orderNumber,
-        tableLabel: bill.meta.tableName || bill.meta.tableCode || selectedTable?.name || 'Table',
-        waiterName: bill.meta.waiterName,
+      const billPayload = {
+        orderNumber: order.orderNumber,
+        tableLabel: meta?.tableName || meta?.tableCode || selectedTable?.name || 'Table',
+        waiterName: meta?.waiterName || null,
         currencySymbol: config.currency?.symbol,
-        orderChannel: bill.meta.orderChannel,
-        guestName: bill.meta.guestName,
-        guestPhone: bill.meta.guestPhone,
-        deliveryAddress: bill.meta.deliveryAddress,
-        pickupLabel: bill.meta.pickupLabel,
-        items: (bill.order.items || []).map((it) => ({
+        orderChannel: meta?.orderChannel,
+        guestName: meta?.guestName,
+        guestPhone: meta?.guestPhone,
+        deliveryAddress: meta?.deliveryAddress,
+        pickupLabel: meta?.pickupLabel,
+        items: orderLines.map((it) => ({
           productName: it.productName,
           quantity: Number(it.quantity),
           unitPrice: Number(it.unitPrice),
           lineTotal: Number(it.lineTotal),
         })),
-        subtotal: Number(bill.order.subtotal),
-        discountAmount: Number(bill.order.discountAmount),
-        taxAmount: Number(bill.order.taxAmount),
+        subtotal: Number(order.subtotal),
+        discountAmount: Number(order.discountAmount),
+        taxAmount: Number(order.taxAmount),
         taxName: 'VAT',
-        totalAmount: Number(bill.order.totalAmount),
-      });
-      toast.success('Bill printed');
+        totalAmount: Number(order.totalAmount),
+      };
+
+      if (!isOnline) {
+        if (selectedTableId) {
+          markRestaurantBillRequestedOffline(selectedTableId, order.id);
+          bumpJournal();
+        }
+        let printOk = true;
+        try {
+          await printRestaurantBill(billPayload);
+        } catch {
+          printOk = false;
+        }
+        toast.success(
+          printOk
+            ? 'Bill requested — table marked billed'
+            : 'Bill requested (print unavailable) — table marked billed',
+        );
+        returnToFloor();
+        return;
+      }
+
+      // SSOT first: mark BILLING on server (do not depend on printer)
+      const res = await api.restaurant.requestBill(order.id);
+      const bill = res.data.data as { order: OrderDetail; meta: CheckMeta };
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
       invalidateCheck();
+
+      let printOk = true;
+      try {
+        await printRestaurantBill({
+          orderNumber: bill.order.orderNumber,
+          tableLabel: bill.meta.tableName || bill.meta.tableCode || selectedTable?.name || 'Table',
+          waiterName: bill.meta.waiterName,
+          currencySymbol: config.currency?.symbol,
+          orderChannel: bill.meta.orderChannel,
+          guestName: bill.meta.guestName,
+          guestPhone: bill.meta.guestPhone,
+          deliveryAddress: bill.meta.deliveryAddress,
+          pickupLabel: bill.meta.pickupLabel,
+          items: (bill.order.items || []).map((it) => ({
+            productName: it.productName,
+            quantity: Number(it.quantity),
+            unitPrice: Number(it.unitPrice),
+            lineTotal: Number(it.lineTotal),
+          })),
+          subtotal: Number(bill.order.subtotal),
+          discountAmount: Number(bill.order.discountAmount),
+          taxAmount: Number(bill.order.taxAmount),
+          taxName: 'VAT',
+          totalAmount: Number(bill.order.totalAmount),
+        });
+      } catch {
+        printOk = false;
+      }
+
+      toast.success(
+        printOk
+          ? 'Bill requested — table marked billed'
+          : 'Bill requested (print failed) — table marked billed; reprint from check if needed',
+        { duration: printOk ? 3000 : 5000 },
+      );
+      returnToFloor();
     } catch (err) {
       toast.error(apiErr(err, 'Bill failed'));
-    } finally {
       setBusy(false);
     }
   };
@@ -1177,6 +1245,7 @@ export default function RestaurantPosPage() {
       await printVoidTickets(data.voidKots || [], reason.trim());
       publishLanKdsBoardChanged('KOT_VOIDED');
       if (data.checkCancelled) {
+        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
         toast.success('Check voided — table freed');
         setSelectedTableId(null);
       } else {
@@ -1225,6 +1294,7 @@ export default function RestaurantPosPage() {
       setBusy(true);
       try {
         cancelRestaurantCheckOffline(derived);
+        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
         toast.success('Check cancelled (offline — will sync)');
         bumpJournal();
         setSelectedTableId(null);
@@ -1243,6 +1313,7 @@ export default function RestaurantPosPage() {
       const data = res.data.data as { voidKots?: VoidKotPrint[] };
       await printVoidTickets(data.voidKots || [], reason.trim());
       publishLanKdsBoardChanged('KOT_VOIDED');
+      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
       toast.success(
         (data.voidKots?.length || 0) > 0
           ? `Check cancelled — ${data.voidKots!.length} VOID ticket(s) sent`
@@ -1310,6 +1381,7 @@ export default function RestaurantPosPage() {
           customReceiptNote: `Table ${paid.tableLabel} (offline)`,
         });
         toast.success(`Paid offline (${paid.offlineId}) — will sync when online`);
+        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
         bumpJournal();
         setSelectedTableId(null);
         invalidateCheck();
@@ -1347,8 +1419,8 @@ export default function RestaurantPosPage() {
 
   return (
     <Layout>
-      <div className="h-[calc(100vh-3rem)] flex flex-col bg-stone-100">
-        <div className="px-4 py-3 bg-white border-b border-stone-200 flex items-center justify-between gap-3">
+      <div className="h-[calc(100vh-3rem)] h-[calc(100dvh-3rem)] flex flex-col bg-stone-100 overflow-hidden">
+        <div className="px-3 sm:px-4 py-2.5 sm:py-3 bg-white border-b border-stone-200 flex items-center justify-between gap-2 sm:gap-3 shrink-0">
           <div>
             <h1 className="text-lg font-semibold text-stone-900">Restaurant POS</h1>
             <p className="text-xs text-stone-500">
@@ -1459,37 +1531,42 @@ export default function RestaurantPosPage() {
                 My tables
               </label>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3 pb-[env(safe-area-inset-bottom)]">
               {floorTables.map((table) => {
                 const occupied = table.status !== 'FREE';
+                const billing = table.status === 'BILLING';
                 const service = isServiceChannelTable(table);
                 return (
                   <button
                     key={table.id}
                     type="button"
                     onClick={() => setSelectedTableId(table.id)}
-                    className={`${touchTile} min-h-[96px] rounded-xl border-2 px-3 py-3 text-left shadow-sm ${
-                      occupied
-                        ? service
-                          ? 'border-violet-500 bg-violet-50'
-                          : 'border-amber-500 bg-amber-50'
-                        : service
-                          ? 'border-violet-300 bg-white active:border-violet-500'
-                          : 'border-stone-300 bg-white active:border-emerald-500'
+                    className={`${touchTile} min-h-[88px] sm:min-h-[96px] rounded-xl border-2 px-3 py-3 text-left shadow-sm ${
+                      billing
+                        ? 'border-rose-700 bg-rose-100'
+                        : occupied
+                          ? service
+                            ? 'border-violet-500 bg-violet-50'
+                            : 'border-amber-500 bg-amber-50'
+                          : service
+                            ? 'border-violet-300 bg-white active:border-violet-500'
+                            : 'border-stone-300 bg-white active:border-emerald-500'
                     }`}
                   >
                     <div className="text-lg font-bold text-stone-900">{table.code}</div>
-                    <div className="text-sm text-stone-600">{table.name}</div>
+                    <div className="text-sm text-stone-600 truncate">{table.name}</div>
                     <div className="text-xs mt-1 text-stone-500">
-                      {occupied
-                        ? table.guestName
+                      {billing
+                        ? 'Bill requested'
+                        : occupied
                           ? table.guestName
-                          : table.orderTotal
-                            ? formatCurrency(Number(table.orderTotal))
-                            : table.status
-                        : service
-                          ? 'Service'
-                          : 'Free'}
+                            ? table.guestName
+                            : table.orderTotal
+                              ? formatCurrency(Number(table.orderTotal))
+                              : table.status
+                          : service
+                            ? 'Service'
+                            : 'Free'}
                     </div>
                     {occupied && table.waiterName ? (
                       <div className="text-[11px] text-stone-600 mt-0.5 truncate">
@@ -1508,8 +1585,9 @@ export default function RestaurantPosPage() {
             )}
           </div>
         ) : (
-          <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12">
-            <div className="lg:col-span-8 flex flex-col min-h-0 border-r border-stone-200 bg-white">
+          <div className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 overflow-hidden">
+            {/* Menu — below ticket on phones so actions stay reachable */}
+            <div className="lg:col-span-8 order-2 lg:order-1 flex flex-col min-h-0 flex-1 border-t lg:border-t-0 lg:border-r border-stone-200 bg-white">
               <div className="sticky top-0 z-10 bg-white border-b border-stone-100 shadow-sm">
                 <div className="p-3 pb-2">
                   <label className="relative block">
@@ -1648,12 +1726,23 @@ export default function RestaurantPosPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-4 flex flex-col min-h-0 bg-stone-50">
-              <div className="px-4 py-3 border-b border-stone-200 bg-white">
-                <h2 className="font-semibold text-stone-900">Order</h2>
-                {order?.orderNumber ? (
-                  <p className="text-xs text-stone-500 mt-0.5">{order.orderNumber}</p>
-                ) : null}
+            <div className="lg:col-span-4 order-1 lg:order-2 flex flex-col min-h-0 max-h-[52vh] lg:max-h-none bg-stone-50 border-b lg:border-b-0 border-stone-200 shrink-0 lg:shrink">
+              <div className="px-3 sm:px-4 py-2.5 sm:py-3 border-b border-stone-200 bg-white shrink-0">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="font-semibold text-stone-900">Order</h2>
+                    {order?.orderNumber ? (
+                      <p className="text-xs text-stone-500 mt-0.5 truncate">{order.orderNumber}</p>
+                    ) : null}
+                  </div>
+                  {selectedTable?.status === 'BILLING' ||
+                  (selectedTableId &&
+                    getRestaurantBillRequestedOffline()[selectedTableId] === order?.id) ? (
+                    <span className="shrink-0 text-[10px] uppercase tracking-wide font-bold text-rose-800 bg-rose-100 px-2 py-1 rounded-lg">
+                      Billed
+                    </span>
+                  ) : null}
+                </div>
                 {serviceChannel && (
                   <p className="text-xs text-violet-700 mt-0.5">
                     {channel === 'DELIVERY' ? 'Delivery' : 'Take Away'} — enter guest before adding items
@@ -1745,7 +1834,7 @@ export default function RestaurantPosPage() {
                   )}
                 </div>
               )}
-              <div className="flex-1 overflow-auto px-4 py-2">
+              <div className="flex-1 min-h-0 overflow-auto px-3 sm:px-4 py-2">
                 {orderLines.length === 0 ? (
                   <p className="text-sm text-stone-500 py-6 text-center">
                     Press products to build the order
@@ -1912,7 +2001,7 @@ export default function RestaurantPosPage() {
                   </button>
                 </div>
               )}
-              <div className="border-t border-stone-200 bg-white p-4 space-y-3">
+              <div className="border-t border-stone-200 bg-white p-3 sm:p-4 space-y-2.5 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
                 <div className="flex justify-between text-sm">
                   <span className="text-stone-600">Subtotal</span>
                   <span>{formatCurrency(Number(order?.subtotal || 0))}</span>
@@ -1969,29 +2058,29 @@ export default function RestaurantPosPage() {
                     Void selected ({selectedLineIds.length})
                   </button>
                 ) : null}
-                <div className="grid grid-cols-1 gap-2.5 pt-1">
+                <div className="grid grid-cols-2 gap-2.5 pt-1">
                   <button
                     type="button"
                     disabled={!order || busy}
                     onClick={() => void handleSendKot()}
-                    className={`${TOUCH} min-h-14 w-full rounded-xl bg-orange-600 text-white text-base font-bold active:bg-orange-700`}
+                    className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-orange-600 text-white text-base font-bold active:bg-orange-700`}
                   >
-                    Send KOT
+                    KOT
                   </button>
                   <button
                     type="button"
-                    disabled={!order || busy}
-                    onClick={() => void handlePrintBill()}
-                    className={`${TOUCH} min-h-14 w-full rounded-xl bg-stone-800 text-white text-base font-bold active:bg-stone-950`}
+                    disabled={!order || busy || orderLines.length === 0}
+                    onClick={() => void handleBill()}
+                    className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-rose-800 text-white text-base font-bold active:bg-rose-950`}
                   >
-                    Print Bill
+                    Bill
                   </button>
                   {canRestaurantPay ? (
                     <button
                       type="button"
                       disabled={!order || busy}
                       onClick={() => void handlePay()}
-                      className={`${TOUCH} min-h-14 w-full rounded-xl bg-emerald-600 text-white text-base font-bold active:bg-emerald-700`}
+                      className={`${TOUCH} min-h-14 col-span-2 rounded-xl bg-emerald-600 text-white text-base font-bold active:bg-emerald-700`}
                     >
                       Pay{!isOnline ? ' (cash offline)' : ''}
                     </button>
@@ -2000,7 +2089,7 @@ export default function RestaurantPosPage() {
                     type="button"
                     disabled={!order || busy}
                     onClick={() => void handleCancelCheck()}
-                    className={`${touchBtnDanger} w-full`}
+                    className={`${touchBtnDanger} col-span-2 w-full`}
                   >
                     Cancel check
                   </button>

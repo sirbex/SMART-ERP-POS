@@ -9,6 +9,8 @@ const MENU_KEY = 'restaurant_offline_menu';
 const CATEGORIES_KEY = 'restaurant_offline_categories';
 const WAITERS_KEY = 'restaurant_offline_waiters';
 const META_KEY = 'restaurant_offline_cache_meta';
+/** tableId → orderId for offline Bill Requested (FOH maroon) until sync/pay */
+const BILL_REQUESTED_KEY = 'restaurant_offline_bill_requested';
 
 export interface CachedRestaurantTable {
   id: string;
@@ -125,6 +127,24 @@ function touchMeta(): void {
 export function getRestaurantCacheLastSync(): number | null {
   const meta = readJson<{ lastSyncAt?: number }>(META_KEY, {});
   return meta.lastSyncAt ?? null;
+}
+
+/** Offline FOH: mark table as Bill Requested (maroon) — mirrors server BILLING. */
+export function markRestaurantBillRequestedOffline(tableId: string, orderId: string): void {
+  const map = readJson<Record<string, string>>(BILL_REQUESTED_KEY, {});
+  map[tableId] = orderId;
+  writeJson(BILL_REQUESTED_KEY, map);
+}
+
+export function clearRestaurantBillRequestedOffline(tableId: string): void {
+  const map = readJson<Record<string, string>>(BILL_REQUESTED_KEY, {});
+  if (!(tableId in map)) return;
+  delete map[tableId];
+  writeJson(BILL_REQUESTED_KEY, map);
+}
+
+export function getRestaurantBillRequestedOffline(): Record<string, string> {
+  return readJson<Record<string, string>>(BILL_REQUESTED_KEY, {});
 }
 
 /**

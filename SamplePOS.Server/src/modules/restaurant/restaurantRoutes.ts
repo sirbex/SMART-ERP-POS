@@ -458,14 +458,24 @@ router.post(
   }),
 );
 
+/** Mark table BILLING + return check for print. Prefer POST (mutating). */
+const billHandler = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const bill = await restaurantService.requestBill(pool, req.params.orderId);
+  res.json({ success: true, data: bill });
+});
+
+router.post(
+  '/checks/:orderId/bill',
+  requireAnyPermission(['restaurant.pay', 'restaurant.order', 'restaurant.read']),
+  billHandler,
+);
+
+/** @deprecated Prefer POST — kept for older clients */
 router.get(
   '/checks/:orderId/bill',
   requireAnyPermission(['restaurant.pay', 'restaurant.order', 'restaurant.read']),
-  asyncHandler(async (req: Request, res: Response) => {
-    const pool = req.tenantPool || globalPool;
-    const bill = await restaurantService.getBill(pool, req.params.orderId);
-    res.json({ success: true, data: bill });
-  }),
+  billHandler,
 );
 
 const CancelCheckSchema = z.object({

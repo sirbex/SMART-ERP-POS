@@ -558,8 +558,11 @@ export const restaurantService = {
       }
 
       const unsent = await restaurantRepository.listUnsentItems(client, orderId);
+      // Expert FOH: KOT with nothing new is a no-op success — waiter still leaves the ticket
+      // (client returns to floor). Do not error; empty array means "already fired".
       if (unsent.length === 0) {
-        throw new BusinessError('No new items to send to kitchen', 'ERR_RESTAURANT_KOT_EMPTY');
+        logger.info('Restaurant KOT no-op (no unsent items)', { orderId });
+        return [];
       }
 
       // Split by resolved station (registry SSOT — unknown codes → default)
@@ -878,18 +881,40 @@ export const restaurantService = {
     }
   },
 
-  async getBill(pool: Pool, orderId: string) {
+  /**
+   * SambaPOS Print Bill rule (FOH):
+   * 1) Mark table BILLING ("Bill Requested") — primary SSOT outcome
+   * 2) Return check payload for optional local print (best-effort)
+   * Order stays PENDING until Pay; waiter UI should return to floor after this.
+   */
+  async requestBill(pool: Pool, orderId: string) {
     await assertRestaurantEnabled(pool);
     const order = await ordersService.getOrder(pool, orderId);
     if (order.status !== 'PENDING') {
       throw new BusinessError('Bill is only available for open checks', 'ERR_RESTAURANT_BILL');
+    }
+    if (!order.items || order.items.length === 0) {
+      throw new BusinessError('Cannot bill an empty check', 'ERR_RESTAURANT_BILL_EMPTY');
     }
     const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
     if (!meta || meta.orderChannel === 'RETAIL') {
       throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
     }
     await this.markBilling(pool, orderId);
-    return { order, meta };
+    const table = meta.tableId
+      ? await restaurantRepository.getTableById(pool, meta.tableId)
+      : null;
+    logger.info('Restaurant bill requested', {
+      orderId,
+      tableId: meta.tableId,
+      tableStatus: table?.status ?? null,
+    });
+    return { order, meta, table };
+  },
+
+  /** @deprecated Prefer requestBill — same behavior */
+  async getBill(pool: Pool, orderId: string) {
+    return this.requestBill(pool, orderId);
   },
 
   /**

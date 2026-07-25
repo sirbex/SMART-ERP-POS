@@ -1289,8 +1289,12 @@ export const api = {
       apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/kot`),
     voidItems: (orderId: string, data: { itemIds: string[]; reason: string }) =>
       apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/void-items`, data),
+    /** Marks table BILLING (Bill Requested); print is client best-effort. */
+    requestBill: (orderId: string) =>
+      apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/bill`),
+    /** @deprecated Prefer requestBill */
     getBill: (orderId: string) =>
-      apiClient.get<ApiResponse>(`restaurant/checks/${orderId}/bill`),
+      apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/bill`),
     cancelCheck: (orderId: string, data?: { reason?: string }) =>
       apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/cancel`, data ?? {}),
     kitchenBoard: (params?: { station?: string }) =>
