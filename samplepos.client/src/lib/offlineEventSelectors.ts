@@ -470,6 +470,7 @@ export interface DerivedKitchenTicket {
     waiterName: string | null;
     station: string;
     status: DerivedKotStatus;
+    ticketKind?: 'FIRE' | 'VOID';
     firedAt: string;
     orderChannel: string | null;
     guestName: string | null;
@@ -524,6 +525,7 @@ export function deriveRestaurantKitchenBoard(
                 waiterName: event.waiterName ?? order.waiterName ?? null,
                 station: (event.station || 'KITCHEN').toUpperCase(),
                 status: 'SENT',
+                ticketKind: event.ticketKind === 'VOID' ? 'VOID' : 'FIRE',
                 firedAt: new Date(event.ts).toISOString(),
                 orderChannel: event.orderChannel ?? order.channel ?? null,
                 guestName: event.guestName ?? order.guestName ?? null,

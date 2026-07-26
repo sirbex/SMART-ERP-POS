@@ -16,25 +16,28 @@ import {
   deriveRestaurantCheckForTable,
   deriveRestaurantFloorOccupancy,
   deriveRestaurantKitchenBoard,
+  deriveRestaurantOpenChecks,
   nextKotStatus,
   type DerivedOrder,
   type DerivedKotStatus,
 } from './offlineEventSelectors';
 import { isServiceProductType } from '@shared/utils/productTypeRules';
 import { decrementLocalStock, getCachedCatalog, restoreLocalStock } from '../services/offlineCatalogService';
-import { getCachedRestaurantMenu } from './restaurantOfflineCache';
+import { getCachedRestaurantMenu, paintRestaurantTableFreeOffline } from './restaurantOfflineCache';
 import { publishLanKdsBoardChanged } from './restaurantLanKds';
 
-/** Resolve product type for offline stock rules (line → menu cache → POS catalog). */
+/** Resolve product type for offline stock rules (menu/catalog beat a stale line stamp). */
 export function resolveOfflineProductType(
   productId: string,
   lineProductType?: string | null,
 ): string {
-  if (lineProductType) return String(lineProductType);
   const menuHit = getCachedRestaurantMenu().find((p) => p.id === productId);
-  if (menuHit?.productType) return String(menuHit.productType);
   const catalogHit = getCachedCatalog().find((p) => p.id === productId);
-  if (catalogHit?.productType) return String(catalogHit.productType);
+  const fromCaches = menuHit?.productType || catalogHit?.productType;
+  // Service dishes never consume parent stock — trust live menu/catalog over a stale journal line.
+  if (isServiceProductType(fromCaches)) return 'service';
+  if (lineProductType) return String(lineProductType);
+  if (fromCaches) return String(fromCaches);
   return 'inventory';
 }
 
@@ -108,14 +111,18 @@ export function seedRestaurantCheckFromServer(input: {
   const lines: EventLine[] = input.items.map((it) => {
     const qty = Number(it.quantity) || 0;
     const unitPrice = Number(it.unitPrice) || 0;
+    const productId = it.productId || `custom_${it.id}`;
     return toEventLine({
       lineId: it.id,
-      productId: it.productId || `custom_${it.id}`,
+      productId,
       productName: it.productName,
       quantity: qty,
       unitPrice,
       lineNotes: it.lineNotes,
       kitchenSentAt: it.kitchenSentAt,
+      productType:
+        (it as { productType?: string }).productType ||
+        resolveOfflineProductType(productId),
     });
   });
 
@@ -143,22 +150,27 @@ export function seedRestaurantCheckFromServer(input: {
 
 /**
  * Replace journal snapshot for a server check with fresh API lines (avoids stale void IDs).
+ * Keeps pending local ofl_line_* adds that have not synced yet.
  */
 export function refreshRestaurantCheckSeedFromServer(
   input: Parameters<typeof seedRestaurantCheckFromServer>[0],
 ): void {
   if (!input.orderId || !input.tableId) return;
-  const lines: EventLine[] = (input.items || []).map((it) => {
+  const serverLines: EventLine[] = (input.items || []).map((it) => {
     const qty = Number(it.quantity) || 0;
     const unitPrice = Number(it.unitPrice) || 0;
+    const productId = it.productId || `custom_${it.id}`;
     return toEventLine({
       lineId: it.id,
-      productId: it.productId || `custom_${it.id}`,
+      productId,
       productName: it.productName,
       quantity: qty,
       unitPrice,
       lineNotes: it.lineNotes,
       kitchenSentAt: it.kitchenSentAt,
+      productType:
+        (it as { productType?: string }).productType ||
+        resolveOfflineProductType(productId),
     });
   });
   const existing = deriveRestaurantCheckForTable(
@@ -171,12 +183,21 @@ export function refreshRestaurantCheckSeedFromServer(
     seedRestaurantCheckFromServer(input);
     return;
   }
+  // Preserve unsynced journal-only lines (ofl_line_*) until they sync.
+  const pendingLocal = existing.lines.filter(
+    (l) => !!l.lineId && l.lineId.startsWith('ofl_line_'),
+  );
+  const serverIds = new Set(serverLines.map((l) => l.lineId).filter(Boolean));
+  const merged = [
+    ...serverLines,
+    ...pendingLocal.filter((l) => l.lineId && !serverIds.has(l.lineId)),
+  ];
   appendSyncedEvent({
     eventType: 'ORDER_UPDATED',
     key: `seed_refresh_${input.orderId}_${Date.now()}`,
     orderId: input.orderId,
     offlineId: input.orderNumber || existing.offlineId,
-    lines,
+    lines: merged,
     ts: Date.now(),
     channel: input.channel || existing.channel || 'DINE_IN',
     tableId: input.tableId,
@@ -539,21 +560,153 @@ export function cancelRestaurantCheckOffline(
 }
 
 /**
- * Remove or reduce unsent (New) lines locally — no VOID ticket / no reason ceremony.
- * Kitchen-sent lines must use online void (VOID KOT).
+ * Close a journal-seeded server check after online pay/cancel so local KDS + floor clear.
+ * Uses SYNCED terminal events (will not re-post a second sale/cancel to the server).
+ */
+export function markRestaurantCheckSettledInJournal(
+  orderId: string,
+  kind: 'PAID' | 'CANCELLED',
+  opts?: { reason?: string },
+): boolean {
+  if (!orderId) return false;
+  const events = getAllEvents();
+  const syncState = getAllSyncState();
+  const open = deriveRestaurantOpenChecks(events, syncState).find((o) => o.orderId === orderId);
+  if (!open?.tableId) return false;
+
+  if (kind === 'PAID') {
+    appendSyncedEvent({
+      eventType: 'SALE_COMPLETED',
+      key: `settled_pay_${orderId}`,
+      orderId,
+      offlineId: open.offlineId || orderId,
+      lines: open.lines,
+      payments: [{ paymentMethod: 'CASH', amount: totalsFromLines(open.lines).totalAmount }],
+      subtotal: totalsFromLines(open.lines).subtotal,
+      discountAmount: 0,
+      taxAmount: totalsFromLines(open.lines).taxAmount,
+      totalAmount: totalsFromLines(open.lines).totalAmount,
+      stockDeductions: [],
+      ts: Date.now(),
+      customerId: open.customerId,
+      tableId: open.tableId,
+      channel: open.channel,
+      tableCode: open.tableCode,
+    });
+    publishLanKdsBoardChanged('SALE_COMPLETED');
+  } else {
+    appendSyncedEvent({
+      eventType: 'ORDER_CANCELLED',
+      key: `settled_cancel_${orderId}`,
+      orderId,
+      offlineId: open.offlineId || orderId,
+      reason: opts?.reason || 'Cancelled / voided (online)',
+      tableId: open.tableId,
+      tableCode: open.tableCode,
+      ts: Date.now(),
+    });
+    publishLanKdsBoardChanged('ORDER_CANCELLED');
+  }
+  return true;
+}
+
+/**
+ * On FOH open (online): drop journal ghosts for tables the server says are FREE.
+ * Keeps ofl_ord_* local-only checks. Fixes "all tables busy" after void/pay without journal close.
+ */
+export function reconcileRestaurantJournalWithServerTables(
+  serverTables: Array<{
+    id: string;
+    status: string;
+    currentOrderId?: string | null;
+  }>,
+): { closed: number; keptLocal: number } {
+  const byId = new Map(serverTables.map((t) => [t.id, t]));
+  const open = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState());
+  let closed = 0;
+  let keptLocal = 0;
+  for (const check of open) {
+    if (!check.tableId) continue;
+    if (isJournalLocalOrderId(check.orderId)) {
+      keptLocal += 1;
+      continue;
+    }
+    const server = byId.get(check.tableId);
+    // No server row, or server FREE, or pointer is a different order → stale seed.
+    const stale =
+      !server ||
+      server.status === 'FREE' ||
+      !server.currentOrderId ||
+      server.currentOrderId !== check.orderId;
+    if (!stale) continue;
+    if (markRestaurantCheckSettledInJournal(check.orderId, 'CANCELLED', {
+      reason: 'Reconciled — table free / check settled on server',
+    })) {
+      closed += 1;
+      const still = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState()).some(
+        (c) => c.tableId === check.tableId,
+      );
+      if (!still) paintRestaurantTableFreeOffline(check.tableId);
+    }
+  }
+  if (closed > 0) publishLanKdsBoardChanged('JOURNAL_RECONCILE');
+  return { closed, keptLocal };
+}
+
+/**
+ * Remove or reduce lines locally.
+ * - Unsent: quiet remove (no VOID ticket).
+ * - Kitchen-sent: append VOID KOT journal event then remove/reduce (never call server with ofl ids).
  * `quantityByLineId` voids/reduces only that many units (Toast/Samba −1).
  */
 export function removeRestaurantLinesOffline(
   order: DerivedOrder,
   lineIds: string[],
   quantityByLineId?: Record<string, number>,
+  opts?: { reason?: string; allowKitchenSent?: boolean },
 ): DerivedOrder {
   if (!order.tableId) throw new Error('Restaurant check missing table');
   const idSet = new Set(lineIds);
   const touching = order.lines.filter((l) => l.lineId && idSet.has(l.lineId));
   if (touching.length === 0) throw new Error('No matching lines to remove');
-  if (touching.some((l) => !!l.kitchenSentAt)) {
-    throw new Error('Kitchen-sent lines require online Void (VOID ticket)');
+  const hasKot = touching.some((l) => !!l.kitchenSentAt);
+  if (hasKot && !opts?.allowKitchenSent) {
+    throw new Error('Kitchen-sent lines require Void (VOID ticket)');
+  }
+
+  if (hasKot) {
+    const voidLines = touching
+      .filter((l) => l.lineId && l.kitchenSentAt)
+      .map((l) => {
+        const voidQty = quantityByLineId?.[l.lineId!] ?? l.quantity;
+        const qty = Math.min(l.quantity, Math.max(0, voidQty));
+        return {
+          lineId: l.lineId!,
+          productName: l.productName,
+          quantity: qty,
+          lineNotes: l.lineNotes ?? null,
+        };
+      })
+      .filter((l) => l.quantity > 0);
+    if (voidLines.length > 0) {
+      appendEvent({
+        eventType: 'RESTAURANT_KOT_FIRED',
+        key: generateEventKey(),
+        orderId: order.orderId,
+        kotOfflineId: newKotOfflineId(),
+        tableCode: order.tableCode,
+        tableName: order.tableName,
+        waiterName: order.waiterName,
+        station: 'KITCHEN',
+        orderChannel: order.channel,
+        guestName: order.guestName,
+        ticketKind: 'VOID',
+        voidReason: opts?.reason?.trim() || 'Voided from restaurant POS',
+        lines: voidLines,
+        ts: Date.now(),
+      });
+      publishLanKdsBoardChanged('KOT_VOIDED');
+    }
   }
 
   const nextLines: typeof order.lines = [];
@@ -577,7 +730,7 @@ export function removeRestaurantLinesOffline(
   }
 
   if (nextLines.length === 0) {
-    cancelRestaurantCheckOffline(order, 'Removed last unsent lines');
+    cancelRestaurantCheckOffline(order, opts?.reason || 'Removed last lines');
     const gone = deriveRestaurantCheckForTable(
       order.tableId,
       getAllEvents(),
@@ -692,6 +845,9 @@ export function mergeRestaurantChecksOffline(
 ): DerivedOrder {
   if (primary.orderId === secondary.orderId) throw new Error('Cannot merge a check into itself');
   if (!secondary.lines.length) throw new Error('Secondary check has no items');
+  if (!primary.tableId || primary.tableId !== secondary.tableId) {
+    throw new Error('Merge only works for tickets on the same table');
+  }
 
   appendEvent({
     eventType: 'RESTAURANT_CHECK_MERGED',

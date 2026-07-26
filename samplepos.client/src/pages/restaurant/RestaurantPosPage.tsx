@@ -35,8 +35,10 @@ import {
   assignRestaurantWaiterOffline,
   cancelRestaurantCheckOffline,
   fireRestaurantKotOffline,
+  markRestaurantCheckSettledInJournal,
   mergeRestaurantChecksOffline,
   payRestaurantCheckOffline,
+  reconcileRestaurantJournalWithServerTables,
   removeRestaurantLinesOffline,
   refreshRestaurantCheckSeedFromServer,
   shouldUseLocalRestaurantMutation,
@@ -47,6 +49,11 @@ import {
   totalsFromLines,
 } from '../../lib/restaurantOfflineOps';
 import { allocateVoidQuantity, isServerOrderItemId } from '../../lib/restaurantVoidQuantity';
+import {
+  appendQtyDigit,
+  clampOrderQty,
+  parsePendingOrderQty,
+} from '../../lib/restaurantPendingQty';
 import { publishLanKdsBoardChanged, subscribeLanKds } from '../../lib/restaurantLanKds';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import type { Customer } from '@shared/zod/customer';
@@ -60,6 +67,8 @@ import {
   markRestaurantBillRequestedOffline,
   clearRestaurantBillRequestedOffline,
   getRestaurantBillRequestedOffline,
+  isRestaurantOrderBillRequestedOffline,
+  paintRestaurantTableFreeOffline,
 } from '../../lib/restaurantOfflineCache';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
 import axios from 'axios';
@@ -190,29 +199,68 @@ const touchBtnGhost = `${touchBtn} border border-stone-300 bg-white text-stone-8
 const touchBtnDark = `${touchBtn} bg-stone-900 text-white active:bg-stone-800`;
 const touchBtnDanger = `${touchBtn} border border-red-300 text-red-700 bg-white active:bg-red-50`;
 const touchChip = `${TOUCH} min-h-11 px-4 py-2.5 rounded-xl text-sm font-semibold whitespace-nowrap`;
+/** Thick Samba-style category targets — finger-friendly on phone + rail. */
+const touchCat =
+  `${TOUCH} min-h-14 px-5 rounded-xl text-base font-bold whitespace-nowrap shrink-0`;
+const touchCatRail =
+  `${TOUCH} min-h-16 w-full px-3 text-left text-base font-bold border-b border-stone-200`;
 const touchField =
   'touch-manipulation min-h-12 w-full border border-stone-300 rounded-xl px-3 py-2.5 text-base bg-white';
 const touchTile = `${TOUCH} active:brightness-[0.97]`;
 
-function isServiceChannelTable(table: RestaurantTable | null | undefined): boolean {
-  if (!table) return false;
-  const code = table.code.toUpperCase();
-  return (
-    code === 'TA' ||
-    code === 'DL' ||
-    table.zone === 'SERVICE' ||
-    /take\s*away/i.test(table.name) ||
-    /delivery/i.test(table.name)
-  );
+function isServiceLaneCode(code: string | null | undefined): boolean {
+  const c = (code || '').toUpperCase();
+  return c === 'TA' || c === 'DL' || c === 'QK';
 }
 
+/** Virtual service lanes (TA/DL/QK) — not dining floor tables. */
+function isServiceChannelTable(table: RestaurantTable | null | undefined): boolean {
+  if (!table) return false;
+  if (isServiceLaneCode(table.code)) return true;
+  return (table.zone || '').toUpperCase() === 'SERVICE';
+}
+
+/** Must match server channelForTable — wrong channel blocks / mis-requires customer. */
 function channelHint(table: RestaurantTable | null | undefined): 'TAKEAWAY' | 'DELIVERY' | 'DINE_IN' {
   if (!table) return 'DINE_IN';
   const code = table.code.toUpperCase();
-  if (code === 'DL' || /delivery/i.test(table.name)) return 'DELIVERY';
-  if (code === 'TA' || table.zone === 'SERVICE' || /take\s*away/i.test(table.name)) return 'TAKEAWAY';
+  if (code === 'DL') return 'DELIVERY';
+  if (code === 'TA') return 'TAKEAWAY';
+  // QK is a service lane UI-wise but dine-in channel (walk-in, no guest required).
+  if (code === 'QK') return 'DINE_IN';
+  if (/delivery/i.test(table.name)) return 'DELIVERY';
+  if (table.zone === 'SERVICE' && /take\s*away/i.test(table.name)) return 'TAKEAWAY';
   return 'DINE_IN';
 }
+
+/** SambaPOS numberpad qty before product tap — see restaurantPendingQty.ts */
+
+type ServiceLaneKind = 'TAKEAWAY' | 'DELIVERY' | 'QUICK';
+
+type QtyPadSheetState =
+  | {
+      purpose: 'set-line-qty';
+      group: TicketLineGroup;
+      digits: string;
+    }
+  | {
+      purpose: 'void-qty';
+      itemIds: string[];
+      lines: OrderItem[];
+      productName: string;
+      kitchenSent: boolean;
+      max: number;
+      digits: string;
+    };
+
+const SERVICE_LANE_DEFS: Record<
+  ServiceLaneKind,
+  { code: string; name: string; zone: string; channel: 'TAKEAWAY' | 'DELIVERY' }
+> = {
+  TAKEAWAY: { code: 'TA', name: 'Takeaway', zone: 'SERVICE', channel: 'TAKEAWAY' },
+  DELIVERY: { code: 'DL', name: 'Delivery', zone: 'SERVICE', channel: 'DELIVERY' },
+  QUICK: { code: 'QK', name: 'Quick order', zone: 'SERVICE', channel: 'TAKEAWAY' },
+};
 
 function apiErr(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
@@ -234,10 +282,12 @@ function uiFromDerivedCheck(
   siblingChecks: [];
 } {
   const totals = totalsFromLines(derived.lines);
+  const tableId = (table as RestaurantTable).id;
+  const billed = isRestaurantOrderBillRequestedOffline(tableId, derived.orderId);
   return {
     table: {
       ...(table as RestaurantTable),
-      status: 'OCCUPIED',
+      status: billed ? 'BILLING' : 'OCCUPIED',
       currentOrderId: derived.orderId,
       orderNumber: derived.offlineId,
       orderTotal: String(totals.totalAmount),
@@ -279,6 +329,24 @@ function uiFromDerivedCheck(
     },
     siblingChecks: [],
   };
+}
+
+/**
+ * Line badges are kitchen state — not bill state.
+ * "New" was confusing next to "Billed" (guest check printed).
+ * Billed + unsent → "On bill" (on guest check, not fired to kitchen).
+ */
+function ticketLineStatus(kitchenSent: boolean, checkBilled: boolean): {
+  label: string;
+  className: string;
+} {
+  if (kitchenSent) {
+    return { label: 'KOT', className: 'text-emerald-700' };
+  }
+  if (checkBilled) {
+    return { label: 'On bill', className: 'text-rose-800' };
+  }
+  return { label: 'Unsent', className: 'text-amber-700' };
 }
 
 type CheckUiPayload = {
@@ -345,24 +413,30 @@ export default function RestaurantPosPage() {
     deliveryAddress: '',
     pickupLabel: '',
   });
-  /** Customers SSOT — takeaway/delivery must pick from existing customer list. */
+  /** Customers SSOT — search/add only; guest fields come from the selected customer. */
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedWaiterId, setSelectedWaiterId] = useState<string>('');
   const [myTablesOnly, setMyTablesOnly] = useState(false);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
-  const [opsMode, setOpsMode] = useState<null | 'transfer' | 'merge' | 'split'>(null);
+  const [opsMode, setOpsMode] = useState<null | 'transfer' | 'merge'>(null);
   const [opsTargetTableId, setOpsTargetTableId] = useState('');
   const [opsSecondaryOrderId, setOpsSecondaryOrderId] = useState('');
-  const [splitSameTable, setSplitSameTable] = useState(true);
   /**
    * Phones: menu is the only always-on view. Order / details / more open as
    * full-screen sheets when the user presses those buttons (not stacked).
    */
   const [mobileSheet, setMobileSheet] = useState<null | 'order' | 'details' | 'more'>(null);
-  /** SambaPOS-style: long-press / ⋯ opens line actions (void, ± qty) */
+  /** SambaPOS-style: ··· opens line actions (qty / void one line) */
   const [lineSheet, setLineSheet] = useState<TicketLineGroup | null>(null);
-  const linePressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** SambaPOS numberpad: type 50 then tap product once. Cleared after each add. */
+  const [pendingQtyDigits, setPendingQtyDigits] = useState('');
+  /** Phone: full dialer sheet for multi-digit qty (compact bar stays in the split). */
+  const [menuQtyPadOpen, setMenuQtyPadOpen] = useState(false);
+  /** Touch qty sheet — Set qty / void qty (never window.prompt). */
+  const [qtyPadSheet, setQtyPadSheet] = useState<QtyPadSheetState | null>(null);
+  /** Survive selectedTableId effect when opening a service lane on phone. */
+  const pendingMobileSheetRef = useRef<null | 'details'>(null);
   /** Bump to re-read journal-derived offline checks */
   const [journalTick, setJournalTick] = useState(0);
   const bumpJournal = () => setJournalTick((n) => n + 1);
@@ -388,10 +462,12 @@ export default function RestaurantPosPage() {
     });
   }, [restaurantEnabled]);
 
-  // Phase 5.3 — crash restore: announce local open checks after reload
+  // Phase 5.3 — crash restore: only announce true local-only (ofl_ord_*) checks.
   useEffect(() => {
     if (!restaurantEnabled) return;
-    const open = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState());
+    const open = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState()).filter((c) =>
+      isJournalLocalOrderId(c.orderId),
+    );
     if (open.length > 0) {
       toast.success(`Restored ${open.length} open check(s) from local journal`, {
         id: 'restaurant-journal-restore',
@@ -415,6 +491,20 @@ export default function RestaurantPosPage() {
     enabled: !!restaurantEnabled,
     refetchInterval: isOnline ? 15_000 : false,
   });
+
+  // Reconcile journal ghosts against live server floor (FREE tables must not look busy).
+  useEffect(() => {
+    if (!restaurantEnabled || !isOnline || !tablesQuery.data?.length) return;
+    const { closed } = reconcileRestaurantJournalWithServerTables(tablesQuery.data);
+    if (closed > 0) {
+      invalidateJournalMemoryCache();
+      bumpJournal();
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'kitchen'] });
+      toast.success(`Cleared ${closed} settled check(s) from floor / kitchen`, {
+        id: 'restaurant-journal-reconcile',
+      });
+    }
+  }, [restaurantEnabled, isOnline, tablesQuery.data, queryClient]);
 
   const waitersQuery = useQuery({
     queryKey: ['restaurant', 'waiters', isOnline],
@@ -557,37 +647,21 @@ export default function RestaurantPosPage() {
       setMobileSheet(null);
       setOpsMode(null);
       setSelectedLineIds([]);
-    } else {
-      setMobileSheet(null);
+      setPendingQtyDigits('');
+      setMenuQtyPadOpen(false);
+      setQtyPadSheet(null);
+      pendingMobileSheetRef.current = null;
+      return;
     }
+    setPendingQtyDigits('');
+    setMenuQtyPadOpen(false);
+    const pending = pendingMobileSheetRef.current;
+    pendingMobileSheetRef.current = null;
+    // Phone only: TA/DL open customer sheet; menu stays usable after Done (never cover menu with Order).
+    const phone =
+      typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches;
+    setMobileSheet(phone && pending === 'details' ? 'details' : null);
   }, [selectedTableId]);
-
-  const openMobileOrder = () => setMobileSheet('order');
-  const closeMobileSheets = () => {
-    setMobileSheet(null);
-    setOpsMode(null);
-    setSelectedLineIds([]);
-    setLineSheet(null);
-    if (linePressTimer.current) {
-      clearTimeout(linePressTimer.current);
-      linePressTimer.current = null;
-    }
-  };
-
-  const clearLinePressTimer = () => {
-    if (linePressTimer.current) {
-      clearTimeout(linePressTimer.current);
-      linePressTimer.current = null;
-    }
-  };
-
-  const startLineLongPress = (group: TicketLineGroup) => {
-    clearLinePressTimer();
-    linePressTimer.current = setTimeout(() => {
-      setLineSheet(group);
-      linePressTimer.current = null;
-    }, 420);
-  };
 
   // Hardware keyboard: type anywhere on the order screen → focus search (Toast / Square / SambaPOS).
   useEffect(() => {
@@ -600,8 +674,20 @@ export default function RestaurantPosPage() {
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === 'Escape') {
+        const q = searchInputRef.current?.value?.trim() || '';
+        if (q) {
+          setMenuSearch('');
+          searchInputRef.current?.blur();
+          return;
+        }
+        // Leave table without ordering (or leave open check on floor) — back to main.
+        setSelectedTableId(null);
         setMenuSearch('');
-        searchInputRef.current?.blur();
+        setSelectedCategoryId(null);
+        setMobileSheet(null);
+        setOpsMode(null);
+        setSelectedLineIds([]);
+        setBusy(false);
         return;
       }
       if (e.key === 'F3') {
@@ -640,72 +726,170 @@ export default function RestaurantPosPage() {
     shouldUseLocalRestaurantMutation(isOnline, orderId);
 
   const addItemMutation = useMutation({
-    mutationFn: async (product: MenuProduct) => {
-      if (!selectedTableId) throw new Error('Select a table first');
+    mutationFn: async (input: MenuProduct | { product: MenuProduct; quantity?: number }) => {
+      const product = 'product' in input ? input.product : input;
+      const quantity =
+        'product' in input && input.quantity != null
+          ? Math.max(1, Math.min(9999, Math.floor(input.quantity)))
+          : parsePendingOrderQty(pendingQtyDigits);
+
+      if (!selectedTableId) throw new Error('Select a table or service lane first');
       if (!selectedWaiterId) throw new Error('Select a waiter first');
       const table =
         tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
       const channel = channelHint(table);
+      const isQuickLane = (table?.code || '').toUpperCase() === 'QK';
       const opening = !order;
-      if (opening && (channel === 'TAKEAWAY' || channel === 'DELIVERY')) {
-        if (!selectedCustomer?.id) {
+      if (opening && (channel === 'TAKEAWAY' || channel === 'DELIVERY') && !isQuickLane) {
+        const hasCustomer =
+          !!selectedCustomer?.id || !!guestDraft.guestName.trim();
+        if (!hasCustomer) {
+          const phone =
+            typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches;
+          if (phone) setMobileSheet('details');
           throw new Error(
             channel === 'DELIVERY'
-              ? 'Select a customer for delivery (customers SSOT)'
-              : 'Select a customer for takeaway (customers SSOT)',
+              ? 'Select a customer for delivery'
+              : 'Select a customer for takeaway',
           );
         }
-        if (channel === 'DELIVERY' && !guestDraft.deliveryAddress.trim() && !selectedCustomer.address) {
-          throw new Error('Enter delivery address');
+        const deliveryAddress =
+          selectedCustomer?.address?.trim() || guestDraft.deliveryAddress.trim() || '';
+        if (channel === 'DELIVERY' && !deliveryAddress) {
+          if (
+            typeof window !== 'undefined' &&
+            !window.matchMedia('(min-width: 1024px)').matches
+          ) {
+            setMobileSheet('details');
+          }
+          throw new Error(
+            'Customer needs a delivery address — use + Add and include the address',
+          );
         }
       }
 
       if (!table) throw new Error('Table not in offline cache — connect once to sync floor/menu');
       const waiter = waiters.find((w) => w.id === selectedWaiterId);
       const guestName =
-        guestDraft.guestName.trim() || selectedCustomer?.name?.trim() || null;
+        selectedCustomer?.name?.trim() ||
+        guestDraft.guestName.trim() ||
+        (isQuickLane ? 'Walk-in' : null);
       const guestPhone =
-        guestDraft.guestPhone.trim() || selectedCustomer?.phone?.trim() || null;
+        selectedCustomer?.phone?.trim() || guestDraft.guestPhone.trim() || null;
       const deliveryAddress =
-        guestDraft.deliveryAddress.trim() || selectedCustomer?.address?.trim() || null;
-      const derived = appendRestaurantItemOffline({
+        selectedCustomer?.address?.trim() || guestDraft.deliveryAddress.trim() || null;
+
+      if (preferLocalRestaurantWrites(order?.id)) {
+        const derived = appendRestaurantItemOffline({
+          tableId: selectedTableId,
+          tableCode: table.code,
+          tableName: table.name,
+          channel,
+          customerId: selectedCustomer?.id || null,
+          waiterId: selectedWaiterId,
+          waiterName: waiter?.fullName,
+          guestName,
+          guestPhone,
+          deliveryAddress,
+          pickupLabel: guestDraft.pickupLabel.trim() || null,
+          productId: product.id,
+          productName: product.name,
+          unitPrice: Number(product.sellingPrice) || 0,
+          quantity,
+          productType: product.productType,
+        });
+        if (selectedTableId) {
+          clearRestaurantBillRequestedOffline(selectedTableId, derived.orderId);
+        }
+        paintJournalCheck(selectedTableId, derived.orderId);
+        if (derived.orderId) setActiveOrderId(derived.orderId);
+        return { offline: true as const, orderId: derived.orderId, quantity };
+      }
+
+      await api.restaurant.addItems({
         tableId: selectedTableId,
-        tableCode: table.code,
-        tableName: table.name,
-        channel,
-        customerId: selectedCustomer?.id || null,
         waiterId: selectedWaiterId,
-        waiterName: waiter?.fullName,
+        customerId: selectedCustomer?.id || null,
         guestName,
         guestPhone,
         deliveryAddress,
         pickupLabel: guestDraft.pickupLabel.trim() || null,
-        productId: product.id,
-        productName: product.name,
-        unitPrice: Number(product.sellingPrice) || 0,
-        quantity: 1,
-        productType: product.productType,
+        items: [{ productId: product.id, quantity }],
       });
-      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
-      paintJournalCheck(selectedTableId, derived.orderId);
-      if (derived.orderId) setActiveOrderId(derived.orderId);
-      return { offline: true as const, orderId: derived.orderId };
+      if (selectedTableId) {
+        clearRestaurantBillRequestedOffline(selectedTableId, order?.id ?? undefined);
+      }
+      return { offline: false as const, quantity };
     },
-    onSuccess: () => {
-      // Already painted from journal — do not invalidate (that reintroduces lag).
+    onSuccess: (data) => {
+      setPendingQtyDigits('');
+      setMenuQtyPadOpen(false);
+      if (data && typeof data === 'object' && 'offline' in data && data.offline) return;
+      invalidateCheck();
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
     },
     onError: (err: unknown) => toast.error(apiErr(err, 'Failed to add item')),
   });
 
+  const openServiceLane = async (kind: ServiceLaneKind) => {
+    const def = SERVICE_LANE_DEFS[kind];
+    // Phone: TA/DL open customer sheet first; Quick goes straight to menu (add items).
+    // Never open Order sheet on lane select — it covers the menu and blocks adds.
+    const sheetAfterSelect: 'details' | null = kind === 'QUICK' ? null : 'details';
+    const existing = (tablesQuery.data || getCachedRestaurantTables()).find(
+      (t) => t.code.toUpperCase() === def.code,
+    );
+    if (existing) {
+      pendingMobileSheetRef.current = sheetAfterSelect;
+      setSelectedTableId(existing.id);
+      setActiveOrderId(null);
+      toast.success(
+        kind === 'QUICK'
+          ? `${def.name} — add items`
+          : `${def.name} — select customer, then add items`,
+      );
+      return;
+    }
+    if (!canManage) {
+      toast.error(
+        `${def.name} lane missing. Ask a manager to create table ${def.code} (zone SERVICE), or enable once online.`,
+      );
+      return;
+    }
+    if (!isOnline) {
+      toast.error(`Connect once to create the ${def.name} lane (${def.code})`);
+      return;
+    }
+    try {
+      const res = await api.restaurant.createTable({
+        code: def.code,
+        name: def.name,
+        zone: def.zone,
+        seats: 0,
+      });
+      const created = res.data.data as RestaurantTable;
+      await queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+      const refreshed = await api.restaurant.listTables();
+      const tables = (refreshed.data.data || []) as RestaurantTable[];
+      const { cacheRestaurantTables } = await import('../../lib/restaurantOfflineCache');
+      cacheRestaurantTables(tables);
+      const opened = tables.find((t) => t.code.toUpperCase() === def.code) || created;
+      pendingMobileSheetRef.current = sheetAfterSelect;
+      setSelectedTableId(opened.id);
+      setActiveOrderId(null);
+      toast.success(`${def.name} lane ready`);
+    } catch (err) {
+      toast.error(apiErr(err, `Failed to open ${def.name}`));
+    }
+  };
+
   const saveGuestMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (customerOverride?: Customer | null) => {
       if (!order) throw new Error('No open check');
-      const guestName =
-        guestDraft.guestName.trim() || selectedCustomer?.name?.trim() || null;
-      const guestPhone =
-        guestDraft.guestPhone.trim() || selectedCustomer?.phone?.trim() || null;
-      const deliveryAddress =
-        guestDraft.deliveryAddress.trim() || selectedCustomer?.address?.trim() || null;
+      const c = customerOverride === undefined ? selectedCustomer : customerOverride;
+      const guestName = c?.name?.trim() || guestDraft.guestName.trim() || null;
+      const guestPhone = c?.phone?.trim() || guestDraft.guestPhone.trim() || null;
+      const deliveryAddress = c?.address?.trim() || guestDraft.deliveryAddress.trim() || null;
       const pickupLabel = guestDraft.pickupLabel.trim() || null;
 
       if (shouldUseLocalRestaurantMutation(isOnline, order.id)) {
@@ -716,7 +900,7 @@ export default function RestaurantPosPage() {
           : null;
         if (!derived) throw new Error('Local check not found in journal');
         const next = updateRestaurantGuestOffline(derived, {
-          customerId: selectedCustomer?.id || null,
+          customerId: c?.id || null,
           guestName,
           guestPhone,
           deliveryAddress,
@@ -735,12 +919,32 @@ export default function RestaurantPosPage() {
       return res.data.data;
     },
     onSuccess: (data) => {
-      toast.success('Customer / guest saved');
+      toast.success('Customer saved on check');
       if (data && typeof data === 'object' && 'offline' in data) return;
       invalidateCheck();
     },
-    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to save guest')),
+    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to save customer')),
   });
+
+  /** Search/add customer → stamp name/phone/address on the check (no duplicate guest form). */
+  const handleSelectServiceCustomer = (c: Customer | null) => {
+    setSelectedCustomer(c);
+    if (c) {
+      setGuestDraft({
+        guestName: c.name || '',
+        guestPhone: c.phone || '',
+        deliveryAddress: c.address || '',
+        pickupLabel: '',
+      });
+      if (order) saveGuestMutation.mutate(c);
+      // Phone: close sheet so menu is free for adding items.
+      const phone =
+        typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches;
+      if (phone) setMobileSheet(null);
+    } else {
+      setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
+    }
+  };
 
   const assignWaiterMutation = useMutation({
     mutationFn: async (waiterId: string) => {
@@ -783,7 +987,20 @@ export default function RestaurantPosPage() {
   const orderLines = useMemo(() => order?.items ?? [], [order]);
   const ticketGroups = useMemo(() => consolidateTicketLines(orderLines), [orderLines]);
   const serviceChannel = isServiceChannelTable(selectedTable);
+  const isQuickLane = (selectedTable?.code || '').toUpperCase() === 'QK';
   const channel = meta?.orderChannel || channelHint(selectedTable);
+  /**
+   * Guest check printed for the *selected* ticket only.
+   * Multi-ticket tables must not treat table BILLING as “all checks billed”.
+   */
+  const isCheckBilled = useMemo(() => {
+    if (!selectedTableId || !order?.id) return false;
+    if (isRestaurantOrderBillRequestedOffline(selectedTableId, order.id)) return true;
+    const hasOtherOpenTickets = siblingChecks.some((s) => s.id !== order.id);
+    // Sole open ticket: server table BILLING still means this check.
+    if (!hasOtherOpenTickets && selectedTable?.status === 'BILLING') return true;
+    return false;
+  }, [selectedTable?.status, selectedTableId, order?.id, journalTick, siblingChecks]);
 
   const waiters = waitersQuery.data || [];
   const floorOccupancy = useMemo(
@@ -793,14 +1010,25 @@ export default function RestaurantPosPage() {
 
   const floorTables = useMemo(() => {
     const billRequested = getRestaurantBillRequestedOffline();
+    const cachedById = new Map(getCachedRestaurantTables().map((t) => [t.id, t]));
     const all = (tablesQuery.data || []).map((t) => {
       const check = floorOccupancy.get(t.id);
       if (check) {
-        // Journal open check wins (offline + crash restore overlay)
+        const localOnly = isJournalLocalOrderId(check.orderId);
+        // Online + server FREE: never paint busy from a stale journal seed.
+        if (isOnline && !localOnly && t.status === 'FREE') {
+          return {
+            ...t,
+            status: 'FREE' as const,
+            currentOrderId: null,
+            orderNumber: null,
+            orderTotal: null,
+            guestName: null,
+          };
+        }
         const totals = totalsFromLines(check.lines);
         const billed =
-          billRequested[t.id] === check.orderId ||
-          (!isOnline && billRequested[t.id] != null);
+          !!check.orderId && (billRequested[t.id] || []).includes(check.orderId);
         return {
           ...t,
           status: (billed ? 'BILLING' : 'OCCUPIED') as RestaurantTable['status'],
@@ -813,8 +1041,18 @@ export default function RestaurantPosPage() {
           orderChannel: check.channel,
         };
       }
-      // Offline: keep last-known occupancy from cache (other device / pre-drop).
-      // Never force FREE — that caused double-booking and "lost" tables.
+      // No open journal check: prefer cached FREE after local pay/cancel/void.
+      const cached = cachedById.get(t.id);
+      if (cached?.status === 'FREE' || t.status === 'FREE') {
+        return {
+          ...t,
+          status: 'FREE' as const,
+          currentOrderId: null,
+          orderNumber: null,
+          orderTotal: null,
+          guestName: null,
+        };
+      }
       return t;
     });
     if (!myTablesOnly || !user?.id) return all;
@@ -829,37 +1067,36 @@ export default function RestaurantPosPage() {
     });
   }, [tablesQuery.data, selectedTableId, floorOccupancy]);
 
-  const mergeCandidates = useMemo(() => {
-    const out: Array<{ orderId: string; label: string }> = [];
-    for (const s of siblingChecks) {
-      if (order && s.id === order.id) continue;
-      out.push({
-        orderId: s.id,
-        label: `${s.orderNumber} · ${formatCurrency(Number(s.totalAmount))} (same table)`,
+  /** Samba: every open ticket on this table (active + siblings) for switching. */
+  const ticketTabs = useMemo(() => {
+    const tabs: Array<{ id: string; orderNumber: string; totalAmount: string }> = [];
+    if (order) {
+      tabs.push({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        totalAmount: order.totalAmount,
       });
     }
-    // Other tables: prefer journal occupancy when present
-    for (const t of tablesQuery.data || []) {
-      if (t.id === selectedTableId) continue;
-      const local = floorOccupancy.get(t.id);
-      if (local) {
-        if (order && local.orderId === order.id) continue;
-        const tot = totalsFromLines(local.lines);
-        out.push({
-          orderId: local.orderId,
-          label: `${t.code} ${t.name} · ${local.offlineId} · ${formatCurrency(tot.totalAmount)}`,
-        });
-        continue;
-      }
-      if (isOnline && t.currentOrderId && t.status !== 'FREE') {
-        out.push({
-          orderId: t.currentOrderId,
-          label: `${t.code} ${t.name}${t.orderNumber ? ` · ${t.orderNumber}` : ''}`,
-        });
-      }
+    for (const s of siblingChecks) {
+      if (tabs.some((t) => t.id === s.id)) continue;
+      tabs.push({
+        id: s.id,
+        orderNumber: s.orderNumber,
+        totalAmount: s.totalAmount,
+      });
     }
-    return out;
-  }, [siblingChecks, order, tablesQuery.data, selectedTableId, floorOccupancy, isOnline]);
+    return tabs;
+  }, [order, siblingChecks]);
+
+  /** Samba: merge only other tickets on the same table (never cross-table). */
+  const mergeCandidates = useMemo(() => {
+    return ticketTabs
+      .filter((t) => !order || t.id !== order.id)
+      .map((t) => ({
+        orderId: t.id,
+        label: `${t.orderNumber} · ${formatCurrency(Number(t.totalAmount))}`,
+      }));
+  }, [ticketTabs, order]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -882,17 +1119,33 @@ export default function RestaurantPosPage() {
       setOpsMode(null);
       return;
     }
-    if (meta) {
-      setGuestDraft({
-        guestName: meta.guestName || '',
-        guestPhone: meta.guestPhone || '',
-        deliveryAddress: meta.deliveryAddress || '',
-        pickupLabel: meta.pickupLabel || '',
-      });
-      if (meta.waiterId) setSelectedWaiterId(meta.waiterId);
-    }
+    // Fresh table selection: clear stale customer from a previous ticket.
+    setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
+    setSelectedCustomer(null);
+    setActiveOrderId(null);
+    setSelectedLineIds([]);
+    setOpsMode(null);
+  }, [selectedTableId]);
+
+  useEffect(() => {
+    if (!selectedTableId || !meta) return;
+    setGuestDraft({
+      guestName: meta.guestName || '',
+      guestPhone: meta.guestPhone || '',
+      deliveryAddress: meta.deliveryAddress || '',
+      pickupLabel: meta.pickupLabel || '',
+    });
+    if (meta.waiterId) setSelectedWaiterId(meta.waiterId);
     if (order?.id) setActiveOrderId(order.id);
-  }, [selectedTableId, meta?.guestName, meta?.guestPhone, meta?.deliveryAddress, meta?.pickupLabel, meta?.waiterId, order?.id]);
+  }, [
+    selectedTableId,
+    meta?.guestName,
+    meta?.guestPhone,
+    meta?.deliveryAddress,
+    meta?.pickupLabel,
+    meta?.waiterId,
+    order?.id,
+  ]);
 
   useEffect(() => {
     setSelectedLineIds([]);
@@ -949,6 +1202,142 @@ export default function RestaurantPosPage() {
     setBusy(false);
   };
 
+  /** After pay/cancel/void: close journal seed, free floor cache, refresh KDS/tables. */
+  const settleCheckOnFloor = (
+    orderId: string,
+    tableId: string | null,
+    kind: 'PAID' | 'CANCELLED',
+    opts?: { reason?: string },
+  ) => {
+    markRestaurantCheckSettledInJournal(orderId, kind, opts);
+    if (tableId) {
+      clearRestaurantBillRequestedOffline(tableId, orderId);
+      // Only free the floor tile when no other open journal check remains on that table.
+      const stillOpen = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState()).some(
+        (c) => c.tableId === tableId && c.orderId !== orderId,
+      );
+      if (!stillOpen) {
+        paintRestaurantTableFreeOffline(tableId);
+        queryClient.setQueryData(
+          ['restaurant', 'tables', isOnline],
+          (prev: RestaurantTable[] | undefined) =>
+            (prev || []).map((t) =>
+              t.id === tableId
+                ? {
+                    ...t,
+                    status: 'FREE' as const,
+                    currentOrderId: null,
+                    orderNumber: null,
+                    orderTotal: null,
+                    guestName: null,
+                  }
+                : t,
+            ),
+        );
+      }
+    }
+    bumpJournal();
+    void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+    void queryClient.invalidateQueries({ queryKey: ['restaurant', 'kitchen'] });
+    void queryClient.invalidateQueries({ queryKey: ['restaurant', 'check'] });
+  };
+
+  /**
+   * Fire unsent lines to kitchen + best-effort KOT print.
+   * Does not return to floor (caller decides). Returns how many tickets were produced.
+   */
+  const fireUnsentKotTickets = async (): Promise<{ kotCount: number; printFailures: number }> => {
+    if (!order) return { kotCount: 0, printFailures: 0 };
+    const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
+    if (unsentCount === 0) return { kotCount: 0, printFailures: 0 };
+
+    const useLocalKot = shouldUseLocalRestaurantMutation(isOnline, order.id);
+    if (useLocalKot) {
+      const events = getAllEvents();
+      const syncState = getAllSyncState();
+      const derived = selectedTableId
+        ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+        : null;
+      if (!derived) throw new Error('Offline check not found');
+      const { kotOfflineId, lines } = fireRestaurantKotOffline(derived);
+      paintJournalCheck(selectedTableId, derived.orderId);
+
+      let printFailures = 0;
+      try {
+        await printKitchenTicket({
+          kotNumber: kotOfflineId,
+          station: 'KITCHEN',
+          tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
+          waiterName: derived.waiterName || null,
+          firedAt: new Date().toLocaleString(),
+          orderChannel: derived.channel,
+          guestName: derived.guestName,
+          guestPhone: derived.guestPhone,
+          deliveryAddress: derived.deliveryAddress,
+          pickupLabel: derived.pickupLabel,
+          items: lines.map((it) => ({
+            productName: it.productName,
+            quantity: it.quantity,
+            lineNotes: it.lineNotes ?? null,
+          })),
+        });
+      } catch {
+        printFailures = 1;
+      }
+      publishLanKdsBoardChanged('KOT_FIRED_OFFLINE');
+      return { kotCount: 1, printFailures };
+    }
+
+    const res = await api.restaurant.sendKot(order.id);
+    const kots = (res.data.data || []) as Array<{
+      kotNumber: string;
+      station: string;
+      printerName?: string | null;
+      tableCode: string | null;
+      tableName: string | null;
+      waiterName: string | null;
+      firedAt: string;
+      orderChannel?: string | null;
+      guestName?: string | null;
+      guestPhone?: string | null;
+      deliveryAddress?: string | null;
+      pickupLabel?: string | null;
+      items: Array<{ productName: string; quantity: string; lineNotes: string | null }>;
+    }>;
+
+    if (kots.length === 0) return { kotCount: 0, printFailures: 0 };
+
+    let printFailures = 0;
+    for (const kot of kots) {
+      try {
+        await printKitchenTicket({
+          kotNumber: kot.kotNumber,
+          station: kot.station,
+          printerName: kot.printerName,
+          tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
+          waiterName: kot.waiterName,
+          firedAt: new Date(kot.firedAt).toLocaleString(),
+          orderChannel: meta?.orderChannel || kot.orderChannel,
+          guestName: meta?.guestName || kot.guestName,
+          guestPhone: meta?.guestPhone || kot.guestPhone,
+          deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
+          pickupLabel: meta?.pickupLabel || kot.pickupLabel,
+          items: kot.items.map((it) => ({
+            productName: it.productName,
+            quantity: Number(it.quantity),
+            lineNotes: it.lineNotes,
+          })),
+        });
+      } catch {
+        printFailures += 1;
+      }
+    }
+
+    publishLanKdsBoardChanged('KOT_FIRED_ONLINE');
+    invalidateCheck();
+    return { kotCount: kots.length, printFailures };
+  };
+
   /**
    * Expert POS rule: kitchen commit is SSOT; print is best-effort.
    * After KOT (including no new items), always return to the floor — never leave
@@ -959,125 +1348,30 @@ export default function RestaurantPosPage() {
     setBusy(true);
     try {
       const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
-
-      // Journal-local checks are not on the server — always fire KOT offline-first.
-      const useLocalKot = shouldUseLocalRestaurantMutation(isOnline, order.id);
-      if (useLocalKot) {
-        if (unsentCount === 0) {
-          toast.success('Nothing new for kitchen — back to tables');
-          returnToFloor();
-          return;
-        }
-        const events = getAllEvents();
-        const syncState = getAllSyncState();
-        const derived = selectedTableId
-          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
-          : null;
-        if (!derived) throw new Error('Offline check not found');
-        const { kotOfflineId, lines } = fireRestaurantKotOffline(derived);
-        paintJournalCheck(selectedTableId, derived.orderId);
-
-        let printOk = true;
-        try {
-          await printKitchenTicket({
-            kotNumber: kotOfflineId,
-            station: 'KITCHEN',
-            tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
-            waiterName: derived.waiterName || null,
-            firedAt: new Date().toLocaleString(),
-            orderChannel: derived.channel,
-            guestName: derived.guestName,
-            guestPhone: derived.guestPhone,
-            deliveryAddress: derived.deliveryAddress,
-            pickupLabel: derived.pickupLabel,
-            items: lines.map((it) => ({
-              productName: it.productName,
-              quantity: it.quantity,
-              lineNotes: it.lineNotes ?? null,
-            })),
-          });
-        } catch {
-          printOk = false;
-        }
-
-        toast.success(
-          printOk
-            ? isOnline
-              ? 'KOT sent (local — will sync)'
-              : 'KOT sent (offline — will sync)'
-            : 'KOT sent to kitchen — printer unavailable; ticket is on local KDS',
-        );
-        returnToFloor();
-        return;
-      }
-
       if (unsentCount === 0) {
         toast.success('Nothing new for kitchen — back to tables');
         returnToFloor();
         return;
       }
 
-      const res = await api.restaurant.sendKot(order.id);
-      const kots = (res.data.data || []) as Array<{
-        kotNumber: string;
-        station: string;
-        printerName?: string | null;
-        tableCode: string | null;
-        tableName: string | null;
-        waiterName: string | null;
-        firedAt: string;
-        orderChannel?: string | null;
-        guestName?: string | null;
-        guestPhone?: string | null;
-        deliveryAddress?: string | null;
-        pickupLabel?: string | null;
-        items: Array<{ productName: string; quantity: string; lineNotes: string | null }>;
-      }>;
-
-      if (kots.length === 0) {
+      const { kotCount, printFailures } = await fireUnsentKotTickets();
+      if (kotCount === 0) {
         toast.success('Nothing new for kitchen — back to tables');
         returnToFloor();
         return;
       }
 
-      // Kitchen rows are committed — print must not undo success or block floor return.
-      let printFailures = 0;
-      for (const kot of kots) {
-        try {
-          await printKitchenTicket({
-            kotNumber: kot.kotNumber,
-            station: kot.station,
-            printerName: kot.printerName,
-            tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
-            waiterName: kot.waiterName,
-            firedAt: new Date(kot.firedAt).toLocaleString(),
-            orderChannel: meta?.orderChannel || kot.orderChannel,
-            guestName: meta?.guestName || kot.guestName,
-            guestPhone: meta?.guestPhone || kot.guestPhone,
-            deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
-            pickupLabel: meta?.pickupLabel || kot.pickupLabel,
-            items: kot.items.map((it) => ({
-              productName: it.productName,
-              quantity: Number(it.quantity),
-              lineNotes: it.lineNotes,
-            })),
-          });
-        } catch {
-          printFailures += 1;
-        }
-      }
-
-      publishLanKdsBoardChanged('KOT_FIRED_ONLINE');
-      invalidateCheck();
-
       if (printFailures === 0) {
         toast.success(
-          `Sent ${kots.length} KOT ticket(s)` +
-            (kots.length > 1 ? ` → ${kots.map((k) => k.station).join(', ')}` : ''),
+          shouldUseLocalRestaurantMutation(isOnline, order.id)
+            ? isOnline
+              ? 'KOT sent (local — will sync)'
+              : 'KOT sent (offline — will sync)'
+            : `Sent ${kotCount} KOT ticket(s)`,
         );
       } else {
         toast.success(
-          `KOT sent to kitchen (${kots.length}) — ${printFailures} print(s) failed; use KDS / reprint`,
+          `KOT sent to kitchen (${kotCount}) — ${printFailures} print(s) failed; use KDS / reprint`,
           { duration: 5000 },
         );
       }
@@ -1089,10 +1383,8 @@ export default function RestaurantPosPage() {
   };
 
   /**
-   * SambaPOS Print Bill rule:
-   * 1) Mark table BILLING (Bill Requested) — primary outcome
-   * 2) Print guest check best-effort
-   * 3) Close ticket UI → return to floor (order stays open until Pay)
+   * Bill = send any unsent KOT first, then mark this *selected* check billed + print.
+   * Multi-ticket tables: only the active ticket is billed; stay on table if siblings remain.
    */
   const handleBill = async () => {
     if (!order) return;
@@ -1100,52 +1392,112 @@ export default function RestaurantPosPage() {
       toast.error('Cannot bill an empty check');
       return;
     }
+    const billedOrderId = order.id;
+    const billedOrderNumber = order.orderNumber;
+    const remainingTickets = ticketTabs.filter((t) => t.id !== billedOrderId);
     setBusy(true);
     try {
+      const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
+      let kotFired = 0;
+      let kotPrintFailures = 0;
+      if (unsentCount > 0) {
+        const kotResult = await fireUnsentKotTickets();
+        kotFired = kotResult.kotCount;
+        kotPrintFailures = kotResult.printFailures;
+      }
+
+      // Refresh line totals for bill print after KOT (journal may have updated).
+      const events = getAllEvents();
+      const syncState = getAllSyncState();
+      const derivedAfterKot =
+        selectedTableId && shouldUseLocalRestaurantMutation(isOnline, order.id)
+          ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+          : null;
+      const billLines = derivedAfterKot
+        ? derivedAfterKot.lines.map((it) => ({
+            productName: it.productName,
+            quantity: Number(it.quantity),
+            unitPrice: Number(it.unitPrice),
+            lineTotal: Number(it.subtotal),
+          }))
+        : orderLines.map((it) => ({
+            productName: it.productName,
+            quantity: Number(it.quantity),
+            unitPrice: Number(it.unitPrice),
+            lineTotal: Number(it.lineTotal),
+          }));
+      const billTotals = derivedAfterKot
+        ? totalsFromLines(derivedAfterKot.lines)
+        : {
+            subtotal: Number(order.subtotal),
+            discountAmount: Number(order.discountAmount),
+            taxAmount: Number(order.taxAmount),
+            totalAmount: Number(order.totalAmount),
+          };
+
       const billPayload = {
-        orderNumber: order.orderNumber,
+        orderNumber: derivedAfterKot?.offlineId || order.orderNumber,
         tableLabel: meta?.tableName || meta?.tableCode || selectedTable?.name || 'Table',
-        waiterName: meta?.waiterName || null,
+        waiterName: meta?.waiterName || derivedAfterKot?.waiterName || null,
         currencySymbol: config.currency?.symbol,
-        orderChannel: meta?.orderChannel,
-        guestName: meta?.guestName,
-        guestPhone: meta?.guestPhone,
-        deliveryAddress: meta?.deliveryAddress,
-        pickupLabel: meta?.pickupLabel,
-        items: orderLines.map((it) => ({
-          productName: it.productName,
-          quantity: Number(it.quantity),
-          unitPrice: Number(it.unitPrice),
-          lineTotal: Number(it.lineTotal),
-        })),
-        subtotal: Number(order.subtotal),
-        discountAmount: Number(order.discountAmount),
-        taxAmount: Number(order.taxAmount),
+        orderChannel: meta?.orderChannel || derivedAfterKot?.channel,
+        guestName: meta?.guestName || derivedAfterKot?.guestName,
+        guestPhone: meta?.guestPhone || derivedAfterKot?.guestPhone,
+        deliveryAddress: meta?.deliveryAddress || derivedAfterKot?.deliveryAddress,
+        pickupLabel: meta?.pickupLabel || derivedAfterKot?.pickupLabel,
+        items: billLines,
+        subtotal: Number(billTotals.subtotal),
+        discountAmount: Number(
+          'discountAmount' in billTotals ? billTotals.discountAmount : order.discountAmount,
+        ),
+        taxAmount: Number(billTotals.taxAmount),
         taxName: 'VAT',
-        totalAmount: Number(order.totalAmount),
+        totalAmount: Number(billTotals.totalAmount),
+      };
+
+      const kotPart =
+        kotFired > 0
+          ? kotPrintFailures === 0
+            ? 'KOT sent · '
+            : 'KOT sent (print issue) · '
+          : '';
+      const billLabel =
+        remainingTickets.length > 0
+          ? `Bill printed for ${billedOrderNumber}`
+          : 'Bill printed — table marked billed';
+
+      const finishAfterBill = async (printOk: boolean) => {
+        if (selectedTableId) {
+          markRestaurantBillRequestedOffline(selectedTableId, billedOrderId);
+          paintJournalCheck(selectedTableId, billedOrderId);
+        }
+        toast.success(
+          printOk
+            ? `${kotPart}${billLabel}`
+            : `${kotPart}Bill marked for ${billedOrderNumber} (print unavailable)`,
+          { duration: printOk ? 3000 : 5000 },
+        );
+        clearLineSelection();
+        // Multi-ticket: stay on table and switch to another open order.
+        if (remainingTickets.length > 0) {
+          await activateSibling(remainingTickets[0].id);
+          setBusy(false);
+          return;
+        }
+        returnToFloor();
       };
 
       if (shouldUseLocalRestaurantMutation(isOnline, order.id)) {
-        if (selectedTableId) {
-          markRestaurantBillRequestedOffline(selectedTableId, order.id);
-          paintJournalCheck(selectedTableId, order.id);
-        }
         let printOk = true;
         try {
           await printRestaurantBill(billPayload);
         } catch {
           printOk = false;
         }
-        toast.success(
-          printOk
-            ? 'Bill requested — table marked billed'
-            : 'Bill requested (print unavailable) — table marked billed',
-        );
-        returnToFloor();
+        await finishAfterBill(printOk);
         return;
       }
 
-      // SSOT first: mark BILLING on server (do not depend on printer)
       const res = await api.restaurant.requestBill(order.id);
       const bill = res.data.data as { order: OrderDetail; meta: CheckMeta };
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
@@ -1179,13 +1531,7 @@ export default function RestaurantPosPage() {
         printOk = false;
       }
 
-      toast.success(
-        printOk
-          ? 'Bill requested — table marked billed'
-          : 'Bill requested (print failed) — table marked billed; reprint from check if needed',
-        { duration: printOk ? 3000 : 5000 },
-      );
-      returnToFloor();
+      await finishAfterBill(printOk);
     } catch (err) {
       toast.error(apiErr(err, 'Bill failed'));
       setBusy(false);
@@ -1194,7 +1540,7 @@ export default function RestaurantPosPage() {
 
   const activateSibling = async (orderId: string) => {
     if (!selectedTableId) return;
-    if (!isOnline || orderId.startsWith('ofl_ord_')) {
+    if (shouldUseLocalRestaurantMutation(isOnline, orderId)) {
       setActiveOrderId(orderId);
       bumpJournal();
       invalidateCheck();
@@ -1216,7 +1562,7 @@ export default function RestaurantPosPage() {
     if (!order || !opsTargetTableId) return;
     setBusy(true);
     try {
-      if (!isOnline) {
+      if (preferLocalRestaurantWrites(order.id)) {
         const events = getAllEvents();
         const syncState = getAllSyncState();
         const derived = selectedTableId
@@ -1231,7 +1577,11 @@ export default function RestaurantPosPage() {
           tableName: target.name,
           channel: channelHint(target),
         });
-        toast.success('Check transferred (offline — will sync)');
+        toast.success(
+          isOnline
+            ? 'Check transferred (will sync)'
+            : 'Check transferred (offline — will sync)',
+        );
         setOpsMode(null);
         setSelectedTableId(opsTargetTableId);
         setActiveOrderId(order.id);
@@ -1256,7 +1606,10 @@ export default function RestaurantPosPage() {
     if (!order || !opsSecondaryOrderId) return;
     setBusy(true);
     try {
-      if (!isOnline) {
+      if (
+        preferLocalRestaurantWrites(order.id) ||
+        preferLocalRestaurantWrites(opsSecondaryOrderId)
+      ) {
         const events = getAllEvents();
         const syncState = getAllSyncState();
         const primary = selectedTableId
@@ -1266,7 +1619,9 @@ export default function RestaurantPosPage() {
         const secondary = open.find((o) => o.orderId === opsSecondaryOrderId) ?? null;
         if (!primary || !secondary) throw new Error('Both checks must be open offline');
         mergeRestaurantChecksOffline(primary, secondary);
-        toast.success('Checks merged (offline — will sync)');
+        toast.success(
+          isOnline ? 'Checks merged (will sync)' : 'Checks merged (offline — will sync)',
+        );
         setOpsMode(null);
         setOpsSecondaryOrderId('');
         bumpJournal();
@@ -1285,16 +1640,24 @@ export default function RestaurantPosPage() {
     }
   };
 
-  const runSplit = async () => {
+  const runSplit = async (opts?: { sameTable?: boolean; targetTableId?: string }) => {
     if (!order || selectedLineIds.length === 0) return;
-    const targetTableId = splitSameTable ? selectedTableId! : opsTargetTableId;
+    const sameTable = opts?.sameTable !== false;
+    const targetTableId = sameTable
+      ? selectedTableId!
+      : opts?.targetTableId || opsTargetTableId;
     if (!targetTableId) {
       toast.error('Pick a target table');
       return;
     }
+    if (selectedLineIds.length >= orderLines.length) {
+      toast.error('Select some items to move — not the whole ticket (use Change table)');
+      return;
+    }
     setBusy(true);
     try {
-      if (!isOnline) {
+      // ofl_ord_* / offline: journal split — never POST ofl_line_* UUIDs to the server.
+      if (preferLocalRestaurantWrites(order.id)) {
         const events = getAllEvents();
         const syncState = getAllSyncState();
         const derived = selectedTableId
@@ -1308,13 +1671,21 @@ export default function RestaurantPosPage() {
           targetTableId: target.id,
           targetTableCode: target.code,
           targetTableName: target.name,
-          sameTable: splitSameTable,
+          sameTable,
           channel: channelHint(target),
         });
-        toast.success('Check split (offline — will sync)');
+        toast.success(
+          sameTable
+            ? isOnline
+              ? 'Moved to new ticket on this table (will sync)'
+              : 'Moved to new ticket on this table (offline — will sync)'
+            : isOnline
+              ? 'Items moved to other table (will sync)'
+              : 'Items moved to other table (offline — will sync)',
+        );
         setOpsMode(null);
         setSelectedLineIds([]);
-        if (!splitSameTable) {
+        if (!sameTable) {
           setSelectedTableId(targetTableId);
           setActiveOrderId(split.orderId);
         } else {
@@ -1327,26 +1698,40 @@ export default function RestaurantPosPage() {
       await api.restaurant.splitCheck(order.id, {
         itemIds: selectedLineIds,
         targetTableId,
-        sameTable: splitSameTable,
+        sameTable,
       });
-      toast.success('Check split');
+      toast.success(
+        sameTable ? 'Moved to new ticket on this table' : 'Items moved to other table',
+      );
       setOpsMode(null);
       setSelectedLineIds([]);
-      if (!splitSameTable) {
+      if (!sameTable) {
         setSelectedTableId(targetTableId);
       }
       invalidateCheck();
     } catch (err) {
-      toast.error(isOnline ? apiErr(err, 'Split failed') : err instanceof Error ? err.message : 'Split failed');
+      toast.error(isOnline ? apiErr(err, 'Move failed') : err instanceof Error ? err.message : 'Move failed');
     } finally {
       setBusy(false);
     }
   };
 
-  const toggleLine = (id: string) => {
-    setSelectedLineIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
+  /** Samba: tap line to highlight (select underlying item ids). */
+  const toggleGroupSelection = (group: TicketLineGroup) => {
+    setOpsMode(null);
+    const allOn = group.itemIds.every((id) => selectedLineIds.includes(id));
+    if (allOn) {
+      setSelectedLineIds((prev) => prev.filter((id) => !group.itemIds.includes(id)));
+    } else {
+      setSelectedLineIds((prev) => [...new Set([...prev, ...group.itemIds])]);
+    }
+  };
+
+  const clearLineSelection = () => setSelectedLineIds([]);
+
+  /** Samba Move: selected lines → new ticket on same table. */
+  const handleMoveSelected = () => {
+    void runSplit({ sameTable: true });
   };
 
   type VoidKotPrint = {
@@ -1416,20 +1801,21 @@ export default function RestaurantPosPage() {
     const totalQty = targetLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
     let voidQty = opts?.voidQuantity;
     if (voidQty === undefined) {
-      voidQty = totalQty;
       if (totalQty > 1 && !opts?.skipConfirm) {
-        const prompted = window.prompt(
-          `How many to void? (1–${totalQty})`,
-          '1',
-        );
-        if (prompted == null) return;
-        const n = Number(prompted);
-        if (!Number.isFinite(n) || n <= 0 || n > totalQty) {
-          toast.error(`Enter a quantity between 1 and ${totalQty}`);
-          return;
-        }
-        voidQty = n;
+        // Touch qty pad (never window.prompt) — Toast/Samba partial void.
+        setLineSheet(null);
+        setQtyPadSheet({
+          purpose: 'void-qty',
+          itemIds,
+          lines: targetLines,
+          productName: targetLines[0]?.productName || 'items',
+          kitchenSent: targetLines.some((l) => !!l.kitchenSentAt),
+          max: totalQty,
+          digits: '1',
+        });
+        return;
       }
+      voidQty = totalQty;
     }
     if (!(voidQty > 0) || voidQty > totalQty) {
       toast.error(`Cannot void ${voidQty} — only ${totalQty} on the check`);
@@ -1453,9 +1839,33 @@ export default function RestaurantPosPage() {
     const voidLineIds = voidItems.map((v) => v.itemId);
     const qtyMap = Object.fromEntries(voidItems.map((v) => [v.itemId, v.quantity]));
 
-    // Unsent only → journal remove/reduce (no reason / no VOID print).
-    if (!hasKot && preferLocalRestaurantWrites(order.id)) {
-      if (
+    // Journal-local checks: never POST ofl_ord_*/ofl_line_* to UUID APIs (online or offline).
+    if (preferLocalRestaurantWrites(order.id)) {
+      let reason = opts?.reason?.trim() || '';
+      if (hasKot) {
+        if (!reason) {
+          const prompted = window.prompt(
+            'Void reason (kitchen will get a VOID ticket):',
+            'Customer changed mind',
+          );
+          if (prompted == null) return;
+          reason = prompted.trim();
+        }
+        if (!reason) {
+          toast.error('Void reason is required');
+          return;
+        }
+        if (
+          !opts?.skipConfirm &&
+          !window.confirm(
+            voidQty < totalQty
+              ? `Void ${voidQty} of ${totalQty}? Kitchen will be notified.`
+              : `Void ${voidQty} unit(s)? Kitchen will be notified to stop/discard.`,
+          )
+        ) {
+          return;
+        }
+      } else if (
         !opts?.skipConfirm &&
         !window.confirm(
           voidQty < totalQty
@@ -1465,6 +1875,7 @@ export default function RestaurantPosPage() {
       ) {
         return;
       }
+
       const events = getAllEvents();
       const syncState = getAllSyncState();
       const derived = selectedTableId
@@ -1475,21 +1886,37 @@ export default function RestaurantPosPage() {
         return;
       }
       try {
-        const next = removeRestaurantLinesOffline(derived, voidLineIds, qtyMap);
+        const next = removeRestaurantLinesOffline(derived, voidLineIds, qtyMap, {
+          reason: reason || 'Removed before kitchen send',
+          allowKitchenSent: hasKot,
+        });
         setLineSheet(null);
+        setQtyPadSheet(null);
         setSelectedLineIds([]);
-        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
         if (next.lines.length === 0) {
-          paintJournalCheck(selectedTableId, order.id);
-          setSelectedTableId(null);
+          settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', {
+            reason: reason || 'Removed last lines',
+          });
           setActiveOrderId(null);
-          toast.success('Check cancelled — table freed');
+          returnToFloor();
+          toast.success(
+            hasKot ? 'Check voided — table freed' : 'Check cancelled — table freed',
+          );
         } else {
+          if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId, order.id);
           paintJournalCheck(selectedTableId, next.orderId);
-          toast.success(voidQty < totalQty ? `Removed ${voidQty}` : 'Line(s) removed');
+          toast.success(
+            hasKot
+              ? voidQty < totalQty
+                ? `Voided ${voidQty} (will sync)`
+                : 'Voided — kitchen notified (will sync)'
+              : voidQty < totalQty
+                ? `Removed ${voidQty}`
+                : 'Line(s) removed',
+          );
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Remove failed');
+        toast.error(err instanceof Error ? err.message : hasKot ? 'Void failed' : 'Remove failed');
       }
       return;
     }
@@ -1563,10 +1990,12 @@ export default function RestaurantPosPage() {
         publishLanKdsBoardChanged('KOT_VOIDED');
       }
       setLineSheet(null);
+      setQtyPadSheet(null);
       if (data.checkCancelled) {
-        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+        settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', { reason });
         toast.success(hasKot ? 'Check voided — table freed' : 'Check cancelled — table freed');
-        setSelectedTableId(null);
+        setActiveOrderId(null);
+        returnToFloor();
       } else {
         toast.success(
           hasKot && (data.voidKots?.length || 0) > 0
@@ -1579,11 +2008,35 @@ export default function RestaurantPosPage() {
       setSelectedLineIds([]);
       invalidateCheck();
     } catch (err) {
-      toast.error(apiErr(err, hasKot ? 'Void failed' : 'Remove failed'));
+      const msg = apiErr(err, hasKot ? 'Void failed' : 'Remove failed');
+      // Order already cancelled/paid (e.g. offline cancel synced) — clear ghost FOH state.
+      const alreadyClosed =
+        /Open restaurant check required to void/i.test(msg) ||
+        (axios.isAxiosError(err) &&
+          (err.response?.data as { error_code?: string } | undefined)?.error_code ===
+            'ERR_RESTAURANT_VOID' &&
+          /Open restaurant check/i.test(msg));
+      if (alreadyClosed && order) {
+        settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', {
+          reason: reason || 'Check already closed',
+        });
+        setActiveOrderId(null);
+        returnToFloor();
+        toast.success('Check was already closed — table freed');
+      } else {
+        toast.error(msg);
+      }
       invalidateCheck();
     } finally {
       setBusy(false);
     }
+  };
+
+  /** Samba Void: highlight lines first, then void (qty pad asks how many when needed). */
+  const handleVoidSelected = () => {
+    if (selectedLineIds.length === 0) return;
+    const lines = orderLines.filter((l) => selectedLineIds.includes(l.id));
+    void handleVoidLines(selectedLineIds, { lines });
   };
 
   /** +1 same product (always adds as New / unsent). */
@@ -1607,17 +2060,17 @@ export default function RestaurantPosPage() {
           customerId: selectedCustomer?.id || null,
           waiterId: selectedWaiterId,
           waiterName: waiter?.fullName,
-          guestName: guestDraft.guestName.trim() || selectedCustomer?.name || null,
-          guestPhone: guestDraft.guestPhone.trim() || selectedCustomer?.phone || null,
+          guestName: selectedCustomer?.name || guestDraft.guestName.trim() || null,
+          guestPhone: selectedCustomer?.phone || guestDraft.guestPhone.trim() || null,
           deliveryAddress:
-            guestDraft.deliveryAddress.trim() || selectedCustomer?.address || null,
+            selectedCustomer?.address || guestDraft.deliveryAddress.trim() || null,
           pickupLabel: guestDraft.pickupLabel.trim() || null,
           productId: group.productId,
           productName: group.productName,
           unitPrice: group.unitPrice,
           quantity: 1,
         });
-        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId, derived.orderId);
         paintJournalCheck(selectedTableId, derived.orderId);
         if (derived.orderId) setActiveOrderId(derived.orderId);
         setLineSheet(null);
@@ -1635,7 +2088,7 @@ export default function RestaurantPosPage() {
         waiterId: selectedWaiterId,
         items: [{ productId: group.productId, quantity: 1 }],
       });
-      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId, order?.id ?? undefined);
       invalidateCheck();
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
       setLineSheet(null);
@@ -1657,6 +2110,111 @@ export default function RestaurantPosPage() {
       lines: group.lines,
       reason: group.kitchenSent ? undefined : 'Quantity decreased',
       skipConfirm: !group.kitchenSent,
+    });
+  };
+
+  /** Apply absolute qty on New/unsent lines (qty pad confirm). */
+  const applySetLineQty = async (group: TicketLineGroup, nextQty: number) => {
+    if (group.kitchenSent) {
+      toast.error('Kitchen-sent lines: void qty then add new — do not edit sent quantity');
+      return;
+    }
+    if (!group.productId) {
+      toast.error('Cannot set quantity for this line');
+      return;
+    }
+    if (nextQty === group.quantity) {
+      setQtyPadSheet(null);
+      setLineSheet(null);
+      return;
+    }
+    if (nextQty === 0) {
+      setQtyPadSheet(null);
+      await handleVoidLines(group.itemIds, {
+        voidQuantity: group.quantity,
+        lines: group.lines,
+        reason: 'Quantity cleared',
+        skipConfirm: true,
+      });
+      return;
+    }
+    if (nextQty < group.quantity) {
+      setQtyPadSheet(null);
+      await handleVoidLines(group.itemIds, {
+        voidQuantity: group.quantity - nextQty,
+        lines: group.lines,
+        reason: 'Quantity decreased',
+        skipConfirm: true,
+      });
+      return;
+    }
+    const addQty = nextQty - group.quantity;
+    addItemMutation.mutate(
+      {
+        product: {
+          id: group.productId,
+          name: group.productName,
+          sellingPrice: String(group.unitPrice),
+          categoryId: null,
+          categoryName: null,
+          kitchenStation: null,
+        },
+        quantity: addQty,
+      },
+      {
+        onSuccess: () => {
+          setQtyPadSheet(null);
+          setLineSheet(null);
+        },
+      },
+    );
+  };
+
+  /** SambaPOS: open touch qty pad for absolute qty (never window.prompt). */
+  const handleLineSetQty = (group: TicketLineGroup) => {
+    if (group.kitchenSent) {
+      toast.error('Kitchen-sent lines: void qty then add new — do not edit sent quantity');
+      return;
+    }
+    if (!group.productId) {
+      toast.error('Cannot set quantity for this line');
+      return;
+    }
+    setLineSheet(null);
+    setQtyPadSheet({
+      purpose: 'set-line-qty',
+      group,
+      digits: String(group.quantity),
+    });
+  };
+
+  const confirmQtyPadSheet = () => {
+    if (!qtyPadSheet) return;
+    if (qtyPadSheet.purpose === 'set-line-qty') {
+      const raw = qtyPadSheet.digits.replace(/\D/g, '');
+      if (!raw) {
+        toast.error('Enter a quantity from 0 to 9999');
+        return;
+      }
+      const nextQty = clampOrderQty(Number.parseInt(raw, 10));
+      if (nextQty == null) {
+        toast.error('Enter a quantity from 0 to 9999');
+        return;
+      }
+      void applySetLineQty(qtyPadSheet.group, nextQty);
+      return;
+    }
+    const raw = qtyPadSheet.digits.replace(/\D/g, '');
+    const n = clampOrderQty(Number.parseInt(raw || '0', 10), qtyPadSheet.max);
+    if (n == null || n < 1) {
+      toast.error(`Enter a quantity between 1 and ${qtyPadSheet.max}`);
+      return;
+    }
+    const sheet = qtyPadSheet;
+    setQtyPadSheet(null);
+    void handleVoidLines(sheet.itemIds, {
+      voidQuantity: n,
+      lines: sheet.lines,
     });
   };
 
@@ -1704,8 +2262,7 @@ export default function RestaurantPosPage() {
       } else {
         try {
           cancelRestaurantCheckOffline(derived, reason);
-          if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
-          paintJournalCheck(selectedTableId, order.id);
+          settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', { reason });
           setSelectedTableId(null);
           setActiveOrderId(null);
           toast.success(
@@ -1731,7 +2288,7 @@ export default function RestaurantPosPage() {
         await printVoidTickets(data.voidKots || [], reason);
         publishLanKdsBoardChanged('KOT_VOIDED');
       }
-      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
+      settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', { reason });
       toast.success(
         hasKot && (data.voidKots?.length || 0) > 0
           ? `Check cancelled — ${data.voidKots!.length} VOID ticket(s) sent`
@@ -1747,37 +2304,63 @@ export default function RestaurantPosPage() {
     }
   };
 
+  /**
+   * Pay = settle the *selected* ticket only (same rule as Bill).
+   * Multi-ticket tables: other order numbers stay open; stay on table when siblings remain.
+   *
+   * Online + server-backed check → Order Payment screen (multi-tender).
+   * Offline / ofl_ord_* → journal cash pay (no payment screen).
+   */
   const handlePay = async () => {
     if (!order) return;
     if (!canRestaurantPay) {
       toast.error('Only cashiers, accountants, or admins can take payment');
       return;
     }
+    if (orderLines.length === 0) {
+      toast.error('Cannot pay an empty check');
+      return;
+    }
 
-    // Journal-first cash pay on every device (works with internet off).
+    const paidOrderId = order.id;
+    const paidOrderNumber = order.orderNumber;
+    const remainingTickets = ticketTabs.filter((t) => t.id !== paidOrderId);
+
+    // Online server checks open the tender screen — do not force offline cash.
+    // After pay, always land on the restaurant floor (tables), never re-open the ticket.
+    const forceLocalCash = shouldUseLocalRestaurantMutation(isOnline, paidOrderId);
+    if (isOnline && !forceLocalCash) {
+      navigate(`/orders/${paidOrderId}/pay?returnTo=${encodeURIComponent('/restaurant')}`);
+      return;
+    }
+
+    // Journal-first cash pay (offline or ofl_ord_* local checks).
     const events = getAllEvents();
     const syncState = getAllSyncState();
     const derived = selectedTableId
-      ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
+      ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, paidOrderId)
       : null;
 
     if (derived) {
       const totalLabel = formatCurrency(Number(order.totalAmount));
-      if (
-        !window.confirm(
-          `Cash pay ${totalLabel} for ${derived.tableName || derived.tableCode || 'table'}?\n\nReceipt prints now; sale syncs when online.`,
-        )
-      ) {
+      const tableLabel = derived.tableName || derived.tableCode || 'table';
+      const confirmMsg =
+        remainingTickets.length > 0
+          ? `Cash pay ${totalLabel} for ${paidOrderNumber} on ${tableLabel}?\n\nOther tickets on this table stay open.\n\nReceipt prints now; sale syncs when online.`
+          : `Cash pay ${totalLabel} for ${paidOrderNumber} (${tableLabel})?\n\nReceipt prints now; sale syncs when online.`;
+      if (!window.confirm(confirmMsg)) {
         return;
       }
       try {
         const paid = payRestaurantCheckOffline(derived);
-        if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId);
-        paintJournalCheck(selectedTableId, order.id);
-        setActiveOrderId(null);
-        returnToFloor();
-        toast.success(`Paid (${paid.offlineId}) — syncs when online`);
-        // Print after UI frees the table — never block FOH on the printer.
+        settleCheckOnFloor(paidOrderId, selectedTableId, 'PAID');
+        clearLineSelection();
+        toast.success(
+          remainingTickets.length > 0
+            ? `Paid ${paidOrderNumber} (${paid.offlineId}) — ${remainingTickets.length} ticket(s) still open on table`
+            : `Paid ${paidOrderNumber} (${paid.offlineId}) — syncs when online`,
+        );
+        // Print after UI updates — never block FOH on the printer.
         void printReceipt({
           saleNumber: paid.offlineId,
           saleDate: new Date().toLocaleString(),
@@ -1801,22 +2384,20 @@ export default function RestaurantPosPage() {
             subtotal: l.subtotal,
             uom: l.uom,
           })),
-          customReceiptNote: `Table ${paid.tableLabel} (offline-first)`,
+          customReceiptNote: `${tableLabel} · ${paidOrderNumber} (offline-first)`,
         }).catch(() => {
           toast.error('Receipt print failed — sale is saved locally');
         });
+
+        setActiveOrderId(null);
+        returnToFloor();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Pay failed');
       }
       return;
     }
 
-    if (!isOnline) {
-      toast.error('Check not in local journal — open it once while online, then pay offline');
-      return;
-    }
-    // Online multi-tender: after pay, OrderPaymentPage returns to restaurant floor.
-    navigate(`/orders/${order.id}/pay?returnTo=${encodeURIComponent('/restaurant')}`);
+    toast.error('Check not in local journal — open it once while online, then pay offline');
   };
 
   if (flagLoading) {
@@ -1855,7 +2436,7 @@ export default function RestaurantPosPage() {
               {meta?.kitchenStatus && meta.kitchenStatus !== 'NONE'
                 ? ` · Kitchen: ${
                     meta.kitchenStatus === 'SENT'
-                      ? 'New'
+                      ? 'Sent'
                       : meta.kitchenStatus === 'PREPARING'
                         ? 'Preparing'
                         : meta.kitchenStatus === 'READY'
@@ -1865,6 +2446,7 @@ export default function RestaurantPosPage() {
                             : meta.kitchenStatus
                   }`
                 : ''}
+              {isCheckBilled ? ' · Bill printed' : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -1887,10 +2469,11 @@ export default function RestaurantPosPage() {
             {selectedTableId && (
               <button
                 type="button"
-                onClick={() => setSelectedTableId(null)}
+                onClick={() => returnToFloor()}
                 className={touchBtnGhost}
+                aria-label="Back to tables"
               >
-                Change table
+                ← Tables
               </button>
             )}
           </div>
@@ -1944,7 +2527,9 @@ export default function RestaurantPosPage() {
             )}
 
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide">Tables</h2>
+              <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide">
+                Service
+              </h2>
               <label className={`${TOUCH} min-h-11 px-3 inline-flex items-center gap-3 text-sm text-stone-700 rounded-xl active:bg-stone-200/60`}>
                 <input
                   type="checkbox"
@@ -1955,11 +2540,57 @@ export default function RestaurantPosPage() {
                 My tables
               </label>
             </div>
+            {/* One tile per lane (TA / DL / QK) — no duplicate "Delivery" button + DL table. */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {(
+                [
+                  ['TAKEAWAY', 'Counter / pickup'],
+                  ['DELIVERY', 'Customer + address'],
+                  ['QUICK', 'Walk-in — no customer'],
+                ] as const
+              ).map(([kind, blurb]) => {
+                const def = SERVICE_LANE_DEFS[kind];
+                const table = floorTables.find((t) => t.code.toUpperCase() === def.code);
+                const occupied = !!table && table.status !== 'FREE';
+                const billing = table?.status === 'BILLING';
+                return (
+                  <button
+                    key={kind}
+                    type="button"
+                    onClick={() => void openServiceLane(kind)}
+                    className={`${touchTile} min-h-[76px] rounded-xl border-2 px-4 py-3 text-left ${
+                      billing
+                        ? 'border-rose-700 bg-rose-100'
+                        : occupied
+                          ? 'border-violet-600 bg-violet-100'
+                          : 'border-violet-300 bg-violet-50 active:border-violet-600'
+                    }`}
+                  >
+                    <div className="text-base font-bold text-stone-900">{def.name}</div>
+                    <div className="text-xs text-stone-600 mt-0.5">
+                      {billing
+                        ? 'Bill requested'
+                        : occupied
+                          ? table?.guestName
+                            ? table.guestName
+                            : table?.orderTotal
+                              ? formatCurrency(Number(table.orderTotal))
+                              : 'Open ticket'
+                          : blurb}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide pt-2">
+              Dining tables
+            </h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3 pb-[env(safe-area-inset-bottom)]">
-              {floorTables.map((table) => {
+              {floorTables
+                .filter((t) => !isServiceChannelTable(t))
+                .map((table) => {
                 const occupied = table.status !== 'FREE';
                 const billing = table.status === 'BILLING';
-                const service = isServiceChannelTable(table);
                 return (
                   <button
                     key={table.id}
@@ -1969,12 +2600,8 @@ export default function RestaurantPosPage() {
                       billing
                         ? 'border-rose-700 bg-rose-100'
                         : occupied
-                          ? service
-                            ? 'border-violet-500 bg-violet-50'
-                            : 'border-amber-500 bg-amber-50'
-                          : service
-                            ? 'border-violet-300 bg-white active:border-violet-500'
-                            : 'border-stone-300 bg-white active:border-emerald-500'
+                          ? 'border-amber-500 bg-amber-50'
+                          : 'border-stone-300 bg-white active:border-emerald-500'
                     }`}
                   >
                     <div className="text-lg font-bold text-stone-900">{table.code}</div>
@@ -1988,9 +2615,7 @@ export default function RestaurantPosPage() {
                             : table.orderTotal
                               ? formatCurrency(Number(table.orderTotal))
                               : table.status
-                          : service
-                            ? 'Service'
-                            : 'Free'}
+                          : 'Free'}
                     </div>
                     {occupied && table.waiterName ? (
                       <div className="text-[11px] text-stone-600 mt-0.5 truncate">
@@ -2010,9 +2635,9 @@ export default function RestaurantPosPage() {
           </div>
         ) : (
           <div className="relative flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 overflow-hidden">
-            {/* Menu — always the working surface on phones */}
-            <div className="lg:col-span-8 flex flex-col min-h-0 flex-1 lg:border-r border-stone-200 bg-white">
-              <div className="sticky top-0 z-10 bg-white border-b border-stone-100 shadow-sm">
+            {/* Menu — phone: top half of split; desktop: left column */}
+            <div className="lg:col-span-8 flex flex-col min-h-0 flex-[1.15] lg:flex-1 border-b lg:border-b-0 lg:border-r border-stone-200 bg-white">
+              <div className="shrink-0 z-10 bg-white border-b border-stone-100 shadow-sm">
                 <div className="p-3 pb-2">
                   <label className="relative block">
                     <span className="sr-only">Search products</span>
@@ -2070,11 +2695,12 @@ export default function RestaurantPosPage() {
                     </p>
                   ) : (
                     <p className="mt-1.5 text-xs text-stone-400 hidden lg:block">
-                      Tap to open keyboard · type anywhere with a physical keyboard · F3 focuses search
+                      Qty pad → product (e.g. 50 → Matooke)
                     </p>
                   )}
                 </div>
-                <div className="px-3 pb-3 overflow-x-auto">
+                {/* Phone: thick horizontal category buttons */}
+                <div className="lg:hidden px-3 pb-3 overflow-x-auto">
                   <div className="flex gap-2 min-w-max">
                     <button
                       type="button"
@@ -2082,10 +2708,10 @@ export default function RestaurantPosPage() {
                         setSelectedCategoryId(null);
                         setMenuSearch('');
                       }}
-                      className={`${touchChip} ${
+                      className={`${touchCat} ${
                         !selectedCategoryId && !deferredMenuSearch.trim()
-                          ? 'bg-stone-900 text-white'
-                          : 'bg-stone-100 text-stone-800 active:bg-stone-200'
+                          ? 'bg-orange-600 text-white'
+                          : 'bg-stone-200 text-stone-900 active:bg-stone-300'
                       }`}
                     >
                       All
@@ -2098,10 +2724,10 @@ export default function RestaurantPosPage() {
                           setSelectedCategoryId(cat.id);
                           setMenuSearch('');
                         }}
-                        className={`${touchChip} ${
+                        className={`${touchCat} ${
                           selectedCategoryId === cat.id && !deferredMenuSearch.trim()
-                            ? 'bg-stone-900 text-white'
-                            : 'bg-stone-100 text-stone-800 active:bg-stone-200'
+                            ? 'bg-orange-600 text-white'
+                            : 'bg-stone-200 text-stone-900 active:bg-stone-300'
                         }`}
                       >
                         {cat.name}
@@ -2110,134 +2736,308 @@ export default function RestaurantPosPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto p-3 pb-28 lg:pb-3">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-                  {visibleProducts.map((product) => (
+
+              <div className="flex flex-1 min-h-0">
+                {/* Wide: thick vertical category rail */}
+                <div className="hidden lg:flex w-40 shrink-0 flex-col border-r border-stone-200 bg-stone-100 overflow-y-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategoryId(null);
+                      setMenuSearch('');
+                    }}
+                    className={`${touchCatRail} ${
+                      !selectedCategoryId && !deferredMenuSearch.trim()
+                        ? 'bg-orange-600 text-white'
+                        : 'text-stone-900 active:bg-stone-200'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {(categoriesQuery.data || []).map((cat) => (
                     <button
-                      key={product.id}
+                      key={cat.id}
                       type="button"
-                      disabled={addItemMutation.isPending}
-                      onClick={() =>
-                        addItemMutation.mutate(product, {
-                          onSuccess: () => {
-                            if (menuSearch.trim()) setMenuSearch('');
-                          },
-                        })
-                      }
-                      className={`${touchTile} min-h-[84px] rounded-xl border border-stone-300 bg-stone-50 px-3 py-3 text-left active:bg-emerald-50 active:border-emerald-500`}
+                      onClick={() => {
+                        setSelectedCategoryId(cat.id);
+                        setMenuSearch('');
+                      }}
+                      className={`${touchCatRail} ${
+                        selectedCategoryId === cat.id && !deferredMenuSearch.trim()
+                          ? 'bg-orange-600 text-white'
+                          : 'text-stone-900 active:bg-stone-200'
+                      }`}
                     >
-                      <div className="text-sm font-semibold text-stone-900 leading-tight">
-                        {product.name}
-                      </div>
-                      {deferredMenuSearch.trim() && product.categoryName ? (
-                        <div className="text-[11px] text-stone-500 mt-0.5 truncate">
-                          {product.categoryName}
-                        </div>
-                      ) : null}
-                      <div className="text-xs text-stone-600 mt-1">
-                        {formatCurrency(Number(product.sellingPrice))}
-                      </div>
+                      {cat.name}
                     </button>
                   ))}
                 </div>
-                {!productsQuery.isLoading && visibleProducts.length === 0 && (
-                  <p className="text-sm text-stone-500 p-4">
-                    {deferredMenuSearch.trim()
-                      ? 'No products match that search.'
-                      : 'No menu products. Ensure active products exist (all show until any are flagged Available in Restaurant).'}
-                  </p>
-                )}
+
+                <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                  <div className="flex-1 overflow-auto p-3 pb-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                      {visibleProducts.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          disabled={addItemMutation.isPending}
+                          onClick={() =>
+                            addItemMutation.mutate(product, {
+                              onSuccess: () => {
+                                if (menuSearch.trim()) setMenuSearch('');
+                              },
+                            })
+                          }
+                          className={`${touchTile} min-h-[72px] sm:min-h-[84px] rounded-xl border border-emerald-700/40 bg-emerald-50/80 px-3 py-2.5 sm:py-3 text-left active:bg-emerald-100 active:border-emerald-600`}
+                        >
+                          <div className="text-sm font-semibold text-stone-900 leading-tight">
+                            {product.name}
+                          </div>
+                          {deferredMenuSearch.trim() && product.categoryName ? (
+                            <div className="text-[11px] text-stone-500 mt-0.5 truncate">
+                              {product.categoryName}
+                            </div>
+                          ) : null}
+                          <div className="text-xs text-stone-600 mt-1">
+                            {formatCurrency(Number(product.sellingPrice))}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    {!productsQuery.isLoading && visibleProducts.length === 0 && (
+                      <p className="text-sm text-stone-500 p-4">
+                        {deferredMenuSearch.trim()
+                          ? 'No products match that search.'
+                          : 'No menu products. Ensure active products exist (all show until any are flagged Available in Restaurant).'}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Qty pad — phone: compact bar + dialer sheet; desktop: calculator */}
+                  <div className="shrink-0 border-t border-stone-200 bg-stone-100/80">
+                    {/* Phone / small: one-row qty + quick amounts (saves ticket space) */}
+                    <div className="lg:hidden flex items-stretch gap-1 p-1.5">
+                      <button
+                        type="button"
+                        aria-label="Open quantity pad"
+                        onClick={() => setMenuQtyPadOpen(true)}
+                        className={`${TOUCH} flex min-w-[4.25rem] flex-col items-center justify-center rounded-xl border-2 border-emerald-600 bg-emerald-50 px-2 py-1`}
+                      >
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-800">
+                          Qty
+                        </span>
+                        <span className="text-xl font-bold tabular-nums leading-none text-stone-900">
+                          {parsePendingOrderQty(pendingQtyDigits)}
+                        </span>
+                      </button>
+                      {[1, 2, 3, 5, 10].map((n) => {
+                        const active = pendingQtyDigits === String(n);
+                        return (
+                          <button
+                            key={n}
+                            type="button"
+                            aria-label={`Quantity ${n}`}
+                            aria-pressed={active}
+                            onClick={() => setPendingQtyDigits(String(n))}
+                            className={`${TOUCH} min-h-11 flex-1 rounded-xl text-sm font-bold ${
+                              active
+                                ? 'border-2 border-emerald-600 bg-emerald-600 text-white'
+                                : 'border border-stone-300 bg-white text-stone-900 active:bg-emerald-50'
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        aria-label="Clear quantity"
+                        onClick={() => setPendingQtyDigits('')}
+                        className={`${TOUCH} min-h-11 min-w-11 rounded-xl border border-stone-300 bg-white text-xs font-bold text-stone-600`}
+                      >
+                        C
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Number pad"
+                        onClick={() => setMenuQtyPadOpen(true)}
+                        className={`${TOUCH} min-h-11 min-w-11 rounded-xl border border-stone-800 bg-stone-900 text-[11px] font-bold text-white`}
+                      >
+                        123
+                      </button>
+                    </div>
+
+                    {/* Tablet / desktop: Samba calculator pad */}
+                    <div className="hidden lg:flex items-stretch gap-2 p-2">
+                      <div className="w-[5.5rem] rounded-xl border-2 border-emerald-600 bg-emerald-50 flex flex-col items-center justify-center px-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                          Qty
+                        </span>
+                        <span className="text-3xl font-bold tabular-nums leading-none text-stone-900">
+                          {parsePendingOrderQty(pendingQtyDigits)}
+                        </span>
+                      </div>
+                      <div className="flex-1 grid grid-cols-3 gap-1.5 max-w-xs">
+                        {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            className={`${TOUCH} min-h-12 rounded-xl border border-stone-300 bg-white text-lg font-bold text-stone-900 active:bg-emerald-100 ${
+                              key === 'C' || key === '⌫' ? 'text-sm text-stone-600' : ''
+                            }`}
+                            onClick={() => {
+                              if (key === 'C') {
+                                setPendingQtyDigits('');
+                                return;
+                              }
+                              if (key === '⌫') {
+                                setPendingQtyDigits((p) => p.slice(0, -1));
+                                return;
+                              }
+                              setPendingQtyDigits((prev) => appendQtyDigit(prev, key));
+                            }}
+                          >
+                            {key}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex flex-col gap-1.5 justify-stretch">
+                        {[5, 10, 20].map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => setPendingQtyDigits(String(n))}
+                            className={`${TOUCH} min-h-12 min-w-14 rounded-xl border border-stone-300 bg-stone-50 text-sm font-bold text-stone-800 active:bg-emerald-100 ${
+                              pendingQtyDigits === String(n)
+                                ? 'border-emerald-600 bg-emerald-600 text-white'
+                                : ''
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Mobile dock — open sheets on demand; do not stack every pane */}
-            <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-stone-200 bg-white/95 backdrop-blur-sm p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] space-y-2 shadow-[0_-4px_24px_rgba(0,0,0,0.08)]">
-              <button
-                type="button"
-                onClick={openMobileOrder}
-                className={`${TOUCH} min-h-12 w-full rounded-xl bg-stone-900 text-white px-4 flex items-center justify-between gap-2 text-sm font-bold`}
-              >
-                <span>
-                  Order
-                  {orderLines.length > 0 ? ` · ${orderLines.length}` : ''}
-                </span>
-                <span>{formatCurrency(Number(order?.totalAmount || 0))}</span>
-              </button>
-              <div className="grid grid-cols-3 gap-2">
+            {/* Phone menu qty dialer — multi-digit without eating the ticket */}
+            {menuQtyPadOpen && (
+              <div className="lg:hidden fixed inset-0 z-[55] flex flex-col justify-end bg-black/40">
                 <button
                   type="button"
-                  disabled={!order || busy}
-                  onClick={() => void handleSendKot()}
-                  className={`${TOUCH} min-h-12 rounded-xl bg-orange-600 text-white text-sm font-bold active:bg-orange-700`}
-                >
-                  KOT
-                </button>
-                <button
-                  type="button"
-                  disabled={!order || busy || orderLines.length === 0}
-                  onClick={() => void handleBill()}
-                  className={`${TOUCH} min-h-12 rounded-xl bg-rose-800 text-white text-sm font-bold active:bg-rose-950`}
-                >
-                  Bill
-                </button>
-                {canRestaurantPay ? (
+                  className="flex-1 w-full cursor-default"
+                  aria-label="Dismiss quantity pad"
+                  onClick={() => setMenuQtyPadOpen(false)}
+                />
+                <div className="relative w-full bg-white rounded-t-2xl p-4 space-y-3 shadow-xl pb-[max(1rem,env(safe-area-inset-bottom))]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wide text-stone-500">
+                        Quantity
+                      </p>
+                      <p className="text-sm text-stone-600">Then tap a product on the menu</p>
+                    </div>
+                    <button
+                      type="button"
+                      className={`${touchBtnGhost} min-h-10 px-3`}
+                      onClick={() => setMenuQtyPadOpen(false)}
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <div className="rounded-xl border-2 border-emerald-600 bg-emerald-50 py-4 text-center">
+                    <span className="text-5xl font-bold tabular-nums text-stone-900">
+                      {pendingQtyDigits || '1'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((key) => (
+                      <button
+                        key={key}
+                        type="button"
+                        className={`${TOUCH} min-h-14 rounded-xl border border-stone-300 bg-stone-50 text-2xl font-bold text-stone-900 active:bg-emerald-100`}
+                        onClick={() => {
+                          if (key === 'C') {
+                            setPendingQtyDigits('');
+                            return;
+                          }
+                          if (key === '⌫') {
+                            setPendingQtyDigits((p) => p.slice(0, -1));
+                            return;
+                          }
+                          setPendingQtyDigits((prev) => appendQtyDigit(prev, key));
+                        }}
+                      >
+                        {key}
+                      </button>
+                    ))}
+                  </div>
                   <button
                     type="button"
-                    disabled={!order || busy}
-                    onClick={() => void handlePay()}
-                    className={`${TOUCH} min-h-12 rounded-xl bg-emerald-600 text-white text-sm font-bold active:bg-emerald-700`}
+                    className={`${touchBtnDark} w-full min-h-14`}
+                    onClick={() => setMenuQtyPadOpen(false)}
                   >
-                    Pay
+                    Done — tap a product
                   </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={openMobileOrder}
-                    className={`${touchBtnGhost} min-h-12`}
-                  >
-                    More
-                  </button>
-                )}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Order sheet: desktop sidebar always; phone full-screen only when opened */}
+            {/* Order ticket — phone: bottom half always visible (split); desktop: sidebar */}
             <div
-              className={`lg:col-span-4 flex-col min-h-0 bg-stone-50 ${
-                mobileSheet
-                  ? 'fixed inset-0 z-40 flex'
-                  : 'hidden lg:relative lg:flex'
+              className={`lg:col-span-4 flex flex-col min-h-0 bg-stone-50 ${
+                mobileSheet === 'details' || mobileSheet === 'more'
+                  ? 'fixed inset-0 z-40'
+                  : 'relative flex-1 lg:flex-1 min-h-[240px]'
               }`}
             >
               <div className="px-3 sm:px-4 py-2 border-b border-stone-200 bg-white shrink-0">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <button
-                      type="button"
-                      className={`${touchBtnGhost} lg:hidden min-h-10 px-3 shrink-0`}
-                      onClick={closeMobileSheets}
-                      aria-label="Close order"
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
+                    {(mobileSheet === 'details' || mobileSheet === 'more') && (
+                      <button
+                        type="button"
+                        className={`${touchBtnGhost} lg:hidden min-h-10 px-3 shrink-0`}
+                        onClick={() => setMobileSheet(null)}
+                        aria-label="Back to ticket"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    )}
                     <div className="min-w-0">
                       <h2 className="font-semibold text-stone-900 text-sm sm:text-base">
                         {mobileSheet === 'details'
-                          ? 'Details'
+                          ? 'Waiter / Customer'
                           : mobileSheet === 'more'
                             ? 'More'
-                            : 'Order'}
+                            : 'Ticket'}
                       </h2>
                       {order?.orderNumber && mobileSheet !== 'details' && mobileSheet !== 'more' ? (
                         <p className="text-xs text-stone-500 truncate">{order.orderNumber}</p>
                       ) : null}
+                      {isCheckBilled &&
+                      mobileSheet !== 'details' &&
+                      mobileSheet !== 'more' ? (
+                        <p className="text-[11px] text-rose-800 truncate">
+                          Guest bill printed
+                        </p>
+                      ) : null}
+                      {(selectedCustomer?.name || guestDraft.guestName) &&
+                      serviceChannel &&
+                      mobileSheet !== 'details' &&
+                      mobileSheet !== 'more' ? (
+                        <p className="text-xs font-semibold text-emerald-800 truncate">
+                          {selectedCustomer?.name || guestDraft.guestName}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
-                  {selectedTable?.status === 'BILLING' ||
-                  (selectedTableId &&
-                    getRestaurantBillRequestedOffline()[selectedTableId] === order?.id) ? (
+                  {isCheckBilled ? (
                     <span className="shrink-0 text-[10px] uppercase tracking-wide font-bold text-rose-800 bg-rose-100 px-2 py-1 rounded-lg">
-                      Billed
+                      Bill printed
                     </span>
                   ) : null}
                 </div>
@@ -2249,14 +3049,14 @@ export default function RestaurantPosPage() {
                       onClick={() => setMobileSheet('details')}
                       className={`${touchBtnGhost} min-h-11 text-xs`}
                     >
-                      Waiter / Guest
+                      Waiter / Customer
                     </button>
                     <button
                       type="button"
                       onClick={() => setMobileSheet('more')}
                       className={`${touchBtnGhost} min-h-11 text-xs`}
                     >
-                      Split / Merge / …
+                      Table / Merge / …
                     </button>
                   </div>
                 )}
@@ -2264,29 +3064,43 @@ export default function RestaurantPosPage() {
                   <button
                     type="button"
                     className={`${touchBtnGhost} lg:hidden mt-2 w-full min-h-11 text-xs`}
-                    onClick={() => setMobileSheet('order')}
+                    onClick={() => setMobileSheet(null)}
                   >
-                    ← Back to order lines
+                    ← Back to ticket
                   </button>
                 ) : null}
 
-                {siblingChecks.length > 1 && (mobileSheet === 'order' || !mobileSheet) && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {siblingChecks.map((s) => (
-                      <button
-                        key={s.id}
-                        type="button"
-                        disabled={busy || s.id === order?.id}
-                        onClick={() => void activateSibling(s.id)}
-                        className={`${touchChip} border text-xs ${
-                          s.id === order?.id
-                            ? 'bg-stone-900 text-white border-stone-900'
-                            : 'bg-white text-stone-700 border-stone-300 active:border-stone-500'
-                        }`}
-                      >
-                        {s.orderNumber}
-                      </button>
-                    ))}
+                {ticketTabs.length > 1 && (mobileSheet === 'order' || !mobileSheet) && (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
+                      Tickets on table
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {ticketTabs.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          disabled={busy || s.id === order?.id}
+                          onClick={() => {
+                            clearLineSelection();
+                            void activateSibling(s.id);
+                          }}
+                          className={`${touchChip} border text-xs ${
+                            s.id === order?.id
+                              ? 'bg-stone-900 text-white border-stone-900'
+                              : 'bg-white text-stone-700 border-stone-300 active:border-stone-500'
+                          }`}
+                        >
+                          {s.orderNumber}
+                          {isRestaurantOrderBillRequestedOffline(selectedTableId, s.id) ? (
+                            <span className="ml-1 opacity-80">· Bill</span>
+                          ) : null}
+                          <span className="ml-1 opacity-80">
+                            {formatCurrency(Number(s.totalAmount))}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -2340,143 +3154,116 @@ export default function RestaurantPosPage() {
                   </select>
                 </div>
                 {serviceChannel && (
-                  <div className="space-y-2 rounded-xl border border-violet-200 bg-violet-50/80 p-3">
-                    <p className="text-xs text-violet-800 font-medium">
-                      {channel === 'DELIVERY' ? 'Delivery customer' : 'Takeaway customer'}
-                    </p>
-                    <CustomerSelector
-                      selectedCustomer={selectedCustomer}
-                      saleTotal={Number(order?.totalAmount || 0)}
-                      onSelectCustomer={(c) => {
-                        setSelectedCustomer(c);
-                        if (c) {
-                          setGuestDraft((prev) => ({
-                            guestName: c.name || prev.guestName,
-                            guestPhone: c.phone || prev.guestPhone,
-                            deliveryAddress:
-                              channel === 'DELIVERY'
-                                ? c.address || prev.deliveryAddress
-                                : prev.deliveryAddress,
-                            pickupLabel: prev.pickupLabel,
-                          }));
+                  <div className="space-y-2">
+                    {selectedCustomer || !guestDraft.guestName ? (
+                      <CustomerSelector
+                        compact
+                        required={!isQuickLane}
+                        label={
+                          channel === 'DELIVERY'
+                            ? 'Delivery customer'
+                            : isQuickLane
+                              ? 'Customer (optional)'
+                              : 'Takeaway customer'
                         }
-                      }}
-                    />
-                    <input
-                      className={touchField}
-                      placeholder="Guest name (from customer)"
-                      value={guestDraft.guestName}
-                      onChange={(e) => setGuestDraft({ ...guestDraft, guestName: e.target.value })}
-                    />
-                    <input
-                      className={touchField}
-                      placeholder="Phone"
-                      value={guestDraft.guestPhone}
-                      onChange={(e) => setGuestDraft({ ...guestDraft, guestPhone: e.target.value })}
-                    />
-                    {channel === 'TAKEAWAY' && (
-                      <input
-                        className={touchField}
-                        placeholder="Pickup label (e.g. Car 4)"
-                        value={guestDraft.pickupLabel}
-                        onChange={(e) => setGuestDraft({ ...guestDraft, pickupLabel: e.target.value })}
+                        selectedCustomer={selectedCustomer}
+                        saleTotal={Number(order?.totalAmount || 0)}
+                        onSelectCustomer={handleSelectServiceCustomer}
                       />
-                    )}
-                    {channel === 'DELIVERY' && (
-                      <textarea
-                        className={`${touchField} min-h-[88px]`}
-                        placeholder="Delivery address *"
-                        rows={2}
-                        value={guestDraft.deliveryAddress}
-                        onChange={(e) =>
-                          setGuestDraft({ ...guestDraft, deliveryAddress: e.target.value })
-                        }
-                      />
-                    )}
-                    {order && (
-                      <button
-                        type="button"
-                        disabled={saveGuestMutation.isPending}
-                        onClick={() => saveGuestMutation.mutate()}
-                        className={`${touchBtnGhost} w-full border-violet-400 text-violet-900`}
-                      >
-                        Save customer / guest
-                      </button>
+                    ) : (
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
+                          Customer
+                        </label>
+                        <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-3 py-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-bold text-base text-stone-900 truncate">
+                              {guestDraft.guestName}
+                            </div>
+                            {guestDraft.guestPhone ? (
+                              <div className="text-sm text-stone-600">{guestDraft.guestPhone}</div>
+                            ) : null}
+                            {guestDraft.deliveryAddress ? (
+                              <div className="text-xs text-stone-500 truncate">
+                                {guestDraft.deliveryAddress}
+                              </div>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            className={`${touchBtnGhost} min-h-11 px-3 shrink-0`}
+                            onClick={() =>
+                              setGuestDraft({
+                                guestName: '',
+                                guestPhone: '',
+                                deliveryAddress: '',
+                                pickupLabel: '',
+                              })
+                            }
+                          >
+                            Change
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
                 <button
                   type="button"
                   className={`${touchBtnDark} w-full`}
-                  onClick={() => setMobileSheet('order')}
+                  onClick={() => setMobileSheet(null)}
                 >
-                  Done
+                  Done — add items
                 </button>
               </div>
 
               {serviceChannel && (
                 <div className="hidden lg:block px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2">
-                  <p className="text-xs text-violet-800 font-medium">
-                    {channel === 'DELIVERY' ? 'Delivery customer' : 'Takeaway customer'}
-                  </p>
-                  <CustomerSelector
-                    selectedCustomer={selectedCustomer}
-                    saleTotal={Number(order?.totalAmount || 0)}
-                    onSelectCustomer={(c) => {
-                      setSelectedCustomer(c);
-                      if (c) {
-                        setGuestDraft((prev) => ({
-                          guestName: c.name || prev.guestName,
-                          guestPhone: c.phone || prev.guestPhone,
-                          deliveryAddress:
-                            channel === 'DELIVERY'
-                              ? c.address || prev.deliveryAddress
-                              : prev.deliveryAddress,
-                          pickupLabel: prev.pickupLabel,
-                        }));
+                  {selectedCustomer || !guestDraft.guestName ? (
+                    <CustomerSelector
+                      compact
+                      required={!isQuickLane}
+                      label={
+                        channel === 'DELIVERY'
+                          ? 'Delivery customer'
+                          : isQuickLane
+                            ? 'Customer (optional)'
+                            : 'Takeaway customer'
                       }
-                    }}
-                  />
-                  <input
-                    className={touchField}
-                    placeholder="Guest name (from customer)"
-                    value={guestDraft.guestName}
-                    onChange={(e) => setGuestDraft({ ...guestDraft, guestName: e.target.value })}
-                  />
-                  <input
-                    className={touchField}
-                    placeholder="Phone"
-                    value={guestDraft.guestPhone}
-                    onChange={(e) => setGuestDraft({ ...guestDraft, guestPhone: e.target.value })}
-                  />
-                  {channel === 'TAKEAWAY' && (
-                    <input
-                      className={touchField}
-                      placeholder="Pickup label (e.g. Car 4)"
-                      value={guestDraft.pickupLabel}
-                      onChange={(e) => setGuestDraft({ ...guestDraft, pickupLabel: e.target.value })}
+                      selectedCustomer={selectedCustomer}
+                      saleTotal={Number(order?.totalAmount || 0)}
+                      onSelectCustomer={handleSelectServiceCustomer}
                     />
-                  )}
-                  {channel === 'DELIVERY' && (
-                    <textarea
-                      className={`${touchField} min-h-[88px]`}
-                      placeholder="Delivery address *"
-                      rows={2}
-                      value={guestDraft.deliveryAddress}
-                      onChange={(e) =>
-                        setGuestDraft({ ...guestDraft, deliveryAddress: e.target.value })
-                      }
-                    />
-                  )}
-                  {order && (
-                    <button
-                      type="button"
-                      disabled={saveGuestMutation.isPending}
-                      onClick={() => saveGuestMutation.mutate()}
-                      className={`${touchBtnGhost} w-full border-violet-400 text-violet-900`}
-                    >
-                      Save customer / guest
-                    </button>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
+                        Customer
+                      </label>
+                      <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-3 py-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-base text-stone-900 truncate">
+                            {guestDraft.guestName}
+                          </div>
+                          {guestDraft.guestPhone ? (
+                            <div className="text-sm text-stone-600">{guestDraft.guestPhone}</div>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className={`${touchBtnGhost} min-h-11 px-3 shrink-0`}
+                          onClick={() =>
+                            setGuestDraft({
+                              guestName: '',
+                              guestPhone: '',
+                              deliveryAddress: '',
+                              pickupLabel: '',
+                            })
+                          }
+                        >
+                          Change
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
@@ -2487,103 +3274,171 @@ export default function RestaurantPosPage() {
                 }`}
               >
                 {orderLines.length === 0 ? (
-                  <p className="text-sm text-stone-500 py-8 text-center">
-                    Add products from the menu
-                  </p>
-                ) : opsMode === 'split' ? (
-                  <ul className="space-y-2">
-                    {orderLines.map((line) => (
-                      <li
-                        key={line.id}
-                        className="flex justify-between gap-2 text-sm border border-stone-200 rounded-xl bg-white px-3 py-3"
-                      >
-                        <div className="flex gap-3 items-start min-w-0 flex-1">
-                          <label className={`${TOUCH} min-h-11 min-w-11 inline-flex items-center justify-center -ml-1`}>
-                            <input
-                              type="checkbox"
-                              className="h-5 w-5"
-                              checked={selectedLineIds.includes(line.id)}
-                              onChange={() => toggleLine(line.id)}
-                            />
-                          </label>
-                          <div className="min-w-0">
-                            <span className="font-medium text-stone-900">
-                              {Number(line.quantity)} × {line.productName}
-                            </span>
-                            {line.kitchenSentAt ? (
-                              <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700">
-                                KOT
-                              </span>
-                            ) : (
-                              <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-700">
-                                New
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="text-stone-700 whitespace-nowrap shrink-0">
-                          {formatCurrency(Number(line.lineTotal))}
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="py-4 lg:py-8 text-center space-y-3">
+                    <p className="text-sm text-stone-500">
+                      {order
+                        ? 'Tap menu items to build the ticket'
+                        : 'No order yet — add items, or go back to the floor'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => returnToFloor()}
+                      className={`${touchBtnGhost} min-h-12 px-4`}
+                    >
+                      ← Back to tables
+                    </button>
+                  </div>
                 ) : (
                   <ul className="space-y-2">
-                    {ticketGroups.map((group) => (
-                      <li
-                        key={group.key}
-                        className="flex justify-between gap-2 text-sm border border-stone-200 rounded-xl bg-white px-3 py-3 active:bg-stone-50"
-                        onPointerDown={() => startLineLongPress(group)}
-                        onPointerUp={clearLinePressTimer}
-                        onPointerLeave={clearLinePressTimer}
-                        onPointerCancel={clearLinePressTimer}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          clearLinePressTimer();
-                          setLineSheet(group);
-                        }}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="font-medium text-stone-900">
-                            {group.quantity} × {group.productName}
-                          </div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                            {group.kitchenSent ? (
-                              <span className="text-[10px] uppercase tracking-wide text-emerald-700 font-semibold">
-                                KOT
+                    {ticketGroups.map((group) => {
+                      const selected = group.itemIds.every((id) => selectedLineIds.includes(id));
+                      const partially =
+                        !selected && group.itemIds.some((id) => selectedLineIds.includes(id));
+                      return (
+                        <li
+                          key={group.key}
+                          className={`flex justify-between gap-2 text-sm border-2 rounded-xl px-3 py-3 ${
+                            selected
+                              ? 'border-emerald-600 bg-emerald-50'
+                              : partially
+                                ? 'border-emerald-300 bg-emerald-50/50'
+                                : 'border-stone-200 bg-white active:bg-stone-50'
+                          }`}
+                          onClick={() => toggleGroupSelection(group)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            setLineSheet(group);
+                          }}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start gap-2">
+                              <span
+                                className={`${TOUCH} mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-xs font-bold ${
+                                  selected
+                                    ? 'border-emerald-600 bg-emerald-600 text-white'
+                                    : 'border-stone-300 bg-white text-transparent'
+                                }`}
+                                aria-hidden
+                              >
+                                ✓
                               </span>
-                            ) : (
-                              <span className="text-[10px] uppercase tracking-wide text-amber-700 font-semibold">
-                                New
-                              </span>
-                            )}
-                            <span className="text-[11px] text-stone-400">Hold for actions</span>
+                              <div className="min-w-0">
+                                <div className="font-medium text-stone-900">
+                                  {group.quantity} × {group.productName}
+                                </div>
+                                <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                                  {(() => {
+                                    const st = ticketLineStatus(group.kitchenSent, isCheckBilled);
+                                    return (
+                                      <span
+                                        className={`text-[10px] uppercase tracking-wide font-semibold ${st.className}`}
+                                      >
+                                        {st.label}
+                                      </span>
+                                    );
+                                  })()}
+                                  {!selected ? (
+                                    <span className="text-[11px] text-stone-400">Tap to select</span>
+                                  ) : null}
+                                </div>
+                                {/* Inline ± on unsent — stopPropagation so row stays selected */}
+                                {!group.kitchenSent && group.productId ? (
+                                  <div
+                                    className="mt-2 inline-flex items-center gap-1"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <button
+                                      type="button"
+                                      aria-label="Decrease quantity"
+                                      disabled={busy}
+                                      onClick={() => void handleLineMinusOne(group)}
+                                      className={`${TOUCH} min-h-10 min-w-10 rounded-lg border border-stone-300 bg-stone-50 text-lg font-bold text-stone-800`}
+                                    >
+                                      −
+                                    </button>
+                                    <button
+                                      type="button"
+                                      aria-label="Set quantity"
+                                      disabled={busy}
+                                      onClick={() => handleLineSetQty(group)}
+                                      className={`${TOUCH} min-h-10 min-w-12 rounded-lg border border-stone-300 bg-white text-sm font-bold text-stone-900`}
+                                    >
+                                      {group.quantity}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      aria-label="Increase quantity"
+                                      disabled={busy}
+                                      onClick={() => void handleLinePlusOne(group)}
+                                      className={`${TOUCH} min-h-10 min-w-10 rounded-lg border border-stone-300 bg-stone-50 text-lg font-bold text-stone-800`}
+                                    >
+                                      +
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <div className="text-stone-700 whitespace-nowrap font-medium">
-                            {formatCurrency(group.lineTotal)}
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <div className="text-stone-700 whitespace-nowrap font-medium">
+                              {formatCurrency(group.lineTotal)}
+                            </div>
+                            <button
+                              type="button"
+                              aria-label="Line actions"
+                              disabled={busy}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setLineSheet(group);
+                              }}
+                              className={`${TOUCH} min-h-9 min-w-9 px-2 rounded-lg text-sm font-bold border border-stone-300 bg-stone-50 text-stone-700`}
+                            >
+                              ···
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            aria-label="Line actions"
-                            disabled={busy}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              clearLinePressTimer();
-                              setLineSheet(group);
-                            }}
-                            onPointerDown={(e) => e.stopPropagation()}
-                            className={`${TOUCH} min-h-9 min-w-9 px-2 rounded-lg text-sm font-bold border border-stone-300 bg-stone-50 text-stone-700`}
-                          >
-                            ···
-                          </button>
-                        </div>
-                      </li>
-                    ))}
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
+
+              {/* Samba: select lines → Void / Move (split to new ticket) */}
+              {selectedLineIds.length > 0 &&
+                order &&
+                (mobileSheet === 'order' || !mobileSheet) && (
+                  <div className="px-3 py-2.5 border-t border-emerald-200 bg-emerald-50 space-y-2 shrink-0">
+                    <p className="text-xs font-semibold text-emerald-900">
+                      {selectedLineIds.length} line(s) selected — Void or Move to new ticket
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleVoidSelected()}
+                        className={`${touchBtnDanger} min-h-12 text-xs`}
+                      >
+                        Void
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || selectedLineIds.length >= orderLines.length}
+                        onClick={() => handleMoveSelected()}
+                        className={`${touchBtnDark} min-h-12 text-xs`}
+                      >
+                        Move
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => clearLineSelection()}
+                        className={`${touchBtnGhost} min-h-12 text-xs`}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                )}
 
               {/* Line action sheet (SambaPOS long-press / Toast edit line) */}
               {lineSheet && (
@@ -2602,7 +3457,11 @@ export default function RestaurantPosPage() {
                         </p>
                         <p className="text-sm text-stone-500">
                           {formatCurrency(lineSheet.lineTotal)}
-                          {lineSheet.kitchenSent ? ' · Sent to kitchen' : ' · Not sent'}
+                          {lineSheet.kitchenSent
+                            ? ' · Sent to kitchen (KOT)'
+                            : isCheckBilled
+                              ? ' · On guest bill · not sent to kitchen'
+                              : ' · Not sent to kitchen'}
                         </p>
                       </div>
                       <button
@@ -2614,23 +3473,35 @@ export default function RestaurantPosPage() {
                       </button>
                     </div>
                     {lineSheet.productId ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void handleLineMinusOne(lineSheet)}
-                          className={`${touchBtnGhost} min-h-14 text-lg font-bold`}
-                        >
-                          −1
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy}
-                          onClick={() => void handleLinePlusOne(lineSheet)}
-                          className={`${touchBtnGhost} min-h-14 text-lg font-bold`}
-                        >
-                          +1
-                        </button>
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void handleLineMinusOne(lineSheet)}
+                            className={`${touchBtnGhost} min-h-14 text-lg font-bold`}
+                          >
+                            −1
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void handleLinePlusOne(lineSheet)}
+                            className={`${touchBtnGhost} min-h-14 text-lg font-bold`}
+                          >
+                            +1
+                          </button>
+                        </div>
+                        {!lineSheet.kitchenSent ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => handleLineSetQty(lineSheet)}
+                            className={`${touchBtnGhost} w-full min-h-12`}
+                          >
+                            Set qty…
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                     <button
@@ -2645,7 +3516,84 @@ export default function RestaurantPosPage() {
                         ? lineSheet.quantity > 1
                           ? 'Void qty… (kitchen VOID ticket)'
                           : 'Void (kitchen VOID ticket)'
-                        : 'Remove (not sent)'}
+                        : 'Remove (unsent)'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Touch qty pad — Set qty / void qty (replaces window.prompt) */}
+              {qtyPadSheet && (
+                <div className="fixed inset-0 z-[60] flex flex-col justify-end lg:justify-center lg:items-center bg-black/40">
+                  <button
+                    type="button"
+                    className="flex-1 w-full lg:absolute lg:inset-0 cursor-default"
+                    aria-label="Dismiss qty pad"
+                    onClick={() => setQtyPadSheet(null)}
+                  />
+                  <div className="relative w-full lg:max-w-sm bg-white rounded-t-2xl lg:rounded-2xl p-4 space-y-3 shadow-xl pb-[max(1rem,env(safe-area-inset-bottom))]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-xs uppercase tracking-wide font-semibold text-stone-500">
+                          {qtyPadSheet.purpose === 'void-qty' ? 'Void quantity' : 'Set quantity'}
+                        </p>
+                        <p className="font-semibold text-stone-900 truncate">
+                          {qtyPadSheet.purpose === 'void-qty'
+                            ? qtyPadSheet.productName
+                            : qtyPadSheet.group.productName}
+                        </p>
+                        <p className="text-sm text-stone-500">
+                          {qtyPadSheet.purpose === 'void-qty'
+                            ? `1–${qtyPadSheet.max}${qtyPadSheet.kitchenSent ? ' · kitchen VOID' : ''}`
+                            : `Current ${qtyPadSheet.group.quantity} · 0 clears line`}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className={`${touchBtnGhost} min-h-10 px-3`}
+                        onClick={() => setQtyPadSheet(null)}
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
+                    <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50 py-3 text-center">
+                      <span className="text-4xl font-bold tabular-nums text-stone-900">
+                        {qtyPadSheet.digits || '0'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', '⌫'].map((key) => (
+                        <button
+                          key={key}
+                          type="button"
+                          className={`${TOUCH} min-h-14 rounded-xl border border-stone-300 bg-stone-50 text-xl font-bold text-stone-900 active:bg-emerald-100`}
+                          onClick={() => {
+                            if (key === 'C') {
+                              setQtyPadSheet((s) => (s ? { ...s, digits: '' } : s));
+                              return;
+                            }
+                            if (key === '⌫') {
+                              setQtyPadSheet((s) =>
+                                s ? { ...s, digits: s.digits.slice(0, -1) } : s,
+                              );
+                              return;
+                            }
+                            setQtyPadSheet((s) =>
+                              s ? { ...s, digits: appendQtyDigit(s.digits, key) } : s,
+                            );
+                          }}
+                        >
+                          {key}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => confirmQtyPadSheet()}
+                      className={`${touchBtnDark} w-full min-h-14`}
+                    >
+                      {qtyPadSheet.purpose === 'void-qty' ? 'Void' : 'Set qty'}
                     </button>
                   </div>
                 </div>
@@ -2656,28 +3604,17 @@ export default function RestaurantPosPage() {
                   mobileSheet === 'more' ? 'flex' : 'hidden'
                 } lg:hidden flex-1 flex-col min-h-0 overflow-y-auto px-3 py-3 space-y-2 bg-amber-50`}
               >
+                <p className="text-xs text-stone-600 px-1">
+                  Tip: tap ticket lines to select, then use Void or Move. Transfer moves the whole
+                  ticket to another table.
+                </p>
                 <button
                   type="button"
-                  disabled={!order || busy}
-                  onClick={() => {
-                    setOpsMode('split');
-                    setSplitSameTable(true);
-                    setMobileSheet('order');
-                  }}
-                  className={`${touchBtnGhost} w-full`}
+                  disabled={busy}
+                  onClick={() => returnToFloor()}
+                  className={`${touchBtnDark} w-full`}
                 >
-                  Split check
-                </button>
-                <button
-                  type="button"
-                  disabled={!order || busy || mergeCandidates.length === 0}
-                  onClick={() => {
-                    setOpsMode('merge');
-                    setMobileSheet('order');
-                  }}
-                  className={`${touchBtnGhost} w-full`}
-                >
-                  Merge check
+                  ← Back to tables
                 </button>
                 <button
                   type="button"
@@ -2685,11 +3622,22 @@ export default function RestaurantPosPage() {
                   onClick={() => {
                     setOpsMode('transfer');
                     setOpsTargetTableId('');
-                    setMobileSheet('order');
+                    setMobileSheet(null);
                   }}
                   className={`${touchBtnGhost} w-full`}
                 >
-                  Transfer table
+                  Change table
+                </button>
+                <button
+                  type="button"
+                  disabled={!order || busy || mergeCandidates.length === 0}
+                  onClick={() => {
+                    setOpsMode('merge');
+                    setMobileSheet(null);
+                  }}
+                  className={`${touchBtnGhost} w-full`}
+                >
+                  Merge tickets
                 </button>
                 <button
                   type="button"
@@ -2701,11 +3649,16 @@ export default function RestaurantPosPage() {
                 </button>
               </div>
 
-              {opsMode && order && (mobileSheet === 'order' || !mobileSheet) && (
+              {opsMode &&
+                order &&
+                (opsMode === 'transfer' || opsMode === 'merge') &&
+                (mobileSheet === 'order' || !mobileSheet) && (
                 <div className="px-3 py-3 border-t border-stone-200 bg-amber-50 space-y-2.5 shrink-0">
                   {opsMode === 'transfer' && (
                     <>
-                      <p className="text-xs font-medium text-stone-700">Transfer to free table</p>
+                      <p className="text-xs font-medium text-stone-700">
+                        Change table (whole ticket)
+                      </p>
                       <select
                         className={touchField}
                         value={opsTargetTableId}
@@ -2724,21 +3677,21 @@ export default function RestaurantPosPage() {
                         onClick={() => void runTransfer()}
                         className={`${touchBtnDark} w-full`}
                       >
-                        Confirm transfer
+                        Confirm change table
                       </button>
                     </>
                   )}
                   {opsMode === 'merge' && (
                     <>
                       <p className="text-xs font-medium text-stone-700">
-                        Merge another check into this one
+                        Merge another ticket on this table into this one
                       </p>
                       <select
                         className={touchField}
                         value={opsSecondaryOrderId}
                         onChange={(e) => setOpsSecondaryOrderId(e.target.value)}
                       >
-                        <option value="">Select check…</option>
+                        <option value="">Select ticket…</option>
                         {mergeCandidates.map((c) => (
                           <option key={c.orderId} value={c.orderId}>
                             {c.label}
@@ -2755,56 +3708,10 @@ export default function RestaurantPosPage() {
                       </button>
                     </>
                   )}
-                  {opsMode === 'split' && (
-                    <>
-                      <p className="text-xs font-medium text-stone-700">
-                        Split selected lines ({selectedLineIds.length}) — leave ≥1 on this check
-                      </p>
-                      <label className={`${TOUCH} min-h-11 px-2 inline-flex items-center gap-3 text-sm text-stone-700 rounded-xl active:bg-amber-100/80`}>
-                        <input
-                          type="checkbox"
-                          checked={splitSameTable}
-                          onChange={(e) => setSplitSameTable(e.target.checked)}
-                          className="h-5 w-5"
-                        />
-                        New bill on same table
-                      </label>
-                      {!splitSameTable && (
-                        <select
-                          className={touchField}
-                          value={opsTargetTableId}
-                          onChange={(e) => setOpsTargetTableId(e.target.value)}
-                        >
-                          <option value="">Free table…</option>
-                          {freeTables.map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.code} · {t.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                      <button
-                        type="button"
-                        disabled={
-                          busy ||
-                          selectedLineIds.length === 0 ||
-                          selectedLineIds.length >= orderLines.length ||
-                          (!splitSameTable && !opsTargetTableId)
-                        }
-                        onClick={() => void runSplit()}
-                        className={`${touchBtnDark} w-full`}
-                      >
-                        Confirm split
-                      </button>
-                    </>
-                  )}
                   <button
                     type="button"
                     className={`${touchBtnGhost} w-full text-stone-600`}
-                    onClick={() => {
-                      setOpsMode(null);
-                      setSelectedLineIds([]);
-                    }}
+                    onClick={() => setOpsMode(null)}
                   >
                     Cancel
                   </button>
@@ -2827,26 +3734,7 @@ export default function RestaurantPosPage() {
                     {formatCurrency(Number(order?.totalAmount || 0))}
                   </span>
                 </div>
-                <div className="hidden lg:grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    disabled={!order || busy}
-                    onClick={() => {
-                      setOpsMode('split');
-                      setSplitSameTable(true);
-                    }}
-                    className={`${touchBtnGhost} min-h-10 px-2 text-xs`}
-                  >
-                    Split
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!order || busy || mergeCandidates.length === 0}
-                    onClick={() => setOpsMode('merge')}
-                    className={`${touchBtnGhost} min-h-10 px-2 text-xs`}
-                  >
-                    Merge
-                  </button>
+                <div className="hidden lg:grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     disabled={!order || busy || freeTables.length === 0}
@@ -2856,23 +3744,20 @@ export default function RestaurantPosPage() {
                     }}
                     className={`${touchBtnGhost} min-h-10 px-2 text-xs`}
                   >
-                    Transfer
+                    Change table
                   </button>
-                </div>
-                {selectedLineIds.length > 0 && !opsMode ? (
                   <button
                     type="button"
-                    disabled={busy}
-                    onClick={() => void handleVoidLines(selectedLineIds)}
-                    className={`${touchBtnDanger} w-full`}
+                    disabled={!order || busy || mergeCandidates.length === 0}
+                    onClick={() => setOpsMode('merge')}
+                    className={`${touchBtnGhost} min-h-10 px-2 text-xs`}
                   >
-                    {selectedLineIds.some((id) =>
-                      orderLines.some((l) => l.id === id && l.kitchenSentAt),
-                    )
-                      ? `Void selected (${selectedLineIds.length})`
-                      : `Remove selected (${selectedLineIds.length})`}
+                    Merge
                   </button>
-                ) : null}
+                </div>
+                <p className="hidden lg:block text-[11px] text-stone-500">
+                  Select lines on the ticket → Void or Move (new ticket). Switch tickets above.
+                </p>
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
@@ -2889,15 +3774,25 @@ export default function RestaurantPosPage() {
                     className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-rose-800 text-white text-base font-bold active:bg-rose-950`}
                   >
                     Bill
+                    {ticketTabs.length > 1 && order ? (
+                      <span className="block text-[10px] font-semibold opacity-90 truncate max-w-full">
+                        {order.orderNumber}
+                      </span>
+                    ) : null}
                   </button>
                   {canRestaurantPay ? (
                     <button
                       type="button"
-                      disabled={!order || busy}
+                      disabled={!order || busy || orderLines.length === 0}
                       onClick={() => void handlePay()}
                       className={`${TOUCH} min-h-14 col-span-2 rounded-xl bg-emerald-600 text-white text-base font-bold active:bg-emerald-700`}
                     >
                       Pay (cash · offline-first)
+                      {ticketTabs.length > 1 && order ? (
+                        <span className="block text-[10px] font-semibold opacity-90 truncate max-w-full">
+                          {order.orderNumber}
+                        </span>
+                      ) : null}
                     </button>
                   ) : null}
                   <button

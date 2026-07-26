@@ -9,8 +9,25 @@ const MENU_KEY = 'restaurant_offline_menu';
 const CATEGORIES_KEY = 'restaurant_offline_categories';
 const WAITERS_KEY = 'restaurant_offline_waiters';
 const META_KEY = 'restaurant_offline_cache_meta';
-/** tableId → orderId for offline Bill Requested (FOH maroon) until sync/pay */
+/**
+ * tableId → orderId[] for Bill Requested (per check).
+ * Legacy values were a single orderId string — normalized on read.
+ */
 const BILL_REQUESTED_KEY = 'restaurant_offline_bill_requested';
+
+function normalizeBillRequestedMap(
+  raw: Record<string, string | string[]>,
+): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [tableId, value] of Object.entries(raw || {})) {
+    if (Array.isArray(value)) {
+      out[tableId] = value.filter((id) => typeof id === 'string' && id.length > 0);
+    } else if (typeof value === 'string' && value.length > 0) {
+      out[tableId] = [value];
+    }
+  }
+  return out;
+}
 
 export interface CachedRestaurantTable {
   id: string;
@@ -122,6 +139,28 @@ export function getCachedRestaurantWaiters(): CachedWaiter[] {
   return readJson(WAITERS_KEY, []);
 }
 
+/** Paint a table FREE in the offline tables cache (after pay/cancel/void). */
+export function paintRestaurantTableFreeOffline(tableId: string): void {
+  if (!tableId) return;
+  const tables = getCachedRestaurantTables();
+  if (tables.length === 0) return;
+  let changed = false;
+  const next = tables.map((t) => {
+    if (t.id !== tableId) return t;
+    if (t.status === 'FREE' && !t.currentOrderId) return t;
+    changed = true;
+    return {
+      ...t,
+      status: 'FREE' as const,
+      currentOrderId: null,
+      orderNumber: null,
+      orderTotal: null,
+      guestName: null,
+    };
+  });
+  if (changed) cacheRestaurantTables(next);
+}
+
 function touchMeta(): void {
   writeJson(META_KEY, { lastSyncAt: Date.now() });
 }
@@ -131,22 +170,44 @@ export function getRestaurantCacheLastSync(): number | null {
   return meta.lastSyncAt ?? null;
 }
 
-/** Offline FOH: mark table as Bill Requested (maroon) — mirrors server BILLING. */
+/** Offline FOH: mark this check Bill Requested (per order on multi-ticket tables). */
 export function markRestaurantBillRequestedOffline(tableId: string, orderId: string): void {
-  const map = readJson<Record<string, string>>(BILL_REQUESTED_KEY, {});
-  map[tableId] = orderId;
+  const map = normalizeBillRequestedMap(
+    readJson<Record<string, string | string[]>>(BILL_REQUESTED_KEY, {}),
+  );
+  const set = new Set(map[tableId] || []);
+  set.add(orderId);
+  map[tableId] = [...set];
   writeJson(BILL_REQUESTED_KEY, map);
 }
 
-export function clearRestaurantBillRequestedOffline(tableId: string): void {
-  const map = readJson<Record<string, string>>(BILL_REQUESTED_KEY, {});
+/** Clear one check's bill flag, or the whole table when orderId omitted. */
+export function clearRestaurantBillRequestedOffline(tableId: string, orderId?: string): void {
+  const map = normalizeBillRequestedMap(
+    readJson<Record<string, string | string[]>>(BILL_REQUESTED_KEY, {}),
+  );
   if (!(tableId in map)) return;
-  delete map[tableId];
+  if (!orderId) {
+    delete map[tableId];
+  } else {
+    map[tableId] = (map[tableId] || []).filter((id) => id !== orderId);
+    if (map[tableId].length === 0) delete map[tableId];
+  }
   writeJson(BILL_REQUESTED_KEY, map);
 }
 
-export function getRestaurantBillRequestedOffline(): Record<string, string> {
-  return readJson<Record<string, string>>(BILL_REQUESTED_KEY, {});
+export function getRestaurantBillRequestedOffline(): Record<string, string[]> {
+  return normalizeBillRequestedMap(
+    readJson<Record<string, string | string[]>>(BILL_REQUESTED_KEY, {}),
+  );
+}
+
+export function isRestaurantOrderBillRequestedOffline(
+  tableId: string | null | undefined,
+  orderId: string | null | undefined,
+): boolean {
+  if (!tableId || !orderId) return false;
+  return (getRestaurantBillRequestedOffline()[tableId] || []).includes(orderId);
 }
 
 /**

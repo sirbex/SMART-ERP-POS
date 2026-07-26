@@ -10,6 +10,15 @@ import { tableHasColumn } from '../../db/schemaColumnCache.js';
 
 export type DbConn = Pool | PoolClient;
 
+/** status_updated_by / fired_by are UUID FKs — never write labels like "system". */
+const USER_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function asUserUuidOrNull(id: string | null | undefined): string | null {
+  if (!id || typeof id !== 'string') return null;
+  return USER_UUID_RE.test(id) ? id : null;
+}
+
 export type TableStatus = 'FREE' | 'OCCUPIED' | 'BILLING';
 export type OrderChannel = 'RETAIL' | 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
 export type KitchenStatus = 'NONE' | 'SENT' | 'PREPARING' | 'READY' | 'SERVED';
@@ -310,15 +319,26 @@ export const restaurantRepository = {
     /**
      * Phase 4: if another PENDING restaurant check shares this table, re-point
      * current_order_id to it instead of freeing the floor.
+     * Also resolve table via pos_orders.table_id when current_order_id pointer is stale.
      */
-    const tableRes = await conn.query(
+    let tableRes = await conn.query(
       `SELECT id
        FROM restaurant_tables
        WHERE current_order_id = $1`,
       [orderId],
     );
     if (!tableRes.rows[0]) {
-      return false;
+      const viaOrder = await conn.query(
+        `SELECT t.id
+         FROM pos_orders o
+         INNER JOIN restaurant_tables t ON t.id = o.table_id
+         WHERE o.id = $1`,
+        [orderId],
+      );
+      if (!viaOrder.rows[0]) {
+        return false;
+      }
+      tableRes = viaOrder;
     }
     const tableId = tableRes.rows[0].id as string;
 
@@ -347,11 +367,43 @@ export const restaurantRepository = {
     const result = await conn.query(
       `UPDATE restaurant_tables
        SET status = 'FREE', current_order_id = NULL, updated_at = NOW()
-       WHERE id = $1 AND current_order_id = $2
+       WHERE id = $1
        RETURNING id`,
-      [tableId, orderId],
+      [tableId],
     );
     return result.rowCount != null && result.rowCount > 0;
+  },
+
+  /**
+   * Clear kitchen board tickets for a settled check.
+   * Always bumps FIRE + VOID — paid/cancelled/voided checks must leave KDS immediately.
+   */
+  async bumpKitchenTicketsForOrder(
+    conn: DbConn,
+    orderId: string,
+    updatedBy?: string | null,
+    opts?: { bumpVoids?: boolean },
+  ): Promise<number> {
+    const hasStatus = await tableHasColumn(conn, 'restaurant_kot', 'status');
+    if (!hasStatus) return 0;
+    // bumpVoids defaults true — only keep FIRE-only when explicitly false (legacy).
+    const bumpVoids = opts?.bumpVoids !== false;
+    const hasKind = await tableHasColumn(conn, 'restaurant_kot', 'ticket_kind');
+    const kindFilter =
+      !bumpVoids && hasKind
+        ? `AND COALESCE(ticket_kind, 'FIRE') = 'FIRE'`
+        : '';
+    const result = await conn.query(
+      `UPDATE restaurant_kot
+       SET status = 'BUMPED',
+           status_updated_at = NOW(),
+           status_updated_by = $2
+       WHERE order_id = $1
+         AND COALESCE(status, 'SENT') <> 'BUMPED'
+         ${kindFilter}`,
+      [orderId, asUserUuidOrNull(updatedBy)],
+    );
+    return result.rowCount ?? 0;
   },
 
   async listPendingOrdersForTable(conn: DbConn, tableId: string): Promise<
@@ -925,6 +977,27 @@ export const restaurantRepository = {
     return convertKeysToCamelCase(result.rows[0]) as RestaurantOrderMeta;
   },
 
+  /**
+   * One-shot cleanup: bump every KOT whose order is no longer PENDING.
+   * Clears legacy VOID tickets that used to linger 4 hours on the board.
+   */
+  async purgeSettledKitchenTickets(conn: DbConn, updatedBy?: string | null): Promise<number> {
+    const hasStatus = await tableHasColumn(conn, 'restaurant_kot', 'status');
+    if (!hasStatus) return 0;
+    const result = await conn.query(
+      `UPDATE restaurant_kot k
+       SET status = 'BUMPED',
+           status_updated_at = NOW(),
+           status_updated_by = $1
+       FROM pos_orders o
+       WHERE o.id = k.order_id
+         AND o.status <> 'PENDING'
+         AND COALESCE(k.status, 'SENT') <> 'BUMPED'`,
+      [asUserUuidOrNull(updatedBy)],
+    );
+    return result.rowCount ?? 0;
+  },
+
   async listActiveKitchenTickets(
     conn: DbConn,
     filters?: { station?: string | null },
@@ -942,11 +1015,12 @@ export const restaurantRepository = {
     const values: unknown[] = [];
     let idx = 1;
     const hasKindForFilter = await tableHasColumn(conn, 'restaurant_kot', 'ticket_kind');
-    // VOID tickets stay visible after check cancel so kitchen sees stop/discard.
-    const openOrRecentVoid = hasKindForFilter
-      ? `(o.status = 'PENDING' OR (COALESCE(k.ticket_kind, 'FIRE') = 'VOID' AND k.fired_at > NOW() - INTERVAL '4 hours'))`
-      : `o.status = 'PENDING'`;
-    const conditions = [`k.status <> 'BUMPED'`, openOrRecentVoid, `o.order_channel <> 'RETAIL'`];
+    // Only open (PENDING) checks appear on KDS — paid/cancelled/voided leave immediately.
+    const conditions = [
+      `k.status <> 'BUMPED'`,
+      `o.status = 'PENDING'`,
+      `o.order_channel <> 'RETAIL'`,
+    ];
 
     if (filters?.station) {
       conditions.push(`UPPER(k.station) = UPPER($${idx++})`);
@@ -1045,7 +1119,7 @@ export const restaurantRepository = {
            status_updated_at = NOW(),
            status_updated_by = $3
        WHERE id = $1`,
-      [kotId, status, updatedBy],
+      [kotId, status, asUserUuidOrNull(updatedBy)],
     );
     return this.getKotById(conn, kotId);
   },

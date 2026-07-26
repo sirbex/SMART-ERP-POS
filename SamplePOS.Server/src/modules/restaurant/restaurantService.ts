@@ -776,7 +776,10 @@ export const restaurantService = {
 
     if (result.checkCancelled) {
       await ordersService.cancelOrder(pool, orderId, input.voidedBy, reason);
-      await this.releaseTableForOrder(pool, orderId);
+      await this.releaseTableForOrder(pool, orderId, {
+        bumpVoids: true,
+        updatedBy: input.voidedBy,
+      });
       logger.info('Restaurant check voided completely', { orderId, reason });
       return {
         voidKots: result.voidKots,
@@ -803,6 +806,11 @@ export const restaurantService = {
 
   async listKitchenBoard(pool: Pool, filters?: { station?: string | null }): Promise<KotRecord[]> {
     await assertRestaurantEnabled(pool);
+    // Start from current truth: bump KOTs for paid/cancelled/voided checks first.
+    const purged = await restaurantRepository.purgeSettledKitchenTickets(pool, null);
+    if (purged > 0) {
+      logger.info('Purged settled kitchen tickets from board', { purged });
+    }
     const tickets = await restaurantRepository.listActiveKitchenTickets(pool, filters);
     // Attach printer routing for reprint / station display
     for (const ticket of tickets) {
@@ -920,7 +928,11 @@ export const restaurantService = {
   async markBilling(pool: Pool, orderId: string): Promise<void> {
     await assertRestaurantEnabled(pool);
     const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
-    if (meta?.tableId) {
+    if (!meta?.tableId) return;
+    // Multi-ticket tables: billing one check must not paint the whole table BILLING
+    // (sibling tickets would incorrectly look billed). Sole open check → BILLING.
+    const siblings = await restaurantRepository.listPendingOrdersForTable(pool, meta.tableId);
+    if (siblings.length <= 1) {
       await restaurantRepository.markTableBilling(pool, meta.tableId);
     }
   },
@@ -928,21 +940,46 @@ export const restaurantService = {
   /**
    * Release floor table when order completes or cancels.
    * Safe no-op when restaurant flag off or order is not table-linked.
+   * Also bumps kitchen FIRE tickets so KDS clears settled checks.
    */
-  async releaseTableForOrder(pool: Pool | PoolClient, orderId: string): Promise<void> {
+  async releaseTableForOrder(
+    pool: Pool | PoolClient,
+    orderId: string,
+    opts?: { bumpVoids?: boolean; updatedBy?: string },
+  ): Promise<void> {
     const enabled = await isRestaurantModeEnabled(pool);
     if (!enabled) return;
+    // KDS bump must never block floor release (status_updated_by is UUID-nullable).
+    let bumped = 0;
+    try {
+      bumped = await restaurantRepository.bumpKitchenTicketsForOrder(
+        pool,
+        orderId,
+        opts?.updatedBy ?? null,
+        { bumpVoids: opts?.bumpVoids !== false },
+      );
+    } catch (bumpErr) {
+      logger.error('Kitchen bump failed during table release — continuing with floor free', {
+        orderId,
+        error: bumpErr instanceof Error ? bumpErr.message : String(bumpErr),
+      });
+    }
     const released = await restaurantRepository.releaseTableByOrderId(pool, orderId);
-    if (released) {
-      logger.info('Restaurant table released for order', { orderId });
+    if (released || bumped > 0) {
+      logger.info('Restaurant table/kitchen cleared for order', {
+        orderId,
+        released,
+        bumpedTickets: bumped,
+        bumpVoids: opts?.bumpVoids !== false,
+      });
     }
   },
 
   /**
    * SambaPOS Print Bill rule (FOH):
-   * 1) Mark table BILLING ("Bill Requested") — primary SSOT outcome
+   * 1) Mark this check billed; table → BILLING only when it is the sole open check
    * 2) Return check payload for optional local print (best-effort)
-   * Order stays PENDING until Pay; waiter UI should return to floor after this.
+   * Order stays PENDING until Pay. Multi-ticket tables stay on floor with siblings.
    */
   async requestBill(pool: Pool, orderId: string) {
     await assertRestaurantEnabled(pool);
@@ -1065,7 +1102,10 @@ export const restaurantService = {
       cancelledBy,
       reason.trim() || 'Cancelled from restaurant POS',
     );
-    await this.releaseTableForOrder(pool, orderId);
+    await this.releaseTableForOrder(pool, orderId, {
+      bumpVoids: true,
+      updatedBy: cancelledBy,
+    });
     return { order, tableId: meta.tableId, voidKots };
   },
 
@@ -1247,6 +1287,13 @@ export const restaurantService = {
     const secondary = await ordersService.getOrder(pool, secondaryOrderId);
     if (primary.status !== 'PENDING' || secondary.status !== 'PENDING') {
       throw new BusinessError('Both checks must be open to merge', 'ERR_RESTAURANT_CHECK_CLOSED');
+    }
+
+    // Samba: merge only tickets on the same dining table.
+    if (!primaryMeta.tableId || primaryMeta.tableId !== secondaryMeta.tableId) {
+      throw new ValidationError(
+        'Merge only works for tickets on the same table — use Change table first if needed',
+      );
     }
 
     const secondaryItems = secondary.items || [];

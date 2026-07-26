@@ -297,9 +297,12 @@ router.post(
     // 3. Create the sale AND atomically mark order completed (single transaction)
     const result = await salesService.createSale(pool, saleInput);
 
-    // 4. Restaurant SSOT: free floor table after successful payment (no-op if flag off)
+    // 4. Restaurant SSOT: free floor + clear FIRE/VOID KOTs from KDS after payment
     try {
-      await restaurantService.releaseTableForOrder(pool, orderId);
+      await restaurantService.releaseTableForOrder(pool, orderId, {
+        bumpVoids: true,
+        updatedBy: userId,
+      });
     } catch (releaseErr) {
       logger.error('Restaurant table release failed after order complete', {
         orderId,
@@ -337,7 +340,10 @@ router.post(
     const order = await ordersService.cancelOrder(pool, req.params.id, userId, reason);
 
     try {
-      await restaurantService.releaseTableForOrder(pool, order.id);
+      await restaurantService.releaseTableForOrder(pool, order.id, {
+        bumpVoids: true,
+        updatedBy: userId,
+      });
     } catch (releaseErr) {
       logger.error('Restaurant table release failed after order cancel', {
         orderId: order.id,

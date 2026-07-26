@@ -11,6 +11,14 @@ import { toast } from 'react-hot-toast';
 import type { Customer } from '@shared/zod/customer';
 import Decimal from 'decimal.js';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
+import { markRestaurantCheckSettledInJournal } from '../../lib/restaurantOfflineOps';
+import {
+  clearRestaurantBillRequestedOffline,
+  paintRestaurantTableFreeOffline,
+} from '../../lib/restaurantOfflineCache';
+import { publishLanKdsBoardChanged } from '../../lib/restaurantLanKds';
+import { getAllEvents, getAllSyncState } from '../../lib/offlineEventJournal';
+import { deriveRestaurantOpenChecks } from '../../lib/offlineEventSelectors';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -71,10 +79,12 @@ export default function OrderPaymentPage() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
 
-  /** Restaurant FOH passes ?returnTo=/restaurant so pay lands back on the floor. */
+  /** Restaurant FOH passes ?returnTo=/restaurant so pay lands on the tables floor. */
   const returnToPath = (() => {
     const raw = searchParams.get('returnTo');
     if (raw === '/restaurant' || raw === '/orders-queue') return raw;
+    // Legacy multi-ticket deep-links still land on the floor (not a specific table).
+    if (raw?.startsWith('/restaurant?')) return '/restaurant';
     return '/orders-queue';
   })();
   const returnToLabel = returnToPath === '/restaurant' ? 'Back to Tables' : 'Back to Queue';
@@ -325,6 +335,19 @@ export default function OrderPaymentPage() {
       queryClient.invalidateQueries({ queryKey: ['customers'] });
       if (returnToPath === '/restaurant') {
         void queryClient.invalidateQueries({ queryKey: ['restaurant'] });
+        if (id) {
+          const openBefore = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState());
+          const tableId = openBefore.find((c) => c.orderId === id)?.tableId ?? null;
+          markRestaurantCheckSettledInJournal(id, 'PAID');
+          if (tableId) {
+            clearRestaurantBillRequestedOffline(tableId, id);
+            const stillOpen = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState()).some(
+              (c) => c.tableId === tableId,
+            );
+            if (!stillOpen) paintRestaurantTableFreeOffline(tableId);
+          }
+          publishLanKdsBoardChanged('SALE_COMPLETED');
+        }
       }
       navigate(returnToPath);
     },

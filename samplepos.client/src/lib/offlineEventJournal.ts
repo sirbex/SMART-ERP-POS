@@ -175,6 +175,9 @@ export type PosOfflineEvent =
         station?: string;
         orderChannel?: string;
         guestName?: string | null;
+        /** FIRE (default) or VOID stop ticket for kitchen-sent lines */
+        ticketKind?: 'FIRE' | 'VOID';
+        voidReason?: string;
         lines: Array<{
             lineId: string;
             productName: string;

@@ -62,6 +62,25 @@ describe('Restaurant architecture proof (Phase 1)', () => {
   it('order complete/cancel release table hook exists', () => {
     const ordersRoutes = readRepo('SamplePOS.Server/src/modules/orders/ordersRoutes.ts');
     expect(ordersRoutes).toMatch(/releaseTableForOrder/);
+
+    // status_updated_by is UUID NULL — never write "system"/"kds-reconcile" labels
+    // (that aborted floor release and left ghost OCCUPIED tables after offline cancel).
+    const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
+    expect(repo).toMatch(/asUserUuidOrNull/);
+    expect(repo).toMatch(/status_updated_by = \$2/);
+    expect(repo).not.toMatch(/updatedBy = 'system'/);
+
+    const svc = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
+    const release = svc.slice(
+      svc.indexOf('async releaseTableForOrder'),
+      svc.indexOf('async requestBill'),
+    );
+    expect(release).toMatch(/Kitchen bump failed/);
+    expect(release).toMatch(/releaseTableByOrderId/);
+    expect(release).not.toMatch(/'system'/);
+
+    const replayer = readRepo('SamplePOS.Server/src/modules/pos/posEventReplayer.ts');
+    expect(replayer).toMatch(/updatedBy:\s*userId/);
   });
 
   it('restaurant cancel check uses orders SSOT', () => {
@@ -136,6 +155,11 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/selectedCustomer/);
     expect(pos).toMatch(/Select a customer/);
     expect(pos).toMatch(/updateRestaurantGuestOffline/);
+    expect(pos).toMatch(/compact/);
+    expect(pos).toMatch(/handleSelectServiceCustomer/);
+    // No duplicate free-text guest forms — customer SSOT only.
+    expect(pos).not.toMatch(/Guest name \(from customer\)/);
+    expect(pos).not.toMatch(/Pickup label/);
   });
 
   it('Phase 2.4 waiter assignment uses pos_orders.waiter_id', () => {
@@ -208,22 +232,23 @@ describe('Restaurant architecture proof (Phase 1)', () => {
 
   it('Expert KOT flow: kitchen commit then return to floor; print is best-effort', () => {
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
-    const sendKotHandler = pos.slice(
-      pos.indexOf('const handleSendKot'),
+    // Shared fire helper + KOT button (Bill also calls fireUnsentKotTickets).
+    const kotBlock = pos.slice(
+      pos.indexOf('const fireUnsentKotTickets'),
       pos.indexOf('const handleBill'),
     );
     // Floor return is mandatory after successful fire (online + offline).
-    expect(sendKotHandler).toMatch(/returnToFloor/);
-    expect(sendKotHandler).toMatch(/api\.restaurant\.sendKot/);
-    expect(sendKotHandler).toMatch(/fireRestaurantKotOffline/);
+    expect(kotBlock).toMatch(/returnToFloor/);
+    expect(kotBlock).toMatch(/api\.restaurant\.sendKot/);
+    expect(kotBlock).toMatch(/fireRestaurantKotOffline/);
     // Local ofl_ord_* checks must never hit the server KOT route.
-    expect(sendKotHandler).toMatch(/shouldUseLocalRestaurantMutation|isJournalLocalOrderId/);
-    expect(sendKotHandler).toMatch(/useLocalKot/);
+    expect(kotBlock).toMatch(/shouldUseLocalRestaurantMutation|isJournalLocalOrderId/);
+    expect(kotBlock).toMatch(/useLocalKot/);
     // Empty / no-new-items still leaves the ticket (FOH close).
-    expect(sendKotHandler).toMatch(/Nothing new for kitchen/);
+    expect(kotBlock).toMatch(/Nothing new for kitchen/);
     // Print failures must not abort the success path (no bare await print as sole post-commit gate).
-    expect(sendKotHandler).toMatch(/printFailures|printOk/);
-    expect(sendKotHandler).toMatch(/printKitchenTicket/);
+    expect(kotBlock).toMatch(/printFailures|printOk/);
+    expect(kotBlock).toMatch(/printKitchenTicket/);
     // createKot must resolve hasStatus before use (never ReferenceError on KOT fire).
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     const createKot = repo.slice(repo.indexOf('async createKot('), repo.indexOf('async getOrderRestaurantMeta('));
@@ -241,15 +266,29 @@ describe('Restaurant architecture proof (Phase 1)', () => {
       pos.indexOf('const handleBill'),
       pos.indexOf('const activateSibling'),
     );
+    // Bill fires unsent KOT first, then prints guest check for the selected ticket.
+    expect(billHandler).toMatch(/fireUnsentKotTickets/);
     expect(billHandler).toMatch(/requestBill|markRestaurantBillRequestedOffline/);
     expect(billHandler).toMatch(/returnToFloor/);
-    expect(billHandler).toMatch(/Bill requested/);
+    expect(billHandler).toMatch(/Bill printed|Bill marked/);
     expect(billHandler).toMatch(/printOk/);
+    expect(billHandler).toMatch(/printRestaurantBill/);
     expect(billHandler).toMatch(/shouldUseLocalRestaurantMutation|isJournalLocalOrderId/);
+    expect(billHandler).not.toMatch(/Print the guest bill anyway/);
+    // Multi-ticket: bill selected order only; stay on table when siblings remain.
+    expect(billHandler).toMatch(/remainingTickets/);
+    expect(billHandler).toMatch(/activateSibling/);
+    expect(billHandler).toMatch(/Bill printed for/);
 
     const svc = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
     expect(svc).toMatch(/async requestBill\(/);
     expect(svc).toMatch(/markBilling/);
+    const markBilling = svc.slice(
+      svc.indexOf('async markBilling'),
+      svc.indexOf('async releaseTableForOrder'),
+    );
+    expect(markBilling).toMatch(/listPendingOrdersForTable/);
+    expect(markBilling).toMatch(/siblings\.length\s*<=\s*1/);
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/router\.post\(\s*'\/checks\/:orderId\/bill'/);
   });
@@ -263,12 +302,19 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/active:scale-\[0\.98\]/);
     // Phones: menu always on; Order/Details/More open as sheets on button press
     expect(pos).toMatch(/mobileSheet/);
-    expect(pos).toMatch(/openMobileOrder/);
+    expect(pos).toMatch(/menuQtyPadOpen|bottom half always visible|Ticket/);
     expect(pos).not.toMatch(/max-h-\[52vh\]/);
     expect(pos).not.toMatch(/mobilePane/);
-    // SambaPOS/Toast: consolidate identical lines + long-press / ··· line actions
+    // SambaPOS/Toast: consolidate lines; tap select → Void / Move; ticket tabs
     expect(pos).toMatch(/consolidateTicketLines/);
-    expect(pos).toMatch(/startLineLongPress/);
+    expect(pos).toMatch(/toggleGroupSelection/);
+    expect(pos).toMatch(/handleMoveSelected|handleVoidSelected/);
+    expect(pos).toMatch(/ticketTabs/);
+    expect(pos).toMatch(/Moved to new ticket/);
+    expect(pos).toMatch(/Change table/);
+    expect(pos).toMatch(/← Tables|Back to tables/);
+    expect(pos).toMatch(/returnToFloor/);
+    expect(pos).not.toMatch(/startLineLongPress/);
     expect(pos).toMatch(/handleLinePlusOne/);
     expect(pos).toMatch(/handleLineMinusOne/);
   });
@@ -278,14 +324,25 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/canRestaurantPay/);
     expect(pos).toMatch(/restaurant\.pay/);
     expect(pos).toMatch(/canRestaurantPay \? \(/);
-    // After payment: return to restaurant tables floor (not orders-queue only).
+    // Pay settles the selected ticket only (same rule as Bill on multi-ticket tables).
     const payHandler = pos.slice(pos.indexOf('const handlePay'), pos.indexOf('if (flagLoading)'));
     expect(payHandler).toMatch(/returnToFloor/);
     expect(payHandler).toMatch(/returnTo=.*restaurant|pay\?returnTo/);
+    expect(payHandler).toMatch(/remainingTickets/);
+    expect(payHandler).toMatch(/activateSibling|Paid .* still open/);
+    expect(payHandler).toMatch(/paidOrderNumber|order\.orderNumber/);
+    expect(payHandler).toMatch(/Other tickets on this table stay open|ticket\(s\) still open/);
+    // Online server checks open tender screen; after pay always return to restaurant floor.
+    expect(payHandler).toMatch(/shouldUseLocalRestaurantMutation/);
+    expect(payHandler).toMatch(/navigate\(`\/orders\/\$\{paidOrderId\}\/pay/);
+    expect(payHandler).toMatch(/returnTo=\$\{encodeURIComponent\('\/restaurant'\)\}|returnTo.*\/restaurant/);
+    expect(payHandler).toMatch(/returnToFloor\(\)/);
+    expect(payHandler).not.toMatch(/\/restaurant\?table=/);
 
     const payPage = readRepo('samplepos.client/src/pages/orders/OrderPaymentPage.tsx');
     expect(payPage).toMatch(/returnToPath/);
     expect(payPage).toMatch(/\/restaurant/);
+    expect(payPage).toMatch(/Back to Tables/);
 
     const grants = readRepo('shared/authorization/systemRoleGrants.ts');
     expect(grants).toMatch(/restaurant\.pay/);
@@ -314,14 +371,51 @@ describe('Restaurant architecture proof (Phase 1)', () => {
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/handleVoidLines/);
+    expect(pos).toMatch(/preferLocalRestaurantWrites\(order\.id\)/);
+    expect(pos).toMatch(/allowKitchenSent/);
+    expect(pos).toMatch(/Open restaurant check required to void/);
+    expect(pos).toMatch(/Check was already closed/);
     expect(pos).toMatch(/voidItems/);
     expect(pos).toMatch(/allocateVoidQuantity/);
-    expect(pos).toMatch(/How many to void/);
+    // Touch qty pad for partial void / set qty — never window.prompt for quantities.
+    expect(pos).toMatch(/qtyPadSheet|QtyPadSheetState/);
+    expect(pos).toMatch(/confirmQtyPadSheet|purpose: 'void-qty'/);
+    expect(pos).not.toMatch(/How many to void/);
+    expect(pos).toMatch(/pendingQtyDigits|parsePendingOrderQty|restaurantPendingQty/);
+    expect(pos).toMatch(/appendQtyDigit/);
+    expect(pos).toMatch(/openServiceLane|SERVICE_LANE_DEFS/);
+    expect(pos).toMatch(/pendingMobileSheetRef/);
+    expect(pos).toMatch(/Quick order|Takeaway/);
+    // One Service lane tile per channel — not "Delivery" button + separate DL table.
+    expect(pos).toMatch(/One tile per lane|no duplicate/);
+    expect(pos).not.toMatch(/Open service tickets/);
+    expect(pos).toMatch(/isServiceLaneCode/);
+    expect(pos).toMatch(/Set qty/);
     expect(pos).toMatch(/ticketKind: 'VOID'/);
-    // New/unsent: cancel/remove without reason or VOID print; Void only after KOT.
+    // Unsent / On bill / KOT — never "New" (confused with bill-printed).
+    expect(pos).toMatch(/ticketLineStatus/);
+    expect(pos).toMatch(/On bill/);
+    expect(pos).toMatch(/Unsent/);
+    expect(pos).not.toMatch(/Kitchen: \$\{[\s\S]*\? 'New'/);
     expect(pos).toMatch(/Removed before kitchen send/);
     expect(pos).toMatch(/Cancel reason is required when kitchen has been notified/);
-    expect(pos).toMatch(/Remove \(not sent\)/);
+    expect(pos).toMatch(/Remove \(unsent\)/);
+    // Bill auto-fires KOT then prints guest check.
+    expect(pos).toMatch(/fireUnsentKotTickets/);
+    expect(pos).toMatch(/Bill printed/);
+    // Samba-style wide layout: vertical category rail + keypad under products.
+    expect(pos).toMatch(/vertical category|bg-orange-600 text-white/);
+    expect(pos).toMatch(/keypad under products|compact bar \+ dialer|Quantity pad|menuQtyPadOpen/);
+    // Phone: split menu + ticket (always visible), not order-hidden behind a dock.
+    expect(pos).toMatch(/bottom half always visible|Phone: bottom half/);
+    expect(pos).not.toMatch(/Mobile dock — open sheets/);
+    // Inline ± on unsent ticket lines.
+    expect(pos).toMatch(/Inline ± on New|Decrease quantity|Inline ± on/);
+
+    const qtyLib = readRepo('samplepos.client/src/lib/restaurantPendingQty.ts');
+    expect(qtyLib).toMatch(/parsePendingOrderQty/);
+    expect(qtyLib).toMatch(/clampOrderQty/);
+    expect(qtyLib).toMatch(/appendQtyDigit/);
 
     const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
     expect(print).toMatch(/STOP \/ DO NOT PREPARE|VOID/);
@@ -349,6 +443,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/transferCheck|splitCheck|mergeChecks/);
+    // Merge is same-table only (Samba).
+    expect(pos).toMatch(/merge only other tickets on the same table/);
+    expect(service).toMatch(/same table/);
   });
 
   it('Phase 5.1 restaurant offline uses existing event journal', () => {
@@ -418,14 +515,44 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(proof).toMatch(/ofl_ord_\* KOT fires locally/);
     expect(proof).toMatch(/getUnsyncedEvents/);
     expect(proof).toMatch(/installMemoryLocalStorage|localStorage/);
+    // Multi-ticket Bill/Pay: structure alone is not acceptance — EVIDENCE cases required.
+    expect(proof).toMatch(/EVIDENCE multi-ticket bill marks only the selected order number/);
+    expect(proof).toMatch(/EVIDENCE multi-ticket pay settles only the selected order number/);
+    expect(proof).toMatch(
+      /EVIDENCE journal-local void of kitchen-sent lines emits VOID KOT/,
+    );
+    expect(proof).toMatch(
+      /EVIDENCE reconcile drops journal ghosts when server table is FREE/,
+    );
+    expect(proof).toMatch(/reconcileRestaurantJournalWithServerTables/);
+    expect(proof).toMatch(/markRestaurantCheckSettledInJournal/);
+    expect(proof).toMatch(/markRestaurantBillRequestedOffline/);
+    expect(proof).toMatch(/isRestaurantOrderBillRequestedOffline/);
+    expect(proof).toMatch(/splitRestaurantCheckOffline/);
+    expect(proof).toMatch(/remainingTickets/);
+    expect(proof).toMatch(/resolveOfflineProductType/);
 
     const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
     expect(ops).toMatch(/export function shouldUseLocalRestaurantMutation/);
     expect(ops).toMatch(/export function isJournalLocalOrderId/);
+    expect(ops).toMatch(/export function markRestaurantCheckSettledInJournal/);
+    expect(ops).toMatch(/export function reconcileRestaurantJournalWithServerTables/);
+
+    const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
+    expect(repo).toMatch(/bumpKitchenTicketsForOrder/);
+    expect(repo).toMatch(/purgeSettledKitchenTickets/);
+    expect(repo).toMatch(/o\.status = 'PENDING'/);
+    expect(repo).not.toMatch(/INTERVAL '4 hours'/);
+
+    const svc = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
+    expect(svc).toMatch(/purgeSettledKitchenTickets/);
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/preferLocalRestaurantWrites/);
     expect(pos).toMatch(/paintJournalCheck/);
+    expect(pos).toMatch(/settleCheckOnFloor/);
+    expect(pos).toMatch(/paintRestaurantTableFreeOffline/);
+    expect(pos).toMatch(/reconcileRestaurantJournalWithServerTables/);
     expect(pos).toMatch(/refreshRestaurantCheckSeedFromServer/);
     expect(pos).toMatch(/shouldUseLocalRestaurantMutation/);
     expect(pos).toMatch(/CustomerSelector/);
@@ -433,6 +560,10 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(
       /preferLocalRestaurantWrites = \(orderId\?: string \| null\) =>\s*shouldUseLocalRestaurantMutation\(isOnline, orderId\)/,
     );
+
+    const payPage = readRepo('samplepos.client/src/pages/orders/OrderPaymentPage.tsx');
+    expect(payPage).toMatch(/markRestaurantCheckSettledInJournal/);
+    expect(payPage).toMatch(/publishLanKdsBoardChanged/);
   });
 
   it('Phase 5.3 offline cancel, waiter assign, crash restore from journal', () => {
@@ -497,6 +628,11 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/transferRestaurantCheckOffline/);
     expect(pos).toMatch(/mergeRestaurantChecksOffline/);
     expect(pos).toMatch(/splitRestaurantCheckOffline/);
+    expect(pos).toMatch(/preferLocalRestaurantWrites\(order\.id\)/);
+    // Move/split must not POST ofl_ord_*/ofl_line_* to the UUID-validated API while "online".
+    const splitHandler = pos.slice(pos.indexOf('const runSplit'), pos.indexOf('const toggleGroupSelection'));
+    expect(splitHandler).toMatch(/preferLocalRestaurantWrites\(order\.id\)/);
+    expect(splitHandler).toMatch(/splitRestaurantCheckOffline/);
   });
 
   it('Phase 5.5 LAN KDS uses journal board + BroadcastChannel (no cloud dependency)', () => {

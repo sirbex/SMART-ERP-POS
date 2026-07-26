@@ -636,7 +636,15 @@ export const posEventReplayer = {
         try {
             let orderId: string | null = null;
 
-            if (event.tableId) {
+            // Prefer explicit server order id when the client already resolved it.
+            if (
+                event.orderId &&
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                    event.orderId,
+                )
+            ) {
+                orderId = event.orderId;
+            } else if (event.tableId) {
                 orderId = await resolvePendingOrderIdForTable(pool as Pool, event.tableId);
             }
 
@@ -666,7 +674,10 @@ export const posEventReplayer = {
             if (status === 'CANCELLED') {
                 try {
                     const { restaurantService } = await import('../restaurant/restaurantService.js');
-                    await restaurantService.releaseTableForOrder(pool, orderId);
+                    await restaurantService.releaseTableForOrder(pool, orderId, {
+                        updatedBy: userId,
+                        bumpVoids: true,
+                    });
                 } catch {
                     /* already cancelled */
                 }
@@ -689,7 +700,10 @@ export const posEventReplayer = {
 
             try {
                 const { restaurantService } = await import('../restaurant/restaurantService.js');
-                await restaurantService.releaseTableForOrder(pool, orderId);
+                await restaurantService.releaseTableForOrder(pool, orderId, {
+                    updatedBy: userId,
+                    bumpVoids: true,
+                });
             } catch (releaseErr) {
                 logger.error('[EventReplayer] Table release after cancel failed', {
                     orderId,

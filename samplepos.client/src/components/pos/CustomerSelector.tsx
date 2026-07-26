@@ -32,9 +32,25 @@ interface CustomerSelectorProps {
   selectedCustomer: Customer | null;
   onSelectCustomer: (customer: Customer | null) => void;
   saleTotal: number;
+  /** Restaurant / touch POS: search or +Add; selected shows name (not credit card). */
+  compact?: boolean;
+  /** Override label (default: Customer). */
+  label?: string;
+  /** Optional — e.g. takeaway required. */
+  required?: boolean;
+  /** Prefill search hint when no selection. */
+  placeholder?: string;
 }
 
-export default function CustomerSelector({ selectedCustomer, onSelectCustomer, saleTotal }: CustomerSelectorProps) {
+export default function CustomerSelector({
+  selectedCustomer,
+  onSelectCustomer,
+  saleTotal,
+  compact = false,
+  label = 'Customer',
+  required = false,
+  placeholder = 'Search by name, email, or phone…',
+}: CustomerSelectorProps) {
   const [search, setSearch] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -67,7 +83,15 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
     setShowDropdown(false);
   };
 
-  const handleQuickAddSuccess = (created: { id: string; name: string; email?: string; phone?: string; address?: string; creditLimit?: number;[key: string]: unknown }) => {
+  const handleQuickAddSuccess = (created: {
+    id: string;
+    name: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    creditLimit?: number;
+    [key: string]: unknown;
+  }) => {
     const customer: Customer = {
       id: created.id,
       name: created.name,
@@ -93,16 +117,71 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
 
   const canUseCredit = selectedCustomer && availableCredit >= saleTotal;
 
+  const touchSearch =
+    'w-full min-h-12 px-3 py-3 text-base border border-stone-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 touch-manipulation';
+  const touchAdd =
+    'touch-manipulation min-h-12 min-w-12 sm:min-w-[5.5rem] px-3 rounded-xl bg-emerald-600 text-white text-sm font-bold active:bg-emerald-700 shrink-0';
+  const touchRow =
+    'touch-manipulation w-full text-left px-3 py-3 border-b last:border-b-0 active:bg-emerald-50';
+
+  if (compact && selectedCustomer) {
+    return (
+      <>
+        <div className="space-y-1.5">
+          <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
+            {label}
+            {required ? ' *' : ''}
+          </label>
+          <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-3 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="font-bold text-base text-stone-900 truncate">{selectedCustomer.name}</div>
+              {selectedCustomer.phone ? (
+                <div className="text-sm text-stone-600 truncate">{selectedCustomer.phone}</div>
+              ) : null}
+              {selectedCustomer.address ? (
+                <div className="text-xs text-stone-500 truncate mt-0.5">{selectedCustomer.address}</div>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => onSelectCustomer(null)}
+              className="touch-manipulation shrink-0 min-h-11 px-3 rounded-xl border border-stone-300 bg-white text-sm font-semibold text-stone-800 active:bg-stone-100"
+            >
+              Change
+            </button>
+          </div>
+        </div>
+        <QuickAddCustomerModal
+          isOpen={showQuickAdd}
+          onClose={() => setShowQuickAdd(false)}
+          onSuccess={handleQuickAddSuccess}
+          isOffline={!isOnline}
+        />
+      </>
+    );
+  }
+
   return (
     <>
-      <div className="mb-4">
-        <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">Customer (Optional)</label>
-        {selectedCustomer ? (
+      <div className={compact ? 'space-y-1.5' : 'mb-4'}>
+        <label
+          className={
+            compact
+              ? 'block text-xs font-semibold uppercase tracking-wide text-stone-500'
+              : 'block text-xs sm:text-sm font-medium text-gray-700 mb-1'
+          }
+        >
+          {label}
+          {required ? (compact ? ' *' : ' (required)') : compact ? '' : ' (Optional)'}
+        </label>
+        {selectedCustomer && !compact ? (
           <div className="border border-gray-300 rounded p-2 sm:p-3 bg-gray-50">
             <div className="flex justify-between items-start gap-2">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold text-sm sm:text-base text-gray-900 truncate">{selectedCustomer.name}</span>
+                  <span className="font-semibold text-sm sm:text-base text-gray-900 truncate">
+                    {selectedCustomer.name}
+                  </span>
                   {selectedCustomer.pricingMode === 'AT_COST' ? (
                     <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-800 shrink-0">
                       At cost
@@ -113,8 +192,12 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
                     </span>
                   ) : null}
                 </div>
-                {selectedCustomer.email && <div className="text-xs text-gray-500 truncate">{selectedCustomer.email}</div>}
-                {selectedCustomer.phone && <div className="text-xs text-gray-500">{selectedCustomer.phone}</div>}
+                {selectedCustomer.email && (
+                  <div className="text-xs text-gray-500 truncate">{selectedCustomer.email}</div>
+                )}
+                {selectedCustomer.phone && (
+                  <div className="text-xs text-gray-500">{selectedCustomer.phone}</div>
+                )}
                 <div className="mt-2 text-xs space-y-1">
                   <div className="flex justify-between gap-2">
                     <span className="font-medium">Credit Limit:</span>
@@ -126,15 +209,15 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
                   </div>
                   <div className="flex justify-between gap-2">
                     <span className="font-medium">Available Credit:</span>
-                    <span className={`text-right ${availableCredit < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    <span
+                      className={`text-right ${availableCredit < 0 ? 'text-red-600' : 'text-green-600'}`}
+                    >
                       {formatCurrency(availableCredit)}
                     </span>
                   </div>
                 </div>
                 {!canUseCredit && saleTotal > 0 && (
-                  <div className="mt-1 text-xs text-red-600">
-                    ⚠ Insufficient credit for this sale
-                  </div>
+                  <div className="mt-1 text-xs text-red-600">⚠ Insufficient credit for this sale</div>
                 )}
               </div>
               <button
@@ -151,39 +234,68 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
             <div className="flex gap-2">
               <div className="flex-1 relative">
                 <input
-                  type="text"
+                  type="search"
+                  inputMode="search"
+                  enterKeyHint="search"
+                  autoComplete="off"
                   value={search}
                   onChange={(e) => {
                     setSearch(e.target.value);
                     setShowDropdown(true);
                   }}
                   onFocus={() => setShowDropdown(true)}
-                  placeholder="Search by name, email, or phone..."
-                  className="w-full px-2 sm:px-3 py-2 text-xs sm:text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
+                  placeholder={placeholder}
+                  className={
+                    compact
+                      ? touchSearch
+                      : 'w-full px-2 sm:px-3 py-2 text-xs sm:text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500'
+                  }
                   aria-label="Search customers"
                 />
                 {showDropdown && (
-                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-y-auto">
+                  <div
+                    className={`absolute z-50 w-full mt-1 bg-white border rounded-xl shadow-lg max-h-60 overflow-y-auto ${
+                      compact ? 'border-stone-300' : 'border-gray-300 rounded'
+                    }`}
+                  >
                     {isLoading ? (
-                      <div className="p-3 text-xs text-gray-500">Loading...</div>
+                      <div className="p-3 text-sm text-stone-500">Loading…</div>
                     ) : customers && customers.length > 0 ? (
                       customers.map((customer: Customer) => (
                         <button
                           key={customer.id}
                           type="button"
                           onClick={() => handleSelect(customer)}
-                          className="w-full text-left px-3 py-2 hover:bg-blue-50 focus:bg-blue-100 border-b last:border-b-0"
+                          className={
+                            compact
+                              ? touchRow
+                              : 'w-full text-left px-3 py-2 hover:bg-blue-50 focus:bg-blue-100 border-b last:border-b-0'
+                          }
                         >
-                          <div className="font-semibold text-xs sm:text-sm text-gray-900 truncate">{customer.name}</div>
-                          {customer.email && <div className="text-xs text-gray-500 truncate">{customer.email}</div>}
-                          {customer.phone && <div className="text-xs text-gray-500">{customer.phone}</div>}
-                          <div className="text-xs text-gray-600 mt-1">
-                            Credit: {formatCurrency(customer.creditLimit)} | Balance: {formatCurrency(customer.balance)}
+                          <div
+                            className={`font-semibold truncate ${compact ? 'text-base text-stone-900' : 'text-xs sm:text-sm text-gray-900'}`}
+                          >
+                            {customer.name}
                           </div>
+                          {customer.phone ? (
+                            <div className="text-xs text-stone-500">{customer.phone}</div>
+                          ) : null}
+                          {customer.address && compact ? (
+                            <div className="text-xs text-stone-400 truncate">{customer.address}</div>
+                          ) : null}
+                          {!compact && customer.email ? (
+                            <div className="text-xs text-gray-500 truncate">{customer.email}</div>
+                          ) : null}
+                          {!compact ? (
+                            <div className="text-xs text-gray-600 mt-1">
+                              Credit: {formatCurrency(customer.creditLimit)} | Balance:{' '}
+                              {formatCurrency(customer.balance)}
+                            </div>
+                          ) : null}
                         </button>
                       ))
                     ) : (
-                      <div className="p-3 text-xs text-gray-500">No customers found</div>
+                      <div className="p-3 text-sm text-stone-500">No customers found — tap + Add</div>
                     )}
                   </div>
                 )}
@@ -191,19 +303,26 @@ export default function CustomerSelector({ selectedCustomer, onSelectCustomer, s
               <button
                 type="button"
                 onClick={() => setShowQuickAdd(true)}
-                className="px-3 sm:px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 focus:ring-2 focus:ring-green-500 whitespace-nowrap text-xs sm:text-sm font-medium flex-shrink-0"
-                title="Quick Add Customer"
+                className={
+                  compact
+                    ? touchAdd
+                    : 'px-3 sm:px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 focus:ring-2 focus:ring-green-500 whitespace-nowrap text-xs sm:text-sm font-medium flex-shrink-0'
+                }
+                title="Add customer"
               >
                 <span className="hidden sm:inline">+ Add</span>
                 <span className="sm:hidden">+</span>
               </button>
             </div>
-            <p className="text-xs text-gray-500">💡 Tip: Create new customers on-the-fly with Quick Add</p>
+            {compact ? (
+              <p className="text-xs text-stone-500">Search existing or + Add if new</p>
+            ) : (
+              <p className="text-xs text-gray-500">💡 Tip: Create new customers on-the-fly with Quick Add</p>
+            )}
           </div>
         )}
       </div>
 
-      {/* Quick Add Customer Modal */}
       <QuickAddCustomerModal
         isOpen={showQuickAdd}
         onClose={() => setShowQuickAdd(false)}

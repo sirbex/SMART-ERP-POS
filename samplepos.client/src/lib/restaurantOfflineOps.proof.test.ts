@@ -8,17 +8,28 @@ import {
   cancelRestaurantCheckOffline,
   fireRestaurantKotOffline,
   isJournalLocalOrderId,
+  markRestaurantCheckSettledInJournal,
   payRestaurantCheckOffline,
+  reconcileRestaurantJournalWithServerTables,
   removeRestaurantLinesOffline,
   seedRestaurantCheckFromServer,
   shouldUseLocalRestaurantMutation,
+  splitRestaurantCheckOffline,
+  resolveOfflineProductType,
   updateRestaurantGuestOffline,
 } from './restaurantOfflineOps';
 import {
   deriveRestaurantCheckForTable,
   deriveRestaurantFloorOccupancy,
   deriveRestaurantOpenChecks,
+  deriveRestaurantSiblingChecks,
+  deriveRestaurantKitchenBoard,
 } from './offlineEventSelectors';
+import {
+  clearRestaurantBillRequestedOffline,
+  isRestaurantOrderBillRequestedOffline,
+  markRestaurantBillRequestedOffline,
+} from './restaurantOfflineCache';
 import {
   JOURNAL_KEY,
   SYNC_STATE_KEY,
@@ -127,24 +138,56 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(deriveRestaurantCheckForTable('t-proof-3', getAllEvents(), getAllSyncState())).toBeNull();
   });
 
-  it('rejects remove of kitchen-sent lines (void requires online / VOID ticket)', () => {
+  it('rejects remove of kitchen-sent lines without allowKitchenSent', () => {
     const open = appendRestaurantItemOffline({
-      tableId: 't-proof-4',
-      tableCode: 'T4',
-      tableName: 'Table 4',
+      tableId: 't-proof-void-kot',
+      tableCode: 'VK',
+      tableName: 'Void Kot',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Burger',
+      unitPrice: 12,
+      productType: 'service',
+    });
+    fireRestaurantKotOffline(open);
+    const after = deriveRestaurantCheckForTable('t-proof-void-kot', getAllEvents(), getAllSyncState());
+    expect(after).toBeTruthy();
+    expect(() =>
+      removeRestaurantLinesOffline(after!, [after!.lines[0].lineId!]),
+    ).toThrow(/Kitchen-sent|VOID/i);
+  });
+
+  it('EVIDENCE journal-local void of kitchen-sent lines emits VOID KOT and never needs server UUIDs', () => {
+    const open = appendRestaurantItemOffline({
+      tableId: 't-proof-void-local',
+      tableCode: 'VL',
+      tableName: 'Void Local',
       channel: 'DINE_IN',
       productId: 'p1',
       productName: 'Steak',
       unitPrice: 20,
+      productType: 'service',
     });
-    // Simulate KOT by rewriting line with kitchenSentAt via ORDER_UPDATED shape already on open
-    const fired = {
-      ...open,
-      lines: open.lines.map((l) => ({ ...l, kitchenSentAt: new Date().toISOString() })),
-    };
-    expect(() => removeRestaurantLinesOffline(fired, [fired.lines[0].lineId!])).toThrow(
-      /Kitchen-sent|VOID/i,
-    );
+    fireRestaurantKotOffline(open);
+    const after = deriveRestaurantCheckForTable(
+      't-proof-void-local',
+      getAllEvents(),
+      getAllSyncState(),
+    )!;
+    const lineId = after.lines[0].lineId!;
+    removeRestaurantLinesOffline(after, [lineId], undefined, {
+      reason: 'Customer changed mind',
+      allowKitchenSent: true,
+    });
+    expect(
+      getAllEvents().some(
+        (e) =>
+          e.eventType === 'RESTAURANT_KOT_FIRED' &&
+          'ticketKind' in e &&
+          e.ticketKind === 'VOID',
+      ),
+    ).toBe(true);
+    expect(deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())).toHaveLength(0);
   });
 
   it('cash pay appends SALE_COMPLETED and frees table', () => {
@@ -356,5 +399,284 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
       productType: 'inventory',
     });
     expect(() => payRestaurantCheckOffline(open)).toThrow(/Insufficient offline stock/i);
+  });
+
+  /**
+   * EVIDENCE (multi-ticket Bill): billing one order number must not mark sibling tickets billed.
+   * Accept only with this exercised proof — not UI string matching alone.
+   */
+  it('EVIDENCE multi-ticket bill marks only the selected order number', () => {
+    const first = appendRestaurantItemOffline({
+      tableId: 't-multi-bill',
+      tableCode: 'M1',
+      tableName: 'Multi Bill',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Steak',
+      unitPrice: 20,
+      quantity: 1,
+    });
+    const secondLine = appendRestaurantItemOffline({
+      tableId: 't-multi-bill',
+      tableCode: 'M1',
+      tableName: 'Multi Bill',
+      channel: 'DINE_IN',
+      productId: 'p2',
+      productName: 'Salad',
+      unitPrice: 8,
+      quantity: 1,
+    });
+    expect(secondLine.orderId).toBe(first.orderId);
+    expect(secondLine.lines).toHaveLength(2);
+
+    const moveId = secondLine.lines.find((l) => l.productName === 'Salad')?.lineId;
+    expect(moveId).toBeTruthy();
+
+    const { source, split } = splitRestaurantCheckOffline(secondLine, {
+      lineIds: [moveId!],
+      targetTableId: 't-multi-bill',
+      targetTableCode: 'M1',
+      targetTableName: 'Multi Bill',
+      sameTable: true,
+    });
+    expect(source.orderId).toBe(first.orderId);
+    expect(split.orderId).not.toBe(source.orderId);
+    expect(source.lines).toHaveLength(1);
+    expect(split.lines).toHaveLength(1);
+
+    const siblings = deriveRestaurantSiblingChecks(
+      't-multi-bill',
+      getAllEvents(),
+      getAllSyncState(),
+      source.orderId,
+    );
+    expect(siblings.some((s) => s.orderId === split.orderId)).toBe(true);
+
+    // Bill selected ticket only (source / Steak).
+    markRestaurantBillRequestedOffline('t-multi-bill', source.orderId);
+    expect(isRestaurantOrderBillRequestedOffline('t-multi-bill', source.orderId)).toBe(true);
+    expect(isRestaurantOrderBillRequestedOffline('t-multi-bill', split.orderId)).toBe(false);
+
+    // Second bill on sibling — both tracked independently.
+    markRestaurantBillRequestedOffline('t-multi-bill', split.orderId);
+    expect(isRestaurantOrderBillRequestedOffline('t-multi-bill', source.orderId)).toBe(true);
+    expect(isRestaurantOrderBillRequestedOffline('t-multi-bill', split.orderId)).toBe(true);
+
+    clearRestaurantBillRequestedOffline('t-multi-bill', source.orderId);
+    expect(isRestaurantOrderBillRequestedOffline('t-multi-bill', source.orderId)).toBe(false);
+    expect(isRestaurantOrderBillRequestedOffline('t-multi-bill', split.orderId)).toBe(true);
+  });
+
+  /**
+   * EVIDENCE (multi-ticket Pay): paying one order number leaves the sibling open on the same table.
+   * Accept only with this exercised proof — not UI string matching alone.
+   */
+  it('EVIDENCE multi-ticket pay settles only the selected order number', () => {
+    const first = appendRestaurantItemOffline({
+      tableId: 't-multi-pay',
+      tableCode: 'M2',
+      tableName: 'Multi Pay',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Burger',
+      unitPrice: 12,
+      quantity: 1,
+      productType: 'service',
+    });
+    const withTwo = appendRestaurantItemOffline({
+      tableId: 't-multi-pay',
+      tableCode: 'M2',
+      tableName: 'Multi Pay',
+      channel: 'DINE_IN',
+      productId: 'p2',
+      productName: 'Soup',
+      unitPrice: 6,
+      quantity: 1,
+      productType: 'service',
+    });
+    const moveId = withTwo.lines.find((l) => l.productName === 'Soup')?.lineId;
+    expect(moveId).toBeTruthy();
+
+    const { source, split } = splitRestaurantCheckOffline(withTwo, {
+      lineIds: [moveId!],
+      targetTableId: 't-multi-pay',
+      targetTableCode: 'M2',
+      targetTableName: 'Multi Pay',
+      sameTable: true,
+    });
+
+    const openBefore = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState()).filter(
+      (c) => c.tableId === 't-multi-pay',
+    );
+    expect(openBefore).toHaveLength(2);
+
+    // Pay selected ticket only (source / Burger).
+    const paid = payRestaurantCheckOffline(source);
+    expect(paid.offlineId.startsWith('OFF-R-PAY-')).toBe(true);
+    expect(paid.totalAmount).toBe(12);
+
+    const openAfter = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState()).filter(
+      (c) => c.tableId === 't-multi-pay',
+    );
+    expect(openAfter).toHaveLength(1);
+    expect(openAfter[0]?.orderId).toBe(split.orderId);
+    expect(openAfter.some((c) => c.orderId === source.orderId)).toBe(false);
+
+    // Paid order is closed; table helper falls back to the remaining open sibling (FOH stay-on-table).
+    const afterPayView = deriveRestaurantCheckForTable(
+      't-multi-pay',
+      getAllEvents(),
+      getAllSyncState(),
+      source.orderId,
+    );
+    expect(afterPayView?.orderId).toBe(split.orderId);
+    expect(
+      deriveRestaurantCheckForTable('t-multi-pay', getAllEvents(), getAllSyncState(), split.orderId)
+        ?.lines,
+    ).toHaveLength(1);
+
+    expect(deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()).has('t-multi-pay')).toBe(
+      true,
+    );
+
+    // Remaining ticket list mirrors FOH Bill/Pay remainingTickets rule.
+    const ticketTabs = [source, split].map((t) => ({ id: t.orderId }));
+    const remainingTickets = ticketTabs.filter((t) => t.id !== source.orderId);
+    expect(remainingTickets).toEqual([{ id: split.orderId }]);
+    expect(first.orderId).toBe(source.orderId);
+  });
+
+  /**
+   * EVIDENCE: service dishes never consume parent stock offline — menu type wins over stale line stamp.
+   */
+  it('EVIDENCE online settle closes journal so paid check leaves local KDS board', () => {
+    const open = appendRestaurantItemOffline({
+      tableId: 't-kds-pay',
+      tableCode: 'K1',
+      tableName: 'KDS Pay',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Steak',
+      unitPrice: 20,
+      productType: 'service',
+    });
+    fireRestaurantKotOffline(open);
+    expect(deriveRestaurantKitchenBoard(getAllEvents(), getAllSyncState()).length).toBeGreaterThan(0);
+
+    // Simulate online payment closing the seeded/local check.
+    expect(markRestaurantCheckSettledInJournal(open.orderId, 'PAID')).toBe(true);
+    expect(deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())).toHaveLength(0);
+    expect(deriveRestaurantKitchenBoard(getAllEvents(), getAllSyncState())).toHaveLength(0);
+    expect(deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()).has('t-kds-pay')).toBe(
+      false,
+    );
+  });
+
+  it('EVIDENCE void/cancel closes journal so table leaves floor occupancy', () => {
+    const open = appendRestaurantItemOffline({
+      tableId: 't-void-floor',
+      tableCode: 'V1',
+      tableName: 'Void Floor',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Soup',
+      unitPrice: 6,
+      productType: 'service',
+    });
+    expect(deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()).has('t-void-floor')).toBe(
+      true,
+    );
+    expect(markRestaurantCheckSettledInJournal(open.orderId, 'CANCELLED')).toBe(true);
+    expect(deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()).has('t-void-floor')).toBe(
+      false,
+    );
+    expect(deriveRestaurantKitchenBoard(getAllEvents(), getAllSyncState())).toHaveLength(0);
+  });
+
+  it('EVIDENCE reconcile drops journal ghosts when server table is FREE', () => {
+    const open = appendRestaurantItemOffline({
+      tableId: 't-ghost',
+      tableCode: 'GHOST',
+      tableName: 'Ghost',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Steak',
+      unitPrice: 20,
+      productType: 'service',
+    });
+    // Pretend this was a server UUID seed (not ofl_ord) by settling via reconcile against FREE table.
+    // Use mark + reopen path: seed a fake server-id check by rewriting — instead call reconcile
+    // after swapping: mark the ofl check should be keptLocal.
+    const local = reconcileRestaurantJournalWithServerTables([
+      { id: 't-ghost', status: 'FREE', currentOrderId: null },
+    ]);
+    expect(local.keptLocal).toBe(1);
+    expect(local.closed).toBe(0);
+    expect(deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())[0]?.orderId).toBe(
+      open.orderId,
+    );
+
+    // Server UUID ghost: settle then ensure FREE table stays clear of occupancy.
+    seedRestaurantCheckFromServer({
+      orderId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      orderNumber: 'R-SEED-1',
+      tableId: 't-seed-free',
+      tableCode: 'SF',
+      tableName: 'Seed Free',
+      channel: 'DINE_IN',
+      items: [
+        {
+          id: 'line-1',
+          productId: 'p1',
+          productName: 'Soup',
+          quantity: 1,
+          unitPrice: 5,
+        },
+      ],
+    });
+    expect(
+      deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()).has('t-seed-free'),
+    ).toBe(true);
+    const r = reconcileRestaurantJournalWithServerTables([
+      { id: 't-seed-free', status: 'FREE', currentOrderId: null },
+    ]);
+    expect(r.closed).toBe(1);
+    expect(
+      deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()).has('t-seed-free'),
+    ).toBe(false);
+  });
+
+  it('EVIDENCE service menu type skips offline parent stock even when journal line stamped inventory', () => {
+    localStorage.setItem(
+      'restaurant_offline_menu',
+      JSON.stringify([
+        {
+          id: 'svc-strips',
+          name: 'Best check test strips',
+          sellingPrice: '10',
+          categoryId: null,
+          categoryName: null,
+          kitchenStation: null,
+          productType: 'service',
+        },
+      ]),
+    );
+    localStorage.setItem('pos_local_stock', JSON.stringify({ 'svc-strips': 0 }));
+
+    const open = appendRestaurantItemOffline({
+      tableId: 't-svc-menu',
+      tableCode: 'SM',
+      tableName: 'Service Menu',
+      channel: 'DINE_IN',
+      productId: 'svc-strips',
+      productName: 'Best check test strips',
+      unitPrice: 10,
+      // Wrong stamp — resolveOfflineProductType must prefer menu service.
+      productType: 'inventory',
+    });
+    expect(resolveOfflineProductType('svc-strips', 'inventory')).toBe('service');
+    const paid = payRestaurantCheckOffline(open);
+    expect(paid.totalAmount).toBe(10);
+    expect(JSON.parse(localStorage.getItem('pos_local_stock') || '{}')['svc-strips']).toBe(0);
   });
 });
