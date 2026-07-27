@@ -220,6 +220,8 @@ export type PosOfflineEvent =
         newOrderId: string;
         newOfflineId: string;
         lineIds: string[];
+        /** Samba Move N of M — when set, only that many units leave each source line. */
+        quantityByLineId?: Record<string, number>;
         movedLines: EventLine[];
         sourceTableId: string;
         targetTableId: string;

@@ -810,29 +810,99 @@ export const restaurantRepository = {
   },
 
   /**
-   * Reduce line quantity after a partial void (Toast/Samba: void N of M).
-   * Updates quantity + line_total; caller recalculates order totals.
+   * Reduce line quantity after a partial void/move (Toast/Samba: N of M).
+   * Updates quantity + line_total; optionally proportional discountAmount.
+   * Caller recalculates order totals.
    */
   async reduceOrderItemQuantity(
     conn: DbConn,
     orderId: string,
     itemId: string,
     newQuantity: number,
+    opts?: { discountAmount?: number },
   ): Promise<boolean> {
     if (!(newQuantity > 0)) return false;
     const result = await conn.query(
       `UPDATE pos_order_items
        SET quantity = $3,
-           line_total = ROUND(($3::numeric * unit_price) - COALESCE(discount_amount, 0), 2),
+           discount_amount = COALESCE($4::numeric, discount_amount),
+           line_total = ROUND(
+             ($3::numeric * unit_price) - COALESCE($4::numeric, discount_amount, 0),
+             2
+           ),
            base_qty = CASE
              WHEN conversion_factor IS NOT NULL AND conversion_factor > 0
                THEN ROUND(($3::numeric * conversion_factor), 6)
              ELSE base_qty
            END
        WHERE order_id = $1 AND id = $2`,
-      [orderId, itemId, newQuantity],
+      [orderId, itemId, newQuantity, opts?.discountAmount ?? null],
     );
     return (result.rowCount ?? 0) > 0;
+  },
+
+  /**
+   * Clone part of a line onto another check (Samba Move N of M).
+   * Preserves kitchen_sent_at / station / notes so pay-split does not re-fire kitchen.
+   */
+  async cloneOrderItemPartial(
+    conn: DbConn,
+    sourceItemId: string,
+    sourceOrderId: string,
+    destOrderId: string,
+    moveQuantity: number,
+  ): Promise<string | null> {
+    if (!(moveQuantity > 0)) return null;
+    const result = await conn.query(
+      `WITH src AS (
+         SELECT *
+         FROM pos_order_items
+         WHERE id = $1 AND order_id = $2
+         FOR UPDATE
+       ),
+       ins AS (
+         INSERT INTO pos_order_items (
+           order_id, product_id, product_name, quantity, unit_price, line_total,
+           discount_amount, uom_id, base_qty, base_uom_id, conversion_factor,
+           line_notes, kitchen_station, kitchen_sent_at
+         )
+         SELECT
+           $3,
+           product_id,
+           product_name,
+           $4::numeric,
+           unit_price,
+           ROUND(
+             ($4::numeric * unit_price)
+             - (
+               COALESCE(discount_amount, 0)
+               * ($4::numeric / NULLIF(quantity, 0))
+             ),
+             2
+           ),
+           ROUND(
+             COALESCE(discount_amount, 0) * ($4::numeric / NULLIF(quantity, 0)),
+             2
+           ),
+           uom_id,
+           CASE
+             WHEN conversion_factor IS NOT NULL AND conversion_factor > 0
+               THEN ROUND(($4::numeric * conversion_factor), 6)
+             ELSE base_qty
+           END,
+           base_uom_id,
+           conversion_factor,
+           line_notes,
+           kitchen_station,
+           kitchen_sent_at
+         FROM src
+         WHERE quantity > $4::numeric
+         RETURNING id
+       )
+       SELECT id FROM ins`,
+      [sourceItemId, sourceOrderId, destOrderId, moveQuantity],
+    );
+    return (result.rows[0]?.id as string | undefined) ?? null;
   },
 
   async markItemsKitchenSent(conn: DbConn, itemIds: string[]): Promise<void> {

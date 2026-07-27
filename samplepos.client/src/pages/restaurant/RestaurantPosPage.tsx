@@ -259,6 +259,17 @@ type QtyPadSheetState =
       kitchenSent: boolean;
       max: number;
       digits: string;
+    }
+  | {
+      /** Samba Move: how many of this product go to the new ticket. */
+      purpose: 'move-qty';
+      itemIds: string[];
+      lines: OrderItem[];
+      productName: string;
+      max: number;
+      digits: string;
+      sameTable: boolean;
+      targetTableId?: string;
     };
 
 const SERVICE_LANE_DEFS: Record<
@@ -1883,8 +1894,13 @@ export default function RestaurantPosPage() {
     }
   };
 
-  const runSplit = async (opts?: { sameTable?: boolean; targetTableId?: string }) => {
-    if (!order || selectedLineIds.length === 0) return;
+  const runSplit = async (opts?: {
+    sameTable?: boolean;
+    targetTableId?: string;
+    /** Samba Move N of M — when set, only these quantities leave the source. */
+    items?: Array<{ itemId: string; quantity?: number }>;
+  }) => {
+    if (!order) return;
     const sameTable = opts?.sameTable !== false;
     const targetTableId = sameTable
       ? selectedTableId!
@@ -1893,13 +1909,34 @@ export default function RestaurantPosPage() {
       toast.error('Pick a target table');
       return;
     }
-    if (selectedLineIds.length >= orderLines.length) {
+
+    const moveItems: Array<{ itemId: string; quantity?: number }> =
+      opts?.items?.length
+        ? opts.items
+        : selectedLineIds.map((itemId) => ({ itemId }));
+    if (moveItems.length === 0) return;
+
+    const moveIdSet = new Set(moveItems.map((i) => i.itemId));
+    const qtyBy: Record<string, number> = {};
+    for (const row of moveItems) {
+      const onHand = Number(orderLines.find((l) => l.id === row.itemId)?.quantity) || 0;
+      const requestedQty = typeof row.quantity === 'number' ? row.quantity : onHand;
+      qtyBy[row.itemId] = requestedQty;
+    }
+    const movingUnits = Object.values(qtyBy).reduce((s, n) => s + n, 0);
+    const totalUnits = orderLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+    if (movingUnits >= totalUnits - 1e-9) {
       toast.error('Select some items to move — not the whole ticket (use Change table)');
       return;
     }
+    // Legacy whole-line guard when no partial qty: cannot select every line id.
+    if (!opts?.items && selectedLineIds.length >= orderLines.length) {
+      toast.error('Select some items to move — not the whole ticket (use Change table)');
+      return;
+    }
+
     setBusy(true);
     try {
-      // ofl_ord_* / offline: journal split — never POST ofl_line_* UUIDs to the server.
       if (preferLocalRestaurantWrites(order.id)) {
         const events = getAllEvents();
         const syncState = getAllSyncState();
@@ -1910,7 +1947,8 @@ export default function RestaurantPosPage() {
         const target = (tablesQuery.data || []).find((t) => t.id === targetTableId);
         if (!target) throw new Error('Target table not found');
         const { split } = splitRestaurantCheckOffline(derived, {
-          lineIds: selectedLineIds,
+          lineIds: [...moveIdSet],
+          quantityByLineId: qtyBy,
           targetTableId: target.id,
           targetTableCode: target.code,
           targetTableName: target.name,
@@ -1939,7 +1977,7 @@ export default function RestaurantPosPage() {
         return;
       }
       await api.restaurant.splitCheck(order.id, {
-        itemIds: selectedLineIds,
+        items: moveItems,
         targetTableId,
         sameTable,
       });
@@ -1972,8 +2010,41 @@ export default function RestaurantPosPage() {
 
   const clearLineSelection = () => setSelectedLineIds([]);
 
-  /** Samba Move: selected lines → new ticket on same table. */
+  /**
+   * Samba Move: selected lines → new ticket on same table.
+   * If one product group with qty > 1 is selected, ask how many to move.
+   */
   const handleMoveSelected = () => {
+    if (!order || selectedLineIds.length === 0) return;
+    const selectedGroups = ticketGroups.filter((g) =>
+      g.itemIds.every((id) => selectedLineIds.includes(id)),
+    );
+    const singleGroup =
+      selectedGroups.length === 1 &&
+      selectedLineIds.every((id) => selectedGroups[0]!.itemIds.includes(id))
+        ? selectedGroups[0]!
+        : null;
+
+    if (singleGroup && singleGroup.quantity > 1) {
+      const totalUnits = orderLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+      const otherRemain = totalUnits - singleGroup.quantity;
+      const maxMove = otherRemain > 0 ? singleGroup.quantity : singleGroup.quantity - 1;
+      if (maxMove < 1) {
+        toast.error('Select some items to move — not the whole ticket (use Change table)');
+        return;
+      }
+      setQtyPadSheet({
+        purpose: 'move-qty',
+        itemIds: singleGroup.itemIds,
+        lines: singleGroup.lines,
+        productName: singleGroup.productName,
+        max: maxMove,
+        digits: String(Math.min(1, maxMove)),
+        sameTable: true,
+      });
+      return;
+    }
+
     void runSplit({ sameTable: true });
   };
 
@@ -2440,6 +2511,30 @@ export default function RestaurantPosPage() {
         return;
       }
       void applySetLineQty(qtyPadSheet.group, nextQty);
+      return;
+    }
+    if (qtyPadSheet.purpose === 'move-qty') {
+      const raw = qtyPadSheet.digits.replace(/\D/g, '');
+      const n = clampOrderQty(Number.parseInt(raw || '0', 10), qtyPadSheet.max);
+      if (n == null || n < 1) {
+        toast.error(`Enter a quantity between 1 and ${qtyPadSheet.max}`);
+        return;
+      }
+      const sheet = qtyPadSheet;
+      setQtyPadSheet(null);
+      try {
+        const allocated = allocateVoidQuantity(
+          sheet.lines.map((l) => ({ id: l.id, quantity: Number(l.quantity) || 0 })),
+          n,
+        );
+        void runSplit({
+          sameTable: sheet.sameTable,
+          targetTableId: sheet.targetTableId,
+          items: allocated.map((a) => ({ itemId: a.itemId, quantity: a.quantity })),
+        });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Invalid move quantity');
+      }
       return;
     }
     const raw = qtyPadSheet.digits.replace(/\D/g, '');
@@ -3796,17 +3891,23 @@ export default function RestaurantPosPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-xs uppercase tracking-wide font-semibold text-stone-500">
-                          {qtyPadSheet.purpose === 'void-qty' ? 'Void quantity' : 'Set quantity'}
+                          {qtyPadSheet.purpose === 'void-qty'
+                            ? 'Void quantity'
+                            : qtyPadSheet.purpose === 'move-qty'
+                              ? 'Move quantity'
+                              : 'Set quantity'}
                         </p>
                         <p className="font-semibold text-stone-900 truncate">
-                          {qtyPadSheet.purpose === 'void-qty'
-                            ? qtyPadSheet.productName
-                            : qtyPadSheet.group.productName}
+                          {qtyPadSheet.purpose === 'set-line-qty'
+                            ? qtyPadSheet.group.productName
+                            : qtyPadSheet.productName}
                         </p>
                         <p className="text-sm text-stone-500">
                           {qtyPadSheet.purpose === 'void-qty'
                             ? `1–${qtyPadSheet.max}${qtyPadSheet.kitchenSent ? ' · kitchen VOID' : ''}`
-                            : `Current ${qtyPadSheet.group.quantity} · 0 clears line`}
+                            : qtyPadSheet.purpose === 'move-qty'
+                              ? `Move 1–${qtyPadSheet.max} to a new ticket`
+                              : `Current ${qtyPadSheet.group.quantity} · 0 clears line`}
                         </p>
                       </div>
                       <button
@@ -3854,7 +3955,11 @@ export default function RestaurantPosPage() {
                       onClick={() => confirmQtyPadSheet()}
                       className={`${touchBtnDark} w-full min-h-14`}
                     >
-                      {qtyPadSheet.purpose === 'void-qty' ? 'Void' : 'Set qty'}
+                      {qtyPadSheet.purpose === 'void-qty'
+                        ? 'Void'
+                        : qtyPadSheet.purpose === 'move-qty'
+                          ? 'Move'
+                          : 'Set qty'}
                     </button>
                   </div>
                 </div>

@@ -895,6 +895,8 @@ export function splitRestaurantCheckOffline(
   source: DerivedOrder,
   input: {
     lineIds: string[];
+    /** Samba Move N of M — omit or full qty means move the whole line. */
+    quantityByLineId?: Record<string, number>;
     targetTableId: string;
     targetTableCode: string;
     targetTableName: string;
@@ -906,12 +908,37 @@ export function splitRestaurantCheckOffline(
   if (!input.lineIds.length) throw new Error('Select at least one line to split');
 
   const moveSet = new Set(input.lineIds);
-  const moving = source.lines.filter((l) => l.lineId && moveSet.has(l.lineId));
-  const remaining = source.lines.filter((l) => !l.lineId || !moveSet.has(l.lineId));
-  if (moving.length !== input.lineIds.length) {
+  const qtyBy = input.quantityByLineId || {};
+  const touching = source.lines.filter((l) => l.lineId && moveSet.has(l.lineId));
+  if (touching.length !== input.lineIds.length) {
     throw new Error('One or more lines are not on this check');
   }
-  if (remaining.length === 0) {
+
+  const movedLines: EventLine[] = [];
+  let remainingUnits = source.lines.reduce((s, l) => s + l.quantity, 0);
+  for (const line of touching) {
+    const lineId = line.lineId!;
+    const moveQty = Math.min(line.quantity, Math.max(0, qtyBy[lineId] ?? line.quantity));
+    if (!(moveQty > 0)) {
+      throw new Error('Move quantity must be positive');
+    }
+    if (moveQty > line.quantity + 1e-9) {
+      throw new Error(`Cannot move ${moveQty} — only ${line.quantity} on the line`);
+    }
+    remainingUnits -= moveQty;
+    const discount =
+      line.discountAmount != null && line.quantity > 0
+        ? (line.discountAmount * moveQty) / line.quantity
+        : line.discountAmount;
+    movedLines.push({
+      ...line,
+      lineId: moveQty >= line.quantity - 1e-9 ? lineId : newOfflineLineId(),
+      quantity: moveQty,
+      subtotal: moveQty * line.unitPrice,
+      discountAmount: discount,
+    });
+  }
+  if (remainingUnits <= 1e-9) {
     throw new Error('Cannot split all lines — leave at least one on the source check');
   }
 
@@ -926,6 +953,11 @@ export function splitRestaurantCheckOffline(
   const newOrderId = newOfflineOrderId();
   const newOfflineId = `OFF-R-SPLIT-${Date.now().toString(36).toUpperCase()}`;
   const destTableId = sameTable ? source.tableId : input.targetTableId;
+  const quantityByLineId: Record<string, number> = {};
+  for (const line of touching) {
+    const lineId = line.lineId!;
+    quantityByLineId[lineId] = Math.min(line.quantity, qtyBy[lineId] ?? line.quantity);
+  }
 
   appendEvent({
     eventType: 'RESTAURANT_CHECK_SPLIT',
@@ -935,7 +967,8 @@ export function splitRestaurantCheckOffline(
     newOrderId,
     newOfflineId,
     lineIds: input.lineIds,
-    movedLines: moving,
+    quantityByLineId,
+    movedLines,
     sourceTableId: source.tableId,
     targetTableId: destTableId,
     targetTableCode: sameTable ? source.tableCode : input.targetTableCode,

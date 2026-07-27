@@ -183,6 +183,7 @@ const RestaurantCheckSplitSchema = z.object({
     newOrderId: z.string().min(1),
     newOfflineId: z.string().min(1),
     lineIds: z.array(z.string().min(1)).min(1),
+    quantityByLineId: z.record(z.string(), z.number().positive()).optional(),
     movedLines: z.array(EventLineSchema).min(1),
     sourceTableId: z.string().min(1),
     targetTableId: z.string().min(1),

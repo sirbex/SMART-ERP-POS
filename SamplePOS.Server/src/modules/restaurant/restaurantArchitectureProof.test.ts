@@ -442,19 +442,24 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(service).toMatch(/mergeChecks/);
     expect(service).toMatch(/splitCheck/);
     expect(service).toMatch(/moveOrderItems|activateCheck/);
+    expect(service).toMatch(/cloneOrderItemPartial/);
     expect(service).not.toMatch(/CREATE TABLE.*restaurant_orders/i);
 
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     expect(repo).toMatch(/moveOrderItems/);
+    expect(repo).toMatch(/cloneOrderItemPartial/);
     expect(repo).toMatch(/listPendingOrdersForTable/);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/checks\/:orderId\/transfer/);
     expect(routes).toMatch(/checks\/:orderId\/merge/);
     expect(routes).toMatch(/checks\/:orderId\/split/);
+    expect(routes).toMatch(/quantity: z\.number\(\)\.positive\(\)\.optional\(\)/);
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/transferCheck|splitCheck|mergeChecks/);
+    expect(pos).toMatch(/purpose: 'move-qty'/);
+    expect(pos).toMatch(/allocateVoidQuantity/);
     // Merge is same-table only (Samba).
     expect(pos).toMatch(/merge only other tickets on the same table/);
     expect(service).toMatch(/same table/);
@@ -538,6 +543,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     );
     expect(proof).toMatch(
       /EVIDENCE multi-ticket append with orderId stays on selected sibling/,
+    );
+    expect(proof).toMatch(
+      /EVIDENCE partial qty move keeps remainder on source and preserves kitchenSentAt/,
     );
     expect(proof).toMatch(/reconcileRestaurantJournalWithServerTables/);
     expect(proof).toMatch(/markRestaurantCheckSettledInJournal/);

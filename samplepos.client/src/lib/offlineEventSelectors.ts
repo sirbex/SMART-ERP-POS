@@ -199,11 +199,40 @@ export function deriveOpenOrders(
                 const source = orderMap.get(event.sourceOrderId);
                 if (!source) break;
                 const moveSet = new Set(event.lineIds);
-                const remaining = source.lines.filter((l) => !l.lineId || !moveSet.has(l.lineId));
+                const qtyBy = event.quantityByLineId || {};
+                const remaining: typeof source.lines = [];
+                for (const l of source.lines) {
+                    if (!l.lineId || !moveSet.has(l.lineId)) {
+                        remaining.push(l);
+                        continue;
+                    }
+                    const moveQty = qtyBy[l.lineId] ?? l.quantity;
+                    if (moveQty >= l.quantity - 1e-9) continue;
+                    const left = l.quantity - moveQty;
+                    remaining.push({
+                        ...l,
+                        quantity: left,
+                        subtotal: left * l.unitPrice,
+                        discountAmount:
+                            l.discountAmount != null && l.quantity > 0
+                                ? (l.discountAmount * left) / l.quantity
+                                : l.discountAmount,
+                    });
+                }
                 const moved =
                     event.movedLines?.length > 0
                         ? event.movedLines
-                        : source.lines.filter((l) => l.lineId && moveSet.has(l.lineId));
+                        : source.lines
+                              .filter((l) => l.lineId && moveSet.has(l.lineId))
+                              .map((l) => {
+                                  const moveQty = qtyBy[l.lineId!] ?? l.quantity;
+                                  return {
+                                      ...l,
+                                      lineId: l.lineId,
+                                      quantity: moveQty,
+                                      subtotal: moveQty * l.unitPrice,
+                                  };
+                              });
                 orderMap.set(event.sourceOrderId, {
                     ...source,
                     lines: remaining,

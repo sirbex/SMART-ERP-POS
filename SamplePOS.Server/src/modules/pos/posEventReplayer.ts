@@ -124,6 +124,8 @@ export interface RestaurantCheckSplitEvent {
     newOrderId: string;
     newOfflineId: string;
     lineIds: string[];
+    /** Samba Move N of M — when set, only that many units leave each source line. */
+    quantityByLineId?: Record<string, number>;
     movedLines: ReplayEventLine[];
     sourceTableId: string;
     targetTableId: string;
@@ -858,17 +860,17 @@ export const posEventReplayer = {
                 };
             }
 
-            const itemIds = await resolveSplitItemIds(pool as Pool, sourceId, event);
-            if (itemIds.length !== event.lineIds.length) {
+            const items = await resolveSplitItems(pool as Pool, sourceId, event);
+            if (items.length !== event.lineIds.length) {
                 return {
                     status: 'REVIEW',
-                    error: `Could not match split lines on server (${itemIds.length}/${event.lineIds.length})`,
+                    error: `Could not match split lines on server (${items.length}/${event.lineIds.length})`,
                 };
             }
 
             const { restaurantService } = await import('../restaurant/restaurantService.js');
             const result = await restaurantService.splitCheck(pool as Pool, sourceId, {
-                itemIds,
+                items,
                 targetTableId: event.targetTableId,
                 actorId: userId,
                 sameTable: event.sameTable,
@@ -891,35 +893,54 @@ export const posEventReplayer = {
 };
 
 /** Match offline split lineIds to server pos_order_items (UUID or product+qty). */
-async function resolveSplitItemIds(
+async function resolveSplitItems(
     pool: Pool,
     sourceOrderId: string,
     event: RestaurantCheckSplitEvent
-): Promise<string[]> {
+): Promise<Array<{ itemId: string; quantity?: number }>> {
     const order = await ordersService.getOrder(pool, sourceOrderId);
     const items = [...(order.items || [])];
     const used = new Set<string>();
-    const resolved: string[] = [];
+    const resolved: Array<{ itemId: string; quantity?: number }> = [];
+    const qtyBy = event.quantityByLineId || {};
 
     for (const lineId of event.lineIds) {
+        const moveQty = qtyBy[lineId];
         const byId = items.find((i) => i.id === lineId && !used.has(i.id));
         if (byId) {
             used.add(byId.id);
-            resolved.push(byId.id);
+            resolved.push(
+                moveQty != null && moveQty > 0 && moveQty < Number(byId.quantity)
+                    ? { itemId: byId.id, quantity: moveQty }
+                    : { itemId: byId.id },
+            );
             continue;
         }
         const moved = event.movedLines.find((l) => l.lineId === lineId)
             ?? event.movedLines[resolved.length];
         if (!moved) continue;
-        const match = items.find(
-            (i) =>
-                !used.has(i.id) &&
-                i.productId === moved.productId &&
-                Number(i.quantity) === Number(moved.quantity)
-        );
+        // Prefer matching product with enough on-hand qty (partial move).
+        const wantQty = moveQty ?? Number(moved.quantity);
+        const match =
+            items.find(
+                (i) =>
+                    !used.has(i.id) &&
+                    i.productId === moved.productId &&
+                    Number(i.quantity) >= wantQty - 1e-9,
+            ) ||
+            items.find(
+                (i) =>
+                    !used.has(i.id) &&
+                    i.productId === moved.productId &&
+                    Number(i.quantity) === Number(moved.quantity),
+            );
         if (match) {
             used.add(match.id);
-            resolved.push(match.id);
+            resolved.push(
+                wantQty > 0 && wantQty < Number(match.quantity)
+                    ? { itemId: match.id, quantity: wantQty }
+                    : { itemId: match.id },
+            );
         }
     }
     return resolved;

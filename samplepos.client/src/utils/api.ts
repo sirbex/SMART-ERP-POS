@@ -1285,7 +1285,12 @@ export const api = {
       apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/merge`, data),
     splitCheck: (
       orderId: string,
-      data: { itemIds: string[]; targetTableId: string; sameTable?: boolean },
+      data: {
+        itemIds?: string[];
+        items?: Array<{ itemId: string; quantity?: number }>;
+        targetTableId: string;
+        sameTable?: boolean;
+      },
     ) => apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/split`, data),
     sendKot: (orderId: string) =>
       apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/kot`),

@@ -223,11 +223,25 @@ const MergeSchema = z.object({
   secondaryOrderId: z.string().uuid(),
 });
 
-const SplitSchema = z.object({
-  itemIds: z.array(z.string().uuid()).min(1),
-  targetTableId: z.string().uuid(),
-  sameTable: z.boolean().optional(),
-});
+const SplitSchema = z
+  .object({
+    /** Full-line move (legacy). Prefer `items` when moving partial qty. */
+    itemIds: z.array(z.string().uuid()).optional(),
+    /** Samba Move N of M — quantity omitted means move the whole line. */
+    items: z
+      .array(
+        z.object({
+          itemId: z.string().uuid(),
+          quantity: z.number().positive().optional(),
+        }),
+      )
+      .optional(),
+    targetTableId: z.string().uuid(),
+    sameTable: z.boolean().optional(),
+  })
+  .refine((d) => (d.items?.length ?? 0) > 0 || (d.itemIds?.length ?? 0) > 0, {
+    message: 'Select at least one line to split',
+  });
 
 router.post(
   '/checks/:orderId/transfer',
@@ -269,6 +283,7 @@ router.post(
     const body = SplitSchema.parse(req.body);
     const result = await restaurantService.splitCheck(pool, req.params.orderId, {
       itemIds: body.itemIds,
+      items: body.items,
       targetTableId: body.targetTableId,
       sameTable: body.sameTable,
       actorId: req.user!.id,

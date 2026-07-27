@@ -1370,18 +1370,44 @@ export const restaurantService = {
     };
   },
 
+  /**
+   * Split selected lines (or partial quantities) onto a new check.
+   * Samba Move: whole lines move via order_id reassignment; partial qty clones
+   * a sibling row onto the dest check and reduces the source (kitchen_sent_at preserved).
+   */
   async splitCheck(
     pool: Pool,
     sourceOrderId: string,
     input: {
-      itemIds: string[];
+      itemIds?: string[];
+      items?: Array<{ itemId: string; quantity?: number }>;
       targetTableId: string;
       actorId: string;
       sameTable?: boolean;
     },
   ) {
     await assertRestaurantEnabled(pool);
-    if (!input.itemIds?.length) throw new ValidationError('Select at least one line to split');
+
+    const moveRequests = new Map<string, number | 'FULL'>();
+    if (input.items?.length) {
+      for (const row of input.items) {
+        if (row.quantity === undefined) {
+          moveRequests.set(row.itemId, 'FULL');
+          continue;
+        }
+        if (!(row.quantity > 0)) {
+          throw new ValidationError('Move quantity must be positive');
+        }
+        const prev = moveRequests.get(row.itemId);
+        if (prev === 'FULL') continue;
+        moveRequests.set(row.itemId, (typeof prev === 'number' ? prev : 0) + row.quantity);
+      }
+    } else if (input.itemIds?.length) {
+      for (const id of input.itemIds) moveRequests.set(id, 'FULL');
+    }
+    if (moveRequests.size === 0) {
+      throw new ValidationError('Select at least one line to split');
+    }
 
     const sourceMeta = await restaurantRepository.getOrderRestaurantMeta(pool, sourceOrderId);
     if (!sourceMeta || sourceMeta.orderChannel === 'RETAIL') {
@@ -1393,13 +1419,43 @@ export const restaurantService = {
     }
 
     const sourceItems = source.items || [];
-    const moveSet = new Set(input.itemIds);
-    const moving = sourceItems.filter((i) => moveSet.has(i.id));
-    const remaining = sourceItems.filter((i) => !moveSet.has(i.id));
-    if (moving.length !== input.itemIds.length) {
-      throw new ValidationError('One or more lines are not on this check');
+    const byId = new Map(sourceItems.map((i) => [i.id, i]));
+    type MoveSlice = {
+      itemId: string;
+      onHand: number;
+      moveQty: number;
+      unitPrice: number;
+      discountAmount: number;
+    };
+    const slices: MoveSlice[] = [];
+    for (const [itemId, req] of moveRequests) {
+      const row = byId.get(itemId);
+      if (!row) {
+        throw new ValidationError('One or more lines are not on this check');
+      }
+      const onHand = Money.toNumber(Money.parseDb(String(row.quantity)));
+      const moveQty = req === 'FULL' ? onHand : req;
+      if (moveQty > onHand + 1e-9) {
+        throw new ValidationError(
+          `Cannot move ${moveQty} of "${row.productName}" — only ${onHand} on the check`,
+        );
+      }
+      slices.push({
+        itemId,
+        onHand,
+        moveQty,
+        unitPrice: Money.toNumber(Money.parseDb(String(row.unitPrice))),
+        discountAmount: Money.toNumber(Money.parseDb(String(row.discountAmount || 0))),
+      });
     }
-    if (remaining.length === 0) {
+
+    // After moves, at least one unit must remain on the source check.
+    let remainingUnits = sourceItems.reduce(
+      (s, it) => s + Money.toNumber(Money.parseDb(String(it.quantity))),
+      0,
+    );
+    for (const slice of slices) remainingUnits -= slice.moveQty;
+    if (remainingUnits <= 1e-9) {
       throw new ValidationError('Cannot split all lines — leave at least one on the source check');
     }
 
@@ -1440,7 +1496,6 @@ export const restaurantService = {
           (await restaurantRepository.getTableById(client, destTableId))!,
         );
 
-        // Empty header via orders SSOT insert (items moved next to preserve kitchen_sent_at)
         const header = await ordersRepository.createOrder(client, {
           customerId: source.customerId,
           subtotal: 0,
@@ -1463,13 +1518,53 @@ export const restaurantService = {
           pickupLabel: sourceMeta.pickupLabel,
         });
 
-        const moved = await restaurantRepository.moveOrderItems(
-          client,
-          moving.map((m) => m.id),
-          newOrderId,
-        );
-        if (moved !== moving.length) {
-          throw new BusinessError('Failed to move split lines', 'ERR_RESTAURANT_SPLIT');
+        const fullMoveIds: string[] = [];
+        for (const slice of slices) {
+          if (slice.moveQty >= slice.onHand - 1e-9) {
+            fullMoveIds.push(slice.itemId);
+            continue;
+          }
+          const cloned = await restaurantRepository.cloneOrderItemPartial(
+            client,
+            slice.itemId,
+            sourceOrderId,
+            newOrderId,
+            slice.moveQty,
+          );
+          if (!cloned) {
+            throw new BusinessError('Failed to split partial quantity', 'ERR_RESTAURANT_SPLIT');
+          }
+          const remainQty = slice.onHand - slice.moveQty;
+          const remainDiscount =
+            slice.onHand > 0
+              ? Number(
+                  new Decimal(slice.discountAmount)
+                    .times(remainQty)
+                    .div(slice.onHand)
+                    .toFixed(2),
+                )
+              : 0;
+          const reduced = await restaurantRepository.reduceOrderItemQuantity(
+            client,
+            sourceOrderId,
+            slice.itemId,
+            remainQty,
+            { discountAmount: remainDiscount },
+          );
+          if (!reduced) {
+            throw new BusinessError('Failed to reduce source line after split', 'ERR_RESTAURANT_SPLIT');
+          }
+        }
+
+        if (fullMoveIds.length > 0) {
+          const moved = await restaurantRepository.moveOrderItems(
+            client,
+            fullMoveIds,
+            newOrderId,
+          );
+          if (moved !== fullMoveIds.length) {
+            throw new BusinessError('Failed to move split lines', 'ERR_RESTAURANT_SPLIT');
+          }
         }
 
         const sourceFresh = await ordersRepository.getById(client, sourceOrderId);
@@ -1493,7 +1588,6 @@ export const restaurantService = {
         if (!sameTable) {
           await restaurantRepository.occupyTable(client, destTableId, newOrderId);
         }
-        // same-table: keep floor pointer on source; new check is a sibling
       });
     } finally {
       for (const k of lockKeys) {
@@ -1504,7 +1598,7 @@ export const restaurantService = {
     logger.info('Restaurant check split', {
       sourceOrderId,
       newOrderId,
-      itemCount: moving.length,
+      itemCount: slices.length,
       sameTable,
       targetTableId: input.targetTableId,
     });

@@ -17,6 +17,7 @@ import {
   splitRestaurantCheckOffline,
   resolveOfflineProductType,
   updateRestaurantGuestOffline,
+  totalsFromLines,
 } from './restaurantOfflineOps';
 import {
   deriveRestaurantCheckForTable,
@@ -752,5 +753,53 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     );
     expect(stillSplit?.lines.some((l) => l.productName === 'Dessert')).toBe(false);
     expect(stillSplit?.lines.some((l) => l.productName === 'Drink')).toBe(true);
+  });
+
+  /**
+   * EVIDENCE (Samba Move N of M): 6 of one product → move 2 → source keeps 4, sibling has 2.
+   * kitchenSentAt must travel with the moved slice (pay-split, not re-fire).
+   */
+  it('EVIDENCE partial qty move keeps remainder on source and preserves kitchenSentAt', () => {
+    const open = appendRestaurantItemOffline({
+      tableId: 't-move-qty',
+      tableCode: 'MQ',
+      tableName: 'Move Qty',
+      channel: 'DINE_IN',
+      productId: 'matooke',
+      productName: 'Matooke with beef',
+      unitPrice: 15,
+      quantity: 6,
+      productType: 'service',
+    });
+    fireRestaurantKotOffline(open);
+    const afterKot = deriveRestaurantCheckForTable(
+      't-move-qty',
+      getAllEvents(),
+      getAllSyncState(),
+      open.orderId,
+    );
+    expect(afterKot).toBeTruthy();
+    expect(afterKot!.lines).toHaveLength(1);
+    expect(afterKot!.lines[0].quantity).toBe(6);
+    expect(afterKot!.lines[0].kitchenSentAt).toBeTruthy();
+
+    const lineId = afterKot!.lines[0].lineId!;
+    const { source, split } = splitRestaurantCheckOffline(afterKot!, {
+      lineIds: [lineId],
+      quantityByLineId: { [lineId]: 2 },
+      targetTableId: 't-move-qty',
+      targetTableCode: 'MQ',
+      targetTableName: 'Move Qty',
+      sameTable: true,
+    });
+
+    expect(source.orderId).toBe(open.orderId);
+    expect(split.orderId).not.toBe(source.orderId);
+    expect(source.lines.reduce((s, l) => s + l.quantity, 0)).toBe(4);
+    expect(split.lines.reduce((s, l) => s + l.quantity, 0)).toBe(2);
+    expect(split.lines.every((l) => !!l.kitchenSentAt)).toBe(true);
+    expect(source.lines.every((l) => !!l.kitchenSentAt)).toBe(true);
+    expect(totalsFromLines(source.lines).subtotal).toBe(60);
+    expect(totalsFromLines(split.lines).subtotal).toBe(30);
   });
 });
