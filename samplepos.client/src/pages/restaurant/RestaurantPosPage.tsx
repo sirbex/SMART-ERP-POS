@@ -58,7 +58,12 @@ import {
   type InFlightOptimisticLine,
   type OptimisticCheckPayload,
 } from '../../lib/restaurantCheckOptimistic';
-import { allocateVoidQuantity, isServerOrderItemId } from '../../lib/restaurantVoidQuantity';
+import { RestaurantOrderTagPad } from '../../components/restaurant/RestaurantOrderTagPad';
+import type { OrderTagGroupOption } from '../../components/restaurant/RestaurantOrderTagPad';
+import {
+  formatOrderTagsAsLineNotes,
+  type RestaurantOrderTagSelection,
+} from '@shared/utils/restaurantOrderTags';
 import {
   appendQtyDigit,
   clampOrderQty,
@@ -131,6 +136,13 @@ interface OrderItem {
   lineTotal: string;
   discountAmount: string;
   kitchenSentAt?: string | null;
+  lineNotes?: string | null;
+  orderTags?: Array<{
+    id?: string | null;
+    label: string;
+    prefix?: string | null;
+    price?: number;
+  }> | null;
 }
 
 /** Toast/Samba-style: identical lines collapse to one row on the ticket. */
@@ -142,6 +154,7 @@ interface TicketLineGroup {
   quantity: number;
   lineTotal: number;
   kitchenSent: boolean;
+  lineNotes: string | null;
   itemIds: string[];
   lines: OrderItem[];
 }
@@ -151,7 +164,9 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
   for (const it of items) {
     const kitchenSent = !!it.kitchenSentAt;
     const unitPrice = Number(it.unitPrice) || 0;
-    const key = `${it.productId ?? 'name:' + it.productName}|${unitPrice}|${kitchenSent ? 'S' : 'N'}`;
+    const notes = (it.lineNotes || '').trim();
+    // Different tags/notes must not merge (kitchen accuracy).
+    const key = `${it.productId ?? 'name:' + it.productName}|${unitPrice}|${kitchenSent ? 'S' : 'N'}|${notes}`;
     const qty = Number(it.quantity) || 0;
     const lineTotal = Number(it.lineTotal) || 0;
     const existing = map.get(key);
@@ -164,6 +179,7 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
         quantity: qty,
         lineTotal,
         kitchenSent,
+        lineNotes: notes || null,
         itemIds: [it.id],
         lines: [it],
       });
@@ -358,6 +374,7 @@ function uiFromDerivedCheck(
         lineTotal: String(l.subtotal),
         discountAmount: String(l.discountAmount || 0),
         kitchenSentAt: l.kitchenSentAt,
+        lineNotes: l.lineNotes ?? null,
       })),
     } as OrderDetail,
     meta: {
@@ -514,6 +531,16 @@ export default function RestaurantPosPage() {
   const [mobileSheet, setMobileSheet] = useState<null | 'order' | 'details' | 'more'>(null);
   /** SambaPOS-style: ··· opens line actions (qty / void one line) */
   const [lineSheet, setLineSheet] = useState<TicketLineGroup | null>(null);
+  const [tagPad, setTagPad] = useState<{
+    orderId: string;
+    itemId: string;
+    productId: string;
+    productName: string;
+    groups: OrderTagGroupOption[];
+    selected: RestaurantOrderTagSelection[];
+    freeText: string;
+  } | null>(null);
+  const [tagPadBusy, setTagPadBusy] = useState(false);
   /** SambaPOS numberpad: type 50 then tap product once. Cleared after each add. */
   const [pendingQtyDigits, setPendingQtyDigits] = useState('');
   /** Phone: full dialer sheet for multi-digit qty (compact bar stays in the split). */
@@ -875,6 +902,92 @@ export default function RestaurantPosPage() {
   const preferLocalRestaurantWrites = (orderId?: string | null) =>
     shouldUseLocalRestaurantMutation(isOnline, orderId);
 
+  const openOrderTagPad = async (args: {
+    orderId: string;
+    itemId: string;
+    productId: string;
+    productName: string;
+    existingNotes?: string | null;
+    existingTags?: RestaurantOrderTagSelection[] | null;
+  }) => {
+    if (isTempRestaurantId(args.itemId) || isTempRestaurantId(args.orderId)) return;
+    try {
+      const res = await api.restaurant.listOrderTagsForProduct(args.productId);
+      const groups = (res.data.data || []) as OrderTagGroupOption[];
+      if (groups.length === 0) return;
+      const shouldPrompt = groups.some((g) => g.autoPrompt) || groups.length > 0;
+      if (!shouldPrompt) return;
+      setTagPad({
+        orderId: args.orderId,
+        itemId: args.itemId,
+        productId: args.productId,
+        productName: args.productName,
+        groups,
+        selected: args.existingTags || [],
+        freeText: args.existingNotes || '',
+      });
+    } catch {
+      // Tag catalog optional — never block add.
+    }
+  };
+
+  const saveOrderTagPad = async () => {
+    if (!tagPad || !selectedTableId) return;
+    setTagPadBusy(true);
+    try {
+      if (preferLocalRestaurantWrites(tagPad.orderId)) {
+        // Offline: fold tags into journal line notes via seed refresh path after local edit.
+        const notes = formatOrderTagsAsLineNotes(tagPad.selected, tagPad.freeText);
+        queryClient.setQueryData(
+          ['restaurant', 'check', selectedTableId, activeOrderId, isOnline],
+          (prev: CheckUiPayload | undefined) => {
+            if (!prev?.order) return prev;
+            return {
+              ...prev,
+              order: {
+                ...prev.order,
+                items: prev.order.items.map((it) =>
+                  it.id === tagPad.itemId
+                    ? { ...it, lineNotes: notes, orderTags: tagPad.selected }
+                    : it,
+                ),
+              },
+            };
+          },
+        );
+        setTagPad(null);
+        toast.success(notes ? 'Tags saved on ticket' : 'Tags cleared');
+        return;
+      }
+      const res = await api.restaurant.setItemOrderTags(tagPad.orderId, {
+        itemId: tagPad.itemId,
+        orderTags: tagPad.selected,
+        freeText: tagPad.freeText.trim() || null,
+      });
+      const payload = res.data.data as { order?: OrderDetail; meta?: CheckMeta };
+      if (payload?.order) {
+        paintServerCheckWithInFlight(
+          selectedTableId,
+          {
+            table: checkQuery.data?.table || ({ id: selectedTableId } as RestaurantTable),
+            order: payload.order,
+            meta: payload.meta || checkQuery.data?.meta || null,
+            siblingChecks: checkQuery.data?.siblingChecks || [],
+          },
+          tagPad.orderId,
+        );
+      } else {
+        invalidateCheck();
+      }
+      setTagPad(null);
+      toast.success('Order tags applied');
+    } catch (err) {
+      toast.error(apiErr(err, 'Failed to apply tags'));
+    } finally {
+      setTagPadBusy(false);
+    }
+  };
+
   const addItemMutation = useMutation({
     mutationFn: async (input: MenuProduct | { product: MenuProduct; quantity?: number }) => {
       const product = 'product' in input ? input.product : input;
@@ -1014,6 +1127,19 @@ export default function RestaurantPosPage() {
         inFlightOptimisticLinesRef.current.delete(tempLineId);
         paintServerCheckWithInFlight(selectedTableId, data, targetOrderId);
         if (data.order?.id) setActiveOrderId(data.order.id);
+        const newest = [...(data.order?.items || [])]
+          .reverse()
+          .find((it) => it.productId === product.id);
+        if (data.order?.id && newest?.id && product.id) {
+          void openOrderTagPad({
+            orderId: data.order.id,
+            itemId: newest.id,
+            productId: product.id,
+            productName: product.name,
+            existingNotes: newest.lineNotes,
+            existingTags: newest.orderTags,
+          });
+        }
         return { offline: false as const, refreshed: true as const, quantity };
       } catch (err) {
         inFlightOptimisticLinesRef.current.delete(tempLineId);
@@ -3732,6 +3858,11 @@ export default function RestaurantPosPage() {
                                 >
                                   {group.quantity} × {group.productName}
                                 </div>
+                                {group.lineNotes ? (
+                                  <div className="text-[11px] font-medium text-amber-800 mt-0.5">
+                                    * {group.lineNotes}
+                                  </div>
+                                ) : null}
                                 <div className="mt-0.5 flex flex-wrap items-center gap-2">
                                   {(() => {
                                     const st = ticketLineStatus(group.kitchenSent, isCheckBilled);
@@ -3869,6 +4000,11 @@ export default function RestaurantPosPage() {
                         <p className="font-semibold text-stone-900 truncate">
                           {lineSheet.quantity} × {lineSheet.productName}
                         </p>
+                        {lineSheet.lineNotes ? (
+                          <p className="text-xs font-medium text-amber-800 mt-0.5">
+                            * {lineSheet.lineNotes}
+                          </p>
+                        ) : null}
                         <p className="text-sm text-stone-500">
                           {formatCurrency(lineSheet.lineTotal)}
                           {lineSheet.kitchenSent
@@ -3886,6 +4022,28 @@ export default function RestaurantPosPage() {
                         <X className="h-5 w-5" />
                       </button>
                     </div>
+                    {lineSheet.productId && !lineSheet.kitchenSent ? (
+                      <button
+                        type="button"
+                        disabled={busy || !order?.id}
+                        onClick={() => {
+                          const line = lineSheet.lines[0];
+                          if (!order?.id || !lineSheet.productId || !line) return;
+                          setLineSheet(null);
+                          void openOrderTagPad({
+                            orderId: order.id,
+                            itemId: line.id,
+                            productId: lineSheet.productId,
+                            productName: lineSheet.productName,
+                            existingNotes: line.lineNotes || lineSheet.lineNotes,
+                            existingTags: line.orderTags,
+                          });
+                        }}
+                        className={`${touchBtnDark} w-full min-h-12 text-sm`}
+                      >
+                        Order tags…
+                      </button>
+                    ) : null}
                     {lineSheet.productId ? (
                       <div className="space-y-2">
                         <div className="grid grid-cols-2 gap-2">
@@ -4233,6 +4391,19 @@ export default function RestaurantPosPage() {
           </div>
         )}
       </div>
+      {tagPad ? (
+        <RestaurantOrderTagPad
+          productName={tagPad.productName}
+          groups={tagPad.groups}
+          selected={tagPad.selected}
+          freeText={tagPad.freeText}
+          busy={tagPadBusy}
+          onChangeSelected={(selected) => setTagPad((p) => (p ? { ...p, selected } : p))}
+          onChangeFreeText={(freeText) => setTagPad((p) => (p ? { ...p, freeText } : p))}
+          onSkip={() => setTagPad(null)}
+          onSave={() => void saveOrderTagPad()}
+        />
+      ) : null}
     </Layout>
   );
 }

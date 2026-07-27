@@ -219,6 +219,38 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     ).toBe(true);
   });
 
+  it('EVIDENCE gate: Samba order tags denormalize to line_notes for KOT', () => {
+    const sql = readRepo('shared/sql/570_restaurant_order_tags.sql');
+    expect(sql).toMatch(/restaurant_order_tag_groups/);
+    expect(sql).toMatch(/restaurant_order_tags/);
+    expect(sql).toMatch(/restaurant_order_tag_mappings/);
+    expect(sql).toMatch(/order_tags JSONB/);
+    expect(sql).toMatch(/INSERT INTO schema_version \(version\) VALUES \(570\)/);
+
+    const util = readRepo('shared/utils/restaurantOrderTags.ts');
+    expect(util).toMatch(/formatOrderTagsAsLineNotes/);
+    expect(util).toMatch(/formatOrderTagLabel/);
+
+    const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
+    expect(routes).toMatch(/\/order-tags/);
+    expect(routes).toMatch(/item-tags/);
+    expect(routes).toMatch(/orderTags/);
+
+    const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
+    expect(pos).toMatch(/RestaurantOrderTagPad/);
+    expect(pos).toMatch(/openOrderTagPad/);
+    expect(pos).toMatch(/Order tags…/);
+
+    expect(
+      existsSync(path.join(repoRoot, 'samplepos.client/src/pages/restaurant/RestaurantOrderTagsPage.tsx')),
+    ).toBe(true);
+    expect(
+      existsSync(
+        path.join(repoRoot, 'samplepos.client/src/__tests__/restaurant-order-tags.evidence.test.ts'),
+      ),
+    ).toBe(true);
+  });
+
   it('EVIDENCE gate: service parent never quantity-checked (planSaleStockDeduction skip)', () => {
     const rules = readRepo('shared/utils/productTypeRules.ts');
     expect(rules).toMatch(/type === 'service' && !hasRecipeLines/);

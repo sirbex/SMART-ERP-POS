@@ -41,6 +41,16 @@ const AddItemsSchema = z.object({
         unitPrice: z.number().nonnegative().optional(),
         discountAmount: z.number().nonnegative().optional(),
         lineNotes: z.string().nullable().optional(),
+        orderTags: z
+          .array(
+            z.object({
+              id: z.string().uuid().nullable().optional(),
+              label: z.string().min(1).max(80),
+              prefix: z.string().max(20).nullable().optional(),
+              price: z.number().nonnegative().optional(),
+            }),
+          )
+          .optional(),
         uomId: z.string().uuid().nullable().optional(),
       }),
     )
@@ -546,6 +556,118 @@ router.post(
       data: result,
       message: `Check ${result.order.orderNumber} cancelled`,
     });
+  }),
+);
+
+// ── Order tags (Samba modifiers) ─────────────────────────────────────
+
+router.get(
+  '/order-tags',
+  requireAnyPermission(['restaurant.read', 'restaurant.order', 'restaurant.manage']),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await restaurantService.listOrderTagCatalog(pool);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/order-tags/for-product/:productId',
+  requireAnyPermission(['restaurant.read', 'restaurant.order']),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await restaurantService.listOrderTagsForProduct(pool, req.params.productId);
+    res.json({ success: true, data });
+  }),
+);
+
+const UpsertTagGroupSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(1).max(80),
+  sortOrder: z.number().int().optional(),
+  minSelect: z.number().int().min(0).optional(),
+  maxSelect: z.number().int().min(0).nullable().optional(),
+  autoPrompt: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+});
+
+router.post(
+  '/order-tags/groups',
+  requirePermission('restaurant.manage'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const body = UpsertTagGroupSchema.parse(req.body);
+    const data = await restaurantService.upsertOrderTagGroup(pool, body);
+    res.json({ success: true, data });
+  }),
+);
+
+const UpsertTagSchema = z.object({
+  id: z.string().uuid().optional(),
+  groupId: z.string().uuid(),
+  label: z.string().min(1).max(80),
+  prefix: z.string().max(20).nullable().optional(),
+  price: z.number().nonnegative().optional(),
+  sortOrder: z.number().int().optional(),
+  isActive: z.boolean().optional(),
+});
+
+router.post(
+  '/order-tags/tags',
+  requirePermission('restaurant.manage'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const body = UpsertTagSchema.parse(req.body);
+    const data = await restaurantService.upsertOrderTag(pool, body);
+    res.json({ success: true, data });
+  }),
+);
+
+const MapTagGroupSchema = z.object({
+  groupId: z.string().uuid(),
+  productId: z.string().uuid().nullable().optional(),
+  categoryId: z.string().uuid().nullable().optional(),
+});
+
+router.post(
+  '/order-tags/mappings',
+  requirePermission('restaurant.manage'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const body = MapTagGroupSchema.parse(req.body);
+    const data = await restaurantService.mapOrderTagGroup(pool, body);
+    res.json({ success: true, data });
+  }),
+);
+
+const SetItemTagsSchema = z.object({
+  itemId: z.string().uuid(),
+  freeText: z.string().max(500).nullable().optional(),
+  orderTags: z
+    .array(
+      z.object({
+        id: z.string().uuid().nullable().optional(),
+        label: z.string().min(1).max(80),
+        prefix: z.string().max(20).nullable().optional(),
+        price: z.number().nonnegative().optional(),
+      }),
+    )
+    .default([]),
+});
+
+router.post(
+  '/checks/:orderId/item-tags',
+  requirePermission('restaurant.order'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const body = SetItemTagsSchema.parse(req.body);
+    const data = await restaurantService.setOrderItemTags(pool, {
+      orderId: req.params.orderId,
+      itemId: body.itemId,
+      orderTags: body.orderTags,
+      freeText: body.freeText,
+    });
+    res.json({ success: true, data });
   }),
 );
 

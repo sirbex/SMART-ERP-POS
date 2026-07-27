@@ -26,6 +26,12 @@ import {
   type RestaurantStationRecord,
 } from './restaurantRepository.js';
 import { recipeRepository } from './recipeRepository.js';
+import { orderTagRepository } from './orderTagRepository.js';
+import {
+  formatOrderTagsAsLineNotes,
+  sumOrderTagPrices,
+  type RestaurantOrderTagSelection,
+} from '../../../../shared/utils/restaurantOrderTags.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { posProductSearchService } from '../inventory/warehouse/posProductSearchService.js';
 
@@ -107,7 +113,36 @@ export interface RestaurantOrderItemInput {
   unitPrice?: number;
   discountAmount?: number;
   lineNotes?: string | null;
+  /** Samba-style structured tags — denormalized into lineNotes for KOT. */
+  orderTags?: RestaurantOrderTagSelection[] | null;
   uomId?: string | null;
+}
+
+function resolveItemNotesAndPrice(item: RestaurantOrderItemInput): {
+  lineNotes: string | null;
+  orderTags: RestaurantOrderTagSelection[];
+  priceDelta: number;
+} {
+  const orderTags = (item.orderTags || [])
+    .map((t) => ({
+      id: t.id ?? null,
+      label: String(t.label || '').trim(),
+      prefix: t.prefix ?? null,
+      price: Number(t.price) || 0,
+    }))
+    .filter((t) => t.label);
+  const fromTags = formatOrderTagsAsLineNotes(orderTags, null);
+  const free = String(item.lineNotes || '').trim();
+  // If client already sent formatted notes and no structured tags, keep notes.
+  const lineNotes =
+    orderTags.length > 0
+      ? formatOrderTagsAsLineNotes(orderTags, free && free !== fromTags ? free : null)
+      : free || null;
+  return {
+    lineNotes,
+    orderTags,
+    priceDelta: sumOrderTagPrices(orderTags),
+  };
 }
 
 export interface RestaurantGuestDetails {
@@ -346,7 +381,9 @@ export const restaurantService = {
 
     // Resolve product names/prices from catalog (SSOT — refuse stale client-only names when product exists)
     const resolvedItems: OrderItemInput[] = [];
-    for (const raw of input.items) {
+    const lineExtras = input.items.map(resolveItemNotesAndPrice);
+    for (let idx = 0; idx < input.items.length; idx++) {
+      const raw = input.items[idx];
       if (!raw.quantity || raw.quantity <= 0) {
         throw new ValidationError('Item quantity must be positive');
       }
@@ -361,10 +398,13 @@ export const restaurantService = {
       if (!prod.rows[0]) {
         throw new ValidationError(`Product not found or inactive: ${raw.productId}`);
       }
-      const unitPrice =
+      const basePrice =
         raw.unitPrice !== undefined
           ? raw.unitPrice
           : Money.toNumber(Money.parseDb(String(prod.rows[0].selling_price)));
+      const unitPrice = Money.toNumber(
+        Money.round(new Decimal(basePrice).plus(lineExtras[idx].priceDelta), 2),
+      );
       resolvedItems.push({
         productId: prod.rows[0].id,
         productName: raw.productName?.trim() || prod.rows[0].name,
@@ -451,9 +491,15 @@ export const restaurantService = {
                    WHERE id = $1`,
                   [
                     fresh.items[i].id,
-                    input.items[i]?.lineNotes ?? null,
+                    lineExtras[i]?.lineNotes ?? null,
                     stationRow.rows[0]?.kitchen_station ?? null,
                   ],
+                );
+                await orderTagRepository.setOrderItemTags(
+                  client,
+                  fresh.items[i].id,
+                  lineExtras[i]?.orderTags ?? [],
+                  lineExtras[i]?.lineNotes ?? null,
                 );
               }
             }
@@ -544,9 +590,15 @@ export const restaurantService = {
              WHERE id = $1`,
             [
               added[i].id,
-              input.items[i]?.lineNotes ?? null,
+              lineExtras[i]?.lineNotes ?? null,
               stationRow.rows[0]?.kitchen_station ?? null,
             ],
+          );
+          await orderTagRepository.setOrderItemTags(
+            client,
+            added[i].id,
+            lineExtras[i]?.orderTags ?? [],
+            lineExtras[i]?.lineNotes ?? null,
           );
         }
 
@@ -1637,6 +1689,156 @@ export const restaurantService = {
         order: await ordersService.getOrder(pool, newOrderId),
         meta: await restaurantRepository.getOrderRestaurantMeta(pool, newOrderId),
       },
+    };
+  },
+
+  async listOrderTagCatalog(pool: Pool) {
+    await assertRestaurantEnabled(pool);
+    return orderTagRepository.listGroupsWithTags(pool, { activeOnly: true });
+  },
+
+  async listOrderTagsForProduct(pool: Pool, productId: string) {
+    await assertRestaurantEnabled(pool);
+    return orderTagRepository.listGroupsForProduct(pool, productId);
+  },
+
+  async upsertOrderTagGroup(
+    pool: Pool,
+    data: {
+      id?: string;
+      name: string;
+      sortOrder?: number;
+      minSelect?: number;
+      maxSelect?: number | null;
+      autoPrompt?: boolean;
+      isActive?: boolean;
+    },
+  ) {
+    await assertRestaurantEnabled(pool);
+    if (!data.name?.trim()) throw new ValidationError('Tag group name is required');
+    return orderTagRepository.upsertGroup(pool, data);
+  },
+
+  async upsertOrderTag(
+    pool: Pool,
+    data: {
+      id?: string;
+      groupId: string;
+      label: string;
+      prefix?: string | null;
+      price?: number;
+      sortOrder?: number;
+      isActive?: boolean;
+    },
+  ) {
+    await assertRestaurantEnabled(pool);
+    if (!data.groupId) throw new ValidationError('groupId is required');
+    if (!data.label?.trim()) throw new ValidationError('Tag label is required');
+    return orderTagRepository.upsertTag(pool, data);
+  },
+
+  async mapOrderTagGroup(
+    pool: Pool,
+    data: { groupId: string; productId?: string | null; categoryId?: string | null },
+  ) {
+    await assertRestaurantEnabled(pool);
+    if (!data.groupId) throw new ValidationError('groupId is required');
+    await orderTagRepository.setGroupMapping(pool, data);
+    return { ok: true };
+  },
+
+  /**
+   * Attach/replace Samba order tags on an open line (before or after paint; KOT uses line_notes).
+   * Blocks tag edits after kitchen fire to avoid silent KOT drift — void + re-add instead.
+   */
+  async setOrderItemTags(
+    pool: Pool,
+    input: {
+      orderId: string;
+      itemId: string;
+      orderTags?: RestaurantOrderTagSelection[] | null;
+      freeText?: string | null;
+    },
+  ) {
+    await assertRestaurantEnabled(pool);
+    const order = await ordersRepository.getById(pool, input.orderId);
+    if (!order || order.status !== 'PENDING') {
+      throw new BusinessError('Check is not open', 'ERR_RESTAURANT_CHECK_CLOSED');
+    }
+    const item = (order.items || []).find((it) => it.id === input.itemId);
+    if (!item) throw new NotFoundError('Order item');
+    if (item.kitchenSentAt) {
+      throw new BusinessError(
+        'Cannot change tags after KOT — void the line and re-add',
+        'ERR_RESTAURANT_TAGS_LOCKED',
+      );
+    }
+
+    const resolved = resolveItemNotesAndPrice({
+      productId: item.productId || '',
+      quantity: Number(item.quantity) || 1,
+      lineNotes: input.freeText ?? null,
+      orderTags: input.orderTags ?? [],
+    });
+
+    // Rebuild unit price: strip prior tag prices then apply new delta.
+    const priorTags = Array.isArray((item as { orderTags?: unknown }).orderTags)
+      ? ((item as { orderTags?: RestaurantOrderTagSelection[] }).orderTags || [])
+      : [];
+    // Prefer reading order_tags from DB when column exists.
+    let priorPrice = 0;
+    await UnitOfWork.run(pool, async (client) => {
+      const tagCol = await client.query(
+        `SELECT order_tags, unit_price::text AS "unitPrice", quantity::text AS quantity,
+                discount_amount::text AS "discountAmount"
+         FROM pos_order_items WHERE id = $1 FOR UPDATE`,
+        [input.itemId],
+      );
+      if (!tagCol.rows[0]) throw new NotFoundError('Order item');
+      const rawTags = tagCol.rows[0].order_tags;
+      const existingTags: RestaurantOrderTagSelection[] = Array.isArray(rawTags)
+        ? rawTags
+        : typeof rawTags === 'string'
+          ? (JSON.parse(rawTags) as RestaurantOrderTagSelection[])
+          : priorTags;
+      priorPrice = sumOrderTagPrices(existingTags);
+      const currentUnit = Money.parseDb(String(tagCol.rows[0].unitPrice));
+      const base = currentUnit.minus(priorPrice);
+      const nextUnit = Money.toNumber(
+        Money.round(base.plus(resolved.priceDelta).lessThan(0) ? new Decimal(0) : base.plus(resolved.priceDelta), 2),
+      );
+      const qty = Money.parseDb(String(tagCol.rows[0].quantity));
+      const lineTotal = Money.toNumber(Money.round(qty.times(nextUnit), 2));
+      await client.query(
+        `UPDATE pos_order_items
+         SET unit_price = $2, line_total = $3
+         WHERE id = $1`,
+        [input.itemId, nextUnit, lineTotal],
+      );
+      await orderTagRepository.setOrderItemTags(
+        client,
+        input.itemId,
+        resolved.orderTags,
+        resolved.lineNotes,
+      );
+
+      const refreshed = await ordersRepository.getById(client, input.orderId);
+      const net = (refreshed?.items || []).reduce((sum, it) => {
+        return sum
+          .plus(Money.parseDb(it.quantity).times(Money.parseDb(it.unitPrice)))
+          .minus(Money.parseDb(it.discountAmount || '0'));
+      }, new Decimal(0));
+      const tax = await computeTaxAmount(client, net);
+      await restaurantRepository.updateOrderTotals(
+        client,
+        input.orderId,
+        recalcFromItems(refreshed?.items || [], tax),
+      );
+    });
+
+    return {
+      order: await ordersService.getOrder(pool, input.orderId),
+      meta: await restaurantRepository.getOrderRestaurantMeta(pool, input.orderId),
     };
   },
 };

@@ -1246,6 +1246,45 @@ export const api = {
       id: string,
       data: { availableInRestaurant?: boolean; kitchenStation?: string | null },
     ) => apiClient.patch<ApiResponse>(`restaurant/menu/products/${id}`, data),
+    listOrderTags: () => apiClient.get<ApiResponse>('restaurant/order-tags'),
+    listOrderTagsForProduct: (productId: string) =>
+      apiClient.get<ApiResponse>(`restaurant/order-tags/for-product/${productId}`),
+    upsertOrderTagGroup: (data: {
+      id?: string;
+      name: string;
+      sortOrder?: number;
+      minSelect?: number;
+      maxSelect?: number | null;
+      autoPrompt?: boolean;
+      isActive?: boolean;
+    }) => apiClient.post<ApiResponse>('restaurant/order-tags/groups', data),
+    upsertOrderTag: (data: {
+      id?: string;
+      groupId: string;
+      label: string;
+      prefix?: string | null;
+      price?: number;
+      sortOrder?: number;
+      isActive?: boolean;
+    }) => apiClient.post<ApiResponse>('restaurant/order-tags/tags', data),
+    mapOrderTagGroup: (data: {
+      groupId: string;
+      productId?: string | null;
+      categoryId?: string | null;
+    }) => apiClient.post<ApiResponse>('restaurant/order-tags/mappings', data),
+    setItemOrderTags: (
+      orderId: string,
+      data: {
+        itemId: string;
+        freeText?: string | null;
+        orderTags: Array<{
+          id?: string | null;
+          label: string;
+          prefix?: string | null;
+          price?: number;
+        }>;
+      },
+    ) => apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/item-tags`, data),
     addItems: (data: {
       tableId: string;
       /** Multi-ticket: append to this open check (not only table.current_order_id). */
@@ -1264,6 +1303,12 @@ export const api = {
         unitPrice?: number;
         discountAmount?: number;
         lineNotes?: string | null;
+        orderTags?: Array<{
+          id?: string | null;
+          label: string;
+          prefix?: string | null;
+          price?: number;
+        }>;
         uomId?: string | null;
       }>;
     }) => apiClient.post<ApiResponse>('restaurant/checks/items', data),

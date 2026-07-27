@@ -259,6 +259,7 @@ export interface OpenOrAddRestaurantItemInput {
   unitPrice: number;
   quantity?: number;
   productType?: string;
+  lineNotes?: string | null;
 }
 
 /**
@@ -281,6 +282,7 @@ export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput)
     quantity: qty,
     unitPrice: input.unitPrice,
     productType: input.productType ?? resolveOfflineProductType(input.productId),
+    lineNotes: input.lineNotes ?? null,
   });
 
   if (!existing) {

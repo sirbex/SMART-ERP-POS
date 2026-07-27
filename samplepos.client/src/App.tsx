@@ -118,6 +118,9 @@ const RestaurantPosPage = lazyWithRetry(() => import('./pages/restaurant/Restaur
 const KitchenDisplayPage = lazyWithRetry(() => import('./pages/restaurant/KitchenDisplayPage'));
 const RestaurantStationsPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantStationsPage'));
 const RestaurantRecipesPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantRecipesPage'));
+const RestaurantOrderTagsPage = lazyWithRetry(
+  () => import('./pages/restaurant/RestaurantOrderTagsPage'),
+);
 const JeApprovalPage = lazyWithRetry(() => import('./pages/accounting/JeApprovalPage'));
 const PaymentProgramPage = lazyWithRetry(() => import('./pages/accounting/PaymentProgramPage'));
 const MultiCurrencyPage = lazyWithRetry(() => import('./pages/accounting/MultiCurrencyPage'));
@@ -413,6 +416,18 @@ function App() {
                         requiredFeature="pos"
                       >
                         <RestaurantStationsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/restaurant/order-tags"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={['restaurant.manage']}
+                        requiredFeature="pos"
+                      >
+                        <RestaurantOrderTagsPage />
                       </ProtectedRoute>
                     }
                   />

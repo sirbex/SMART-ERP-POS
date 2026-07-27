@@ -381,6 +381,18 @@ export const posEventReplayer = {
                 })),
             });
 
+            // Persist Samba-style line notes onto created items (ORDER_CREATED → pos_order_items).
+            if (order.items?.length) {
+                for (let i = 0; i < order.items.length; i++) {
+                    const notes = event.lines[i]?.lineNotes ?? null;
+                    if (!notes) continue;
+                    await pool.query(
+                        `UPDATE pos_order_items SET line_notes = $2 WHERE id = $1`,
+                        [order.items[i].id, notes],
+                    );
+                }
+            }
+
             // Phase 5.1: restaurant table link when present — do not swallow floor failures
             if (event.tableId && event.channel) {
                 try {

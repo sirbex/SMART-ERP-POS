@@ -49,6 +49,12 @@ export interface OrderItemRecord {
   kitchenSentAt?: string | null;
   lineNotes?: string | null;
   kitchenStation?: string | null;
+  orderTags?: Array<{
+    id?: string | null;
+    label: string;
+    prefix?: string | null;
+    price?: number;
+  }> | null;
 }
 
 export interface CreateOrderData {
@@ -286,8 +292,9 @@ export const ordersRepository = {
 
     // Fetch items (kitchen_* columns exist after migration 560 — keep SELECT resilient)
     const hasKitchenCols = await tableHasColumn(pool, 'pos_order_items', 'kitchen_sent_at');
+    const hasOrderTags = await tableHasColumn(pool, 'pos_order_items', 'order_tags');
     const kitchenSelect = hasKitchenCols
-      ? `, kitchen_sent_at, line_notes, kitchen_station`
+      ? `, kitchen_sent_at, line_notes, kitchen_station${hasOrderTags ? ', order_tags' : ''}`
       : ``;
 
     const itemsResult = await pool.query(
