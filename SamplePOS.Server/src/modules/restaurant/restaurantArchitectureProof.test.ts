@@ -309,7 +309,15 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/consolidateTicketLines/);
     expect(pos).toMatch(/toggleGroupSelection/);
     expect(pos).toMatch(/handleMoveSelected|handleVoidSelected/);
+    expect(pos).toMatch(/border-amber-500 bg-amber-100|Selected/);
     expect(pos).toMatch(/ticketTabs/);
+    expect(pos).toMatch(/ticketTabAccent|TICKET_TAB_ACCENTS/);
+    expect(pos).toMatch(/Active ·/);
+    expect(pos).toMatch(/Tickets on table/);
+    expect(pos).toMatch(/activateSibling/);
+    expect(pos).toMatch(/Instant ticket switch|placeholderData/);
+    expect(pos).toMatch(/prefetchQuery/);
+    expect(pos).toMatch(/attachSiblingTabs/);
     expect(pos).toMatch(/Moved to new ticket/);
     expect(pos).toMatch(/Change table/);
     expect(pos).toMatch(/← Tables|Back to tables/);
@@ -377,6 +385,10 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/Check was already closed/);
     expect(pos).toMatch(/voidItems/);
     expect(pos).toMatch(/allocateVoidQuantity/);
+    // FOH voids: no blocking confirm/prompt — default kitchen reason.
+    expect(pos).toMatch(/No confirm\/prompt|one-tap/);
+    expect(pos).not.toMatch(/Kitchen will be notified\./);
+    expect(pos).not.toMatch(/Void reason \(kitchen will get a VOID ticket\)/);
     // Touch qty pad for partial void / set qty — never window.prompt for quantities.
     expect(pos).toMatch(/qtyPadSheet|QtyPadSheetState/);
     expect(pos).toMatch(/confirmQtyPadSheet|purpose: 'void-qty'/);
