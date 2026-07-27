@@ -23,6 +23,8 @@ const TableUpdateSchema = TableCreateSchema.partial().extend({
 
 const AddItemsSchema = z.object({
   tableId: z.string().uuid(),
+  /** Multi-ticket: append to this open check (not only table.current_order_id). */
+  orderId: z.string().uuid().optional(),
   customerId: z.string().uuid().nullable().optional(),
   taxAmount: z.number().nonnegative().optional(),
   waiterId: z.string().uuid().optional(),

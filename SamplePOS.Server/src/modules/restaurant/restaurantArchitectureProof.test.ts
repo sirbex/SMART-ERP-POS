@@ -536,6 +536,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(proof).toMatch(
       /EVIDENCE reconcile drops journal ghosts when server table is FREE/,
     );
+    expect(proof).toMatch(
+      /EVIDENCE multi-ticket append with orderId stays on selected sibling/,
+    );
     expect(proof).toMatch(/reconcileRestaurantJournalWithServerTables/);
     expect(proof).toMatch(/markRestaurantCheckSettledInJournal/);
     expect(proof).toMatch(/markRestaurantBillRequestedOffline/);
@@ -544,11 +547,31 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(proof).toMatch(/remainingTickets/);
     expect(proof).toMatch(/resolveOfflineProductType/);
 
+    const optimisticProof = readRepo(
+      'samplepos.client/src/lib/restaurantCheckOptimistic.proof.test.ts',
+    );
+    expect(optimisticProof).toMatch(
+      /EVIDENCE optimistic open paints tmp_ord \+ tmp_line before API/,
+    );
+    expect(optimisticProof).toMatch(
+      /EVIDENCE rapid taps stack optimistic lines without wiping prior temp/,
+    );
+    expect(optimisticProof).toMatch(
+      /EVIDENCE soft-refresh mid-race keeps sibling in-flight temp lines/,
+    );
+
     const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
     expect(ops).toMatch(/export function shouldUseLocalRestaurantMutation/);
     expect(ops).toMatch(/export function isJournalLocalOrderId/);
     expect(ops).toMatch(/export function markRestaurantCheckSettledInJournal/);
     expect(ops).toMatch(/export function reconcileRestaurantJournalWithServerTables/);
+    expect(ops).toMatch(/orderId\?: string \| null/);
+    expect(ops).toMatch(/existing\.orderId/);
+
+    const optimistic = readRepo('samplepos.client/src/lib/restaurantCheckOptimistic.ts');
+    expect(optimistic).toMatch(/export function appendOptimisticMenuItem/);
+    expect(optimistic).toMatch(/export function mergeInFlightOptimisticLines/);
+    expect(optimistic).toMatch(/export function isTempRestaurantId/);
 
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     expect(repo).toMatch(/bumpKitchenTicketsForOrder/);
@@ -558,6 +581,11 @@ describe('Restaurant architecture proof (Phase 1)', () => {
 
     const svc = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
     expect(svc).toMatch(/purgeSettledKitchenTickets/);
+    expect(svc).toMatch(/input\.orderId/);
+    expect(svc).toMatch(/Order does not belong to this table/);
+
+    const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
+    expect(routes).toMatch(/orderId: z\.string\(\)\.uuid\(\)\.optional\(\)/);
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/preferLocalRestaurantWrites/);
@@ -568,6 +596,10 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/refreshRestaurantCheckSeedFromServer/);
     expect(pos).toMatch(/shouldUseLocalRestaurantMutation/);
     expect(pos).toMatch(/CustomerSelector/);
+    expect(pos).toMatch(/appendOptimisticMenuItem/);
+    expect(pos).toMatch(/mergeInFlightOptimisticLines/);
+    expect(pos).toMatch(/orderId: apiOrderId/);
+    expect(pos).not.toMatch(/disabled=\{addItemMutation\.isPending\}/);
     // ofl_ord_* journal-first; server UUID checks use API online (void needs real line UUIDs).
     expect(pos).toMatch(
       /preferLocalRestaurantWrites = \(orderId\?: string \| null\) =>\s*shouldUseLocalRestaurantMutation\(isOnline, orderId\)/,

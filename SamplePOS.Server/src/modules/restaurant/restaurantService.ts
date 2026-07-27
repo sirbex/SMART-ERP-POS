@@ -284,6 +284,8 @@ export const restaurantService = {
     pool: Pool,
     input: {
       tableId: string;
+      /** Multi-ticket: target open check (avoids racing activateCheck). */
+      orderId?: string;
       items: RestaurantOrderItemInput[];
       waiterId: string;
       customerId?: string | null;
@@ -352,17 +354,31 @@ export const restaurantService = {
     const lockKey = `restaurant_table_${input.tableId}`;
     await pool.query(`SELECT pg_advisory_lock(hashtext($1))`, [lockKey]);
     try {
-      let orderId = table.currentOrderId;
-      if (orderId) {
-        const existing = await ordersRepository.getById(pool, orderId);
+      let orderId: string | null = null;
+
+      if (input.orderId) {
+        const meta = await restaurantRepository.getOrderRestaurantMeta(pool, input.orderId);
+        if (!meta || meta.tableId !== input.tableId) {
+          throw new ValidationError('Order does not belong to this table');
+        }
+        const existing = await ordersRepository.getById(pool, input.orderId);
         if (!existing || existing.status !== 'PENDING') {
-          orderId = null;
+          throw new ValidationError('Check is not open');
+        }
+        orderId = input.orderId;
+      } else {
+        orderId = table.currentOrderId;
+        if (orderId) {
+          const existing = await ordersRepository.getById(pool, orderId);
+          if (!existing || existing.status !== 'PENDING') {
+            orderId = null;
+          }
         }
       }
 
       const lockedTable = await restaurantRepository.getTableById(pool, input.tableId);
       if (!lockedTable) throw new NotFoundError('Restaurant table');
-      if (lockedTable.currentOrderId) {
+      if (!input.orderId && lockedTable.currentOrderId) {
         orderId = lockedTable.currentOrderId;
         const existing = await ordersRepository.getById(pool, orderId);
         if (!existing || existing.status !== 'PENDING') {
@@ -524,6 +540,9 @@ export const restaurantService = {
 
         if (lockedTable.status === 'FREE' || !lockedTable.currentOrderId) {
           await restaurantRepository.occupyTable(client, lockedTable.id, orderId!);
+        } else if (input.orderId && lockedTable.currentOrderId !== orderId) {
+          // Multi-ticket: keep table pointer on the check the FOH just added to.
+          await restaurantRepository.setTableCurrentOrder(client, lockedTable.id, orderId!);
         }
       });
 

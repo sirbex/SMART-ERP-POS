@@ -679,4 +679,78 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(paid.totalAmount).toBe(10);
     expect(JSON.parse(localStorage.getItem('pos_local_stock') || '{}')['svc-strips']).toBe(0);
   });
+
+  /**
+   * EVIDENCE (multi-ticket add): appending with orderId must stay on the selected sibling,
+   * not the most-recently-updated check on the table.
+   */
+  it('EVIDENCE multi-ticket append with orderId stays on selected sibling', () => {
+    const first = appendRestaurantItemOffline({
+      tableId: 't-multi-add',
+      tableCode: 'MA',
+      tableName: 'Multi Add',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Steak',
+      unitPrice: 20,
+    });
+    const withTwo = appendRestaurantItemOffline({
+      tableId: 't-multi-add',
+      tableCode: 'MA',
+      tableName: 'Multi Add',
+      channel: 'DINE_IN',
+      orderId: first.orderId,
+      productId: 'p2',
+      productName: 'Salad',
+      unitPrice: 8,
+    });
+    const moveId = withTwo.lines.find((l) => l.productName === 'Salad')?.lineId;
+    expect(moveId).toBeTruthy();
+    const { source, split } = splitRestaurantCheckOffline(withTwo, {
+      lineIds: [moveId!],
+      targetTableId: 't-multi-add',
+      targetTableCode: 'MA',
+      targetTableName: 'Multi Add',
+      sameTable: true,
+    });
+    expect(source.orderId).not.toBe(split.orderId);
+
+    // Touch split so it becomes most-recently-updated on the table.
+    const splitPlus = appendRestaurantItemOffline({
+      tableId: 't-multi-add',
+      tableCode: 'MA',
+      tableName: 'Multi Add',
+      channel: 'DINE_IN',
+      orderId: split.orderId,
+      productId: 'p3',
+      productName: 'Drink',
+      unitPrice: 3,
+    });
+    expect(splitPlus.orderId).toBe(split.orderId);
+    expect(splitPlus.lines.some((l) => l.productName === 'Drink')).toBe(true);
+
+    // Append to older sibling explicitly — must not land on split.
+    const sourcePlus = appendRestaurantItemOffline({
+      tableId: 't-multi-add',
+      tableCode: 'MA',
+      tableName: 'Multi Add',
+      channel: 'DINE_IN',
+      orderId: source.orderId,
+      productId: 'p4',
+      productName: 'Dessert',
+      unitPrice: 6,
+    });
+    expect(sourcePlus.orderId).toBe(source.orderId);
+    expect(sourcePlus.lines.some((l) => l.productName === 'Dessert')).toBe(true);
+    expect(sourcePlus.lines.some((l) => l.productName === 'Drink')).toBe(false);
+
+    const stillSplit = deriveRestaurantCheckForTable(
+      't-multi-add',
+      getAllEvents(),
+      getAllSyncState(),
+      split.orderId,
+    );
+    expect(stillSplit?.lines.some((l) => l.productName === 'Dessert')).toBe(false);
+    expect(stillSplit?.lines.some((l) => l.productName === 'Drink')).toBe(true);
+  });
 });

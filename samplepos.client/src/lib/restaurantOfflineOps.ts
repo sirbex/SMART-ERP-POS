@@ -245,6 +245,8 @@ export interface OpenOrAddRestaurantItemInput {
   tableCode: string;
   tableName: string;
   channel: RestaurantOrderChannel;
+  /** Multi-ticket: append to this check (not whichever derive picks by table). */
+  orderId?: string | null;
   customerId?: string | null;
   waiterId?: string;
   waiterName?: string;
@@ -265,7 +267,12 @@ export interface OpenOrAddRestaurantItemInput {
 export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput): DerivedOrder {
   const events = getAllEvents();
   const syncState = getAllSyncState();
-  const existing = deriveRestaurantCheckForTable(input.tableId, events, syncState);
+  const existing = deriveRestaurantCheckForTable(
+    input.tableId,
+    events,
+    syncState,
+    input.orderId || undefined,
+  );
   const qty = input.quantity ?? 1;
   const line = toEventLine({
     lineId: newOfflineLineId(),
@@ -299,29 +306,42 @@ export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput)
       deliveryAddress: input.deliveryAddress,
       pickupLabel: input.pickupLabel,
     });
-  } else {
-    appendEvent({
-      eventType: 'ORDER_UPDATED',
-      key: generateEventKey(),
-      orderId: existing.orderId,
-      offlineId: existing.offlineId,
-      lines: [...existing.lines, line],
-      ts: Date.now(),
-      customerId: existing.customerId ?? input.customerId ?? undefined,
-      channel: existing.channel ?? input.channel,
-      tableId: existing.tableId ?? input.tableId,
-      tableCode: existing.tableCode ?? input.tableCode,
-      tableName: existing.tableName ?? input.tableName,
-      waiterId: existing.waiterId ?? input.waiterId,
-      waiterName: existing.waiterName ?? input.waiterName,
-      guestName: existing.guestName ?? input.guestName,
-      guestPhone: existing.guestPhone ?? input.guestPhone,
-      deliveryAddress: existing.deliveryAddress ?? input.deliveryAddress,
-      pickupLabel: existing.pickupLabel ?? input.pickupLabel,
-    });
+    const next = deriveRestaurantCheckForTable(
+      input.tableId,
+      getAllEvents(),
+      getAllSyncState(),
+      orderId,
+    );
+    if (!next) throw new Error('Failed to derive offline restaurant check');
+    return next;
   }
 
-  const next = deriveRestaurantCheckForTable(input.tableId, getAllEvents(), getAllSyncState());
+  appendEvent({
+    eventType: 'ORDER_UPDATED',
+    key: generateEventKey(),
+    orderId: existing.orderId,
+    offlineId: existing.offlineId,
+    lines: [...existing.lines, line],
+    ts: Date.now(),
+    customerId: existing.customerId ?? input.customerId ?? undefined,
+    channel: existing.channel ?? input.channel,
+    tableId: existing.tableId ?? input.tableId,
+    tableCode: existing.tableCode ?? input.tableCode,
+    tableName: existing.tableName ?? input.tableName,
+    waiterId: existing.waiterId ?? input.waiterId,
+    waiterName: existing.waiterName ?? input.waiterName,
+    guestName: existing.guestName ?? input.guestName,
+    guestPhone: existing.guestPhone ?? input.guestPhone,
+    deliveryAddress: existing.deliveryAddress ?? input.deliveryAddress,
+    pickupLabel: existing.pickupLabel ?? input.pickupLabel,
+  });
+
+  const next = deriveRestaurantCheckForTable(
+    input.tableId,
+    getAllEvents(),
+    getAllSyncState(),
+    existing.orderId,
+  );
   if (!next) throw new Error('Failed to derive offline restaurant check');
   return next;
 }

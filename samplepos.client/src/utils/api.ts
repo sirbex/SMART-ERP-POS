@@ -1248,6 +1248,8 @@ export const api = {
     ) => apiClient.patch<ApiResponse>(`restaurant/menu/products/${id}`, data),
     addItems: (data: {
       tableId: string;
+      /** Multi-ticket: append to this open check (not only table.current_order_id). */
+      orderId?: string;
       customerId?: string | null;
       taxAmount?: number;
       waiterId?: string;
