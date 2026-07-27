@@ -53,6 +53,7 @@ import {
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
   newTempLineId,
+  toServerRestaurantOrderId,
   type InFlightOptimisticLine,
   type OptimisticCheckPayload,
 } from '../../lib/restaurantCheckOptimistic';
@@ -651,6 +652,23 @@ export default function RestaurantPosPage() {
       if (local?.order && isJournalLocalOrderId(local.order.id)) {
         return attachSiblingTabs(local, tableTicketsRef.current.tabs);
       }
+      // Optimistic tmp_ord_* painted before first addItems returns — never GET ?orderId=tmp_*.
+      if (local?.order && isTempRestaurantId(local.order.id)) {
+        return attachSiblingTabs(local, tableTicketsRef.current.tabs);
+      }
+      if (isTempRestaurantId(activeOrderId)) {
+        const optimistic =
+          (queryClient.getQueryData([
+            'restaurant',
+            'check',
+            selectedTableId,
+            null,
+            isOnline,
+          ]) as CheckUiPayload | undefined) || local;
+        if (optimistic?.order) {
+          return attachSiblingTabs(optimistic, tableTicketsRef.current.tabs);
+        }
+      }
       // Offline with a seeded server check: serve from journal.
       if (!isOnline) {
         return attachSiblingTabs(
@@ -673,9 +691,10 @@ export default function RestaurantPosPage() {
         };
       }
 
+      const serverOrderId = toServerRestaurantOrderId(activeOrderId);
       const res = await api.restaurant.getTableCheck(
         selectedTableId,
-        activeOrderId ? { orderId: activeOrderId } : undefined,
+        serverOrderId ? { orderId: serverOrderId } : undefined,
       );
       const data = res.data.data as CheckUiPayload;
       seedCheckPayloadIntoJournal(selectedTableId, data);
@@ -945,10 +964,7 @@ export default function RestaurantPosPage() {
       setPendingQtyDigits('');
       setMenuQtyPadOpen(false);
 
-      const apiOrderId =
-        targetOrderId && !isTempRestaurantId(String(targetOrderId))
-          ? String(targetOrderId)
-          : undefined;
+      const apiOrderId = toServerRestaurantOrderId(targetOrderId);
 
       try {
         await api.restaurant.addItems({
@@ -1273,14 +1289,18 @@ export default function RestaurantPosPage() {
     if (!isOnline || !selectedTableId || ticketTabs.length < 2) return;
     for (const t of ticketTabs) {
       if (t.id === activeOrderId || t.id === order?.id) continue;
-      if (isJournalLocalOrderId(t.id)) continue;
+      if (isJournalLocalOrderId(t.id) || isTempRestaurantId(t.id)) continue;
+      const serverOrderId = toServerRestaurantOrderId(t.id);
+      if (!serverOrderId) continue;
       const key = ['restaurant', 'check', selectedTableId, t.id, isOnline] as const;
       if (queryClient.getQueryData(key)) continue;
       void queryClient.prefetchQuery({
         queryKey: key,
         staleTime: 60_000,
         queryFn: async () => {
-          const res = await api.restaurant.getTableCheck(selectedTableId, { orderId: t.id });
+          const res = await api.restaurant.getTableCheck(selectedTableId, {
+            orderId: serverOrderId,
+          });
           const data = res.data.data as CheckUiPayload;
           seedCheckPayloadIntoJournal(selectedTableId, data);
           return attachSiblingTabs(data, tableTicketsRef.current.tabs);
@@ -1357,8 +1377,10 @@ export default function RestaurantPosPage() {
   ]);
 
   // Seed active ticket only when opening a table (never overwrite a user switch mid-flight).
+  // Never seed optimistic tmp_ord_* — that would refetch GET check?orderId=tmp_* (Postgres 22P02).
   useEffect(() => {
     if (!selectedTableId || activeOrderId || !order?.id) return;
+    if (isTempRestaurantId(order.id)) return;
     setActiveOrderId(order.id);
   }, [selectedTableId, activeOrderId, order?.id]);
 
@@ -1789,14 +1811,22 @@ export default function RestaurantPosPage() {
 
     setActiveOrderId(orderId);
 
-    if (!isOnline || isJournalLocalOrderId(orderId)) {
+    if (!isOnline || isJournalLocalOrderId(orderId) || isTempRestaurantId(orderId)) {
+      bumpJournal();
+      return;
+    }
+
+    const serverOrderId = toServerRestaurantOrderId(orderId);
+    if (!serverOrderId) {
       bumpJournal();
       return;
     }
 
     void (async () => {
       try {
-        const res = await api.restaurant.activateCheck(selectedTableId, { orderId });
+        const res = await api.restaurant.activateCheck(selectedTableId, {
+          orderId: serverOrderId,
+        });
         const data = res.data.data as CheckUiPayload;
         seedCheckPayloadIntoJournal(selectedTableId, data);
         // Ignore stale responses if the user already switched again.
@@ -2372,10 +2402,7 @@ export default function RestaurantPosPage() {
       }) as CheckUiPayload,
     );
     setLineSheet(null);
-    const apiOrderId =
-      targetOrderId && !isTempRestaurantId(String(targetOrderId))
-        ? String(targetOrderId)
-        : undefined;
+    const apiOrderId = toServerRestaurantOrderId(targetOrderId);
     try {
       await api.restaurant.addItems({
         tableId: selectedTableId,

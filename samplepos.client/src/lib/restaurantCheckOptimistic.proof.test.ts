@@ -8,6 +8,7 @@ import {
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
   newTempLineId,
+  toServerRestaurantOrderId,
   type OptimisticCheckPayload,
 } from './restaurantCheckOptimistic';
 
@@ -115,5 +116,15 @@ describe('Restaurant optimistic online add (behavioral proof)', () => {
     expect(isTempRestaurantId('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee')).toBe(false);
     expect(isTempRestaurantId('ofl_ord_1')).toBe(false);
     expect(isTempRestaurantId(null)).toBe(false);
+  });
+
+  it('EVIDENCE tmp_ord never becomes API ?orderId= (avoids Postgres 22P02)', () => {
+    expect(toServerRestaurantOrderId('tmp_ord_ms3jx3bl')).toBeUndefined();
+    expect(toServerRestaurantOrderId('tmp_line_1')).toBeUndefined();
+    expect(toServerRestaurantOrderId('ofl_ord_abc')).toBeUndefined();
+    expect(toServerRestaurantOrderId('not-a-uuid')).toBeUndefined();
+    expect(toServerRestaurantOrderId('398cb162-906b-42e9-a224-3248fdf5bb7c')).toBe(
+      '398cb162-906b-42e9-a224-3248fdf5bb7c',
+    );
   });
 });

@@ -234,4 +234,12 @@ export async function refreshRestaurantOfflineCache(api: {
   cacheRestaurantMenu((products.data.data as CachedMenuProduct[] | undefined) || []);
   cacheRestaurantCategories((categories.data.data as CachedCategory[] | undefined) || []);
   cacheRestaurantWaiters((waiters.data.data as CachedWaiter[] | undefined) || []);
+
+  // Multistore: keep offline stock mirror on the shop/SELLING catalog (same as retail POS).
+  try {
+    const { syncProductCatalog } = await import('../services/offlineCatalogService');
+    await syncProductCatalog();
+  } catch {
+    // Non-fatal — restaurant FOH can still open from menu cache.
+  }
 }

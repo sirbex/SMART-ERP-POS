@@ -73,7 +73,7 @@ export function posSellingStoreFilterSql(storeParamRef: string): string {
 
 /** Store scope when no explicit selling store is configured yet. */
 export const POS_SELLING_STORE_FALLBACK_FILTER_SQL = `sl.is_active = true
-        AND (sl.is_pos_selling = true OR sl.store_type = 'SELLING')`;
+        AND sl.store_type = 'SELLING'`;
 
 /** Lot + balance eligibility for sellable stock (correlated to products.min_days_before_expiry_sale). */
 export const SELLABLE_LOT_PREDICATE_SQL = `pl.status = 'ACTIVE'

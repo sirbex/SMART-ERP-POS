@@ -77,6 +77,27 @@ export function isTempRestaurantId(id: string | null | undefined): boolean {
   return id.startsWith('tmp_line_') || id.startsWith('tmp_ord_');
 }
 
+/**
+ * Only real server check UUIDs may be sent as ?orderId= / activateCheck body.
+ * Optimistic tmp_ord_* and journal ofl_ord_* must never hit Postgres UUID columns.
+ */
+export function toServerRestaurantOrderId(
+  id: string | null | undefined,
+): string | undefined {
+  if (!id) return undefined;
+  if (isTempRestaurantId(id)) return undefined;
+  if (id.startsWith('ofl_ord_') || id.startsWith('ofl_')) return undefined;
+  // Loose UUID shape — reject labels that would 500 as 22P02.
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      id,
+    )
+  ) {
+    return undefined;
+  }
+  return id;
+}
+
 export function newTempLineId(now = Date.now()): string {
   return `tmp_line_${now}_${Math.random().toString(36).slice(2, 7)}`;
 }

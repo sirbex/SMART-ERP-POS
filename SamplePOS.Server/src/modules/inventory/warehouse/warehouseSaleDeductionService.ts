@@ -99,7 +99,7 @@ export const warehouseSaleDeductionService = {
         const storeId = await posProductSearchService.resolveActiveSellingStoreId(client);
         if (!storeId) {
             throw new BusinessError(
-                'Multistore POS requires an active selling store (store_locations.is_pos_selling).',
+                'Multistore POS/restaurant requires an active shop store (store_type=SELLING). MAIN warehouse cannot sell.',
                 'ERR_STORE_001',
             );
         }

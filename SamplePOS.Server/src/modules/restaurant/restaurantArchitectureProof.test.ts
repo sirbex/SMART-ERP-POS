@@ -219,6 +219,69 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     ).toBe(true);
   });
 
+  it('EVIDENCE gate: service parent never quantity-checked (planSaleStockDeduction skip)', () => {
+    const rules = readRepo('shared/utils/productTypeRules.ts');
+    expect(rules).toMatch(/type === 'service' && !hasRecipeLines/);
+    expect(rules).toMatch(/kind: 'skip'/);
+
+    const sales = readRepo('SamplePOS.Server/src/modules/sales/salesService.ts');
+    expect(sales).toMatch(/stockPlan\.kind === 'skip'/);
+    expect(sales).toMatch(/Skipping inventory deduction for service item/);
+
+    const offline = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
+    expect(offline).toMatch(/isServiceProductType\(productType\)/);
+
+    expect(
+      existsSync(
+        path.join(
+          repoRoot,
+          'SamplePOS.Server/src/modules/sales/serviceProductNeverQuantityIssues.evidence.test.ts',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('Multistore restaurant uses shop/SELLING store — never MAIN warehouse', () => {
+    const storeRepo = readRepo(
+      'SamplePOS.Server/src/modules/inventory/warehouse/storeLocationRepository.ts',
+    );
+    expect(storeRepo).toMatch(/getActivePosSellingStore/);
+    expect(storeRepo).toMatch(/store_type = 'SELLING'/);
+    // Must not accept MAIN via is_pos_selling alone.
+    const sellingFn = storeRepo.slice(
+      storeRepo.indexOf('async getActivePosSellingStore'),
+      storeRepo.indexOf('async getDefaultReceivingStore'),
+    );
+    expect(sellingFn).toMatch(/store_type = 'SELLING'/);
+    expect(sellingFn).not.toMatch(/is_pos_selling = true\s*\n\s*OR store_type/);
+
+    const fragments = readRepo(
+      'SamplePOS.Server/src/modules/inventory/warehouse/inventoryStockSqlFragments.ts',
+    );
+    expect(fragments).toMatch(/POS_SELLING_STORE_FALLBACK_FILTER_SQL[\s\S]*store_type = 'SELLING'/);
+
+    const restaurantService = readRepo(
+      'SamplePOS.Server/src/modules/restaurant/restaurantService.ts',
+    );
+    expect(restaurantService).toMatch(/resolveRestaurantShopStoreId/);
+    expect(restaurantService).toMatch(/isMultistoreEnabled/);
+    expect(restaurantService).toMatch(/resolveActiveSellingStoreId/);
+    expect(restaurantService).toMatch(/not MAIN warehouse/);
+
+    const restaurantRepo = readRepo(
+      'SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts',
+    );
+    expect(restaurantRepo).toMatch(/sellingStoreId/);
+    expect(restaurantRepo).toMatch(/productPosVisibleAtStoreSql/);
+
+    const sales = readRepo('SamplePOS.Server/src/modules/sales/salesService.ts');
+    expect(sales).toMatch(/resolveSellingStoreId/);
+    expect(sales).toMatch(/warehouseSaleDeductionService/);
+
+    const cache = readRepo('samplepos.client/src/lib/restaurantOfflineCache.ts');
+    expect(cache).toMatch(/syncProductCatalog/);
+  });
+
   it('Restaurant menu categories match category_id or free-text category', () => {
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     expect(repo).toMatch(/syncProductCategoryLinks/);
@@ -567,6 +630,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(optimisticProof).toMatch(
       /EVIDENCE soft-refresh mid-race keeps sibling in-flight temp lines/,
     );
+    expect(optimisticProof).toMatch(
+      /EVIDENCE tmp_ord never becomes API \?orderId= \(avoids Postgres 22P02\)/,
+    );
 
     const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
     expect(ops).toMatch(/export function shouldUseLocalRestaurantMutation/);
@@ -580,6 +646,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(optimistic).toMatch(/export function appendOptimisticMenuItem/);
     expect(optimistic).toMatch(/export function mergeInFlightOptimisticLines/);
     expect(optimistic).toMatch(/export function isTempRestaurantId/);
+    expect(optimistic).toMatch(/export function toServerRestaurantOrderId/);
 
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     expect(repo).toMatch(/bumpKitchenTicketsForOrder/);
@@ -591,11 +658,17 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(svc).toMatch(/purgeSettledKitchenTickets/);
     expect(svc).toMatch(/input\.orderId/);
     expect(svc).toMatch(/Order does not belong to this table/);
+    expect(svc).toMatch(/ignore client temp\/journal ids/);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/orderId: z\.string\(\)\.uuid\(\)\.optional\(\)/);
+    expect(routes).toMatch(/ORDER_ID_UUID_RE/);
+    expect(routes).toMatch(/tmp_ord_\*|ofl_ord_\*/);
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
+    expect(pos).toMatch(/toServerRestaurantOrderId/);
+    expect(pos).toMatch(/isTempRestaurantId\(order\.id\)/);
+    expect(pos).toMatch(/Never seed optimistic tmp_ord_/);
     expect(pos).toMatch(/preferLocalRestaurantWrites/);
     expect(pos).toMatch(/paintJournalCheck/);
     expect(pos).toMatch(/settleCheckOnFloor/);

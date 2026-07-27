@@ -154,15 +154,15 @@ describe('Service product type — form / save business logic', () => {
 });
 
 describe('Service product type — sale stock plan (pay SSOT)', () => {
-  it('service without recipe → skip stock (fee / dish without BOM yet)', () => {
+  it('EVIDENCE service without recipe → skip stock (never quantity-check parent)', () => {
     expect(planSaleStockDeduction('service', false)).toEqual({ kind: 'skip' });
   });
 
-  it('service with recipe → deduct ingredients (prepared matooke)', () => {
+  it('service with recipe → deduct ingredients only (parent still not stocked)', () => {
     expect(planSaleStockDeduction('service', true)).toEqual({ kind: 'ingredients' });
   });
 
-  it('inventory without recipe → deduct parent (Coke)', () => {
+  it('inventory without recipe → deduct parent (Coke) — control', () => {
     expect(planSaleStockDeduction('inventory', false)).toEqual({ kind: 'parent' });
   });
 });

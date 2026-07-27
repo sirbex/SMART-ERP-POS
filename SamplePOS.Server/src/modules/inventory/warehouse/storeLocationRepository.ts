@@ -36,18 +36,15 @@ export const storeLocationRepository = {
     },
 
     /**
-     * Active POS selling store — used for stock visibility and POS lookup scope.
-     * Prefers explicitly flagged is_pos_selling; falls back to first SELLING type store.
+     * Active POS / restaurant shop store — never MAIN warehouse.
+     * Prefers is_pos_selling among SELLING-type stores; falls back to first active SELLING store.
      */
     async getActivePosSellingStore(conn: DbConn): Promise<StoreLocation | null> {
         const result = await conn.query<StoreLocationDbRow>(
             `SELECT *
              FROM store_locations
              WHERE is_active = true
-               AND (
-                 is_pos_selling = true
-                 OR store_type = 'SELLING'
-               )
+               AND store_type = 'SELLING'
              ORDER BY is_pos_selling DESC, code ASC
              LIMIT 1`,
         );

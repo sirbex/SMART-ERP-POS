@@ -7,6 +7,7 @@ import type { Pool, PoolClient } from 'pg';
 import { convertKeysToCamelCase } from '../../utils/caseConverter.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
 import { tableHasColumn } from '../../db/schemaColumnCache.js';
+import { productPosVisibleAtStoreSql } from '../inventory/warehouse/productDistributionSqlFragments.js';
 
 export type DbConn = Pool | PoolClient;
 
@@ -482,7 +483,10 @@ export const restaurantRepository = {
     return result.rowCount ?? 0;
   },
 
-  async listMenuCategories(conn: DbConn): Promise<RestaurantCategory[]> {
+  async listMenuCategories(
+    conn: DbConn,
+    opts?: { sellingStoreId?: string | null },
+  ): Promise<RestaurantCategory[]> {
     await this.syncProductCategoryLinks(conn);
 
     // Opt-out: show when available_in_restaurant=TRUE.
@@ -496,6 +500,17 @@ export const restaurantRepository = {
     const restaurantFilter = useWhitelist
       ? `AND p.available_in_restaurant = TRUE`
       : '';
+
+    const values: unknown[] = [];
+    let storeVisibility = '';
+    if (opts?.sellingStoreId) {
+      values.push(opts.sellingStoreId);
+      // Multistore: shop/SELLING store only — services always OK; inventory must be POS-visible at shop.
+      storeVisibility = `AND (
+        COALESCE(p.product_type, 'inventory') = 'service'
+        OR ${productPosVisibleAtStoreSql('p', '$1')}
+      )`;
+    }
 
     const result = await conn.query(
       `SELECT c.id, c.name, COUNT(p.id)::int AS product_count
@@ -511,10 +526,12 @@ export const restaurantRepository = {
          )
          AND COALESCE(p.is_active, true) = TRUE
          ${restaurantFilter}
+         ${storeVisibility}
        WHERE COALESCE(c.is_active, TRUE) = TRUE
        GROUP BY c.id, c.name
        HAVING COUNT(p.id) > 0
        ORDER BY c.name`,
+      values,
     );
 
     return result.rows.map((r) => convertKeysToCamelCase(r) as RestaurantCategory);
@@ -522,7 +539,7 @@ export const restaurantRepository = {
 
   async listMenuProducts(
     conn: DbConn,
-    filters?: { categoryId?: string | null },
+    filters?: { categoryId?: string | null; sellingStoreId?: string | null },
   ): Promise<RestaurantMenuProduct[]> {
     await this.syncProductCategoryLinks(conn);
 
@@ -540,6 +557,17 @@ export const restaurantRepository = {
     if (useWhitelist) {
       conditions.push(`p.available_in_restaurant = TRUE`);
     }
+
+    // Multistore: restaurant FOH uses the shop/SELLING store (same as retail POS) — never MAIN.
+    if (filters?.sellingStoreId) {
+      conditions.push(`(
+        COALESCE(p.product_type, 'inventory') = 'service'
+        OR ${productPosVisibleAtStoreSql('p', `$${i}`)}
+      )`);
+      values.push(filters.sellingStoreId);
+      i += 1;
+    }
+
     if (filters?.categoryId) {
       conditions.push(`(
         p.category_id = $${i}

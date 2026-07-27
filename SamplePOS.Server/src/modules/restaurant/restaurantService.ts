@@ -26,6 +26,20 @@ import {
   type RestaurantStationRecord,
 } from './restaurantRepository.js';
 import { recipeRepository } from './recipeRepository.js';
+import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
+import { posProductSearchService } from '../inventory/warehouse/posProductSearchService.js';
+
+async function resolveRestaurantShopStoreId(pool: Pool | PoolClient): Promise<string | null> {
+  if (!(await isMultistoreEnabled(pool))) return null;
+  const storeId = await posProductSearchService.resolveActiveSellingStoreId(pool);
+  if (!storeId) {
+    throw new BusinessError(
+      'Multistore restaurant requires an active shop/selling store (not MAIN warehouse).',
+      'ERR_STORE_001',
+    );
+  }
+  return storeId;
+}
 
 const KOT_STATUS_FLOW: Record<KotTicketStatus, KotTicketStatus | null> = {
   SENT: 'PREPARING',
@@ -192,7 +206,8 @@ export const restaurantService = {
 
   async listMenuCategories(pool: Pool): Promise<RestaurantCategory[]> {
     await assertRestaurantEnabled(pool);
-    return restaurantRepository.listMenuCategories(pool);
+    const sellingStoreId = await resolveRestaurantShopStoreId(pool);
+    return restaurantRepository.listMenuCategories(pool, { sellingStoreId });
   },
 
   async listMenuProducts(
@@ -200,7 +215,11 @@ export const restaurantService = {
     filters?: { categoryId?: string | null },
   ): Promise<RestaurantMenuProduct[]> {
     await assertRestaurantEnabled(pool);
-    return restaurantRepository.listMenuProducts(pool, filters);
+    const sellingStoreId = await resolveRestaurantShopStoreId(pool);
+    return restaurantRepository.listMenuProducts(pool, {
+      ...filters,
+      sellingStoreId,
+    });
   },
 
   async setProductFlags(
@@ -225,7 +244,13 @@ export const restaurantService = {
 
     const siblings = await restaurantRepository.listPendingOrdersForTable(pool, tableId);
 
-    let orderId = activeOrderId || table.currentOrderId;
+    // Defense: ignore client temp/journal ids (tmp_ord_*, ofl_*) — never query UUID columns with them.
+    const ORDER_UUID_RE =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const safeActive =
+      activeOrderId && ORDER_UUID_RE.test(activeOrderId) ? activeOrderId : null;
+
+    let orderId = safeActive || table.currentOrderId;
     if (orderId && !siblings.some((s) => s.id === orderId) && siblings.length > 0) {
       // Stale pointer or explicit id not pending — fall back
       orderId = table.currentOrderId || siblings[0]?.id || null;

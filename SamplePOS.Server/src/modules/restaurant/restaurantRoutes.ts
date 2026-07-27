@@ -119,15 +119,20 @@ router.patch(
   }),
 );
 
+const ORDER_ID_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 router.get(
   '/tables/:id/check',
   requireAnyPermission(['restaurant.read', 'restaurant.order']),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const activeOrderId =
+    // Optimistic tmp_ord_* / ofl_ord_* must never reach Postgres UUID columns (22P02).
+    const rawOrderId =
       typeof req.query.orderId === 'string' && req.query.orderId.length > 0
         ? req.query.orderId
         : null;
+    const activeOrderId = rawOrderId && ORDER_ID_UUID_RE.test(rawOrderId) ? rawOrderId : null;
     const check = await restaurantService.getTableCheck(pool, req.params.id, activeOrderId);
     res.json({ success: true, data: check });
   }),

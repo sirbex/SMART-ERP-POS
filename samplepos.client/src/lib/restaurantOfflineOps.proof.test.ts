@@ -365,7 +365,11 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(next.deliveryAddress).toBe('12 Main St');
   });
 
-  it('service dish offline pay skips parent stock even at zero qty', () => {
+  /**
+   * EVIDENCE: product_type=service must never raise quantity issues on the parent SKU.
+   * Zero local stock + pay must succeed with empty stockDeductions.
+   */
+  it('EVIDENCE service dish offline pay never raises quantity issues at zero stock', () => {
     localStorage.setItem('pos_local_stock', JSON.stringify({ 'svc-dish': 0 }));
     const open = appendRestaurantItemOffline({
       tableId: 't-svc',
@@ -375,19 +379,20 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
       productId: 'svc-dish',
       productName: 'Matooke',
       unitPrice: 15,
+      quantity: 3,
       productType: 'service',
     });
     expect(open.lines[0]?.productType).toBe('service');
 
     const paid = payRestaurantCheckOffline(open);
-    expect(paid.totalAmount).toBe(15);
+    expect(paid.totalAmount).toBe(45);
     expect(JSON.parse(localStorage.getItem('pos_local_stock') || '{}')['svc-dish']).toBe(0);
 
     const sale = getUnsyncedEvents().find((e) => e.eventType === 'SALE_COMPLETED');
     expect(sale && sale.eventType === 'SALE_COMPLETED' && sale.stockDeductions).toEqual([]);
   });
 
-  it('inventory dish still blocks offline pay when local stock is zero', () => {
+  it('EVIDENCE inventory dish still blocks offline pay when local stock is zero (control)', () => {
     localStorage.setItem('pos_local_stock', JSON.stringify({ inv1: 0 }));
     const open = appendRestaurantItemOffline({
       tableId: 't-inv',
