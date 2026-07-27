@@ -51,6 +51,7 @@ const SyncPayloadSchema = z.object({
                 subtotal: z.number().nonnegative().optional().default(0),
                 taxAmount: z.number().nonnegative().optional().default(0),
                 discountAmount: z.number().nonnegative().optional().default(0),
+                productType: z.enum(['inventory', 'consumable', 'service']).optional(),
             })
         ).min(1),
         subtotal: z.number().nonnegative(),

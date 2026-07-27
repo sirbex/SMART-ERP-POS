@@ -14,6 +14,8 @@ export const POSSaleLineItemSchema = z.object({
   discountAmount: z.number().nonnegative().finite().optional(), // Per-item discount amount
   taxAmount: z.number().nonnegative().finite().optional(),
   notes: z.string().max(500).optional().or(z.null()).transform(val => val ?? undefined), // Line item notes (converts null to undefined)
+  // Cart/offline stamp — service lines skip stock; restaurant-enabled tenants always send this.
+  productType: z.enum(['inventory', 'consumable', 'service']).optional(),
 }).strict();
 
 // Payment Line Schema (for split payments)

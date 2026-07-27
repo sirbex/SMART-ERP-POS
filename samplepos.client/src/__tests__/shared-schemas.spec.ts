@@ -169,6 +169,17 @@ describe('Shared Zod Schemas', () => {
             });
             expect(result.success).toBe(false);
         });
+
+        it('EVIDENCE line item accepts productType (strict schema no longer unrecognized_keys)', () => {
+            const result = POSSaleLineItemSchema.safeParse({
+                ...validLineItem,
+                productType: 'service',
+            });
+            expect(result.success).toBe(true);
+            if (result.success) {
+                expect(result.data.productType).toBe('service');
+            }
+        });
     });
 
     describe('POSSaleSchema', () => {
@@ -213,6 +224,41 @@ describe('Shared Zod Schemas', () => {
                 subtotal: 9999, // Wrong
             });
             expect(result.success).toBe(false);
+        });
+
+        it('EVIDENCE restaurant-enabled retail POSSaleSchema accepts lineItems.productType', () => {
+            // Mirrors production failure: restaurant-enabled client stamps productType;
+            // .strict() previously threw unrecognized_keys → VALIDATION STOPPED SALE.
+            const sale = {
+                customerId: 'cda73fcb-cf42-4fc2-94d0-8d8cdf21b2d3',
+                quoteId: '23964646-d8f0-4b3f-81a7-92f03646f251',
+                idempotencyKey: 'pos_proof_product_type',
+                lineItems: [
+                    {
+                        productId: '123e4567-e89b-12d3-a456-426614174000',
+                        productName: 'Service / menu item',
+                        sku: '',
+                        uom: 'PIECE',
+                        quantity: 1,
+                        unitPrice: 2000,
+                        costPrice: 0,
+                        subtotal: 2000,
+                        taxAmount: 0,
+                        productType: 'service' as const,
+                    },
+                ],
+                subtotal: 2000,
+                discountAmount: 0,
+                taxAmount: 0,
+                totalAmount: 2000,
+                paymentLines: [{ paymentMethod: 'CASH' as const, amount: 2000 }],
+            };
+            const result = POSSaleSchema.safeParse(sale);
+            expect(result.success).toBe(true);
+            if (!result.success) {
+                // Surface Zod issues in evidence output if this regresses.
+                expect(result.error.issues).toEqual([]);
+            }
         });
     });
 });
