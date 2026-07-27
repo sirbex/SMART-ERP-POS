@@ -53,6 +53,7 @@ import {
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
   newTempLineId,
+  scrubRestaurantTicketTabs,
   toServerRestaurantOrderId,
   type InFlightOptimisticLine,
   type OptimisticCheckPayload,
@@ -440,9 +441,8 @@ function attachSiblingTabs(
   data: CheckUiPayload,
   knownTabs: TicketTab[],
 ): CheckUiPayload {
-  if (knownTabs.length <= 1) return data;
   const activeId = data.order?.id;
-  const siblings = knownTabs
+  const siblings = scrubRestaurantTicketTabs(knownTabs)
     .filter((t) => t.id !== activeId)
     .map((t) => ({
       id: t.id,
@@ -543,6 +543,27 @@ export default function RestaurantPosPage() {
       inFlightOptimisticLinesRef.current.values(),
     ) as CheckUiPayload;
     seedCheckPayloadIntoJournal(tableId, data);
+    // Drop optimistic tmp_ord_* ghosts before they reappear as fake sibling tickets.
+    tableTicketsRef.current = {
+      tableId,
+      tabs: scrubRestaurantTicketTabs([
+        ...tableTicketsRef.current.tabs.filter((t) => t.id !== preferredKeyOrderId),
+        ...(data.order
+          ? [
+              {
+                id: data.order.id,
+                orderNumber: data.order.orderNumber,
+                totalAmount: data.order.totalAmount,
+              },
+            ]
+          : []),
+        ...(data.siblingChecks || []).map((s) => ({
+          id: s.id,
+          orderNumber: s.orderNumber,
+          totalAmount: s.totalAmount,
+        })),
+      ]),
+    };
     const painted = attachSiblingTabs(merged, tableTicketsRef.current.tabs);
     const nextOrderId = data.order?.id ?? preferredKeyOrderId ?? null;
     queryClient.setQueryData(
@@ -554,6 +575,10 @@ export default function RestaurantPosPage() {
         ['restaurant', 'check', tableId, preferredKeyOrderId, isOnline],
         painted,
       );
+    }
+    // Also refresh the null-key paint used during first optimistic open.
+    if (preferredKeyOrderId == null || isTempRestaurantId(preferredKeyOrderId)) {
+      queryClient.setQueryData(['restaurant', 'check', tableId, null, isOnline], painted);
     }
     return painted;
   };
@@ -1256,10 +1281,11 @@ export default function RestaurantPosPage() {
   const ticketTabs = useMemo(() => {
     const tabs: TicketTab[] = [];
     const pushTab = (id: string, orderNumber: string, totalAmount: string) => {
-      if (!id || tabs.some((t) => t.id === id)) return;
+      // Never surface optimistic tmp_ord_* as a switchable ticket (activate-check 400).
+      if (!id || isTempRestaurantId(id) || tabs.some((t) => t.id === id)) return;
       tabs.push({ id, orderNumber, totalAmount });
     };
-    if (order) {
+    if (order && !isTempRestaurantId(order.id)) {
       pushTab(order.id, order.orderNumber, order.totalAmount);
     }
     for (const s of siblingChecks) {
@@ -1274,14 +1300,15 @@ export default function RestaurantPosPage() {
         pushTab(c.orderId, c.offlineId, String(totalsFromLines(c.lines).totalAmount));
       }
     }
-    if (tabs.length > 0 && selectedTableId) {
-      tableTicketsRef.current = { tableId: selectedTableId, tabs };
-      return tabs;
+    const cleaned = scrubRestaurantTicketTabs(tabs);
+    if (cleaned.length > 0 && selectedTableId) {
+      tableTicketsRef.current = { tableId: selectedTableId, tabs: cleaned };
+      return cleaned;
     }
     if (tableTicketsRef.current.tableId === selectedTableId) {
-      return tableTicketsRef.current.tabs;
+      return scrubRestaurantTicketTabs(tableTicketsRef.current.tabs);
     }
-    return tabs;
+    return cleaned;
   }, [order, siblingChecks, selectedTableId, journalTick]);
 
   /** Prefetch sibling checks so switching tickets is cache-instant. */
@@ -1782,12 +1809,15 @@ export default function RestaurantPosPage() {
   const activateSibling = (orderId: string) => {
     if (!selectedTableId) return;
     if (orderId === order?.id || orderId === activeOrderId) return;
+    // Ghost optimistic tickets are not activatable — never POST activate-check with tmp_*.
+    if (isTempRestaurantId(orderId)) return;
+
     setSelectedLineIds([]);
 
     const cachedTable =
       getCachedRestaurantTables().find((t) => t.id === selectedTableId) ||
       tablesQuery.data?.find((t) => t.id === selectedTableId);
-    const knownTabs = tableTicketsRef.current.tabs;
+    const knownTabs = scrubRestaurantTicketTabs(tableTicketsRef.current.tabs);
     const fromJournal = buildCheckUiFromJournal(selectedTableId, orderId, cachedTable);
     const fromCache = queryClient.getQueryData([
       'restaurant',
@@ -1811,13 +1841,14 @@ export default function RestaurantPosPage() {
 
     setActiveOrderId(orderId);
 
-    if (!isOnline || isJournalLocalOrderId(orderId) || isTempRestaurantId(orderId)) {
+    if (!isOnline || isJournalLocalOrderId(orderId)) {
       bumpJournal();
       return;
     }
 
     const serverOrderId = toServerRestaurantOrderId(orderId);
     if (!serverOrderId) {
+      // Non-UUID (should be rare after scrub) — stay local, never 400 the API.
       bumpJournal();
       return;
     }
@@ -1833,7 +1864,7 @@ export default function RestaurantPosPage() {
         if (tableTicketsRef.current.tableId !== selectedTableId) return;
         queryClient.setQueryData(
           ['restaurant', 'check', selectedTableId, orderId, isOnline],
-          attachSiblingTabs(data, tableTicketsRef.current.tabs),
+          attachSiblingTabs(data, scrubRestaurantTicketTabs(tableTicketsRef.current.tabs)),
         );
         bumpJournal();
       } catch (err) {

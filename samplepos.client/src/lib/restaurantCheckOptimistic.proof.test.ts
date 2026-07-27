@@ -8,6 +8,7 @@ import {
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
   newTempLineId,
+  scrubRestaurantTicketTabs,
   toServerRestaurantOrderId,
   type OptimisticCheckPayload,
 } from './restaurantCheckOptimistic';
@@ -126,5 +127,41 @@ describe('Restaurant optimistic online add (behavioral proof)', () => {
     expect(toServerRestaurantOrderId('398cb162-906b-42e9-a224-3248fdf5bb7c')).toBe(
       '398cb162-906b-42e9-a224-3248fdf5bb7c',
     );
+  });
+
+  it('EVIDENCE tmp_ord never becomes switchable sibling (activate-check 400)', () => {
+    const tempOpen = appendOptimisticMenuItem(undefined, {
+      table,
+      product: { id: 'p1', name: 'Burger', sellingPrice: 10 },
+      quantity: 1,
+      tempLineId: 'tmp_line_ghost',
+      channel: 'DINE_IN',
+      now: 99,
+      knownTabs: [
+        {
+          id: 'tmp_ord_stale',
+          orderNumber: '…',
+          totalAmount: '10',
+        },
+        {
+          id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+          orderNumber: 'R-2',
+          totalAmount: '20',
+        },
+      ],
+    });
+
+    // Active is still temp during paint; siblings must not include any tmp_*.
+    expect(tempOpen.siblingChecks?.every((s) => !isTempRestaurantId(s.id))).toBe(true);
+    expect(tempOpen.siblingChecks?.map((s) => s.id)).toEqual([
+      'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    ]);
+
+    const scrubbed = scrubRestaurantTicketTabs([
+      { id: 'tmp_ord_ms3jx3bl', orderNumber: '…', totalAmount: '5' },
+      { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', orderNumber: 'R-1', totalAmount: '5' },
+      { id: 'tmp_ord_ms3jx3bl', orderNumber: '…', totalAmount: '5' },
+    ]);
+    expect(scrubbed.map((t) => t.id)).toEqual(['aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee']);
   });
 });

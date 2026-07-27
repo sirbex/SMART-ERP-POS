@@ -633,6 +633,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(optimisticProof).toMatch(
       /EVIDENCE tmp_ord never becomes API \?orderId= \(avoids Postgres 22P02\)/,
     );
+    expect(optimisticProof).toMatch(
+      /EVIDENCE tmp_ord never becomes switchable sibling \(activate-check 400\)/,
+    );
 
     const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
     expect(ops).toMatch(/export function shouldUseLocalRestaurantMutation/);
@@ -647,6 +650,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(optimistic).toMatch(/export function mergeInFlightOptimisticLines/);
     expect(optimistic).toMatch(/export function isTempRestaurantId/);
     expect(optimistic).toMatch(/export function toServerRestaurantOrderId/);
+    expect(optimistic).toMatch(/export function scrubRestaurantTicketTabs/);
 
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     expect(repo).toMatch(/bumpKitchenTicketsForOrder/);
@@ -669,6 +673,8 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/toServerRestaurantOrderId/);
     expect(pos).toMatch(/isTempRestaurantId\(order\.id\)/);
     expect(pos).toMatch(/Never seed optimistic tmp_ord_/);
+    expect(pos).toMatch(/scrubRestaurantTicketTabs/);
+    expect(pos).toMatch(/Ghost optimistic tickets are not activatable/);
     expect(pos).toMatch(/preferLocalRestaurantWrites/);
     expect(pos).toMatch(/paintJournalCheck/);
     expect(pos).toMatch(/settleCheckOnFloor/);

@@ -102,13 +102,31 @@ export function newTempLineId(now = Date.now()): string {
   return `tmp_line_${now}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+/**
+ * Ticket tabs / sibling chips must never expose optimistic tmp_ord_* ghosts.
+ * Those ghosts caused activate-check 400 (Invalid uuid) after first online add.
+ */
+export function scrubRestaurantTicketTabs(
+  tabs: OptimisticTicketTab[],
+): OptimisticTicketTab[] {
+  const out: OptimisticTicketTab[] = [];
+  for (const t of tabs) {
+    if (!t?.id || isTempRestaurantId(t.id)) continue;
+    if (out.some((x) => x.id === t.id)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
 function attachSiblingTabs(
   data: OptimisticCheckPayload,
   knownTabs: OptimisticTicketTab[],
 ): OptimisticCheckPayload {
   const activeId = data.order?.id;
-  const siblings = knownTabs
+  const siblings = scrubRestaurantTicketTabs(knownTabs)
     .filter((t) => t.id !== activeId)
+    // Never promote an optimistic temp order into a switchable sibling tab.
+    .filter((t) => !isTempRestaurantId(t.id))
     .map((t) => ({
       id: t.id,
       orderNumber: t.orderNumber,

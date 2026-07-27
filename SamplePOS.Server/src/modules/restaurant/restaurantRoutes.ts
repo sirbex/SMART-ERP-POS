@@ -143,7 +143,13 @@ router.post(
   requirePermission('restaurant.order'),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const body = z.object({ orderId: z.string().uuid() }).parse(req.body);
+    const body = z.object({ orderId: z.string().min(1) }).parse(req.body);
+    // Optimistic tmp_ord_* / ofl_* must never hit UUID columns — ignore and resume table check.
+    if (!ORDER_ID_UUID_RE.test(body.orderId)) {
+      const check = await restaurantService.getTableCheck(pool, req.params.id, null);
+      res.json({ success: true, data: check });
+      return;
+    }
     const check = await restaurantService.activateCheck(pool, req.params.id, body.orderId);
     res.json({ success: true, data: check });
   }),
