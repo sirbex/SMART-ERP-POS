@@ -9,7 +9,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
-import { Plus, Search, Eye, Check, FileText, FileMinus, FilePlus, XCircle, Sparkles } from 'lucide-react';
+import { Plus, Search, FileText, FileMinus, FilePlus, Sparkles } from 'lucide-react';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import {
     Button,
@@ -26,7 +26,6 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
-    Badge,
     Textarea,
     Tabs,
     TabsContent,
@@ -63,9 +62,6 @@ import {
 /** Supplier notes use DRAFT/POSTED/APPLIED; customer notes use Draft/Posted. */
 function isNoteDraft(status: string): boolean {
     return status === 'DRAFT' || status === 'Draft';
-}
-function isSupplierPosted(status: string): boolean {
-    return status === 'POSTED' || status === 'APPLIED';
 }
 
 /** APPLIED = user allocated credit to bill(s) via Apply to Open Bills. */
