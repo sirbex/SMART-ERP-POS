@@ -17,6 +17,21 @@ function toNum(v: unknown): number {
     return new Decimal(String(v ?? 0)).toDecimalPlaces(2).toNumber();
 }
 
+function normalizeInvoiceSettlementFields<T extends Record<string, unknown>>(row: T): T & {
+    amountPaid: number;
+    creditsApplied: number;
+    outstandingBalance: number;
+    totalAmount: number;
+} {
+    return {
+        ...row,
+        totalAmount: toNum(row.totalAmount),
+        amountPaid: toNum(row.amountPaid),
+        creditsApplied: toNum(row.creditsApplied),
+        outstandingBalance: toNum(row.outstandingBalance),
+    };
+}
+
 export interface SupplierPayment {
     id: string;
     paymentNumber: string;
@@ -53,7 +68,10 @@ export interface SupplierInvoice {
     subtotal: number;
     taxAmount: number;
     totalAmount: number;
+    /** Cash/bank payments only (ledger SSOT). Not credit notes. */
     amountPaid: number;
+    /** Sum of APPLIED supplier credit notes linked to this bill. */
+    creditsApplied: number;
     outstandingBalance: number;
     status: string;
     documentType?: string | null;
@@ -61,6 +79,16 @@ export interface SupplierInvoice {
     createdAt: string;
     updatedAt: string;
 }
+
+/** SQL fragment: applied SCN credits against a supplier_invoices alias `si`. */
+const CREDITS_APPLIED_SQL = `COALESCE((
+  SELECT SUM(scn."TotalAmount")
+  FROM supplier_invoices scn
+  WHERE scn.reference_invoice_id = si."Id"
+    AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+    AND scn.deleted_at IS NULL
+    AND UPPER(scn."Status") = 'APPLIED'
+), 0)`;
 
 export interface SupplierPaymentAllocation {
     id: string;
@@ -472,6 +500,7 @@ export async function findAllInvoices(
        si."TaxAmount" as "taxAmount",
        si."TotalAmount" as "totalAmount",
        COALESCE(si."AmountPaid", 0) as "amountPaid",
+       ${CREDITS_APPLIED_SQL} as "creditsApplied",
        COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
        si."Status" as status,
        si.document_type as "documentType",
@@ -487,7 +516,7 @@ export async function findAllInvoices(
     );
 
     return {
-        items: result.rows,
+        items: result.rows.map(normalizeInvoiceSettlementFields),
         total: parseInt(countResult.rows[0].total)
     };
 }
@@ -509,6 +538,7 @@ export async function findInvoiceById(pool: Pool | PoolClient, id: string): Prom
        si."TaxAmount" as "taxAmount",
        si."TotalAmount" as "totalAmount",
        COALESCE(si."AmountPaid", 0) as "amountPaid",
+       ${CREDITS_APPLIED_SQL} as "creditsApplied",
        COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
        si."Status" as status,
        si."Notes" as notes,
@@ -519,7 +549,7 @@ export async function findInvoiceById(pool: Pool | PoolClient, id: string): Prom
      WHERE si."Id" = $1 AND si.deleted_at IS NULL`,
         [id]
     );
-    return result.rows[0] || null;
+    return result.rows[0] ? normalizeInvoiceSettlementFields(result.rows[0]) : null;
 }
 
 /**
@@ -539,6 +569,7 @@ export async function findOutstandingInvoices(pool: Pool | PoolClient, supplierI
        si."TaxAmount" as "taxAmount",
        si."TotalAmount" as "totalAmount",
        COALESCE(si."AmountPaid", 0) as "amountPaid",
+       ${CREDITS_APPLIED_SQL} as "creditsApplied",
        COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
        si."Status" as status,
        si.document_type as "documentType",
@@ -556,7 +587,7 @@ export async function findOutstandingInvoices(pool: Pool | PoolClient, supplierI
      ORDER BY si."DueDate" ASC NULLS LAST, si."InvoiceDate" ASC`,
         [supplierId]
     );
-    return result.rows;
+    return result.rows.map(normalizeInvoiceSettlementFields);
 }
 
 /**
@@ -586,6 +617,14 @@ export async function findInvoiceWithDetails(pool: Pool | PoolClient, id: string
         allocationDate: string;
         paymentMethod: string;
     }>;
+    creditNotesApplied: Array<{
+        id: string;
+        creditNoteNumber: string;
+        amount: number;
+        status: string;
+        creditNoteDate: string;
+        reason: string | null;
+    }>;
 } | null> {
     // Get invoice with supplier details
     const invoiceResult = await pool.query(
@@ -605,6 +644,7 @@ export async function findInvoiceWithDetails(pool: Pool | PoolClient, id: string
        si."TaxAmount" as "taxAmount",
        si."TotalAmount" as "totalAmount",
        COALESCE(si."AmountPaid", 0) as "amountPaid",
+       ${CREDITS_APPLIED_SQL} as "creditsApplied",
        COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
        si."Status" as status,
        si."Notes" as notes,
@@ -655,8 +695,25 @@ export async function findInvoiceWithDetails(pool: Pool | PoolClient, id: string
         [id]
     );
 
+    const creditNotesResult = await pool.query(
+        `SELECT
+           scn."Id" as id,
+           scn."SupplierInvoiceNumber" as "creditNoteNumber",
+           scn."TotalAmount"::numeric as amount,
+           scn."Status" as status,
+           scn."InvoiceDate" as "creditNoteDate",
+           scn.reason
+         FROM supplier_invoices scn
+         WHERE scn.reference_invoice_id = $1
+           AND scn.document_type = 'SUPPLIER_CREDIT_NOTE'
+           AND scn.deleted_at IS NULL
+           AND UPPER(scn."Status") = 'APPLIED'
+         ORDER BY scn."InvoiceDate" ASC, scn."CreatedAt" ASC`,
+        [id],
+    );
+
     return {
-        invoice: invoiceResult.rows[0],
+        invoice: normalizeInvoiceSettlementFields(invoiceResult.rows[0]),
         lineItems: lineItemsResult.rows.map(item => ({
             ...item,
             quantity: new Decimal(item.quantity || 0).toNumber(),
@@ -669,6 +726,14 @@ export async function findInvoiceWithDetails(pool: Pool | PoolClient, id: string
         allocations: allocationsResult.rows.map(a => ({
             ...a,
             amountAllocated: new Decimal(a.amountAllocated || 0).toNumber(),
+        })),
+        creditNotesApplied: creditNotesResult.rows.map((r) => ({
+            id: r.id as string,
+            creditNoteNumber: r.creditNoteNumber as string,
+            amount: new Decimal(r.amount || 0).toNumber(),
+            status: r.status as string,
+            creditNoteDate: r.creditNoteDate as string,
+            reason: (r.reason as string | null) ?? null,
         })),
     };
 }
@@ -690,6 +755,7 @@ export async function findInvoicesBySupplier(pool: Pool | PoolClient, supplierId
        si."TaxAmount" as "taxAmount",
        si."TotalAmount" as "totalAmount",
        COALESCE(si."AmountPaid", 0) as "amountPaid",
+       ${CREDITS_APPLIED_SQL} as "creditsApplied",
        COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as "outstandingBalance",
        si."Status" as status,
        si.document_type as "documentType",
@@ -703,7 +769,7 @@ export async function findInvoicesBySupplier(pool: Pool | PoolClient, supplierId
      ORDER BY si."InvoiceDate" DESC, si."CreatedAt" DESC`,
         [supplierId]
     );
-    return result.rows;
+    return result.rows.map(normalizeInvoiceSettlementFields);
 }
 
 /**
@@ -1355,6 +1421,8 @@ function deriveInvoiceStatus(
     if (outstanding.lessThanOrEqualTo(0.009)) {
         return documentType === 'SUPPLIER_CREDIT_NOTE' ? 'APPLIED' : 'PAID';
     }
+    // Keep PARTIALLY_PAID in storage for filter compatibility; UI maps
+    // credit-only cases to "Partially settled" via supplierBillSettlement.
     if (paid.greaterThan(0) || credits.greaterThan(0)) {
         return 'PARTIALLY_PAID';
     }

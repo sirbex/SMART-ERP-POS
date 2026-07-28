@@ -311,7 +311,9 @@ export const supplierCreditDebitNoteController = {
                 success: true,
                 data: result,
                 message: result.totalApplied > 0
-                    ? `Applied ${result.totalApplied} across ${result.allocations.length} bill(s). Residual: ${result.residual}.`
+                    ? `Allocated ${result.totalApplied} to ${result.allocations.length} bill(s). Bill balance due reduced. Supplier AP was already reduced when this credit was posted.${
+                        result.residual > 0 ? ` Residual on-account: ${result.residual}.` : ''
+                      }`
                     : 'No open bills available — credit note remains on-account.',
             });
         } catch (error: unknown) {

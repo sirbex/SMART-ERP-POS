@@ -35,6 +35,7 @@ import {
   isSupplierCreditNote,
   summarizeSupplierOpenItems,
 } from '../utils/supplierOpenItemSummary';
+import { buildSupplierBillSettlement } from '@shared/utils/supplierBillSettlement';
 // TIMEZONE STRATEGY: Display dates without conversion
 // Backend returns DATE as YYYY-MM-DD string (no timezone)
 // Frontend displays as-is without parsing to Date object
@@ -138,7 +139,10 @@ interface SupplierInvoiceSummary {
   subtotal: number;
   taxAmount: number;
   totalAmount: number;
+  /** Cash/bank payments only — not credit notes. */
   amountPaid: number;
+  /** Applied supplier credit notes (SCN). */
+  creditsApplied?: number;
   outstandingBalance: number;
   status: string;
   documentType?: string | null;
@@ -179,6 +183,14 @@ interface InvoiceDetails {
   };
   lineItems: InvoiceLineItem[];
   allocations: InvoiceAllocation[];
+  creditNotesApplied?: Array<{
+    id: string;
+    creditNoteNumber: string;
+    amount: number;
+    status: string;
+    creditNoteDate: string;
+    reason: string | null;
+  }>;
 }
 
 interface SupplierFormData {
@@ -2133,21 +2145,29 @@ function SupplierDetailModal({
                     </div>
                   </div>
 
+                  <p className="text-xs text-gray-500 mb-3">
+                    Bill figures: <span className="font-medium">Balance due = Invoice total − Payments − Credits</span>.
+                    Credits are supplier credit notes (not cash). Applying a credit reduces the bill balance due;
+                    supplier AP was already reduced when the credit was posted.
+                  </p>
+
                   {/* Invoice List — mobile cards + desktop table */}
                   {/* Mobile cards */}
                   <div className="block sm:hidden space-y-3">
                     {filteredInvoices.length === 0 ? (
                       <div className="text-center py-8 text-gray-500 text-sm">No invoices match your search.</div>
                       ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
-                      const balance = Number(inv.outstandingBalance || 0);
+                      const settlement = buildSupplierBillSettlement(inv);
+                      const balance = settlement.balanceDue;
                       const payable = isPayableInvoice(inv);
                       const isCn = isSupplierCreditNote(inv);
                       const checked = multiSelected.has(inv.id);
                       const statusColor =
                         isCn ? 'bg-teal-100 text-teal-800'
-                          : inv.status === 'Paid' ? 'bg-green-100 text-green-800'
-                          : inv.status === 'PartiallyPaid' ? 'bg-yellow-100 text-yellow-800'
-                            : inv.status === 'Pending' ? 'bg-blue-100 text-blue-800'
+                          : settlement.displayStatus === 'Paid' ? 'bg-green-100 text-green-800'
+                          : settlement.displayStatus === 'Partially settled' || settlement.displayStatus === 'Partially paid'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : settlement.displayStatus === 'Open' ? 'bg-blue-100 text-blue-800'
                               : 'bg-gray-100 text-gray-800';
                       return (
                         <div key={inv.id} className={`border rounded-lg p-3 ${checked ? 'border-purple-400 bg-purple-50' : isCn ? 'border-teal-200 bg-teal-50/40' : 'border-gray-200'}`}>
@@ -2169,7 +2189,12 @@ function SupplierDetailModal({
                                 </span>
                               )}
                             </div>
-                            <span className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusColor}`}>{inv.status}</span>
+                            <span
+                              className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusColor}`}
+                              title={settlement.equationHint}
+                            >
+                              {settlement.displayStatus}
+                            </span>
                           </div>
                           <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-2">
                             <span className="text-gray-500">Date</span>
@@ -2177,12 +2202,18 @@ function SupplierDetailModal({
                             <span className="text-gray-500">Due</span>
                             <span className="text-right">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '—'}</span>
                             <span className="text-gray-500">Total</span>
-                            <span className="text-right font-semibold">{formatCurrency(Number(inv.totalAmount || 0))}</span>
-                            <span className="text-gray-500">Paid</span>
-                            <span className="text-right text-green-600">{formatCurrency(Number(inv.amountPaid || 0))}</span>
+                            <span className="text-right font-semibold">{formatCurrency(settlement.invoiceTotal)}</span>
+                            {!isCn && (
+                              <>
+                                <span className="text-gray-500">Payments</span>
+                                <span className="text-right text-green-600">{formatCurrency(settlement.payments)}</span>
+                                <span className="text-gray-500">Credits</span>
+                                <span className="text-right text-teal-700">{formatCurrency(settlement.creditsApplied)}</span>
+                              </>
+                            )}
                             {balance > 0 && (
                               <>
-                                <span className="text-gray-500">{isCn ? 'Credit left' : 'Balance'}</span>
+                                <span className="text-gray-500">{isCn ? 'Credit left' : 'Balance due'}</span>
                                 <span className={`text-right font-bold ${isCn ? 'text-teal-700' : 'text-red-600'}`}>
                                   {formatCurrency(balance)}
                                 </span>
@@ -2230,30 +2261,33 @@ function SupplierDetailModal({
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
                           <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                           <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Paid</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Balance</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase" title="Cash/bank payments only">Payments</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase" title="Applied supplier credit notes">Credits</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase" title="Total − Payments − Credits">Balance due</th>
                           {canCreatePayment && <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Pay Amount</th>}
                           <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {filteredInvoices.length === 0 ? (
-                          <tr><td colSpan={canCreatePayment ? 11 : 9} className="px-4 py-8 text-center text-sm text-gray-500">No invoices match your search.</td></tr>
+                          <tr><td colSpan={canCreatePayment ? 12 : 10} className="px-4 py-8 text-center text-sm text-gray-500">No invoices match your search.</td></tr>
                         ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
-                          const total = Number(inv.totalAmount || 0);
-                          const paid = Number(inv.amountPaid || 0);
-                          const balance = Number(inv.outstandingBalance || 0);
+                          const settlement = buildSupplierBillSettlement(inv);
+                          const total = settlement.invoiceTotal;
+                          const paid = settlement.payments;
+                          const credits = settlement.creditsApplied;
+                          const balance = settlement.balanceDue;
                           const payable = isPayableInvoice(inv);
                           const isCn = isSupplierCreditNote(inv);
                           const checked = multiSelected.has(inv.id);
                           const statusColor =
                             isCn
                               ? 'bg-teal-100 text-teal-800'
-                              : inv.status === 'Paid'
+                              : settlement.displayStatus === 'Paid'
                               ? 'bg-green-100 text-green-800'
-                              : inv.status === 'PartiallyPaid'
+                              : settlement.displayStatus === 'Partially settled' || settlement.displayStatus === 'Partially paid'
                                 ? 'bg-yellow-100 text-yellow-800'
-                                : inv.status === 'Pending'
+                                : settlement.displayStatus === 'Open'
                                   ? 'bg-blue-100 text-blue-800'
                                   : 'bg-gray-100 text-gray-800';
                           const isExpanded = selectedInvoice === inv.id;
@@ -2291,10 +2325,16 @@ function SupplierDetailModal({
                                 <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
                                 <td className="px-4 py-3 text-sm text-gray-600">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}</td>
                                 <td className="px-4 py-3">
-                                  <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>{inv.status}</span>
+                                  <span
+                                    className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}
+                                    title={settlement.equationHint}
+                                  >
+                                    {settlement.displayStatus}
+                                  </span>
                                 </td>
                                 <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
-                                <td className="px-4 py-3 text-sm text-right text-green-600">{formatCurrency(paid)}</td>
+                                <td className="px-4 py-3 text-sm text-right text-green-600">{isCn ? '—' : formatCurrency(paid)}</td>
+                                <td className="px-4 py-3 text-sm text-right text-teal-700">{isCn ? '—' : formatCurrency(credits)}</td>
                                 <td className={`px-4 py-3 text-sm text-right font-semibold ${isCn ? 'text-teal-700' : 'text-red-600'}`}>
                                   {balance > 0
                                     ? (isCn ? `Credit ${formatCurrency(balance)}` : formatCurrency(balance))
@@ -2358,7 +2398,7 @@ function SupplierDetailModal({
                               </tr>
                               {isExpanded && (
                                 <tr className="bg-blue-50/30">
-                                  <td colSpan={canCreatePayment ? 11 : 9} className="px-4 py-4">
+                                  <td colSpan={canCreatePayment ? 12 : 10} className="px-4 py-4">
                                     {loadingInvoiceDetails ? (
                                       <div className="text-sm text-gray-600">Loading details...</div>
                                     ) : invoiceDetails ? (
@@ -2447,6 +2487,26 @@ function SupplierDetailModal({
                                                       <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded text-gray-600">{alloc.paymentMethod}</span>
                                                     </div>
                                                     <span className="font-bold text-green-700 text-xs">{formatCurrency(alloc.amountAllocated)}</span>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          )}
+
+                                          {invoiceDetails.creditNotesApplied && invoiceDetails.creditNotesApplied.length > 0 && (
+                                            <div>
+                                              <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Credits applied</h5>
+                                              <div className="space-y-2">
+                                                {invoiceDetails.creditNotesApplied.map((cn) => (
+                                                  <div key={cn.id} className="flex justify-between items-center bg-teal-50 rounded-lg px-3 py-2">
+                                                    <div>
+                                                      <span className="font-medium text-gray-900 text-xs">{cn.creditNoteNumber}</span>
+                                                      <span className="ml-2 text-xs text-gray-500">{formatDisplayDate(cn.creditNoteDate)}</span>
+                                                      {cn.reason && (
+                                                        <span className="ml-2 text-xs text-gray-500">{cn.reason}</span>
+                                                      )}
+                                                    </div>
+                                                    <span className="font-bold text-teal-700 text-xs">{formatCurrency(cn.amount)}</span>
                                                   </div>
                                                 ))}
                                               </div>
@@ -3072,24 +3132,30 @@ function SupplierDetailModal({
                   <span className="text-gray-600">Invoice</span>
                   <span className="font-semibold text-gray-900">{payingInvoice.invoiceNumber}</span>
                 </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-gray-600">Total</span>
-                  <span className="text-gray-900">
-                    {formatCurrency(Number(payingInvoice.totalAmount || 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between mt-1">
-                  <span className="text-gray-600">Paid</span>
-                  <span className="text-green-600">
-                    {formatCurrency(Number(payingInvoice.amountPaid || 0))}
-                  </span>
-                </div>
-                <div className="flex justify-between mt-1 pt-1 border-t border-gray-200">
-                  <span className="font-semibold text-gray-700">Outstanding</span>
-                  <span className="font-bold text-red-600">
-                    {formatCurrency(Number(payingInvoice.outstandingBalance || 0))}
-                  </span>
-                </div>
+                {(() => {
+                  const settlement = buildSupplierBillSettlement(payingInvoice);
+                  return (
+                    <>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-gray-600">Invoice total</span>
+                        <span className="text-gray-900">{formatCurrency(settlement.invoiceTotal)}</span>
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-gray-600">Payments</span>
+                        <span className="text-green-600">{formatCurrency(settlement.payments)}</span>
+                      </div>
+                      <div className="flex justify-between mt-1">
+                        <span className="text-gray-600">Credits applied</span>
+                        <span className="text-teal-700">{formatCurrency(settlement.creditsApplied)}</span>
+                      </div>
+                      <div className="flex justify-between mt-1 pt-1 border-t border-gray-200">
+                        <span className="font-semibold text-gray-700">Balance due</span>
+                        <span className="font-bold text-red-600">{formatCurrency(settlement.balanceDue)}</span>
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-2">{settlement.equationHint}</p>
+                    </>
+                  );
+                })()}
               </div>
 
               {paymentSuccess && (

@@ -73,10 +73,14 @@ export async function getDomainLaneSummary(
   pool: Db,
   domain: FinancialDomain,
   asOfDate?: string,
+  options?: { lanes?: LaneKind[] },
 ): Promise<DomainLaneSummary> {
   const provider = getFinancialLaneProvider(domain);
+  const requested = options?.lanes?.length
+    ? provider.supportedLanes.filter((lane) => options.lanes!.includes(lane))
+    : [...provider.supportedLanes];
   const lanes = await Promise.all(
-    provider.supportedLanes.map((lane) => getFinancialLane(pool, domain, lane, asOfDate)),
+    requested.map((lane) => getFinancialLane(pool, domain, lane, asOfDate)),
   );
 
   const integrity = lanes.find((l) => l.lane === 'integrity');
@@ -94,12 +98,95 @@ export async function getDomainLaneSummary(
   };
 }
 
+/** Lanes required for Control Tower / period-close — skip history journal dumps. */
+export const FINANCIAL_HEALTH_LANES: LaneKind[] = [
+  'integrity',
+  'cache',
+  'quarantine',
+  'writeoff',
+];
+
+const HEALTH_EXCEPTION_CAP = 25;
+const HEALTH_CACHE_TTL_MS = 45_000;
+
+type HealthCacheEntry = { expiresAt: number; data: DomainLaneSummary[] };
+const healthCacheByPool = new WeakMap<object, Map<string, HealthCacheEntry>>();
+
+function trimHealthSummary(summary: DomainLaneSummary): DomainLaneSummary {
+  return {
+    ...summary,
+    lanes: summary.lanes.map((lane) => ({
+      ...lane,
+      exceptions: lane.exceptions.slice(0, HEALTH_EXCEPTION_CAP),
+      auditJournals: [],
+    })),
+  };
+}
+
 export async function getAllDomainSummaries(
   pool: Db,
   asOfDate?: string,
+  options?: {
+    lanes?: LaneKind[];
+    exceptionCap?: number;
+    omitAuditJournals?: boolean;
+  },
 ): Promise<DomainLaneSummary[]> {
   const domains = listRegisteredDomains();
-  return Promise.all(domains.map((d) => getDomainLaneSummary(pool, d, asOfDate)));
+  const summaries = await Promise.all(
+    domains.map((d) =>
+      getDomainLaneSummary(pool, d, asOfDate, {
+        lanes: options?.lanes,
+      }),
+    ),
+  );
+
+  if (options?.exceptionCap == null && !options?.omitAuditJournals) {
+    return summaries;
+  }
+
+  return summaries.map((summary) => ({
+    ...summary,
+    lanes: summary.lanes.map((lane) => ({
+      ...lane,
+      exceptions:
+        options.exceptionCap != null
+          ? lane.exceptions.slice(0, options.exceptionCap)
+          : lane.exceptions,
+      auditJournals: options.omitAuditJournals ? [] : lane.auditJournals,
+    })),
+  }));
+}
+
+/**
+ * Control Tower health payload — integrity/cache (+ quarantine/writeoff when present).
+ * Skips history lane (100-journal dumps) and caches briefly per pool/asOf.
+ */
+export async function getFinancialHealthSummaries(
+  pool: Db,
+  asOfDate?: string,
+): Promise<DomainLaneSummary[]> {
+  const date = asOfDate ?? getBusinessDate();
+  const cacheKey = date;
+  const poolKey = pool as object;
+  let byDate = healthCacheByPool.get(poolKey);
+  if (!byDate) {
+    byDate = new Map();
+    healthCacheByPool.set(poolKey, byDate);
+  }
+  const hit = byDate.get(cacheKey);
+  if (hit && hit.expiresAt > Date.now()) {
+    return hit.data;
+  }
+
+  const summaries = await getAllDomainSummaries(pool, date, {
+    lanes: FINANCIAL_HEALTH_LANES,
+    exceptionCap: HEALTH_EXCEPTION_CAP,
+    omitAuditJournals: true,
+  });
+  const trimmed = summaries.map(trimHealthSummary);
+  byDate.set(cacheKey, { expiresAt: Date.now() + HEALTH_CACHE_TTL_MS, data: trimmed });
+  return trimmed;
 }
 
 /** Merge legacy AP field names for consumers not yet on FinancialLaneResult. */

@@ -36,6 +36,7 @@ import {
     TabsTrigger,
 } from '../../components/ui/temp-ui-components';
 import { formatCurrency } from '../../utils/currency';
+import { formatScnApplySuccessMessage } from '@shared/utils/supplierBillSettlement';
 import { toast } from 'react-hot-toast';
 import {
     creditDebitNoteService,
@@ -511,11 +512,20 @@ function SupplierNotesTab() {
             const count = res.data?.allocations?.length ?? 0;
             if (applied > 0) {
                 toast.success(
-                    `Applied ${formatCurrency(applied)} across ${count} bill${count === 1 ? '' : 's'}.` +
-                    (residual > 0 ? ` ${formatCurrency(residual)} remains on-account.` : '')
+                    formatScnApplySuccessMessage({
+                        applied,
+                        billCount: count,
+                        residual,
+                        formatMoney: formatCurrency,
+                    }),
                 );
             } else {
-                toast('No open bills available — credit note remains on-account.');
+                toast(formatScnApplySuccessMessage({
+                    applied: 0,
+                    billCount: 0,
+                    residual: 0,
+                    formatMoney: formatCurrency,
+                }));
             }
             fetchNotes();
         } catch {

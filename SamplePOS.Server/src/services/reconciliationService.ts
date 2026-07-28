@@ -44,6 +44,7 @@ import {
 import {
   getFinancialLane as fetchFinancialLane,
   getAllDomainSummaries,
+  getFinancialHealthSummaries,
   withLegacyApFields,
   withLegacyArFields,
   withLegacyInventoryFields,
@@ -715,10 +716,10 @@ export class ReconciliationService {
         return result;
     }
 
-    /** All registered domain lane summaries (health dashboard). */
+    /** Control Tower health — integrity/cache focused (skips history dumps). */
     async getFinancialHealthSummary(asOfDate?: string) {
         const date = asOfDate || getBusinessDate();
-        return getAllDomainSummaries(this.pool, date);
+        return getFinancialHealthSummaries(this.pool, date);
     }
 
     /**

@@ -1253,7 +1253,7 @@ router.get(
 
 /**
  * GET /api/erp-accounting/reconciliation/financial-health
- * Aggregated lane status for all registered domains (read-only).
+ * Control Tower light summary — integrity/cache (+ quarantine/writeoff), no history dumps.
  */
 router.get(
   '/reconciliation/financial-health',
