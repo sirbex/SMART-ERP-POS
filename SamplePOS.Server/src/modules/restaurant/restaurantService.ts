@@ -32,8 +32,40 @@ import {
   sumOrderTagPrices,
   type RestaurantOrderTagSelection,
 } from '../../../../shared/utils/restaurantOrderTags.js';
+import { consolidateKotLines } from '../../../../shared/utils/consolidateKotLines.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { posProductSearchService } from '../inventory/warehouse/posProductSearchService.js';
+
+/** Samba/Toast: same product + same notes → one KOT qty line (prices never enter KOT). */
+function toConsolidatedKotItems(
+  items: Array<{
+    id: string;
+    productId?: string | null;
+    productName: string;
+    quantity: number | string;
+    lineNotes?: string | null;
+  }>,
+): Array<{
+  orderItemId: string;
+  productName: string;
+  quantity: number;
+  lineNotes: string | null;
+}> {
+  return consolidateKotLines(
+    items.map((it) => ({
+      productId: it.productId ?? null,
+      productName: it.productName,
+      quantity: it.quantity,
+      lineNotes: it.lineNotes ?? null,
+      orderItemId: it.id,
+    })),
+  ).map((c) => ({
+    orderItemId: c.orderItemId || c.sourceIds[0] || items[0]!.id,
+    productName: c.productName,
+    quantity: c.quantity,
+    lineNotes: c.lineNotes,
+  }));
+}
 
 async function resolveRestaurantShopStoreId(pool: Pool | PoolClient): Promise<string | null> {
   if (!(await isMultistoreEnabled(pool))) return null;
@@ -327,6 +359,15 @@ export const restaurantService = {
     if (!table || !table.isActive) throw new NotFoundError('Restaurant table');
     const order = await ordersService.getOrder(pool, orderId);
     if (order.status !== 'PENDING') {
+      // Stale FOH tab — free pointer if it still points at this closed check.
+      if (table.currentOrderId === orderId) {
+        const siblings = await restaurantRepository.listPendingOrdersForTable(pool, tableId);
+        if (siblings[0]) {
+          await restaurantRepository.setTableCurrentOrder(pool, tableId, siblings[0].id);
+        } else {
+          await restaurantRepository.releaseTableByOrderId(pool, orderId);
+        }
+      }
       throw new BusinessError('Only open checks can be activated', 'ERR_RESTAURANT_CHECK_CLOSED');
     }
     const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
@@ -680,12 +721,15 @@ export const restaurantService = {
           waiterName: meta.waiterName,
           station: station.code,
           firedBy,
-          items: items.map((it) => ({
-            orderItemId: it.id,
-            productName: it.productName,
-            quantity: Money.toNumber(Money.parseDb(it.quantity)),
-            lineNotes: it.lineNotes,
-          })),
+          items: toConsolidatedKotItems(
+            items.map((it) => ({
+              id: it.id,
+              productId: it.productId,
+              productName: it.productName,
+              quantity: Money.toNumber(Money.parseDb(it.quantity)),
+              lineNotes: it.lineNotes,
+            })),
+          ),
         });
         await restaurantRepository.markItemsKitchenSent(
           client,
@@ -803,12 +847,15 @@ export const restaurantService = {
             firedBy: input.voidedBy,
             ticketKind: 'VOID',
             voidReason: reason,
-            items: items.map((it) => ({
-              orderItemId: it.id,
-              productName: it.productName,
-              quantity: it.voidQuantity,
-              lineNotes: it.lineNotes,
-            })),
+            items: toConsolidatedKotItems(
+              items.map((it) => ({
+                id: it.id,
+                productId: it.productId,
+                productName: it.productName,
+                quantity: it.voidQuantity,
+                lineNotes: it.lineNotes,
+              })),
+            ),
           });
           kot.printerName = station.printerName;
           voidKots.push(kot);
@@ -1179,12 +1226,15 @@ export const restaurantService = {
           firedBy: cancelledBy,
           ticketKind: 'VOID',
           voidReason: reason.trim() || 'Check cancelled',
-          items: items.map((it) => ({
-            orderItemId: it.id,
-            productName: it.productName,
-            quantity: Money.toNumber(Money.parseDb(it.quantity)),
-            lineNotes: it.lineNotes,
-          })),
+          items: toConsolidatedKotItems(
+            items.map((it) => ({
+              id: it.id,
+              productId: it.productId,
+              productName: it.productName,
+              quantity: Money.toNumber(Money.parseDb(it.quantity)),
+              lineNotes: it.lineNotes,
+            })),
+          ),
         });
         kot.printerName = station.printerName;
         kots.push(kot);

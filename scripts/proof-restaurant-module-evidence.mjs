@@ -147,7 +147,60 @@ ok('P5.5 KDS surfaces API fallback error', /console\.error/.test(kdsPage) && /to
 const posPage = read('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
 ok('P5.x: POS paintJournalCheck (instant UI)', /paintJournalCheck/.test(posPage));
 ok('P5.x: POS preferLocalRestaurantWrites', /preferLocalRestaurantWrites/.test(posPage));
-ok('P5.x: POS seeds server checks for offline continue', /seedRestaurantCheckFromServer/.test(posPage));
+ok('P5.x: POS seeds server checks for offline continue', /seedCheckPayloadIntoJournal|refreshRestaurantCheckSeedFromServer|seedRestaurantCheckFromServer/.test(posPage));
+
+// ── KOT consolidate + company branding + station split (current FOH) ──
+const printRest = read('samplepos.client/src/lib/printRestaurant.ts');
+const consolidate = exists('shared/utils/consolidateKotLines.ts')
+  ? read('shared/utils/consolidateKotLines.ts')
+  : '';
+ok('KOT: consolidateKotLines SSOT exists', /export function consolidateKotLines/.test(consolidate));
+ok(
+  'KOT: print + service + offline consume consolidate',
+  /consolidateKotLines/.test(printRest) &&
+    /consolidateKotLines/.test(svc) &&
+    /consolidateKotLines/.test(ops),
+);
+
+const branding = exists('samplepos.client/src/lib/documentCompanyBranding.ts')
+  ? read('samplepos.client/src/lib/documentCompanyBranding.ts')
+  : '';
+ok('Docs: brandingFromTenant SSOT', /brandingFromTenant/.test(branding) && /documentCompanyHeaderHtml/.test(branding));
+ok(
+  'Docs: KOT kitchen + Bill guest headers wired',
+  /documentCompanyHeaderHtml/.test(printRest) &&
+    /mode: 'kitchen'/.test(printRest) &&
+    /mode: 'guest'/.test(read('samplepos.client/src/lib/thermalGuestDocument.ts')) &&
+    /brandingFromTenant/.test(posPage),
+);
+ok(
+  'KOT: online sendKot splits byStation',
+  /byStation/.test(svc) && /Split by resolved station/.test(svc),
+);
+ok(
+  'KOT: offline fire splits resolveOfflineKotStation',
+  /resolveOfflineKotStation/.test(ops) && /byStation/.test(ops),
+);
+ok(
+  'KOT: behavioral evidence tests present',
+  exists('samplepos.client/src/__tests__/kot-consolidate.evidence.test.ts') &&
+    exists('samplepos.client/src/__tests__/restaurant-doc-branding.evidence.test.ts') &&
+    exists('samplepos.client/src/__tests__/bill-consolidate.evidence.test.ts') &&
+    /splits offline KOT by station/.test(opsProof),
+);
+ok(
+  'Bill: consolidatePricedLines SSOT wired',
+  exists('shared/utils/consolidatePricedLines.ts') &&
+    exists('samplepos.client/src/lib/thermalGuestDocument.ts') &&
+    /buildThermalGuestDocumentHtml/.test(read('samplepos.client/src/lib/thermalGuestDocument.ts')) &&
+    /billToThermalGuestDocument/.test(read('samplepos.client/src/lib/thermalGuestDocument.ts')) &&
+    /receiptToThermalGuestDocument/.test(read('samplepos.client/src/lib/thermalGuestDocument.ts')),
+);
+ok(
+  'Docs: bill+receipt share thermalGuestDocument',
+  /buildThermalGuestDocumentHtml/.test(read('samplepos.client/src/lib/print.ts')) &&
+    /buildThermalGuestDocumentHtml|billToThermalGuestDocument/.test(printRest),
+);
 ok('P5.x: POS pay uses journal cash path', /payRestaurantCheckOffline/.test(posPage));
 ok('P5.x POS cache warm logs failure', /Offline cache warm failed/.test(posPage));
 ok('ADR offline doc', exists('docs/architecture/RESTAURANT_OFFLINE_ADR.md'));

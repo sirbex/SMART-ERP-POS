@@ -119,16 +119,42 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(service).toMatch(/resolveStation/);
     expect(service).toMatch(/listStations/);
     expect(service).toMatch(/printerName/);
+    const sendKot = service.slice(
+      service.indexOf('async sendKot('),
+      service.indexOf('async voidCheckItems('),
+    );
+    expect(sendKot).toMatch(/byStation/);
+    expect(sendKot).toMatch(/Split by resolved station/);
+
+    const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
+    expect(ops).toMatch(/resolveOfflineKotStation/);
+    expect(ops).toMatch(/byStation/);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/\/stations/);
 
     const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
     expect(print).toMatch(/X-Printer-Name/);
+    expect(print).toMatch(/documentCompanyHeaderHtml/);
+    expect(print).toMatch(/companyName/);
+
+    const branding = readRepo('samplepos.client/src/lib/documentCompanyBranding.ts');
+    expect(branding).toMatch(/brandingFromTenant/);
+    expect(branding).toMatch(/documentCompanyHeaderHtml/);
 
     expect(
       existsSync(path.join(repoRoot, 'samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx')),
     ).toBe(true);
+    expect(
+      existsSync(
+        path.join(repoRoot, 'samplepos.client/src/components/restaurant/StationPrinterPicker.tsx'),
+      ),
+    ).toBe(true);
+    const stationsPage = readRepo('samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx');
+    expect(stationsPage).toMatch(/StationPrinterPicker/);
+    const bridge = readRepo('samplepos.client/src/lib/localPrintBridge.ts');
+    expect(bridge).toMatch(/listLocalPrintBridgePrinters/);
+    expect(bridge).toMatch(/localhost:1811/);
   });
 
   it('Phase 2.3 takeaway/delivery guest details on checks', () => {
@@ -249,6 +275,43 @@ describe('Restaurant architecture proof (Phase 1)', () => {
         path.join(repoRoot, 'samplepos.client/src/__tests__/restaurant-order-tags.evidence.test.ts'),
       ),
     ).toBe(true);
+  });
+
+  it('EVIDENCE gate: KOT consolidates same product+notes into qty (not 1,1,1,1)', () => {
+    const util = readRepo('shared/utils/consolidateKotLines.ts');
+    expect(util).toMatch(/consolidateKotLines/);
+    expect(util).toMatch(/kotLineNotesMergeKey/);
+
+    const service = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
+    const sendKot = service.slice(
+      service.indexOf('async sendKot('),
+      service.indexOf('async voidCheckItems('),
+    );
+    expect(sendKot).toMatch(/toConsolidatedKotItems|consolidateKotLines/);
+
+    const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
+    expect(print).toMatch(/consolidateKotLines/);
+    // Bound to BillPrintData — do not include bill types (unitPrice/lineTotal live there).
+    const kotStart = print.indexOf('export async function printKitchenTicket');
+    const kotEnd = print.indexOf('export interface BillPrintData');
+    expect(kotStart).toBeGreaterThanOrEqual(0);
+    expect(kotEnd).toBeGreaterThan(kotStart);
+    const kotFn = print.slice(kotStart, kotEnd);
+    expect(kotFn).toMatch(/consolidateKotLines/);
+    expect(kotFn).toMatch(/NO PRICES/);
+    expect(kotFn).not.toMatch(/formatCurrency/);
+    expect(kotFn).not.toMatch(/unitPrice|lineTotal/);
+
+    // Bill + receipt share thermalGuestDocument SSOT
+    const guest = readRepo('samplepos.client/src/lib/thermalGuestDocument.ts');
+    expect(guest).toMatch(/buildThermalGuestDocumentHtml/);
+    expect(guest).toMatch(/billToThermalGuestDocument/);
+    expect(guest).toMatch(/receiptToThermalGuestDocument/);
+    expect(guest).toMatch(/consolidatePricedLines/);
+    expect(print).toMatch(/buildThermalGuestDocumentHtml|billToThermalGuestDocument/);
+    const receiptPrint = readRepo('samplepos.client/src/lib/print.ts');
+    expect(receiptPrint).toMatch(/buildThermalGuestDocumentHtml/);
+    expect(receiptPrint).toMatch(/receiptToThermalGuestDocument/);
   });
 
   it('EVIDENCE gate: service parent never quantity-checked (planSaleStockDeduction skip)', () => {
@@ -537,6 +600,8 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(service).toMatch(/mergeChecks/);
     expect(service).toMatch(/splitCheck/);
     expect(service).toMatch(/moveOrderItems|activateCheck/);
+    expect(service).toMatch(/ERR_RESTAURANT_CHECK_CLOSED/);
+    expect(service).toMatch(/listPendingOrdersForTable/);
     expect(service).toMatch(/cloneOrderItemPartial/);
     expect(service).not.toMatch(/CREATE TABLE.*restaurant_orders/i);
 

@@ -7,6 +7,7 @@ import {
   appendOptimisticMenuItem,
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
+  mergeRestaurantSiblingTabs,
   newTempLineId,
   scrubRestaurantTicketTabs,
   toServerRestaurantOrderId,
@@ -163,5 +164,43 @@ describe('Restaurant optimistic online add (behavioral proof)', () => {
       { id: 'tmp_ord_ms3jx3bl', orderNumber: '…', totalAmount: '5' },
     ]);
     expect(scrubbed.map((t) => t.id)).toEqual(['aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee']);
+  });
+
+  it('EVIDENCE closed checks are not resurrected into sibling strip (activate-check CLOSED)', () => {
+    const open = new Set(['bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb']);
+    const merged = mergeRestaurantSiblingTabs(
+      {
+        table: { ...table, status: 'OCCUPIED', currentOrderId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+        order: {
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          orderNumber: 'R-open',
+          subtotal: '10',
+          discountAmount: '0',
+          taxAmount: '0',
+          totalAmount: '10',
+          status: 'PENDING',
+          items: [],
+        },
+        siblingChecks: [],
+      },
+      [
+        {
+          id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+          orderNumber: 'R-paid',
+          totalAmount: '40',
+        },
+        {
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          orderNumber: 'R-open',
+          totalAmount: '10',
+        },
+      ],
+      open,
+    );
+
+    expect(merged.siblingChecks?.map((s) => s.id)).toEqual([]);
+    expect(
+      merged.siblingChecks?.some((s) => s.id === 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
+    ).toBe(false);
   });
 });

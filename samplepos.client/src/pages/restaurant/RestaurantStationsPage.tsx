@@ -9,6 +9,7 @@ import Layout from '../../components/Layout';
 import { api } from '../../utils/api';
 import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 import { useCanAccess } from '../../authorization/useAuthorization';
+import { StationPrinterPicker } from '../../components/restaurant/StationPrinterPicker';
 import { toast } from 'react-hot-toast';
 import axios from 'axios';
 
@@ -130,6 +131,11 @@ export default function RestaurantStationsPage() {
     [stationsQuery.data],
   );
 
+  const knownPrinters = useMemo(
+    () => (stationsQuery.data || []).map((s) => s.printerName),
+    [stationsQuery.data],
+  );
+
   const filteredProducts = useMemo(() => {
     const q = menuFilter.trim().toLowerCase();
     const list = productsQuery.data || [];
@@ -173,8 +179,9 @@ export default function RestaurantStationsPage() {
           <div>
             <h1 className="text-xl font-semibold text-stone-900">Kitchen stations</h1>
             <p className="text-sm text-stone-600">
-              Route KOTs by station (Kitchen / Bar / Pizza). Optional printer name for the local
-              ESC/POS bridge (<code className="text-xs">X-Printer-Name</code>).
+              Route KOTs by station (Kitchen / Bar / Pizza). Pick a printer from the local
+              print bridge list (<code className="text-xs">localhost:1811</code>) — sent as{' '}
+              <code className="text-xs">X-Printer-Name</code>.
             </p>
           </div>
           <div className="flex gap-2 text-sm">
@@ -202,12 +209,15 @@ export default function RestaurantStationsPage() {
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
-            <input
-              className="border rounded px-3 py-2 text-sm"
-              placeholder="Printer name (optional)"
-              value={form.printerName}
-              onChange={(e) => setForm({ ...form, printerName: e.target.value })}
-            />
+            <div className="sm:col-span-2 lg:col-span-1">
+              <StationPrinterPicker
+                value={form.printerName}
+                knownPrinters={knownPrinters}
+                onChange={(printerName) =>
+                  setForm({ ...form, printerName: printerName || '' })
+                }
+              />
+            </div>
             <input
               type="number"
               className="border rounded px-3 py-2 text-sm"
@@ -255,17 +265,18 @@ export default function RestaurantStationsPage() {
                     }
                   }}
                 />
-                <input
-                  className="border rounded px-2 py-1.5 text-sm lg:col-span-2"
-                  defaultValue={station.printerName || ''}
-                  placeholder="Printer name"
-                  onBlur={(e) => {
-                    const next = e.target.value.trim() || null;
-                    if (next !== (station.printerName || null)) {
-                      updateMutation.mutate({ id: station.id, data: { printerName: next } });
-                    }
-                  }}
-                />
+                <div className="lg:col-span-2">
+                  <StationPrinterPicker
+                    value={station.printerName}
+                    knownPrinters={knownPrinters}
+                    disabled={updateMutation.isPending}
+                    onCommit={(next) => {
+                      if (next !== (station.printerName || null)) {
+                        updateMutation.mutate({ id: station.id, data: { printerName: next } });
+                      }
+                    }}
+                  />
+                </div>
                 <button
                   type="button"
                   className="text-xs px-2 py-1.5 rounded border border-stone-300"

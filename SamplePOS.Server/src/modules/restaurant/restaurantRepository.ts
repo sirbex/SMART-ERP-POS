@@ -734,6 +734,7 @@ export const restaurantRepository = {
   async listUnsentItems(conn: DbConn, orderId: string): Promise<
     Array<{
       id: string;
+      productId: string | null;
       productName: string;
       quantity: string;
       lineNotes: string | null;
@@ -741,7 +742,7 @@ export const restaurantRepository = {
     }>
   > {
     const result = await conn.query(
-      `SELECT id, product_name, quantity, line_notes, kitchen_station
+      `SELECT id, product_id, product_name, quantity, line_notes, kitchen_station
        FROM pos_order_items
        WHERE order_id = $1 AND kitchen_sent_at IS NULL
        ORDER BY product_name`,
@@ -749,6 +750,7 @@ export const restaurantRepository = {
     );
     return result.rows.map((r) => convertKeysToCamelCase(r) as {
       id: string;
+      productId: string | null;
       productName: string;
       quantity: string;
       lineNotes: string | null;
@@ -763,6 +765,7 @@ export const restaurantRepository = {
   ): Promise<
     Array<{
       id: string;
+      productId: string | null;
       productName: string;
       quantity: string;
       lineNotes: string | null;
@@ -774,7 +777,7 @@ export const restaurantRepository = {
   > {
     if (itemIds.length === 0) return [];
     const result = await conn.query(
-      `SELECT id, product_name, quantity, line_notes, kitchen_station, kitchen_sent_at,
+      `SELECT id, product_id, product_name, quantity, line_notes, kitchen_station, kitchen_sent_at,
               unit_price, discount_amount
        FROM pos_order_items
        WHERE order_id = $1 AND id = ANY($2::uuid[])
@@ -785,6 +788,7 @@ export const restaurantRepository = {
       (r) =>
         convertKeysToCamelCase(r) as {
           id: string;
+          productId: string | null;
           productName: string;
           quantity: string;
           lineNotes: string | null;
@@ -802,6 +806,7 @@ export const restaurantRepository = {
   ): Promise<
     Array<{
       id: string;
+      productId: string | null;
       productName: string;
       quantity: string;
       lineNotes: string | null;
@@ -809,7 +814,7 @@ export const restaurantRepository = {
     }>
   > {
     const result = await conn.query(
-      `SELECT id, product_name, quantity, line_notes, kitchen_station
+      `SELECT id, product_id, product_name, quantity, line_notes, kitchen_station
        FROM pos_order_items
        WHERE order_id = $1 AND kitchen_sent_at IS NOT NULL
        ORDER BY product_name`,
@@ -819,6 +824,7 @@ export const restaurantRepository = {
       (r) =>
         convertKeysToCamelCase(r) as {
           id: string;
+          productId: string | null;
           productName: string;
           quantity: string;
           lineNotes: string | null;

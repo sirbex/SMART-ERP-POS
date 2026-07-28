@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { AdaptiveDialog } from '../../components/adaptive';
-import { api } from '../../utils/api';
+import { api, getStructuredError } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
 import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 import { useLayoutTier } from '../../hooks/useLayoutTier';
@@ -23,8 +23,10 @@ import {
   allocateVoidQuantity,
   isServerOrderItemId,
 } from '../../lib/restaurantVoidQuantity';
+import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
 import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
 import { printReceipt } from '../../lib/print';
+import { brandingFromTenant } from '../../lib/documentCompanyBranding';
 import { toast } from 'react-hot-toast';
 import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -64,6 +66,7 @@ import {
   appendOptimisticMenuItem,
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
+  mergeRestaurantSiblingTabs,
   newTempLineId,
   scrubRestaurantTicketTabs,
   toServerRestaurantOrderId,
@@ -177,8 +180,8 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
     const kitchenSent = !!it.kitchenSentAt;
     const unitPrice = Number(it.unitPrice) || 0;
     const notes = (it.lineNotes || '').trim();
-    // Different tags/notes must not merge (kitchen accuracy).
-    const key = `${it.productId ?? 'name:' + it.productName}|${unitPrice}|${kitchenSent ? 'S' : 'N'}|${notes}`;
+    // Same product + same modifiers merge (tag order independent). Kitchen sent stays separate.
+    const key = `${it.productId ?? 'name:' + it.productName}|${unitPrice}|${kitchenSent ? 'S' : 'N'}|${kotLineNotesMergeKey(notes)}`;
     const qty = Number(it.quantity) || 0;
     const lineTotal = Number(it.lineTotal) || 0;
     const existing = map.get(key);
@@ -465,22 +468,34 @@ function buildCheckUiFromJournal(
 
 type TicketTab = { id: string; orderNumber: string; totalAmount: string };
 
-/** Keep multi-ticket strip complete when painting one check from journal/cache. */
+/** Open check ids for this table (journal + payload) — blocks closed-tab resurrection. */
+function openTicketIdsForTable(
+  tableId: string | null | undefined,
+  data?: CheckUiPayload | null,
+): Set<string> {
+  const ids = new Set<string>();
+  if (data?.order?.id) ids.add(data.order.id);
+  for (const s of data?.siblingChecks || []) {
+    if (s?.id) ids.add(s.id);
+  }
+  if (!tableId) return ids;
+  for (const c of deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())) {
+    if (c.tableId === tableId) ids.add(c.orderId);
+  }
+  return ids;
+}
+
+/** Keep multi-ticket strip complete without resurrecting paid/cancelled checks. */
 function attachSiblingTabs(
   data: CheckUiPayload,
   knownTabs: TicketTab[],
+  tableId?: string | null,
 ): CheckUiPayload {
-  const activeId = data.order?.id;
-  const siblings = scrubRestaurantTicketTabs(knownTabs)
-    .filter((t) => t.id !== activeId)
-    .map((t) => ({
-      id: t.id,
-      orderNumber: t.orderNumber,
-      totalAmount: t.totalAmount,
-      createdAt: new Date().toISOString(),
-    }));
-  if (siblings.length === 0) return data;
-  return { ...data, siblingChecks: siblings };
+  return mergeRestaurantSiblingTabs(
+    data as OptimisticCheckPayload,
+    knownTabs,
+    openTicketIdsForTable(tableId ?? data.table?.id, data),
+  ) as CheckUiPayload;
 }
 
 function seedCheckPayloadIntoJournal(tableId: string, data: CheckUiPayload): void {
@@ -507,6 +522,9 @@ export default function RestaurantPosPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { config } = useTenant();
+  /** Same company fields as receipt / other docs (tenant branding SSOT). */
+  const companyBranding = useMemo(() => brandingFromTenant(config.branding), [config.branding]);
+  const taxName = config.tax?.name || 'VAT';
   const { user } = useAuth();
   const { isOnline } = useOfflineContext();
   const { tier, chrome } = useLayoutTier();
@@ -1439,16 +1457,18 @@ export default function RestaurantPosPage() {
         pushTab(c.orderId, c.offlineId, String(totalsFromLines(c.lines).totalAmount));
       }
     }
-    const cleaned = scrubRestaurantTicketTabs(tabs);
-    if (cleaned.length > 0 && selectedTableId) {
+    const openIds = openTicketIdsForTable(selectedTableId, checkQuery.data);
+    const cleaned = scrubRestaurantTicketTabs(tabs).filter((t) => {
+      if (isJournalLocalOrderId(t.id) || isTempRestaurantId(t.id)) return true;
+      // No open-id evidence yet (cold load) — keep strip; do not wipe.
+      if (openIds.size === 0) return true;
+      return openIds.has(t.id);
+    });
+    if (selectedTableId) {
       tableTicketsRef.current = { tableId: selectedTableId, tabs: cleaned };
-      return cleaned;
-    }
-    if (tableTicketsRef.current.tableId === selectedTableId) {
-      return scrubRestaurantTicketTabs(tableTicketsRef.current.tabs);
     }
     return cleaned;
-  }, [order, siblingChecks, selectedTableId, journalTick]);
+  }, [order, siblingChecks, selectedTableId, journalTick, checkQuery.data]);
 
   /** Prefetch sibling checks so switching tickets is cache-instant. */
   useEffect(() => {
@@ -1615,6 +1635,14 @@ export default function RestaurantPosPage() {
     markRestaurantCheckSettledInJournal(orderId, kind, opts);
     if (tableId) {
       clearRestaurantBillRequestedOffline(tableId, orderId);
+      if (tableTicketsRef.current.tableId === tableId) {
+        tableTicketsRef.current = {
+          tableId,
+          tabs: scrubRestaurantTicketTabs(tableTicketsRef.current.tabs).filter(
+            (t) => t.id !== orderId,
+          ),
+        };
+      }
       // Only free the floor tile when no other open journal check remains on that table.
       const stillOpen = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState()).some(
         (c) => c.tableId === tableId && c.orderId !== orderId,
@@ -1662,33 +1690,39 @@ export default function RestaurantPosPage() {
         ? deriveRestaurantCheckForTable(selectedTableId, events, syncState, order.id)
         : null;
       if (!derived) throw new Error('Offline check not found');
-      const { kotOfflineId, lines } = fireRestaurantKotOffline(derived);
+      const { tickets } = fireRestaurantKotOffline(derived);
       paintJournalCheck(selectedTableId, derived.orderId);
 
       let printFailures = 0;
-      try {
-        await printKitchenTicket({
-          kotNumber: kotOfflineId,
-          station: 'KITCHEN',
-          tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
-          waiterName: derived.waiterName || null,
-          firedAt: new Date().toLocaleString(),
-          orderChannel: derived.channel,
-          guestName: derived.guestName,
-          guestPhone: derived.guestPhone,
-          deliveryAddress: derived.deliveryAddress,
-          pickupLabel: derived.pickupLabel,
-          items: lines.map((it) => ({
-            productName: it.productName,
-            quantity: it.quantity,
-            lineNotes: it.lineNotes ?? null,
-          })),
-        });
-      } catch {
-        printFailures = 1;
+      for (const kot of tickets) {
+        try {
+          await printKitchenTicket({
+            kotNumber: kot.kotOfflineId,
+            station: kot.station,
+            printerName: kot.printerName,
+            tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
+            waiterName: derived.waiterName || null,
+            firedAt: new Date().toLocaleString(),
+            orderChannel: derived.channel,
+            guestName: derived.guestName,
+            guestPhone: derived.guestPhone,
+            deliveryAddress: derived.deliveryAddress,
+            pickupLabel: derived.pickupLabel,
+            companyName: companyBranding.companyName,
+            companyAddress: companyBranding.companyAddress,
+            companyPhone: companyBranding.companyPhone,
+            items: kot.lines.map((it) => ({
+              productName: it.productName,
+              quantity: it.quantity,
+              lineNotes: it.lineNotes ?? null,
+            })),
+          });
+        } catch {
+          printFailures += 1;
+        }
       }
       publishLanKdsBoardChanged('KOT_FIRED_OFFLINE');
-      return { kotCount: 1, printFailures };
+      return { kotCount: tickets.length, printFailures };
     }
 
     const res = await api.restaurant.sendKot(order.id);
@@ -1725,6 +1759,9 @@ export default function RestaurantPosPage() {
           guestPhone: meta?.guestPhone || kot.guestPhone,
           deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
           pickupLabel: meta?.pickupLabel || kot.pickupLabel,
+          companyName: companyBranding.companyName,
+          companyAddress: companyBranding.companyAddress,
+          companyPhone: companyBranding.companyPhone,
           items: kot.items.map((it) => ({
             productName: it.productName,
             quantity: Number(it.quantity),
@@ -1797,7 +1834,12 @@ export default function RestaurantPosPage() {
     }
     const billedOrderId = order.id;
     const billedOrderNumber = order.orderNumber;
-    const remainingTickets = ticketTabs.filter((t) => t.id !== billedOrderId);
+    const openIds = openTicketIdsForTable(selectedTableId, checkQuery.data);
+    const remainingTickets = ticketTabs.filter(
+      (t) =>
+        t.id !== billedOrderId &&
+        (openIds.size === 0 || openIds.has(t.id) || isJournalLocalOrderId(t.id)),
+    );
     setBusy(true);
     try {
       const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
@@ -1818,16 +1860,20 @@ export default function RestaurantPosPage() {
           : null;
       const billLines = derivedAfterKot
         ? derivedAfterKot.lines.map((it) => ({
+            productId: it.productId,
             productName: it.productName,
             quantity: Number(it.quantity),
             unitPrice: Number(it.unitPrice),
             lineTotal: Number(it.subtotal),
+            lineNotes: it.lineNotes ?? null,
           }))
         : orderLines.map((it) => ({
+            productId: it.productId,
             productName: it.productName,
             quantity: Number(it.quantity),
             unitPrice: Number(it.unitPrice),
             lineTotal: Number(it.lineTotal),
+            lineNotes: it.lineNotes ?? null,
           }));
       const billTotals = derivedAfterKot
         ? totalsFromLines(derivedAfterKot.lines)
@@ -1842,19 +1888,30 @@ export default function RestaurantPosPage() {
         orderNumber: derivedAfterKot?.offlineId || order.orderNumber,
         tableLabel: meta?.tableName || meta?.tableCode || selectedTable?.name || 'Table',
         waiterName: meta?.waiterName || derivedAfterKot?.waiterName || null,
+        printedAt: new Date().toLocaleString(undefined, {
+          year: 'numeric',
+          month: 'short',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
         currencySymbol: config.currency?.symbol,
         orderChannel: meta?.orderChannel || derivedAfterKot?.channel,
         guestName: meta?.guestName || derivedAfterKot?.guestName,
         guestPhone: meta?.guestPhone || derivedAfterKot?.guestPhone,
         deliveryAddress: meta?.deliveryAddress || derivedAfterKot?.deliveryAddress,
         pickupLabel: meta?.pickupLabel || derivedAfterKot?.pickupLabel,
+        companyName: companyBranding.companyName,
+        companyAddress: companyBranding.companyAddress,
+        companyPhone: companyBranding.companyPhone,
         items: billLines,
         subtotal: Number(billTotals.subtotal),
         discountAmount: Number(
           'discountAmount' in billTotals ? billTotals.discountAmount : order.discountAmount,
         ),
         taxAmount: Number(billTotals.taxAmount),
-        taxName: 'VAT',
+        taxName,
         totalAmount: Number(billTotals.totalAmount),
       };
 
@@ -1912,22 +1969,35 @@ export default function RestaurantPosPage() {
           orderNumber: bill.order.orderNumber,
           tableLabel: bill.meta.tableName || bill.meta.tableCode || selectedTable?.name || 'Table',
           waiterName: bill.meta.waiterName,
+          printedAt: new Date().toLocaleString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          }),
           currencySymbol: config.currency?.symbol,
           orderChannel: bill.meta.orderChannel,
           guestName: bill.meta.guestName,
           guestPhone: bill.meta.guestPhone,
           deliveryAddress: bill.meta.deliveryAddress,
           pickupLabel: bill.meta.pickupLabel,
+          companyName: companyBranding.companyName,
+          companyAddress: companyBranding.companyAddress,
+          companyPhone: companyBranding.companyPhone,
           items: (bill.order.items || []).map((it) => ({
+            productId: it.productId,
             productName: it.productName,
             quantity: Number(it.quantity),
             unitPrice: Number(it.unitPrice),
             lineTotal: Number(it.lineTotal),
+            lineNotes: it.lineNotes ?? null,
           })),
           subtotal: Number(bill.order.subtotal),
           discountAmount: Number(bill.order.discountAmount),
           taxAmount: Number(bill.order.taxAmount),
-          taxName: 'VAT',
+          taxName,
           totalAmount: Number(bill.order.totalAmount),
         });
       } catch {
@@ -1951,6 +2021,23 @@ export default function RestaurantPosPage() {
     // Ghost optimistic tickets are not activatable — never POST activate-check with tmp_*.
     if (isTempRestaurantId(orderId)) return;
 
+    // Closed checks must never hit activate-check (ERR_RESTAURANT_CHECK_CLOSED).
+    const openIds = openTicketIdsForTable(selectedTableId, checkQuery.data);
+    if (
+      !isJournalLocalOrderId(orderId) &&
+      openIds.size > 0 &&
+      !openIds.has(orderId)
+    ) {
+      tableTicketsRef.current = {
+        tableId: selectedTableId,
+        tabs: scrubRestaurantTicketTabs(tableTicketsRef.current.tabs).filter(
+          (t) => t.id !== orderId,
+        ),
+      };
+      bumpJournal();
+      return;
+    }
+
     setSelectedLineIds([]);
 
     const cachedTable =
@@ -1967,9 +2054,9 @@ export default function RestaurantPosPage() {
     ]) as CheckUiPayload | undefined;
     const instant =
       fromJournal.order
-        ? attachSiblingTabs(fromJournal, knownTabs)
+        ? attachSiblingTabs(fromJournal, knownTabs, selectedTableId)
         : fromCache?.order
-          ? attachSiblingTabs(fromCache, knownTabs)
+          ? attachSiblingTabs(fromCache, knownTabs, selectedTableId)
           : null;
     if (instant) {
       queryClient.setQueryData(
@@ -2003,10 +2090,30 @@ export default function RestaurantPosPage() {
         if (tableTicketsRef.current.tableId !== selectedTableId) return;
         queryClient.setQueryData(
           ['restaurant', 'check', selectedTableId, orderId, isOnline],
-          attachSiblingTabs(data, scrubRestaurantTicketTabs(tableTicketsRef.current.tabs)),
+          attachSiblingTabs(
+            data,
+            scrubRestaurantTicketTabs(tableTicketsRef.current.tabs),
+            selectedTableId,
+          ),
         );
         bumpJournal();
       } catch (err) {
+        const { errorCode } = getStructuredError(err);
+        if (errorCode === 'ERR_RESTAURANT_CHECK_CLOSED') {
+          tableTicketsRef.current = {
+            tableId: selectedTableId,
+            tabs: scrubRestaurantTicketTabs(tableTicketsRef.current.tabs).filter(
+              (t) => t.id !== orderId,
+            ),
+          };
+          bumpJournal();
+          void queryClient.invalidateQueries({
+            queryKey: ['restaurant', 'check', selectedTableId],
+          });
+          void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+          toast.error('That check is already closed');
+          return;
+        }
         toast.error(apiErr(err, 'Failed to switch check'));
       }
     })();
@@ -2282,6 +2389,9 @@ export default function RestaurantPosPage() {
           guestPhone: meta?.guestPhone || kot.guestPhone,
           deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
           pickupLabel: meta?.pickupLabel || kot.pickupLabel,
+          companyName: companyBranding.companyName,
+          companyAddress: companyBranding.companyAddress,
+          companyPhone: companyBranding.companyPhone,
           items: kot.items.map((it) => ({
             productName: it.productName,
             quantity: Number(it.quantity),
@@ -2904,9 +3014,9 @@ export default function RestaurantPosPage() {
           changeGiven: paid.changeAmount,
           payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
           cashierName: user?.fullName || user?.email || undefined,
-          companyName: config.branding.companyName,
-          companyAddress: config.branding.companyAddress,
-          companyPhone: config.branding.companyPhone,
+          companyName: companyBranding.companyName || undefined,
+          companyAddress: companyBranding.companyAddress || undefined,
+          companyPhone: companyBranding.companyPhone || undefined,
           items: paid.lines.map((l) => ({
             name: l.productName,
             quantity: l.quantity,

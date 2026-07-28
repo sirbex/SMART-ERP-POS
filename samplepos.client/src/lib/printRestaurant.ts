@@ -1,8 +1,20 @@
 /**
  * Kitchen ticket (KOT) and restaurant bill printing.
- * KOT must never include prices. Bill includes prices.
- * Receipt after payment still uses existing printReceipt SSOT.
+ * KOT must never include prices.
+ * Guest BILL HTML is SSOT with RECEIPT via thermalGuestDocument.
  */
+
+import { consolidateKotLines } from '@shared/utils/consolidateKotLines';
+import {
+  documentCompanyHeaderHtml,
+  type DocumentCompanyBranding,
+} from './documentCompanyBranding';
+import { printHtmlDocument } from './print';
+import {
+  billToThermalGuestDocument,
+  buildThermalGuestDocumentHtml,
+  formatGuestDocMoney,
+} from './thermalGuestDocument';
 
 async function printHtml(html: string, printerName?: string | null): Promise<void> {
   try {
@@ -44,7 +56,7 @@ async function printHtml(html: string, printerName?: string | null): Promise<voi
   setTimeout(() => document.body.removeChild(iframe), 1000);
 }
 
-export interface KotPrintData {
+export interface KotPrintData extends DocumentCompanyBranding {
   kotNumber: string;
   station: string;
   tableLabel: string;
@@ -66,9 +78,18 @@ export interface KotPrintData {
 
 export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   const isVoid = data.ticketKind === 'VOID';
-  const lines = data.items
+  const consolidated = consolidateKotLines(
+    data.items.map((it) => ({
+      productName: it.productName,
+      quantity: it.quantity,
+      lineNotes: it.lineNotes ?? null,
+    })),
+  );
+  const lines = consolidated
     .map((it) => {
-      const note = it.lineNotes ? `<div style="font-size:11px;padding-left:8px">* ${escapeHtml(it.lineNotes)}</div>` : '';
+      const note = it.lineNotes
+        ? `<div style="font-size:11px;padding-left:8px">* ${escapeHtml(it.lineNotes)}</div>`
+        : '';
       return `<div style="margin:6px 0"><strong>${escapeHtml(String(it.quantity))}</strong> × ${escapeHtml(it.productName)}</div>${note}`;
     })
     .join('');
@@ -90,6 +111,15 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
     .filter(Boolean)
     .join('');
 
+  const companyBlock = documentCompanyHeaderHtml(
+    {
+      companyName: data.companyName,
+      companyAddress: data.companyAddress,
+      companyPhone: data.companyPhone,
+    },
+    { mode: 'kitchen', escapeHtml },
+  );
+
   const title = isVoid ? '*** VOID ***' : `${escapeHtml(data.station)} ORDER`;
   const html = `<!DOCTYPE html><html><head><title>${isVoid ? 'VOID' : 'KOT'} ${escapeHtml(data.kotNumber)} · ${escapeHtml(data.station)}</title>
 <style>
@@ -98,6 +128,7 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   .meta { font-size: 12px; margin-bottom: 8px; }
   hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
 </style></head><body>
+  ${companyBlock}
   <h1>${title}</h1>
   <div class="meta">
     <div><strong>${escapeHtml(data.tableLabel)}</strong></div>
@@ -117,17 +148,26 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   await printHtml(html, data.printerName);
 }
 
-export interface BillPrintData {
+export interface BillPrintData extends DocumentCompanyBranding {
   orderNumber: string;
   tableLabel: string;
   waiterName?: string | null;
+  /** When the bill was printed (defaults to now if omitted). */
+  printedAt?: string | null;
   currencySymbol?: string;
   orderChannel?: string | null;
   guestName?: string | null;
   guestPhone?: string | null;
   deliveryAddress?: string | null;
   pickupLabel?: string | null;
-  items: Array<{ productName: string; quantity: number; unitPrice: number; lineTotal: number }>;
+  items: Array<{
+    productId?: string | null;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    lineNotes?: string | null;
+  }>;
   subtotal: number;
   discountAmount: number;
   taxAmount: number;
@@ -135,61 +175,18 @@ export interface BillPrintData {
   totalAmount: number;
 }
 
+/** @deprecated Prefer formatGuestDocMoney — kept for evidence import stability. */
+export function formatBillMoney(amount: number, _currencySymbol?: string | null): string {
+  return formatGuestDocMoney(amount);
+}
+
+/** Pure HTML builder — SSOT with receipt via buildThermalGuestDocumentHtml. */
+export function buildRestaurantBillHtml(data: BillPrintData): string {
+  return buildThermalGuestDocumentHtml(billToThermalGuestDocument(data));
+}
+
 export async function printRestaurantBill(data: BillPrintData): Promise<void> {
-  const fmt = (n: number) =>
-    `${data.currencySymbol || ''}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-  const lines = data.items
-    .map(
-      (it) =>
-        `<tr>
-          <td>${escapeHtml(it.productName)}</td>
-          <td style="text-align:right">${escapeHtml(String(it.quantity))}</td>
-          <td style="text-align:right">${fmt(it.unitPrice)}</td>
-          <td style="text-align:right">${fmt(it.lineTotal)}</td>
-        </tr>`,
-    )
-    .join('');
-
-  const channelLabel =
-    data.orderChannel === 'TAKEAWAY'
-      ? 'TAKE AWAY'
-      : data.orderChannel === 'DELIVERY'
-        ? 'DELIVERY'
-        : null;
-
-  const html = `<!DOCTYPE html><html><head><title>Bill ${escapeHtml(data.orderNumber)}</title>
-<style>
-  body { font-family: monospace; font-size: 13px; width: 300px; margin: 0; padding: 8px; }
-  h1 { font-size: 16px; margin: 0 0 8px; text-align: center; }
-  table { width: 100%; border-collapse: collapse; }
-  td { padding: 2px 0; vertical-align: top; }
-  hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
-  .tot { font-weight: bold; font-size: 14px; }
-</style></head><body>
-  <h1>BILL${channelLabel ? ` · ${escapeHtml(channelLabel)}` : ''}</h1>
-  <div>${escapeHtml(data.tableLabel)}</div>
-  <div>Order: ${escapeHtml(data.orderNumber)}</div>
-  ${data.guestName ? `<div>Guest: ${escapeHtml(data.guestName)}</div>` : ''}
-  ${data.guestPhone ? `<div>Phone: ${escapeHtml(data.guestPhone)}</div>` : ''}
-  ${data.pickupLabel ? `<div>Pickup: ${escapeHtml(data.pickupLabel)}</div>` : ''}
-  ${data.deliveryAddress ? `<div>Addr: ${escapeHtml(data.deliveryAddress)}</div>` : ''}
-  ${data.waiterName ? `<div>Waiter: ${escapeHtml(data.waiterName)}</div>` : ''}
-  <hr/>
-  <table>
-    <thead><tr><td>Item</td><td style="text-align:right">Qty</td><td style="text-align:right">Price</td><td style="text-align:right">Amt</td></tr></thead>
-    <tbody>${lines}</tbody>
-  </table>
-  <hr/>
-  <div style="display:flex;justify-content:space-between"><span>Subtotal</span><span>${fmt(data.subtotal)}</span></div>
-  ${data.discountAmount > 0 ? `<div style="display:flex;justify-content:space-between"><span>Discount</span><span>-${fmt(data.discountAmount)}</span></div>` : ''}
-  ${data.taxAmount > 0 ? `<div style="display:flex;justify-content:space-between"><span>${escapeHtml(data.taxName || 'Tax')}</span><span>${fmt(data.taxAmount)}</span></div>` : ''}
-  <div class="tot" style="display:flex;justify-content:space-between;margin-top:6px"><span>Total</span><span>${fmt(data.totalAmount)}</span></div>
-  <hr/>
-  <div style="text-align:center;font-size:11px">Pay at cashier</div>
-</body></html>`;
-
-  await printHtml(html);
+  await printHtmlDocument(buildRestaurantBillHtml(data));
 }
 
 function escapeHtml(s: string): string {

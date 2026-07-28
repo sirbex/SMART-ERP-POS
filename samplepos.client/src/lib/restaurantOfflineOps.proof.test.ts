@@ -28,6 +28,8 @@ import {
 } from './offlineEventSelectors';
 import {
   clearRestaurantBillRequestedOffline,
+  cacheRestaurantMenu,
+  cacheRestaurantStations,
   isRestaurantOrderBillRequestedOffline,
   markRestaurantBillRequestedOffline,
 } from './restaurantOfflineCache';
@@ -333,15 +335,91 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
       false,
     );
 
-    const { kotOfflineId, lines } = fireRestaurantKotOffline(open);
-    expect(kotOfflineId.startsWith('KOT-OFF-')).toBe(true);
-    expect(lines).toHaveLength(1);
+    const { tickets } = fireRestaurantKotOffline(open);
+    expect(tickets.length).toBeGreaterThanOrEqual(1);
+    expect(tickets[0]!.kotOfflineId.startsWith('KOT-OFF-')).toBe(true);
+    expect(tickets[0]!.lines).toHaveLength(1);
     expect(getUnsyncedEvents().some((e) => e.eventType === 'RESTAURANT_KOT_FIRED')).toBe(true);
 
     const after = deriveRestaurantCheckForTable('t-kot', getAllEvents(), getAllSyncState());
     expect(after?.lines.every((l) => !!l.kitchenSentAt)).toBe(true);
     expect(after?.kotPrinted).toBe(true);
     expect(() => fireRestaurantKotOffline(after!)).toThrow(/No new lines/i);
+  });
+
+  it('EVIDENCE one Send splits offline KOT by station (BAR + KITCHEN printers)', () => {
+    cacheRestaurantStations([
+      {
+        id: 's-kit',
+        code: 'KITCHEN',
+        name: 'Kitchen',
+        printerName: 'KitchenPrinter',
+        sortOrder: 10,
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        id: 's-bar',
+        code: 'BAR',
+        name: 'Bar',
+        printerName: 'BarPrinter',
+        sortOrder: 20,
+        isActive: true,
+        isDefault: false,
+      },
+    ]);
+    cacheRestaurantMenu([
+      {
+        id: 'food-1',
+        name: 'Burger',
+        sellingPrice: '10',
+        categoryId: null,
+        categoryName: null,
+        kitchenStation: 'KITCHEN',
+        productType: 'service',
+      },
+      {
+        id: 'drink-1',
+        name: 'Beer',
+        sellingPrice: '5',
+        categoryId: null,
+        categoryName: null,
+        kitchenStation: 'BAR',
+        productType: 'service',
+      },
+    ]);
+
+    appendRestaurantItemOffline({
+      tableId: 't-split-kot',
+      tableCode: 'S1',
+      tableName: 'Split',
+      channel: 'DINE_IN',
+      productId: 'food-1',
+      productName: 'Burger',
+      unitPrice: 10,
+      productType: 'service',
+    });
+    const open = appendRestaurantItemOffline({
+      tableId: 't-split-kot',
+      tableCode: 'S1',
+      tableName: 'Split',
+      channel: 'DINE_IN',
+      productId: 'drink-1',
+      productName: 'Beer',
+      unitPrice: 5,
+      productType: 'service',
+    });
+
+    const { tickets } = fireRestaurantKotOffline(open);
+    expect(tickets).toHaveLength(2);
+    const byStation = Object.fromEntries(tickets.map((t) => [t.station, t]));
+    expect(byStation.KITCHEN?.printerName).toBe('KitchenPrinter');
+    expect(byStation.BAR?.printerName).toBe('BarPrinter');
+    expect(byStation.KITCHEN?.lines.some((l) => l.productName === 'Burger')).toBe(true);
+    expect(byStation.BAR?.lines.some((l) => l.productName === 'Beer')).toBe(true);
+    expect(
+      getUnsyncedEvents().filter((e) => e.eventType === 'RESTAURANT_KOT_FIRED'),
+    ).toHaveLength(2);
   });
 
   it('updateRestaurantGuestOffline links customers SSOT customerId', () => {

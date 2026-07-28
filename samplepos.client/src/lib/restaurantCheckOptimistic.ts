@@ -118,23 +118,61 @@ export function scrubRestaurantTicketTabs(
   return out;
 }
 
-function attachSiblingTabs(
+function isJournalLocalOrderId(id: string): boolean {
+  return id.startsWith('ofl_ord_') || id.startsWith('ofl_');
+}
+
+/**
+ * Merge multi-ticket strip without wiping server siblings or resurrecting closed checks.
+ *
+ * - Always keep `data.siblingChecks` (PENDING / authoritative when from API).
+ * - Add `knownTabs` for mid-switch continuity.
+ * - When `openOrderIds` is provided, drop known UUID tabs not in that set
+ *   (paid/cancelled → activate-check ERR_RESTAURANT_CHECK_CLOSED).
+ * - Journal-local `ofl_*` ids are always eligible when present in knownTabs.
+ */
+export function mergeRestaurantSiblingTabs(
   data: OptimisticCheckPayload,
   knownTabs: OptimisticTicketTab[],
+  openOrderIds?: ReadonlySet<string>,
 ): OptimisticCheckPayload {
-  const activeId = data.order?.id;
-  const siblings = scrubRestaurantTicketTabs(knownTabs)
-    .filter((t) => t.id !== activeId)
-    // Never promote an optimistic temp order into a switchable sibling tab.
-    .filter((t) => !isTempRestaurantId(t.id))
-    .map((t) => ({
+  const activeId = data.order?.id ?? null;
+  const byId = new Map<
+    string,
+    NonNullable<OptimisticCheckPayload['siblingChecks']>[number]
+  >();
+
+  for (const s of data.siblingChecks || []) {
+    if (!s?.id || s.id === activeId || isTempRestaurantId(s.id)) continue;
+    byId.set(s.id, s);
+  }
+
+  for (const t of scrubRestaurantTicketTabs(knownTabs)) {
+    if (!t.id || t.id === activeId || byId.has(t.id)) continue;
+    if (isTempRestaurantId(t.id)) continue;
+    if (openOrderIds && !openOrderIds.has(t.id) && !isJournalLocalOrderId(t.id)) {
+      continue;
+    }
+    byId.set(t.id, {
       id: t.id,
       orderNumber: t.orderNumber,
       totalAmount: t.totalAmount,
       createdAt: new Date().toISOString(),
-    }));
-  if (siblings.length === 0) return data;
+    });
+  }
+
+  const siblings = Array.from(byId.values());
+  if (siblings.length === 0 && !Array.isArray(data.siblingChecks)) {
+    return data;
+  }
   return { ...data, siblingChecks: siblings };
+}
+
+function attachSiblingTabs(
+  data: OptimisticCheckPayload,
+  knownTabs: OptimisticTicketTab[],
+): OptimisticCheckPayload {
+  return mergeRestaurantSiblingTabs(data, knownTabs);
 }
 
 function recalculateTotals(

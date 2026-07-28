@@ -22,8 +22,9 @@ import {
   type DerivedKotStatus,
 } from './offlineEventSelectors';
 import { isServiceProductType } from '@shared/utils/productTypeRules';
+import { consolidateKotLines } from '@shared/utils/consolidateKotLines';
 import { decrementLocalStock, getCachedCatalog, restoreLocalStock } from '../services/offlineCatalogService';
-import { getCachedRestaurantMenu, paintRestaurantTableFreeOffline } from './restaurantOfflineCache';
+import { getCachedRestaurantMenu, getCachedRestaurantStations, paintRestaurantTableFreeOffline } from './restaurantOfflineCache';
 import { publishLanKdsBoardChanged } from './restaurantLanKds';
 
 /** Resolve product type for offline stock rules (menu/catalog beat a stale line stamp). */
@@ -393,39 +394,102 @@ export function updateRestaurantGuestOffline(
 }
 
 /**
- * Mark unsent lines as KOT-fired: append RESTAURANT_KOT_FIRED + ORDER_UPDATED with kitchenSentAt.
+ * Mark unsent lines as KOT-fired: one RESTAURANT_KOT_FIRED per station (same as online sendKot),
+ * then ORDER_UPDATED with kitchenSentAt. Menu kitchenStation + station registry printers.
  */
-export function fireRestaurantKotOffline(order: DerivedOrder): {
+export type OfflineKotTicket = {
   kotOfflineId: string;
+  station: string;
+  printerName: string | null;
   lines: Array<{ lineId: string; productName: string; quantity: number; lineNotes?: string | null }>;
-} {
+};
+
+function resolveOfflineKotStation(productId: string): { code: string; printerName: string | null } {
+  const menu = getCachedRestaurantMenu();
+  const stations = getCachedRestaurantStations().filter((s) => s.isActive);
+  const product = menu.find((p) => p.id === productId);
+  const code = String(product?.kitchenStation || '')
+    .trim()
+    .toUpperCase();
+  const match = code
+    ? stations.find((s) => s.code.toUpperCase() === code)
+    : undefined;
+  if (match) return { code: match.code.toUpperCase(), printerName: match.printerName };
+  const def = stations.find((s) => s.isDefault) || stations[0];
+  if (def) return { code: def.code.toUpperCase(), printerName: def.printerName };
+  return { code: 'KITCHEN', printerName: null };
+}
+
+export function fireRestaurantKotOffline(order: DerivedOrder): { tickets: OfflineKotTicket[] } {
   const unsent = order.lines.filter((l) => l.lineId && !l.kitchenSentAt);
   if (unsent.length === 0) {
     throw new Error('No new lines to send to kitchen');
   }
-  const kotOfflineId = newKotOfflineId();
-  const firedAt = new Date().toISOString();
-  const kotLines = unsent.map((l) => ({
-    lineId: l.lineId!,
-    productName: l.productName,
-    quantity: l.quantity,
-    lineNotes: l.lineNotes ?? null,
-  }));
 
-  appendEvent({
-    eventType: 'RESTAURANT_KOT_FIRED',
-    key: generateEventKey(),
-    orderId: order.orderId,
-    kotOfflineId,
-    tableCode: order.tableCode,
-    tableName: order.tableName,
-    waiterName: order.waiterName,
-    station: 'KITCHEN',
-    orderChannel: order.channel,
-    guestName: order.guestName,
-    lines: kotLines,
-    ts: Date.now(),
-  });
+  const firedAt = new Date().toISOString();
+  const byStation = new Map<
+    string,
+    { station: string; printerName: string | null; items: typeof unsent }
+  >();
+  for (const line of unsent) {
+    const resolved = resolveOfflineKotStation(line.productId);
+    const key = resolved.code;
+    const bucket = byStation.get(key) || {
+      station: key,
+      printerName: resolved.printerName,
+      items: [],
+    };
+    bucket.items.push(line);
+    byStation.set(key, bucket);
+  }
+
+  const tickets: OfflineKotTicket[] = [];
+  for (const bucket of byStation.values()) {
+    const kotOfflineId = newKotOfflineId();
+    const kotLines = bucket.items.map((l) => ({
+      lineId: l.lineId!,
+      productName: l.productName,
+      quantity: l.quantity,
+      lineNotes: l.lineNotes ?? null,
+    }));
+
+    appendEvent({
+      eventType: 'RESTAURANT_KOT_FIRED',
+      key: generateEventKey(),
+      orderId: order.orderId,
+      kotOfflineId,
+      tableCode: order.tableCode,
+      tableName: order.tableName,
+      waiterName: order.waiterName,
+      station: bucket.station,
+      orderChannel: order.channel,
+      guestName: order.guestName,
+      lines: kotLines,
+      ts: Date.now(),
+    });
+
+    const printLines = consolidateKotLines(
+      kotLines.map((l) => ({
+        productId: bucket.items.find((u) => u.lineId === l.lineId)?.productId ?? null,
+        productName: l.productName,
+        quantity: l.quantity,
+        lineNotes: l.lineNotes,
+        lineId: l.lineId,
+      })),
+    ).map((c) => ({
+      lineId: c.lineId || c.sourceIds[0] || kotLines[0]!.lineId,
+      productName: c.productName,
+      quantity: c.quantity,
+      lineNotes: c.lineNotes,
+    }));
+
+    tickets.push({
+      kotOfflineId,
+      station: bucket.station,
+      printerName: bucket.printerName,
+      lines: printLines,
+    });
+  }
 
   appendEvent({
     eventType: 'ORDER_UPDATED',
@@ -451,7 +515,7 @@ export function fireRestaurantKotOffline(order: DerivedOrder): {
   });
 
   publishLanKdsBoardChanged('KOT_FIRED');
-  return { kotOfflineId, lines: kotLines };
+  return { tickets };
 }
 
 /**
