@@ -9,6 +9,7 @@
 
 import type pg from 'pg';
 import { Money } from '../../utils/money.js';
+import { resolveSupplierFilter } from './supplierFilter.js';
 
 // =============================================================================
 // TYPES
@@ -112,9 +113,16 @@ export async function getOpenItems(
     const params: unknown[] = [];
     let idx = 0;
 
-    if (filters.supplierId) {
+    const supplierFilter = resolveSupplierFilter(filters.supplierId);
+    if (supplierFilter.mode === 'id') {
         conditions.push(`po.supplier_id = $${++idx}`);
-        params.push(filters.supplierId);
+        params.push(supplierFilter.supplierId);
+    } else if (supplierFilter.mode === 'search') {
+        // Free-text: name / code — never bind non-UUID into supplier_id (PG 22P02).
+        conditions.push(
+            `(s."CompanyName" ILIKE $${++idx} OR COALESCE(s."SupplierCode", '') ILIKE $${idx})`,
+        );
+        params.push(`%${supplierFilter.supplierSearch}%`);
     }
     if (filters.poNumber) {
         conditions.push(`po.order_number ILIKE $${++idx}`);
@@ -139,12 +147,17 @@ export async function getOpenItems(
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const supplierJoin =
+        supplierFilter.mode === 'search'
+            ? `JOIN suppliers s ON po.supplier_id = s."Id"`
+            : '';
 
     // Count query
     const countResult = await client.query(
         `SELECT COUNT(DISTINCT gr.id) as total
      FROM goods_receipts gr
      JOIN purchase_orders po ON gr.purchase_order_id = po.id
+     ${supplierJoin}
      ${whereClause}`,
         params
     );
@@ -316,17 +329,23 @@ export async function getMatchCandidates(
     client: pg.Pool | pg.PoolClient,
     options: { supplierId?: string; tolerancePercent?: number } = {}
 ): Promise<GrirMatchCandidateRow[]> {
-    const conditions: string[] = [
-        `gr.status = 'COMPLETED'`,
+    const invoiceConditions: string[] = [
         `si."Status" NOT IN ('CANCELLED')`,
         `si.deleted_at IS NULL`,
     ];
+    const whereConditions: string[] = [`gr.status = 'COMPLETED'`];
     const params: unknown[] = [];
     let idx = 0;
 
-    if (options.supplierId) {
-        conditions.push(`po.supplier_id = $${++idx}`);
-        params.push(options.supplierId);
+    const supplierFilter = resolveSupplierFilter(options.supplierId);
+    if (supplierFilter.mode === 'id') {
+        whereConditions.push(`po.supplier_id = $${++idx}`);
+        params.push(supplierFilter.supplierId);
+    } else if (supplierFilter.mode === 'search') {
+        whereConditions.push(
+            `(s."CompanyName" ILIKE $${++idx} OR COALESCE(s."SupplierCode", '') ILIKE $${idx})`,
+        );
+        params.push(`%${supplierFilter.supplierSearch}%`);
     }
 
     const result = await client.query(
@@ -354,15 +373,14 @@ export async function getMatchCandidates(
      ) gr_items ON gr_items.goods_receipt_id = gr.id
      JOIN supplier_invoices si
        ON si."PurchaseOrderId" = po.id
-       AND ${conditions.slice(1).join(' AND ')}
-     WHERE ${conditions[0]}
+       AND ${invoiceConditions.join(' AND ')}
+     WHERE ${whereConditions.join(' AND ')}
        AND NOT EXISTS (
          SELECT 1 FROM grir_clearing gc
          WHERE gc.goods_receipt_id = gr.id
            AND gc.invoice_id = si."Id"
            AND gc.status IN ('MATCHED', 'VARIANCE')
        )
-     ${options.supplierId ? `AND po.supplier_id = $1` : ''}
      ORDER BY is_exact_match DESC, amount_diff ASC`,
         params
     );

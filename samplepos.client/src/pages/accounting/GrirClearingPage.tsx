@@ -422,10 +422,10 @@ export default function GrirClearingPage() {
         {showFilters && (
           <div className="mt-4 pt-4 border-t grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <FilterInput
-              label="Supplier ID"
+              label="Supplier"
               value={filters.supplierId || ''}
               onChange={(v) => setFilters({ ...filters, supplierId: v || undefined })}
-              placeholder="Supplier UUID or name"
+              placeholder="Name, code, or UUID"
             />
             <FilterInput
               label="PO Number"
@@ -697,7 +697,7 @@ export default function GrirClearingPage() {
                 value={autoMatchSupplier}
                 onChange={(e) => setAutoMatchSupplier(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
-                placeholder="Filter by supplier ID..."
+                placeholder="Name, code, or UUID"
               />
             </div>
             <div>
@@ -1048,7 +1048,7 @@ function CandidatesTab({
             value={supplierFilter}
             onChange={(e) => onSupplierChange(e.target.value)}
             className="w-full px-3 py-2 border rounded-lg text-sm"
-            placeholder="Filter by supplier ID..."
+            placeholder="Filter by supplier name, code, or UUID..."
           />
         </div>
         <div className="text-sm text-gray-500">
