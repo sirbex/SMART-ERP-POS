@@ -763,7 +763,10 @@ export const supplierCreditDebitNoteRepository = {
     async postSupplierNote(client: Pool | PoolClient, noteId: string): Promise<SupplierCreditDebitNoteRecord | null> {
         const result = await client.query(
             `UPDATE supplier_invoices
-       SET "Status" = 'POSTED', "UpdatedAt" = NOW()
+       SET "Status" = 'POSTED',
+           is_posted_to_gl = TRUE,
+           posted_to_gl_at = COALESCE(posted_to_gl_at, NOW()),
+           "UpdatedAt" = NOW()
        WHERE "Id" = $1 AND "Status" = 'DRAFT' AND document_type IN ('SUPPLIER_CREDIT_NOTE', 'SUPPLIER_DEBIT_NOTE')
        RETURNING *`,
             [noteId]
