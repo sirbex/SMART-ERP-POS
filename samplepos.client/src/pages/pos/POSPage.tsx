@@ -5,6 +5,9 @@ import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapp
 import POSProductSearch, { POSProductSearchHandle } from './POSProductSearch';
 import POSButton from '../../components/pos/POSButton';
 import POSModal from '../../components/pos/POSModal';
+import { AdaptiveAppShell } from '../../components/adaptive';
+import { useLayoutTier } from '../../hooks/useLayoutTier';
+import { shouldShowCoach } from '../../lib/adaptiveChrome';
 import PrintReceiptDialog from '../../components/pos/PrintReceiptDialog';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { computeUomPrices } from '@shared/utils/uom-pricing';
@@ -355,6 +358,7 @@ export default function POSPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { tier, chrome } = useLayoutTier();
   const discountLimitPercent = useDiscountLimitPercent();
   const canAccessImport = useHasPermission('admin.create');
   const canAccessSettings = useHasPermission('system.read');
@@ -3406,7 +3410,15 @@ export default function POSPage() {
   }, [canAccessImport, canAccessSettings, canAccessRoles]);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <AdaptiveAppShell className="h-screen">
+    <div
+      className="flex flex-col h-screen bg-gray-50"
+      data-pos-tier={tier}
+      data-adaptive-coach={chrome.coach}
+      data-adaptive-pad={chrome.numericPad}
+      data-adaptive-secondary={chrome.secondaryActions}
+      data-adaptive-labels={chrome.actionLabels}
+    >
       {/* Navigation Drawer */}
       {showNavDrawer && (
         <>
@@ -3520,7 +3532,11 @@ export default function POSPage() {
               {failedCount} failed
             </button>
           )}
-          <span className="hidden lg:inline text-xs text-gray-500">Bank-grade precision</span>
+          {shouldShowCoach(chrome, 'coach') ? (
+            <span className="text-xs text-gray-500" data-pos-coach="precision">
+              Bank-grade precision
+            </span>
+          ) : null}
           <ServerClock />
         </div>
       </header>
@@ -5455,5 +5471,6 @@ export default function POSPage() {
         </div>
       )}
     </div>
+    </AdaptiveAppShell>
   );
 }

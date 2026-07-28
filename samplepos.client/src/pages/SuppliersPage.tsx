@@ -16,6 +16,12 @@ import { handleApiError } from '../utils/errorHandler';
 import { downloadFile } from '../utils/download';
 import { useCanAccess } from '../components/auth/ProtectedRoute';
 import SupplierPOItemsInline from '../components/suppliers/SupplierPOItemsInline';
+import { SupplierInvoicesAdaptiveGrid } from '../components/suppliers/SupplierInvoicesAdaptiveGrid';
+import {
+  AdaptiveDialog,
+  AdaptiveFormField,
+  AdaptiveFormLayout,
+} from '../components/adaptive';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { useServerTableSort } from '../hooks/useServerTableSort';
 import { WorkflowHelpTrigger } from '../components/inventory/shared';
@@ -2151,381 +2157,144 @@ function SupplierDetailModal({
                     supplier AP was already reduced when the credit was posted.
                   </p>
 
-                  {/* Invoice List — mobile cards + desktop table */}
-                  {/* Mobile cards */}
-                  <div className="block sm:hidden space-y-3">
-                    {filteredInvoices.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500 text-sm">No invoices match your search.</div>
-                      ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
-                      const settlement = buildSupplierBillSettlement(inv);
-                      const balance = settlement.balanceDue;
-                      const payable = isPayableInvoice(inv);
-                      const isCn = isSupplierCreditNote(inv);
-                      const checked = multiSelected.has(inv.id);
-                      const statusColor =
-                        isCn ? 'bg-teal-100 text-teal-800'
-                          : settlement.displayStatus === 'Paid' ? 'bg-green-100 text-green-800'
-                          : settlement.displayStatus === 'Partially settled' || settlement.displayStatus === 'Partially paid'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : settlement.displayStatus === 'Open' ? 'bg-blue-100 text-blue-800'
-                              : 'bg-gray-100 text-gray-800';
-                      return (
-                        <div key={inv.id} className={`border rounded-lg p-3 ${checked ? 'border-purple-400 bg-purple-50' : isCn ? 'border-teal-200 bg-teal-50/40' : 'border-gray-200'}`}>
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center gap-2">
-                              {canCreatePayment && payable && (
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => toggleMultiRow(inv)}
-                                  className="w-4 h-4 accent-purple-600 cursor-pointer"
-                                  title="Select for payment"
-                                />
-                              )}
-                              <span className="font-semibold text-blue-600 text-sm">{inv.invoiceNumber}</span>
-                              {isCn && (
-                                <span className="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded bg-teal-100 text-teal-800">
-                                  Credit note
-                                </span>
-                              )}
+                  {/* Invoice List — AdaptiveDataGrid (cards / reduced / full) */}
+                  <SupplierInvoicesAdaptiveGrid
+                    rows={paginatedInvoices}
+                    canCreatePayment={canCreatePayment}
+                    multiSelected={multiSelected}
+                    downloadingPdf={downloadingPdf}
+                    selectedInvoiceId={selectedInvoice}
+                    formatDisplayDate={formatDisplayDate}
+                    isPayableInvoice={isPayableInvoice}
+                    onToggleMulti={toggleMultiRow}
+                    onSetMultiAmount={setMultiAmount}
+                    onToggleExpand={handleInlineInvoiceToggle}
+                    onDownloadPdf={handleDownloadPdf}
+                    onPay={openPayModal}
+                    renderExpanded={(inv) => (
+                      loadingInvoiceDetails && selectedInvoice === inv.id ? (
+                        <div className="text-sm text-gray-600">Loading details...</div>
+                      ) : invoiceDetails && selectedInvoice === inv.id ? (
+                        <div className="border border-blue-200 rounded-lg overflow-hidden bg-white">
+                          <div className="bg-blue-50 px-4 py-3 flex justify-between items-center gap-3 flex-wrap">
+                            <div>
+                              <h4 className="text-base font-semibold text-gray-900">
+                                {invoiceDetails.invoice.invoiceNumber}
+                                {invoiceDetails.invoice.supplierInvoiceNumber && (
+                                  <span className="ml-2 text-xs font-normal text-gray-500">
+                                    (Ref: {invoiceDetails.invoice.supplierInvoiceNumber})
+                                  </span>
+                                )}
+                              </h4>
+                              <p className="text-xs text-gray-600">
+                                {formatDisplayDate(invoiceDetails.invoice.invoiceDate)}
+                                {invoiceDetails.invoice.dueDate && ` | Due: ${formatDisplayDate(invoiceDetails.invoice.dueDate)}`}
+                              </p>
                             </div>
-                            <span
-                              className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full ${statusColor}`}
-                              title={settlement.equationHint}
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
+                              disabled={downloadingPdf === inv.id}
+                              className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 min-h-[var(--layout-touch-target)]"
                             >
-                              {settlement.displayStatus}
-                            </span>
+                              {downloadingPdf === inv.id ? '⏳ Generating...' : '📄 Export PDF'}
+                            </button>
                           </div>
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mb-2">
-                            <span className="text-gray-500">Date</span>
-                            <span className="text-right">{formatDisplayDate(inv.invoiceDate)}</span>
-                            <span className="text-gray-500">Due</span>
-                            <span className="text-right">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '—'}</span>
-                            <span className="text-gray-500">Total</span>
-                            <span className="text-right font-semibold">{formatCurrency(settlement.invoiceTotal)}</span>
-                            {!isCn && (
-                              <>
-                                <span className="text-gray-500">Payments</span>
-                                <span className="text-right text-green-600">{formatCurrency(settlement.payments)}</span>
-                                <span className="text-gray-500">Credits</span>
-                                <span className="text-right text-teal-700">{formatCurrency(settlement.creditsApplied)}</span>
-                              </>
+                          <div className="p-4 space-y-4">
+                            {invoiceDetails.lineItems && invoiceDetails.lineItems.length > 0 ? (
+                              <div>
+                                <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Line Items</h5>
+                                <div className="overflow-x-auto">
+                                  <table className="min-w-full divide-y divide-gray-200 text-xs">
+                                    <thead className="bg-gray-50">
+                                      <tr>
+                                        <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">#</th>
+                                        <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">Product/Service</th>
+                                        <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">Description</th>
+                                        <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Qty</th>
+                                        <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Unit Cost</th>
+                                        <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Total</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                      {invoiceDetails.lineItems.map((item: InvoiceLineItem, idx: number) => (
+                                        <tr key={item.id || idx} className="hover:bg-gray-50">
+                                          <td className="px-3 py-2 text-gray-500">{item.lineNumber || idx + 1}</td>
+                                          <td className="px-3 py-2 font-medium text-gray-900">{item.productName}</td>
+                                          <td className="px-3 py-2 text-gray-600">{item.description || '-'}</td>
+                                          <td className="px-3 py-2 text-right text-gray-900">{item.quantity} {item.unitOfMeasure || ''}</td>
+                                          <td className="px-3 py-2 text-right text-gray-900">{formatCurrency(item.unitCost)}</td>
+                                          <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatCurrency(item.lineTotal)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                    <tfoot className="bg-gray-50">
+                                      <tr>
+                                        <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Subtotal:</td>
+                                        <td className="px-3 py-2 text-right font-bold text-gray-900">{formatCurrency(Number(invoiceDetails.invoice.subtotal || invoiceDetails.invoice.totalAmount || 0))}</td>
+                                      </tr>
+                                      {Number(invoiceDetails.invoice.taxAmount || 0) > 0 && (
+                                        <tr>
+                                          <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Tax:</td>
+                                          <td className="px-3 py-2 text-right font-bold text-gray-900">{formatCurrency(Number(invoiceDetails.invoice.taxAmount))}</td>
+                                        </tr>
+                                      )}
+                                      <tr className="border-t-2 border-gray-300">
+                                        <td colSpan={5} className="px-3 py-2 text-right font-bold text-gray-900">Total:</td>
+                                        <td className="px-3 py-2 text-right font-bold text-blue-600">{formatCurrency(Number(invoiceDetails.invoice.totalAmount || 0))}</td>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-xs text-gray-500 italic">No line items recorded for this invoice.</div>
                             )}
-                            {balance > 0 && (
-                              <>
-                                <span className="text-gray-500">{isCn ? 'Credit left' : 'Balance due'}</span>
-                                <span className={`text-right font-bold ${isCn ? 'text-teal-700' : 'text-red-600'}`}>
-                                  {formatCurrency(balance)}
-                                </span>
-                              </>
+
+                            {invoiceDetails.allocations && invoiceDetails.allocations.length > 0 && (
+                              <div>
+                                <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Payment History</h5>
+                                <div className="space-y-2">
+                                  {invoiceDetails.allocations.map((alloc: InvoiceAllocation) => (
+                                    <div key={alloc.id} className="flex justify-between items-center bg-green-50 rounded-lg px-3 py-2">
+                                      <div>
+                                        <span className="font-medium text-gray-900 text-xs">{alloc.paymentNumber}</span>
+                                        <span className="ml-2 text-xs text-gray-500">{formatDisplayDate(alloc.allocationDate)}</span>
+                                        <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded text-gray-600">{alloc.paymentMethod}</span>
+                                      </div>
+                                      <span className="font-bold text-green-700 text-xs">{formatCurrency(alloc.amountAllocated)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
                             )}
-                          </div>
-                          {/* Inline pay amount when checked */}
-                          {checked && (
-                            <div className="flex items-center gap-2 mb-2 pt-2 border-t border-purple-200">
-                              <span className="text-xs text-purple-700 font-medium">Pay:</span>
-                              <input
-                                type="number"
-                                value={multiSelected.get(inv.id) ?? ''}
-                                onChange={(e) => setMultiAmount(inv.id, e.target.value)}
-                                className="flex-1 border border-purple-300 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-purple-500"
-                                min="0.01"
-                                max={balance}
-                                step="0.01"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => setMultiAmount(inv.id, balance.toString())}
-                                className="text-xs text-purple-600 hover:text-purple-800 underline whitespace-nowrap"
-                              >Full</button>
-                            </div>
-                          )}
-                          <div className="flex gap-2 pt-2 border-t border-gray-100">
-                            <button onClick={() => loadInvoiceDetails(inv.id)} className="flex-1 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">👁️ View</button>
-                            <button onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)} disabled={downloadingPdf === inv.id} className="flex-1 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 disabled:opacity-50">{downloadingPdf === inv.id ? '⏳' : '📄'} PDF</button>
-                            {balance > 0 && !['Cancelled', 'CANCELLED', 'DRAFT'].includes(inv.status || '') && <button onClick={() => openPayModal(inv)} className="flex-1 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 font-semibold">💰 Pay</button>}
+
+                            {invoiceDetails.creditNotesApplied && invoiceDetails.creditNotesApplied.length > 0 && (
+                              <div>
+                                <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Credits applied</h5>
+                                <div className="space-y-2">
+                                  {invoiceDetails.creditNotesApplied.map((cn) => (
+                                    <div key={cn.id} className="flex justify-between items-center bg-teal-50 rounded-lg px-3 py-2">
+                                      <div>
+                                        <span className="font-medium text-gray-900 text-xs">{cn.creditNoteNumber}</span>
+                                        <span className="ml-2 text-xs text-gray-500">{formatDisplayDate(cn.creditNoteDate)}</span>
+                                        {cn.reason && (
+                                          <span className="ml-2 text-xs text-gray-500">{cn.reason}</span>
+                                        )}
+                                      </div>
+                                      <span className="font-bold text-teal-700 text-xs">{formatCurrency(cn.amount)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                  {/* Desktop table */}
-                  <div className="hidden sm:block overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          {canCreatePayment && <th className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase w-8">✓</th>}
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice #</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ref</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
-                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase" title="Cash/bank payments only">Payments</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase" title="Applied supplier credit notes">Credits</th>
-                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase" title="Total − Payments − Credits">Balance due</th>
-                          {canCreatePayment && <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Pay Amount</th>}
-                          <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredInvoices.length === 0 ? (
-                          <tr><td colSpan={canCreatePayment ? 12 : 10} className="px-4 py-8 text-center text-sm text-gray-500">No invoices match your search.</td></tr>
-                        ) : paginatedInvoices.map((inv: SupplierInvoiceSummary) => {
-                          const settlement = buildSupplierBillSettlement(inv);
-                          const total = settlement.invoiceTotal;
-                          const paid = settlement.payments;
-                          const credits = settlement.creditsApplied;
-                          const balance = settlement.balanceDue;
-                          const payable = isPayableInvoice(inv);
-                          const isCn = isSupplierCreditNote(inv);
-                          const checked = multiSelected.has(inv.id);
-                          const statusColor =
-                            isCn
-                              ? 'bg-teal-100 text-teal-800'
-                              : settlement.displayStatus === 'Paid'
-                              ? 'bg-green-100 text-green-800'
-                              : settlement.displayStatus === 'Partially settled' || settlement.displayStatus === 'Partially paid'
-                                ? 'bg-yellow-100 text-yellow-800'
-                                : settlement.displayStatus === 'Open'
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : 'bg-gray-100 text-gray-800';
-                          const isExpanded = selectedInvoice === inv.id;
-                          return (
-                            <Fragment key={inv.id}>
-                              <tr
-                                onClick={() => handleInlineInvoiceToggle(inv.id)}
-                                className={`${checked ? 'bg-purple-50' : isCn ? 'bg-teal-50/50 hover:bg-teal-50' : 'hover:bg-gray-50'} cursor-pointer ${isExpanded ? 'bg-blue-50/40' : ''}`}
-                              >
-                                {canCreatePayment && (
-                                  <td className="px-3 py-3 text-center">
-                                    {payable && (
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={() => toggleMultiRow(inv)}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="w-4 h-4 accent-purple-600 cursor-pointer"
-                                        title="Select for payment"
-                                      />
-                                    )}
-                                  </td>
-                                )}
-                                <td className="px-4 py-3 text-sm font-medium text-blue-600">
-                                  <div className="flex items-center gap-2">
-                                    <span>{inv.invoiceNumber}</span>
-                                    {isCn && (
-                                      <span className="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded bg-teal-100 text-teal-800 whitespace-nowrap">
-                                        Credit note
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-sm text-gray-600">{inv.supplierInvoiceNumber || '-'}</td>
-                                <td className="px-4 py-3 text-sm text-gray-900">{formatDisplayDate(inv.invoiceDate)}</td>
-                                <td className="px-4 py-3 text-sm text-gray-600">{inv.dueDate ? formatDisplayDate(inv.dueDate) : '-'}</td>
-                                <td className="px-4 py-3">
-                                  <span
-                                    className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}
-                                    title={settlement.equationHint}
-                                  >
-                                    {settlement.displayStatus}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">{formatCurrency(total)}</td>
-                                <td className="px-4 py-3 text-sm text-right text-green-600">{isCn ? '—' : formatCurrency(paid)}</td>
-                                <td className="px-4 py-3 text-sm text-right text-teal-700">{isCn ? '—' : formatCurrency(credits)}</td>
-                                <td className={`px-4 py-3 text-sm text-right font-semibold ${isCn ? 'text-teal-700' : 'text-red-600'}`}>
-                                  {balance > 0
-                                    ? (isCn ? `Credit ${formatCurrency(balance)}` : formatCurrency(balance))
-                                    : balance < 0
-                                      ? <span className="text-green-600">Overpaid {formatCurrency(Math.abs(balance))}</span>
-                                      : <span className="text-green-600">Paid</span>}
-                                </td>
-                                {canCreatePayment && (
-                                  <td className="px-4 py-3 text-right">
-                                    {checked && (
-                                      <div className="flex items-center gap-1 justify-end">
-                                        <input
-                                          type="number"
-                                          value={multiSelected.get(inv.id) ?? ''}
-                                          onChange={(e) => setMultiAmount(inv.id, e.target.value)}
-                                          onClick={(e) => e.stopPropagation()}
-                                          className="w-28 border border-purple-300 rounded px-2 py-1 text-xs text-right focus:ring-1 focus:ring-purple-500"
-                                          min="0.01"
-                                          max={balance}
-                                          step="0.01"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setMultiAmount(inv.id, balance.toString());
-                                          }}
-                                          className="text-xs text-purple-600 hover:text-purple-800 underline whitespace-nowrap"
-                                        >Full</button>
-                                      </div>
-                                    )}
-                                  </td>
-                                )}
-                                <td className="px-4 py-3 text-center">
-                                  <div className="flex items-center justify-center gap-1">
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleInlineInvoiceToggle(inv.id);
-                                      }}
-                                      className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 transition-colors"
-                                      title={isExpanded ? 'Hide Details' : 'View Details'}
-                                    >
-                                      {isExpanded ? '▾ Hide' : '▸ View'}
-                                    </button>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDownloadPdf(inv.id, inv.invoiceNumber);
-                                      }}
-                                      disabled={downloadingPdf === inv.id}
-                                      className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 transition-colors disabled:opacity-50"
-                                      title="Download PDF"
-                                    >{downloadingPdf === inv.id ? '⏳' : '📄'} PDF</button>
-                                    {balance > 0 && !['Cancelled', 'CANCELLED', 'DRAFT'].includes(inv.status || '') && <button onClick={(e) => {
-                                      e.stopPropagation();
-                                      openPayModal(inv);
-                                    }} className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 transition-colors font-semibold" title="Record Payment">💰 Pay</button>}
-                                  </div>
-                                </td>
-                              </tr>
-                              {isExpanded && (
-                                <tr className="bg-blue-50/30">
-                                  <td colSpan={canCreatePayment ? 12 : 10} className="px-4 py-4">
-                                    {loadingInvoiceDetails ? (
-                                      <div className="text-sm text-gray-600">Loading details...</div>
-                                    ) : invoiceDetails ? (
-                                      <div className="border border-blue-200 rounded-lg overflow-hidden bg-white">
-                                        <div className="bg-blue-50 px-4 py-3 flex justify-between items-center">
-                                          <div>
-                                            <h4 className="text-base font-semibold text-gray-900">
-                                              {invoiceDetails.invoice.invoiceNumber}
-                                              {invoiceDetails.invoice.supplierInvoiceNumber && (
-                                                <span className="ml-2 text-xs font-normal text-gray-500">
-                                                  (Ref: {invoiceDetails.invoice.supplierInvoiceNumber})
-                                                </span>
-                                              )}
-                                            </h4>
-                                            <p className="text-xs text-gray-600">
-                                              {formatDisplayDate(invoiceDetails.invoice.invoiceDate)}
-                                              {invoiceDetails.invoice.dueDate && ` | Due: ${formatDisplayDate(invoiceDetails.invoice.dueDate)}`}
-                                            </p>
-                                          </div>
-                                          <button
-                                            onClick={() => handleDownloadPdf(inv.id, inv.invoiceNumber)}
-                                            disabled={downloadingPdf === inv.id}
-                                            className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
-                                          >
-                                            {downloadingPdf === inv.id ? '⏳ Generating...' : '📄 Export PDF'}
-                                          </button>
-                                        </div>
-                                        <div className="p-4 space-y-4">
-                                          {invoiceDetails.lineItems && invoiceDetails.lineItems.length > 0 ? (
-                                            <div>
-                                              <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Line Items</h5>
-                                              <table className="min-w-full divide-y divide-gray-200 text-xs">
-                                                <thead className="bg-gray-50">
-                                                  <tr>
-                                                    <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">#</th>
-                                                    <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">Product/Service</th>
-                                                    <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase">Description</th>
-                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Qty</th>
-                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Unit Cost</th>
-                                                    <th className="px-3 py-2 text-right font-medium text-gray-500 uppercase">Total</th>
-                                                  </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-gray-100">
-                                                  {invoiceDetails.lineItems.map((item: InvoiceLineItem, idx: number) => (
-                                                    <tr key={item.id || idx} className="hover:bg-gray-50">
-                                                      <td className="px-3 py-2 text-gray-500">{item.lineNumber || idx + 1}</td>
-                                                      <td className="px-3 py-2 font-medium text-gray-900">{item.productName}</td>
-                                                      <td className="px-3 py-2 text-gray-600">{item.description || '-'}</td>
-                                                      <td className="px-3 py-2 text-right text-gray-900">{item.quantity} {item.unitOfMeasure || ''}</td>
-                                                      <td className="px-3 py-2 text-right text-gray-900">{formatCurrency(item.unitCost)}</td>
-                                                      <td className="px-3 py-2 text-right font-semibold text-gray-900">{formatCurrency(item.lineTotal)}</td>
-                                                    </tr>
-                                                  ))}
-                                                </tbody>
-                                                <tfoot className="bg-gray-50">
-                                                  <tr>
-                                                    <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Subtotal:</td>
-                                                    <td className="px-3 py-2 text-right font-bold text-gray-900">{formatCurrency(Number(invoiceDetails.invoice.subtotal || invoiceDetails.invoice.totalAmount || 0))}</td>
-                                                  </tr>
-                                                  {Number(invoiceDetails.invoice.taxAmount || 0) > 0 && (
-                                                    <tr>
-                                                      <td colSpan={5} className="px-3 py-2 text-right font-semibold text-gray-700">Tax:</td>
-                                                      <td className="px-3 py-2 text-right font-bold text-gray-900">{formatCurrency(Number(invoiceDetails.invoice.taxAmount))}</td>
-                                                    </tr>
-                                                  )}
-                                                  <tr className="border-t-2 border-gray-300">
-                                                    <td colSpan={5} className="px-3 py-2 text-right font-bold text-gray-900">Total:</td>
-                                                    <td className="px-3 py-2 text-right font-bold text-blue-600">{formatCurrency(Number(invoiceDetails.invoice.totalAmount || 0))}</td>
-                                                  </tr>
-                                                </tfoot>
-                                              </table>
-                                            </div>
-                                          ) : (
-                                            <div className="text-xs text-gray-500 italic">No line items recorded for this invoice.</div>
-                                          )}
-
-                                          {invoiceDetails.allocations && invoiceDetails.allocations.length > 0 && (
-                                            <div>
-                                              <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Payment History</h5>
-                                              <div className="space-y-2">
-                                                {invoiceDetails.allocations.map((alloc: InvoiceAllocation) => (
-                                                  <div key={alloc.id} className="flex justify-between items-center bg-green-50 rounded-lg px-3 py-2">
-                                                    <div>
-                                                      <span className="font-medium text-gray-900 text-xs">{alloc.paymentNumber}</span>
-                                                      <span className="ml-2 text-xs text-gray-500">{formatDisplayDate(alloc.allocationDate)}</span>
-                                                      <span className="ml-2 text-xs bg-white px-2 py-0.5 rounded text-gray-600">{alloc.paymentMethod}</span>
-                                                    </div>
-                                                    <span className="font-bold text-green-700 text-xs">{formatCurrency(alloc.amountAllocated)}</span>
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          )}
-
-                                          {invoiceDetails.creditNotesApplied && invoiceDetails.creditNotesApplied.length > 0 && (
-                                            <div>
-                                              <h5 className="text-xs font-semibold text-gray-700 mb-2 uppercase tracking-wide">Credits applied</h5>
-                                              <div className="space-y-2">
-                                                {invoiceDetails.creditNotesApplied.map((cn) => (
-                                                  <div key={cn.id} className="flex justify-between items-center bg-teal-50 rounded-lg px-3 py-2">
-                                                    <div>
-                                                      <span className="font-medium text-gray-900 text-xs">{cn.creditNoteNumber}</span>
-                                                      <span className="ml-2 text-xs text-gray-500">{formatDisplayDate(cn.creditNoteDate)}</span>
-                                                      {cn.reason && (
-                                                        <span className="ml-2 text-xs text-gray-500">{cn.reason}</span>
-                                                      )}
-                                                    </div>
-                                                    <span className="font-bold text-teal-700 text-xs">{formatCurrency(cn.amount)}</span>
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="text-sm text-gray-500">No details found for this invoice.</div>
-                                    )}
-                                  </td>
-                                </tr>
-                              )}
-                            </Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                      ) : (
+                        <div className="text-sm text-gray-500">No details found for this invoice.</div>
+                      )
+                    )}
+                  />
 
                   {/* Pagination */}
                   {invoiceTotalPages > 1 && (
@@ -3351,6 +3120,9 @@ interface SupplierFormModalProps {
   onSubmit: (data: SupplierFormData) => void;
 }
 
+const supplierFormControlClass =
+  'w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]';
+
 function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalProps) {
   const { data: whtTypesRaw } = useWhtTypes();
   const supplierWhtTypes = useMemo(() => {
@@ -3382,7 +3154,6 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
     if (!formData.name.trim()) {
       alert('Supplier name is required');
       return;
@@ -3401,30 +3172,35 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg p-4 sm:p-6 max-w-[95vw] sm:max-w-2xl w-full mx-2 sm:mx-4 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold">
-            {supplier ? 'Edit Supplier' : 'Add New Supplier'}
-          </h3>
+    <AdaptiveDialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title={supplier ? 'Edit Supplier' : 'Add New Supplier'}
+      size="md"
+      footer={
+        <>
           <button
+            type="button"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
-            aria-label="Close"
+            className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 min-h-[var(--layout-touch-target)]"
           >
-            ×
+            Cancel
           </button>
-        </div>
-
-        <form onSubmit={handleSubmit}>
-          {/* Supplier Name */}
-          <div className="mb-4">
+          <button
+            type="submit"
+            form="supplier-form"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 min-h-[var(--layout-touch-target)]"
+          >
+            {supplier ? 'Update Supplier' : 'Create Supplier'}
+          </button>
+        </>
+      }
+    >
+      <form id="supplier-form" onSubmit={handleSubmit} className="space-y-4">
+        <AdaptiveFormLayout>
+          <AdaptiveFormField span="full">
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-2">
               Supplier Name <span className="text-red-500">*</span>
             </label>
@@ -3433,14 +3209,13 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
               id="name"
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className={supplierFormControlClass}
               required
               maxLength={255}
             />
-          </div>
+          </AdaptiveFormField>
 
-          {/* Contact Person */}
-          <div className="mb-4">
+          <AdaptiveFormField>
             <label htmlFor="contactPerson" className="block text-sm font-medium text-gray-700 mb-2">
               Contact Person
             </label>
@@ -3449,13 +3224,12 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
               id="contactPerson"
               value={formData.contactPerson}
               onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className={supplierFormControlClass}
               maxLength={255}
             />
-          </div>
+          </AdaptiveFormField>
 
-          {/* Email */}
-          <div className="mb-4">
+          <AdaptiveFormField>
             <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
               Email
             </label>
@@ -3464,12 +3238,11 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
               id="email"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className={supplierFormControlClass}
             />
-          </div>
+          </AdaptiveFormField>
 
-          {/* Phone */}
-          <div className="mb-4">
+          <AdaptiveFormField>
             <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-2">
               Phone
             </label>
@@ -3478,13 +3251,30 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
               id="phone"
               value={formData.phone}
               onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className={supplierFormControlClass}
               maxLength={50}
             />
-          </div>
+          </AdaptiveFormField>
 
-          {/* Address */}
-          <div className="mb-4">
+          <AdaptiveFormField>
+            <label htmlFor="paymentTerms" className="block text-sm font-medium text-gray-700 mb-2">
+              Payment Terms
+            </label>
+            <select
+              id="paymentTerms"
+              value={formData.paymentTerms}
+              onChange={(e) => setFormData({ ...formData, paymentTerms: e.target.value })}
+              className={supplierFormControlClass}
+            >
+              {PAYMENT_TERMS.map((term) => (
+                <option key={term.value} value={term.value}>
+                  {term.label}
+                </option>
+              ))}
+            </select>
+          </AdaptiveFormField>
+
+          <AdaptiveFormField span="full">
             <label htmlFor="address" className="block text-sm font-medium text-gray-700 mb-2">
               Address
             </label>
@@ -3495,99 +3285,65 @@ function SupplierFormModal({ supplier, onClose, onSubmit }: SupplierFormModalPro
               rows={3}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
-          </div>
+          </AdaptiveFormField>
 
-          {/* Payment Terms */}
-          <div className="mb-6">
-            <label htmlFor="paymentTerms" className="block text-sm font-medium text-gray-700 mb-2">
-              Payment Terms
-            </label>
-            <select
-              id="paymentTerms"
-              value={formData.paymentTerms}
-              onChange={(e) => setFormData({ ...formData, paymentTerms: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              {PAYMENT_TERMS.map((term) => (
-                <option key={term.value} value={term.value}>
-                  {term.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50/60 p-4 space-y-3">
-            <div className="flex items-start gap-3">
-              <Checkbox
-                id="supplier-wht-liable"
-                checked={formData.whtLiable === true}
-                onCheckedChange={(checked) =>
-                  setFormData({
-                    ...formData,
-                    whtLiable: checked === true,
-                    defaultWhtTypeId: checked === true ? formData.defaultWhtTypeId : null,
-                  })
-                }
-              />
-              <div>
-                <Label htmlFor="supplier-wht-liable" className="text-sm font-medium text-gray-900">
-                  Subject to withholding tax
-                </Label>
-                <p className="text-xs text-gray-600 mt-0.5">
-                  When paying this supplier, WHT will be suggested automatically (you can still skip).
-                </p>
-              </div>
-            </div>
-            {formData.whtLiable && (
-              <div>
-                <Label htmlFor="supplier-default-wht" className="text-sm font-medium text-gray-700">
-                  Default WHT type
-                </Label>
-                <select
-                  id="supplier-default-wht"
-                  value={formData.defaultWhtTypeId || ''}
-                  onChange={(e) =>
+          <AdaptiveFormField span="full">
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="supplier-wht-liable"
+                  checked={formData.whtLiable === true}
+                  onCheckedChange={(checked) =>
                     setFormData({
                       ...formData,
-                      defaultWhtTypeId: e.target.value || null,
+                      whtLiable: checked === true,
+                      defaultWhtTypeId: checked === true ? formData.defaultWhtTypeId : null,
                     })
                   }
-                  className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
-                >
-                  <option value="">— Select when paying —</option>
-                  {supplierWhtTypes.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.code} — {t.name} ({(Number(t.rate) * 100).toFixed(1)}%)
-                    </option>
-                  ))}
-                </select>
-                {supplierWhtTypes.length === 0 && (
-                  <p className="text-xs text-amber-800 mt-1">
-                    No supplier WHT types yet. Create one under Accounting → Withholding Tax.
+                />
+                <div>
+                  <Label htmlFor="supplier-wht-liable" className="text-sm font-medium text-gray-900">
+                    Subject to withholding tax
+                  </Label>
+                  <p className="text-xs text-gray-600 mt-0.5">
+                    When paying this supplier, WHT will be suggested automatically (you can still skip).
                   </p>
-                )}
+                </div>
               </div>
-            )}
-          </div>
-
-          {/* Form Actions */}
-          <div className="flex justify-end gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              {supplier ? 'Update Supplier' : 'Create Supplier'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+              {formData.whtLiable && (
+                <div>
+                  <Label htmlFor="supplier-default-wht" className="text-sm font-medium text-gray-700">
+                    Default WHT type
+                  </Label>
+                  <select
+                    id="supplier-default-wht"
+                    value={formData.defaultWhtTypeId || ''}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        defaultWhtTypeId: e.target.value || null,
+                      })
+                    }
+                    className={`mt-1 bg-white ${supplierFormControlClass}`}
+                  >
+                    <option value="">— Select when paying —</option>
+                    {supplierWhtTypes.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.code} — {t.name} ({(Number(t.rate) * 100).toFixed(1)}%)
+                      </option>
+                    ))}
+                  </select>
+                  {supplierWhtTypes.length === 0 && (
+                    <p className="text-xs text-amber-800 mt-1">
+                      No supplier WHT types yet. Create one under Accounting → Withholding Tax.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </AdaptiveFormField>
+        </AdaptiveFormLayout>
+      </form>
+    </AdaptiveDialog>
   );
 }

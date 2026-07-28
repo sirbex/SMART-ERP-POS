@@ -26,8 +26,6 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
-    Card,
-    CardContent,
     Badge,
     Textarea,
     Tabs,
@@ -50,8 +48,17 @@ import {
 import { api } from '../../services/api';
 import { formatTimestampDate } from '../../utils/businessDate';
 import { ListSkeleton } from '../../components/ui/ListSkeleton';
-import { ResponsiveActionBar, ResponsiveToolbar, ResponsiveToolbarActions } from '../../components/ui/ResponsiveActionBar';
+import { ResponsiveToolbar, ResponsiveToolbarActions } from '../../components/ui/ResponsiveActionBar';
 import { AdjustCustomerInvoiceModal } from '../../components/shared/AdjustCustomerInvoiceModal';
+import {
+    CustomerNotesAdaptiveGrid,
+    SupplierNotesAdaptiveGrid,
+} from '../../components/accounting/CreditDebitNotesAdaptiveGrids';
+import {
+    AdaptiveDialog,
+    AdaptiveFormField,
+    AdaptiveFormLayout,
+} from '../../components/adaptive';
 
 /** Supplier notes use DRAFT/POSTED/APPLIED; customer notes use Draft/Posted. */
 function isNoteDraft(status: string): boolean {
@@ -262,82 +269,13 @@ function CustomerNotesTab() {
                 <div className="rounded-lg border border-gray-100 bg-white">
                     <ListSkeleton rows={5} />
                 </div>
-            ) : filteredNotes.length === 0 ? (
-                <div className="text-center py-12 text-gray-500 text-sm">No notes found</div>
             ) : (
-                <div className="space-y-2">
-                    {filteredNotes.map(note => (
-                        <Card key={note.id}>
-                            <CardContent className="p-4">
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                            <span className="font-semibold text-base sm:text-lg break-all">{note.invoiceNumber}</span>
-                                            <Badge variant={note.documentType === 'CREDIT_NOTE' ? 'destructive' : 'default'}>
-                                                {note.documentType === 'CREDIT_NOTE' ? 'Credit Note' : 'Debit Note'}
-                                            </Badge>
-                                            <Badge variant={note.status === 'Posted' ? 'default' : 'secondary'}>
-                                                {note.status}
-                                            </Badge>
-                                        </div>
-                                        <div className="mt-1.5 text-sm text-gray-600 break-words">
-                                            <span className="font-medium">{note.customerName}</span>
-                                            {note.referenceInvoiceNumber && (
-                                                <span className="block sm:inline sm:ml-2">Ref: {note.referenceInvoiceNumber}</span>
-                                            )}
-                                            {note.reason && <span className="block sm:inline sm:ml-2 text-gray-500">{note.reason}</span>}
-                                        </div>
-                                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-sm">
-                                            <div>
-                                                <span className="text-gray-500">Total:</span>{' '}
-                                                <span className="font-semibold">{formatCurrency(note.totalAmount)}</span>
-                                            </div>
-                                            <div>
-                                                <span className="text-gray-500">Tax:</span> {formatCurrency(note.taxAmount)}
-                                            </div>
-                                            <div className="col-span-2 sm:col-span-1">
-                                                <span className="text-gray-500">Date:</span>{' '}
-                                                {formatTimestampDate(note.issueDate)}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <ResponsiveActionBar className="sm:shrink-0">
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => { setSelectedNote(note); setIsDetailOpen(true); }}
-                                        >
-                                            <Eye className="h-4 w-4 shrink-0" />
-                                            <span className="ml-2 sm:hidden">View</span>
-                                        </Button>
-                                        {note.status === 'Draft' && (
-                                            <Button
-                                                size="sm"
-                                                onClick={() => handlePost(note.id)}
-                                                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                                            >
-                                                <Check className="h-4 w-4 shrink-0" />
-                                                Post
-                                            </Button>
-                                        )}
-                                        {note.status === 'Posted' && (
-                                            <Button
-                                                variant="destructive"
-                                                size="sm"
-                                                onClick={() => handleCancel(note.id)}
-                                                className="flex items-center gap-1"
-                                            >
-                                                <XCircle className="h-4 w-4 shrink-0" />
-                                                Cancel
-                                            </Button>
-                                        )}
-                                    </ResponsiveActionBar>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
+                <CustomerNotesAdaptiveGrid
+                    notes={filteredNotes}
+                    onView={(note) => { setSelectedNote(note); setIsDetailOpen(true); }}
+                    onPost={handlePost}
+                    onCancel={handleCancel}
+                />
             )}
 
             {/* Smart credit note: invoice → adjustment wizard (posted CN) */}
@@ -374,39 +312,62 @@ function CustomerNotesTab() {
             )}
 
             {/* Detail View */}
-            <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen} zIndex={detailGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
-                <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>{selectedNote?.invoiceNumber}</DialogTitle>
-                        <DialogDescription>
-                            {selectedNote?.documentType === 'CREDIT_NOTE' ? 'Credit' : 'Debit'} Note Details
-                        </DialogDescription>
-                    </DialogHeader>
-                    {selectedNote && (
-                        <div className="space-y-3 text-sm">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <div><span className="text-gray-500">Customer:</span> {selectedNote.customerName}</div>
-                                <div><span className="text-gray-500">Status:</span> {selectedNote.status}</div>
-                                <div><span className="text-gray-500">Subtotal:</span> {formatCurrency(selectedNote.subtotal)}</div>
-                                <div><span className="text-gray-500">Tax:</span> {formatCurrency(selectedNote.taxAmount)}</div>
-                                <div><span className="text-gray-500">Total:</span> {formatCurrency(selectedNote.totalAmount)}</div>
-                                <div><span className="text-gray-500">Date:</span> {formatTimestampDate(selectedNote.issueDate)}</div>
-                            </div>
-                            {selectedNote.reason && (
-                                <div><span className="text-gray-500">Reason:</span> {selectedNote.reason}</div>
-                            )}
-                            {selectedNote.notes && (
-                                <div><span className="text-gray-500">Notes:</span> {selectedNote.notes}</div>
-                            )}
+            <AdaptiveDialog
+                open={isDetailOpen}
+                onOpenChange={setIsDetailOpen}
+                zIndex={detailGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}
+                size="md"
+                title={selectedNote?.invoiceNumber ?? 'Note details'}
+                description={`${selectedNote?.documentType === 'CREDIT_NOTE' ? 'Credit' : 'Debit'} Note Details`}
+            >
+                {selectedNote && (
+                    <AdaptiveFormLayout>
+                        <AdaptiveFormField>
+                            <span className="text-gray-500 text-sm">Customer</span>
+                            <div className="font-medium">{selectedNote.customerName}</div>
+                        </AdaptiveFormField>
+                        <AdaptiveFormField>
+                            <span className="text-gray-500 text-sm">Status</span>
+                            <div className="font-medium">{selectedNote.status}</div>
+                        </AdaptiveFormField>
+                        <AdaptiveFormField>
+                            <span className="text-gray-500 text-sm">Subtotal</span>
+                            <div>{formatCurrency(selectedNote.subtotal)}</div>
+                        </AdaptiveFormField>
+                        <AdaptiveFormField>
+                            <span className="text-gray-500 text-sm">Tax</span>
+                            <div>{formatCurrency(selectedNote.taxAmount)}</div>
+                        </AdaptiveFormField>
+                        <AdaptiveFormField>
+                            <span className="text-gray-500 text-sm">Total</span>
+                            <div className="font-semibold">{formatCurrency(selectedNote.totalAmount)}</div>
+                        </AdaptiveFormField>
+                        <AdaptiveFormField>
+                            <span className="text-gray-500 text-sm">Date</span>
+                            <div>{formatTimestampDate(selectedNote.issueDate)}</div>
+                        </AdaptiveFormField>
+                        {selectedNote.reason && (
+                            <AdaptiveFormField span="full">
+                                <span className="text-gray-500 text-sm">Reason</span>
+                                <div>{selectedNote.reason}</div>
+                            </AdaptiveFormField>
+                        )}
+                        {selectedNote.notes && (
+                            <AdaptiveFormField span="full">
+                                <span className="text-gray-500 text-sm">Notes</span>
+                                <div>{selectedNote.notes}</div>
+                            </AdaptiveFormField>
+                        )}
+                        <AdaptiveFormField span="full">
                             <DocumentFlowButton
                                 entityType={selectedNote.documentType === 'CREDIT_NOTE' ? 'CREDIT_NOTE' : 'DEBIT_NOTE'}
                                 entityId={selectedNote.id}
                                 size="sm"
                             />
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+                        </AdaptiveFormField>
+                    </AdaptiveFormLayout>
+                )}
+            </AdaptiveDialog>
         </div>
     );
 }
@@ -648,122 +609,16 @@ function SupplierNotesTab() {
                 <div className="rounded-lg border border-gray-100 bg-white">
                     <ListSkeleton rows={5} />
                 </div>
-            ) : filteredNotes.length === 0 ? (
-                <div className="text-center py-12 text-gray-500 text-sm">No supplier notes found</div>
             ) : (
-                <div className="space-y-2">
-                    {filteredNotes.map(note => (
-                        <Card
-                            key={note.id}
-                            className={highlightNoteId === note.id ? 'ring-2 ring-amber-400' : undefined}
-                        >
-                            <CardContent className="p-4">
-                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                                            <span className="font-semibold text-base sm:text-lg break-all">{note.invoiceNumber}</span>
-                                            <Badge variant={note.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'destructive' : 'default'}>
-                                                {note.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'Credit Note' : 'Debit Note'}
-                                            </Badge>
-                                            <Badge variant={
-                                                note.status === 'APPLIED' ? 'default'
-                                                    : isSupplierPosted(note.status) ? 'default'
-                                                        : 'secondary'
-                                            }>
-                                                {supplierNoteStatusLabel(note)}
-                                            </Badge>
-                                            {note.documentType === 'SUPPLIER_CREDIT_NOTE'
-                                                && note.status === 'POSTED'
-                                                && note.outstandingBalance > 0
-                                                && isReturnGrnCreditNote(note) && (
-                                                <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-800">
-                                                    Apply to bill required
-                                                </Badge>
-                                            )}
-                                            {isNoteDraft(note.status) && (
-                                                <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-800">
-                                                    Needs posting
-                                                </Badge>
-                                            )}
-                                            {note.documentType === 'SUPPLIER_CREDIT_NOTE'
-                                                && note.status === 'POSTED'
-                                                && note.outstandingBalance > 0 && (
-                                                    <Badge variant="outline" className="border-purple-300 bg-purple-50 text-purple-700">
-                                                        On-account: {formatCurrency(note.outstandingBalance)}
-                                                    </Badge>
-                                                )}
-                                        </div>
-                                        <div className="mt-1.5 text-sm text-gray-600 break-words">
-                                            <span className="font-medium">{note.supplierName || 'Unknown supplier'}</span>
-                                            {note.referenceInvoiceNumber && (
-                                                <span className="block sm:inline sm:ml-2">Ref: {note.referenceInvoiceNumber}</span>
-                                            )}
-                                            {note.reason && <span className="block sm:inline sm:ml-2 text-gray-500">{note.reason}</span>}
-                                        </div>
-                                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-sm">
-                                            <div>
-                                                <span className="text-gray-500">Total:</span>{' '}
-                                                <span className="font-semibold">{formatCurrency(note.totalAmount)}</span>
-                                            </div>
-                                            <div>
-                                                <span className="text-gray-500">Tax:</span> {formatCurrency(note.taxAmount)}
-                                            </div>
-                                            <div className="col-span-2 sm:col-span-1">
-                                                <span className="text-gray-500">Date:</span>{' '}
-                                                {formatTimestampDate(note.issueDate)}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <ResponsiveActionBar className="sm:shrink-0">
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => { setSelectedNote(note); setIsDetailOpen(true); }}
-                                        >
-                                            <Eye className="h-4 w-4 shrink-0" />
-                                            <span className="ml-2 sm:hidden">View</span>
-                                        </Button>
-                                        {isNoteDraft(note.status) && (
-                                            <Button
-                                                size="sm"
-                                                onClick={() => handlePost(note)}
-                                                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                                            >
-                                                <Check className="h-4 w-4 shrink-0" />
-                                                Post to GL
-                                            </Button>
-                                        )}
-                                        {(note.status === 'POSTED' || note.status === 'APPLIED') && (
-                                            <Button
-                                                variant="destructive"
-                                                size="sm"
-                                                onClick={() => handleCancel(note.id)}
-                                                className="flex items-center gap-1"
-                                            >
-                                                <XCircle className="h-4 w-4 shrink-0" />
-                                                Cancel
-                                            </Button>
-                                        )}
-                                        {note.documentType === 'SUPPLIER_CREDIT_NOTE'
-                                            && note.status === 'POSTED'
-                                            && note.outstandingBalance > 0 && (
-                                                <Button
-                                                    size="sm"
-                                                    onClick={() => handleApplyFIFO(note.id)}
-                                                    disabled={applyingNoteId === note.id}
-                                                    className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                                                >
-                                                    <Sparkles className="h-4 w-4 shrink-0" />
-                                                    {applyingNoteId === note.id ? 'Applying…' : 'Apply to Open Bills'}
-                                                </Button>
-                                            )}
-                                    </ResponsiveActionBar>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
+                <SupplierNotesAdaptiveGrid
+                    notes={filteredNotes}
+                    highlightNoteId={highlightNoteId}
+                    applyingNoteId={applyingNoteId}
+                    onView={(note) => { setSelectedNote(note); setIsDetailOpen(true); }}
+                    onPost={handlePost}
+                    onCancel={handleCancel}
+                    onApplyFifo={handleApplyFIFO}
+                />
             )}
 
             {/* Create Supplier Note Modal */}
@@ -779,77 +634,100 @@ function SupplierNotesTab() {
             />
 
             {/* Detail View */}
-            <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen} zIndex={detailGuardRefS.current?.panelZIndex ?? ZINDEX.PANEL}>
-                <DialogContent className="max-w-[95vw] sm:max-w-lg max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>{selectedNote?.invoiceNumber}</DialogTitle>
-                        <DialogDescription>
-                            Supplier {selectedNote?.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'Credit' : 'Debit'} Note Details
-                        </DialogDescription>
-                    </DialogHeader>
-                    {selectedNote && (
-                        <div className="space-y-3 text-sm">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <div><span className="text-gray-500">Supplier:</span> {selectedNote.supplierName}</div>
-                                <div><span className="text-gray-500">Status:</span> {supplierNoteStatusLabel(selectedNote)}</div>
-                                <div><span className="text-gray-500">Subtotal:</span> {formatCurrency(selectedNote.subtotal)}</div>
-                                <div><span className="text-gray-500">Tax:</span> {formatCurrency(selectedNote.taxAmount)}</div>
-                                <div><span className="text-gray-500">Total:</span> {formatCurrency(selectedNote.totalAmount)}</div>
-                                <div><span className="text-gray-500">Date:</span> {formatTimestampDate(selectedNote.issueDate)}</div>
-                            </div>
+            <AdaptiveDialog
+                open={isDetailOpen}
+                onOpenChange={setIsDetailOpen}
+                zIndex={detailGuardRefS.current?.panelZIndex ?? ZINDEX.PANEL}
+                size="md"
+                title={selectedNote?.invoiceNumber ?? 'Note details'}
+                description={`Supplier ${selectedNote?.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'Credit' : 'Debit'} Note Details`}
+            >
+                {selectedNote && (
+                    <div className="space-y-4 text-sm">
+                        <AdaptiveFormLayout>
+                            <AdaptiveFormField>
+                                <span className="text-gray-500">Supplier</span>
+                                <div className="font-medium">{selectedNote.supplierName}</div>
+                            </AdaptiveFormField>
+                            <AdaptiveFormField>
+                                <span className="text-gray-500">Status</span>
+                                <div className="font-medium">{supplierNoteStatusLabel(selectedNote)}</div>
+                            </AdaptiveFormField>
+                            <AdaptiveFormField>
+                                <span className="text-gray-500">Subtotal</span>
+                                <div>{formatCurrency(selectedNote.subtotal)}</div>
+                            </AdaptiveFormField>
+                            <AdaptiveFormField>
+                                <span className="text-gray-500">Tax</span>
+                                <div>{formatCurrency(selectedNote.taxAmount)}</div>
+                            </AdaptiveFormField>
+                            <AdaptiveFormField>
+                                <span className="text-gray-500">Total</span>
+                                <div className="font-semibold">{formatCurrency(selectedNote.totalAmount)}</div>
+                            </AdaptiveFormField>
+                            <AdaptiveFormField>
+                                <span className="text-gray-500">Date</span>
+                                <div>{formatTimestampDate(selectedNote.issueDate)}</div>
+                            </AdaptiveFormField>
                             {selectedNote.reason && (
-                                <div><span className="text-gray-500">Reason:</span> {selectedNote.reason}</div>
+                                <AdaptiveFormField span="full">
+                                    <span className="text-gray-500">Reason</span>
+                                    <div>{selectedNote.reason}</div>
+                                </AdaptiveFormField>
                             )}
                             {selectedNote.notes && (
-                                <div><span className="text-gray-500">Notes:</span> {selectedNote.notes}</div>
+                                <AdaptiveFormField span="full">
+                                    <span className="text-gray-500">Notes</span>
+                                    <div>{selectedNote.notes}</div>
+                                </AdaptiveFormField>
                             )}
-                            {isNoteDraft(selectedNote.status) && (
-                                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                                    <p className="font-medium">Next step: Post to GL</p>
-                                    <p className="mt-1 text-xs">
-                                        Draft notes do not affect GL or supplier balance. Close this dialog and click
-                                        {' '}<strong>Post to GL</strong> on the list (or use Create &amp; Post when creating).
-                                    </p>
-                                </div>
-                            )}
-                            {selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE'
-                                && selectedNote.status === 'APPLIED'
-                                && selectedNote.referenceInvoiceNumber && (
-                                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
-                                    <p className="font-medium">Credit allocated to {selectedNote.referenceInvoiceNumber}</p>
-                                    <p className="mt-1 text-xs">
-                                        This credit note&apos;s full amount ({formatCurrency(selectedNote.totalAmount)}) was
-                                        applied to the referenced bill. The bill&apos;s outstanding balance is reduced in
-                                        Supplier Payments.
-                                    </p>
-                                </div>
-                            )}
-                            {selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE'
-                                && selectedNote.status === 'POSTED'
-                                && selectedNote.outstandingBalance > 0 && (
-                                <div className="rounded-md border border-purple-200 bg-purple-50 p-3 text-purple-900">
-                                    <p className="font-medium">Next step: Apply to open bills</p>
-                                    <p className="mt-1 text-xs">
-                                        On-account balance {formatCurrency(selectedNote.outstandingBalance)} —
-                                        use <strong>Apply to Open Bills</strong> on the list.
-                                        {isReturnGrnCreditNote(selectedNote) && selectedNote.referenceInvoiceNumber && (
-                                            <>
-                                                {' '}Return credits target <strong>{selectedNote.referenceInvoiceNumber}</strong> first,
-                                                then any remaining amount goes to other open bills (FIFO).
-                                            </>
-                                        )}
-                                    </p>
-                                </div>
-                            )}
-                            <DocumentFlowButton
-                                entityType={selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'CREDIT_NOTE' : 'DEBIT_NOTE'}
-                                entityId={selectedNote.id}
-                                size="sm"
-                            />
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
+                        </AdaptiveFormLayout>
+                        {isNoteDraft(selectedNote.status) && (
+                            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                                <p className="font-medium">Next step: Post to GL</p>
+                                <p className="mt-1 text-xs">
+                                    Draft notes do not affect GL or supplier balance. Close this dialog and click
+                                    {' '}<strong>Post to GL</strong> on the list (or use Create &amp; Post when creating).
+                                </p>
+                            </div>
+                        )}
+                        {selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE'
+                            && selectedNote.status === 'APPLIED'
+                            && selectedNote.referenceInvoiceNumber && (
+                            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-emerald-900">
+                                <p className="font-medium">Credit allocated to {selectedNote.referenceInvoiceNumber}</p>
+                                <p className="mt-1 text-xs">
+                                    This credit note&apos;s full amount ({formatCurrency(selectedNote.totalAmount)}) was
+                                    applied to the referenced bill. The bill&apos;s outstanding balance is reduced in
+                                    Supplier Payments.
+                                </p>
+                            </div>
+                        )}
+                        {selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE'
+                            && selectedNote.status === 'POSTED'
+                            && selectedNote.outstandingBalance > 0 && (
+                            <div className="rounded-md border border-purple-200 bg-purple-50 p-3 text-purple-900">
+                                <p className="font-medium">Next step: Apply to open bills</p>
+                                <p className="mt-1 text-xs">
+                                    On-account balance {formatCurrency(selectedNote.outstandingBalance)} —
+                                    use <strong>Apply to Open Bills</strong> on the list.
+                                    {isReturnGrnCreditNote(selectedNote) && selectedNote.referenceInvoiceNumber && (
+                                        <>
+                                            {' '}Return credits target <strong>{selectedNote.referenceInvoiceNumber}</strong> first,
+                                            then any remaining amount goes to other open bills (FIFO).
+                                        </>
+                                    )}
+                                </p>
+                            </div>
+                        )}
+                        <DocumentFlowButton
+                            entityType={selectedNote.documentType === 'SUPPLIER_CREDIT_NOTE' ? 'CREDIT_NOTE' : 'DEBIT_NOTE'}
+                            entityId={selectedNote.id}
+                            size="sm"
+                        />
+                    </div>
+                )}
+            </AdaptiveDialog>
         </div>
     );
 }
@@ -1396,20 +1274,43 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess, onCreated
     };
 
     return (
-        <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }} zIndex={snGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
-            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle>
-                        Create Supplier {noteType === 'SUPPLIER_CREDIT_NOTE' ? 'Credit' : 'Debit'} Note
-                    </DialogTitle>
-                    <DialogDescription>
-                        {noteType === 'SUPPLIER_CREDIT_NOTE'
-                            ? 'Price correction or allowance — reduces amount owed to supplier'
-                            : 'Additional charge — increases amount owed to supplier'}
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-4">
+        <AdaptiveDialog
+            open={open}
+            onOpenChange={(v) => { if (!v) onClose(); }}
+            preventDismiss
+            zIndex={snGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}
+            size="md"
+            title={`Create Supplier ${noteType === 'SUPPLIER_CREDIT_NOTE' ? 'Credit' : 'Debit'} Note`}
+            description={
+                noteType === 'SUPPLIER_CREDIT_NOTE'
+                    ? 'Price correction or allowance — reduces amount owed to supplier'
+                    : 'Additional charge — increases amount owed to supplier'
+            }
+            footer={
+                <>
+                    <Button variant="outline" onClick={onClose} disabled={submitting} className="min-h-[var(--layout-touch-target)]">
+                        Cancel
+                    </Button>
+                    <Button
+                        variant="outline"
+                        onClick={() => handleSubmit(false)}
+                        disabled={submitting}
+                        className="min-h-[var(--layout-touch-target)]"
+                    >
+                        {submitting ? 'Saving...' : 'Save as Draft'}
+                    </Button>
+                    <Button
+                        onClick={() => handleSubmit(true)}
+                        disabled={submitting}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white min-h-[var(--layout-touch-target)]"
+                    >
+                        {submitting ? 'Posting...' : 'Create & Post to GL'}
+                    </Button>
+                </>
+            }
+        >
+            <AdaptiveFormLayout>
+                <AdaptiveFormField span="full">
                     <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
                         <p className="font-medium">Workflow</p>
                         <ol className="mt-1 list-decimal list-inside space-y-0.5 text-xs">
@@ -1418,9 +1319,10 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess, onCreated
                             <li><strong>Apply to Open Bills</strong> — only if posted and still shows on-account balance</li>
                         </ol>
                     </div>
+                </AdaptiveFormField>
 
-                    {/* Return Goods Banner (credit notes only) */}
-                    {noteType === 'SUPPLIER_CREDIT_NOTE' && (
+                {noteType === 'SUPPLIER_CREDIT_NOTE' && (
+                    <AdaptiveFormField span="full">
                         <div className="flex items-start gap-3 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm">
                             <FileMinus className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
                             <div>
@@ -1433,113 +1335,94 @@ function CreateSupplierNoteModal({ open, onClose, noteType, onSuccess, onCreated
                                 </span>
                             </div>
                         </div>
+                    </AdaptiveFormField>
+                )}
+
+                <AdaptiveFormField span="full">
+                    <Label>Original Supplier Invoice *</Label>
+                    {selectedInvoice ? (
+                        <div className="flex flex-wrap items-center gap-2 p-2 bg-blue-50 rounded min-h-[var(--layout-touch-target)]">
+                            <span className="font-medium">{selectedInvoice.invoiceNumber}</span>
+                            <span className="text-gray-500">—</span>
+                            <span>{selectedInvoice.supplierName}</span>
+                            <span className="text-gray-500">({formatCurrency(parseFloat(selectedInvoice.totalAmount))})</span>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => { setSelectedInvoice(null); setInvoiceId(''); }}
+                                className="ml-auto min-h-[var(--layout-touch-target)]"
+                            >
+                                Change
+                            </Button>
+                        </div>
+                    ) : (
+                        <div className="relative">
+                            <Input
+                                placeholder="Search by invoice number or supplier..."
+                                value={invoiceSearch}
+                                onChange={e => { setInvoiceSearch(e.target.value); searchInvoices(e.target.value); }}
+                                className="min-h-[var(--layout-touch-target)]"
+                            />
+                            {invoiceResults.length > 0 && (
+                                <div className="absolute z-10 w-full bg-white border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
+                                    {invoiceResults.map(inv => (
+                                        <button
+                                            key={inv.id}
+                                            type="button"
+                                            className="w-full text-left px-3 py-2 hover:bg-gray-100 text-sm min-h-[var(--layout-touch-target)]"
+                                            onClick={() => {
+                                                setInvoiceId(inv.id);
+                                                setSelectedInvoice(inv);
+                                                setInvoiceResults([]);
+                                            }}
+                                        >
+                                            <span className="font-medium">{inv.invoiceNumber}</span>
+                                            <span className="text-gray-500 ml-2">{inv.supplierName}</span>
+                                            <span className="text-gray-400 ml-2">{formatCurrency(parseFloat(inv.totalAmount))}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     )}
+                </AdaptiveFormField>
 
-                    {/* Supplier Invoice Search */}
-                    <div>
-                        <Label>Original Supplier Invoice *</Label>
-                        {selectedInvoice ? (
-                            <div className="flex items-center gap-2 p-2 bg-blue-50 rounded">
-                                <span className="font-medium">{selectedInvoice.invoiceNumber}</span>
-                                <span className="text-gray-500">—</span>
-                                <span>{selectedInvoice.supplierName}</span>
-                                <span className="text-gray-500">({formatCurrency(parseFloat(selectedInvoice.totalAmount))})</span>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => { setSelectedInvoice(null); setInvoiceId(''); }}
-                                    className="ml-auto"
-                                >
-                                    Change
-                                </Button>
-                            </div>
-                        ) : (
-                            <div className="relative">
-                                <Input
-                                    placeholder="Search by invoice number or supplier..."
-                                    value={invoiceSearch}
-                                    onChange={e => { setInvoiceSearch(e.target.value); searchInvoices(e.target.value); }}
-                                />
-                                {invoiceResults.length > 0 && (
-                                    <div className="absolute z-10 w-full bg-white border rounded-md shadow-lg mt-1 max-h-48 overflow-y-auto">
-                                        {invoiceResults.map(inv => (
-                                            <button
-                                                key={inv.id}
-                                                className="w-full text-left px-3 py-2 hover:bg-gray-100 text-sm"
-                                                onClick={() => {
-                                                    setInvoiceId(inv.id);
-                                                    setSelectedInvoice(inv);
-                                                    setInvoiceResults([]);
-                                                }}
-                                            >
-                                                <span className="font-medium">{inv.invoiceNumber}</span>
-                                                <span className="text-gray-500 ml-2">{inv.supplierName}</span>
-                                                <span className="text-gray-400 ml-2">{formatCurrency(parseFloat(inv.totalAmount))}</span>
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
+                <AdaptiveFormField span="full">
+                    <Label>Reason *</Label>
+                    <Textarea
+                        value={reason}
+                        onChange={e => setReason(e.target.value)}
+                        placeholder={noteType === 'SUPPLIER_CREDIT_NOTE'
+                            ? 'e.g. Supplier overcharged on invoice, price correction for item X'
+                            : 'e.g. Additional freight charge not in original invoice'}
+                        rows={2}
+                    />
+                </AdaptiveFormField>
 
-                    {/* Reason */}
-                    <div>
-                        <Label>Reason *</Label>
-                        <Textarea
-                            value={reason}
-                            onChange={e => setReason(e.target.value)}
-                            placeholder={noteType === 'SUPPLIER_CREDIT_NOTE'
-                                ? 'e.g. Supplier overcharged on invoice, price correction for item X'
-                                : 'e.g. Additional freight charge not in original invoice'}
-                            rows={2}
-                        />
-                    </div>
+                <AdaptiveFormField>
+                    <Label>Amount (UGX) *</Label>
+                    <Input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={amount}
+                        onChange={e => setAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="min-h-[var(--layout-touch-target)]"
+                    />
+                </AdaptiveFormField>
 
-                    {/* Amount */}
-                    <div>
-                        <Label>Amount (UGX) *</Label>
-                        <Input
-                            type="number"
-                            min="0.01"
-                            step="0.01"
-                            value={amount}
-                            onChange={e => setAmount(e.target.value)}
-                            placeholder="0.00"
-                        />
-                    </div>
-
-                    {/* Additional Notes */}
-                    <div>
-                        <Label>Additional Notes</Label>
-                        <Textarea
-                            value={additionalNotes}
-                            onChange={e => setAdditionalNotes(e.target.value)}
-                            placeholder="Optional notes..."
-                            rows={2}
-                        />
-                    </div>
-                </div>
-
-                <DialogFooter className="flex-col sm:flex-row gap-2">
-                    <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
-                    <Button
-                        variant="outline"
-                        onClick={() => handleSubmit(false)}
-                        disabled={submitting}
-                    >
-                        {submitting ? 'Saving...' : 'Save as Draft'}
-                    </Button>
-                    <Button
-                        onClick={() => handleSubmit(true)}
-                        disabled={submitting}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white"
-                    >
-                        {submitting ? 'Posting...' : 'Create & Post to GL'}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+                <AdaptiveFormField>
+                    <Label>Additional Notes</Label>
+                    <Textarea
+                        value={additionalNotes}
+                        onChange={e => setAdditionalNotes(e.target.value)}
+                        placeholder="Optional notes..."
+                        rows={2}
+                    />
+                </AdaptiveFormField>
+            </AdaptiveFormLayout>
+        </AdaptiveDialog>
     );
 }
 

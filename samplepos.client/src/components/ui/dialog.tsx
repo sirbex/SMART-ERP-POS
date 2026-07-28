@@ -10,9 +10,10 @@ const DialogClose = DialogPrimitive.Close
 const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className = "", ...props }, ref) => (
+>(({ className = "", style, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
+    style={style}
     className={`fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 ${className}`}
     {...props}
   />
@@ -42,22 +43,34 @@ function usesCompoundDialogLayout(children: React.ReactNode): boolean {
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className = "", children, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
+    /** Layout surface — AdaptiveDialog sets this from layout tier. */
+    surface?: 'centered' | 'near-full' | 'full'
+  }
+>(({ className = "", children, surface = 'centered', style, ...props }, ref) => {
   const compound = usesCompoundDialogLayout(children);
+
+  const surfaceClass =
+    surface === 'full'
+      ? 'fixed inset-0 z-50 flex w-full h-full max-w-none max-h-none translate-x-0 translate-y-0 rounded-none border-0'
+      : surface === 'near-full'
+        ? 'fixed left-[50%] top-[50%] z-50 flex w-[min(96vw,42rem)] max-w-none max-h-[min(92vh,56rem)] translate-x-[-50%] translate-y-[-50%] rounded-xl border'
+        : 'fixed left-[50%] top-[50%] z-50 flex w-[95vw] sm:w-[90vw] md:w-[85vw] lg:w-[80vw] xl:w-[75vw] max-w-6xl max-h-[90vh] translate-x-[-50%] translate-y-[-50%] rounded-lg border';
 
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay style={style} />
       <DialogPrimitive.Content
         ref={ref}
-        className={`fixed left-[50%] top-[50%] z-50 flex w-[95vw] sm:w-[90vw] md:w-[85vw] lg:w-[80vw] xl:w-[75vw] max-w-6xl max-h-[90vh] translate-x-[-50%] translate-y-[-50%] flex-col border bg-white shadow-2xl duration-300 ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 rounded-lg overflow-hidden ${className}`}
+        data-dialog-surface={surface}
+        style={style}
+        className={`${surfaceClass} flex-col bg-white shadow-2xl duration-300 ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 overflow-hidden ${className}`}
         {...props}
       >
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {compound ? children : <DialogScrollArea>{children}</DialogScrollArea>}
         </div>
-        <DialogPrimitive.Close className="absolute right-3 top-3 sm:right-4 sm:top-4 z-20 rounded-full p-1.5 sm:p-2 opacity-70 ring-offset-white transition-all hover:opacity-100 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2 disabled:pointer-events-none">
+        <DialogPrimitive.Close className="absolute right-3 top-3 sm:right-4 sm:top-4 z-20 rounded-full p-1.5 sm:p-2 opacity-70 ring-offset-white transition-all hover:opacity-100 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2 disabled:pointer-events-none min-h-[var(--layout-touch-target)] min-w-[var(--layout-touch-target)] flex items-center justify-center">
           <X className="h-4 w-4 sm:h-5 sm:w-5" />
           <span className="sr-only">Close</span>
         </DialogPrimitive.Close>

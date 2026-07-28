@@ -8,9 +8,17 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import Layout from '../../components/Layout';
+import { AdaptiveDialog } from '../../components/adaptive';
 import { api } from '../../utils/api';
 import { formatCurrency } from '../../utils/currency';
 import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
+import { useLayoutTier } from '../../hooks/useLayoutTier';
+import {
+  inlineRowEditorsOnSameLine,
+  resolvePayButtonLabel,
+  shouldShowCoach,
+  showInlineRowEditors,
+} from '../../lib/adaptiveChrome';
 import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
 import { printReceipt } from '../../lib/print';
 import { toast } from 'react-hot-toast';
@@ -497,6 +505,7 @@ export default function RestaurantPosPage() {
   const { config } = useTenant();
   const { user } = useAuth();
   const { isOnline } = useOfflineContext();
+  const { tier, chrome } = useLayoutTier();
   const { data: restaurantEnabled, isLoading: flagLoading } = useRestaurantEnabled();
   const canManage = useCanAccess(undefined, ['restaurant.manage']);
   /** Pay is cashier / accountant / admin only — waiters and managers order but do not settle. */
@@ -2941,7 +2950,15 @@ export default function RestaurantPosPage() {
 
   return (
     <Layout>
-      <div className="h-[calc(100vh-3rem)] h-[calc(100dvh-3rem)] flex flex-col bg-stone-100 overflow-hidden">
+      <div
+        data-fill-viewport="true"
+        data-pos-tier={tier}
+        data-qty-pad={chrome.numericPad}
+        data-secondary-ops={chrome.secondaryActions}
+        data-list-row={chrome.listRow}
+        data-ticket-lines-primary="true"
+        className="flex-1 min-h-0 flex flex-col bg-stone-100 overflow-hidden"
+      >
         <div className="px-3 sm:px-4 py-2.5 sm:py-3 bg-white border-b border-stone-200 flex items-center justify-between gap-2 sm:gap-3 shrink-0">
           <div>
             <h1 className="text-lg font-semibold text-stone-900">Restaurant POS</h1>
@@ -3151,9 +3168,9 @@ export default function RestaurantPosPage() {
             )}
           </div>
         ) : (
-          <div className="relative flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 overflow-hidden">
+          <div className="relative flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 lg:grid-rows-1 overflow-hidden">
             {/* Menu — phone: top half of split; desktop: left column */}
-            <div className="lg:col-span-8 flex flex-col min-h-0 flex-[1.15] lg:flex-1 border-b lg:border-b-0 lg:border-r border-stone-200 bg-white">
+            <div className="lg:col-span-8 flex flex-col min-h-0 min-w-0 flex-[1.15] lg:flex-1 lg:h-full border-b lg:border-b-0 lg:border-r border-stone-200 bg-white">
               <div className="shrink-0 z-10 bg-white border-b border-stone-100 shadow-sm">
                 <div className="p-3 pb-2">
                   <label className="relative block">
@@ -3210,14 +3227,17 @@ export default function RestaurantPosPage() {
                       {quickAddProduct ? ' · Enter to add' : ''}
                       {selectedCategoryId ? ' · across all categories' : ''}
                     </p>
-                  ) : (
-                    <p className="mt-1.5 text-xs text-stone-400 hidden lg:block">
-                      Qty pad → product (e.g. 50 → Matooke)
+                  ) : shouldShowCoach(chrome, 'coach') ? (
+                    <p className="mt-1.5 text-xs text-stone-400" data-pos-coach="menu">
+                      {chrome.coach === 'full'
+                        ? 'Qty pad → product (e.g. 50 → Matooke)'
+                        : 'Qty then product'}
                     </p>
-                  )}
+                  ) : null}
                 </div>
-                {/* Phone: thick horizontal category buttons */}
-                <div className="lg:hidden px-3 pb-3 overflow-x-auto">
+                {/* Touch tiers: horizontal category chips (Toast/Samba) */}
+                {chrome.categoryNav === 'chips' ? (
+                <div className="px-3 pb-3 overflow-x-auto">
                   <div className="flex gap-2 min-w-max">
                     <button
                       type="button"
@@ -3252,11 +3272,13 @@ export default function RestaurantPosPage() {
                     ))}
                   </div>
                 </div>
+                ) : null}
               </div>
 
               <div className="flex flex-1 min-h-0">
-                {/* Wide: thick vertical category rail */}
-                <div className="hidden lg:flex w-40 shrink-0 flex-col border-r border-stone-200 bg-stone-100 overflow-y-auto">
+                {/* Desktop/wide: vertical category rail */}
+                {chrome.categoryNav === 'rail' ? (
+                <div className="flex w-40 shrink-0 flex-col border-r border-stone-200 bg-stone-100 overflow-y-auto">
                   <button
                     type="button"
                     onClick={() => {
@@ -3289,6 +3311,7 @@ export default function RestaurantPosPage() {
                     </button>
                   ))}
                 </div>
+                ) : null}
 
                 <div className="flex-1 flex flex-col min-h-0 min-w-0">
                   <div className="flex-1 overflow-auto p-3 pb-3">
@@ -3329,10 +3352,10 @@ export default function RestaurantPosPage() {
                     )}
                   </div>
 
-                  {/* Qty pad — phone: compact bar + dialer sheet; desktop: calculator */}
+                  {/* Qty pad — icon-sheet on touch tiers; docked calculator on desktop/wide */}
                   <div className="shrink-0 border-t border-stone-200 bg-stone-100/80">
-                    {/* Phone / small: one-row qty + quick amounts (saves ticket space) */}
-                    <div className="lg:hidden flex items-stretch gap-1 p-1.5">
+                    {chrome.numericPad === 'icon-sheet' ? (
+                    <div className="flex items-stretch gap-1 p-1.5" data-qty-pad-surface="icon-sheet">
                       <button
                         type="button"
                         aria-label="Open quantity pad"
@@ -3382,9 +3405,8 @@ export default function RestaurantPosPage() {
                         123
                       </button>
                     </div>
-
-                    {/* Tablet / desktop: Samba calculator pad */}
-                    <div className="hidden lg:flex items-stretch gap-2 p-2">
+                    ) : (
+                    <div className="flex items-stretch gap-2 p-2" data-qty-pad-surface="docked">
                       <div className="w-[5.5rem] rounded-xl border-2 border-emerald-600 bg-emerald-50 flex flex-col items-center justify-center px-2">
                         <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">
                           Qty
@@ -3434,14 +3456,15 @@ export default function RestaurantPosPage() {
                         ))}
                       </div>
                     </div>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Phone menu qty dialer — multi-digit without eating the ticket */}
-            {menuQtyPadOpen && (
-              <div className="lg:hidden fixed inset-0 z-[55] flex flex-col justify-end bg-black/40">
+            {/* On-demand qty dialer — only when chrome is icon-sheet */}
+            {menuQtyPadOpen && chrome.numericPad === 'icon-sheet' && (
+              <div className="fixed inset-0 z-[55] flex flex-col justify-end bg-black/40">
                 <button
                   type="button"
                   className="flex-1 w-full cursor-default"
@@ -3503,90 +3526,61 @@ export default function RestaurantPosPage() {
             )}
 
             {/* Order ticket — phone: bottom half always visible (split); desktop: sidebar */}
-            <div
-              className={`lg:col-span-4 flex flex-col min-h-0 bg-stone-50 ${
-                mobileSheet === 'details' || mobileSheet === 'more'
-                  ? 'fixed inset-0 z-40'
-                  : 'relative flex-1 lg:flex-1 min-h-[240px]'
-              }`}
-            >
+            <div className="lg:col-span-4 flex flex-col min-h-0 min-w-0 lg:h-full overflow-hidden bg-stone-50 relative flex-1 lg:flex-1 min-h-[240px]">
               <div className="px-3 sm:px-4 py-2 border-b border-stone-200 bg-white shrink-0">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {(mobileSheet === 'details' || mobileSheet === 'more') && (
-                      <button
-                        type="button"
-                        className={`${touchBtnGhost} lg:hidden min-h-10 px-3 shrink-0`}
-                        onClick={() => setMobileSheet(null)}
-                        aria-label="Back to ticket"
-                      >
-                        <X className="h-5 w-5" />
-                      </button>
-                    )}
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
                     <div className="min-w-0">
-                      <h2 className="font-semibold text-stone-900 text-sm sm:text-base">
-                        {mobileSheet === 'details'
-                          ? 'Waiter / Customer'
-                          : mobileSheet === 'more'
-                            ? 'More'
-                            : 'Ticket'}
-                      </h2>
-                      {order?.orderNumber && mobileSheet !== 'details' && mobileSheet !== 'more' ? (
+                      <h2 className="font-semibold text-stone-900 text-sm sm:text-base">Ticket</h2>
+                      {order?.orderNumber ? (
                         <p className="text-xs text-stone-500 truncate">{order.orderNumber}</p>
                       ) : null}
-                      {isCheckBilled &&
-                      mobileSheet !== 'details' &&
-                      mobileSheet !== 'more' ? (
-                        <p className="text-[11px] text-rose-800 truncate">
-                          Guest bill printed
-                        </p>
+                      {isCheckBilled ? (
+                        <p className="text-[11px] text-rose-800 truncate">Guest bill printed</p>
                       ) : null}
-                      {(selectedCustomer?.name || guestDraft.guestName) &&
-                      serviceChannel &&
-                      mobileSheet !== 'details' &&
-                      mobileSheet !== 'more' ? (
+                      {(selectedCustomer?.name || guestDraft.guestName) && serviceChannel ? (
                         <p className="text-xs font-semibold text-emerald-800 truncate">
                           {selectedCustomer?.name || guestDraft.guestName}
                         </p>
                       ) : null}
                     </div>
                   </div>
-                  {isCheckBilled ? (
+                  {/* Same header line as Ticket / order # — opens AdaptiveDialog (box), not full-screen */}
+                  {chrome.secondaryActions === 'sheet' ? (
+                    <div className="flex items-center gap-1.5 shrink-0" data-ticket-header-actions="true">
+                      {isCheckBilled ? (
+                        <span className="text-[10px] uppercase tracking-wide font-bold text-rose-800 bg-rose-100 px-1.5 py-1 rounded-md">
+                          Bill
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => setMobileSheet('details')}
+                        className={`${touchBtnGhost} min-h-10 min-w-10 px-2 text-xs`}
+                        aria-label="Waiter and customer"
+                        title="Waiter / Customer"
+                      >
+                        👤
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMobileSheet('more')}
+                        className={`${touchBtnGhost} min-h-10 min-w-10 px-2 text-xs`}
+                        aria-label="Table, merge, and more"
+                        title="Table / Merge"
+                      >
+                        ⋯
+                      </button>
+                    </div>
+                  ) : null}
+                  {isCheckBilled && chrome.secondaryActions === 'inline' ? (
                     <span className="shrink-0 text-[10px] uppercase tracking-wide font-bold text-rose-800 bg-rose-100 px-2 py-1 rounded-lg">
                       Bill printed
                     </span>
                   ) : null}
                 </div>
 
-                {(mobileSheet === 'order' || mobileSheet === null) && (
-                  <div className="lg:hidden mt-2 grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setMobileSheet('details')}
-                      className={`${touchBtnGhost} min-h-11 text-xs`}
-                    >
-                      Waiter / Customer
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMobileSheet('more')}
-                      className={`${touchBtnGhost} min-h-11 text-xs`}
-                    >
-                      Table / Merge / …
-                    </button>
-                  </div>
-                )}
-                {mobileSheet === 'details' || mobileSheet === 'more' ? (
-                  <button
-                    type="button"
-                    className={`${touchBtnGhost} lg:hidden mt-2 w-full min-h-11 text-xs`}
-                    onClick={() => setMobileSheet(null)}
-                  >
-                    ← Back to ticket
-                  </button>
-                ) : null}
-
-                {ticketTabs.length > 1 && (mobileSheet === 'order' || !mobileSheet) && (
+                {ticketTabs.length > 1 && (
                   <div className="mt-2 space-y-1.5">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-stone-500">
                       Tickets on table · tap to switch
@@ -3628,7 +3622,8 @@ export default function RestaurantPosPage() {
                   </div>
                 )}
 
-                <div className="hidden lg:flex mt-2 items-center gap-2">
+                {chrome.secondaryActions === 'inline' ? (
+                <div className="flex mt-2 items-center gap-2">
                   <label className="text-[10px] font-semibold uppercase tracking-wide text-stone-500 shrink-0">
                     Waiter
                   </label>
@@ -3649,100 +3644,11 @@ export default function RestaurantPosPage() {
                     )}
                   </select>
                 </div>
+                ) : null}
               </div>
 
-              <div
-                className={`${
-                  mobileSheet === 'details' ? 'flex' : 'hidden'
-                } lg:hidden flex-1 flex-col min-h-0 overflow-y-auto px-3 py-3 space-y-3 bg-white`}
-              >
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-stone-600 uppercase tracking-wide">
-                    Waiter
-                  </label>
-                  <select
-                    className={touchField}
-                    value={selectedWaiterId}
-                    disabled={assignWaiterMutation.isPending}
-                    onChange={(e) => handleWaiterChange(e.target.value)}
-                  >
-                    {waiters.length === 0 && user ? (
-                      <option value={user.id}>{user.fullName || user.email}</option>
-                    ) : (
-                      waiters.map((w) => (
-                        <option key={w.id} value={w.id}>
-                          {w.fullName || w.email}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                {serviceChannel && (
-                  <div className="space-y-2">
-                    {selectedCustomer || !guestDraft.guestName ? (
-                      <CustomerSelector
-                        compact
-                        required={!isQuickLane}
-                        label={
-                          channel === 'DELIVERY'
-                            ? 'Delivery customer'
-                            : isQuickLane
-                              ? 'Customer (optional)'
-                              : 'Takeaway customer'
-                        }
-                        selectedCustomer={selectedCustomer}
-                        saleTotal={Number(order?.totalAmount || 0)}
-                        onSelectCustomer={handleSelectServiceCustomer}
-                      />
-                    ) : (
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
-                          Customer
-                        </label>
-                        <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-3 py-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="font-bold text-base text-stone-900 truncate">
-                              {guestDraft.guestName}
-                            </div>
-                            {guestDraft.guestPhone ? (
-                              <div className="text-sm text-stone-600">{guestDraft.guestPhone}</div>
-                            ) : null}
-                            {guestDraft.deliveryAddress ? (
-                              <div className="text-xs text-stone-500 truncate">
-                                {guestDraft.deliveryAddress}
-                              </div>
-                            ) : null}
-                          </div>
-                          <button
-                            type="button"
-                            className={`${touchBtnGhost} min-h-11 px-3 shrink-0`}
-                            onClick={() =>
-                              setGuestDraft({
-                                guestName: '',
-                                guestPhone: '',
-                                deliveryAddress: '',
-                                pickupLabel: '',
-                              })
-                            }
-                          >
-                            Change
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  className={`${touchBtnDark} w-full`}
-                  onClick={() => setMobileSheet(null)}
-                >
-                  Done — add items
-                </button>
-              </div>
-
-              {serviceChannel && (
-                <div className="hidden lg:block px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2">
+              {serviceChannel && chrome.secondaryActions === 'inline' ? (
+                <div className="px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2">
                   {selectedCustomer || !guestDraft.guestName ? (
                     <CustomerSelector
                       compact
@@ -3790,12 +3696,12 @@ export default function RestaurantPosPage() {
                     </div>
                   )}
                 </div>
-              )}
+              ) : null}
 
+              {/* Ticket lines — basis-0 + min-h-0 so grid/flex parents can allocate real height */}
               <div
-                className={`flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-4 py-2 ${
-                  mobileSheet === 'details' || mobileSheet === 'more' ? 'hidden lg:block' : 'block'
-                }`}
+                className="flex-1 basis-0 min-h-[8rem] overflow-y-auto overscroll-contain px-3 sm:px-4 py-2 block"
+                data-ticket-lines="true"
               >
                 {orderLines.length === 0 ? (
                   <div className="py-4 lg:py-8 text-center space-y-3">
@@ -3812,18 +3718,91 @@ export default function RestaurantPosPage() {
                       ← Back to tables
                     </button>
                   </div>
+                ) : ticketGroups.length === 0 ? (
+                  <div className="py-4 text-center text-sm text-stone-500">
+                    {orderLines.length} line{orderLines.length === 1 ? '' : 's'} on check — refresh if
+                    names do not appear.
+                  </div>
                 ) : (
-                  <ul className="space-y-2" role="listbox" aria-label="Ticket lines" aria-multiselectable="true">
+                  <ul
+                    className={chrome.listRow === 'dense' ? 'space-y-1' : 'space-y-2'}
+                    role="listbox"
+                    aria-label="Ticket lines"
+                    aria-multiselectable="true"
+                    data-list-row={chrome.listRow}
+                  >
                     {ticketGroups.map((group) => {
                       const selected = group.itemIds.every((id) => selectedLineIds.includes(id));
                       const partially =
                         !selected && group.itemIds.some((id) => selectedLineIds.includes(id));
+                      const dense = chrome.listRow === 'dense';
+                      const sameLineEditors = inlineRowEditorsOnSameLine(chrome);
+                      const st = ticketLineStatus(group.kitchenSent, isCheckBilled);
+                      const showQtyEditors =
+                        showInlineRowEditors(chrome) && !group.kitchenSent && !!group.productId;
+                      const qtyEditors = showQtyEditors ? (
+                        <div
+                          className={`inline-flex items-center gap-0.5 shrink-0 ${
+                            sameLineEditors ? '' : 'mt-2'
+                          }`}
+                          onClick={(e) => e.stopPropagation()}
+                          data-row-editors={sameLineEditors ? 'same-line' : 'stacked'}
+                        >
+                          <button
+                            type="button"
+                            aria-label="Decrease quantity"
+                            disabled={busy}
+                            onClick={() => void handleLineMinusOne(group)}
+                            className={`${TOUCH} ${
+                              sameLineEditors ? 'min-h-9 min-w-9 text-base' : 'min-h-10 min-w-10 text-lg'
+                            } rounded-lg border border-stone-300 bg-stone-50 font-bold text-stone-800`}
+                          >
+                            −
+                          </button>
+                          {!sameLineEditors ? (
+                            <button
+                              type="button"
+                              aria-label="Set quantity"
+                              disabled={busy}
+                              onClick={() => handleLineSetQty(group)}
+                              className={`${TOUCH} min-h-10 min-w-12 rounded-lg border border-stone-300 bg-white text-sm font-bold text-stone-900`}
+                            >
+                              {group.quantity}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label="Set quantity"
+                              disabled={busy}
+                              onClick={() => handleLineSetQty(group)}
+                              className={`${TOUCH} min-h-9 min-w-9 rounded-lg border border-stone-300 bg-white text-xs font-bold tabular-nums text-stone-900`}
+                            >
+                              {group.quantity}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label="Increase quantity"
+                            disabled={busy}
+                            onClick={() => void handleLinePlusOne(group)}
+                            className={`${TOUCH} ${
+                              sameLineEditors ? 'min-h-9 min-w-9 text-base' : 'min-h-10 min-w-10 text-lg'
+                            } rounded-lg border border-stone-300 bg-stone-50 font-bold text-stone-800`}
+                          >
+                            +
+                          </button>
+                        </div>
+                      ) : null;
                       return (
                         <li
                           key={group.key}
                           role="option"
                           aria-selected={selected}
-                          className={`flex justify-between gap-2 text-sm border-2 rounded-xl px-3 py-3 cursor-pointer ${
+                          className={`flex justify-between gap-1.5 border-2 rounded-xl cursor-pointer ${
+                            dense
+                              ? 'text-sm px-2 py-1.5 items-center min-h-[44px]'
+                              : 'text-sm px-3 py-3 items-start'
+                          } ${
                             selected
                               ? 'border-amber-500 bg-amber-100 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.45)] ring-2 ring-amber-400/50'
                               : partially
@@ -3836,95 +3815,78 @@ export default function RestaurantPosPage() {
                             setLineSheet(group);
                           }}
                         >
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start gap-2">
-                              <span
-                                className={`${TOUCH} mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-xs font-bold ${
-                                  selected
-                                    ? 'border-amber-600 bg-amber-600 text-white'
-                                    : partially
-                                      ? 'border-amber-400 bg-amber-200 text-amber-900'
-                                      : 'border-stone-300 bg-white text-transparent'
-                                }`}
-                                aria-hidden
-                              >
-                                {partially && !selected ? '–' : '✓'}
-                              </span>
-                              <div className="min-w-0">
+                          <div
+                            className={`min-w-0 flex-1 flex gap-2 ${
+                              dense ? 'items-center' : 'items-start'
+                            }`}
+                          >
+                            <span
+                              className={`${TOUCH} ${dense ? '' : 'mt-0.5'} inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-xs font-bold ${
+                                selected
+                                  ? 'border-amber-600 bg-amber-600 text-white'
+                                  : partially
+                                    ? 'border-amber-400 bg-amber-200 text-amber-900'
+                                    : 'border-stone-300 bg-white text-transparent'
+                              }`}
+                              aria-hidden
+                            >
+                              {partially && !selected ? '–' : '✓'}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 min-w-0">
                                 <div
-                                  className={`font-medium ${
-                                    selected ? 'text-amber-950' : 'text-stone-900'
-                                  }`}
+                                  className={`font-medium min-w-0 ${
+                                    dense ? 'truncate' : ''
+                                  } ${selected ? 'text-amber-950' : 'text-stone-900'}`}
                                 >
-                                  {group.quantity} × {group.productName}
+                                  <span className="tabular-nums">{group.quantity}</span>
+                                  <span className="text-stone-400 font-normal"> × </span>
+                                  {group.productName}
                                 </div>
-                                {group.lineNotes ? (
-                                  <div className="text-[11px] font-medium text-amber-800 mt-0.5">
-                                    * {group.lineNotes}
-                                  </div>
+                                {dense ? (
+                                  <span
+                                    className={`shrink-0 text-[10px] uppercase tracking-wide font-semibold ${st.className}`}
+                                  >
+                                    {st.label}
+                                  </span>
                                 ) : null}
+                              </div>
+                              {group.lineNotes ? (
+                                <div className="text-[11px] font-medium text-amber-800 mt-0.5 truncate">
+                                  * {group.lineNotes}
+                                </div>
+                              ) : null}
+                              {!dense ? (
                                 <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                                  {(() => {
-                                    const st = ticketLineStatus(group.kitchenSent, isCheckBilled);
-                                    return (
-                                      <span
-                                        className={`text-[10px] uppercase tracking-wide font-semibold ${st.className}`}
-                                      >
-                                        {st.label}
-                                      </span>
-                                    );
-                                  })()}
+                                  <span
+                                    className={`text-[10px] uppercase tracking-wide font-semibold ${st.className}`}
+                                  >
+                                    {st.label}
+                                  </span>
                                   {selected ? (
                                     <span className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
                                       Selected
                                     </span>
-                                  ) : (
+                                  ) : chrome.selectHints ? (
                                     <span className="text-[11px] text-stone-400">Tap to select</span>
-                                  )}
+                                  ) : null}
                                 </div>
-                                {/* Inline ± on unsent — stopPropagation so row stays selected */}
-                                {!group.kitchenSent && group.productId ? (
-                                  <div
-                                    className="mt-2 inline-flex items-center gap-1"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <button
-                                      type="button"
-                                      aria-label="Decrease quantity"
-                                      disabled={busy}
-                                      onClick={() => void handleLineMinusOne(group)}
-                                      className={`${TOUCH} min-h-10 min-w-10 rounded-lg border border-stone-300 bg-stone-50 text-lg font-bold text-stone-800`}
-                                    >
-                                      −
-                                    </button>
-                                    <button
-                                      type="button"
-                                      aria-label="Set quantity"
-                                      disabled={busy}
-                                      onClick={() => handleLineSetQty(group)}
-                                      className={`${TOUCH} min-h-10 min-w-12 rounded-lg border border-stone-300 bg-white text-sm font-bold text-stone-900`}
-                                    >
-                                      {group.quantity}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      aria-label="Increase quantity"
-                                      disabled={busy}
-                                      onClick={() => void handleLinePlusOne(group)}
-                                      className={`${TOUCH} min-h-10 min-w-10 rounded-lg border border-stone-300 bg-stone-50 text-lg font-bold text-stone-800`}
-                                    >
-                                      +
-                                    </button>
-                                  </div>
-                                ) : null}
-                              </div>
+                              ) : null}
+                              {/* Comfortable: ± stacked under name */}
+                              {!sameLineEditors ? qtyEditors : null}
                             </div>
                           </div>
-                          <div className="flex flex-col items-end gap-1 shrink-0">
+                          <div
+                            className={`flex shrink-0 items-center gap-1 ${
+                              dense ? '' : 'flex-col items-end gap-1'
+                            }`}
+                          >
+                            {/* Dense: ± relocated onto the same row as name / total */}
+                            {sameLineEditors ? qtyEditors : null}
                             <div
-                              className={`whitespace-nowrap font-medium ${
+                              className={`whitespace-nowrap font-medium tabular-nums ${
                                 selected ? 'text-amber-950' : 'text-stone-700'
-                              }`}
+                              } ${dense ? 'text-xs' : ''}`}
                             >
                               {formatCurrency(group.lineTotal)}
                             </div>
@@ -3949,9 +3911,7 @@ export default function RestaurantPosPage() {
               </div>
 
               {/* Samba: select lines → Void / Move (split to new ticket) */}
-              {selectedLineIds.length > 0 &&
-                order &&
-                (mobileSheet === 'order' || !mobileSheet) && (
+              {selectedLineIds.length > 0 && order && (
                   <div className="px-3 py-2.5 border-t-2 border-amber-400 bg-amber-100 space-y-2 shrink-0">
                     <p className="text-xs font-bold uppercase tracking-wide text-amber-950">
                       {selectedLineIds.length} selected — Void or Move
@@ -4181,60 +4141,9 @@ export default function RestaurantPosPage() {
                 </div>
               )}
 
-              <div
-                className={`${
-                  mobileSheet === 'more' ? 'flex' : 'hidden'
-                } lg:hidden flex-1 flex-col min-h-0 overflow-y-auto px-3 py-3 space-y-2 bg-amber-50`}
-              >
-                <p className="text-xs text-stone-600 px-1">
-                  Tip: tap ticket lines to select, then use Void or Move. Transfer moves the whole
-                  ticket to another table.
-                </p>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => returnToFloor()}
-                  className={`${touchBtnDark} w-full`}
-                >
-                  ← Back to tables
-                </button>
-                <button
-                  type="button"
-                  disabled={!order || busy || freeTables.length === 0}
-                  onClick={() => {
-                    setOpsMode('transfer');
-                    setOpsTargetTableId('');
-                    setMobileSheet(null);
-                  }}
-                  className={`${touchBtnGhost} w-full`}
-                >
-                  Change table
-                </button>
-                <button
-                  type="button"
-                  disabled={!order || busy || mergeCandidates.length === 0}
-                  onClick={() => {
-                    setOpsMode('merge');
-                    setMobileSheet(null);
-                  }}
-                  className={`${touchBtnGhost} w-full`}
-                >
-                  Merge tickets
-                </button>
-                <button
-                  type="button"
-                  disabled={!order || busy}
-                  onClick={() => void handleCancelCheck()}
-                  className={`${touchBtnDanger} w-full`}
-                >
-                  Cancel check
-                </button>
-              </div>
-
               {opsMode &&
                 order &&
-                (opsMode === 'transfer' || opsMode === 'merge') &&
-                (mobileSheet === 'order' || !mobileSheet) && (
+                (opsMode === 'transfer' || opsMode === 'merge') && (
                 <div className="px-3 py-3 border-t border-stone-200 bg-amber-50 space-y-2.5 shrink-0">
                   {opsMode === 'transfer' && (
                     <>
@@ -4301,9 +4210,7 @@ export default function RestaurantPosPage() {
               )}
 
               <div
-                className={`border-t border-stone-200 bg-white p-3 space-y-2 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] ${
-                  mobileSheet === 'order' || !mobileSheet ? 'flex flex-col' : 'hidden'
-                } lg:flex`}
+                className="border-t border-stone-200 bg-white p-3 space-y-2 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex flex-col"
               >
                 <div className="flex justify-between items-baseline gap-2">
                   <span className="text-sm text-stone-600">
@@ -4316,7 +4223,8 @@ export default function RestaurantPosPage() {
                     {formatCurrency(Number(order?.totalAmount || 0))}
                   </span>
                 </div>
-                <div className="hidden lg:grid grid-cols-2 gap-2">
+                {chrome.secondaryActions === 'inline' ? (
+                <div className="grid grid-cols-2 gap-2" data-secondary-ops-surface="inline">
                   <button
                     type="button"
                     disabled={!order || busy || freeTables.length === 0}
@@ -4337,15 +4245,21 @@ export default function RestaurantPosPage() {
                     Merge
                   </button>
                 </div>
-                <p className="hidden lg:block text-[11px] text-stone-500">
-                  Select lines on the ticket → Void or Move (new ticket). Switch tickets above.
+                ) : null}
+                {shouldShowCoach(chrome, 'coach') ? (
+                <p className="text-[11px] text-stone-500" data-pos-coach="ticket">
+                  {chrome.coach === 'full'
+                    ? 'Select lines on the ticket → Void or Move (new ticket). Switch tickets above.'
+                    : 'Select lines → Void or Move'}
                 </p>
+                ) : null}
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     disabled={!order || busy}
                     onClick={() => void handleSendKot()}
                     className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-orange-600 text-white text-base font-bold active:bg-orange-700`}
+                    data-pos-primary="kot"
                   >
                     KOT
                   </button>
@@ -4354,6 +4268,7 @@ export default function RestaurantPosPage() {
                     disabled={!order || busy || orderLines.length === 0}
                     onClick={() => void handleBill()}
                     className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-rose-800 text-white text-base font-bold active:bg-rose-950`}
+                    data-pos-primary="bill"
                   >
                     Bill
                     {ticketTabs.length > 1 && order ? (
@@ -4368,29 +4283,197 @@ export default function RestaurantPosPage() {
                       disabled={!order || busy || orderLines.length === 0}
                       onClick={() => void handlePay()}
                       className={`${TOUCH} min-h-14 col-span-2 rounded-xl bg-emerald-600 text-white text-base font-bold active:bg-emerald-700`}
+                      data-pos-primary="pay"
                     >
-                      Pay (cash · offline-first)
-                      {ticketTabs.length > 1 && order ? (
+                      {resolvePayButtonLabel(chrome, {
+                        multiTicket: ticketTabs.length > 1,
+                        orderNumber: order?.orderNumber,
+                      })}
+                      {ticketTabs.length > 1 && order && chrome.actionLabels === 'verbose' ? (
                         <span className="block text-[10px] font-semibold opacity-90 truncate max-w-full">
                           {order.orderNumber}
                         </span>
                       ) : null}
                     </button>
                   ) : null}
+                  {chrome.secondaryActions === 'inline' ? (
                   <button
                     type="button"
                     disabled={!order || busy}
                     onClick={() => void handleCancelCheck()}
-                    className={`${touchBtnDanger} col-span-2 w-full min-h-11 hidden lg:inline-flex`}
+                    className={`${touchBtnDanger} col-span-2 w-full min-h-11 inline-flex`}
+                    data-secondary-ops-surface="cancel"
                   >
                     Cancel check
                   </button>
+                  ) : null}
                 </div>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      <AdaptiveDialog
+        open={mobileSheet === 'details'}
+        onOpenChange={(open) => {
+          if (!open) setMobileSheet(null);
+        }}
+        title="Waiter / Customer"
+        size="sm"
+        presentationOverride="modal"
+        footer={
+          <button
+            type="button"
+            className={`${touchBtnDark} w-full`}
+            onClick={() => setMobileSheet(null)}
+          >
+            Done
+          </button>
+        }
+      >
+        <div className="space-y-3" data-ticket-dialog="details">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-stone-600 uppercase tracking-wide">
+              Waiter
+            </label>
+            <select
+              className={touchField}
+              value={selectedWaiterId}
+              disabled={assignWaiterMutation.isPending}
+              onChange={(e) => handleWaiterChange(e.target.value)}
+            >
+              {waiters.length === 0 && user ? (
+                <option value={user.id}>{user.fullName || user.email}</option>
+              ) : (
+                waiters.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.fullName || w.email}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          {serviceChannel ? (
+            <div className="space-y-2">
+              {selectedCustomer || !guestDraft.guestName ? (
+                <CustomerSelector
+                  compact
+                  required={!isQuickLane}
+                  label={
+                    channel === 'DELIVERY'
+                      ? 'Delivery customer'
+                      : isQuickLane
+                        ? 'Customer (optional)'
+                        : 'Takeaway customer'
+                  }
+                  selectedCustomer={selectedCustomer}
+                  saleTotal={Number(order?.totalAmount || 0)}
+                  onSelectCustomer={handleSelectServiceCustomer}
+                />
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
+                    Customer
+                  </label>
+                  <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-3 py-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-base text-stone-900 truncate">
+                        {guestDraft.guestName}
+                      </div>
+                      {guestDraft.guestPhone ? (
+                        <div className="text-sm text-stone-600">{guestDraft.guestPhone}</div>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className={`${touchBtnGhost} min-h-11 px-3 shrink-0`}
+                      onClick={() =>
+                        setGuestDraft({
+                          guestName: '',
+                          guestPhone: '',
+                          deliveryAddress: '',
+                          pickupLabel: '',
+                        })
+                      }
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </AdaptiveDialog>
+
+      <AdaptiveDialog
+        open={mobileSheet === 'more'}
+        onOpenChange={(open) => {
+          if (!open) setMobileSheet(null);
+        }}
+        title="Table / Merge"
+        size="sm"
+        presentationOverride="modal"
+        footer={
+          <button
+            type="button"
+            className={`${touchBtnGhost} w-full`}
+            onClick={() => setMobileSheet(null)}
+          >
+            Close
+          </button>
+        }
+      >
+        <div className="space-y-2" data-ticket-dialog="more" data-secondary-ops-surface="dialog">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setMobileSheet(null);
+              returnToFloor();
+            }}
+            className={`${touchBtnDark} w-full`}
+          >
+            ← Tables
+          </button>
+          <button
+            type="button"
+            disabled={!order || busy || freeTables.length === 0}
+            onClick={() => {
+              setOpsMode('transfer');
+              setOpsTargetTableId('');
+              setMobileSheet(null);
+            }}
+            className={`${touchBtnGhost} w-full`}
+          >
+            Change table
+          </button>
+          <button
+            type="button"
+            disabled={!order || busy || mergeCandidates.length === 0}
+            onClick={() => {
+              setOpsMode('merge');
+              setMobileSheet(null);
+            }}
+            className={`${touchBtnGhost} w-full`}
+          >
+            Merge
+          </button>
+          <button
+            type="button"
+            disabled={!order || busy}
+            onClick={() => {
+              setMobileSheet(null);
+              void handleCancelCheck();
+            }}
+            className={`${touchBtnDanger} w-full`}
+          >
+            Cancel check
+          </button>
+        </div>
+      </AdaptiveDialog>
+
       {tagPad ? (
         <RestaurantOrderTagPad
           productName={tagPad.productName}

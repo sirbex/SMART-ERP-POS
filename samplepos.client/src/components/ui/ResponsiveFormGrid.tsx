@@ -1,13 +1,15 @@
 import type { ReactNode } from 'react';
+import { AdaptiveFormLayout } from '../adaptive/AdaptiveFormLayout';
 
 interface ResponsiveFormGridProps {
     children: ReactNode;
+    className?: string;
 }
 
-export function ResponsiveFormGrid({ children }: ResponsiveFormGridProps) {
-    return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {children}
-        </div>
-    );
+/**
+ * Backward-compatible form grid — delegates to AdaptiveFormLayout (Phase 2).
+ * Prefer AdaptiveFormLayout / AdaptiveFormField for new code.
+ */
+export function ResponsiveFormGrid({ children, className }: ResponsiveFormGridProps) {
+    return <AdaptiveFormLayout className={className}>{children}</AdaptiveFormLayout>;
 }

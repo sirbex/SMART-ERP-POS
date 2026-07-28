@@ -24,6 +24,16 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
     --radius: 0.5rem;
+
+    /* Adaptive layout tiers (Phase 0) — defaults = desktop */
+    --layout-tier-mobile: 768px;
+    --layout-tier-compact: 1024px;
+    --layout-tier-wide: 1600px;
+    --layout-touch-target: 44px;
+    --layout-sidebar-expanded: 256px;
+    --layout-sidebar-rail: 80px;
+    --layout-form-columns: 3;
+    --layout-content-max: 100%;
   }
 
   .dark {
@@ -98,4 +108,49 @@ body,
   overflow-y: auto;
   min-width: 0;
   /* prevent horizontal overflow in flex context */
+}
+.page-container-inner {
+  width: 100%;
+  max-width: var(--layout-content-max);
+  margin-inline: auto;
+}
+
+/*
+ * Full-bleed ops surfaces (Restaurant POS): fill the shell scrollport.
+ * Internal panes own scrolling — avoids 100vh calc fighting AdaptiveAppShell
+ * (shellbar + optional bottom nav), which collapsed the ticket line list.
+ */
+.page-container:has([data-fill-viewport='true']) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.page-container-inner:has(> [data-fill-viewport='true']) {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+}
+.page-container-inner:has(> [data-fill-viewport='true']) > [data-fill-viewport='true'] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Mobile bottom nav — reserved in the shell flex column (Phase 1) */
+.adaptive-bottom-nav {
+  min-height: var(--layout-touch-target);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Touch-first control helper — use with interactive elements */
+.touch-target {
+  min-height: var(--layout-touch-target);
+  min-width: var(--layout-touch-target);
+}
+
+/* Phase 2 — form density mirrors shell token */
+.adaptive-app-shell {
+  --adaptive-form-columns: var(--layout-form-columns, 3);
 }

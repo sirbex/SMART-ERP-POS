@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import ServerClock from './ServerClock';
 import { useBackendPermission } from '../hooks/useBackendPermission';
+import { AdaptiveAppShell } from './adaptive';
 
 interface AccountingLayoutProps {
   children: React.ReactNode;
@@ -386,6 +387,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
   );
 
   return (
+    <AdaptiveAppShell className="h-full">
     <div className="h-full bg-gray-50 flex">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col w-64 bg-white border-r shadow-sm">
@@ -460,5 +462,6 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
         </main>
       </div>
     </div>
+    </AdaptiveAppShell>
   );
 }

@@ -60,53 +60,59 @@ export interface ReceiptData {
 }
 
 /**
- * Print a receipt using a pluggable print strategy:
- *   1. If http://localhost:1811/print is reachable, POST the receipt HTML to it
- *      (used by Sunmi and other ESC/POS bridge agents running locally).
- *   2. Otherwise, fall back to browser window.print() via a hidden iframe.
- * @param receiptData - The receipt data to print
- * @param options - Print options including format
+ * Print a receipt using the shared PrintService contract:
+ *   0. SUNMI WebView JSON bridge (receipts only)
+ *   1. Local ESC/POS HTML bridge at localhost:1811
+ *   2. Browser window.print() via hidden iframe
+ *
+ * Reports and other HTML documents should call {@link printHtmlDocument}
+ * (same strategies 1–2 — no new backends).
  */
 export async function printReceipt(receiptData: ReceiptData, options: PrintOptions = {}): Promise<void> {
-  // Validate receipt data
   if (!receiptData || !receiptData.saleNumber) {
     throw new Error('Invalid receipt data: saleNumber is required');
   }
 
   const printFormat = options.format || 'detailed';
-
-  // Generate receipt HTML (shared by both strategies)
   const receiptHTML = printFormat === 'compact'
     ? generateCompactReceiptHTML(receiptData)
     : generateDetailedReceiptHTML(receiptData);
 
-  // ── Strategy 0: SUNMI Android WebView bridge ──
-  // When the app runs inside a SUNMI WebView, the native app injects a
-  // `SunmiPrinter` object into the JS context. If present, delegate directly
-  // to the hardware printer and return — no other strategy is needed.
+  // Strategy 0: SUNMI Android WebView bridge (receipt payload)
   if (typeof (window as unknown as { SunmiPrinter?: unknown }).SunmiPrinter !== 'undefined') {
     (window as unknown as { SunmiPrinter: { printReceipt: (json: string) => void } })
       .SunmiPrinter.printReceipt(JSON.stringify(receiptData));
     return;
   }
 
-  // ── Strategy 1: local print bridge (e.g. Sunmi ESC/POS bridge on localhost:1811) ──
+  return printHtmlDocument(receiptHTML);
+}
+
+/**
+ * Shared HTML print path for receipts (fallback) and report documents.
+ * Does not invent printers — reuses the existing bridge + browser print chain.
+ */
+export async function printHtmlDocument(html: string): Promise<void> {
+  if (!html || !html.trim()) {
+    throw new Error('Invalid print document: HTML is required');
+  }
+
+  // Strategy 1: local print bridge (Sunmi ESC/POS agent, etc.)
   try {
     const bridgeRes = await fetch('http://localhost:1811/print', {
       method: 'POST',
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
-      body: receiptHTML,
+      body: html,
       signal: AbortSignal.timeout(1500),
     });
-    if (bridgeRes.ok) return; // Bridge handled printing — done
+    if (bridgeRes.ok) return;
   } catch {
-    // Bridge not reachable — fall through to browser print
+    // Bridge not reachable — fall through
   }
 
-  // ── Strategy 2: browser window.print() via hidden iframe ──
+  // Strategy 2: browser window.print() via hidden iframe
   return new Promise((resolve, reject) => {
     try {
-      // Create a hidden iframe for printing
       const printFrame = document.createElement('iframe');
       printFrame.style.position = 'absolute';
       printFrame.style.width = '0';
@@ -119,18 +125,14 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
         throw new Error('Unable to create print window');
       }
 
-      // Write content to iframe
       printWindow.document.open();
-      printWindow.document.write(receiptHTML);
+      printWindow.document.write(html);
       printWindow.document.close();
 
-      // Wait for content to load, then print
       printWindow.onload = () => {
         try {
           printWindow.focus();
           printWindow.print();
-
-          // Clean up iframe after printing
           setTimeout(() => {
             if (document.body.contains(printFrame)) {
               document.body.removeChild(printFrame);
@@ -145,7 +147,6 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
         }
       };
 
-      // Fallback timeout in case onload doesn't fire
       setTimeout(() => {
         if (document.body.contains(printFrame)) {
           document.body.removeChild(printFrame);
@@ -156,6 +157,15 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
       reject(error);
     }
   });
+}
+
+/**
+ * Report print helper — same PrintService as receipts (HTML strategies only).
+ * Prefer server PDF export when archival fidelity is required; use this for
+ * quick operator print of the on-screen summary.
+ */
+export async function printReportDocument(html: string): Promise<void> {
+  return printHtmlDocument(html);
 }
 
 /** Shared customer block for thermal/browser receipts (SSOT with receiptFromSale). */

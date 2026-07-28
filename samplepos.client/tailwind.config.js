@@ -15,10 +15,16 @@ export default {
     screens: {
       'xs': '475px',
       'sm': '640px',
+      /** Compact tier starts (Sunmi / tablets) — same as historical `md` */
       'md': '768px',
+      'compact': '768px',
+      /** Desktop tier starts — same as historical `lg` */
       'lg': '1024px',
+      'desktop': '1024px',
       'xl': '1280px',
       '2xl': '1536px',
+      /** Wide monitors / dual-screen workstations */
+      'wide': '1600px',
     },
     extend: {
       colors: {
