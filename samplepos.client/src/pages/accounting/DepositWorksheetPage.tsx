@@ -1,5 +1,5 @@
 /**
- * Deposit Worksheet UI — Phase 1B (Undeposited Funds → Bank)
+ * Deposit Worksheet UI — Undeposited Funds → Cash / Mobile Money / Bank
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -17,8 +17,9 @@ import {
 } from '../../components/ui/select';
 import { Loader2, RefreshCw, Landmark, CheckSquare } from 'lucide-react';
 import { formatCurrency } from '../../utils/currency';
-import { useBankAccounts } from '../../hooks/useBanking';
 import { TreasuryFeatureDisabledNotice } from '../../components/treasury/TreasuryFeatureDisabledNotice';
+
+type DestinationKind = 'CASH' | 'MOBILE_MONEY' | 'BANK';
 
 interface UnsettledReceipt {
   id: string;
@@ -41,26 +42,34 @@ interface DepositRecon {
   difference: number;
 }
 
+interface DepositDestination {
+  kind: DestinationKind;
+  bankAccountId: string;
+  name: string;
+  glAccountCode: string;
+  glAccountName: string | null;
+  systemAccountTag: string | null;
+  isDefault?: boolean;
+}
+
+interface DepositDestinations {
+  cash: DepositDestination;
+  mobileMoney: DepositDestination;
+  banks: DepositDestination[];
+}
+
+function destinationLabel(kind: DestinationKind): string {
+  if (kind === 'CASH') return 'Cash';
+  if (kind === 'MOBILE_MONEY') return 'Mobile money';
+  return 'Bank';
+}
+
 export default function DepositWorksheetPage({ embedded = false }: { embedded?: boolean }) {
-  const { data: bankAccounts = [] } = useBankAccounts();
-
-  /** Deposit destination must be a real bank/cash liquidity account — not AR / equity / 1015. */
-  const eligibleBankAccounts = useMemo(() => {
-    const blockedCodes = new Set(['1200', '1015', '3050', '2100', '2200']);
-    return bankAccounts.filter((a) => {
-      const code = String(a.glAccountCode || '');
-      if (blockedCodes.has(code)) return false;
-      if (code.startsWith('12') || code.startsWith('2') || code.startsWith('3') || code.startsWith('4') || code.startsWith('5') || code.startsWith('6') || code.startsWith('7')) {
-        // Still allow 10xx liquidity range; block obvious non-cash classes when code is known
-        if (code && !code.startsWith('10')) return false;
-      }
-      return true;
-    });
-  }, [bankAccounts]);
-
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [receipts, setReceipts] = useState<UnsettledReceipt[]>([]);
   const [selected, setSelected] = useState<Record<string, number>>({});
+  const [destinations, setDestinations] = useState<DepositDestinations | null>(null);
+  const [destinationKind, setDestinationKind] = useState<DestinationKind>('CASH');
   const [bankAccountId, setBankAccountId] = useState('');
   const [depositReference, setDepositReference] = useState('');
   const [transactionDate, setTransactionDate] = useState(
@@ -74,6 +83,8 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const bankOptions = destinations?.banks ?? [];
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -84,14 +95,28 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
       if (!isOn) {
         setReceipts([]);
         setRecon(null);
+        setDestinations(null);
         return;
       }
-      const [receiptsRes, reconRes] = await Promise.all([
+      const [receiptsRes, reconRes, destRes] = await Promise.all([
         api.treasury.listUnsettledReceipts({ limit: 200 }),
         api.treasury.getDepositReconciliation(),
+        api.treasury.listDepositDestinations(),
       ]);
       setReceipts((receiptsRes.data?.data?.items ?? []) as unknown as UnsettledReceipt[]);
       setRecon((reconRes.data?.data ?? null) as DepositRecon | null);
+      const dest = destRes.data?.data as DepositDestinations | undefined;
+      setDestinations(dest ?? null);
+      if (dest?.banks?.length) {
+        setBankAccountId((prev) => {
+          if (prev && dest.banks.some((b) => b.bankAccountId === prev)) return prev;
+          const def =
+            dest.banks.find((b) => b.isDefault) ??
+            dest.banks.find((b) => b.glAccountCode === '1030') ??
+            dest.banks[0];
+          return def?.bankAccountId ?? '';
+        });
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load deposit worksheet data');
     } finally {
@@ -104,23 +129,15 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
   }, [load]);
 
   useEffect(() => {
-    if (bankAccountId && eligibleBankAccounts.length > 0) {
-      const stillValid = eligibleBankAccounts.some((a) => a.id === bankAccountId);
-      if (!stillValid) setBankAccountId('');
-    }
-  }, [eligibleBankAccounts, bankAccountId]);
-
-  useEffect(() => {
-    if (!bankAccountId && eligibleBankAccounts.length > 0) {
+    if (destinationKind !== 'BANK') return;
+    if (!bankAccountId && bankOptions.length > 0) {
       const def =
-        eligibleBankAccounts.find((a) => a.isDefault) ??
-        eligibleBankAccounts.find((a) => a.glAccountCode === '1030') ??
-        eligibleBankAccounts[0];
-      if (def?.id) setBankAccountId(def.id);
+        bankOptions.find((b) => b.isDefault) ??
+        bankOptions.find((b) => b.glAccountCode === '1030') ??
+        bankOptions[0];
+      if (def?.bankAccountId) setBankAccountId(def.bankAccountId);
     }
-  }, [eligibleBankAccounts, bankAccountId]);
-
-  const selectedBank = eligibleBankAccounts.find((a) => a.id === bankAccountId);
+  }, [destinationKind, bankAccountId, bankOptions]);
 
   const selectedTotal = useMemo(
     () =>
@@ -128,11 +145,16 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
     [selected],
   );
 
-  const bankDepositAmount = useMemo(() => {
+  const depositAmount = useMemo(() => {
     const shortage = Number(shortageAmount) || 0;
     const overage = Number(overageAmount) || 0;
     return selectedTotal - shortage + overage;
   }, [selectedTotal, shortageAmount, overageAmount]);
+
+  const canPost =
+    selectedTotal > 0 &&
+    enabled !== false &&
+    (destinationKind !== 'BANK' || (bankAccountId && bankOptions.length > 0));
 
   const toggleReceipt = (receipt: UnsettledReceipt) => {
     setSelected((prev) => {
@@ -164,7 +186,9 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
     setMessage(null);
     setError(null);
     try {
-      if (!bankAccountId) throw new Error('Select a bank account');
+      if (destinationKind === 'BANK' && !bankAccountId) {
+        throw new Error('Select a bank account');
+      }
       const receiptsPayload = Object.entries(selected)
         .filter(([, amount]) => amount > 0)
         .map(([key, amount]) => {
@@ -182,7 +206,8 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
 
       const createRes = await api.treasury.createDepositWorksheet({
         transactionDate,
-        bankAccountId,
+        destinationKind,
+        bankAccountId: destinationKind === 'BANK' ? bankAccountId : undefined,
         depositReference: depositReference || undefined,
         shortageAmount: Number(shortageAmount) || 0,
         overageAmount: Number(overageAmount) || 0,
@@ -194,7 +219,7 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
       const postRes = await api.treasury.post(doc.id);
       const posted = postRes.data?.data;
       setMessage(
-        `Posted ${posted?.documentNumber ?? doc.documentNumber} — bank ${formatCurrency(bankDepositAmount)}`,
+        `Posted ${posted?.documentNumber ?? doc.documentNumber} — ${destinationLabel(destinationKind).toLowerCase()} ${formatCurrency(depositAmount)}`,
       );
       setSelected({});
       setDepositReference('');
@@ -208,6 +233,17 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
     }
   };
 
+  const destinationHint =
+    destinationKind === 'CASH'
+      ? destinations
+        ? `${destinations.cash.name} (${destinations.cash.glAccountCode})`
+        : 'Cash Drawer (1010)'
+      : destinationKind === 'MOBILE_MONEY'
+        ? destinations
+          ? `${destinations.mobileMoney.name} (${destinations.mobileMoney.glAccountCode})`
+          : 'Mobile Money (1040)'
+        : null;
+
   return (
     <div className={embedded ? 'space-y-6' : 'space-y-6 p-6'}>
       {!embedded && (
@@ -218,8 +254,8 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
               Undeposited receipts
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Clear sales and payment receipts sitting in Undeposited Funds into a bank account.
-              Supports partial deposits and shortage/overage.
+              Clear sales and payment receipts sitting in Undeposited Funds into cash, mobile money,
+              or a bank account. Supports partial deposits and shortage/overage.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
@@ -236,8 +272,8 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
       {embedded && (
         <div className="flex flex-wrap items-start justify-between gap-3">
           <p className="text-sm text-muted-foreground max-w-2xl">
-            Select unsettled receipts and post them to a bank account. This is not a till cash bag
-            deposit — use the cash register for drawer cash to bank.
+            Select unsettled receipts and clear them into cash, mobile money, or a bank account.
+            This is not a till cash-bag deposit — use the cash register for drawer cash to bank.
           </p>
           <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
             {loading ? (
@@ -349,34 +385,59 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
         <div className="space-y-4 rounded-lg border p-4">
           <div className="text-sm font-medium">Deposit details</div>
           <div className="space-y-2">
-            <Label>Bank account</Label>
-            <Select value={bankAccountId} onValueChange={setBankAccountId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select bank" />
-              </SelectTrigger>
-              <SelectContent>
-                {eligibleBankAccounts.map((account) => (
-                  <SelectItem key={account.id} value={account.id}>
-                    {account.name}
-                    {account.glAccountCode
-                      ? ` (${account.glAccountCode}${account.glAccountName ? ` · ${account.glAccountName}` : ''})`
-                      : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {eligibleBankAccounts.length === 0 && (
-              <p className="text-xs text-destructive">
-                No valid bank accounts. Create one under Banking → Accounts linked to a Bank / Cash
-                asset GL (e.g. 1030 Checking) — not Accounts Receivable (1200).
-              </p>
-            )}
-            {selectedBank?.glAccountCode === '1200' && (
-              <p className="text-xs text-destructive">
-                This account is linked to AR (1200). Fix the bank account GL before depositing.
-              </p>
+            <Label>Deposit into</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  { kind: 'CASH' as const, label: 'Cash' },
+                  { kind: 'MOBILE_MONEY' as const, label: 'Mobile money' },
+                  { kind: 'BANK' as const, label: 'Bank' },
+                ] as const
+              ).map((opt) => (
+                <Button
+                  key={opt.kind}
+                  type="button"
+                  size="sm"
+                  variant={destinationKind === opt.kind ? 'default' : 'outline'}
+                  onClick={() => setDestinationKind(opt.kind)}
+                  disabled={enabled === false}
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+            {destinationHint && (
+              <p className="text-xs text-muted-foreground">Posts to {destinationHint}</p>
             )}
           </div>
+
+          {destinationKind === 'BANK' && (
+            <div className="space-y-2">
+              <Label>Bank account</Label>
+              <Select value={bankAccountId} onValueChange={setBankAccountId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select bank" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bankOptions.map((account) => (
+                    <SelectItem key={account.bankAccountId} value={account.bankAccountId}>
+                      {account.name}
+                      {account.glAccountCode
+                        ? ` (${account.glAccountCode}${account.glAccountName ? ` · ${account.glAccountName}` : ''})`
+                        : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {bankOptions.length === 0 && (
+                <p className="text-xs text-destructive">
+                  No bank accounts yet. Create one under Banking → Accounts linked to a bank GL
+                  (e.g. 1030), or deposit into Cash / Mobile money instead.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label>Deposit date</Label>
             <Input
@@ -390,7 +451,13 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
             <Input
               value={depositReference}
               onChange={(e) => setDepositReference(e.target.value)}
-              placeholder="Slip / bank reference"
+              placeholder={
+                destinationKind === 'MOBILE_MONEY'
+                  ? 'MoMo reference'
+                  : destinationKind === 'CASH'
+                    ? 'Optional note'
+                    : 'Slip / bank reference'
+              }
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -403,7 +470,9 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
                 value={shortageAmount}
                 onChange={(e) => setShortageAmount(e.target.value)}
               />
-              <p className="text-[11px] text-muted-foreground">Cash bag short only — leave 0 for bank transfers</p>
+              <p className="text-[11px] text-muted-foreground">
+                Short count only — leave 0 when the full amount lands
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Overage</Label>
@@ -414,13 +483,15 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
                 value={overageAmount}
                 onChange={(e) => setOverageAmount(e.target.value)}
               />
-              <p className="text-[11px] text-muted-foreground">Cash bag over only — leave 0 for bank transfers</p>
+              <p className="text-[11px] text-muted-foreground">
+                Over count only — leave 0 when the full amount lands
+              </p>
             </div>
           </div>
           {(Number(overageAmount) > 0 || Number(shortageAmount) > 0) && (
             <p className="text-xs text-amber-700">
-              For a customer bank transfer, shortage and overage should both be 0. Bank deposit must
-              equal receipts selected ({formatCurrency(selectedTotal)}).
+              Shortage/overage should usually be 0 for exact bank or MoMo transfers. Deposit amount
+              must match what arrived ({formatCurrency(selectedTotal)} selected).
             </p>
           )}
           <div className="rounded-md bg-muted/50 p-3 text-sm space-y-1">
@@ -429,19 +500,13 @@ export default function DepositWorksheetPage({ embedded = false }: { embedded?: 
               <span>{formatCurrency(selectedTotal)}</span>
             </div>
             <div className="flex justify-between font-medium">
-              <span>Bank deposit</span>
-              <span>{formatCurrency(bankDepositAmount)}</span>
+              <span>{destinationLabel(destinationKind)} deposit</span>
+              <span>{formatCurrency(depositAmount)}</span>
             </div>
           </div>
           <Button
             className="w-full"
-            disabled={
-              posting ||
-              enabled === false ||
-              selectedTotal <= 0 ||
-              eligibleBankAccounts.length === 0 ||
-              !bankAccountId
-            }
+            disabled={posting || !canPost}
             onClick={() => void createAndPost()}
           >
             {posting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}

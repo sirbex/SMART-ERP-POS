@@ -1149,9 +1149,40 @@ export const api = {
       ),
     getDepositReconciliation: () =>
       apiClient.get<ApiResponse<Record<string, unknown>>>('treasury/deposit-reconciliation'),
+    listDepositDestinations: () =>
+      apiClient.get<
+        ApiResponse<{
+          cash: {
+            kind: 'CASH';
+            bankAccountId: string;
+            name: string;
+            glAccountCode: string;
+            glAccountName: string | null;
+            systemAccountTag: string | null;
+          };
+          mobileMoney: {
+            kind: 'MOBILE_MONEY';
+            bankAccountId: string;
+            name: string;
+            glAccountCode: string;
+            glAccountName: string | null;
+            systemAccountTag: string | null;
+          };
+          banks: Array<{
+            kind: 'BANK';
+            bankAccountId: string;
+            name: string;
+            glAccountCode: string;
+            glAccountName: string | null;
+            systemAccountTag: string | null;
+            isDefault?: boolean;
+          }>;
+        }>
+      >('treasury/deposit-destinations'),
     createDepositWorksheet: (data: {
       transactionDate: string;
-      bankAccountId: string;
+      destinationKind?: 'CASH' | 'MOBILE_MONEY' | 'BANK';
+      bankAccountId?: string;
       depositReference?: string;
       memo?: string;
       shortageAmount?: number;

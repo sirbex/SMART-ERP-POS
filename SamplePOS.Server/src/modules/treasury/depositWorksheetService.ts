@@ -24,10 +24,16 @@ import {
   assertSettlementCeiling,
 } from '@shared/treasury/index.js';
 import { ensureBankGlLiquidityTag } from '../banking/ensureBankGlLiquidityTag.js';
+import {
+  ensureDepositLiquidityBook,
+  type DepositLiquidityKind,
+} from './ensureDepositLiquidityBook.js';
 
 const CLEARING_CODE = '1015';
 const SHORTAGE_CODE = '6850';
 const OVERAGE_CODE = '4900';
+
+export type DepositDestinationKind = 'CASH' | 'MOBILE_MONEY' | 'BANK';
 
 export type DepositReceiptApplication = {
   sourceType: settlementRepo.ReceiptSourceType;
@@ -37,7 +43,10 @@ export type DepositReceiptApplication = {
 
 export interface CreateDepositWorksheetInput {
   transactionDate: string;
-  bankAccountId: string;
+  /** Required when destinationKind is BANK (default). Ignored for CASH / MOBILE_MONEY. */
+  bankAccountId?: string;
+  /** Explicit destination. CASH / MOBILE_MONEY auto-ensure Banking books for 1010 / 1040. */
+  destinationKind?: DepositDestinationKind;
   depositReference?: string;
   memo?: string;
   receipts: DepositReceiptApplication[];
@@ -46,6 +55,16 @@ export interface CreateDepositWorksheetInput {
   requiresApproval?: boolean;
   createdBy: string;
 }
+
+export type DepositDestinationOption = {
+  kind: DepositDestinationKind;
+  bankAccountId: string;
+  name: string;
+  glAccountCode: string;
+  glAccountName: string | null;
+  systemAccountTag: string | null;
+  isDefault?: boolean;
+};
 
 async function assertFeatureEnabled(pool: Pool): Promise<void> {
   const enabled = await isTreasuryDocumentEnabled(pool);
@@ -103,7 +122,8 @@ async function resolveBankGlCode(client: PoolClient, bankAccountId: string): Pro
   if (blockedTags.has(tag) || code === '1200' || code === '1015' || code === '3050') {
     throw new ValidationError(
       `Bank account "${row.name}" is linked to GL ${code} (${tag || type}), which cannot receive deposits. ` +
-        `Edit the bank account under Banking → Accounts and link it to a Bank / Cash / Mobile Money asset account (e.g. 1030).`,
+        `Edit the bank account under Banking → Accounts and link it to a Bank / Cash / Mobile Money asset account (e.g. 1030), ` +
+        `or choose Cash / Mobile Money on Undeposited receipts.`,
     );
   }
   if (type !== 'ASSET') {
@@ -147,6 +167,130 @@ export async function getDepositReconciliation(pool: Pool) {
 }
 
 /**
+ * Destinations for Undeposited receipt clearing:
+ * - Cash Drawer (1010) and Mobile Money (1040) are always offered
+ * - Banking books for those GLs are created on first deposit (not on list)
+ * - Other Banking → Accounts books remain selectable as Bank
+ */
+export async function listDepositDestinations(pool: Pool): Promise<{
+  cash: DepositDestinationOption;
+  mobileMoney: DepositDestinationOption;
+  banks: DepositDestinationOption[];
+}> {
+  await assertFeatureEnabled(pool);
+
+  const [cashBook, momoBook, bankRows] = await Promise.all([
+    findDepositLiquidityBook(pool, 'CASH'),
+    findDepositLiquidityBook(pool, 'MOBILE_MONEY'),
+    pool.query<{
+      id: string;
+      name: string;
+      gl_account_code: string;
+      gl_account_name: string | null;
+      system_account_tag: string | null;
+      is_default: boolean;
+    }>(
+      `SELECT ba.id,
+              ba.name,
+              a."AccountCode" AS gl_account_code,
+              a."AccountName" AS gl_account_name,
+              a."SystemAccountTag" AS system_account_tag,
+              ba.is_default
+       FROM bank_accounts ba
+       JOIN accounts a ON a."Id" = ba.gl_account_id
+       WHERE ba.is_active = TRUE
+         AND a."IsActive" = TRUE
+         AND a."AccountCode" NOT IN ('1010', '1040', '1015', '1012', '1200', '3050')
+         AND COALESCE(UPPER(a."SystemAccountTag"), '') NOT IN (
+           'CASH', 'MOBILE_MONEY', 'UNDEPOSITED_FUNDS', 'PETTY_CASH',
+           'ACCOUNTS_RECEIVABLE', 'OPENING_BALANCE_EQUITY'
+         )
+       ORDER BY ba.is_default DESC, ba.name ASC`,
+    ),
+  ]);
+
+  return {
+    cash: cashBook,
+    mobileMoney: momoBook,
+    banks: bankRows.rows.map((row) => ({
+      kind: 'BANK' as const,
+      bankAccountId: row.id,
+      name: row.name,
+      glAccountCode: row.gl_account_code,
+      glAccountName: row.gl_account_name,
+      systemAccountTag: row.system_account_tag,
+      isDefault: row.is_default,
+    })),
+  };
+}
+
+async function findDepositLiquidityBook(
+  pool: Pool,
+  kind: DepositLiquidityKind,
+): Promise<DepositDestinationOption> {
+  const glCode = kind === 'CASH' ? '1010' : '1040';
+  const fallbackName = kind === 'CASH' ? 'Cash Drawer' : 'Mobile Money';
+  const tag = kind;
+
+  const result = await pool.query<{
+    bank_account_id: string | null;
+    bank_name: string | null;
+    gl_account_code: string | null;
+    gl_account_name: string | null;
+  }>(
+    `SELECT ba.id AS bank_account_id,
+            ba.name AS bank_name,
+            a."AccountCode" AS gl_account_code,
+            a."AccountName" AS gl_account_name
+     FROM accounts a
+     LEFT JOIN bank_accounts ba
+       ON ba.gl_account_id = a."Id" AND ba.is_active = TRUE
+     WHERE a."AccountCode" = $1
+     ORDER BY ba.is_default DESC NULLS LAST, ba.created_at ASC NULLS LAST
+     LIMIT 1`,
+    [glCode],
+  );
+
+  const row = result.rows[0];
+  return {
+    kind,
+    bankAccountId: row?.bank_account_id ?? '',
+    name: row?.bank_name || row?.gl_account_name || fallbackName,
+    glAccountCode: row?.gl_account_code || glCode,
+    glAccountName: row?.gl_account_name || fallbackName,
+    systemAccountTag: tag,
+  };
+}
+
+async function resolveDepositBankAccountId(
+  client: PoolClient,
+  input: CreateDepositWorksheetInput,
+): Promise<{ bankAccountId: string; destinationKind: DepositDestinationKind }> {
+  const kind = input.destinationKind ?? 'BANK';
+  if (kind === 'CASH' || kind === 'MOBILE_MONEY') {
+    const book = await ensureDepositLiquidityBook(client, kind as DepositLiquidityKind);
+    return { bankAccountId: book.bankAccountId, destinationKind: kind };
+  }
+  if (!input.bankAccountId) {
+    throw new ValidationError('Select a bank account to deposit into');
+  }
+  return { bankAccountId: input.bankAccountId, destinationKind: 'BANK' };
+}
+
+function depositLineDescription(
+  kind: DepositDestinationKind,
+  depositReference?: string,
+): string {
+  const base =
+    kind === 'CASH'
+      ? 'Cash deposit'
+      : kind === 'MOBILE_MONEY'
+        ? 'Mobile money deposit'
+        : 'Bank deposit';
+  return depositReference ? `${base} ${depositReference}` : base;
+}
+
+/**
  * Build a balanced DEPOSIT_WORKSHEET draft from selected unsettled receipts.
  * Journal shape:
  *   DR Bank (sum − shortage + overage)
@@ -171,7 +315,8 @@ export async function createDepositWorksheet(
   }
 
   return UnitOfWork.run(pool, async (client) => {
-    const bankGlCode = await resolveBankGlCode(client, input.bankAccountId);
+    const { bankAccountId, destinationKind } = await resolveDepositBankAccountId(client, input);
+    const bankGlCode = await resolveBankGlCode(client, bankAccountId);
     const lines: TreasuryDocumentLineInput[] = [];
     let receiptTotal = 0;
 
@@ -238,9 +383,7 @@ export async function createDepositWorksheet(
     lines.unshift({
       lineType: 'ACCOUNT_MOVE',
       accountCode: bankGlCode,
-      description: input.depositReference
-        ? `Bank deposit ${input.depositReference}`
-        : 'Bank deposit',
+      description: depositLineDescription(destinationKind, input.depositReference),
       debitAmount: bankDebit,
       creditAmount: 0,
     });
@@ -281,7 +424,7 @@ export async function createDepositWorksheet(
       memo: input.memo ?? `Deposit worksheet — ${input.receipts.length} receipt(s)`,
       fromAccountCode: CLEARING_CODE,
       toAccountCode: bankGlCode,
-      bankAccountId: input.bankAccountId,
+      bankAccountId,
       depositReference: input.depositReference,
       shortageAmount,
       overageAmount,

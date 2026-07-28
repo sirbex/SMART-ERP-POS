@@ -8,6 +8,10 @@ import {
   assertSettlementCeiling,
   TreasuryInvariantError,
 } from '@shared/treasury/index.js';
+import { depositLiquidityGlCode } from './ensureDepositLiquidityBook.js';
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 
 function expectCode(fn: () => unknown, code: string): void {
   try {
@@ -98,6 +102,30 @@ describe('Deposit Worksheet invariants (Phase 1B)', () => {
         { debitAmount: 0, creditAmount: 50 }, // overage income
       ]);
       expect(result.totalDebits).toBe(1050);
+    });
+  });
+
+  describe('explicit Cash / Mobile Money destinations', () => {
+    it('maps CASH → 1010 and MOBILE_MONEY → 1040', () => {
+      expect(depositLiquidityGlCode('CASH')).toBe('1010');
+      expect(depositLiquidityGlCode('MOBILE_MONEY')).toBe('1040');
+    });
+
+    it('service accepts destinationKind and ensures liquidity books', () => {
+      const here = dirname(fileURLToPath(import.meta.url));
+      const service = readFileSync(join(here, 'depositWorksheetService.ts'), 'utf8');
+      const routes = readFileSync(join(here, 'treasuryRoutes.ts'), 'utf8');
+      const ensure = readFileSync(join(here, 'ensureDepositLiquidityBook.ts'), 'utf8');
+
+      expect(service).toMatch(/destinationKind/);
+      expect(service).toMatch(/ensureDepositLiquidityBook/);
+      expect(service).toMatch(/listDepositDestinations/);
+      expect(routes).toMatch(/\/deposit-destinations/);
+      expect(routes).toMatch(/CASH.*MOBILE_MONEY.*BANK/);
+      expect(ensure).toMatch(/Cash Drawer/);
+      expect(ensure).toMatch(/Mobile Money/);
+      expect(ensure).toMatch(/'1010'/);
+      expect(ensure).toMatch(/'1040'/);
     });
   });
 });

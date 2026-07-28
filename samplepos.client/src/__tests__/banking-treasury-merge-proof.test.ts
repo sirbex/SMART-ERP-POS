@@ -61,6 +61,16 @@ describe('Banking ↔ Treasury merge — UX proof', () => {
     }
   });
 
+  it('Undeposited receipts offers Cash / Mobile money / Bank destinations', () => {
+    const deposit = readSrc('pages/accounting/DepositWorksheetPage.tsx');
+    expect(deposit).toContain("kind: 'CASH'");
+    expect(deposit).toContain("kind: 'MOBILE_MONEY'");
+    expect(deposit).toContain("kind: 'BANK'");
+    expect(deposit).toContain('listDepositDestinations');
+    expect(deposit).toContain('destinationKind');
+    expect(deposit).toMatch(/Mobile money/);
+  });
+
   it('Bank Transfer modal explains relationship to Move money when treasury on', () => {
     const tab = readSrc('components/banking/BankTransactionsTab.tsx');
     expect(tab).toContain('useTreasuryEnabled');

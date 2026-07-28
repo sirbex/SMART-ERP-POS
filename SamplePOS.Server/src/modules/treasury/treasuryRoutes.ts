@@ -72,24 +72,36 @@ const UpdateSchema = z.object({
   expectedRowVersion: z.number().int().positive(),
 });
 
-const DepositWorksheetSchema = z.object({
-  transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  bankAccountId: z.string().uuid(),
-  depositReference: z.string().optional(),
-  memo: z.string().optional(),
-  shortageAmount: z.number().nonnegative().optional(),
-  overageAmount: z.number().nonnegative().optional(),
-  requiresApproval: z.boolean().optional(),
-  receipts: z
-    .array(
-      z.object({
-        sourceType: z.enum(['AR_CUSTOMER_PAYMENT', 'INVOICE_PAYMENT', 'CUSTOMER_DEPOSIT']),
-        sourceId: z.string().uuid(),
-        amount: z.number().positive(),
-      }),
-    )
-    .min(1),
-});
+const DepositWorksheetSchema = z
+  .object({
+    transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    destinationKind: z.enum(['CASH', 'MOBILE_MONEY', 'BANK']).optional(),
+    bankAccountId: z.string().uuid().optional(),
+    depositReference: z.string().optional(),
+    memo: z.string().optional(),
+    shortageAmount: z.number().nonnegative().optional(),
+    overageAmount: z.number().nonnegative().optional(),
+    requiresApproval: z.boolean().optional(),
+    receipts: z
+      .array(
+        z.object({
+          sourceType: z.enum(['AR_CUSTOMER_PAYMENT', 'INVOICE_PAYMENT', 'CUSTOMER_DEPOSIT']),
+          sourceId: z.string().uuid(),
+          amount: z.number().positive(),
+        }),
+      )
+      .min(1),
+  })
+  .superRefine((data, ctx) => {
+    const kind = data.destinationKind ?? 'BANK';
+    if (kind === 'BANK' && !data.bankAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'bankAccountId is required when depositing to a bank account',
+        path: ['bankAccountId'],
+      });
+    }
+  });
 
 const TransferSchema = z.object({
   transactionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -157,6 +169,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const pool = req.tenantPool || globalPool;
     const data = await depositWorksheetService.getDepositReconciliation(pool);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  '/deposit-destinations',
+  requireLiquidityRead,
+  asyncHandler(async (req, res) => {
+    const pool = req.tenantPool || globalPool;
+    const data = await depositWorksheetService.listDepositDestinations(pool);
     res.json({ success: true, data });
   }),
 );
