@@ -49,6 +49,9 @@ export interface OrderItemRecord {
   kitchenSentAt?: string | null;
   lineNotes?: string | null;
   kitchenStation?: string | null;
+  /** Who rang this line (may differ from check owner after handoff). */
+  addedBy?: string | null;
+  addedByName?: string | null;
   orderTags?: Array<{
     id?: string | null;
     label: string;
@@ -83,6 +86,8 @@ export interface CreateOrderItemData {
   baseQty?: number | null;
   baseUomId?: string | null;
   conversionFactor?: number | null;
+  /** Actor who added the line (restaurant FOH attribution). */
+  addedBy?: string | null;
 }
 
 // ── Repository ───────────────────────────────────────────────────────
@@ -199,51 +204,70 @@ export const ordersRepository = {
   async addOrderItems(client: Pool | PoolClient, items: CreateOrderItemData[]): Promise<OrderItemRecord[]> {
     if (items.length === 0) return [];
 
+    const hasAddedBy = await tableHasColumn(client, 'pos_order_items', 'added_by');
     const values: unknown[] = [];
     const placeholders: string[] = [];
     let idx = 1;
 
     for (const item of items) {
-      placeholders.push(
-        `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`
-      );
-      values.push(
-        item.orderId,
-        item.productId,
-        item.productName,
-        item.quantity,
-        item.unitPrice,
-        item.lineTotal,
-        item.discountAmount || 0,
-        item.uomId || null,
-        item.baseQty ?? null,
-        item.baseUomId || null,
-        item.conversionFactor ?? null
-      );
+      if (hasAddedBy) {
+        placeholders.push(
+          `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
+        );
+        values.push(
+          item.orderId,
+          item.productId,
+          item.productName,
+          item.quantity,
+          item.unitPrice,
+          item.lineTotal,
+          item.discountAmount || 0,
+          item.uomId || null,
+          item.baseQty ?? null,
+          item.baseUomId || null,
+          item.conversionFactor ?? null,
+          item.addedBy || null,
+        );
+      } else {
+        placeholders.push(
+          `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
+        );
+        values.push(
+          item.orderId,
+          item.productId,
+          item.productName,
+          item.quantity,
+          item.unitPrice,
+          item.lineTotal,
+          item.discountAmount || 0,
+          item.uomId || null,
+          item.baseQty ?? null,
+          item.baseUomId || null,
+          item.conversionFactor ?? null,
+        );
+      }
     }
 
     const result = await client.query(
-      `INSERT INTO pos_order_items (
-        order_id, product_id, product_name, quantity, unit_price, line_total,
-        discount_amount, uom_id, base_qty, base_uom_id, conversion_factor
-      ) VALUES ${placeholders.join(', ')}
-      RETURNING
-        id,
-        order_id,
-        product_id,
-        product_name,
-        quantity,
-        unit_price,
-        line_total,
-        discount_amount,
-        uom_id,
-        base_qty,
-        base_uom_id,
-        conversion_factor`,
-      values
+      hasAddedBy
+        ? `INSERT INTO pos_order_items (
+            order_id, product_id, product_name, quantity, unit_price, line_total,
+            discount_amount, uom_id, base_qty, base_uom_id, conversion_factor, added_by
+          ) VALUES ${placeholders.join(', ')}
+          RETURNING
+            id, order_id, product_id, product_name, quantity, unit_price, line_total,
+            discount_amount, uom_id, base_qty, base_uom_id, conversion_factor, added_by`
+        : `INSERT INTO pos_order_items (
+            order_id, product_id, product_name, quantity, unit_price, line_total,
+            discount_amount, uom_id, base_qty, base_uom_id, conversion_factor
+          ) VALUES ${placeholders.join(', ')}
+          RETURNING
+            id, order_id, product_id, product_name, quantity, unit_price, line_total,
+            discount_amount, uom_id, base_qty, base_uom_id, conversion_factor`,
+      values,
     );
 
-    return result.rows.map(r => convertKeysToCamelCase(r) as OrderItemRecord);
+    return result.rows.map((r) => convertKeysToCamelCase(r) as OrderItemRecord);
   },
 
   /**
@@ -290,31 +314,40 @@ export const ordersRepository = {
 
     const order: OrderRecord = convertKeysToCamelCase(orderResult.rows[0]) as OrderRecord;
 
-    // Fetch items (kitchen_* columns exist after migration 560 — keep SELECT resilient)
+    // Fetch items (kitchen_* / added_by columns — keep SELECT resilient across migrations)
     const hasKitchenCols = await tableHasColumn(pool, 'pos_order_items', 'kitchen_sent_at');
     const hasOrderTags = await tableHasColumn(pool, 'pos_order_items', 'order_tags');
+    const hasAddedBy = await tableHasColumn(pool, 'pos_order_items', 'added_by');
     const kitchenSelect = hasKitchenCols
-      ? `, kitchen_sent_at, line_notes, kitchen_station${hasOrderTags ? ', order_tags' : ''}`
+      ? `, oi.kitchen_sent_at, oi.line_notes, oi.kitchen_station${hasOrderTags ? ', oi.order_tags' : ''}`
+      : ``;
+    const addedBySelect = hasAddedBy
+      ? `, oi.added_by, ua_add.full_name AS added_by_name`
+      : ``;
+    const addedByJoin = hasAddedBy
+      ? `LEFT JOIN users ua_add ON ua_add.id = oi.added_by`
       : ``;
 
     const itemsResult = await pool.query(
       `SELECT
-        id,
-        order_id,
-        product_id,
-        product_name,
-        quantity,
-        unit_price,
-        line_total,
-        discount_amount,
-        uom_id,
-        base_qty,
-        base_uom_id,
-        conversion_factor
+        oi.id,
+        oi.order_id,
+        oi.product_id,
+        oi.product_name,
+        oi.quantity,
+        oi.unit_price,
+        oi.line_total,
+        oi.discount_amount,
+        oi.uom_id,
+        oi.base_qty,
+        oi.base_uom_id,
+        oi.conversion_factor
         ${kitchenSelect}
-      FROM pos_order_items
-      WHERE order_id = $1
-      ORDER BY product_name`,
+        ${addedBySelect}
+      FROM pos_order_items oi
+      ${addedByJoin}
+      WHERE oi.order_id = $1
+      ORDER BY oi.product_name`,
       [order.id]
     );
 

@@ -12,6 +12,10 @@ import { useCanAccess } from '../../authorization/useAuthorization';
 import { StationPrinterPicker } from '../../components/restaurant/StationPrinterPicker';
 import { toast } from 'react-hot-toast';
 import axios from 'axios';
+import {
+  isRestaurantFohAutoLogoutEnabled,
+  setRestaurantFohAutoLogoutEnabled,
+} from '../../utils/restaurantFohAutoLogout';
 
 interface Station {
   id: string;
@@ -44,6 +48,9 @@ export default function RestaurantStationsPage() {
   const queryClient = useQueryClient();
   const { data: restaurantEnabled, isLoading: flagLoading } = useRestaurantEnabled();
   const canManage = useCanAccess(undefined, ['restaurant.manage']);
+  const [autoLogoutAfterPrint, setAutoLogoutAfterPrint] = useState(() =>
+    isRestaurantFohAutoLogoutEnabled(),
+  );
 
   const [form, setForm] = useState({
     code: '',
@@ -193,6 +200,32 @@ export default function RestaurantStationsPage() {
             </Link>
           </div>
         </div>
+
+        <section className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2">
+          <h2 className="text-sm font-semibold text-stone-800">FOH terminal — auto logout after print</h2>
+          <p className="text-xs text-stone-600">
+            When enabled on this device: after KOT (kitchen/bar) anyone who is not Admin or Manager
+            is signed out; after guest bill print, Waiter/Waitress profiles are signed out and
+            return to PIN quick-login for the next staff member.
+          </p>
+          <label className="flex items-center gap-2 text-sm text-stone-800">
+            <input
+              type="checkbox"
+              checked={autoLogoutAfterPrint}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setAutoLogoutAfterPrint(next);
+                setRestaurantFohAutoLogoutEnabled(next);
+                toast.success(
+                  next
+                    ? 'Auto-logout after KOT/bill is ON for this terminal'
+                    : 'Auto-logout after KOT/bill is OFF for this terminal',
+                );
+              }}
+            />
+            Auto-logout after KOT / bill print (this terminal)
+          </label>
+        </section>
 
         <section className="bg-white border border-stone-200 rounded-lg p-4 space-y-3">
           <h2 className="text-sm font-semibold text-stone-800">Add station</h2>

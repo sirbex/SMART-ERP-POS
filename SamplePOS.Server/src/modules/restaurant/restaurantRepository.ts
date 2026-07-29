@@ -408,15 +408,24 @@ export const restaurantRepository = {
   },
 
   async listPendingOrdersForTable(conn: DbConn, tableId: string): Promise<
-    Array<{ id: string; orderNumber: string; totalAmount: string; createdAt: string }>
+    Array<{
+      id: string;
+      orderNumber: string;
+      totalAmount: string;
+      createdAt: string;
+      waiterId: string | null;
+      waiterName: string | null;
+    }>
   > {
     const result = await conn.query(
-      `SELECT id, order_number, total_amount, created_at
-       FROM pos_orders
-       WHERE table_id = $1
-         AND status = 'PENDING'
-         AND order_channel IS DISTINCT FROM 'RETAIL'
-       ORDER BY created_at ASC`,
+      `SELECT o.id, o.order_number, o.total_amount, o.created_at,
+              o.waiter_id, uw.full_name AS waiter_name
+       FROM pos_orders o
+       LEFT JOIN users uw ON uw.id = o.waiter_id
+       WHERE o.table_id = $1
+         AND o.status = 'PENDING'
+         AND o.order_channel IS DISTINCT FROM 'RETAIL'
+       ORDER BY o.created_at ASC`,
       [tableId],
     );
     return result.rows.map((r) => convertKeysToCamelCase(r) as {
@@ -424,6 +433,8 @@ export const restaurantRepository = {
       orderNumber: string;
       totalAmount: string;
       createdAt: string;
+      waiterId: string | null;
+      waiterName: string | null;
     });
   },
 

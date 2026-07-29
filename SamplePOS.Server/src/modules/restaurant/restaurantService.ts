@@ -6,6 +6,7 @@
 import type { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
+import { tableHasColumn } from '../../db/schemaColumnCache.js';
 import { BusinessError, ForbiddenError, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
 import { Money } from '../../utils/money.js';
 import { normalizeProductIdForDb } from '../../utils/productIdBoundary.js';
@@ -33,8 +34,24 @@ import {
   type RestaurantOrderTagSelection,
 } from '../../../../shared/utils/restaurantOrderTags.js';
 import { consolidateKotLines } from '../../../../shared/utils/consolidateKotLines.js';
+import {
+  canEditOtherWaitersChecks,
+  canMutateRestaurantCheck,
+  isTableVisibleToWaiter,
+  RESTAURANT_CHECK_OWNED_MESSAGE,
+  type OwnershipActor,
+} from '../../../../shared/utils/restaurantCheckOwnership.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { posProductSearchService } from '../inventory/warehouse/posProductSearchService.js';
+
+function requireCheckMutationAccess(
+  checkWaiterId: string | null | undefined,
+  actor: OwnershipActor | undefined,
+): void {
+  if (!actor) return;
+  if (canMutateRestaurantCheck({ checkWaiterId, actor })) return;
+  throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
+}
 
 /** Samba/Toast: same product + same notes → one KOT qty line (prices never enter KOT). */
 function toConsolidatedKotItems(
@@ -219,9 +236,34 @@ export const restaurantService = {
     return meta.orderChannel != null && meta.orderChannel !== 'RETAIL';
   },
 
-  async listTables(pool: Pool, includeInactive = false): Promise<RestaurantTableRecord[]> {
+  async listTables(
+    pool: Pool,
+    includeInactive = false,
+    actor?: OwnershipActor,
+  ): Promise<RestaurantTableRecord[]> {
     await assertRestaurantEnabled(pool);
-    return restaurantRepository.listTables(pool, includeInactive);
+    const tables = await restaurantRepository.listTables(pool, includeInactive);
+    if (!actor || canEditOtherWaitersChecks(actor)) return tables;
+
+    const owned = await pool.query<{ table_id: string }>(
+      `SELECT DISTINCT table_id
+       FROM pos_orders
+       WHERE status = 'PENDING'
+         AND waiter_id = $1
+         AND table_id IS NOT NULL
+         AND order_channel IS DISTINCT FROM 'RETAIL'`,
+      [actor.userId],
+    );
+    const ownedSet = new Set(owned.rows.map((r) => r.table_id));
+
+    return tables.filter((t) =>
+      isTableVisibleToWaiter({
+        tableStatus: t.status,
+        checkWaiterId: t.waiterId,
+        actorOwnsAnyCheckOnTable: ownedSet.has(t.id),
+        actor,
+      }),
+    );
   },
 
   async listAssignableWaiters(pool: Pool) {
@@ -229,15 +271,29 @@ export const restaurantService = {
     return restaurantRepository.listAssignableWaiters(pool);
   },
 
-  async assignWaiter(pool: Pool, orderId: string, waiterId: string) {
+  async assignWaiter(
+    pool: Pool,
+    orderId: string,
+    waiterId: string,
+    actor?: OwnershipActor,
+  ) {
     await assertRestaurantEnabled(pool);
     const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
     if (!meta || meta.orderChannel === 'RETAIL') {
       throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
     }
+    requireCheckMutationAccess(meta.waiterId, actor);
+
     const order = await ordersService.getOrder(pool, orderId);
     if (order.status !== 'PENDING') {
       throw new BusinessError('Only open checks can change waiter', 'ERR_RESTAURANT_CHECK_CLOSED');
+    }
+
+    // Only edit-others (manager/cashier) may hand a check to a different waiter.
+    if (actor && !canEditOtherWaitersChecks(actor) && waiterId !== actor.userId) {
+      throw new ForbiddenError(
+        'Only a manager or cashier can reassign this check to another waiter',
+      );
     }
 
     const waiters = await restaurantRepository.listAssignableWaiters(pool);
@@ -316,7 +372,12 @@ export const restaurantService = {
    * Open or resume the pending check for a table.
    * Does not create an empty order — returns table + existing order if any.
    */
-  async getTableCheck(pool: Pool, tableId: string, activeOrderId?: string | null) {
+  async getTableCheck(
+    pool: Pool,
+    tableId: string,
+    activeOrderId?: string | null,
+    actor?: OwnershipActor,
+  ) {
     await assertRestaurantEnabled(pool);
     const table = await restaurantRepository.getTableById(pool, tableId);
     if (!table || !table.isActive) throw new NotFoundError('Restaurant table');
@@ -337,6 +398,17 @@ export const restaurantService = {
     if (!orderId && siblings.length > 0) {
       orderId = siblings[0].id;
       await restaurantRepository.setTableCurrentOrder(pool, tableId, orderId);
+    }
+
+    // Toast/Aloha: waiters may only open their own checks (FREE tables are fine).
+    if (actor && !canEditOtherWaitersChecks(actor) && siblings.length > 0) {
+      const ownsAny = siblings.some((s) => !s.waiterId || s.waiterId === actor.userId);
+      const target = siblings.find((s) => s.id === orderId);
+      const canOpenTarget =
+        !target || !target.waiterId || target.waiterId === actor.userId;
+      if (!ownsAny || !canOpenTarget) {
+        throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
+      }
     }
 
     let order = null;
@@ -365,7 +437,12 @@ export const restaurantService = {
     };
   },
 
-  async activateCheck(pool: Pool, tableId: string, orderId: string) {
+  async activateCheck(
+    pool: Pool,
+    tableId: string,
+    orderId: string,
+    actor?: OwnershipActor,
+  ) {
     await assertRestaurantEnabled(pool);
     const table = await restaurantRepository.getTableById(pool, tableId);
     if (!table || !table.isActive) throw new NotFoundError('Restaurant table');
@@ -386,8 +463,9 @@ export const restaurantService = {
     if (!meta || meta.tableId !== tableId) {
       throw new ValidationError('Check does not belong to this table');
     }
+    requireCheckMutationAccess(meta.waiterId, actor);
     await restaurantRepository.setTableCurrentOrder(pool, tableId, orderId);
-    return this.getTableCheck(pool, tableId, orderId);
+    return this.getTableCheck(pool, tableId, orderId, actor);
   },
 
   /**
@@ -407,6 +485,8 @@ export const restaurantService = {
       guestPhone?: string | null;
       deliveryAddress?: string | null;
       pickupLabel?: string | null;
+      /** Acting user — ownership + line attribution (Toast/Aloha). */
+      actor?: OwnershipActor;
     },
   ) {
     await assertRestaurantEnabled(pool);
@@ -417,6 +497,12 @@ export const restaurantService = {
 
     const table = await restaurantRepository.getTableById(pool, input.tableId);
     if (!table || !table.isActive) throw new NotFoundError('Restaurant table');
+
+    // Waiters always own what they open; managers may assign another waiter on open.
+    const actor = input.actor;
+    const effectiveWaiterId =
+      actor && !canEditOtherWaitersChecks(actor) ? actor.userId : input.waiterId;
+    const addedByUserId = actor?.userId || effectiveWaiterId;
 
     const channel = channelForTable(table);
     const guestPayload: RestaurantGuestDetails = {
@@ -479,6 +565,7 @@ export const restaurantService = {
         if (!meta || meta.tableId !== input.tableId) {
           throw new ValidationError('Order does not belong to this table');
         }
+        requireCheckMutationAccess(meta.waiterId, actor);
         const existing = await ordersRepository.getById(pool, input.orderId);
         if (!existing || existing.status !== 'PENDING') {
           throw new ValidationError('Check is not open');
@@ -490,6 +577,9 @@ export const restaurantService = {
           const existing = await ordersRepository.getById(pool, orderId);
           if (!existing || existing.status !== 'PENDING') {
             orderId = null;
+          } else {
+            const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
+            requireCheckMutationAccess(meta?.waiterId, actor);
           }
         }
       }
@@ -501,19 +591,22 @@ export const restaurantService = {
         const existing = await ordersRepository.getById(pool, orderId);
         if (!existing || existing.status !== 'PENDING') {
           orderId = null;
+        } else {
+          const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
+          requireCheckMutationAccess(meta?.waiterId, actor);
         }
       }
 
       if (!orderId) {
         const waiters = await restaurantRepository.listAssignableWaiters(pool);
-        if (waiters.length > 0 && !waiters.some((w) => w.id === input.waiterId)) {
+        if (waiters.length > 0 && !waiters.some((w) => w.id === effectiveWaiterId)) {
           throw new ValidationError('Selected user is not an assignable waiter');
         }
 
         const created = await ordersService.createOrder(pool, {
           customerId: input.customerId ?? null,
           items: resolvedItems,
-          createdBy: input.waiterId,
+          createdBy: effectiveWaiterId,
           notes: `Restaurant ${lockedTable.code}`,
         });
         orderId = created.id;
@@ -523,7 +616,7 @@ export const restaurantService = {
             await restaurantRepository.patchOrderRestaurantFields(client, orderId!, {
               tableId: lockedTable.id,
               orderChannel: channel,
-              waiterId: input.waiterId,
+              waiterId: effectiveWaiterId,
               kitchenStatus: 'NONE',
               guestName: input.guestName,
               guestPhone: input.guestPhone,
@@ -538,16 +631,31 @@ export const restaurantService = {
                   `SELECT kitchen_station FROM products WHERE id = $1`,
                   [normalizeProductIdForDb(resolvedItems[i].productId)],
                 );
-                await client.query(
-                  `UPDATE pos_order_items
-                   SET line_notes = $2, kitchen_station = $3
-                   WHERE id = $1`,
-                  [
-                    fresh.items[i].id,
-                    lineExtras[i]?.lineNotes ?? null,
-                    stationRow.rows[0]?.kitchen_station ?? null,
-                  ],
-                );
+                const hasAddedBy = await tableHasColumn(client, 'pos_order_items', 'added_by');
+                if (hasAddedBy) {
+                  await client.query(
+                    `UPDATE pos_order_items
+                     SET line_notes = $2, kitchen_station = $3, added_by = COALESCE(added_by, $4)
+                     WHERE id = $1`,
+                    [
+                      fresh.items[i].id,
+                      lineExtras[i]?.lineNotes ?? null,
+                      stationRow.rows[0]?.kitchen_station ?? null,
+                      addedByUserId,
+                    ],
+                  );
+                } else {
+                  await client.query(
+                    `UPDATE pos_order_items
+                     SET line_notes = $2, kitchen_station = $3
+                     WHERE id = $1`,
+                    [
+                      fresh.items[i].id,
+                      lineExtras[i]?.lineNotes ?? null,
+                      stationRow.rows[0]?.kitchen_station ?? null,
+                    ],
+                  );
+                }
                 await orderTagRepository.setOrderItemTags(
                   client,
                   fresh.items[i].id,
@@ -573,7 +681,7 @@ export const restaurantService = {
             await ordersService.cancelOrder(
               pool,
               orderId,
-              input.waiterId,
+              effectiveWaiterId,
               'Restaurant open-check failed',
             );
           } catch (cancelErr) {
@@ -628,6 +736,7 @@ export const restaurantService = {
             baseQty: snapshot.baseQuantity,
             baseUomId: snapshot.baseUomId,
             conversionFactor: snapshot.conversionFactor,
+            addedBy: addedByUserId,
           });
         }
 
@@ -689,7 +798,7 @@ export const restaurantService = {
   /**
    * Fire unsent lines to kitchen. Creates immutable KOT rows without prices.
    */
-  async sendKot(pool: Pool, orderId: string, firedBy: string): Promise<KotRecord[]> {
+  async sendKot(pool: Pool, orderId: string, firedBy: string, actor?: OwnershipActor): Promise<KotRecord[]> {
     await assertRestaurantEnabled(pool);
 
     return UnitOfWork.run(pool, async (client: PoolClient) => {
@@ -697,6 +806,8 @@ export const restaurantService = {
       if (!order || order.status !== 'PENDING') {
         throw new BusinessError('Open restaurant check required to send KOT', 'ERR_RESTAURANT_KOT');
       }
+      const metaEarly = await restaurantRepository.getOrderRestaurantMeta(client, orderId);
+      requireCheckMutationAccess(metaEarly?.waiterId, actor || { userId: firedBy });
 
       const meta = await restaurantRepository.getOrderRestaurantMeta(client, orderId);
       if (!meta || meta.orderChannel === 'RETAIL') {
@@ -778,6 +889,7 @@ export const restaurantService = {
       items: Array<{ itemId: string; quantity?: number }>;
       reason: string;
       voidedBy: string;
+      actor?: OwnershipActor;
     },
   ): Promise<{
     voidKots: KotRecord[];
@@ -814,6 +926,10 @@ export const restaurantService = {
       if (!meta || meta.orderChannel === 'RETAIL') {
         throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
       }
+      requireCheckMutationAccess(
+        meta.waiterId,
+        input.actor || { userId: input.voidedBy },
+      );
 
       const rows = await restaurantRepository.listOrderItemsForVoid(client, orderId, uniqueIds);
       if (rows.length !== uniqueIds.length) {

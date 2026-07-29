@@ -38,6 +38,14 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { useCanAccess } from '../../authorization/useAuthorization';
 import {
+  performRestaurantFohAutoLogout,
+} from '../../utils/restaurantFohAutoLogout';
+import { isRestaurantWaiterProfile } from '../../utils/restaurantWaiterLockdown';
+import {
+  canEditOtherWaitersChecks,
+  shortWaiterLabel,
+} from '@shared/utils/restaurantCheckOwnership';
+import {
   getAllEvents,
   getAllSyncState,
   invalidateJournalMemoryCache,
@@ -161,6 +169,9 @@ interface OrderItem {
   discountAmount: string;
   kitchenSentAt?: string | null;
   lineNotes?: string | null;
+  /** Who rang this line (may differ from check owner). */
+  addedBy?: string | null;
+  addedByName?: string | null;
   orderTags?: Array<{
     id?: string | null;
     label: string;
@@ -179,6 +190,8 @@ interface TicketLineGroup {
   lineTotal: number;
   kitchenSent: boolean;
   lineNotes: string | null;
+  addedBy: string | null;
+  addedByName: string | null;
   itemIds: string[];
   lines: OrderItem[];
 }
@@ -189,8 +202,9 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
     const kitchenSent = !!it.kitchenSentAt;
     const unitPrice = Number(it.unitPrice) || 0;
     const notes = (it.lineNotes || '').trim();
-    // Same product + same modifiers merge (tag order independent). Kitchen sent stays separate.
-    const key = `${it.productId ?? 'name:' + it.productName}|${unitPrice}|${kitchenSent ? 'S' : 'N'}|${kotLineNotesMergeKey(notes)}`;
+    const adder = it.addedBy || 'unknown';
+    // Same product + same modifiers + same adder merge. Different waiters stay separate.
+    const key = `${it.productId ?? 'name:' + it.productName}|${unitPrice}|${kitchenSent ? 'S' : 'N'}|${kotLineNotesMergeKey(notes)}|${adder}`;
     const qty = Number(it.quantity) || 0;
     const lineTotal = Number(it.lineTotal) || 0;
     const existing = map.get(key);
@@ -204,6 +218,8 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
         lineTotal,
         kitchenSent,
         lineNotes: notes || null,
+        addedBy: it.addedBy ?? null,
+        addedByName: it.addedByName ?? null,
         itemIds: [it.id],
         lines: [it],
       });
@@ -565,7 +581,7 @@ export default function RestaurantPosPage() {
     [invoiceBranding, config.branding],
   );
   const taxName = config.tax?.name || 'VAT';
-  const { user } = useAuth();
+  const { user, permissions, logout } = useAuth();
   const { isOnline } = useOfflineContext();
   const { tier, chrome } = useLayoutTier();
   const { data: restaurantEnabled, isLoading: flagLoading } = useRestaurantEnabled();
@@ -574,6 +590,41 @@ export default function RestaurantPosPage() {
   const canOrder = useCanAccess(undefined, ['restaurant.order']);
   /** Pay is cashier / accountant / admin only — waiters and managers order but do not settle. */
   const canRestaurantPay = useCanAccess(undefined, ['restaurant.pay']);
+  /** Toast: Edit other employees' orders — managers/cashiers see every table. */
+  const canEditOthers = canEditOtherWaitersChecks({
+    userId: user?.id || '',
+    role: user?.role,
+    permissions,
+  });
+  const isWaiterProfile = isRestaurantWaiterProfile({
+    role: user?.role,
+    permissions,
+    restaurantEnabled: !!restaurantEnabled,
+  });
+
+  /** After KOT/bill print — rotate shared FOH terminal via hard redirect (no Router race). */
+  const maybeAutoLogoutAfterPrint = (kind: 'kot' | 'bill'): boolean => {
+    const did = performRestaurantFohAutoLogout(
+      {
+        kind,
+        role: user?.role,
+        permissions,
+      },
+      {
+        logout,
+        returnPath: '/restaurant',
+      },
+    );
+    if (did) {
+      toast.success(
+        kind === 'kot'
+          ? 'KOT done — sign in again for the next order'
+          : 'Bill printed — sign in again for the next order',
+        { id: 'restaurant-foh-auto-logout', duration: 2500 },
+      );
+    }
+    return did;
+  };
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [menuSearch, setMenuSearch] = useState('');
@@ -591,7 +642,12 @@ export default function RestaurantPosPage() {
   /** Customers SSOT — search/add only; guest fields come from the selected customer. */
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedWaiterId, setSelectedWaiterId] = useState<string>('');
-  const [myTablesOnly, setMyTablesOnly] = useState(false);
+  const [myTablesOnly, setMyTablesOnly] = useState(true);
+  /** Managers/cashiers start on the full floor; waiters stay on My tables. */
+  useEffect(() => {
+    if (canEditOthers) setMyTablesOnly(false);
+    else if (isWaiterProfile) setMyTablesOnly(true);
+  }, [canEditOthers, isWaiterProfile]);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
   const [opsMode, setOpsMode] = useState<null | 'transfer' | 'merge'>(null);
@@ -1867,6 +1923,8 @@ export default function RestaurantPosPage() {
           { duration: 5000 },
         );
       }
+      // Shared FOH: auto-logout after KOT for waiters / cashiers / staff (not admin/manager).
+      if (maybeAutoLogoutAfterPrint('kot')) return;
       returnToFloor();
     } catch (err) {
       toast.error(apiErr(err, 'KOT failed'));
@@ -1994,6 +2052,13 @@ export default function RestaurantPosPage() {
           { duration: printOk ? 3000 : 5000 },
         );
         clearLineSelection();
+
+        // Bill commanded (server/offline mark): rotate waiter even if local printer failed.
+        if (maybeAutoLogoutAfterPrint('bill')) return;
+
+        // If bill also fired KOT and user isn't a waiter, still apply KOT logout rule.
+        if (kotFired > 0 && maybeAutoLogoutAfterPrint('kot')) return;
+
         // Multi-ticket: stay on table and switch to another open order.
         if (remainingTickets.length > 0) {
           await activateSibling(remainingTickets[0].id);
@@ -3297,9 +3362,10 @@ export default function RestaurantPosPage() {
                   type="checkbox"
                   checked={myTablesOnly}
                   onChange={(e) => setMyTablesOnly(e.target.checked)}
+                  disabled={!canEditOthers}
                   className="h-5 w-5 rounded border-stone-300"
                 />
-                My tables
+                {canEditOthers ? 'My tables only' : 'My tables'}
               </label>
             </div>
             {/* One tile per lane (TA / DL / QK) — no duplicate "Delivery" button + DL table. */}
@@ -3380,8 +3446,16 @@ export default function RestaurantPosPage() {
                           : 'Free'}
                     </div>
                     {occupied && table.waiterName ? (
-                      <div className="text-[11px] text-stone-600 mt-0.5 truncate">
-                        Waiter: {table.waiterName}
+                      <div
+                        className={`text-[11px] mt-0.5 truncate font-medium ${
+                          table.waiterId && user?.id && table.waiterId !== user.id
+                            ? 'text-violet-700'
+                            : 'text-stone-600'
+                        }`}
+                      >
+                        {table.waiterId === user?.id
+                          ? 'Yours'
+                          : shortWaiterLabel(table.waiterName)}
                       </div>
                     ) : null}
                   </button>
@@ -3858,7 +3932,7 @@ export default function RestaurantPosPage() {
                   <select
                     className={`${touchField} min-h-10 py-1.5 text-sm`}
                     value={selectedWaiterId}
-                    disabled={assignWaiterMutation.isPending}
+                    disabled={assignWaiterMutation.isPending || !canEditOthers}
                     onChange={(e) => handleWaiterChange(e.target.value)}
                   >
                     {waiters.length === 0 && user ? (
@@ -4087,6 +4161,14 @@ export default function RestaurantPosPage() {
                               {group.lineNotes ? (
                                 <div className="text-[11px] font-medium text-amber-800 mt-0.5 truncate">
                                   * {group.lineNotes}
+                                </div>
+                              ) : null}
+                              {group.addedByName &&
+                              (canEditOthers ||
+                                (group.addedBy && group.addedBy !== user?.id) ||
+                                (meta?.waiterId && group.addedBy && group.addedBy !== meta.waiterId)) ? (
+                                <div className="text-[10px] text-stone-500 mt-0.5 truncate">
+                                  by {shortWaiterLabel(group.addedByName)}
                                 </div>
                               ) : null}
                               {!dense ? (
@@ -4573,7 +4655,7 @@ export default function RestaurantPosPage() {
             <select
               className={touchField}
               value={selectedWaiterId}
-              disabled={assignWaiterMutation.isPending}
+              disabled={assignWaiterMutation.isPending || !canEditOthers}
               onChange={(e) => handleWaiterChange(e.target.value)}
             >
               {waiters.length === 0 && user ? (

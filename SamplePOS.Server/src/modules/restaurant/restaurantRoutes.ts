@@ -5,6 +5,15 @@ import { authenticate } from '../../middleware/auth.js';
 import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { restaurantService } from './restaurantService.js';
+import type { OwnershipActor } from '../../../../shared/utils/restaurantCheckOwnership.js';
+
+function ownershipActorFromReq(req: Request): OwnershipActor {
+  return {
+    userId: req.user!.id,
+    role: req.user!.role,
+    permissions: req.authContext?.permissions ?? [],
+  };
+}
 
 const router = Router();
 router.use(authenticate);
@@ -92,7 +101,11 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const includeInactive = req.query.includeInactive === 'true';
-    const tables = await restaurantService.listTables(pool, includeInactive);
+    const tables = await restaurantService.listTables(
+      pool,
+      includeInactive,
+      ownershipActorFromReq(req),
+    );
     res.json({ success: true, data: tables });
   }),
 );
@@ -143,7 +156,12 @@ router.get(
         ? req.query.orderId
         : null;
     const activeOrderId = rawOrderId && ORDER_ID_UUID_RE.test(rawOrderId) ? rawOrderId : null;
-    const check = await restaurantService.getTableCheck(pool, req.params.id, activeOrderId);
+    const check = await restaurantService.getTableCheck(
+      pool,
+      req.params.id,
+      activeOrderId,
+      ownershipActorFromReq(req),
+    );
     res.json({ success: true, data: check });
   }),
 );
@@ -156,11 +174,21 @@ router.post(
     const body = z.object({ orderId: z.string().min(1) }).parse(req.body);
     // Optimistic tmp_ord_* / ofl_* must never hit UUID columns — ignore and resume table check.
     if (!ORDER_ID_UUID_RE.test(body.orderId)) {
-      const check = await restaurantService.getTableCheck(pool, req.params.id, null);
+      const check = await restaurantService.getTableCheck(
+        pool,
+        req.params.id,
+        null,
+        ownershipActorFromReq(req),
+      );
       res.json({ success: true, data: check });
       return;
     }
-    const check = await restaurantService.activateCheck(pool, req.params.id, body.orderId);
+    const check = await restaurantService.activateCheck(
+      pool,
+      req.params.id,
+      body.orderId,
+      ownershipActorFromReq(req),
+    );
     res.json({ success: true, data: check });
   }),
 );
@@ -209,6 +237,7 @@ router.post(
     const result = await restaurantService.addItemsToTable(pool, {
       ...body,
       waiterId: body.waiterId ?? req.user!.id,
+      actor: ownershipActorFromReq(req),
     });
     res.status(201).json({ success: true, data: result });
   }),
@@ -231,7 +260,12 @@ router.patch(
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const body = AssignWaiterSchema.parse(req.body);
-    const result = await restaurantService.assignWaiter(pool, req.params.orderId, body.waiterId);
+    const result = await restaurantService.assignWaiter(
+      pool,
+      req.params.orderId,
+      body.waiterId,
+      ownershipActorFromReq(req),
+    );
     res.json({ success: true, data: result });
   }),
 );
@@ -318,7 +352,12 @@ router.post(
   requireAnyPermission(['restaurant.kitchen', 'restaurant.order']),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const kots = await restaurantService.sendKot(pool, req.params.orderId, req.user!.id);
+    const kots = await restaurantService.sendKot(
+      pool,
+      req.params.orderId,
+      req.user!.id,
+      ownershipActorFromReq(req),
+    );
     res.status(201).json({ success: true, data: kots });
   }),
 );
@@ -361,6 +400,7 @@ router.post(
       items,
       reason: body.reason,
       voidedBy: req.user!.id,
+      actor: ownershipActorFromReq(req),
     });
     res.status(200).json({
       success: true,

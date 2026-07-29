@@ -6,6 +6,9 @@ import { useNavigate } from 'react-router-dom';
 import { useQuickLogin, useTrustedDevices } from '../../hooks/useQuickLogin';
 import { useHasPermission } from '../../authorization/useAuthorization';
 import { toast } from 'react-hot-toast';
+import { resolvePostLoginPath } from '../../utils/cashierLockdown';
+import { takeRestaurantPostQuickLoginPath } from '../../utils/restaurantFohAutoLogout';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ============================================================
 // PIN Input Component
@@ -245,6 +248,7 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
 
 export default function QuickLoginScreen() {
     const navigate = useNavigate();
+    const { permissions } = useAuth();
     const {
         isLoading,
         error,
@@ -260,11 +264,29 @@ export default function QuickLoginScreen() {
         try {
             const result = await loginWithPinOnly(pin);
             toast.success(`Welcome, ${result.user.fullName}!`);
-            navigate('/pos', { replace: true });
+            // Restaurant FOH auto-logout stashes /restaurant; waiters land back on tables.
+            const intended = takeRestaurantPostQuickLoginPath('/pos');
+            let perms: string[] = [];
+            try {
+                const raw = localStorage.getItem('rbac_permissions');
+                if (raw) {
+                    const parsed = JSON.parse(raw) as unknown;
+                    if (Array.isArray(parsed)) perms = parsed.filter((p): p is string => typeof p === 'string');
+                }
+            } catch {
+                perms = [...permissions];
+            }
+            navigate(
+              resolvePostLoginPath(
+                { role: result.user.role, permissions: perms },
+                intended,
+              ),
+              { replace: true },
+            );
         } catch {
             // Error is handled by hook, shown in PinInput
         }
-    }, [loginWithPinOnly, navigate]);
+    }, [loginWithPinOnly, navigate, permissions]);
 
     const handlePasswordLogin = useCallback(() => {
         navigate('/login');
