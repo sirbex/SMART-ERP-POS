@@ -1,0 +1,65 @@
+name: Blis Reset Transactions
+
+# Wipe testing transactions on Blis (pos_tenant_blis) for a fresh go-live.
+# Preserves products, customers, suppliers, users, COA, settings, restaurant tables.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview only (1) or execute wipe (0)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '0'
+      confirm:
+        description: 'Must type RESET ALL TRANSACTIONS when dry_run=0'
+        required: false
+        default: ''
+
+jobs:
+  reset-blis:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PROD_SSH_PRIVATE_KEY }}" > ~/.ssh/prod_key
+          chmod 600 ~/.ssh/prod_key
+          ssh-keyscan -H 209.38.203.138 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Preview or reset Blis transactional data
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "0" ] && [ "$CONFIRM" != "RESET ALL TRANSACTIONS" ]; then
+            echo "❌ When dry_run=0 you must set confirm to exactly: RESET ALL TRANSACTIONS"
+            exit 1
+          fi
+
+          scp -i ~/.ssh/prod_key -o ConnectTimeout=30 \
+            scripts/blis-reset-transactions.mjs \
+            root@209.38.203.138:/tmp/blis-reset-transactions.mjs
+
+          ssh -i ~/.ssh/prod_key -o ConnectTimeout=30 root@209.38.203.138 bash -s <<REMOTE
+          set -euo pipefail
+          docker cp /tmp/blis-reset-transactions.mjs smarterp-backend:/tmp/blis-reset-transactions.mjs
+          docker exec -u root smarterp-backend cp /tmp/blis-reset-transactions.mjs /app/blis-reset-transactions.mjs
+          docker exec -u root smarterp-backend chown nodejs:nodejs /app/blis-reset-transactions.mjs
+          docker exec -w /app \
+            -e DRY_RUN=${DRY_RUN} \
+            -e CONFIRM='${CONFIRM}' \
+            -e RESET_REASON='Blis go-live fresh start: clear testing transactions, customer deposits, and balances' \
+            smarterp-backend node blis-reset-transactions.mjs
+          REMOTE
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/prod_key

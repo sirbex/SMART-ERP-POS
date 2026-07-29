@@ -206,8 +206,21 @@ export const adminRepository = {
       // Held orders
       deletedRecords.pos_held_order_items = await safeDelete('pos_held_order_items', step++);
       deletedRecords.pos_held_orders = await safeDelete('pos_held_orders', step++);
+      deletedRecords.restaurant_kot_items = await safeDelete('restaurant_kot_items', step++);
+      deletedRecords.restaurant_kot = await safeDelete('restaurant_kot', step++);
       deletedRecords.pos_order_items = await safeDelete('pos_order_items', step++);
       deletedRecords.pos_orders = await safeDelete('pos_orders', step++);
+      try {
+        await client.query(`SAVEPOINT sp_free_restaurant_tables`);
+        const freeResult = await client.query(
+          `UPDATE restaurant_tables SET status = 'FREE' WHERE status <> 'FREE'`,
+        );
+        deletedRecords.restaurant_tables_freed = freeResult.rowCount || 0;
+        await client.query(`RELEASE SAVEPOINT sp_free_restaurant_tables`);
+      } catch (error: unknown) {
+        await client.query(`ROLLBACK TO SAVEPOINT sp_free_restaurant_tables`);
+        deletedRecords.restaurant_tables_freed = 0;
+      }
 
       // =========================================================================
       // PHASE 3: SUPPLIER & PURCHASE DATA

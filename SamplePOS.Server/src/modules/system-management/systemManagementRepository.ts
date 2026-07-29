@@ -480,6 +480,12 @@ export const systemManagementRepository = {
             'deposit_applications',
             'credit_applications',
             'customer_credits',
+            'ar_customer_payments',
+            'ar_payment_allocations',
+            'sale_payments',
+            'sale_line_price_events',
+            'restaurant_kot',
+            'restaurant_kot_items',
             'customer_balance_adjustments',
             'customer_accounts',
             'payment_transactions',
@@ -878,6 +884,9 @@ export const systemManagementRepository = {
         tablesCleared['customer_deposits'] = await safeDelete('customer_deposits', step++);
         tablesCleared['pos_customer_deposits'] = await safeDelete('pos_customer_deposits', step++);
         tablesCleared['customer_payments'] = await safeDelete('customer_payments', step++);
+        // AR receipt headers (CRP-*) — separate from legacy customer_payments
+        tablesCleared['ar_payment_allocations'] = await safeDelete('ar_payment_allocations', step++);
+        tablesCleared['ar_customer_payments'] = await safeDelete('ar_customer_payments', step++);
         tablesCleared['customer_credits'] = await safeDelete('customer_credits', step++);
         tablesCleared['customer_balance_adjustments'] = await safeDelete(
             'customer_balance_adjustments',
@@ -899,9 +908,33 @@ export const systemManagementRepository = {
         tablesCleared['sale_refund_items'] = await safeDelete('sale_refund_items', step++);
         tablesCleared['sale_refunds'] = await safeDelete('sale_refunds', step++);
 
+        // Split payments + price events (FK to sales — must delete before sales)
+        tablesCleared['sale_line_price_events'] = await safeDelete('sale_line_price_events', step++);
+        tablesCleared['sale_payments'] = await safeDelete('sale_payments', step++);
+
+        // Restaurant KOTs (FK to pos_orders ON DELETE RESTRICT — must clear before orders)
+        tablesCleared['restaurant_kot_items'] = await safeDelete('restaurant_kot_items', step++);
+        tablesCleared['restaurant_kot'] = await safeDelete('restaurant_kot', step++);
+
         // POS orders (legacy/new POS order tables)
         tablesCleared['pos_order_items'] = await safeDelete('pos_order_items', step++);
         tablesCleared['pos_orders'] = await safeDelete('pos_orders', step++);
+
+        // Floor status — keep table master, free all occupied/billing seats
+        try {
+            await client.query(`SAVEPOINT sp_free_restaurant_tables`);
+            const freeResult = await client.query(
+                `UPDATE restaurant_tables SET status = 'FREE' WHERE status <> 'FREE'`,
+            );
+            tablesCleared['restaurant_tables_freed'] = freeResult.rowCount || 0;
+            await client.query(`RELEASE SAVEPOINT sp_free_restaurant_tables`);
+        } catch (error: unknown) {
+            await client.query(`ROLLBACK TO SAVEPOINT sp_free_restaurant_tables`);
+            logger.warn(
+                `Free restaurant tables skipped: ${error instanceof Error ? error.message : String(error)}`,
+            );
+            tablesCleared['restaurant_tables_freed'] = 0;
+        }
 
         // Withholding tax & down payments
         tablesCleared['withholding_tax_entries'] = await safeDelete('withholding_tax_entries', step++);
