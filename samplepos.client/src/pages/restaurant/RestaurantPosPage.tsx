@@ -27,7 +27,11 @@ import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
 import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
 import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
 import { printReceipt } from '../../lib/print';
-import { brandingFromTenant } from '../../lib/documentCompanyBranding';
+import { brandingFromTenant, mergeDocumentCompanyBranding } from '../../lib/documentCompanyBranding';
+import {
+  fetchInvoiceSettingsForReceipt,
+  invoiceSettingsToReceiptBranding,
+} from '../../lib/receiptFromSale';
 import { toast } from 'react-hot-toast';
 import { useTenant } from '../../contexts/TenantContext';
 import { useAuth } from '../../contexts/AuthContext';
@@ -526,8 +530,27 @@ export default function RestaurantPosPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { config } = useTenant();
-  /** Same company fields as receipt / other docs (tenant branding SSOT). */
-  const companyBranding = useMemo(() => brandingFromTenant(config.branding), [config.branding]);
+  /** Invoice Settings (DB) preferred — same company SSOT as POS receipts; tenant branding fallback. */
+  const { data: invoiceBranding } = useQuery({
+    queryKey: ['settings', 'invoice', 'restaurant-doc-branding'],
+    queryFn: async () => {
+      const settings = await fetchInvoiceSettingsForReceipt();
+      return invoiceSettingsToReceiptBranding(settings);
+    },
+    staleTime: 60_000,
+  });
+  const companyBranding = useMemo(
+    () =>
+      mergeDocumentCompanyBranding(
+        {
+          companyName: invoiceBranding?.companyName,
+          companyAddress: invoiceBranding?.companyAddress,
+          companyPhone: invoiceBranding?.companyPhone,
+        },
+        brandingFromTenant(config.branding),
+      ),
+    [invoiceBranding, config.branding],
+  );
   const taxName = config.tax?.name || 'VAT';
   const { user } = useAuth();
   const { isOnline } = useOfflineContext();
@@ -3805,59 +3828,61 @@ export default function RestaurantPosPage() {
                 ) : null}
               </div>
 
-              {serviceChannel ? (
-                <div
-                  className="px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2 relative z-20 shrink-0"
-                  data-restaurant-customer="primary"
-                >
-                  {selectedCustomer || !guestDraft.guestName ? (
-                    <CustomerSelector
-                      compact
-                      required={!isQuickLane}
-                      label={
-                        channel === 'DELIVERY'
-                          ? 'Delivery customer'
-                          : isQuickLane
-                            ? 'Customer (optional)'
-                            : 'Takeaway customer'
-                      }
-                      selectedCustomer={selectedCustomer}
-                      saleTotal={Number(order?.totalAmount || 0)}
-                      onSelectCustomer={handleSelectServiceCustomer}
-                    />
-                  ) : (
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
-                        Customer
-                      </label>
-                      <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-3 py-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="font-bold text-base text-stone-900 truncate">
-                            {guestDraft.guestName}
-                          </div>
-                          {guestDraft.guestPhone ? (
-                            <div className="text-sm text-stone-600">{guestDraft.guestPhone}</div>
-                          ) : null}
+              <div
+                className="px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2 relative z-20 shrink-0"
+                data-restaurant-customer="primary"
+              >
+                {selectedCustomer || !guestDraft.guestName ? (
+                  <CustomerSelector
+                    compact
+                    required={
+                      serviceChannel &&
+                      !isQuickLane &&
+                      (channel === 'TAKEAWAY' || channel === 'DELIVERY')
+                    }
+                    label={
+                      channel === 'DELIVERY'
+                        ? 'Delivery customer'
+                        : channel === 'TAKEAWAY' && !isQuickLane
+                          ? 'Takeaway customer'
+                          : 'Customer (optional)'
+                    }
+                    selectedCustomer={selectedCustomer}
+                    saleTotal={Number(order?.totalAmount || 0)}
+                    onSelectCustomer={handleSelectServiceCustomer}
+                  />
+                ) : (
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
+                      Customer
+                    </label>
+                    <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-3 py-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="font-bold text-base text-stone-900 truncate">
+                          {guestDraft.guestName}
                         </div>
-                        <button
-                          type="button"
-                          className={`${touchBtnGhost} min-h-11 px-3 shrink-0`}
-                          onClick={() =>
-                            setGuestDraft({
-                              guestName: '',
-                              guestPhone: '',
-                              deliveryAddress: '',
-                              pickupLabel: '',
-                            })
-                          }
-                        >
-                          Change
-                        </button>
+                        {guestDraft.guestPhone ? (
+                          <div className="text-sm text-stone-600">{guestDraft.guestPhone}</div>
+                        ) : null}
                       </div>
+                      <button
+                        type="button"
+                        className={`${touchBtnGhost} min-h-11 px-3 shrink-0`}
+                        onClick={() =>
+                          setGuestDraft({
+                            guestName: '',
+                            guestPhone: '',
+                            deliveryAddress: '',
+                            pickupLabel: '',
+                          })
+                        }
+                      >
+                        Change
+                      </button>
                     </div>
-                  )}
-                </div>
-              ) : null}
+                  </div>
+                )}
+              </div>
 
               {/* Ticket lines — basis-0 + min-h-0 so grid/flex parents can allocate real height */}
               <div
@@ -4515,18 +4540,21 @@ export default function RestaurantPosPage() {
               )}
             </select>
           </div>
-          {serviceChannel ? (
-            <div className="space-y-2">
+          <div className="space-y-2">
               {selectedCustomer || !guestDraft.guestName ? (
                 <CustomerSelector
                   compact
-                  required={!isQuickLane}
+                  required={
+                    serviceChannel &&
+                    !isQuickLane &&
+                    (channel === 'TAKEAWAY' || channel === 'DELIVERY')
+                  }
                   label={
                     channel === 'DELIVERY'
                       ? 'Delivery customer'
-                      : isQuickLane
-                        ? 'Customer (optional)'
-                        : 'Takeaway customer'
+                      : channel === 'TAKEAWAY' && !isQuickLane
+                        ? 'Takeaway customer'
+                        : 'Customer (optional)'
                   }
                   selectedCustomer={selectedCustomer}
                   saleTotal={Number(order?.totalAmount || 0)}
@@ -4564,7 +4592,6 @@ export default function RestaurantPosPage() {
                 </div>
               )}
             </div>
-          ) : null}
         </div>
       </AdaptiveDialog>
 

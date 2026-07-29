@@ -27,6 +27,24 @@ export function brandingFromTenant(
   };
 }
 
+/** Prefer Invoice Settings (DB) over tenant file branding; fill blanks from fallback. */
+export function mergeDocumentCompanyBranding(
+  preferred?: DocumentCompanyBranding | null,
+  fallback?: DocumentCompanyBranding | null,
+): DocumentCompanyBranding {
+  const pick = (a?: string | null, b?: string | null) => {
+    const t = a?.trim();
+    if (t) return t;
+    const f = b?.trim();
+    return f || null;
+  };
+  return {
+    companyName: pick(preferred?.companyName, fallback?.companyName),
+    companyAddress: pick(preferred?.companyAddress, fallback?.companyAddress),
+    companyPhone: pick(preferred?.companyPhone, fallback?.companyPhone),
+  };
+}
+
 /**
  * Thermal/HTML company block.
  * - guest: full name + address + phone (bill / receipt-style)

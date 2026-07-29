@@ -23,6 +23,12 @@ import { publishLanKdsBoardChanged } from '../../lib/restaurantLanKds';
 import { getAllEvents, getAllSyncState } from '../../lib/offlineEventJournal';
 import { deriveRestaurantOpenChecks } from '../../lib/offlineEventSelectors';
 import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
+import { printReceipt } from '../../lib/print';
+import {
+  buildReceiptDataFromCheckout,
+  fetchInvoiceSettingsForReceipt,
+} from '../../lib/receiptFromSale';
+import { useAuth } from '../../contexts/AuthContext';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -82,6 +88,7 @@ export default function OrderPaymentPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   /** Restaurant FOH passes ?returnTo=/restaurant so pay lands on the tables floor. */
   const returnToPath = (() => {
@@ -342,7 +349,7 @@ export default function OrderPaymentPage() {
       const resp = await api.orders.complete(id!, payload);
       return resp.data;
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       const result = data.data as {
         order?: OrderDetail;
         sale?: { saleNumber?: string };
@@ -373,6 +380,55 @@ export default function OrderPaymentPage() {
           publishLanKdsBoardChanged('SALE_COMPLETED');
         }
       }
+
+      // Same as POS: print guest receipt after complete (restaurant + orders queue).
+      try {
+        const invoiceSettings = await fetchInvoiceSettingsForReceipt();
+        const paidForReceipt = paymentLines.reduce((s, l) => s + l.amount, 0);
+        const changeForReceipt =
+          paidForReceipt > totalAmount ? paidForReceipt - totalAmount : 0;
+        const orderDiscount = Number(order?.discountAmount || 0) + cashierDiscount;
+        printReceipt(
+          buildReceiptDataFromCheckout({
+            saleNumber: saleNum || order?.orderNumber || '',
+            saleDate: new Date().toISOString(),
+            subtotal: Number(order?.subtotal || totalAmount),
+            discountAmount: orderDiscount > 0 ? orderDiscount : undefined,
+            taxAmount: Number(order?.taxAmount || 0),
+            totalAmount,
+            cashierName: user?.fullName || user?.email || undefined,
+            customer: selectedCustomer
+              ? {
+                  name: selectedCustomer.name,
+                  phone: selectedCustomer.phone,
+                  email: selectedCustomer.email,
+                }
+              : order?.customerName
+                ? { name: order.customerName }
+                : undefined,
+            paymentMethod: paymentLines[0]?.paymentMethod || paymentMethod,
+            amountPaid: paidForReceipt > 0 ? paidForReceipt : totalAmount,
+            changeGiven: changeForReceipt > 0 ? changeForReceipt : undefined,
+            items: (order?.items || []).map((it) => ({
+              name: it.productName,
+              quantity: Number(it.quantity),
+              unitPrice: Number(it.unitPrice),
+              subtotal: Number(it.lineTotal),
+              discountAmount: Number(it.discountAmount || 0) || undefined,
+            })),
+            payments: paymentLines.map((l) => ({
+              method: l.paymentMethod,
+              amount: l.amount,
+              reference: l.reference,
+            })),
+            invoiceSettings,
+          }),
+        );
+      } catch (printErr) {
+        console.error('Receipt print after order complete failed:', printErr);
+        toast.error('Sale completed — receipt print failed. Reprint from Sales if needed.');
+      }
+
       navigate(returnToPath);
     },
     onError: (err: Error & { response?: { data?: { error?: string; error_code?: string; code?: string } } }) => {

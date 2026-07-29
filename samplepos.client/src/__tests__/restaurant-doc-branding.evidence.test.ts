@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   brandingFromTenant,
   documentCompanyHeaderHtml,
+  mergeDocumentCompanyBranding,
 } from '../lib/documentCompanyBranding';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,9 +53,31 @@ describe('Restaurant docs use company branding SSOT', () => {
     expect(guest).toContain('documentCompanyHeaderHtml');
     expect(guest).toContain("mode: 'guest'");
     expect(print).toContain('NO PRICES');
-    expect(pos).toContain('brandingFromTenant');
+    expect(pos).toContain('fetchInvoiceSettingsForReceipt');
+    expect(pos).toContain('mergeDocumentCompanyBranding');
     expect(pos).toContain('companyBranding.companyName');
     expect(pos).toContain('companyBranding.companyAddress');
     expect(pos).toContain('companyBranding.companyPhone');
+  });
+
+  it('mergeDocumentCompanyBranding prefers Invoice Settings over tenant fallback', () => {
+    expect(
+      mergeDocumentCompanyBranding(
+        {
+          companyName: 'Invoice Co',
+          companyAddress: 'Invoice Addr',
+          companyPhone: null,
+        },
+        {
+          companyName: 'Tenant Co',
+          companyAddress: 'Tenant Addr',
+          companyPhone: '+256700',
+        },
+      ),
+    ).toEqual({
+      companyName: 'Invoice Co',
+      companyAddress: 'Invoice Addr',
+      companyPhone: '+256700',
+    });
   });
 });
