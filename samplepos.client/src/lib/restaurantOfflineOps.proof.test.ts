@@ -13,6 +13,8 @@ import {
   reconcileRestaurantJournalWithServerTables,
   removeRestaurantLinesOffline,
   seedRestaurantCheckFromServer,
+  refreshRestaurantCheckSeedFromServer,
+  hasPendingRestaurantMutations,
   shouldUseLocalRestaurantMutation,
   splitRestaurantCheckOffline,
   resolveOfflineProductType,
@@ -271,6 +273,54 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(derived?.offlineId).toBe('ORD-SEED-1');
     cancelRestaurantCheckOffline(derived!);
     expect(deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())).toHaveLength(0);
+  });
+
+  it('EVIDENCE: refresh does not restore voided lines while ORDER_UPDATED is pending', () => {
+    const orderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const lineKeep = '11111111-1111-1111-1111-111111111111';
+    const lineVoid = '22222222-2222-2222-2222-222222222222';
+    seedRestaurantCheckFromServer({
+      orderId,
+      orderNumber: 'ORD-VOID-SEED',
+      tableId: 't-void-refresh',
+      tableCode: 'TV',
+      channel: 'DINE_IN',
+      items: [
+        { id: lineKeep, productId: 'p1', productName: 'Keep', quantity: 1, unitPrice: 5 },
+        { id: lineVoid, productId: 'p2', productName: 'VoidMe', quantity: 1, unitPrice: 5 },
+      ],
+    });
+    const derived = deriveRestaurantCheckForTable(
+      't-void-refresh',
+      getAllEvents(),
+      getAllSyncState(),
+      orderId,
+    )!;
+    removeRestaurantLinesOffline(derived, [lineVoid], undefined, {
+      reason: 'Guest changed mind',
+      allowKitchenSent: false,
+    });
+    expect(hasPendingRestaurantMutations(orderId)).toBe(true);
+
+    refreshRestaurantCheckSeedFromServer({
+      orderId,
+      orderNumber: 'ORD-VOID-SEED',
+      tableId: 't-void-refresh',
+      tableCode: 'TV',
+      channel: 'DINE_IN',
+      items: [
+        { id: lineKeep, productId: 'p1', productName: 'Keep', quantity: 1, unitPrice: 5 },
+        { id: lineVoid, productId: 'p2', productName: 'VoidMe', quantity: 1, unitPrice: 5 },
+      ],
+    });
+
+    const after = deriveRestaurantCheckForTable(
+      't-void-refresh',
+      getAllEvents(),
+      getAllSyncState(),
+      orderId,
+    );
+    expect(after?.lines.map((l) => l.lineId)).toEqual([lineKeep]);
   });
 
   it('appendSyncedEvent is idempotent; invalidateJournalMemoryCache forces re-read', () => {

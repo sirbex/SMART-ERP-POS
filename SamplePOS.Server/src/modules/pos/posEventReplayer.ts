@@ -301,6 +301,76 @@ async function releaseRestaurantFloorAfterSale(
     }
 }
 
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Diff server order lines vs journal ORDER_UPDATED snapshot → void quantities.
+ * Prefer UUID line ids (seeded server checks); fall back to productId aggregates for ofl_line_*.
+ */
+export function computeVoidItemsFromUpdatedLines(
+    serverItems: Array<{
+        id: string;
+        quantity: string | number;
+        productId?: string | null;
+    }>,
+    eventLines: Array<{ lineId?: string; productId?: string; quantity?: number }>,
+): Array<{ itemId: string; quantity: number }> {
+    const desiredByUuid = new Map<string, number>();
+    let hasUuidLine = false;
+    for (const line of eventLines) {
+        const id = typeof line.lineId === 'string' ? line.lineId : '';
+        if (!UUID_RE.test(id)) continue;
+        hasUuidLine = true;
+        desiredByUuid.set(id, Number(line.quantity) || 0);
+    }
+
+    const voids: Array<{ itemId: string; quantity: number }> = [];
+
+    if (hasUuidLine) {
+        for (const item of serverItems) {
+            const have = Number(item.quantity) || 0;
+            if (!(have > 0)) continue;
+            if (!desiredByUuid.has(item.id)) {
+                voids.push({ itemId: item.id, quantity: have });
+                continue;
+            }
+            const want = desiredByUuid.get(item.id)!;
+            if (want < have - 1e-9) {
+                voids.push({ itemId: item.id, quantity: have - want });
+            }
+        }
+        return voids;
+    }
+
+    const desiredByProduct = new Map<string, number>();
+    for (const line of eventLines) {
+        const pid = typeof line.productId === 'string' ? line.productId : '';
+        if (!pid) continue;
+        desiredByProduct.set(pid, (desiredByProduct.get(pid) || 0) + (Number(line.quantity) || 0));
+    }
+    const haveByProduct = new Map<string, Array<{ id: string; qty: number }>>();
+    for (const item of serverItems) {
+        const pid = item.productId || '';
+        const rows = haveByProduct.get(pid) || [];
+        rows.push({ id: item.id, qty: Number(item.quantity) || 0 });
+        haveByProduct.set(pid, rows);
+    }
+    for (const [pid, rows] of haveByProduct) {
+        let toVoid = rows.reduce((s, r) => s + r.qty, 0) - (desiredByProduct.get(pid) || 0);
+        if (!(toVoid > 1e-9)) continue;
+        for (const row of rows) {
+            if (!(toVoid > 1e-9)) break;
+            const take = Math.min(row.qty, toVoid);
+            if (take > 1e-9) {
+                voids.push({ itemId: row.id, quantity: take });
+                toVoid -= take;
+            }
+        }
+    }
+    return voids;
+}
+
 // ── Event Replayer ────────────────────────────────────────────
 
 export const posEventReplayer = {
@@ -322,7 +392,7 @@ export const posEventReplayer = {
                 return posEventReplayer.cancelOrder(pool, event, userId);
 
             case 'ORDER_UPDATED':
-                return posEventReplayer.updateOrder(pool, event);
+                return posEventReplayer.updateOrder(pool, event, userId);
 
             case 'RESTAURANT_CHECK_TRANSFERRED':
                 return posEventReplayer.transferRestaurantCheck(pool, event, userId);
@@ -601,17 +671,17 @@ export const posEventReplayer = {
     },
 
     /**
-     * ORDER_UPDATED → Phase 5.3: apply waiter when table-linked.
+     * ORDER_UPDATED → apply offline line voids (journal snapshot) + waiter when present.
+     * Without this, FOH voids look removed locally but Complete Sale still charges server lines.
      */
     async updateOrder(
         pool: Pool | PoolClient,
-        event: OrderUpdatedEvent
+        event: OrderUpdatedEvent,
+        userId: string,
     ): Promise<ReplayResult> {
         const waiterId = typeof event.waiterId === 'string' ? event.waiterId : undefined;
         const tableId = typeof event.tableId === 'string' ? event.tableId : undefined;
-        if (!waiterId || !tableId) {
-            return { status: 'ACKNOWLEDGED', eventType: 'ORDER_UPDATED' };
-        }
+        const eventLines = Array.isArray(event.lines) ? event.lines : null;
 
         try {
             const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
@@ -619,19 +689,65 @@ export const posEventReplayer = {
                 return { status: 'ACKNOWLEDGED', eventType: 'ORDER_UPDATED' };
             }
 
-            const orderId = await resolvePendingOrderIdForTable(pool as Pool, tableId);
+            let orderId: string | null = null;
+            if (event.orderId && UUID_RE.test(event.orderId)) {
+                orderId = event.orderId;
+            } else if (tableId) {
+                orderId = await resolvePendingOrderIdForTable(pool as Pool, tableId);
+            }
+
             if (!orderId) {
-                logger.warn('[EventReplayer] ORDER_UPDATED waiter: no PENDING order for table', {
-                    tableId,
-                    key: event.key,
-                });
+                // No server row yet (ofl_ord_* not created) — ACK so sync does not stick.
                 return { status: 'ACKNOWLEDGED', eventType: 'ORDER_UPDATED' };
             }
 
             const { restaurantRepository } = await import('../restaurant/restaurantRepository.js');
-            await restaurantRepository.patchOrderRestaurantFields(pool, orderId, { waiterId });
-            logger.info(`[EventReplayer] ORDER_UPDATED waiter → order ${orderId}`);
-            return { status: 'SYNCED', data: { orderId, waiterId } };
+            const { restaurantService } = await import('../restaurant/restaurantService.js');
+            let voidedCount = 0;
+            let checkCancelled = false;
+
+            if (eventLines) {
+                const order = await ordersService.getOrder(pool as Pool, orderId);
+                if (order && order.status === 'PENDING') {
+                    const voidItems = computeVoidItemsFromUpdatedLines(
+                        order.items || [],
+                        eventLines as Array<{
+                            lineId?: string;
+                            productId?: string;
+                            quantity?: number;
+                        }>,
+                    );
+                    if (voidItems.length > 0) {
+                        const reason =
+                            typeof event.voidReason === 'string' && event.voidReason.trim()
+                                ? event.voidReason.trim()
+                                : 'Offline void sync';
+                        const voided = await restaurantService.voidCheckItems(pool as Pool, orderId, {
+                            items: voidItems,
+                            reason,
+                            voidedBy: userId,
+                        });
+                        voidedCount = voidItems.length;
+                        checkCancelled = !!voided.checkCancelled;
+                        logger.info(
+                            `[EventReplayer] ORDER_UPDATED voided ${voidItems.length} line(s) → order ${orderId}`,
+                        );
+                    }
+                }
+            }
+
+            if (waiterId && !checkCancelled) {
+                await restaurantRepository.patchOrderRestaurantFields(pool, orderId, { waiterId });
+                logger.info(`[EventReplayer] ORDER_UPDATED waiter → order ${orderId}`);
+            }
+
+            if (voidedCount > 0 || waiterId) {
+                return {
+                    status: 'SYNCED',
+                    data: { orderId, waiterId: waiterId ?? null, voidedCount, checkCancelled },
+                };
+            }
+            return { status: 'ACKNOWLEDGED', eventType: 'ORDER_UPDATED' };
         } catch (err: unknown) {
             const errMsg = err instanceof Error ? err.message : String(err);
             logger.error(`[EventReplayer] ORDER_UPDATED failed key=${event.key}: ${errMsg}`);

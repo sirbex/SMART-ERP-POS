@@ -149,14 +149,34 @@ export function seedRestaurantCheckFromServer(input: {
   return true;
 }
 
+/** True when this check has unsynced journal mutations (void/add/cancel/pay/KOT). */
+export function hasPendingRestaurantMutations(orderId: string): boolean {
+  if (!orderId) return false;
+  const sync = getAllSyncState();
+  return getAllEvents().some((e) => {
+    const st = sync[e.key]?.status;
+    if (st === 'SYNCED' || st === 'ACKNOWLEDGED' || st === 'CANCELLED') return false;
+    if (!('orderId' in e) || e.orderId !== orderId) return false;
+    return (
+      e.eventType === 'ORDER_UPDATED' ||
+      e.eventType === 'ORDER_CANCELLED' ||
+      e.eventType === 'SALE_COMPLETED' ||
+      e.eventType === 'RESTAURANT_KOT_FIRED' ||
+      e.eventType === 'ORDER_CREATED'
+    );
+  });
+}
+
 /**
  * Replace journal snapshot for a server check with fresh API lines (avoids stale void IDs).
  * Keeps pending local ofl_line_* adds that have not synced yet.
+ * Skips overwrite when unsynced voids/edits exist — otherwise Complete Sale would charge voided lines.
  */
 export function refreshRestaurantCheckSeedFromServer(
   input: Parameters<typeof seedRestaurantCheckFromServer>[0],
 ): void {
   if (!input.orderId || !input.tableId) return;
+  if (hasPendingRestaurantMutations(input.orderId)) return;
   const serverLines: EventLine[] = (input.items || []).map((it) => {
     const qty = Number(it.quantity) || 0;
     const unitPrice = Number(it.unitPrice) || 0;
@@ -844,6 +864,8 @@ export function removeRestaurantLinesOffline(
     guestPhone: order.guestPhone,
     deliveryAddress: order.deliveryAddress,
     pickupLabel: order.pickupLabel,
+    /** Server ORDER_UPDATED replay uses this when applying voidCheckItems. */
+    voidReason: opts?.reason?.trim() || (hasKot ? 'Offline void' : 'Removed before kitchen send'),
   });
 
   const next = deriveRestaurantCheckForTable(

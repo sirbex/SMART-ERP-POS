@@ -809,6 +809,8 @@ describe('Restaurant architecture proof (Phase 1)', () => {
 
     const replayer = readRepo('SamplePOS.Server/src/modules/pos/posEventReplayer.ts');
     expect(replayer).toMatch(/updateOrder/);
+    expect(replayer).toMatch(/voidCheckItems/);
+    expect(replayer).toMatch(/computeVoidItemsFromUpdatedLines/);
     expect(replayer).toMatch(/cancelOrder/);
     expect(replayer).toMatch(/releaseTableForOrder/);
     expect(replayer).toMatch(/pos_orders/);
@@ -819,9 +821,15 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/paintJournalCheck/);
     expect(pos).toMatch(/preferLocalRestaurantWrites/);
     expect(pos).toMatch(/refreshRestaurantCheckSeedFromServer/);
+    expect(pos).toMatch(/hasPendingRestaurantMutations/);
+    expect(pos).toMatch(/syncOfflineSales/);
     expect(pos).toMatch(/payRestaurantCheckOffline/);
     expect(pos).toMatch(/deriveRestaurantOpenChecks/);
     expect(pos).toMatch(/Restored .* open check/);
+
+    const opsRefresh = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
+    expect(opsRefresh).toMatch(/hasPendingRestaurantMutations/);
+    expect(opsRefresh).toMatch(/Skips overwrite when unsynced/);
   });
 
   it('Phase 5.4 offline split/merge/transfer reuse journal + Phase 4 service', () => {

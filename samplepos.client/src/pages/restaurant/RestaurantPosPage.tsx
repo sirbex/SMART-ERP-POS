@@ -55,6 +55,7 @@ import {
   reconcileRestaurantJournalWithServerTables,
   removeRestaurantLinesOffline,
   refreshRestaurantCheckSeedFromServer,
+  hasPendingRestaurantMutations,
   shouldUseLocalRestaurantMutation,
   isJournalLocalOrderId,
   splitRestaurantCheckOffline,
@@ -62,6 +63,7 @@ import {
   updateRestaurantGuestOffline,
   totalsFromLines,
 } from '../../lib/restaurantOfflineOps';
+import { hasPendingSales, syncOfflineSales } from '../../services/offlineSyncEngine';
 import {
   appendOptimisticMenuItem,
   isTempRestaurantId,
@@ -2970,6 +2972,25 @@ export default function RestaurantPosPage() {
     // After pay, always land on the restaurant floor (tables), never re-open the ticket.
     const forceLocalCash = shouldUseLocalRestaurantMutation(isOnline, paidOrderId);
     if (isOnline && !forceLocalCash) {
+      // Flush offline voids before Complete Sale — payment page loads server lines only.
+      if (hasPendingRestaurantMutations(paidOrderId) || hasPendingSales()) {
+        setBusy(true);
+        try {
+          const result = await syncOfflineSales();
+          if (result.failed > 0 || result.review > 0) {
+            toast.error(
+              'Offline voids/edits did not sync — open Sync panel and retry before paying',
+            );
+            return;
+          }
+        } catch {
+          toast.error('Could not sync offline voids — retry before paying');
+          return;
+        } finally {
+          setBusy(false);
+        }
+        invalidateCheck();
+      }
       navigate(`/orders/${paidOrderId}/pay?returnTo=${encodeURIComponent('/restaurant')}`);
       return;
     }
