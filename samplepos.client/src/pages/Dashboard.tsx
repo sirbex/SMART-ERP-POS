@@ -17,6 +17,11 @@ import { useNeedingReorder, useStockLevels } from '../hooks/useInventory';
 import ExpiryAlertsWidget from '../components/ExpiryAlertsWidget';
 import { CASHIER_HOME_PATH, isCashierRole } from '../utils/cashierLockdown';
 import {
+  isRestaurantWaiterProfile,
+  WAITER_HOME_PATH,
+} from '../utils/restaurantWaiterLockdown';
+import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
+import {
   ShoppingCart,
   Package,
   BarChart3,
@@ -172,9 +177,19 @@ function PaymentMethodIcon({ method }: { method: string }) {
 }
 
 export default function Dashboard() {
-  const { user } = useAuth();
+  const { user, permissions } = useAuth();
+  const { data: restaurantEnabled = false } = useRestaurantEnabled();
   if (isCashierRole(user?.role)) {
     return <Navigate to={CASHIER_HOME_PATH} replace />;
+  }
+  if (
+    isRestaurantWaiterProfile({
+      role: user?.role,
+      permissions,
+      restaurantEnabled,
+    })
+  ) {
+    return <Navigate to={WAITER_HOME_PATH} replace />;
   }
   return <DashboardContent />;
 }

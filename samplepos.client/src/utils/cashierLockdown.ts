@@ -1,8 +1,14 @@
 /**
  * Phase D — Cashier lockdown: POS-first access, no inventory admin surfaces.
+ * Also resolves post-login home for cashiers and restaurant waiters.
  */
 
 import { isWarehouseRoutePath } from '../../../shared/utils/warehouseRbac';
+import {
+  isRestaurantWaiterProfile,
+  isWaiterAllowedPath,
+  WAITER_HOME_PATH,
+} from './restaurantWaiterLockdown';
 
 export const CASHIER_HOME_PATH = '/pos';
 
@@ -22,13 +28,39 @@ export function isCashierAllowedPath(pathname: string): boolean {
   return false;
 }
 
-export function resolvePostLoginPath(role: string | undefined, intendedPath?: string): string {
-  if (isCashierRole(role)) {
+export type PostLoginPathInput = {
+  role?: string | null;
+  permissions?: Iterable<string> | null;
+  restaurantEnabled?: boolean;
+};
+
+/**
+ * Where to land after login.
+ * Cashier → POS; restaurant waiter → Restaurant FOH; else dashboard / intended.
+ */
+export function resolvePostLoginPath(
+  roleOrOpts: string | undefined | null | PostLoginPathInput,
+  intendedPath?: string,
+): string {
+  const opts: PostLoginPathInput =
+    roleOrOpts && typeof roleOrOpts === 'object'
+      ? roleOrOpts
+      : { role: roleOrOpts ?? undefined };
+
+  if (isCashierRole(opts.role)) {
     if (intendedPath && isCashierAllowedPath(intendedPath)) {
       return intendedPath;
     }
     return CASHIER_HOME_PATH;
   }
+
+  if (isRestaurantWaiterProfile(opts)) {
+    if (intendedPath && isWaiterAllowedPath(intendedPath)) {
+      return intendedPath;
+    }
+    return WAITER_HOME_PATH;
+  }
+
   return intendedPath || '/dashboard';
 }
 

@@ -349,7 +349,7 @@ const VoidItemsSchema = z
  */
 router.post(
   '/checks/:orderId/void-items',
-  requireAnyPermission(['restaurant.order', 'orders.cancel']),
+  requirePermission('restaurant.order'),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const body = VoidItemsSchema.parse(req.body);
@@ -541,7 +541,7 @@ const CancelCheckSchema = z.object({
 
 router.post(
   '/checks/:orderId/cancel',
-  requireAnyPermission(['restaurant.order', 'orders.cancel']),
+  requirePermission('restaurant.order'),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const body = CancelCheckSchema.parse(req.body ?? {});

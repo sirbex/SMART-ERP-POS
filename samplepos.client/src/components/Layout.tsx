@@ -5,6 +5,10 @@ import { useTenant } from '../contexts/TenantContext';
 import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
 import ServerClock from './ServerClock';
 import { CASHIER_NAV_ITEMS, isCashierRole } from '../utils/cashierLockdown';
+import {
+  isRestaurantWaiterProfile,
+  WAITER_NAV_ITEMS,
+} from '../utils/restaurantWaiterLockdown';
 import { createClientAuthorization } from '../authorization/authorizationService';
 import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
 import {
@@ -128,6 +132,28 @@ function LayoutChrome({ children }: LayoutProps) {
   const allNavItems = useMemo(() => {
     if (isCashierRole(user?.role)) {
       return CASHIER_NAV_ITEMS.map((item) => ({
+        name: item.name,
+        path: item.path,
+        icon: item.icon,
+        color: 'text-gray-700',
+      }));
+    }
+
+    if (
+      isRestaurantWaiterProfile({
+        role: user?.role,
+        permissions,
+        restaurantEnabled,
+      })
+    ) {
+      // Waiters: Restaurant FOH only — never Kitchen / Stations / Recipes / Order tags.
+      const authz = createClientAuthorization(user, permissions);
+      return WAITER_NAV_ITEMS.filter((item) => {
+        if (item.path === '/customers') {
+          return !!authz?.hasPermission('customers.read');
+        }
+        return true;
+      }).map((item) => ({
         name: item.name,
         path: item.path,
         icon: item.icon,

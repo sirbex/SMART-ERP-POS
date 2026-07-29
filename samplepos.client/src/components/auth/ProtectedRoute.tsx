@@ -89,7 +89,12 @@ export function ProtectedRoute({
         );
     }
 
-    return <Navigate to={isCashierRole(user.role) ? CASHIER_HOME_PATH : '/dashboard'} replace />;
+    return (
+      <Navigate
+        to={isCashierRole(user.role) ? CASHIER_HOME_PATH : '/dashboard'}
+        replace
+      />
+    );
 }
 
 /** @deprecated Import useCanAccess from authorization/useAuthorization instead. */

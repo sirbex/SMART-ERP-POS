@@ -7,9 +7,10 @@ import { salesService, CreateSaleInput, SaleItemInput } from '../sales/salesServ
 import { restaurantService } from '../restaurant/restaurantService.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
-import { asyncHandler } from '../../middleware/errorHandler.js';
+import { asyncHandler, BusinessError } from '../../middleware/errorHandler.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
+import { userHasPermission } from '../../authorization/serviceAuth.js';
 
 // ── Validation Schemas ────────────────────────────────────────────────
 
@@ -227,11 +228,14 @@ router.get(
  * POST /api/orders/:id/complete
  * Complete an order by converting it to a sale (cashier workflow).
  * The cashier provides payment details; the order items become sale items.
- * Access: orders.pay (CASHIER, ADMIN, MANAGER)
+ * Access:
+ *   - Restaurant checks (table / non-RETAIL channel): restaurant.pay
+ *   - Retail / queue orders: orders.pay
+ * Manager has orders.pay but not restaurant.pay — cannot settle FOH checks.
  */
 router.post(
   '/:id/complete',
-  requirePermission('orders.pay'),
+  requireAnyPermission(['orders.pay', 'restaurant.pay']),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const paymentData = CompleteOrderSchema.parse(req.body);
@@ -240,6 +244,20 @@ router.post(
 
     // 1. Validate the order is PENDING and get its items
     const order = await ordersService.prepareOrderForPayment(pool, orderId);
+
+    // Restaurant settlement must use restaurant.pay (not orders.pay alone).
+    const isRestaurantCheck = await restaurantService.isRestaurantCheck(pool, orderId);
+    const needed = isRestaurantCheck ? 'restaurant.pay' : 'orders.pay';
+    const allowed = await userHasPermission(pool, userId, needed, req.user?.role);
+    if (!allowed) {
+      throw new BusinessError(
+        isRestaurantCheck
+          ? 'Restaurant payment requires restaurant.pay (cashier, accountant, or admin)'
+          : 'Order payment requires orders.pay',
+        'ERR_PERMISSION_DENIED',
+        { orderId, permission: needed },
+      );
+    }
 
     // 2. Build CreateSaleInput from order items
     const saleItems: SaleItemInput[] = order.items!.map(item => ({

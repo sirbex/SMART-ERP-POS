@@ -490,6 +490,8 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/canRestaurantPay/);
     expect(pos).toMatch(/restaurant\.pay/);
     expect(pos).toMatch(/canRestaurantPay \? \(/);
+    expect(pos).toMatch(/canOrder/);
+    expect(pos).toMatch(/restaurant\.order/);
     // Pay settles the selected ticket only (same rule as Bill on multi-ticket tables).
     const payHandler = pos.slice(pos.indexOf('const handlePay'), pos.indexOf('if (flagLoading)'));
     expect(payHandler).toMatch(/returnToFloor/);
@@ -509,6 +511,17 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(payPage).toMatch(/returnToPath/);
     expect(payPage).toMatch(/\/restaurant/);
     expect(payPage).toMatch(/Back to Tables/);
+    expect(payPage).toMatch(/canSettleThisOrder/);
+    expect(payPage).toMatch(/restaurant\.pay/);
+
+    const ordersRoutes = readRepo('SamplePOS.Server/src/modules/orders/ordersRoutes.ts');
+    expect(ordersRoutes).toMatch(/isRestaurantCheck/);
+    expect(ordersRoutes).toMatch(/restaurant\.pay/);
+    expect(ordersRoutes).toMatch(/orders\.pay/);
+
+    const restRoutes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
+    expect(restRoutes).toMatch(/void-items[\s\S]*requirePermission\('restaurant\.order'\)/s);
+    expect(restRoutes).not.toMatch(/void-items[\s\S]*orders\.cancel/s);
 
     const grants = readRepo('shared/authorization/systemRoleGrants.ts');
     expect(grants).toMatch(/restaurant\.pay/);

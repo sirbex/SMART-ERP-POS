@@ -9,6 +9,21 @@ import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store, WifiOff, Fingerprint 
 import { useTenant } from '../contexts/TenantContext';
 import { MathCaptcha } from '../components/auth/MathCaptcha';
 
+function readCachedPermissionKeys(): string[] {
+  try {
+    const raw = localStorage.getItem('rbac_permissions');
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function homeAfterLogin(role: string | undefined, intended?: string): string {
+  return resolvePostLoginPath({ role, permissions: readCachedPermissionKeys() }, intended);
+}
+
 /** Shape returned by POST /auth/login inside `data.data` */
 interface LoginResponseData {
   isSuperAdmin?: boolean;
@@ -218,7 +233,7 @@ export default function LoginPage() {
 
   // Redirect if already authenticated
   if (isAuthenticated) {
-    return <Navigate to={resolvePostLoginPath(user?.role, from)} replace />;
+    return <Navigate to={homeAfterLogin(user?.role, from)} replace />;
   }
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -239,7 +254,7 @@ export default function LoginPage() {
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             await login(offlineUser, existingToken);
-            navigate(resolvePostLoginPath(offlineUser.role, from), { replace: true });
+            navigate(homeAfterLogin(offlineUser.role, from), { replace: true });
             return;
           }
         } catch {
@@ -284,7 +299,7 @@ export default function LoginPage() {
         await login(user, accessToken || token, refreshToken, expiresIn);
         // Cache for offline login
         await cacheLoginCredential(email, password, user);
-        navigate(resolvePostLoginPath(user.role, from), { replace: true });
+        navigate(homeAfterLogin(user.role, from), { replace: true });
       } else {
         setError(response.data.error || 'Login failed');
       }
@@ -306,7 +321,7 @@ export default function LoginPage() {
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             await login(offlineUser, existingToken);
-            navigate(resolvePostLoginPath(offlineUser.role, from), { replace: true });
+            navigate(homeAfterLogin(offlineUser.role, from), { replace: true });
             return;
           }
         } catch {
@@ -361,7 +376,7 @@ export default function LoginPage() {
     if (email && password) {
       cacheLoginCredential(email, password, authUser).catch(() => { });
     }
-    navigate(resolvePostLoginPath(authUser.role, from), { replace: true });
+    navigate(homeAfterLogin(authUser.role, from), { replace: true });
   };
 
   const handle2FACancel = () => {

@@ -570,6 +570,8 @@ export default function RestaurantPosPage() {
   const { tier, chrome } = useLayoutTier();
   const { data: restaurantEnabled, isLoading: flagLoading } = useRestaurantEnabled();
   const canManage = useCanAccess(undefined, ['restaurant.manage']);
+  /** Floor service (add/void/KOT/bill/transfer) — waiters/cashiers/managers with restaurant.order. */
+  const canOrder = useCanAccess(undefined, ['restaurant.order']);
   /** Pay is cashier / accountant / admin only — waiters and managers order but do not settle. */
   const canRestaurantPay = useCanAccess(undefined, ['restaurant.pay']);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
@@ -1064,6 +1066,7 @@ export default function RestaurantPosPage() {
 
   const addItemMutation = useMutation({
     mutationFn: async (input: MenuProduct | { product: MenuProduct; quantity?: number }) => {
+      if (!canOrder) throw new Error('You need restaurant.order permission to add items');
       const product = 'product' in input ? input.product : input;
       const quantity =
         'product' in input && input.quantity != null
@@ -1830,6 +1833,10 @@ export default function RestaurantPosPage() {
    */
   const handleSendKot = async () => {
     if (!order) return;
+    if (!canOrder) {
+      toast.error('You need restaurant.order permission to send KOT');
+      return;
+    }
     setBusy(true);
     try {
       const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
@@ -1873,6 +1880,10 @@ export default function RestaurantPosPage() {
    */
   const handleBill = async () => {
     if (!order) return;
+    if (!canOrder) {
+      toast.error('You need restaurant.order permission to print a bill');
+      return;
+    }
     if (orderLines.length === 0) {
       toast.error('Cannot bill an empty check');
       return;
@@ -2166,6 +2177,10 @@ export default function RestaurantPosPage() {
 
   const runTransfer = async () => {
     if (!order || !opsTargetTableId) return;
+    if (!canOrder) {
+      toast.error('You need restaurant.order permission to transfer');
+      return;
+    }
     setBusy(true);
     try {
       if (preferLocalRestaurantWrites(order.id)) {
@@ -2209,6 +2224,10 @@ export default function RestaurantPosPage() {
   };
 
   const runMerge = async () => {
+    if (!canOrder) {
+      toast.error('You need restaurant.order permission to merge');
+      return;
+    }
     if (!order || !opsSecondaryOrderId) return;
     setBusy(true);
     try {
@@ -2460,6 +2479,10 @@ export default function RestaurantPosPage() {
     },
   ) => {
     if (!order || itemIds.length === 0) return;
+    if (!canOrder) {
+      toast.error('You need restaurant.order permission to void lines');
+      return;
+    }
     const targetLines = (opts?.lines || orderLines).filter((l) => itemIds.includes(l.id));
     if (targetLines.length === 0) {
       toast.error('Line not found on this check — refresh and try again');
@@ -2905,6 +2928,10 @@ export default function RestaurantPosPage() {
 
   const handleCancelCheck = async () => {
     if (!order) return;
+    if (!canOrder) {
+      toast.error('You need restaurant.order permission to cancel a check');
+      return;
+    }
     // New/unsent checks: cancel with confirm only (no reason, no VOID print).
     // Sent/printed lines: void reason + VOID tickets to kitchen.
     const hasKot = orderLines.some((l) => l.kitchenSentAt);
@@ -4462,18 +4489,18 @@ export default function RestaurantPosPage() {
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    disabled={!order || busy}
+                    disabled={!order || busy || !canOrder}
                     onClick={() => void handleSendKot()}
-                    className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-orange-600 text-white text-base font-bold active:bg-orange-700`}
+                    className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-orange-600 text-white text-base font-bold active:bg-orange-700 disabled:opacity-50`}
                     data-pos-primary="kot"
                   >
                     KOT
                   </button>
                   <button
                     type="button"
-                    disabled={!order || busy || orderLines.length === 0}
+                    disabled={!order || busy || orderLines.length === 0 || !canOrder}
                     onClick={() => void handleBill()}
-                    className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-rose-800 text-white text-base font-bold active:bg-rose-950`}
+                    className={`${TOUCH} min-h-14 col-span-1 rounded-xl bg-rose-800 text-white text-base font-bold active:bg-rose-950 disabled:opacity-50`}
                     data-pos-primary="bill"
                   >
                     Bill

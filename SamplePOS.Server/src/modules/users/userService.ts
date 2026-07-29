@@ -18,6 +18,7 @@ function mapRbacRoleToLegacy(rbacRoleName: string): UserRole {
   if (name.includes('administrator') || name === 'super administrator') return 'ADMIN';
   if (name.includes('manager')) return 'MANAGER';
   if (name === 'cashier') return 'CASHIER';
+  // Waiter / kitchen staff / custom roles → STAFF (CHECK constraint has no WAITER)
   return 'STAFF';
 }
 

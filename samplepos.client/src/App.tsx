@@ -8,8 +8,9 @@ import { CashierPathGuard } from './components/auth/CashierPathGuard';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBanner from './components/NetworkStatusBanner';
 import BusinessDateSync from './components/BusinessDateSync';
-import { CASHIER_HOME_PATH, isCashierRole } from './utils/cashierLockdown';
+import { CASHIER_HOME_PATH, isCashierRole, resolvePostLoginPath } from './utils/cashierLockdown';
 import OfflineAutoSync from './components/OfflineAutoSync';
+import { useRestaurantEnabled } from './hooks/useRestaurantEnabled';
 
 // Layouts stay static (small, shared across routes)
 import InventoryLayout from './components/InventoryLayout';
@@ -177,10 +178,23 @@ const TenantsPage = lazyWithRetry(() => import('./pages/platform/TenantsPage'));
 const AdminsPage = lazyWithRetry(() => import('./pages/platform/AdminsPage'));
 const PlatformHealthPage = lazyWithRetry(() => import('./pages/platform/PlatformHealthPage'));
 
-// Redirect home: cashiers land on POS, everyone else on dashboard
+// Redirect home: cashiers → POS, waiters → Restaurant FOH, else dashboard
 function HomeRedirect() {
-  const { user } = useAuth();
-  return <Navigate to={isCashierRole(user?.role) ? CASHIER_HOME_PATH : '/dashboard'} replace />;
+  const { user, permissions } = useAuth();
+  const { data: restaurantEnabled = false } = useRestaurantEnabled();
+  if (isCashierRole(user?.role)) {
+    return <Navigate to={CASHIER_HOME_PATH} replace />;
+  }
+  return (
+    <Navigate
+      to={resolvePostLoginPath({
+        role: user?.role,
+        permissions,
+        restaurantEnabled,
+      })}
+      replace
+    />
+  );
 }
 
 // Platform route guard
@@ -458,7 +472,7 @@ function App() {
                   <Route
                     path="/orders/:id/pay"
                     element={
-                      <ProtectedRoute requiredPermissions={['orders.pay']} requiredFeature="pos">
+                      <ProtectedRoute requiredPermissions={['orders.pay', 'restaurant.pay']} requiredFeature="pos">
                         <OrderPaymentPage />
                       </ProtectedRoute>
                     }

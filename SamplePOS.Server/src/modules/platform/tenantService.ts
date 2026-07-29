@@ -953,6 +953,17 @@ export const tenantService = {
             ].includes(_p.key),
         },
         {
+          name: 'Waiter',
+          desc: 'Restaurant floor service — open checks, KOT, and bill (no kitchen config or payment)',
+          filter: (_p) =>
+            [
+              'restaurant.read',
+              'restaurant.order',
+              'customers.read',
+              'customers.create',
+            ].includes(_p.key),
+        },
+        {
           name: 'Auditor',
           desc: 'Read-only access for auditing purposes',
           filter: (p) => p.action === 'read',

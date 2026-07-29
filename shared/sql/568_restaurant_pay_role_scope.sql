@@ -1,5 +1,6 @@
 -- 568: Restaurant Pay — Cashier, Accountant, Admin only (not Manager / waiter).
--- Waiters keep restaurant.order for floor service; payment uses restaurant.pay.
+-- Waiters keep restaurant.order for floor service (add/void/KOT/bill).
+-- Settlement (Complete Order) requires restaurant.pay — orders.pay alone is not enough.
 
 INSERT INTO rbac_permissions_catalog (key, module, action, description)
 VALUES

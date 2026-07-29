@@ -11,6 +11,7 @@ import { toast } from 'react-hot-toast';
 import type { Customer } from '@shared/zod/customer';
 import Decimal from 'decimal.js';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
+import { useCanAccess } from '../../authorization/useAuthorization';
 import {
   clearPayDesiredLines,
   markRestaurantCheckSettledInJournal,
@@ -100,6 +101,11 @@ export default function OrderPaymentPage() {
     return '/orders-queue';
   })();
   const returnToLabel = returnToPath === '/restaurant' ? 'Back to Tables' : 'Back to Queue';
+  /** Restaurant FOH settlement requires restaurant.pay — orders.pay alone is not enough. */
+  const canRestaurantPay = useCanAccess(undefined, ['restaurant.pay']);
+  const canOrdersPay = useCanAccess(undefined, ['orders.pay']);
+  const canSettleThisOrder =
+    returnToPath === '/restaurant' ? canRestaurantPay : canOrdersPay || canRestaurantPay;
 
   const {
     data: currentSession,
@@ -251,6 +257,7 @@ export default function OrderPaymentPage() {
   }, [paymentLines]);
 
   const canCompleteSale = useMemo(() => {
+    if (!canSettleThisOrder) return false;
     if (paymentLines.length === 0) return false;
     const hasCreditPayment = paymentLines.some((l) => l.paymentMethod === 'CREDIT');
     // Exact payment
@@ -261,7 +268,7 @@ export default function OrderPaymentPage() {
     if (remainingBalance > 0.01 && hasCreditPayment) return true;
     if (remainingBalance > 0.01 && selectedCustomer) return true;
     return false;
-  }, [paymentLines, remainingBalance, hasCashPayment, selectedCustomer]);
+  }, [canSettleThisOrder, paymentLines, remainingBalance, hasCashPayment, selectedCustomer]);
 
   // Add a payment line
   const handleAddPayment = () => {
@@ -521,6 +528,25 @@ export default function OrderPaymentPage() {
           <div className="text-5xl mb-4">{order.status === 'COMPLETED' ? '✅' : '❌'}</div>
           <h2 className="text-xl font-bold text-gray-900 mb-2">Order {order.orderNumber}</h2>
           <p className="text-gray-500 mb-4">This order is already {order.status.toLowerCase()}.</p>
+          <button onClick={() => navigate(returnToPath)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">
+            {returnToLabel}
+          </button>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (!canSettleThisOrder) {
+    return (
+      <Layout>
+        <div className="max-w-2xl mx-auto py-12 text-center">
+          <div className="text-5xl mb-4">🔒</div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Payment not allowed</h2>
+          <p className="text-gray-500 mb-4">
+            {returnToPath === '/restaurant'
+              ? 'Restaurant settlement requires the restaurant.pay permission (cashier, accountant, or admin).'
+              : 'Completing this order requires the orders.pay permission.'}
+          </p>
           <button onClick={() => navigate(returnToPath)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">
             {returnToLabel}
           </button>

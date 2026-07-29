@@ -207,6 +207,18 @@ export const restaurantService = {
     return isRestaurantModeEnabled(pool);
   },
 
+  /**
+   * True when the order is a restaurant FOH check (table and/or non-RETAIL channel).
+   * Used so settlement requires restaurant.pay instead of orders.pay alone.
+   */
+  async isRestaurantCheck(pool: Pool, orderId: string): Promise<boolean> {
+    if (!(await isRestaurantModeEnabled(pool))) return false;
+    const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
+    if (!meta) return false;
+    if (meta.tableId) return true;
+    return meta.orderChannel != null && meta.orderChannel !== 'RETAIL';
+  },
+
   async listTables(pool: Pool, includeInactive = false): Promise<RestaurantTableRecord[]> {
     await assertRestaurantEnabled(pool);
     return restaurantRepository.listTables(pool, includeInactive);

@@ -231,6 +231,34 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       );
     }
 
+    // ----- Waiter (Restaurant FOH only) -----
+    const waiterResult = await client.query(
+      `INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
+       VALUES ($1, $2, true, $3, $3)
+       ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description
+       RETURNING id`,
+      [
+        'Waiter',
+        'Restaurant floor service — open checks, KOT, and bill (no kitchen config or payment)',
+        systemUserId,
+      ]
+    );
+    const waiterRoleId = waiterResult.rows[0].id;
+    const waiterPermissions = [
+      'restaurant.read',
+      'restaurant.order',
+      'customers.read',
+      'customers.create',
+    ];
+    for (const permKey of waiterPermissions) {
+      await client.query(
+        `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (role_id, permission_key) DO NOTHING`,
+        [waiterRoleId, permKey, systemUserId]
+      );
+    }
+
     const auditorResult = await client.query(
       `INSERT INTO rbac_roles (name, description, is_system_role, created_by, updated_by)
        VALUES ($1, $2, true, $3, $3)
