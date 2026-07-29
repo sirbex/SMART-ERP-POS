@@ -36,7 +36,7 @@ function consolidateForProof(items: Line[], fallbackWaiterName?: string | null) 
       quantity: number;
       orderedByLabel: string | null;
       notes: string | null;
-      rawNames: string[];
+      rawNames: Array<string | null>;
     }
   >();
   for (const it of items) {

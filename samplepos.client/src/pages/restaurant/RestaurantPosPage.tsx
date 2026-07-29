@@ -1892,6 +1892,8 @@ export default function RestaurantPosPage() {
       tableCode: string | null;
       tableName: string | null;
       waiterName: string | null;
+      firedByName?: string | null;
+      serverName?: string | null;
       firedAt: string;
       orderChannel?: string | null;
       guestName?: string | null;

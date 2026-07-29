@@ -129,7 +129,7 @@ export function resolveLineOrderedByName(input: {
 }
 
 /** Clock time for a line ring (local HH:mm). */
-export function formatLineAddedClock(iso?: string | null, now = Date.now()): string | null {
+export function formatLineAddedClock(iso?: string | null, _now = Date.now()): string | null {
   if (!iso) return null;
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return null;
