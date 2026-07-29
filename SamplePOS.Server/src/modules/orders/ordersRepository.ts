@@ -228,11 +228,18 @@ export const ordersRepository = {
         item.baseUomId || null,
         item.conversionFactor ?? null,
       ];
+      // Never bind NULL into added_at — explicit NULL bypasses DEFAULT and breaks NOT NULL (pg 23502).
+      const addedAt = item.addedAt || new Date().toISOString();
       if (hasAddedBy && hasAddedAt) {
         placeholders.push(
           `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
         );
-        values.push(...base, item.addedBy || null, item.addedAt || null);
+        values.push(...base, item.addedBy || null, addedAt);
+      } else if (hasAddedAt) {
+        placeholders.push(
+          `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
+        );
+        values.push(...base, addedAt);
       } else if (hasAddedBy) {
         placeholders.push(
           `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
