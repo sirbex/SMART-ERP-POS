@@ -44,6 +44,25 @@ import {
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { posProductSearchService } from '../inventory/warehouse/posProductSearchService.js';
 
+async function lookupUserDisplayName(client: PoolClient, userId: string): Promise<string | null> {
+  const row = await client.query<{ full_name: string | null }>(
+    `SELECT full_name FROM users WHERE id = $1`,
+    [userId],
+  );
+  return row.rows[0]?.full_name?.trim() || null;
+}
+
+function applyKotActorNames(
+  kot: KotRecord,
+  firedByName: string | null,
+  checkWaiterName: string | null | undefined,
+): void {
+  kot.firedByName = firedByName;
+  if (checkWaiterName && checkWaiterName !== firedByName) {
+    kot.serverName = checkWaiterName;
+  }
+}
+
 function requireCheckMutationAccess(
   checkWaiterId: string | null | undefined,
   actor: OwnershipActor | undefined,
@@ -635,7 +654,7 @@ export const restaurantService = {
                 if (hasAddedBy) {
                   await client.query(
                     `UPDATE pos_order_items
-                     SET line_notes = $2, kitchen_station = $3, added_by = COALESCE(added_by, $4)
+                     SET line_notes = $2, kitchen_station = $3, added_by = $4
                      WHERE id = $1`,
                     [
                       fresh.items[i].id,
@@ -644,6 +663,13 @@ export const restaurantService = {
                       addedByUserId,
                     ],
                   );
+                  const hasAddedAt = await tableHasColumn(client, 'pos_order_items', 'added_at');
+                  if (hasAddedAt) {
+                    await client.query(
+                      `UPDATE pos_order_items SET added_at = COALESCE(added_at, NOW()) WHERE id = $1`,
+                      [fresh.items[i].id],
+                    );
+                  }
                 } else {
                   await client.query(
                     `UPDATE pos_order_items
@@ -737,6 +763,7 @@ export const restaurantService = {
             baseUomId: snapshot.baseUomId,
             conversionFactor: snapshot.conversionFactor,
             addedBy: addedByUserId,
+            addedAt: new Date().toISOString(),
           });
         }
 
@@ -825,6 +852,9 @@ export const restaurantService = {
         return [];
       }
 
+      // Toast/Aloha: ticket shows who SENT it (login user), not only check owner.
+      const firedByName = await lookupUserDisplayName(client, firedBy);
+
       // Split by resolved station (registry SSOT — unknown codes → default)
       const byStation = new Map<string, { station: RestaurantStationRecord; items: typeof unsent }>();
       for (const item of unsent) {
@@ -841,7 +871,8 @@ export const restaurantService = {
           orderId,
           tableCode: meta.tableCode,
           tableName: meta.tableName,
-          waiterName: meta.waiterName,
+          // Persist the person who fired — kitchen must see who commanded the ticket.
+          waiterName: firedByName || meta.waiterName,
           station: station.code,
           firedBy,
           items: toConsolidatedKotItems(
@@ -859,6 +890,7 @@ export const restaurantService = {
           items.map((it) => it.id),
         );
         kot.printerName = station.printerName;
+        applyKotActorNames(kot, firedByName, meta.waiterName);
         kots.push(kot);
       }
 
@@ -965,12 +997,13 @@ export const restaurantService = {
           bucket.items.push(item);
           byStation.set(key, bucket);
         }
+        const voidedByName = await lookupUserDisplayName(client, input.voidedBy);
         for (const { station, items } of byStation.values()) {
           const kot = await restaurantRepository.createKot(client, {
             orderId,
             tableCode: meta.tableCode,
             tableName: meta.tableName,
-            waiterName: meta.waiterName,
+            waiterName: voidedByName || meta.waiterName,
             station: station.code,
             firedBy: input.voidedBy,
             ticketKind: 'VOID',
@@ -986,6 +1019,7 @@ export const restaurantService = {
             ),
           });
           kot.printerName = station.printerName;
+          applyKotActorNames(kot, voidedByName, meta.waiterName);
           voidKots.push(kot);
         }
       }
@@ -1343,13 +1377,14 @@ export const restaurantService = {
         byStation.set(key, bucket);
       }
 
+      const cancelledByName = await lookupUserDisplayName(client, cancelledBy);
       const kots: KotRecord[] = [];
       for (const { station, items } of byStation.values()) {
         const kot = await restaurantRepository.createKot(client, {
           orderId,
           tableCode: meta.tableCode,
           tableName: meta.tableName,
-          waiterName: meta.waiterName,
+          waiterName: cancelledByName || meta.waiterName,
           station: station.code,
           firedBy: cancelledBy,
           ticketKind: 'VOID',
@@ -1365,6 +1400,7 @@ export const restaurantService = {
           ),
         });
         kot.printerName = station.printerName;
+        applyKotActorNames(kot, cancelledByName, meta.waiterName);
         kots.push(kot);
       }
       return kots;

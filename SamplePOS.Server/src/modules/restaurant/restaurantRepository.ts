@@ -43,6 +43,8 @@ export interface RestaurantTableRecord {
   orderChannel?: OrderChannel | string | null;
   waiterId?: string | null;
   waiterName?: string | null;
+  /** When the current open check was created (table timer). */
+  checkOpenedAt?: string | null;
 }
 
 export interface RestaurantWaiterRecord {
@@ -94,6 +96,10 @@ export interface KotRecord {
   /** FIRE = cook; VOID = stop / discard previously fired lines */
   ticketKind?: 'FIRE' | 'VOID';
   firedBy: string;
+  /** Display name of who fired this ticket (looked up; not always a DB column). */
+  firedByName?: string | null;
+  /** Check owner when different from who fired (print "Server:"). */
+  serverName?: string | null;
   firedAt: string;
   statusUpdatedAt?: string;
   statusUpdatedBy?: string | null;
@@ -175,7 +181,8 @@ export const restaurantRepository = {
          t.status, t.current_order_id, t.created_at, t.updated_at,
          o.order_number, o.total_amount AS order_total,
          o.waiter_id,
-         uw.full_name AS waiter_name
+         uw.full_name AS waiter_name,
+         o.created_at AS check_opened_at
          ${guestSelect}
        FROM restaurant_tables t
        LEFT JOIN pos_orders o ON o.id = t.current_order_id AND o.status = 'PENDING'
@@ -199,7 +206,8 @@ export const restaurantRepository = {
          t.status, t.current_order_id, t.created_at, t.updated_at,
          o.order_number, o.total_amount AS order_total,
          o.waiter_id,
-         uw.full_name AS waiter_name
+         uw.full_name AS waiter_name,
+         o.created_at AS check_opened_at
          ${guestSelect}
        FROM restaurant_tables t
        LEFT JOIN pos_orders o ON o.id = t.current_order_id AND o.status = 'PENDING'

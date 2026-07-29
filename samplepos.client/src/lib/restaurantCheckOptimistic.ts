@@ -22,6 +22,7 @@ export type OptimisticOrderItem = {
   kitchenSentAt?: string | null;
   addedBy?: string | null;
   addedByName?: string | null;
+  addedAt?: string | null;
 };
 
 export type OptimisticCheckPayload = {
@@ -203,6 +204,7 @@ export function appendOptimisticMenuItem(
     /** Acting user who rang this add (may differ from check owner). */
     addedBy?: string | null;
     addedByName?: string | null;
+    addedAt?: string | null;
     guestName?: string | null;
     guestPhone?: string | null;
     deliveryAddress?: string | null;
@@ -225,6 +227,7 @@ export function appendOptimisticMenuItem(
     kitchenSentAt: null,
     addedBy: args.addedBy ?? null,
     addedByName: args.addedByName ?? null,
+    addedAt: args.addedAt ?? new Date().toISOString(),
   };
   const knownTabs = args.knownTabs || [];
 

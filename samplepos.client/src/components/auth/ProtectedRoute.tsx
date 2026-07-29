@@ -9,9 +9,10 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { FeatureGate } from './FeatureGate';
 import { UserRole } from '../../types';
-import { CASHIER_HOME_PATH, isCashierRole } from '../../utils/cashierLockdown';
+import { isCashierRole, resolveCashierHomePath } from '../../utils/cashierLockdown';
 import { createClientAuthorization } from '../../authorization/authorizationService';
 import { useCanAccess } from '../../authorization/useAuthorization';
+import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 
 interface ProtectedRouteProps {
     children: React.ReactNode;
@@ -38,6 +39,7 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
     const { isAuthenticated, user, permissions } = useAuth();
     const location = useLocation();
+    const { data: restaurantEnabled = false } = useRestaurantEnabled();
 
     if (!isAuthenticated || !user) {
         return <Navigate to={fallbackPath} state={{ from: location }} replace />;
@@ -91,7 +93,7 @@ export function ProtectedRoute({
 
     return (
       <Navigate
-        to={isCashierRole(user.role) ? CASHIER_HOME_PATH : '/dashboard'}
+        to={isCashierRole(user.role) ? resolveCashierHomePath(restaurantEnabled) : '/dashboard'}
         replace
       />
     );

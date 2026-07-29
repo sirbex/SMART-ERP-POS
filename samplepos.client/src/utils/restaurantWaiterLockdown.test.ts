@@ -62,5 +62,8 @@ describe('restaurantWaiterLockdown', () => {
       resolvePostLoginPath({ role: 'STAFF', permissions: waiterPerms }, undefined),
     ).toBe(WAITER_HOME_PATH);
     expect(resolvePostLoginPath({ role: 'CASHIER' }, undefined)).toBe('/pos');
+    expect(
+      resolvePostLoginPath({ role: 'CASHIER', restaurantEnabled: true }, undefined),
+    ).toBe('/restaurant');
   });
 });

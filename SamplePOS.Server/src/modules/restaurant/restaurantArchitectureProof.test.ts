@@ -299,6 +299,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const kotFn = print.slice(kotStart, kotEnd);
     expect(kotFn).toMatch(/consolidateKotLines/);
     expect(kotFn).toMatch(/NO PRICES/);
+    expect(kotFn).toMatch(/Steward:/);
     expect(kotFn).not.toMatch(/formatCurrency/);
     expect(kotFn).not.toMatch(/unitPrice|lineTotal/);
 

@@ -8,7 +8,7 @@ import { CashierPathGuard } from './components/auth/CashierPathGuard';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatusBanner from './components/NetworkStatusBanner';
 import BusinessDateSync from './components/BusinessDateSync';
-import { CASHIER_HOME_PATH, isCashierRole, resolvePostLoginPath } from './utils/cashierLockdown';
+import { isCashierRole, resolveCashierHomePath, resolvePostLoginPath } from './utils/cashierLockdown';
 import OfflineAutoSync from './components/OfflineAutoSync';
 import { useRestaurantEnabled } from './hooks/useRestaurantEnabled';
 
@@ -183,7 +183,7 @@ function HomeRedirect() {
   const { user, permissions } = useAuth();
   const { data: restaurantEnabled = false } = useRestaurantEnabled();
   if (isCashierRole(user?.role)) {
-    return <Navigate to={CASHIER_HOME_PATH} replace />;
+    return <Navigate to={resolveCashierHomePath(restaurantEnabled)} replace />;
   }
   return (
     <Navigate

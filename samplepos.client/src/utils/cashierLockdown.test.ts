@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CASHIER_NAV_ITEMS,
   isCashierAllowedPath,
+  resolveCashierHomePath,
+  resolveCashierNavItems,
 } from './cashierLockdown';
 
 describe('cashierLockdown', () => {
@@ -19,5 +21,12 @@ describe('cashierLockdown', () => {
 
   it('includes orders queue in cashier navigation', () => {
     expect(CASHIER_NAV_ITEMS.some((item) => item.path === '/orders-queue')).toBe(true);
+  });
+
+  it('restaurant mode: cashier uses Restaurant FOH instead of retail POS', () => {
+    expect(resolveCashierHomePath(true)).toBe('/restaurant');
+    expect(resolveCashierNavItems(true)[0]?.path).toBe('/restaurant');
+    expect(isCashierAllowedPath('/pos', { restaurantEnabled: true })).toBe(false);
+    expect(isCashierAllowedPath('/restaurant', { restaurantEnabled: true })).toBe(true);
   });
 });

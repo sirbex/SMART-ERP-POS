@@ -112,19 +112,47 @@ export function formatOrderedByLabels(
   return labels.length > 0 ? labels.join(', ') : null;
 }
 
-/** Resolve display name for a line: stamped adder → check owner → Staff. */
+/** Resolve display name for a line — stamped login user only (Toast). */
 export function resolveLineOrderedByName(input: {
   addedByName?: string | null;
+  /** Legacy rows with no stamp — last resort only. */
   checkWaiterName?: string | null;
   actorName?: string | null;
-}): string {
+}): string | null {
   const stamped = (input.addedByName || '').trim();
   if (stamped) return stamped;
-  const owner = (input.checkWaiterName || '').trim();
-  if (owner) return owner;
   const actor = (input.actorName || '').trim();
   if (actor) return actor;
-  return 'Staff';
+  const owner = (input.checkWaiterName || '').trim();
+  if (owner) return owner;
+  return null;
+}
+
+/** Clock time for a line ring (local HH:mm). */
+export function formatLineAddedClock(iso?: string | null, now = Date.now()): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/**
+ * How long a check has been open (Toast table timer).
+ * Examples: "3m", "1h 12m", "2d 4h"
+ */
+export function formatCheckOpenDuration(openedAtIso?: string | null, now = Date.now()): string | null {
+  if (!openedAtIso) return null;
+  const start = new Date(openedAtIso).getTime();
+  if (!Number.isFinite(start) || start > now) return null;
+  const mins = Math.floor((now - start) / 60_000);
+  if (mins < 1) return '<1m';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  const rem = mins % 60;
+  if (hours < 24) return rem ? `${hours}h ${rem}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const rh = hours % 24;
+  return rh ? `${days}d ${rh}h` : `${days}d`;
 }
 
 /**

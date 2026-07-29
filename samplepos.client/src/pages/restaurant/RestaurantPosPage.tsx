@@ -43,8 +43,9 @@ import {
 import { isRestaurantWaiterProfile } from '../../utils/restaurantWaiterLockdown';
 import {
   canEditOtherWaitersChecks,
+  formatCheckOpenDuration,
+  formatLineAddedClock,
   formatOrderedByLabels,
-  resolveLineOrderedByName,
   restaurantTicketLineMergeKey,
   shortWaiterLabel,
 } from '@shared/utils/restaurantCheckOwnership';
@@ -137,6 +138,8 @@ interface RestaurantTable {
   orderChannel?: string | null;
   waiterId?: string | null;
   waiterName?: string | null;
+  /** Open check created_at — floor timer. */
+  checkOpenedAt?: string | null;
 }
 
 interface RestaurantWaiter {
@@ -175,6 +178,8 @@ interface OrderItem {
   /** Who rang this line (may differ from check owner). */
   addedBy?: string | null;
   addedByName?: string | null;
+  /** When this line was rung. */
+  addedAt?: string | null;
   orderTags?: Array<{
     id?: string | null;
     label: string;
@@ -193,8 +198,10 @@ interface TicketLineGroup {
   lineTotal: number;
   kitchenSent: boolean;
   lineNotes: string | null;
-  /** Everyone who rang units on this merged product row (owner stays check waiter). */
+  /** Login user(s) who rang units on this row — not masked by check owner. */
   orderedByLabel: string | null;
+  /** Clock time when first unit on this row was rung. */
+  addedAtLabel: string | null;
   itemIds: string[];
   lines: OrderItem[];
 }
@@ -219,10 +226,6 @@ function consolidateTicketLines(
     });
     const qty = Number(it.quantity) || 0;
     const lineTotal = Number(it.lineTotal) || 0;
-    const lineName = resolveLineOrderedByName({
-      addedByName: it.addedByName,
-      checkWaiterName: fallbackWaiterName,
-    });
     const existing = map.get(key);
     if (!existing) {
       map.set(key, {
@@ -234,7 +237,9 @@ function consolidateTicketLines(
         lineTotal,
         kitchenSent,
         lineNotes: notes || null,
-        orderedByLabel: formatOrderedByLabels([lineName], fallbackWaiterName),
+        // Use stamped names only; fallback only when every unit lacks a stamp (legacy).
+        orderedByLabel: formatOrderedByLabels([it.addedByName], fallbackWaiterName),
+        addedAtLabel: formatLineAddedClock(it.addedAt),
         itemIds: [it.id],
         lines: [it],
       });
@@ -244,14 +249,16 @@ function consolidateTicketLines(
       existing.itemIds.push(it.id);
       existing.lines.push(it);
       existing.orderedByLabel = formatOrderedByLabels(
-        existing.lines.map((l) =>
-          resolveLineOrderedByName({
-            addedByName: l.addedByName,
-            checkWaiterName: fallbackWaiterName,
-          }),
-        ),
+        existing.lines.map((l) => l.addedByName),
         fallbackWaiterName,
       );
+      const times = existing.lines
+        .map((l) => (l.addedAt ? new Date(l.addedAt).getTime() : NaN))
+        .filter((t) => Number.isFinite(t));
+      const earliest = times.length ? Math.min(...times) : NaN;
+      existing.addedAtLabel = Number.isFinite(earliest)
+        ? formatLineAddedClock(new Date(earliest).toISOString())
+        : existing.addedAtLabel;
     }
   }
   return Array.from(map.values());
@@ -674,6 +681,12 @@ export default function RestaurantPosPage() {
     if (canEditOthers) setMyTablesOnly(false);
     else if (isWaiterProfile) setMyTablesOnly(true);
   }, [canEditOthers, isWaiterProfile]);
+  /** Tick so open-table duration stays fresh (Toast table timer). */
+  const [floorClockMs, setFloorClockMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setFloorClockMs(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
   const [selectedLineIds, setSelectedLineIds] = useState<string[]>([]);
   const [opsMode, setOpsMode] = useState<null | 'transfer' | 'merge'>(null);
@@ -1253,6 +1266,7 @@ export default function RestaurantPosPage() {
           waiterName: waiter?.fullName ?? null,
           addedBy: user?.id ?? null,
           addedByName: user?.fullName || user?.email || null,
+          addedAt: new Date().toISOString(),
           guestName,
           guestPhone,
           deliveryAddress,
@@ -1840,7 +1854,13 @@ export default function RestaurantPosPage() {
             station: kot.station,
             printerName: kot.printerName,
             tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
-            waiterName: derived.waiterName || null,
+            sentByName: user?.fullName || user?.email || null,
+            serverName:
+              derived.waiterName &&
+              derived.waiterName !== (user?.fullName || user?.email)
+                ? derived.waiterName
+                : null,
+            waiterName: user?.fullName || user?.email || derived.waiterName || null,
             firedAt: new Date().toLocaleString(),
             orderChannel: derived.channel,
             guestName: derived.guestName,
@@ -1891,7 +1911,9 @@ export default function RestaurantPosPage() {
           station: kot.station,
           printerName: kot.printerName,
           tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
-          waiterName: kot.waiterName,
+          sentByName: kot.firedByName || kot.waiterName || user?.fullName || user?.email || null,
+          serverName: kot.serverName || null,
+          waiterName: kot.firedByName || kot.waiterName,
           firedAt: new Date(kot.firedAt).toLocaleString(),
           orderChannel: meta?.orderChannel || kot.orderChannel,
           guestName: meta?.guestName || kot.guestName,
@@ -2526,6 +2548,8 @@ export default function RestaurantPosPage() {
     tableCode: string | null;
     tableName: string | null;
     waiterName: string | null;
+    firedByName?: string | null;
+    serverName?: string | null;
     firedAt: string;
     ticketKind?: 'FIRE' | 'VOID';
     orderChannel?: string | null;
@@ -2544,7 +2568,10 @@ export default function RestaurantPosPage() {
           station: kot.station,
           printerName: kot.printerName,
           tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
-          waiterName: kot.waiterName,
+          sentByName:
+            kot.firedByName || kot.waiterName || user?.fullName || user?.email || null,
+          serverName: kot.serverName || null,
+          waiterName: kot.firedByName || kot.waiterName,
           firedAt: new Date(kot.firedAt).toLocaleString(),
           ticketKind: 'VOID',
           voidReason: reason || null,
@@ -2843,6 +2870,7 @@ export default function RestaurantPosPage() {
         waiterName: waiters.find((w) => w.id === selectedWaiterId)?.fullName ?? null,
         addedBy: user?.id ?? null,
         addedByName: user?.fullName || user?.email || null,
+        addedAt: new Date().toISOString(),
         guestName: selectedCustomer?.name || guestDraft.guestName.trim() || null,
         guestPhone: selectedCustomer?.phone || guestDraft.guestPhone.trim() || null,
         deliveryAddress:
@@ -3495,6 +3523,19 @@ export default function RestaurantPosPage() {
                           : shortWaiterLabel(table.waiterName)}
                       </div>
                     ) : null}
+                    {occupied
+                      ? (() => {
+                          const openFor = formatCheckOpenDuration(
+                            table.checkOpenedAt,
+                            floorClockMs,
+                          );
+                          return openFor ? (
+                            <div className="text-[11px] mt-0.5 font-semibold text-amber-800 tabular-nums">
+                              Open {openFor}
+                            </div>
+                          ) : null;
+                        })()
+                      : null}
                   </button>
                 );
               })}
@@ -4200,9 +4241,13 @@ export default function RestaurantPosPage() {
                                   * {group.lineNotes}
                                 </div>
                               ) : null}
-                              {group.orderedByLabel ? (
+                              {group.orderedByLabel || group.addedAtLabel ? (
                                 <div className="text-[11px] font-semibold text-violet-800 mt-0.5 truncate">
-                                  Ordered by {group.orderedByLabel}
+                                  {group.orderedByLabel
+                                    ? `Ordered by ${group.orderedByLabel}`
+                                    : null}
+                                  {group.orderedByLabel && group.addedAtLabel ? ' · ' : null}
+                                  {group.addedAtLabel ? group.addedAtLabel : null}
                                 </div>
                               ) : null}
                               {!dense ? (
@@ -4314,9 +4359,13 @@ export default function RestaurantPosPage() {
                             * {lineSheet.lineNotes}
                           </p>
                         ) : null}
-                        {lineSheet.orderedByLabel ? (
-                          <p className="text-xs text-stone-500 mt-0.5">
-                            Ordered by {lineSheet.orderedByLabel}
+                        {lineSheet.orderedByLabel || lineSheet.addedAtLabel ? (
+                          <p className="text-xs font-semibold text-violet-800 mt-0.5">
+                            {lineSheet.orderedByLabel
+                              ? `Ordered by ${lineSheet.orderedByLabel}`
+                              : null}
+                            {lineSheet.orderedByLabel && lineSheet.addedAtLabel ? ' · ' : null}
+                            {lineSheet.addedAtLabel ? lineSheet.addedAtLabel : null}
                           </p>
                         ) : null}
                         <p className="text-sm text-stone-500">

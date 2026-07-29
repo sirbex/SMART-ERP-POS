@@ -60,7 +60,12 @@ export interface KotPrintData extends DocumentCompanyBranding {
   kotNumber: string;
   station: string;
   tableLabel: string;
+  /** @deprecated Prefer sentByName — kept for older callers. */
   waiterName?: string | null;
+  /** Login user who fired this KOT (Toast: who commanded kitchen). */
+  sentByName?: string | null;
+  /** Check owner / floor server when different from steward. */
+  serverName?: string | null;
   firedAt: string;
   /** Phase 2.2 — optional ESC/POS bridge target */
   printerName?: string | null;
@@ -74,6 +79,20 @@ export interface KotPrintData extends DocumentCompanyBranding {
   deliveryAddress?: string | null;
   pickupLabel?: string | null;
   items: Array<{ productName: string; quantity: number; lineNotes?: string | null }>;
+}
+
+/** Pure labels for KOT header — login firer is Steward; check owner is Server when different. */
+export function resolveKotStaffPrintLabels(input: {
+  sentByName?: string | null;
+  serverName?: string | null;
+  waiterName?: string | null;
+}): { steward: string | null; server: string | null } {
+  const steward = (input.sentByName || input.waiterName || '').trim() || null;
+  const server = (input.serverName || '').trim() || null;
+  if (server && steward && server === steward) {
+    return { steward, server: null };
+  }
+  return { steward, server };
 }
 
 export async function printKitchenTicket(data: KotPrintData): Promise<void> {
@@ -121,6 +140,11 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   );
 
   const title = isVoid ? '*** VOID ***' : `${escapeHtml(data.station)} ORDER`;
+  const staff = resolveKotStaffPrintLabels({
+    sentByName: data.sentByName,
+    serverName: data.serverName,
+    waiterName: data.waiterName,
+  });
   const html = `<!DOCTYPE html><html><head><title>${isVoid ? 'VOID' : 'KOT'} ${escapeHtml(data.kotNumber)} · ${escapeHtml(data.station)}</title>
 <style>
   body { font-family: monospace; font-size: 14px; width: 280px; margin: 0; padding: 8px; }
@@ -135,7 +159,8 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
     ${guestBlock}
     <div>Station: ${escapeHtml(data.station)}</div>
     <div>${isVoid ? 'VOID' : 'KOT'}: ${escapeHtml(data.kotNumber)}</div>
-    ${data.waiterName ? `<div>Waiter: ${escapeHtml(data.waiterName)}</div>` : ''}
+    ${staff.server ? `<div>Server: ${escapeHtml(staff.server)}</div>` : ''}
+    ${staff.steward ? `<div>Steward: ${escapeHtml(staff.steward)}</div>` : ''}
     ${isVoid && data.voidReason ? `<div>Reason: ${escapeHtml(data.voidReason)}</div>` : ''}
     <div>Time: ${escapeHtml(data.firedAt)}</div>
   </div>

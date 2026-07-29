@@ -4,13 +4,14 @@ import { useAuth } from '../hooks/useAuth';
 import { useTenant } from '../contexts/TenantContext';
 import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
 import ServerClock from './ServerClock';
-import { CASHIER_NAV_ITEMS, isCashierRole } from '../utils/cashierLockdown';
+import { isCashierRole, resolveCashierNavItems } from '../utils/cashierLockdown';
 import {
   isRestaurantWaiterProfile,
   WAITER_NAV_ITEMS,
 } from '../utils/restaurantWaiterLockdown';
 import { createClientAuthorization } from '../authorization/authorizationService';
 import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
+import { shouldHideRetailPos } from '../utils/retailPosVisibility';
 import {
   AdaptiveAppShell,
   AdaptiveBottomNav,
@@ -131,7 +132,7 @@ function LayoutChrome({ children }: LayoutProps) {
 
   const allNavItems = useMemo(() => {
     if (isCashierRole(user?.role)) {
-      return CASHIER_NAV_ITEMS.map((item) => ({
+      return resolveCashierNavItems(restaurantEnabled).map((item) => ({
         name: item.name,
         path: item.path,
         icon: item.icon,
@@ -164,6 +165,8 @@ function LayoutChrome({ children }: LayoutProps) {
     const items = [...navItems, ...adminNavItems];
     const authz = createClientAuthorization(user, permissions);
     return items.filter((item) => {
+      // Restaurant tenant = FOH, not retail POS.
+      if (item.path === '/pos' && shouldHideRetailPos(restaurantEnabled)) return false;
       if (item.requiresRestaurant && !restaurantEnabled) return false;
       if (item.feature) {
         if (tenantLoading) return false;

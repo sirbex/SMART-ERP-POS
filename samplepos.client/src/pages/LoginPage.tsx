@@ -8,6 +8,7 @@ import type { UserRole } from '../types';
 import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store, WifiOff, Fingerprint } from 'lucide-react';
 import { useTenant } from '../contexts/TenantContext';
 import { MathCaptcha } from '../components/auth/MathCaptcha';
+import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
 
 function readCachedPermissionKeys(): string[] {
   try {
@@ -20,8 +21,15 @@ function readCachedPermissionKeys(): string[] {
   }
 }
 
-function homeAfterLogin(role: string | undefined, intended?: string): string {
-  return resolvePostLoginPath({ role, permissions: readCachedPermissionKeys() }, intended);
+function homeAfterLogin(
+  role: string | undefined,
+  intended?: string,
+  restaurantEnabled?: boolean,
+): string {
+  return resolvePostLoginPath(
+    { role, permissions: readCachedPermissionKeys(), restaurantEnabled },
+    intended,
+  );
 }
 
 /** Shape returned by POST /auth/login inside `data.data` */
@@ -201,6 +209,7 @@ export default function LoginPage() {
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const { login, isAuthenticated, user } = useAuth();
   const { config } = useTenant();
+  const { data: restaurantEnabled = false } = useRestaurantEnabled();
   const brandName = config.branding.companyName || config.name || 'SMART ERP';
   const navigate = useNavigate();
   const location = useLocation();
@@ -233,7 +242,7 @@ export default function LoginPage() {
 
   // Redirect if already authenticated
   if (isAuthenticated) {
-    return <Navigate to={homeAfterLogin(user?.role, from)} replace />;
+    return <Navigate to={homeAfterLogin(user?.role, from, restaurantEnabled)} replace />;
   }
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -254,7 +263,7 @@ export default function LoginPage() {
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             await login(offlineUser, existingToken);
-            navigate(homeAfterLogin(offlineUser.role, from), { replace: true });
+            navigate(homeAfterLogin(offlineUser.role, from, restaurantEnabled), { replace: true });
             return;
           }
         } catch {
@@ -299,7 +308,7 @@ export default function LoginPage() {
         await login(user, accessToken || token, refreshToken, expiresIn);
         // Cache for offline login
         await cacheLoginCredential(email, password, user);
-        navigate(homeAfterLogin(user.role, from), { replace: true });
+        navigate(homeAfterLogin(user.role, from, restaurantEnabled), { replace: true });
       } else {
         setError(response.data.error || 'Login failed');
       }
@@ -321,7 +330,7 @@ export default function LoginPage() {
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             await login(offlineUser, existingToken);
-            navigate(homeAfterLogin(offlineUser.role, from), { replace: true });
+            navigate(homeAfterLogin(offlineUser.role, from, restaurantEnabled), { replace: true });
             return;
           }
         } catch {
@@ -376,7 +385,7 @@ export default function LoginPage() {
     if (email && password) {
       cacheLoginCredential(email, password, authUser).catch(() => { });
     }
-    navigate(homeAfterLogin(authUser.role, from), { replace: true });
+    navigate(homeAfterLogin(authUser.role, from, restaurantEnabled), { replace: true });
   };
 
   const handle2FACancel = () => {

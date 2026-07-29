@@ -93,7 +93,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useDiscountLimitPercent } from '../../authorization/useDiscountLimitPercent';
 import { useHasPermission } from '../../authorization/useAuthorization';
 import { getBusinessDate, formatTimestampDate, formatTimestampTime } from '../../utils/businessDate';
-import { CASHIER_NAV_ITEMS, isCashierRole } from '../../utils/cashierLockdown';
+import { isCashierRole, resolveCashierNavItems } from '../../utils/cashierLockdown';
+import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 import { usePosAssignedStore } from '../../hooks/usePosAssignedStore';
 
 // ── Discount applied from DiscountDialog (before manager approval extension) ──
@@ -358,6 +359,7 @@ export default function POSPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { data: restaurantEnabled = false } = useRestaurantEnabled();
   const { tier, chrome } = useLayoutTier();
   const discountLimitPercent = useDiscountLimitPercent();
   const canAccessImport = useHasPermission('admin.create');
@@ -3387,11 +3389,13 @@ export default function POSPage() {
 
   const posNavItems = useMemo(() => {
     if (isCashierRole(user?.role)) {
-      return CASHIER_NAV_ITEMS;
+      return resolveCashierNavItems(restaurantEnabled);
     }
     return [
       { name: 'Dashboard', path: '/dashboard', icon: '📊' },
-      { name: 'Point of Sale', path: '/pos', icon: '🛒' },
+      ...(restaurantEnabled
+        ? [{ name: 'Restaurant', path: '/restaurant', icon: '🍽️' }]
+        : [{ name: 'Point of Sale', path: '/pos', icon: '🛒' }]),
       { name: 'Inventory', path: '/inventory', icon: '📦' },
       { name: 'Customers', path: '/customers', icon: '👥' },
       { name: 'Suppliers', path: '/suppliers', icon: '🏢' },
@@ -3408,7 +3412,7 @@ export default function POSPage() {
           ]
         : []),
     ];
-  }, [canAccessImport, canAccessSettings, canAccessRoles]);
+  }, [canAccessImport, canAccessSettings, canAccessRoles, user?.role, restaurantEnabled]);
 
   return (
     <AdaptiveAppShell className="h-screen">

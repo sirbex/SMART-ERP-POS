@@ -15,14 +15,16 @@ import {
 } from '../hooks/useApi';
 import { useNeedingReorder, useStockLevels } from '../hooks/useInventory';
 import ExpiryAlertsWidget from '../components/ExpiryAlertsWidget';
-import { CASHIER_HOME_PATH, isCashierRole } from '../utils/cashierLockdown';
+import { isCashierRole, resolveCashierHomePath } from '../utils/cashierLockdown';
 import {
   isRestaurantWaiterProfile,
   WAITER_HOME_PATH,
 } from '../utils/restaurantWaiterLockdown';
 import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
+import { shouldHideRetailPos } from '../utils/retailPosVisibility';
 import {
   ShoppingCart,
+  UtensilsCrossed,
   Package,
   BarChart3,
   Users,
@@ -180,7 +182,7 @@ export default function Dashboard() {
   const { user, permissions } = useAuth();
   const { data: restaurantEnabled = false } = useRestaurantEnabled();
   if (isCashierRole(user?.role)) {
-    return <Navigate to={CASHIER_HOME_PATH} replace />;
+    return <Navigate to={resolveCashierHomePath(restaurantEnabled)} replace />;
   }
   if (
     isRestaurantWaiterProfile({
@@ -197,6 +199,7 @@ export default function Dashboard() {
 function DashboardContent() {
   const navigate = useNavigate();
   const { user, permissions } = useAuth();
+  const { data: restaurantEnabled = false } = useRestaurantEnabled();
   const isScopedSalesUser = useMemo(
     () => shouldRestrictSalesToOwnUser(permissions, user?.role),
     [permissions, user?.role],
@@ -260,14 +263,30 @@ function DashboardContent() {
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   // ─── Quick‑access modules ────────────────────────────────────────
+  const sellModule = shouldHideRetailPos(restaurantEnabled)
+    ? {
+        name: 'Restaurant',
+        path: '/restaurant',
+        icon: UtensilsCrossed,
+        color: 'bg-amber-600',
+        hoverColor: 'hover:bg-amber-700',
+      }
+    : {
+        name: 'Point of Sale',
+        path: '/pos',
+        icon: ShoppingCart,
+        color: 'bg-blue-500',
+        hoverColor: 'hover:bg-blue-600',
+      };
+
   const modules = isScopedSalesUser
     ? [
-      { name: 'Point of Sale', path: '/pos', icon: ShoppingCart, color: 'bg-blue-500', hoverColor: 'hover:bg-blue-600' },
+      sellModule,
       { name: 'My Sales', path: '/sales', icon: DollarSign, color: 'bg-orange-500', hoverColor: 'hover:bg-orange-600' },
       { name: 'Customers', path: '/customers', icon: Users, color: 'bg-amber-500', hoverColor: 'hover:bg-amber-600' },
     ]
     : [
-      { name: 'Point of Sale', path: '/pos', icon: ShoppingCart, color: 'bg-blue-500', hoverColor: 'hover:bg-blue-600' },
+      sellModule,
       { name: 'Products', path: '/inventory/products', icon: Package, color: 'bg-emerald-500', hoverColor: 'hover:bg-emerald-600' },
       { name: 'Inventory', path: '/inventory', icon: BarChart3, color: 'bg-purple-500', hoverColor: 'hover:bg-purple-600' },
       { name: 'Customers', path: '/customers', icon: Users, color: 'bg-amber-500', hoverColor: 'hover:bg-amber-600' },

@@ -151,7 +151,7 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     const foh = readFileSync(resolve(root, 'pages/restaurant/RestaurantPosPage.tsx'), 'utf8');
     expect(foh).toContain('restaurantTicketLineMergeKey');
     expect(foh).toContain('formatOrderedByLabels');
-    expect(foh).toContain('Ordered by {group.orderedByLabel}');
+    expect(foh).toMatch(/Ordered by \$\{group\.orderedByLabel\}/);
     // Must not re-introduce adder-split merge keys
     expect(foh).not.toMatch(/kotLineNotesMergeKey\(notes\)\}\|\$\{adder\}/);
   });

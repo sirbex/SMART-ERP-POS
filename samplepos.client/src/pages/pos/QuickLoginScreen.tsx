@@ -9,6 +9,7 @@ import { toast } from 'react-hot-toast';
 import { resolvePostLoginPath } from '../../utils/cashierLockdown';
 import { takeRestaurantPostQuickLoginPath } from '../../utils/restaurantFohAutoLogout';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 
 // ============================================================
 // PIN Input Component
@@ -249,6 +250,7 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
 export default function QuickLoginScreen() {
     const navigate = useNavigate();
     const { permissions } = useAuth();
+    const { data: restaurantEnabled = false } = useRestaurantEnabled();
     const {
         isLoading,
         error,
@@ -265,7 +267,9 @@ export default function QuickLoginScreen() {
             const result = await loginWithPinOnly(pin);
             toast.success(`Welcome, ${result.user.fullName}!`);
             // Restaurant FOH auto-logout stashes /restaurant; waiters land back on tables.
-            const intended = takeRestaurantPostQuickLoginPath('/pos');
+            const intended = takeRestaurantPostQuickLoginPath(
+              restaurantEnabled ? '/restaurant' : '/pos',
+            );
             let perms: string[] = [];
             try {
                 const raw = localStorage.getItem('rbac_permissions');
@@ -278,7 +282,7 @@ export default function QuickLoginScreen() {
             }
             navigate(
               resolvePostLoginPath(
-                { role: result.user.role, permissions: perms },
+                { role: result.user.role, permissions: perms, restaurantEnabled },
                 intended,
               ),
               { replace: true },
@@ -286,7 +290,7 @@ export default function QuickLoginScreen() {
         } catch {
             // Error is handled by hook, shown in PinInput
         }
-    }, [loginWithPinOnly, navigate, permissions]);
+    }, [loginWithPinOnly, navigate, permissions, restaurantEnabled]);
 
     const handlePasswordLogin = useCallback(() => {
         navigate('/login');

@@ -169,7 +169,7 @@ describe('ticket Ordered by stamp (behavioral evidence)', () => {
     expect(rows[0]!.orderedByLabel).toMatch(/Pat/);
   });
 
-  it('EVIDENCE: FOH + orders repo wire Ordered by + added_by_name coalesce', () => {
+  it('EVIDENCE: FOH + orders repo wire Ordered by + added_by_name (no owner mask)', () => {
     const here = dirname(fileURLToPath(import.meta.url));
     const foh = readFileSync(resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'), 'utf8');
     const repo = readFileSync(
@@ -180,11 +180,11 @@ describe('ticket Ordered by stamp (behavioral evidence)', () => {
       resolve(here, '../../../SamplePOS.Server/src/db/schemaColumnCache.ts'),
       'utf8',
     );
-    expect(foh).toContain('Ordered by {group.orderedByLabel}');
-    expect(foh).toContain('resolveLineOrderedByName');
+    expect(foh).toMatch(/Ordered by \$\{group\.orderedByLabel\}/);
+    expect(foh).toContain('formatOrderedByLabels');
     expect(foh).toContain('consolidateTicketLines(');
     expect(repo).toMatch(/added_by_name/);
-    expect(repo).toMatch(/COALESCE/);
+    expect(repo).not.toMatch(/COALESCE\(\s*ua_add\.full_name/);
     expect(cache).toMatch(/current_database/);
   });
 });

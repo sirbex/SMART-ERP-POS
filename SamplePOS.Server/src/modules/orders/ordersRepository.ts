@@ -52,6 +52,8 @@ export interface OrderItemRecord {
   /** Who rang this line (may differ from check owner after handoff). */
   addedBy?: string | null;
   addedByName?: string | null;
+  /** When this line was rung (FOH timeline). */
+  addedAt?: string | null;
   orderTags?: Array<{
     id?: string | null;
     label: string;
@@ -88,6 +90,8 @@ export interface CreateOrderItemData {
   conversionFactor?: number | null;
   /** Actor who added the line (restaurant FOH attribution). */
   addedBy?: string | null;
+  /** When the line was rung (defaults to NOW() in DB). */
+  addedAt?: string | null;
 }
 
 // ── Repository ───────────────────────────────────────────────────────
@@ -205,65 +209,59 @@ export const ordersRepository = {
     if (items.length === 0) return [];
 
     const hasAddedBy = await tableHasColumn(client, 'pos_order_items', 'added_by');
+    const hasAddedAt = await tableHasColumn(client, 'pos_order_items', 'added_at');
     const values: unknown[] = [];
     const placeholders: string[] = [];
     let idx = 1;
 
     for (const item of items) {
-      if (hasAddedBy) {
+      const base = [
+        item.orderId,
+        item.productId,
+        item.productName,
+        item.quantity,
+        item.unitPrice,
+        item.lineTotal,
+        item.discountAmount || 0,
+        item.uomId || null,
+        item.baseQty ?? null,
+        item.baseUomId || null,
+        item.conversionFactor ?? null,
+      ];
+      if (hasAddedBy && hasAddedAt) {
+        placeholders.push(
+          `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
+        );
+        values.push(...base, item.addedBy || null, item.addedAt || null);
+      } else if (hasAddedBy) {
         placeholders.push(
           `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
         );
-        values.push(
-          item.orderId,
-          item.productId,
-          item.productName,
-          item.quantity,
-          item.unitPrice,
-          item.lineTotal,
-          item.discountAmount || 0,
-          item.uomId || null,
-          item.baseQty ?? null,
-          item.baseUomId || null,
-          item.conversionFactor ?? null,
-          item.addedBy || null,
-        );
+        values.push(...base, item.addedBy || null);
       } else {
         placeholders.push(
           `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`,
         );
-        values.push(
-          item.orderId,
-          item.productId,
-          item.productName,
-          item.quantity,
-          item.unitPrice,
-          item.lineTotal,
-          item.discountAmount || 0,
-          item.uomId || null,
-          item.baseQty ?? null,
-          item.baseUomId || null,
-          item.conversionFactor ?? null,
-        );
+        values.push(...base);
       }
     }
 
+    const extraReturning = [
+      ...(hasAddedBy ? [', added_by'] : []),
+      ...(hasAddedAt ? [', added_at'] : []),
+    ].join('');
+
     const result = await client.query(
-      hasAddedBy
-        ? `INSERT INTO pos_order_items (
-            order_id, product_id, product_name, quantity, unit_price, line_total,
-            discount_amount, uom_id, base_qty, base_uom_id, conversion_factor, added_by
-          ) VALUES ${placeholders.join(', ')}
-          RETURNING
-            id, order_id, product_id, product_name, quantity, unit_price, line_total,
-            discount_amount, uom_id, base_qty, base_uom_id, conversion_factor, added_by`
-        : `INSERT INTO pos_order_items (
-            order_id, product_id, product_name, quantity, unit_price, line_total,
-            discount_amount, uom_id, base_qty, base_uom_id, conversion_factor
-          ) VALUES ${placeholders.join(', ')}
-          RETURNING
-            id, order_id, product_id, product_name, quantity, unit_price, line_total,
-            discount_amount, uom_id, base_qty, base_uom_id, conversion_factor`,
+      `INSERT INTO pos_order_items (
+        order_id, product_id, product_name, quantity, unit_price, line_total,
+        discount_amount, uom_id, base_qty, base_uom_id, conversion_factor
+        ${hasAddedBy ? ', added_by' : ''}
+        ${hasAddedAt ? ', added_at' : ''}
+      ) VALUES ${placeholders.join(', ')}
+      RETURNING
+        id, order_id, product_id, product_name, quantity, unit_price, line_total,
+        discount_amount, uom_id, base_qty, base_uom_id, conversion_factor
+        ${extraReturning}`,
       values,
     );
 
@@ -318,20 +316,15 @@ export const ordersRepository = {
     const hasKitchenCols = await tableHasColumn(pool, 'pos_order_items', 'kitchen_sent_at');
     const hasOrderTags = await tableHasColumn(pool, 'pos_order_items', 'order_tags');
     const hasAddedBy = await tableHasColumn(pool, 'pos_order_items', 'added_by');
+    const hasAddedAt = await tableHasColumn(pool, 'pos_order_items', 'added_at');
     const kitchenSelect = hasKitchenCols
       ? `, oi.kitchen_sent_at, oi.line_notes, oi.kitchen_station${hasOrderTags ? ', oi.order_tags' : ''}`
       : ``;
+    // Toast: show the person who rang the line — never mask with check owner when stamp is missing.
     const addedBySelect = hasAddedBy
-      ? `, oi.added_by,
-         COALESCE(
-           ua_add.full_name,
-           (SELECT COALESCE(uw.full_name, uc.full_name)
-            FROM pos_orders o2
-            LEFT JOIN users uw ON uw.id = o2.waiter_id
-            LEFT JOIN users uc ON uc.id = o2.created_by
-            WHERE o2.id = oi.order_id)
-         ) AS added_by_name`
+      ? `, oi.added_by, ua_add.full_name AS added_by_name`
       : ``;
+    const addedAtSelect = hasAddedAt ? `, oi.added_at` : ``;
     const addedByJoin = hasAddedBy
       ? `LEFT JOIN users ua_add ON ua_add.id = oi.added_by`
       : ``;
@@ -352,10 +345,11 @@ export const ordersRepository = {
         oi.conversion_factor
         ${kitchenSelect}
         ${addedBySelect}
+        ${addedAtSelect}
       FROM pos_order_items oi
       ${addedByJoin}
       WHERE oi.order_id = $1
-      ORDER BY oi.product_name`,
+      ORDER BY ${hasAddedAt ? 'oi.added_at ASC NULLS LAST,' : ''} oi.product_name`,
       [order.id]
     );
 
