@@ -8,8 +8,10 @@ import { fileURLToPath } from 'node:url';
 import {
   canEditOtherWaitersChecks,
   canMutateRestaurantCheck,
+  formatOrderedByLabels,
   isTableVisibleToWaiter,
   ownsRestaurantCheck,
+  restaurantTicketLineMergeKey,
   shortWaiterLabel,
 } from '@shared/utils/restaurantCheckOwnership';
 
@@ -98,6 +100,28 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     expect(shortWaiterLabel('Sam')).toBe('Sam');
   });
 
+  it('EVIDENCE: same product from waiter + manager stays one ticket row with both names', () => {
+    const keyWaiter = restaurantTicketLineMergeKey({
+      productId: 'p1',
+      productName: 'Smoothie',
+      unitPrice: 15000,
+      kitchenSent: false,
+      lineNotes: null,
+      notesMergeKey: (n) => n,
+    });
+    const keyManager = restaurantTicketLineMergeKey({
+      productId: 'p1',
+      productName: 'Smoothie',
+      unitPrice: 15000,
+      kitchenSent: false,
+      lineNotes: null,
+      notesMergeKey: (n) => n,
+    });
+    expect(keyWaiter).toBe(keyManager);
+    expect(formatOrderedByLabels(['Alice Waiter', 'Pat Manager'])).toBe('Alice W., Pat M.');
+    expect(formatOrderedByLabels(['Cashier Kim', 'Cashier Kim'])).toBe('Cashier K.');
+  });
+
   it('EVIDENCE: migration + service wire ownership + added_by', () => {
     const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
     const sql = readFileSync(
@@ -119,5 +143,15 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     expect(service).toMatch(/canMutateRestaurantCheck|canEditOtherWaitersChecks/);
     expect(service).toMatch(/addedBy|added_by/);
     expect(repo).toMatch(/added_by|addedBy/);
+  });
+
+  it('EVIDENCE: FOH merges product rows without splitting by adder', () => {
+    const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+    const foh = readFileSync(resolve(root, 'pages/restaurant/RestaurantPosPage.tsx'), 'utf8');
+    expect(foh).toContain('restaurantTicketLineMergeKey');
+    expect(foh).toContain('formatOrderedByLabels');
+    expect(foh).toContain('Ordered by {group.orderedByLabel}');
+    // Must not re-introduce adder-split merge keys
+    expect(foh).not.toMatch(/kotLineNotesMergeKey\(notes\)\}\|\$\{adder\}/);
   });
 });

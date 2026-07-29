@@ -86,3 +86,41 @@ export function shortWaiterLabel(fullName?: string | null): string {
   if (parts.length === 1) return parts[0]!;
   return `${parts[0]} ${parts[parts.length - 1]![0]}.`;
 }
+
+/**
+ * Toast/Aloha: one product row on the ticket; show everyone who rang units on it.
+ * Same SKU from waiter + manager stays one line — "by Alice N., Pat M."
+ */
+export function formatOrderedByLabels(
+  names: Array<string | null | undefined>,
+): string | null {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const raw of names) {
+    const trimmed = (raw || '').trim();
+    if (!trimmed) continue;
+    const label = shortWaiterLabel(trimmed);
+    if (seen.has(label)) continue;
+    seen.add(label);
+    labels.push(label);
+  }
+  return labels.length > 0 ? labels.join(', ') : null;
+}
+
+/**
+ * Merge key for ticket display — product + price + kitchen state + notes.
+ * Intentionally excludes added_by so manager/cashier adds bump the same row.
+ */
+export function restaurantTicketLineMergeKey(input: {
+  productId?: string | null;
+  productName: string;
+  unitPrice: number;
+  kitchenSent: boolean;
+  lineNotes?: string | null;
+  notesMergeKey: (notes: string) => string;
+}): string {
+  const notes = (input.lineNotes || '').trim();
+  return `${input.productId ?? 'name:' + input.productName}|${input.unitPrice}|${
+    input.kitchenSent ? 'S' : 'N'
+  }|${input.notesMergeKey(notes)}`;
+}

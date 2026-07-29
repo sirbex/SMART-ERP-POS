@@ -43,6 +43,8 @@ import {
 import { isRestaurantWaiterProfile } from '../../utils/restaurantWaiterLockdown';
 import {
   canEditOtherWaitersChecks,
+  formatOrderedByLabels,
+  restaurantTicketLineMergeKey,
   shortWaiterLabel,
 } from '@shared/utils/restaurantCheckOwnership';
 import {
@@ -190,8 +192,8 @@ interface TicketLineGroup {
   lineTotal: number;
   kitchenSent: boolean;
   lineNotes: string | null;
-  addedBy: string | null;
-  addedByName: string | null;
+  /** Everyone who rang units on this merged product row (owner stays check waiter). */
+  orderedByLabel: string | null;
   itemIds: string[];
   lines: OrderItem[];
 }
@@ -202,9 +204,15 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
     const kitchenSent = !!it.kitchenSentAt;
     const unitPrice = Number(it.unitPrice) || 0;
     const notes = (it.lineNotes || '').trim();
-    const adder = it.addedBy || 'unknown';
-    // Same product + same modifiers + same adder merge. Different waiters stay separate.
-    const key = `${it.productId ?? 'name:' + it.productName}|${unitPrice}|${kitchenSent ? 'S' : 'N'}|${kotLineNotesMergeKey(notes)}|${adder}`;
+    // Same product merges regardless of who added — attribution lists all rangers on the row.
+    const key = restaurantTicketLineMergeKey({
+      productId: it.productId,
+      productName: it.productName,
+      unitPrice,
+      kitchenSent,
+      lineNotes: notes,
+      notesMergeKey: kotLineNotesMergeKey,
+    });
     const qty = Number(it.quantity) || 0;
     const lineTotal = Number(it.lineTotal) || 0;
     const existing = map.get(key);
@@ -218,8 +226,7 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
         lineTotal,
         kitchenSent,
         lineNotes: notes || null,
-        addedBy: it.addedBy ?? null,
-        addedByName: it.addedByName ?? null,
+        orderedByLabel: formatOrderedByLabels([it.addedByName]),
         itemIds: [it.id],
         lines: [it],
       });
@@ -228,6 +235,9 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
       existing.lineTotal += lineTotal;
       existing.itemIds.push(it.id);
       existing.lines.push(it);
+      existing.orderedByLabel = formatOrderedByLabels(
+        existing.lines.map((l) => l.addedByName),
+      );
     }
   }
   return Array.from(map.values());
@@ -1225,6 +1235,8 @@ export default function RestaurantPosPage() {
           channel,
           waiterId: selectedWaiterId,
           waiterName: waiter?.fullName ?? null,
+          addedBy: user?.id ?? null,
+          addedByName: user?.fullName || user?.email || null,
           guestName,
           guestPhone,
           deliveryAddress,
@@ -2806,6 +2818,8 @@ export default function RestaurantPosPage() {
         channel: channelHint(table),
         waiterId: selectedWaiterId,
         waiterName: waiters.find((w) => w.id === selectedWaiterId)?.fullName ?? null,
+        addedBy: user?.id ?? null,
+        addedByName: user?.fullName || user?.email || null,
         guestName: selectedCustomer?.name || guestDraft.guestName.trim() || null,
         guestPhone: selectedCustomer?.phone || guestDraft.guestPhone.trim() || null,
         deliveryAddress:
@@ -4163,12 +4177,9 @@ export default function RestaurantPosPage() {
                                   * {group.lineNotes}
                                 </div>
                               ) : null}
-                              {group.addedByName &&
-                              (canEditOthers ||
-                                (group.addedBy && group.addedBy !== user?.id) ||
-                                (meta?.waiterId && group.addedBy && group.addedBy !== meta.waiterId)) ? (
+                              {group.orderedByLabel ? (
                                 <div className="text-[10px] text-stone-500 mt-0.5 truncate">
-                                  by {shortWaiterLabel(group.addedByName)}
+                                  Ordered by {group.orderedByLabel}
                                 </div>
                               ) : null}
                               {!dense ? (
@@ -4278,6 +4289,11 @@ export default function RestaurantPosPage() {
                         {lineSheet.lineNotes ? (
                           <p className="text-xs font-medium text-amber-800 mt-0.5">
                             * {lineSheet.lineNotes}
+                          </p>
+                        ) : null}
+                        {lineSheet.orderedByLabel ? (
+                          <p className="text-xs text-stone-500 mt-0.5">
+                            Ordered by {lineSheet.orderedByLabel}
                           </p>
                         ) : null}
                         <p className="text-sm text-stone-500">

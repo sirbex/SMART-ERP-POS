@@ -20,6 +20,8 @@ export type OptimisticOrderItem = {
   lineTotal: string;
   discountAmount: string;
   kitchenSentAt?: string | null;
+  addedBy?: string | null;
+  addedByName?: string | null;
 };
 
 export type OptimisticCheckPayload = {
@@ -198,6 +200,9 @@ export function appendOptimisticMenuItem(
     channel: OptimisticChannel;
     waiterId?: string | null;
     waiterName?: string | null;
+    /** Acting user who rang this add (may differ from check owner). */
+    addedBy?: string | null;
+    addedByName?: string | null;
     guestName?: string | null;
     guestPhone?: string | null;
     deliveryAddress?: string | null;
@@ -218,6 +223,8 @@ export function appendOptimisticMenuItem(
     lineTotal: String(lineTotal),
     discountAmount: '0',
     kitchenSentAt: null,
+    addedBy: args.addedBy ?? null,
+    addedByName: args.addedByName ?? null,
   };
   const knownTabs = args.knownTabs || [];
 
