@@ -7,7 +7,10 @@ import { useGlobalSessionActivity } from '../hooks/useGlobalSessionActivity';
 import { setupAuthBroadcastListener, onAuthBroadcast, broadcastAuthEvent } from '../lib/authBroadcast';
 import { setupOfflineQueueAutoFlush } from '../lib/offlineRequestQueue';
 import { isUserActiveOrGuarded, isTransactionGuardActive } from '../lib/sessionActivity';
-import { shouldIgnoreCrossTabSessionExpired } from '../lib/sessionLogoutPolicy';
+import {
+  shouldIgnoreCrossTabSessionExpired,
+  shouldPerformIdleLogout,
+} from '../lib/sessionLogoutPolicy';
 import type { AxiosError } from 'axios';
 import type { UserRole } from '../types';
 
@@ -318,6 +321,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // ── Auto-logout on idle (60 minutes without deliberate interaction) ────────
   const idleLogout = useCallback(() => {
+    // SAP/Odoo: never idle-logout while this or any peer tab is still working.
+    if (!shouldPerformIdleLogout(isUserActiveOrGuarded(IDLE_TIMEOUT_MS))) {
+      return;
+    }
     if (isTransactionGuardActive()) {
       pendingIdleLogoutRef.current = true;
       return;
@@ -325,20 +332,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
     pendingIdleLogoutRef.current = false;
     logout();
     sessionStorage.setItem('session_expired', '1');
-  }, [logout]);
+  }, [logout, IDLE_TIMEOUT_MS]);
 
   useEffect(() => {
     const onGuard = (e: Event) => {
       const detail = (e as CustomEvent<{ active?: boolean }>).detail;
       if (detail?.active) return;
       if (!pendingIdleLogoutRef.current) return;
+      if (!shouldPerformIdleLogout(isUserActiveOrGuarded(IDLE_TIMEOUT_MS))) {
+        pendingIdleLogoutRef.current = false;
+        return;
+      }
       pendingIdleLogoutRef.current = false;
       logout();
       sessionStorage.setItem('session_expired', '1');
     };
     window.addEventListener('app:transaction-guard', onGuard);
     return () => window.removeEventListener('app:transaction-guard', onGuard);
-  }, [logout]);
+  }, [logout, IDLE_TIMEOUT_MS]);
 
   useIdleTimeout({
     timeoutMs: IDLE_TIMEOUT_MS,

@@ -96,7 +96,11 @@ apiClient.interceptors.request.use(
     // If a refresh is already in-flight, freeze this request until it completes.
     // This prevents sending a stale token while another request is mid-refresh.
     if (getAuthState() === 'REFRESHING') {
-      try { await waitForAuthenticated(); } catch { /* EXPIRED — response interceptor handles */ }
+      try {
+        await waitForAuthenticated();
+      } catch {
+        /* Timed out / expired — fall through and re-read tokens */
+      }
     } else if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
       try {
         await refreshAccessTokenDeduped();
@@ -105,7 +109,16 @@ apiClient.interceptors.request.use(
       }
     }
 
-    const token = getAccessToken() || localStorage.getItem('auth_token');
+    let token = getAccessToken() || localStorage.getItem('auth_token');
+    // Refresh can still be finishing after a wait timeout — give one short retry.
+    if (!token && getAuthState() === 'REFRESHING') {
+      try {
+        await waitForAuthenticated(8_000);
+      } catch {
+        /* still unavailable */
+      }
+      token = getAccessToken() || localStorage.getItem('auth_token');
+    }
     if (!token) {
       // Avoid anonymous API calls that produce misleading "Authentication token required" 401s
       return Promise.reject(new Error('Session not ready — please sign in again'));
@@ -156,7 +169,7 @@ apiClient.interceptors.response.use(
   async (error: AxiosError<ApiResponse>) => {
     // Log error (status undefined = no HTTP response: network, timeout, or aborted)
     const isNetworkFailure = !error.response;
-    if (isNetworkFailure) {
+    if (isNetworkFailure && error.config) {
       console.warn('[API Network Error]', {
         url: error.config?.url,
         method: error.config?.method,
@@ -164,6 +177,9 @@ apiClient.interceptors.response.use(
         message: error.message,
         online: navigator.onLine,
       });
+    } else if (isNetworkFailure) {
+      // Request interceptor gate (e.g. missing token) — not a transport failure
+      console.warn('[API Auth Gate]', { message: error.message, online: navigator.onLine });
     } else {
       console.error('[API Response Error]', {
         url: error.config?.url,
@@ -239,6 +255,10 @@ apiClient.interceptors.response.use(
 
     // Network / no response
     if (!error.response) {
+      // Auth gate before the request left the browser — do not toast as "connection problem"
+      if (!error.config && /Session not ready/i.test(error.message || '')) {
+        return Promise.reject(error);
+      }
       const msg = navigator.onLine
         ? 'Could not reach the server. Please try again.'
         : 'You appear to be offline. Check your connection and try again.';

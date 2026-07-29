@@ -10,6 +10,8 @@ export const ACTIVE_SESSION_WINDOW_MS = 60 * 60 * 1000;
 
 const ACTIVITY_STORAGE_KEY = 'smarterp_last_activity_at';
 
+export { ACTIVITY_STORAGE_KEY };
+
 let lastActivityAt = Date.now();
 let transactionGuardDepth = 0;
 let lastPersistAt = 0;

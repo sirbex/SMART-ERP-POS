@@ -174,6 +174,14 @@ describe('Enterprise — cross-tab activity sync (Odoo pattern)', () => {
     syncActivityFromPeerTab(String(Date.now()));
     expect(shouldPerformIdleLogout(isUserActiveOrGuarded())).toBe(false);
   });
+
+  it('EVIDENCE: idle timer fire must not logout when peer tab is active', () => {
+    // Simulate this tab's timer due, but peer activity keeps session alive
+    __resetSessionActivityForTests(ACTIVE_SESSION_WINDOW_MS + 1);
+    syncActivityFromPeerTab(String(Date.now()));
+    expect(isUserActiveOrGuarded()).toBe(true);
+    expect(shouldPerformIdleLogout(isUserActiveOrGuarded())).toBe(false);
+  });
 });
 
 describe('Enterprise — module-agnostic auto-logout policy matrix', () => {
