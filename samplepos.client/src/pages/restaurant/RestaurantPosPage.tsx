@@ -62,6 +62,7 @@ import {
   refreshRestaurantCheckSeedFromServer,
   hasPendingRestaurantMutations,
   resolveDesiredLinesBeforePay,
+  storePayDesiredLines,
   shouldUseLocalRestaurantMutation,
   isJournalLocalOrderId,
   splitRestaurantCheckOffline,
@@ -526,6 +527,18 @@ function seedCheckPayloadIntoJournal(tableId: string, data: CheckUiPayload): voi
   });
 }
 
+/** After seed/clamp, FOH must show journal truth — never raw server lines that resurrect voids. */
+function checkUiAfterServerSeed(tableId: string, data: CheckUiPayload): CheckUiPayload {
+  seedCheckPayloadIntoJournal(tableId, data);
+  const local = buildCheckUiFromJournal(tableId, data.order?.id ?? null, data.table);
+  if (!local?.order) return data;
+  return {
+    ...local,
+    table: data.table || local.table,
+    siblingChecks: data.siblingChecks?.length ? data.siblingChecks : local.siblingChecks,
+  };
+}
+
 export default function RestaurantPosPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -623,11 +636,12 @@ export default function RestaurantPosPage() {
     data: CheckUiPayload,
     preferredKeyOrderId?: string | null,
   ) => {
+    // Clamp to journal (voids) first, then overlay in-flight optimistic adds.
+    const clamped = checkUiAfterServerSeed(tableId, data);
     const merged = mergeInFlightOptimisticLines(
-      data as OptimisticCheckPayload,
+      clamped as OptimisticCheckPayload,
       inFlightOptimisticLinesRef.current.values(),
     ) as CheckUiPayload;
-    seedCheckPayloadIntoJournal(tableId, data);
     // Drop optimistic tmp_ord_* ghosts before they reappear as fake sibling tickets.
     tableTicketsRef.current = {
       tableId,
@@ -807,8 +821,10 @@ export default function RestaurantPosPage() {
         serverOrderId ? { orderId: serverOrderId } : undefined,
       );
       const data = res.data.data as CheckUiPayload;
-      seedCheckPayloadIntoJournal(selectedTableId, data);
-      return attachSiblingTabs(data, tableTicketsRef.current.tabs);
+      return attachSiblingTabs(
+        checkUiAfterServerSeed(selectedTableId, data),
+        tableTicketsRef.current.tabs,
+      );
     },
     // Instant ticket switch: show journal/cache for the target order — never flash the previous ticket.
     placeholderData: () => {
@@ -1515,8 +1531,10 @@ export default function RestaurantPosPage() {
             orderId: serverOrderId,
           });
           const data = res.data.data as CheckUiPayload;
-          seedCheckPayloadIntoJournal(selectedTableId, data);
-          return attachSiblingTabs(data, tableTicketsRef.current.tabs);
+          return attachSiblingTabs(
+            checkUiAfterServerSeed(selectedTableId, data),
+            tableTicketsRef.current.tabs,
+          );
         },
       });
     }
@@ -2112,13 +2130,13 @@ export default function RestaurantPosPage() {
           orderId: serverOrderId,
         });
         const data = res.data.data as CheckUiPayload;
-        seedCheckPayloadIntoJournal(selectedTableId, data);
+        const clamped = checkUiAfterServerSeed(selectedTableId, data);
         // Ignore stale responses if the user already switched again.
         if (tableTicketsRef.current.tableId !== selectedTableId) return;
         queryClient.setQueryData(
           ['restaurant', 'check', selectedTableId, orderId, isOnline],
           attachSiblingTabs(
-            data,
+            clamped,
             scrubRestaurantTicketTabs(tableTicketsRef.current.tabs),
             selectedTableId,
           ),
@@ -3018,6 +3036,8 @@ export default function RestaurantPosPage() {
             quantity: l.quantity,
           })),
         );
+        // Ticket truth must travel with Pay — payment page must not trust server-as-FOH.
+        storePayDesiredLines(paidOrderId, desired);
         const serverRes = await api.orders.getById(paidOrderId);
         const serverOrder = serverRes.data.data as {
           items?: Array<{ id: string; quantity: string; productId?: string | null }>;

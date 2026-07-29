@@ -12,9 +12,11 @@ import type { Customer } from '@shared/zod/customer';
 import Decimal from 'decimal.js';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import {
+  clearPayDesiredLines,
   markRestaurantCheckSettledInJournal,
-  resolveDesiredLinesBeforePay,
+  resolveDesiredLinesForPaymentPage,
 } from '../../lib/restaurantOfflineOps';
+import { computeVoidItemsFromUpdatedLines, totalLineQuantity } from '@shared/utils/reconcileOrderLineVoids';
 import {
   clearRestaurantBillRequestedOffline,
   paintRestaurantTableFreeOffline,
@@ -22,7 +24,6 @@ import {
 import { publishLanKdsBoardChanged } from '../../lib/restaurantLanKds';
 import { getAllEvents, getAllSyncState } from '../../lib/offlineEventJournal';
 import { deriveRestaurantOpenChecks } from '../../lib/offlineEventSelectors';
-import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
 import { printReceipt } from '../../lib/print';
 import {
   buildReceiptDataFromCheckout,
@@ -136,7 +137,8 @@ export default function OrderPaymentPage() {
       const resp = await api.orders.getById(id!);
       let detail = resp.data.data as OrderDetail;
       if (returnToPath === '/restaurant' && detail.status === 'PENDING' && detail.items?.length) {
-        const desired = resolveDesiredLinesBeforePay(
+        // Prefer ticket snapshot stored at Pay — never treat raw server lines as FOH truth.
+        const desired = resolveDesiredLinesForPaymentPage(
           detail.id,
           detail.items.map((it) => ({
             id: it.id,
@@ -152,6 +154,15 @@ export default function OrderPaymentPage() {
           });
           const refreshed = await api.orders.getById(id!);
           detail = refreshed.data.data as OrderDetail;
+        }
+        // Hard stop: refuse to show Complete Order totals that still exceed ticket truth.
+        const stillExtra = computeVoidItemsFromUpdatedLines(detail.items, desired);
+        if (stillExtra.length > 0 || totalLineQuantity(
+          detail.items.map((it) => ({ lineId: it.id, quantity: Number(it.quantity) || 0 })),
+        ) > totalLineQuantity(desired) + 1e-9) {
+          throw new Error(
+            'Ticket and server lines still disagree after void heal — go back to the ticket and retry Pay',
+          );
         }
       }
       return detail;
@@ -367,6 +378,7 @@ export default function OrderPaymentPage() {
       if (returnToPath === '/restaurant') {
         void queryClient.invalidateQueries({ queryKey: ['restaurant'] });
         if (id) {
+          clearPayDesiredLines(id);
           const openBefore = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState());
           const tableId = openBefore.find((c) => c.orderId === id)?.tableId ?? null;
           markRestaurantCheckSettledInJournal(id, 'PAID');

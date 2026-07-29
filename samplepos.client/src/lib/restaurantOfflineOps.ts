@@ -217,6 +217,110 @@ export function resolveDesiredLinesBeforePay(
   return totalLineQuantity(snap) < totalLineQuantity(foh) - 1e-9 ? snap : foh;
 }
 
+const PAY_DESIRED_KEY = (orderId: string) => `restaurant_pay_desired_${orderId}`;
+
+/** Memory fallback when sessionStorage is missing (tests) or blocked (private mode). */
+const payDesiredMemory = new Map<string, { ts: number; lines: ReconcileDesiredLine[] }>();
+
+function normalizePayDesiredLines(lines: ReconcileDesiredLine[]): ReconcileDesiredLine[] {
+  return lines.map((l) => ({
+    lineId: typeof l.lineId === 'string' ? l.lineId : undefined,
+    productId: typeof l.productId === 'string' ? l.productId : undefined,
+    quantity: Number(l.quantity) || 0,
+  }));
+}
+
+/** Persist ticket lines before navigating to Order Payment (survives journal-less payment page). */
+export function storePayDesiredLines(
+  orderId: string,
+  lines: ReconcileDesiredLine[],
+): void {
+  if (!orderId) return;
+  const payload = {
+    ts: Date.now(),
+    lines: normalizePayDesiredLines(lines),
+  };
+  payDesiredMemory.set(orderId, payload);
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(PAY_DESIRED_KEY(orderId), JSON.stringify(payload));
+  } catch {
+    /* private mode / quota — memory map still holds ticket truth for this tab */
+  }
+}
+
+export function loadPayDesiredLines(orderId: string): ReconcileDesiredLine[] | null {
+  if (!orderId) return null;
+  const fromMemory = (): ReconcileDesiredLine[] | null => {
+    const mem = payDesiredMemory.get(orderId);
+    if (!mem?.lines?.length) return null;
+    if (Date.now() - mem.ts > 2 * 60 * 60 * 1000) {
+      payDesiredMemory.delete(orderId);
+      return null;
+    }
+    return normalizePayDesiredLines(mem.lines);
+  };
+  if (typeof sessionStorage !== 'undefined') {
+    try {
+      const raw = sessionStorage.getItem(PAY_DESIRED_KEY(orderId));
+      if (raw) {
+        const parsed = JSON.parse(raw) as { lines?: ReconcileDesiredLine[]; ts?: number };
+        if (Array.isArray(parsed.lines) && parsed.lines.length > 0) {
+          // Stale after 2h — do not void against ancient snapshots
+          if (parsed.ts && Date.now() - parsed.ts > 2 * 60 * 60 * 1000) {
+            sessionStorage.removeItem(PAY_DESIRED_KEY(orderId));
+            payDesiredMemory.delete(orderId);
+            return null;
+          }
+          const lines = normalizePayDesiredLines(parsed.lines);
+          payDesiredMemory.set(orderId, { ts: parsed.ts || Date.now(), lines });
+          return lines;
+        }
+      }
+    } catch {
+      /* fall through to memory */
+    }
+  }
+  return fromMemory();
+}
+
+export function clearPayDesiredLines(orderId: string): void {
+  if (!orderId) return;
+  payDesiredMemory.delete(orderId);
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.removeItem(PAY_DESIRED_KEY(orderId));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Complete-Sale desired lines — ticket snapshot > journal void snap > FOH/server.
+ * NEVER treat raw server lines alone as ticket truth when a stricter snapshot exists.
+ */
+export function resolveDesiredLinesForPaymentPage(
+  orderId: string,
+  serverOrFohItems: Array<{
+    id: string;
+    productId?: string | null;
+    quantity: string | number;
+  }>,
+): ReconcileDesiredLine[] {
+  const stored = loadPayDesiredLines(orderId);
+  if (stored && stored.length > 0) {
+    const fohQty = totalLineQuantity(
+      serverOrFohItems.map((it) => ({
+        lineId: it.id,
+        productId: it.productId || undefined,
+        quantity: Number(it.quantity) || 0,
+      })),
+    );
+    if (totalLineQuantity(stored) <= fohQty + 1e-9) return stored;
+  }
+  return resolveDesiredLinesBeforePay(orderId, serverOrFohItems);
+}
+
 /**
  * Replace journal snapshot for a server check with fresh API lines (avoids stale void IDs).
  * Keeps pending local ofl_line_* adds that have not synced yet.
