@@ -159,7 +159,7 @@ export function hasPendingRestaurantMutations(orderId: string): boolean {
   const sync = getAllSyncState();
   return getAllEvents().some((e) => {
     const st = sync[e.key]?.status;
-    if (st === 'SYNCED' || st === 'ACKNOWLEDGED' || st === 'CANCELLED') return false;
+    if (st === 'SYNCED' || st === 'CANCELLED') return false;
     if (!('orderId' in e) || e.orderId !== orderId) return false;
     return (
       e.eventType === 'ORDER_UPDATED' ||

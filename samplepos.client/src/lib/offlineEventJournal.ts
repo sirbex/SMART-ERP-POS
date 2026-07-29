@@ -109,6 +109,8 @@ export type PosOfflineEvent =
         guestPhone?: string | null;
         deliveryAddress?: string | null;
         pickupLabel?: string | null;
+        /** When lines were removed offline — replay uses voidCheckItems with this reason. */
+        voidReason?: string;
     }
     | {
         eventType: 'ORDER_CANCELLED';
