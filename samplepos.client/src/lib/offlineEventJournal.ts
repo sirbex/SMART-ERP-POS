@@ -51,6 +51,11 @@ export interface EventLine {
     lineNotes?: string | null;
     /** ISO timestamp when KOT fired for this line */
     kitchenSentAt?: string | null;
+    /** Who rang this line (login actor) — not check owner. */
+    addedBy?: string | null;
+    addedByName?: string | null;
+    /** When the line was rung. */
+    addedAt?: string | null;
 }
 
 /** Optional restaurant fields on ORDER_* events (Phase 5.1) */

@@ -102,6 +102,10 @@ export function seedRestaurantCheckFromServer(input: {
     unitPrice: number | string;
     lineNotes?: string | null;
     kitchenSentAt?: string | null;
+    addedBy?: string | null;
+    addedByName?: string | null;
+    addedAt?: string | null;
+    productType?: string;
   }>;
 }): boolean {
   if (!input.orderId || !input.tableId || !input.items?.length) return false;
@@ -125,9 +129,10 @@ export function seedRestaurantCheckFromServer(input: {
       unitPrice,
       lineNotes: it.lineNotes,
       kitchenSentAt: it.kitchenSentAt,
-      productType:
-        (it as { productType?: string }).productType ||
-        resolveOfflineProductType(productId),
+      addedBy: it.addedBy,
+      addedByName: it.addedByName,
+      addedAt: it.addedAt,
+      productType: it.productType || resolveOfflineProductType(productId),
     });
   });
 
@@ -344,9 +349,10 @@ export function refreshRestaurantCheckSeedFromServer(
       unitPrice,
       lineNotes: it.lineNotes,
       kitchenSentAt: it.kitchenSentAt,
-      productType:
-        (it as { productType?: string }).productType ||
-        resolveOfflineProductType(productId),
+      addedBy: it.addedBy,
+      addedByName: it.addedByName,
+      addedAt: it.addedAt,
+      productType: it.productType || resolveOfflineProductType(productId),
     });
   });
   const voidSnap = getLastNonSeedRestaurantLineSnapshot(input.orderId);
@@ -384,6 +390,10 @@ export function refreshRestaurantCheckSeedFromServer(
       unitPrice: l.unitPrice,
       lineNotes: l.lineNotes,
       kitchenSentAt: l.kitchenSentAt,
+      addedBy: l.addedBy,
+      addedByName: l.addedByName,
+      addedAt: l.addedAt,
+      productType: l.productType,
     })) });
     return;
   }
@@ -425,6 +435,9 @@ function toEventLine(input: {
   productType?: string;
   lineNotes?: string | null;
   kitchenSentAt?: string | null;
+  addedBy?: string | null;
+  addedByName?: string | null;
+  addedAt?: string | null;
 }): EventLine {
   const subtotal = input.quantity * input.unitPrice;
   return {
@@ -441,6 +454,9 @@ function toEventLine(input: {
     productType: input.productType,
     lineNotes: input.lineNotes ?? null,
     kitchenSentAt: input.kitchenSentAt ?? null,
+    addedBy: input.addedBy ?? null,
+    addedByName: input.addedByName ?? null,
+    addedAt: input.addedAt ?? null,
   };
 }
 
@@ -454,6 +470,10 @@ export interface OpenOrAddRestaurantItemInput {
   customerId?: string | null;
   waiterId?: string;
   waiterName?: string;
+  /** Login user who rang this line (Toast attribution). */
+  addedBy?: string | null;
+  addedByName?: string | null;
+  addedAt?: string | null;
   guestName?: string | null;
   guestPhone?: string | null;
   deliveryAddress?: string | null;
@@ -487,6 +507,9 @@ export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput)
     unitPrice: input.unitPrice,
     productType: input.productType ?? resolveOfflineProductType(input.productId),
     lineNotes: input.lineNotes ?? null,
+    addedBy: input.addedBy ?? null,
+    addedByName: input.addedByName ?? input.waiterName ?? null,
+    addedAt: input.addedAt ?? new Date().toISOString(),
   });
 
   if (!existing) {

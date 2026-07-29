@@ -773,16 +773,38 @@ export const restaurantService = {
             `SELECT kitchen_station FROM products WHERE id = $1`,
             [normalizeProductIdForDb(resolvedItems[i].productId)],
           );
-          await client.query(
-            `UPDATE pos_order_items
-             SET line_notes = $2, kitchen_station = $3
-             WHERE id = $1`,
-            [
-              added[i].id,
-              lineExtras[i]?.lineNotes ?? null,
-              stationRow.rows[0]?.kitchen_station ?? null,
-            ],
-          );
+          const hasAddedBy = await tableHasColumn(client, 'pos_order_items', 'added_by');
+          if (hasAddedBy) {
+            await client.query(
+              `UPDATE pos_order_items
+               SET line_notes = $2, kitchen_station = $3, added_by = COALESCE(added_by, $4)
+               WHERE id = $1`,
+              [
+                added[i].id,
+                lineExtras[i]?.lineNotes ?? null,
+                stationRow.rows[0]?.kitchen_station ?? null,
+                addedByUserId,
+              ],
+            );
+            const hasAddedAt = await tableHasColumn(client, 'pos_order_items', 'added_at');
+            if (hasAddedAt) {
+              await client.query(
+                `UPDATE pos_order_items SET added_at = COALESCE(added_at, NOW()) WHERE id = $1`,
+                [added[i].id],
+              );
+            }
+          } else {
+            await client.query(
+              `UPDATE pos_order_items
+               SET line_notes = $2, kitchen_station = $3
+               WHERE id = $1`,
+              [
+                added[i].id,
+                lineExtras[i]?.lineNotes ?? null,
+                stationRow.rows[0]?.kitchen_station ?? null,
+              ],
+            );
+          }
           await orderTagRepository.setOrderItemTags(
             client,
             added[i].id,

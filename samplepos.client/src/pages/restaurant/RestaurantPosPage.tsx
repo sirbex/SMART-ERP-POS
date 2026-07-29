@@ -446,8 +446,10 @@ function uiFromDerivedCheck(
         discountAmount: String(l.discountAmount || 0),
         kitchenSentAt: l.kitchenSentAt,
         lineNotes: l.lineNotes ?? null,
-        addedBy: derived.waiterId ?? null,
-        addedByName: derived.waiterName ?? null,
+        // Per-line stamp — never mask with check owner when the ranger is known.
+        addedBy: l.addedBy ?? null,
+        addedByName: l.addedByName ?? null,
+        addedAt: l.addedAt ?? null,
       })),
     } as OrderDetail,
     meta: {
@@ -576,13 +578,29 @@ function seedCheckPayloadIntoJournal(tableId: string, data: CheckUiPayload): voi
   });
 }
 
-/** After seed/clamp, FOH must show journal truth — never raw server lines that resurrect voids. */
+/** After seed/clamp, FOH must show journal truth — never raw server lines that resurrect voids.
+ * Overlay server per-line attribution so admin/cashier stamps survive journal rebuild.
+ */
 function checkUiAfterServerSeed(tableId: string, data: CheckUiPayload): CheckUiPayload {
   seedCheckPayloadIntoJournal(tableId, data);
   const local = buildCheckUiFromJournal(tableId, data.order?.id ?? null, data.table);
   if (!local?.order) return data;
+  const byId = new Map(
+    (data.order?.items || []).map((it) => [it.id, it] as const),
+  );
+  const items = local.order.items.map((it) => {
+    const server = byId.get(it.id);
+    if (!server) return it;
+    return {
+      ...it,
+      addedBy: server.addedBy ?? it.addedBy ?? null,
+      addedByName: server.addedByName ?? it.addedByName ?? null,
+      addedAt: server.addedAt ?? it.addedAt ?? null,
+    };
+  });
   return {
     ...local,
+    order: { ...local.order, items },
     table: data.table || local.table,
     siblingChecks: data.siblingChecks?.length ? data.siblingChecks : local.siblingChecks,
   };
@@ -1224,6 +1242,9 @@ export default function RestaurantPosPage() {
           customerId: selectedCustomer?.id || null,
           waiterId: selectedWaiterId,
           waiterName: waiter?.fullName,
+          addedBy: user?.id ?? null,
+          addedByName: user?.fullName || user?.email || null,
+          addedAt: new Date().toISOString(),
           guestName,
           guestPhone,
           deliveryAddress,
@@ -2819,6 +2840,9 @@ export default function RestaurantPosPage() {
           customerId: selectedCustomer?.id || null,
           waiterId: selectedWaiterId,
           waiterName: waiter?.fullName,
+          addedBy: user?.id ?? null,
+          addedByName: user?.fullName || user?.email || null,
+          addedAt: new Date().toISOString(),
           guestName: selectedCustomer?.name || guestDraft.guestName.trim() || null,
           guestPhone: selectedCustomer?.phone || guestDraft.guestPhone.trim() || null,
           deliveryAddress:
