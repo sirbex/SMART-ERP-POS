@@ -44,6 +44,7 @@ import { isRestaurantWaiterProfile } from '../../utils/restaurantWaiterLockdown'
 import {
   canEditOtherWaitersChecks,
   formatOrderedByLabels,
+  resolveLineOrderedByName,
   restaurantTicketLineMergeKey,
   shortWaiterLabel,
 } from '@shared/utils/restaurantCheckOwnership';
@@ -198,7 +199,10 @@ interface TicketLineGroup {
   lines: OrderItem[];
 }
 
-function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
+function consolidateTicketLines(
+  items: OrderItem[],
+  fallbackWaiterName?: string | null,
+): TicketLineGroup[] {
   const map = new Map<string, TicketLineGroup>();
   for (const it of items) {
     const kitchenSent = !!it.kitchenSentAt;
@@ -215,6 +219,10 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
     });
     const qty = Number(it.quantity) || 0;
     const lineTotal = Number(it.lineTotal) || 0;
+    const lineName = resolveLineOrderedByName({
+      addedByName: it.addedByName,
+      checkWaiterName: fallbackWaiterName,
+    });
     const existing = map.get(key);
     if (!existing) {
       map.set(key, {
@@ -226,7 +234,7 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
         lineTotal,
         kitchenSent,
         lineNotes: notes || null,
-        orderedByLabel: formatOrderedByLabels([it.addedByName]),
+        orderedByLabel: formatOrderedByLabels([lineName], fallbackWaiterName),
         itemIds: [it.id],
         lines: [it],
       });
@@ -236,7 +244,13 @@ function consolidateTicketLines(items: OrderItem[]): TicketLineGroup[] {
       existing.itemIds.push(it.id);
       existing.lines.push(it);
       existing.orderedByLabel = formatOrderedByLabels(
-        existing.lines.map((l) => l.addedByName),
+        existing.lines.map((l) =>
+          resolveLineOrderedByName({
+            addedByName: l.addedByName,
+            checkWaiterName: fallbackWaiterName,
+          }),
+        ),
+        fallbackWaiterName,
       );
     }
   }
@@ -425,6 +439,8 @@ function uiFromDerivedCheck(
         discountAmount: String(l.discountAmount || 0),
         kitchenSentAt: l.kitchenSentAt,
         lineNotes: l.lineNotes ?? null,
+        addedBy: derived.waiterId ?? null,
+        addedByName: derived.waiterName ?? null,
       })),
     } as OrderDetail,
     meta: {
@@ -1466,7 +1482,14 @@ export default function RestaurantPosPage() {
     tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
 
   const orderLines = useMemo(() => order?.items ?? [], [order]);
-  const ticketGroups = useMemo(() => consolidateTicketLines(orderLines), [orderLines]);
+  const ticketGroups = useMemo(
+    () =>
+      consolidateTicketLines(
+        orderLines,
+        meta?.waiterName || user?.fullName || user?.email || null,
+      ),
+    [orderLines, meta?.waiterName, user?.fullName, user?.email],
+  );
   const serviceChannel = isServiceChannelTable(selectedTable);
   const isQuickLane = (selectedTable?.code || '').toUpperCase() === 'QK';
   const channel = meta?.orderChannel || channelHint(selectedTable);
@@ -4178,7 +4201,7 @@ export default function RestaurantPosPage() {
                                 </div>
                               ) : null}
                               {group.orderedByLabel ? (
-                                <div className="text-[10px] text-stone-500 mt-0.5 truncate">
+                                <div className="text-[11px] font-semibold text-violet-800 mt-0.5 truncate">
                                   Ordered by {group.orderedByLabel}
                                 </div>
                               ) : null}

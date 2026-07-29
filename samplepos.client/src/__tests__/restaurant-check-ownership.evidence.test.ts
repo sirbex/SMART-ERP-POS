@@ -120,6 +120,7 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     expect(keyWaiter).toBe(keyManager);
     expect(formatOrderedByLabels(['Alice Waiter', 'Pat Manager'])).toBe('Alice W., Pat M.');
     expect(formatOrderedByLabels(['Cashier Kim', 'Cashier Kim'])).toBe('Cashier K.');
+    expect(formatOrderedByLabels([null, null], 'Alice Waiter')).toBe('Alice W.');
   });
 
   it('EVIDENCE: migration + service wire ownership + added_by', () => {

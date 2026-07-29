@@ -322,7 +322,15 @@ export const ordersRepository = {
       ? `, oi.kitchen_sent_at, oi.line_notes, oi.kitchen_station${hasOrderTags ? ', oi.order_tags' : ''}`
       : ``;
     const addedBySelect = hasAddedBy
-      ? `, oi.added_by, ua_add.full_name AS added_by_name`
+      ? `, oi.added_by,
+         COALESCE(
+           ua_add.full_name,
+           (SELECT COALESCE(uw.full_name, uc.full_name)
+            FROM pos_orders o2
+            LEFT JOIN users uw ON uw.id = o2.waiter_id
+            LEFT JOIN users uc ON uc.id = o2.created_by
+            WHERE o2.id = oi.order_id)
+         ) AS added_by_name`
       : ``;
     const addedByJoin = hasAddedBy
       ? `LEFT JOIN users ua_add ON ua_add.id = oi.added_by`

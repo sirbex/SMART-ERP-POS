@@ -1,7 +1,17 @@
 import type { Pool, PoolClient } from 'pg';
 
-/** Cached information_schema lookups — safe across tenants in long-lived processes */
+/** Cached information_schema lookups — keyed by database so tenants never poison each other */
 const columnExistsCache = new Map<string, boolean>();
+const poolDatabaseCache = new WeakMap<object, string>();
+
+async function resolveDatabaseName(pool: Pool | PoolClient): Promise<string> {
+  const cached = poolDatabaseCache.get(pool as object);
+  if (cached) return cached;
+  const result = await pool.query<{ db: string }>('SELECT current_database() AS db');
+  const name = result.rows[0]?.db || 'unknown';
+  poolDatabaseCache.set(pool as object, name);
+  return name;
+}
 
 /**
  * Returns true when `table.column` exists in public schema (migration may not be applied yet).
@@ -11,7 +21,8 @@ export async function tableHasColumn(
   table: string,
   column: string
 ): Promise<boolean> {
-  const key = `${table}.${column}`;
+  const db = await resolveDatabaseName(pool);
+  const key = `${db}.${table}.${column}`;
   const cached = columnExistsCache.get(key);
   if (cached !== undefined) return cached;
 

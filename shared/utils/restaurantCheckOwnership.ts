@@ -90,9 +90,11 @@ export function shortWaiterLabel(fullName?: string | null): string {
 /**
  * Toast/Aloha: one product row on the ticket; show everyone who rang units on it.
  * Same SKU from waiter + manager stays one line — "by Alice N., Pat M."
+ * Falls back to check owner when a line was never stamped (pre-migration rows).
  */
 export function formatOrderedByLabels(
   names: Array<string | null | undefined>,
+  fallbackName?: string | null,
 ): string | null {
   const seen = new Set<string>();
   const labels: string[] = [];
@@ -104,7 +106,25 @@ export function formatOrderedByLabels(
     seen.add(label);
     labels.push(label);
   }
+  if (labels.length === 0 && fallbackName?.trim()) {
+    return shortWaiterLabel(fallbackName);
+  }
   return labels.length > 0 ? labels.join(', ') : null;
+}
+
+/** Resolve display name for a line: stamped adder → check owner → Staff. */
+export function resolveLineOrderedByName(input: {
+  addedByName?: string | null;
+  checkWaiterName?: string | null;
+  actorName?: string | null;
+}): string {
+  const stamped = (input.addedByName || '').trim();
+  if (stamped) return stamped;
+  const owner = (input.checkWaiterName || '').trim();
+  if (owner) return owner;
+  const actor = (input.actorName || '').trim();
+  if (actor) return actor;
+  return 'Staff';
 }
 
 /**
