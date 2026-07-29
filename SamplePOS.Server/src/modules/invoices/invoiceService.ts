@@ -86,7 +86,7 @@ interface SaleItemDeliveryRow {
 
 type InvoicePaymentInput = {
   amount: number;
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
   paymentDate?: Date | string | null;
   referenceNumber?: string | null;
   notes?: string | null;
@@ -593,7 +593,7 @@ export const invoiceService = {
             await invoiceRepository.addPayment(client, {
               invoiceId: invoice.id,
               amount: lineAmount,
-              paymentMethod: lineMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER',
+              paymentMethod: lineMethod as 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER',
               paymentDate: getBusinessDate(),
               referenceNumber: payLine.reference || null,
               notes: 'Initial payment from sale',

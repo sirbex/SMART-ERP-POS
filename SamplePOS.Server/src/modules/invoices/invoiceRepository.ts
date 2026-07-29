@@ -41,7 +41,7 @@ export interface InvoiceRecord {
   issue_date: Date;
   due_date: Date | null;
   status: 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED';
-  payment_method?: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT' | null;
+  payment_method?: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT' | null;
   subtotal: number;
   tax_amount: number;
   total_amount: number;
@@ -59,7 +59,7 @@ export interface InvoicePaymentRecord {
   receipt_number: string;
   invoice_id: string;
   payment_date: Date;
-  payment_method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
+  payment_method: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
   amount: number;
   reference_number: string | null;
   notes: string | null;
@@ -279,7 +279,7 @@ export const invoiceRepository = {
     data: {
       invoiceId: string;
       amount: number;
-      paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
+      paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
       paymentDate?: Date | string | null;
       referenceNumber?: string | null;
       notes?: string | null;
