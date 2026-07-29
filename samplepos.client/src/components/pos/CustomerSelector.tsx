@@ -232,7 +232,7 @@ export default function CustomerSelector({
         ) : (
           <div className="space-y-2">
             <div className="flex gap-2">
-              <div className="flex-1 relative">
+              <div className={`flex-1 ${compact ? '' : 'relative'}`}>
                 <input
                   type="search"
                   inputMode="search"
@@ -252,12 +252,10 @@ export default function CustomerSelector({
                   }
                   aria-label="Search customers"
                 />
-                {showDropdown && (
-                  <div
-                    className={`absolute z-50 w-full mt-1 bg-white border rounded-xl shadow-lg max-h-60 overflow-y-auto ${
-                      compact ? 'border-stone-300' : 'border-gray-300 rounded'
-                    }`}
-                  >
+                {/* Non-compact: absolute overlay. Compact (restaurant/touch): in-flow list so
+                    results are not clipped by ticket overflow-hidden / AdaptiveDialogBody. */}
+                {showDropdown && !compact ? (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-y-auto">
                     {isLoading ? (
                       <div className="p-3 text-sm text-stone-500">Loading…</div>
                     ) : customers && customers.length > 0 ? (
@@ -266,39 +264,28 @@ export default function CustomerSelector({
                           key={customer.id}
                           type="button"
                           onClick={() => handleSelect(customer)}
-                          className={
-                            compact
-                              ? touchRow
-                              : 'w-full text-left px-3 py-2 hover:bg-blue-50 focus:bg-blue-100 border-b last:border-b-0'
-                          }
+                          className="w-full text-left px-3 py-2 hover:bg-blue-50 focus:bg-blue-100 border-b last:border-b-0"
                         >
-                          <div
-                            className={`font-semibold truncate ${compact ? 'text-base text-stone-900' : 'text-xs sm:text-sm text-gray-900'}`}
-                          >
+                          <div className="font-semibold truncate text-xs sm:text-sm text-gray-900">
                             {customer.name}
                           </div>
                           {customer.phone ? (
                             <div className="text-xs text-stone-500">{customer.phone}</div>
                           ) : null}
-                          {customer.address && compact ? (
-                            <div className="text-xs text-stone-400 truncate">{customer.address}</div>
-                          ) : null}
-                          {!compact && customer.email ? (
+                          {customer.email ? (
                             <div className="text-xs text-gray-500 truncate">{customer.email}</div>
                           ) : null}
-                          {!compact ? (
-                            <div className="text-xs text-gray-600 mt-1">
-                              Credit: {formatCurrency(customer.creditLimit)} | Balance:{' '}
-                              {formatCurrency(customer.balance)}
-                            </div>
-                          ) : null}
+                          <div className="text-xs text-gray-600 mt-1">
+                            Credit: {formatCurrency(customer.creditLimit)} | Balance:{' '}
+                            {formatCurrency(customer.balance)}
+                          </div>
                         </button>
                       ))
                     ) : (
                       <div className="p-3 text-sm text-stone-500">No customers found — tap + Add</div>
                     )}
                   </div>
-                )}
+                ) : null}
               </div>
               <button
                 type="button"
@@ -314,6 +301,40 @@ export default function CustomerSelector({
                 <span className="sm:hidden">+</span>
               </button>
             </div>
+            {showDropdown && compact ? (
+              <div
+                className="w-full bg-white border border-stone-300 rounded-xl shadow-sm max-h-60 overflow-y-auto"
+                data-customer-results="inline"
+                role="listbox"
+                aria-label="Customer search results"
+              >
+                {isLoading ? (
+                  <div className="p-3 text-sm text-stone-500">Loading…</div>
+                ) : customers && customers.length > 0 ? (
+                  customers.map((customer: Customer) => (
+                    <button
+                      key={customer.id}
+                      type="button"
+                      role="option"
+                      onClick={() => handleSelect(customer)}
+                      className={touchRow}
+                    >
+                      <div className="font-semibold truncate text-base text-stone-900">
+                        {customer.name}
+                      </div>
+                      {customer.phone ? (
+                        <div className="text-xs text-stone-500">{customer.phone}</div>
+                      ) : null}
+                      {customer.address ? (
+                        <div className="text-xs text-stone-400 truncate">{customer.address}</div>
+                      ) : null}
+                    </button>
+                  ))
+                ) : (
+                  <div className="p-3 text-sm text-stone-500">No customers found — tap + Add</div>
+                )}
+              </div>
+            ) : null}
             {compact ? (
               <p className="text-xs text-stone-500">Search existing or + Add if new</p>
             ) : (

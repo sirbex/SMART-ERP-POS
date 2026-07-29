@@ -84,7 +84,7 @@ export interface SaleItemInput {
 }
 
 export interface PaymentLineInput {
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT' | 'DEPOSIT';
   amount: number;
   reference?: string;
 }
@@ -97,7 +97,7 @@ export interface CreateSaleInput {
   discountAmount?: number; // Discount amount applied to sale
   taxAmount?: number; // Tax amount
   totalAmount?: number; // Total amount (can be provided or calculated)
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT' | 'BANK_TRANSFER';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT' | 'DEPOSIT' | 'BANK_TRANSFER';
   paymentReceived: number;
   soldBy: string;
   saleDate?: string; // ISO 8601 datetime for backdated sales
@@ -1908,6 +1908,7 @@ export const salesService = {
                       | 'CASH'
                       | 'CARD'
                       | 'MOBILE_MONEY'
+                      | 'AIRTEL_MONEY'
                       | 'BANK_TRANSFER',
                     paymentDate: undefined, // Use current date
                     referenceNumber: paymentLine.reference || null,
@@ -2050,6 +2051,7 @@ export const salesService = {
                     | 'CASH'
                     | 'CARD'
                     | 'MOBILE_MONEY'
+                    | 'AIRTEL_MONEY'
                     | 'BANK_TRANSFER',
                   paymentDate: undefined,
                   referenceNumber: paymentLine.reference || null,
@@ -3787,7 +3789,7 @@ export const salesService = {
 
       // CASH REGISTER: Record refund movement for drawer tracking (REFUND only — not exchange store credit)
       const isCashPayment = sale.payment_method === 'CASH';
-      const isMobilePayment = sale.payment_method === 'MOBILE_MONEY';
+      const isMobilePayment = sale.payment_method === 'MOBILE_MONEY' || sale.payment_method === 'AIRTEL_MONEY';
       if (
         refundType === 'REFUND'
         && (isCashPayment || isMobilePayment)

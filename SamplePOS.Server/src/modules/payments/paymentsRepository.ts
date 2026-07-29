@@ -91,8 +91,9 @@ export const paymentsRepository = {
           WHEN 'CASH' THEN 1
           WHEN 'CARD' THEN 2
           WHEN 'MOBILE_MONEY' THEN 3
-          WHEN 'CUSTOMER_CREDIT' THEN 4
-          ELSE 5
+          WHEN 'AIRTEL_MONEY' THEN 4
+          WHEN 'CUSTOMER_CREDIT' THEN 5
+          ELSE 6
         END
     `;
 

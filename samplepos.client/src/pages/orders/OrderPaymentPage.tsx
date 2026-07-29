@@ -73,7 +73,7 @@ interface OrderDetail {
   items: OrderItem[];
 }
 
-type PaymentMethod = 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT' | 'BANK_TRANSFER';
+type PaymentMethod = 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT' | 'DEPOSIT' | 'BANK_TRANSFER';
 
 // ── Component ────────────────────────────────────────────────────────
 
@@ -398,8 +398,9 @@ export default function OrderPaymentPage() {
 
   const methodLabel = (m: string) => {
     const labels: Record<string, string> = {
-      CASH: '💵 Cash', CARD: '💳 Card', MOBILE_MONEY: '📱 M-Money',
-      DEPOSIT: '🏦 Deposit', CREDIT: '📝 Credit', BANK_TRANSFER: '🏦 Transfer',
+      CASH: '💵 Cash', CARD: '💳 Card', MOBILE_MONEY: '📱 MTN MoMo',
+      AIRTEL_MONEY: '📱 Airtel', DEPOSIT: '🏦 Deposit', CREDIT: '📝 Credit',
+      BANK_TRANSFER: '🏦 Transfer',
     };
     return labels[m] || m;
   };
@@ -408,7 +409,8 @@ export default function OrderPaymentPage() {
   const allPaymentMethods: { value: PaymentMethod; label: string; icon: string; requiresCustomer: boolean }[] = [
     { value: 'CASH', label: 'Cash', icon: '💵', requiresCustomer: false },
     { value: 'CARD', label: 'Card', icon: '💳', requiresCustomer: false },
-    { value: 'MOBILE_MONEY', label: 'Mobile Money', icon: '📱', requiresCustomer: false },
+    { value: 'MOBILE_MONEY', label: 'MTN MoMo', icon: '📱', requiresCustomer: false },
+    { value: 'AIRTEL_MONEY', label: 'Airtel Money', icon: '📱', requiresCustomer: false },
     { value: 'DEPOSIT', label: 'Deposit', icon: '🏦', requiresCustomer: true },
     { value: 'CREDIT', label: 'Credit', icon: '📝', requiresCustomer: true },
   ];
@@ -730,7 +732,7 @@ export default function OrderPaymentPage() {
                     )}
 
                     {/* Reference input for Card / Mobile Money */}
-                    {(paymentMethod === 'CARD' || paymentMethod === 'MOBILE_MONEY') && (
+                    {(paymentMethod === 'CARD' || paymentMethod === 'MOBILE_MONEY' || paymentMethod === 'AIRTEL_MONEY') && (
                       <input
                         type="text"
                         value={paymentReference}

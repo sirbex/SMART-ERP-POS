@@ -3805,8 +3805,11 @@ export default function RestaurantPosPage() {
                 ) : null}
               </div>
 
-              {serviceChannel && chrome.secondaryActions === 'inline' ? (
-                <div className="px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2">
+              {serviceChannel ? (
+                <div
+                  className="px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2 relative z-20 shrink-0"
+                  data-restaurant-customer="primary"
+                >
                   {selectedCustomer || !guestDraft.guestName ? (
                     <CustomerSelector
                       compact

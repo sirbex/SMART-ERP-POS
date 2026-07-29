@@ -191,7 +191,7 @@ describe('CreateSaleSchema — soldBy stripped from body (#4)', () => {
     customerId: z.string().uuid().optional().nullable(),
     customerName: z.string().optional().nullable(),
     items: z.array(SaleItemSchema).min(1),
-    paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT']),
+    paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'AIRTEL_MONEY', 'CREDIT']),
     paymentReceived: z.number().nonnegative(),
     // soldBy intentionally omitted — always forced from req.user.id (SECURITY LAW)
   }).strict();
@@ -209,6 +209,14 @@ describe('CreateSaleSchema — soldBy stripped from body (#4)', () => {
 
   it('accepts payload without soldBy', () => {
     const result = CreateSaleSchema.safeParse(validBase);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts Airtel Money as a valid payment method', () => {
+    const result = CreateSaleSchema.safeParse({
+      ...validBase,
+      paymentMethod: 'AIRTEL_MONEY',
+    });
     expect(result.success).toBe(true);
   });
 

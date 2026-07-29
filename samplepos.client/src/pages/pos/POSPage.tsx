@@ -369,7 +369,7 @@ export default function POSPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<
-    'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT'
+    'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT' | 'DEPOSIT'
   >('CASH');
 
   // Cash register session + policy + transaction mode (single API call, no dual queries)
@@ -395,12 +395,13 @@ export default function POSPage() {
     Array<{
       id: string;
       paymentMethodId: string;
-      paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
+      paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT' | 'DEPOSIT';
       amount: number;
       reference?: string;
       createdAt: string;
     }>
   >([]);
+
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [isProcessingSale, setIsProcessingSale] = useState(false);
@@ -2445,7 +2446,7 @@ export default function POSPage() {
 
     // Optional: Warn about missing reference for card/mobile money
     if (
-      (paymentMethod === 'CARD' || paymentMethod === 'MOBILE_MONEY') &&
+      (paymentMethod === 'CARD' || paymentMethod === 'MOBILE_MONEY' || paymentMethod === 'AIRTEL_MONEY') &&
       !paymentReference.trim()
     ) {
       const proceed = confirm(
@@ -4425,7 +4426,7 @@ export default function POSPage() {
               <label className="block text-sm sm:text-base font-semibold text-gray-800 mb-2">
                 Payment Method
               </label>
-              <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
                 <button
                   onClick={() => setPaymentMethod('CASH')}
                   className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'CASH'
@@ -4447,11 +4448,20 @@ export default function POSPage() {
                 <button
                   onClick={() => setPaymentMethod('MOBILE_MONEY')}
                   className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'MOBILE_MONEY'
-                    ? 'bg-purple-600 text-white ring-2 sm:ring-4 ring-purple-300 shadow-lg transform scale-105'
+                    ? 'bg-yellow-600 text-white ring-2 sm:ring-4 ring-yellow-300 shadow-lg transform scale-105'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
                     }`}
                 >
-                  <span className="hidden sm:inline">📱 </span>Mobile Money
+                  <span className="hidden sm:inline">📱 </span>MTN MoMo
+                </button>
+                <button
+                  onClick={() => setPaymentMethod('AIRTEL_MONEY')}
+                  className={`py-3 sm:py-4 px-3 sm:px-4 rounded-lg font-semibold text-sm sm:text-base transition-all ${paymentMethod === 'AIRTEL_MONEY'
+                    ? 'bg-red-600 text-white ring-2 sm:ring-4 ring-red-300 shadow-lg transform scale-105'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border-2 border-gray-300'
+                    }`}
+                >
+                  <span className="hidden sm:inline">📱 </span>Airtel Money
                 </button>
               </div>
               {/* Deposit Payment Option - Shows when customer is selected */}
@@ -4603,7 +4613,7 @@ export default function POSPage() {
             </div>
 
             {/* Reference Input (for Card/Mobile Money) */}
-            {(paymentMethod === 'CARD' || paymentMethod === 'MOBILE_MONEY') && (
+            {(paymentMethod === 'CARD' || paymentMethod === 'MOBILE_MONEY' || paymentMethod === 'AIRTEL_MONEY') && (
               <div className="mb-3 sm:mb-4">
                 <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1">
                   Reference Number <span className="text-gray-500">(Optional)</span>

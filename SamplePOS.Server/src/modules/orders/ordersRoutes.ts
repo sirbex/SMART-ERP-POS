@@ -40,10 +40,10 @@ const CreateOrderSchema = z.object({
 });
 
 const CompleteOrderSchema = z.object({
-  paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT', 'DEPOSIT', 'BANK_TRANSFER']),
+  paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'AIRTEL_MONEY', 'CREDIT', 'DEPOSIT', 'BANK_TRANSFER']),
   paymentReceived: z.number().nonnegative(),
   paymentLines: z.array(z.object({
-    paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT', 'DEPOSIT']),
+    paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'AIRTEL_MONEY', 'CREDIT', 'DEPOSIT']),
     amount: z.number().positive(),
     reference: z.string().optional(),
   })).optional(),

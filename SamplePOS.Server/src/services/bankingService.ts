@@ -2673,6 +2673,7 @@ export class BankingService {
         const glCodeMap: Record<string, string> = {
             CARD: '1020',
             MOBILE_MONEY: '1040',
+            AIRTEL_MONEY: '1040',
             BANK_TRANSFER: '1030',
             CREDIT: '1200', // AR account for credit sales
         };

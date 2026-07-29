@@ -35,7 +35,8 @@ interface PaymentMethod {
 const PAYMENT_METHODS: PaymentMethod[] = [
   { code: 'CASH', name: 'Cash', requiresReference: false, icon: '💵' },
   { code: 'CARD', name: 'Card', requiresReference: true, icon: '💳' },
-  { code: 'MOBILE_MONEY', name: 'Mobile Money', requiresReference: true, icon: '📱' },
+  { code: 'MOBILE_MONEY', name: 'MTN MoMo', requiresReference: true, icon: '📱' },
+  { code: 'AIRTEL_MONEY', name: 'Airtel Money', requiresReference: true, icon: '📱' },
   { code: 'CREDIT', name: 'Customer Credit', requiresReference: false, icon: '📝' },
 ];
 

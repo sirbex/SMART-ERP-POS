@@ -1068,7 +1068,8 @@ function formatCustomerPaymentMethodLabel(method?: string | null): string | unde
   switch (method.toUpperCase()) {
     case 'CASH': return 'Cash';
     case 'CARD': return 'Card';
-    case 'MOBILE_MONEY': return 'Mobile Money';
+    case 'MOBILE_MONEY': return 'MTN Mobile Money';
+    case 'AIRTEL_MONEY': return 'Airtel Money';
     case 'BANK_TRANSFER': return 'Bank Transfer';
     case 'CREDIT': return 'Credit';
     case 'DEPOSIT': return 'Deposit';

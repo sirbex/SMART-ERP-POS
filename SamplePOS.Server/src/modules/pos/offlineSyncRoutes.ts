@@ -60,7 +60,7 @@ const SyncPayloadSchema = z.object({
         totalAmount: z.number().nonnegative(),
         paymentLines: z.array(
             z.object({
-                paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'CREDIT']),
+                paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'AIRTEL_MONEY', 'CREDIT']),
                 amount: z.number().nonnegative(),
                 reference: z.string().optional(),
             })

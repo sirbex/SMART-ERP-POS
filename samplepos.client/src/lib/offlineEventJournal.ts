@@ -57,7 +57,7 @@ export interface EventLine {
 export type RestaurantOrderChannel = 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY';
 
 export interface EventPayment {
-    paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT';
+    paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT';
     amount: number;
     reference?: string;
 }

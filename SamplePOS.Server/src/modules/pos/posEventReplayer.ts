@@ -43,7 +43,7 @@ export interface ReplayEventLine {
 }
 
 export interface ReplayEventPayment {
-    paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT';
+    paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT';
     amount: number;
     reference?: string;
 }

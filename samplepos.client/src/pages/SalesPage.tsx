@@ -867,7 +867,8 @@ export default function SalesPage() {
                 <option value="ALL">All Methods</option>
                 <option value="CASH">Cash</option>
                 <option value="CARD">Card</option>
-                <option value="MOBILE_MONEY">Mobile Money</option>
+                <option value="MOBILE_MONEY">MTN Mobile Money</option>
+                <option value="AIRTEL_MONEY">Airtel Money</option>
                 <option value="CREDIT">Credit</option>
               </select>
             </div>

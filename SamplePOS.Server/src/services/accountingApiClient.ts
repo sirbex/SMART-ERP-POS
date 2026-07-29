@@ -54,7 +54,7 @@ interface PaymentPostingRequest {
   customerId: string;
   customerName?: string;
   amount: number;
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER' | 'CREDIT';
   paymentDate: string;
   reference?: string;
   notes?: string;

@@ -131,7 +131,7 @@ export interface SaleData {
   saleDate: string;
   totalAmount: number;
   costAmount: number;
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT' | 'DEPOSIT';
   amountPaid?: number;  // Amount actually paid (for partial payment tracking)
   taxAmount?: number;   // Tax amount (posted to Tax Payable liability)
   customerId?: string;
@@ -404,6 +404,7 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
           paymentDescription = 'Credit card payment received';
           break;
         case 'MOBILE_MONEY':
+        case 'AIRTEL_MONEY':
           debitAccountCode = AccountCodes.MOBILE_MONEY;
           paymentDescription = 'Mobile money payment received';
           break;
@@ -583,7 +584,7 @@ export interface CustomerPaymentData {
   paymentDate: string;
   /** Gross AR settlement (invoice reduction). */
   amount: number;
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER';
   customerId: string;
   customerName: string;
   /**
@@ -743,7 +744,7 @@ export interface ExpenseData {
   categoryCode: string; // Maps to expense account code
   categoryName: string;
   description: string;
-  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'PETTY_CASH' | 'MOBILE_MONEY';
+  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'PETTY_CASH' | 'MOBILE_MONEY' | 'AIRTEL_MONEY';
   supplierId?: string;
   supplierName?: string;
 }
@@ -774,6 +775,7 @@ export async function recordExpenseToGL(expense: ExpenseData, pool?: pg.Pool): P
         creditAccountCode = AccountCodes.CHECKING_ACCOUNT;
         break;
       case 'MOBILE_MONEY':
+      case 'AIRTEL_MONEY':
         creditAccountCode = AccountCodes.MOBILE_MONEY;
         break;
       default:
@@ -1252,7 +1254,7 @@ export interface SupplierPaymentData {
   paymentDate: string;
   /** Gross AP settlement amount (invoice reduction). */
   amount: number;
-  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY';
+  paymentMethod: 'CASH' | 'CARD' | 'BANK_TRANSFER' | 'CHECK' | 'MOBILE_MONEY' | 'AIRTEL_MONEY';
   supplierId: string;
   supplierName: string;
   /** Explicit liquidity GL to credit (multi-bank / MoMo book). Overrides method default. */
@@ -1296,6 +1298,7 @@ export async function recordSupplierPaymentToGL(
           creditAccountCode = AccountCodes.CHECKING_ACCOUNT;
           break;
         case 'MOBILE_MONEY':
+        case 'AIRTEL_MONEY':
           creditAccountCode = AccountCodes.MOBILE_MONEY;
           break;
         default:
@@ -1912,6 +1915,7 @@ function buildRefundRevenueCreditLines(data: SaleRefundData): JournalLine[] {
       creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
       break;
     case 'MOBILE_MONEY':
+    case 'AIRTEL_MONEY':
       creditAccountCode = AccountCodes.MOBILE_MONEY;
       break;
     case 'DEPOSIT':
@@ -1943,7 +1947,7 @@ export interface SaleRefundData {
   reason: string;
   totalAmount: number;  // Revenue to reverse
   totalCost: number;    // COGS to reverse
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'CREDIT' | 'DEPOSIT';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT' | 'DEPOSIT';
   customerId?: string;
   /** AR credit portion for CREDIT-method refunds (capped to open-item reduction). Defaults to totalAmount. */
   arCreditAmount?: number;
@@ -2150,7 +2154,7 @@ export interface CustomerDepositData {
   depositNumber: string;
   depositDate: string;
   amount: number;
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER';
   customerId: string;
   customerName: string;
 }
@@ -2362,7 +2366,7 @@ export interface InvoicePaymentData {
   receiptNumber: string;
   paymentDate: string;
   amount: number;
-  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'BANK_TRANSFER' | 'CREDIT' | 'DEPOSIT';
   invoiceId: string;
   invoiceNumber: string;
   customerId: string;

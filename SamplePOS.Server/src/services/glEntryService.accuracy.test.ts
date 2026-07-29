@@ -206,6 +206,29 @@ describe('glEntryService — GL Posting Accuracy', () => {
         });
     });
 
+    describe('recordSaleToGL — Airtel Money sale', () => {
+        it('should debit Mobile Money (1040) so Airtel stays on the same liquidity ledger as MoMo', async () => {
+            await recordSaleToGL({
+                saleId: 'sale-airtel',
+                saleNumber: 'SALE-2026-0011',
+                saleDate: '2026-03-15',
+                totalAmount: 7000,
+                costAmount: 4200,
+                paymentMethod: 'AIRTEL_MONEY',
+                saleItems: [
+                    { productType: 'inventory', totalPrice: 7000, unitCost: 4200, quantity: 1 },
+                ],
+            });
+
+            const revenueLines = capturedEntries[0].lines;
+            const momoLine = findLine(revenueLines, AccountCodes.MOBILE_MONEY);
+            expect(momoLine).toBeDefined();
+            expect(momoLine!.debitAmount).toBe(7000);
+            expect(findLine(revenueLines, AccountCodes.CASH)).toBeUndefined();
+            assertBalanced(revenueLines);
+        });
+    });
+
     // ========================================================================
     // recordSaleToGL — Credit Sale with partial payment
     // ========================================================================
