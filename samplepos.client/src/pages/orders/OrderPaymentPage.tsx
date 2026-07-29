@@ -11,7 +11,10 @@ import { toast } from 'react-hot-toast';
 import type { Customer } from '@shared/zod/customer';
 import Decimal from 'decimal.js';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
-import { markRestaurantCheckSettledInJournal } from '../../lib/restaurantOfflineOps';
+import {
+  markRestaurantCheckSettledInJournal,
+  resolveDesiredLinesBeforePay,
+} from '../../lib/restaurantOfflineOps';
 import {
   clearRestaurantBillRequestedOffline,
   paintRestaurantTableFreeOffline,
@@ -19,6 +22,7 @@ import {
 import { publishLanKdsBoardChanged } from '../../lib/restaurantLanKds';
 import { getAllEvents, getAllSyncState } from '../../lib/offlineEventJournal';
 import { deriveRestaurantOpenChecks } from '../../lib/offlineEventSelectors';
+import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -118,12 +122,32 @@ export default function OrderPaymentPage() {
     }>
   >([]);
 
-  // Fetch order details
+  // Fetch order details — restaurant pay heals ACK'd offline voids before showing totals.
   const { data: order, isLoading, error } = useQuery({
-    queryKey: ['orders', id],
+    queryKey: ['orders', id, returnToPath],
     queryFn: async () => {
       const resp = await api.orders.getById(id!);
-      return resp.data.data as OrderDetail;
+      let detail = resp.data.data as OrderDetail;
+      if (returnToPath === '/restaurant' && detail.status === 'PENDING' && detail.items?.length) {
+        const desired = resolveDesiredLinesBeforePay(
+          detail.id,
+          detail.items.map((it) => ({
+            id: it.id,
+            productId: it.productId,
+            quantity: it.quantity,
+          })),
+        );
+        const voids = computeVoidItemsFromUpdatedLines(detail.items, desired);
+        if (voids.length > 0) {
+          await api.restaurant.voidItems(detail.id, {
+            items: voids,
+            reason: 'Reconcile voided lines before pay',
+          });
+          const refreshed = await api.orders.getById(id!);
+          detail = refreshed.data.data as OrderDetail;
+        }
+      }
+      return detail;
     },
     enabled: !!id,
   });

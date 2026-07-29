@@ -23,6 +23,10 @@ import {
 } from './offlineEventSelectors';
 import { isServiceProductType } from '@shared/utils/productTypeRules';
 import { consolidateKotLines } from '@shared/utils/consolidateKotLines';
+import {
+  totalLineQuantity,
+  type ReconcileDesiredLine,
+} from '@shared/utils/reconcileOrderLineVoids';
 import { decrementLocalStock, getCachedCatalog, restoreLocalStock } from '../services/offlineCatalogService';
 import { getCachedRestaurantMenu, getCachedRestaurantStations, paintRestaurantTableFreeOffline } from './restaurantOfflineCache';
 import { publishLanKdsBoardChanged } from './restaurantLanKds';
@@ -168,16 +172,63 @@ export function hasPendingRestaurantMutations(orderId: string): boolean {
 }
 
 /**
+ * Last non-seed ORDER_UPDATED line snapshot for a check.
+ * Survives ACK'd offline voids that never deleted server rows (pre-fix sync).
+ */
+export function getLastNonSeedRestaurantLineSnapshot(
+  orderId: string,
+): ReconcileDesiredLine[] | null {
+  if (!orderId) return null;
+  let last: ReconcileDesiredLine[] | null = null;
+  for (const e of getAllEvents()) {
+    if (e.eventType !== 'ORDER_UPDATED') continue;
+    if (e.orderId !== orderId) continue;
+    if (e.key.startsWith('seed_')) continue;
+    if (!Array.isArray(e.lines)) continue;
+    last = e.lines.map((l) => ({
+      lineId: l.lineId,
+      productId: l.productId,
+      quantity: Number(l.quantity) || 0,
+    }));
+  }
+  return last;
+}
+
+/**
+ * Ticket truth for Complete Sale: prefer the stricter of FOH lines vs last journal void snapshot.
+ * Heals orders whose offline voids were ACK'd before server reconcile existed.
+ */
+export function resolveDesiredLinesBeforePay(
+  orderId: string,
+  fohItems: Array<{
+    id: string;
+    productId?: string | null;
+    quantity: string | number;
+  }>,
+): ReconcileDesiredLine[] {
+  const foh: ReconcileDesiredLine[] = fohItems.map((it) => ({
+    lineId: it.id,
+    productId: it.productId || undefined,
+    quantity: Number(it.quantity) || 0,
+  }));
+  const snap = getLastNonSeedRestaurantLineSnapshot(orderId);
+  if (!snap || snap.length === 0) return foh;
+  if (foh.length === 0) return snap;
+  return totalLineQuantity(snap) < totalLineQuantity(foh) - 1e-9 ? snap : foh;
+}
+
+/**
  * Replace journal snapshot for a server check with fresh API lines (avoids stale void IDs).
  * Keeps pending local ofl_line_* adds that have not synced yet.
  * Skips overwrite when unsynced voids/edits exist — otherwise Complete Sale would charge voided lines.
+ * Also clamps to last non-seed void snapshot so ACK'd offline voids are not resurrected on FOH.
  */
 export function refreshRestaurantCheckSeedFromServer(
   input: Parameters<typeof seedRestaurantCheckFromServer>[0],
 ): void {
   if (!input.orderId || !input.tableId) return;
   if (hasPendingRestaurantMutations(input.orderId)) return;
-  const serverLines: EventLine[] = (input.items || []).map((it) => {
+  let serverLines: EventLine[] = (input.items || []).map((it) => {
     const qty = Number(it.quantity) || 0;
     const unitPrice = Number(it.unitPrice) || 0;
     const productId = it.productId || `custom_${it.id}`;
@@ -194,6 +245,26 @@ export function refreshRestaurantCheckSeedFromServer(
         resolveOfflineProductType(productId),
     });
   });
+  const voidSnap = getLastNonSeedRestaurantLineSnapshot(input.orderId);
+  if (voidSnap && totalLineQuantity(voidSnap) < totalLineQuantity(
+    serverLines.map((l) => ({ lineId: l.lineId, productId: l.productId, quantity: l.quantity })),
+  ) - 1e-9) {
+    const wantById = new Map(
+      voidSnap.filter((l) => l.lineId).map((l) => [l.lineId!, Number(l.quantity) || 0]),
+    );
+    serverLines = serverLines
+      .map((l) => {
+        if (!l.lineId || !wantById.has(l.lineId)) return null;
+        const want = wantById.get(l.lineId)!;
+        if (!(want > 0)) return null;
+        return {
+          ...l,
+          quantity: want,
+          subtotal: want * l.unitPrice,
+        };
+      })
+      .filter((l): l is EventLine => !!l);
+  }
   const existing = deriveRestaurantCheckForTable(
     input.tableId,
     getAllEvents(),
@@ -201,7 +272,15 @@ export function refreshRestaurantCheckSeedFromServer(
     input.orderId,
   );
   if (!existing) {
-    seedRestaurantCheckFromServer(input);
+    seedRestaurantCheckFromServer({ ...input, items: serverLines.map((l) => ({
+      id: l.lineId || `custom_${l.productId}`,
+      productId: l.productId,
+      productName: l.productName,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      lineNotes: l.lineNotes,
+      kitchenSentAt: l.kitchenSentAt,
+    })) });
     return;
   }
   // Preserve unsynced journal-only lines (ofl_line_*) until they sync.

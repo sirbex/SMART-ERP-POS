@@ -23,7 +23,12 @@ import {
   allocateVoidQuantity,
   isServerOrderItemId,
 } from '../../lib/restaurantVoidQuantity';
-import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
+import { consolidateKotLines } from '@shared/utils/consolidateKotLines';
+import {
+  computeVoidItemsFromUpdatedLines,
+  totalLineQuantity,
+  type ReconcileDesiredLine,
+} from '@shared/utils/reconcileOrderLineVoids';
 import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
 import { printReceipt } from '../../lib/print';
 import { brandingFromTenant } from '../../lib/documentCompanyBranding';
@@ -56,6 +61,7 @@ import {
   removeRestaurantLinesOffline,
   refreshRestaurantCheckSeedFromServer,
   hasPendingRestaurantMutations,
+  resolveDesiredLinesBeforePay,
   shouldUseLocalRestaurantMutation,
   isJournalLocalOrderId,
   splitRestaurantCheckOffline,
@@ -2972,10 +2978,10 @@ export default function RestaurantPosPage() {
     // After pay, always land on the restaurant floor (tables), never re-open the ticket.
     const forceLocalCash = shouldUseLocalRestaurantMutation(isOnline, paidOrderId);
     if (isOnline && !forceLocalCash) {
-      // Flush offline voids before Complete Sale — payment page loads server lines only.
-      if (hasPendingRestaurantMutations(paidOrderId) || hasPendingSales()) {
-        setBusy(true);
-        try {
+      setBusy(true);
+      try {
+        // Flush pending journal events (new voids).
+        if (hasPendingRestaurantMutations(paidOrderId) || hasPendingSales()) {
           const result = await syncOfflineSales();
           if (result.failed > 0 || result.review > 0) {
             toast.error(
@@ -2983,13 +2989,34 @@ export default function RestaurantPosPage() {
             );
             return;
           }
-        } catch {
-          toast.error('Could not sync offline voids — retry before paying');
-          return;
-        } finally {
-          setBusy(false);
+        }
+        // Heal ACK'd offline voids that never deleted server rows (existing open checks).
+        const desired = resolveDesiredLinesBeforePay(
+          paidOrderId,
+          orderLines.map((l) => ({
+            id: l.id,
+            productId: l.productId,
+            quantity: l.quantity,
+          })),
+        );
+        const serverRes = await api.orders.getById(paidOrderId);
+        const serverOrder = serverRes.data.data as {
+          items?: Array<{ id: string; quantity: string; productId?: string | null }>;
+        };
+        const voids = computeVoidItemsFromUpdatedLines(serverOrder.items || [], desired);
+        if (voids.length > 0) {
+          await api.restaurant.voidItems(paidOrderId, {
+            items: voids,
+            reason: 'Reconcile voided lines before pay',
+          });
+          toast.success(`Removed ${voids.length} voided line(s) before payment`);
         }
         invalidateCheck();
+      } catch (err) {
+        toast.error(apiErr(err, 'Could not sync voided lines — retry before paying'));
+        return;
+      } finally {
+        setBusy(false);
       }
       navigate(`/orders/${paidOrderId}/pay?returnTo=${encodeURIComponent('/restaurant')}`);
       return;

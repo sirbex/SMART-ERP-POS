@@ -1,7 +1,7 @@
 /**
  * Offline void → ORDER_UPDATED must reconcile server lines (Complete Sale SSOT).
  */
-import { computeVoidItemsFromUpdatedLines } from './posEventReplayer.js';
+import { computeVoidItemsFromUpdatedLines } from '../../../../shared/utils/reconcileOrderLineVoids.js';
 
 describe('ORDER_UPDATED void reconcile (Complete Sale)', () => {
   it('voids full UUID lines missing from journal snapshot', () => {

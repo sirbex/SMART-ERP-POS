@@ -15,12 +15,14 @@ import {
   seedRestaurantCheckFromServer,
   refreshRestaurantCheckSeedFromServer,
   hasPendingRestaurantMutations,
+  resolveDesiredLinesBeforePay,
   shouldUseLocalRestaurantMutation,
   splitRestaurantCheckOffline,
   resolveOfflineProductType,
   updateRestaurantGuestOffline,
   totalsFromLines,
 } from './restaurantOfflineOps';
+import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
 import {
   deriveRestaurantCheckForTable,
   deriveRestaurantFloorOccupancy,
@@ -321,6 +323,43 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
       orderId,
     );
     expect(after?.lines.map((l) => l.lineId)).toEqual([lineKeep]);
+  });
+
+  it('EVIDENCE: resolveDesiredLinesBeforePay prefers journal void snapshot over resurrected FOH', () => {
+    const orderId = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+    const lineKeep = '33333333-3333-3333-3333-333333333333';
+    const lineVoid = '44444444-4444-4444-4444-444444444444';
+    seedRestaurantCheckFromServer({
+      orderId,
+      orderNumber: 'ORD-PAY-HEAL',
+      tableId: 't-pay-heal',
+      tableCode: 'TH',
+      channel: 'DINE_IN',
+      items: [
+        { id: lineKeep, productId: 'p1', productName: 'Keep', quantity: 1, unitPrice: 5 },
+        { id: lineVoid, productId: 'p2', productName: 'VoidMe', quantity: 1, unitPrice: 5 },
+      ],
+    });
+    const derived = deriveRestaurantCheckForTable(
+      't-pay-heal',
+      getAllEvents(),
+      getAllSyncState(),
+      orderId,
+    )!;
+    removeRestaurantLinesOffline(derived, [lineVoid], undefined, { reason: 'Changed mind' });
+
+    // Simulate seed refresh resurrecting server lines on FOH.
+    const fohResurrected = [
+      { id: lineKeep, productId: 'p1', quantity: 1 },
+      { id: lineVoid, productId: 'p2', quantity: 1 },
+    ];
+    const desired = resolveDesiredLinesBeforePay(orderId, fohResurrected);
+    expect(desired.map((l) => l.lineId)).toEqual([lineKeep]);
+    const voids = computeVoidItemsFromUpdatedLines(
+      fohResurrected.map((l) => ({ id: l.id, quantity: l.quantity, productId: l.productId })),
+      desired,
+    );
+    expect(voids).toEqual([{ itemId: lineVoid, quantity: 1 }]);
   });
 
   it('appendSyncedEvent is idempotent; invalidateJournalMemoryCache forces re-read', () => {
