@@ -23,12 +23,8 @@ import {
   allocateVoidQuantity,
   isServerOrderItemId,
 } from '../../lib/restaurantVoidQuantity';
-import { consolidateKotLines } from '@shared/utils/consolidateKotLines';
-import {
-  computeVoidItemsFromUpdatedLines,
-  totalLineQuantity,
-  type ReconcileDesiredLine,
-} from '@shared/utils/reconcileOrderLineVoids';
+import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
+import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
 import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
 import { printReceipt } from '../../lib/print';
 import { brandingFromTenant } from '../../lib/documentCompanyBranding';
