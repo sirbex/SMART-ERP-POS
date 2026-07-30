@@ -1,7 +1,7 @@
 /**
  * Offline prewarm must not call /products without inventory.read (waiter/FOH 403 toast).
  */
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
