@@ -65,7 +65,7 @@ export default function AgedBalancePage() {
         { id: 'd30', label: '1–30 Days', value: fmt(report.summary.days1to30), toneClassName: 'text-yellow-600', priority: 'primary' },
         { id: 'd60', label: '31–60 Days', value: fmt(report.summary.days31to60), toneClassName: 'text-orange-500', priority: 'secondary' },
         { id: 'd90', label: '61–90 Days', value: fmt(report.summary.days61to90), toneClassName: 'text-red-500', priority: 'secondary' },
-        { id: 'over90', label: '90+ Days', value: fmt(report.summary.over90), toneClassName: 'text-red-700', priority: 'tertiary' },
+        { id: 'over90', label: '90+ Days', value: fmt(report.summary.over90), toneClassName: 'text-red-700', priority: 'secondary' },
         { id: 'total', label: 'Total', value: fmt(report.summary.total), toneClassName: 'text-gray-900', priority: 'primary', accent: true },
       ]
     : [];

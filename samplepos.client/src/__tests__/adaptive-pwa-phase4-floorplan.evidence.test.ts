@@ -51,7 +51,7 @@ describe('Phase 4 floorplan wave 1 — POS', () => {
     expect(src).toContain('onScan={handleBarcodeScanned}');
     expect(src).toContain('data-pos-adaptive-scanner');
     expect(src).not.toMatch(/useBarcodeScanner\s*\(/);
-    expect(src).not.toMatch(/from ['\"].*useBarcodeScanner['\"]/);
+    expect(src).not.toMatch(/from ['"].*useBarcodeScanner['"]/);
     // Sale / reprint APIs unchanged
     expect(src).toContain('useCreatePOSSale');
     expect(src).toContain('/sales/');
@@ -63,7 +63,7 @@ describe('Phase 4 floorplan wave 1 — POS', () => {
     expect(src).toContain('printReceipt');
     expect(src).toContain('data-adaptive-print-receipt');
     expect(src).toContain('data-receipt-preview');
-    expect(src).not.toMatch(/from ['\"]@\/components\/ui\/dialog['\"]/);
-    expect(src).not.toMatch(/fetch\(['\"]http:\/\/localhost:1811/);
+    expect(src).not.toMatch(/from ['"]@\/components\/ui\/dialog['"]/);
+    expect(src).not.toMatch(/fetch\(['"]http:\/\/localhost:1811/);
   });
 });

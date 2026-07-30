@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
 import Decimal from 'decimal.js';
-import { Eye, Search, Download, ArrowUpDown } from 'lucide-react';
+import { Eye, Download, ArrowUpDown } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { DatePicker } from '../../components/ui/date-picker';
 import {
   Button,
-  Input,
   Dialog,
   DialogContent,
   DialogDescription,

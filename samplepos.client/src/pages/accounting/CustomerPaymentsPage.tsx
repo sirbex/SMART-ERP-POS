@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { AxiosError } from 'axios';
-import { Plus, Search, DollarSign, FileText, ArrowUpRight, Wallet, User, Undo2, RefreshCw } from 'lucide-react';
+import { Plus, DollarSign, FileText, ArrowUpRight, Wallet, User, Undo2, RefreshCw } from 'lucide-react';
 import { OpeningBalancePanel } from '../../components/accounting/OpeningBalancePanel';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';

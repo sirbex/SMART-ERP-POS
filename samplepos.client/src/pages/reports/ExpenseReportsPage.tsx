@@ -29,7 +29,6 @@ import {
   FileText,
   Loader2,
   RefreshCw,
-  Receipt,
 } from 'lucide-react';
 
 function monthStart(iso: string): string {
@@ -354,7 +353,7 @@ export default function ExpenseReportsPage() {
               ? formatCurrency(Number(value || 0))
               : Number(value || 0).toLocaleString(),
             sub: card.hint,
-            priority: (idx < 2 ? 'primary' : idx < 4 ? 'secondary' : 'tertiary') as AdaptiveReportMetric['priority'],
+            priority: (idx < 2 ? 'primary' : 'secondary') as AdaptiveReportMetric['priority'],
           };
         })
       : [];

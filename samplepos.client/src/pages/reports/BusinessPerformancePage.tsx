@@ -202,7 +202,7 @@ const BusinessPerformancePage: React.FC = () => {
     value: card.value,
     sub: card.sub,
     toneClassName: card.color,
-    priority: (idx < 2 ? 'primary' : idx < 4 ? 'secondary' : 'tertiary') as AdaptiveReportMetric['priority'],
+    priority: (idx < 2 ? 'primary' : 'secondary') as AdaptiveReportMetric['priority'],
   }));
 
   return (

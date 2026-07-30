@@ -9,7 +9,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
-import { Plus, Search, FileText, FileMinus, FilePlus, Sparkles } from 'lucide-react';
+import { Plus, FileText, FileMinus, FilePlus, Sparkles } from 'lucide-react';
 import { DocumentFlowButton } from '../../components/shared/DocumentFlowButton';
 import {
     Button,
