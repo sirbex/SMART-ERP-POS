@@ -45,6 +45,8 @@ export function isCashierAllowedPath(
 
   if (pathname === '/customers' || pathname.startsWith('/customers/')) return true;
   if (pathname === '/sales' || pathname.startsWith('/sales/')) return true;
+  // Inventory browse (stock levels / products / batches) — warehouse network stays blocked above.
+  if (pathname === '/inventory' || pathname.startsWith('/inventory/')) return true;
   if (pathname === '/orders-queue') return true;
   if (/^\/orders\/[^/]+\/pay$/.test(pathname)) return true;
   if (pathname === '/my/quick-login') return true;
@@ -100,6 +102,7 @@ export const CASHIER_NAV_ITEMS: CashierNavItem[] = [
   { name: 'Orders Queue', path: '/orders-queue', icon: '📋' },
   { name: 'My Sales', path: '/sales', icon: '💰' },
   { name: 'Customers', path: '/customers', icon: '👥' },
+  { name: 'Inventory', path: '/inventory/stock-levels', icon: '📦' },
 ];
 
 export function resolveCashierNavItems(
@@ -111,5 +114,6 @@ export function resolveCashierNavItems(
     { name: 'Orders Queue', path: '/orders-queue', icon: '📋' },
     { name: 'My Sales', path: '/sales', icon: '💰' },
     { name: 'Customers', path: '/customers', icon: '👥' },
+    { name: 'Inventory', path: '/inventory/stock-levels', icon: '📦' },
   ];
 }

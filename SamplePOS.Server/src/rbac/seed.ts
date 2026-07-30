@@ -2,7 +2,9 @@ import { Pool } from 'pg';
 import { getAllPermissions } from './permissions.js';
 import {
   isSystemAccountantPermission,
+  isSystemCashierPermission,
   isSystemManagerPermission,
+  isSystemWaiterPermission,
 } from '@shared/authorization/systemRoleGrants.js';
 
 export async function seedRbacTables(pool: Pool): Promise<void> {
@@ -210,18 +212,9 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
     );
     const cashierRoleId = cashierResult.rows[0].id;
 
-    const cashierPermissions = [
-      'pos.read', 'pos.create',
-      'sales.read', 'sales.create',
-      'customers.read', 'customers.create',
-      'delivery.read',
-      'settings.read',
-      'quotations.read', 'quotations.create',
-      'orders.read', 'orders.pay', 'orders.cancel',
-      'restaurant.read', 'restaurant.order', 'restaurant.kitchen', 'restaurant.pay',
-      'reports.sales_view',
-      'expenses.read', 'expenses.create',
-    ];
+    const cashierPermissions = permissions
+      .filter((p) => isSystemCashierPermission(p))
+      .map((p) => p.key);
     for (const permKey of cashierPermissions) {
       await client.query(
         `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
@@ -244,12 +237,9 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       ]
     );
     const waiterRoleId = waiterResult.rows[0].id;
-    const waiterPermissions = [
-      'restaurant.read',
-      'restaurant.order',
-      'customers.read',
-      'customers.create',
-    ];
+    const waiterPermissions = permissions
+      .filter((p) => isSystemWaiterPermission(p))
+      .map((p) => p.key);
     for (const permKey of waiterPermissions) {
       await client.query(
         `INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)

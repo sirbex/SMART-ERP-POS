@@ -1,6 +1,6 @@
 # Authorization Phases — Proof Run
 
-**Generated:** 2026-07-10T10:35:40.397Z
+**Generated:** 2026-07-30T08:53:36.363Z
 
 ## Summary
 
@@ -9,7 +9,7 @@
 | Static checks passed | 25 / 31 |
 | Test suites executed | 6 |
 | Test suites passed | 6 |
-| Individual tests passed | 91 |
+| Individual tests passed | 97 |
 | Overall | **PASS** |
 
 ## Phase map
@@ -48,20 +48,20 @@
 - **PASS** Phase 3 — sessionService loads RBAC permissions
 - **PASS** Phase 3 — deprecated authStore.ts deleted
 - **PASS** Phase 3 — no ADMIN/MANAGER/CASHIER business checks in migrated client pages
-- **PASS** Phase 0 tests — authorizationService + shared policies — 23 tests passed
+- **PASS** Phase 0 tests — authorizationService + shared policies — 27 tests passed
 - **PASS** Phase 2 tests — salesRoutes.rbacPolicy — 12 tests passed
-- **PASS** Phase 2 tests — salesRoutes.security — 47 tests passed
+- **PASS** Phase 2 tests — salesRoutes.security — 48 tests passed
 - **PASS** Phase 2 tests — glReconciliationService.auth — 1 tests passed
-- **PASS** Phase 0/3 client — authorizationService — 4 tests passed
+- **PASS** Phase 0/3 client — authorizationService — 5 tests passed
 - **PASS** Phase 3 client — warehouseRbac — 4 tests passed
 
 ## Test runs
 
-- **PASS** `Phase 0 tests — authorizationService + shared policies` — pattern: `authorization discountPolicy documentPolicy serviceAuth` (23 tests)
+- **PASS** `Phase 0 tests — authorizationService + shared policies` — pattern: `authorization discountPolicy documentPolicy serviceAuth` (27 tests)
 - **PASS** `Phase 2 tests — salesRoutes.rbacPolicy` — pattern: `salesRoutes.rbacPolicy` (12 tests)
-- **PASS** `Phase 2 tests — salesRoutes.security` — pattern: `salesRoutes.security` (47 tests)
+- **PASS** `Phase 2 tests — salesRoutes.security` — pattern: `salesRoutes.security` (48 tests)
 - **PASS** `Phase 2 tests — glReconciliationService.auth` — pattern: `glReconciliationService.auth` (1 tests)
-- **PASS** `Phase 0/3 client — authorizationService` — pattern: `authorizationService` (4 tests)
+- **PASS** `Phase 0/3 client — authorizationService` — pattern: `authorizationService` (5 tests)
 - **PASS** `Phase 3 client — warehouseRbac` — pattern: `warehouseRbac` (4 tests)
 
 ## Re-run

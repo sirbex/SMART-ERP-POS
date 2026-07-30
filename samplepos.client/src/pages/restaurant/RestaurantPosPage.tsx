@@ -693,8 +693,8 @@ export default function RestaurantPosPage() {
   /** Customers SSOT — search/add only; guest fields come from the selected customer. */
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [selectedWaiterId, setSelectedWaiterId] = useState<string>('');
-  const [myTablesOnly, setMyTablesOnly] = useState(true);
-  /** Managers/cashiers start on the full floor; waiters stay on My tables. */
+  /** Cashiers/accountants (restaurant.pay) see all tables by default; waiters start on My tables. */
+  const [myTablesOnly, setMyTablesOnly] = useState(() => !canEditOthers);
   useEffect(() => {
     if (canEditOthers) setMyTablesOnly(false);
     else if (isWaiterProfile) setMyTablesOnly(true);

@@ -13,7 +13,9 @@ import { tenantRepository } from './tenantRepository.js';
 import { getAllPermissions } from '../../rbac/permissions.js';
 import {
   isSystemAccountantPermission,
+  isSystemCashierPermission,
   isSystemManagerPermission,
+  isSystemWaiterPermission,
 } from '@shared/authorization/systemRoleGrants.js';
 import { normalizeTenant, PLAN_LIMITS } from '../../../../shared/types/tenant.js';
 import type {
@@ -938,30 +940,12 @@ export const tenantService = {
         {
           name: 'Cashier',
           desc: 'Point of sale operations',
-          filter: (_p) =>
-            [
-              'pos.read', 'pos.create',
-              'sales.read', 'sales.create',
-              'customers.read', 'customers.create',
-              'inventory.read',
-              'delivery.read',
-              'settings.read',
-              'quotations.read', 'quotations.create',
-              'orders.read', 'orders.pay', 'orders.cancel',
-              'restaurant.read', 'restaurant.order', 'restaurant.kitchen', 'restaurant.pay',
-              'reports.sales_view',
-            ].includes(_p.key),
+          filter: (p) => isSystemCashierPermission(p),
         },
         {
           name: 'Waiter',
           desc: 'Restaurant floor service — open checks, KOT, and bill (no kitchen config or payment)',
-          filter: (_p) =>
-            [
-              'restaurant.read',
-              'restaurant.order',
-              'customers.read',
-              'customers.create',
-            ].includes(_p.key),
+          filter: (p) => isSystemWaiterPermission(p),
         },
         {
           name: 'Auditor',

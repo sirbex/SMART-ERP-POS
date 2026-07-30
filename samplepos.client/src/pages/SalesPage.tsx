@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import Layout from '../components/Layout';
 import { useSales, useSalesSummary, useSalesSummaryByDate, useSalesByCashier } from '../hooks/useApi';
 import { useAuth } from '../hooks/useAuth';
-import { shouldRestrictSalesToOwnUser } from '@shared/authorization/salesPolicy';
+import { shouldRestrictSalesToOwnUser, shouldLockSalesToBusinessDay } from '@shared/authorization/salesPolicy';
 import { formatCurrency } from '../utils/currency';
 import { BUSINESS_TIMEZONE, getBusinessDate, formatTimestamp, formatTimestampDate } from '../utils/businessDate';
 import Decimal from 'decimal.js';
@@ -373,11 +373,17 @@ export default function SalesPage() {
     () => shouldRestrictSalesToOwnUser(permissions, user?.role),
     [permissions, user?.role],
   );
+  const lockSalesToBusinessDay = useMemo(
+    () => shouldLockSalesToBusinessDay(permissions, user?.role),
+    [permissions, user?.role],
+  );
   const [activeTab, setActiveTab] = useState<TabType>(isScopedSalesUser ? 'all-sales' : 'overview');
-  const [dateFilter, setDateFilter] = useState<DateFilterType>('this-month');
+  const [dateFilter, setDateFilter] = useState<DateFilterType>(
+    lockSalesToBusinessDay ? 'today' : 'this-month',
+  );
 
-  // Initialize with this month's date range
-  const initialRange = getDateRange('this-month');
+  // Initialize with this month's date range (cashiers: business day only)
+  const initialRange = getDateRange(lockSalesToBusinessDay ? 'today' : 'this-month');
   const [startDate, setStartDate] = useState<string>(initialRange.start);
   const [endDate, setEndDate] = useState<string>(initialRange.end);
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('ALL');
@@ -412,6 +418,7 @@ export default function SalesPage() {
 
   // Handle date filter change
   const handleDateFilterChange = (filter: DateFilterType) => {
+    if (lockSalesToBusinessDay && filter !== 'today') return;
     setDateFilter(filter);
     if (filter !== 'custom') {
       const range = getDateRange(filter);
@@ -419,6 +426,14 @@ export default function SalesPage() {
       setEndDate(range.end);
     }
   };
+
+  useEffect(() => {
+    if (!lockSalesToBusinessDay) return;
+    const range = getDateRange('today');
+    setDateFilter('today');
+    setStartDate(range.start);
+    setEndDate(range.end);
+  }, [lockSalesToBusinessDay]);
 
   // Fetch sales data (send dates without timezone conversion)
   const { data: salesData, isLoading: salesLoading, refetch: refetchSales } = useSales(currentPage, limit, {
@@ -780,11 +795,14 @@ export default function SalesPage() {
                         ['last-month', 'Last Month'],
                         ['custom', 'Custom Range'],
                       ] as const
-                    ).map(([key, label]) => (
+                    )
+                      .filter(([key]) => !lockSalesToBusinessDay || key === 'today')
+                      .map(([key, label]) => (
                       <button
                         key={key}
                         type="button"
                         onClick={() => handleDateFilterChange(key)}
+                        disabled={lockSalesToBusinessDay && key !== 'today'}
                         className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors min-h-[var(--layout-touch-target)] ${
                           dateFilter === key
                             ? 'bg-blue-600 text-white'
@@ -795,7 +813,14 @@ export default function SalesPage() {
                       </button>
                     ))}
                   </div>
+                  {lockSalesToBusinessDay ? (
+                    <p className="text-xs text-stone-500" data-sales-day-lock="true">
+                      Cashiers can view today&apos;s sales only.
+                    </p>
+                  ) : null}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {!lockSalesToBusinessDay ? (
+                      <>
                     <div>
                       <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
                         Start Date
@@ -824,6 +849,8 @@ export default function SalesPage() {
                         minDate={startDate ? new Date(startDate) : undefined}
                       />
                     </div>
+                      </>
+                    ) : null}
                     <div>
                       <label
                         htmlFor="paymentMethod"

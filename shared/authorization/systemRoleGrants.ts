@@ -28,6 +28,7 @@ export const SYSTEM_ACCOUNTANT_MODULES = [
  * Extra permission keys for Accountant (beyond full modules).
  * Includes customers.update — required by AR payment routes/UI.
  * Includes distribution.read — dist APIs when orders UI is visible.
+ * Restaurant FOH keys — accountants settle and may operate floor when covering.
  */
 export const SYSTEM_ACCOUNTANT_EXTRA_KEYS = [
   'pos.read',
@@ -57,7 +58,47 @@ export const SYSTEM_ACCOUNTANT_EXTRA_KEYS = [
   'quotations.read',
   'distribution.read',
   'restaurant.read',
+  'restaurant.order',
+  'restaurant.kitchen',
   'restaurant.pay',
+] as const;
+
+/**
+ * System Cashier grants — POS + FOH settle + inventory browse + customers.
+ * Waiters never get restaurant.pay; cashiers always do.
+ */
+export const SYSTEM_CASHIER_PERMISSION_KEYS = [
+  'pos.read',
+  'pos.create',
+  'sales.read',
+  'sales.create',
+  'customers.read',
+  'customers.create',
+  'inventory.read',
+  'delivery.read',
+  'settings.read',
+  'quotations.read',
+  'quotations.create',
+  'orders.read',
+  'orders.pay',
+  'orders.cancel',
+  'restaurant.read',
+  'restaurant.order',
+  'restaurant.kitchen',
+  'restaurant.pay',
+  'reports.sales_view',
+  'expenses.read',
+  'expenses.create',
+] as const;
+
+/**
+ * System Waiter grants — floor only. Never restaurant.pay / kitchen / manage.
+ */
+export const SYSTEM_WAITER_PERMISSION_KEYS = [
+  'restaurant.read',
+  'restaurant.order',
+  'customers.read',
+  'customers.create',
 ] as const;
 
 export type CatalogPermission = { key: string; module: string; action?: string };
@@ -73,4 +114,12 @@ export function isSystemAccountantPermission(permission: CatalogPermission): boo
     (SYSTEM_ACCOUNTANT_MODULES as readonly string[]).includes(permission.module) ||
     (SYSTEM_ACCOUNTANT_EXTRA_KEYS as readonly string[]).includes(permission.key)
   );
+}
+
+export function isSystemCashierPermission(permission: CatalogPermission): boolean {
+  return (SYSTEM_CASHIER_PERMISSION_KEYS as readonly string[]).includes(permission.key);
+}
+
+export function isSystemWaiterPermission(permission: CatalogPermission): boolean {
+  return (SYSTEM_WAITER_PERMISSION_KEYS as readonly string[]).includes(permission.key);
 }

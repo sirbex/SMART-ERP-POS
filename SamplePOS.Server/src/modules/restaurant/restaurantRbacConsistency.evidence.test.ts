@@ -27,13 +27,21 @@ describe('restaurant RBAC grant ↔ enforce consistency', () => {
     expect(
       isSystemAccountantPermission({ key: 'restaurant.pay', module: 'restaurant', action: 'pay' }),
     ).toBe(true);
+    // Accountant covers full restaurant operate (order + kitchen + pay), not settle-only.
     expect(
       isSystemAccountantPermission({
         key: 'restaurant.order',
         module: 'restaurant',
         action: 'create',
       }),
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      isSystemAccountantPermission({
+        key: 'restaurant.kitchen',
+        module: 'restaurant',
+        action: 'kitchen',
+      }),
+    ).toBe(true);
 
     expect(legacyRoleGrantsPermission('MANAGER', 'restaurant.pay')).toBe(false);
     expect(legacyRoleGrantsPermission('MANAGER', 'restaurant.order')).toBe(true);

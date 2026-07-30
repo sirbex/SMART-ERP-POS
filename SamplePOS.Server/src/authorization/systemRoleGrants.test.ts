@@ -1,9 +1,13 @@
 import {
   SYSTEM_ACCOUNTANT_EXTRA_KEYS,
   SYSTEM_ACCOUNTANT_MODULES,
+  SYSTEM_CASHIER_PERMISSION_KEYS,
   SYSTEM_MANAGER_MODULES,
+  SYSTEM_WAITER_PERMISSION_KEYS,
   isSystemAccountantPermission,
+  isSystemCashierPermission,
   isSystemManagerPermission,
+  isSystemWaiterPermission,
 } from '@shared/authorization/systemRoleGrants.js';
 import { LEGACY_MANAGER_MODULES } from '@shared/authorization/legacyRoleFallback.js';
 
@@ -58,6 +62,25 @@ describe('systemRoleGrants SSOT', () => {
     ).toBe(false);
     expect(
       isSystemManagerPermission({ key: 'restaurant.order', module: 'restaurant' }),
+    ).toBe(true);
+  });
+
+  it('Cashier gets inventory.read + restaurant.pay; Waiter never gets pay', () => {
+    expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('inventory.read');
+    expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('restaurant.pay');
+    expect(isSystemCashierPermission({ key: 'inventory.read', module: 'inventory' })).toBe(true);
+    expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.pay');
+    expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.kitchen');
+    expect(isSystemWaiterPermission({ key: 'restaurant.pay', module: 'restaurant' })).toBe(false);
+    expect(isSystemWaiterPermission({ key: 'restaurant.order', module: 'restaurant' })).toBe(true);
+  });
+
+  it('Accountant gets full restaurant operate keys (order + kitchen + pay)', () => {
+    expect(SYSTEM_ACCOUNTANT_EXTRA_KEYS).toContain('restaurant.order');
+    expect(SYSTEM_ACCOUNTANT_EXTRA_KEYS).toContain('restaurant.kitchen');
+    expect(SYSTEM_ACCOUNTANT_EXTRA_KEYS).toContain('restaurant.pay');
+    expect(
+      isSystemAccountantPermission({ key: 'restaurant.order', module: 'restaurant' }),
     ).toBe(true);
   });
 });

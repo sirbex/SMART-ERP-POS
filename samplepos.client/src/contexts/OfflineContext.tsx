@@ -191,10 +191,25 @@ async function prewarmCustomers(): Promise<void> {
 
 async function prewarmBatches(): Promise<void> {
   try {
+    // inventory.read required — skip to avoid Access denied toast for waiters / guests.
+    if (!canSyncInventoryReadFromCache()) return;
     const res = await apiClient.get('/inventory/batches-all');
     const raw: ApiRow[] = res.data?.data || [];
     await putBatches(raw.map(mapApiBatch));
   } catch {
     // Silent — batch endpoint may not exist, that's fine
+  }
+}
+
+/** Matches GET /inventory/batches-all (inventory.read). */
+function canSyncInventoryReadFromCache(): boolean {
+  try {
+    const raw = localStorage.getItem('rbac_permissions');
+    if (!raw) return true;
+    const perms = JSON.parse(raw) as unknown;
+    if (!Array.isArray(perms) || perms.length === 0) return true;
+    return (perms as string[]).includes('inventory.read');
+  } catch {
+    return true;
   }
 }

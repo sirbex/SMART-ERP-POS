@@ -68,6 +68,31 @@ export function shouldRestrictSalesToOwnUser(
   return legacyRole?.toUpperCase() === 'CASHIER';
 }
 
+/**
+ * Cashiers may browse today's sales only — not change the date range to another day.
+ * Managers/admins/accountants keep full date filters.
+ */
+export function shouldLockSalesToBusinessDay(
+  permissions: Iterable<string>,
+  legacyRole?: string | null
+): boolean {
+  const role = (legacyRole || '').toUpperCase();
+  if (role === 'CASHIER') return true;
+  const keys = new Set(permissions);
+  // Explicit cashier profile: can sell + read sales, lacks org-wide financial approve
+  if (
+    keys.has('sales.read') &&
+    (keys.has('pos.create') || keys.has('sales.create')) &&
+    keys.has('restaurant.pay') &&
+    !keys.has('accounting.read') &&
+    !keys.has('sales.approve') &&
+    !keys.has('admin.update')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export function canProcessRefundType(
   refundType: 'REFUND' | 'EXCHANGE',
   permissions: Iterable<string>,

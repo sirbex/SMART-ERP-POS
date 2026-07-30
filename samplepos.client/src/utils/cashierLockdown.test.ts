@@ -15,12 +15,17 @@ describe('cashierLockdown', () => {
     expect(isCashierAllowedPath('/orders/123/pay')).toBe(true);
   });
 
-  it('keeps warehouse routes blocked', () => {
-    expect(isCashierAllowedPath('/inventory')).toBe(false);
+  it('allows inventory browse but keeps warehouse routes blocked', () => {
+    expect(isCashierAllowedPath('/inventory')).toBe(true);
+    expect(isCashierAllowedPath('/inventory/stock-levels')).toBe(true);
+    expect(isCashierAllowedPath('/inventory/store-network')).toBe(false);
+    expect(isCashierAllowedPath('/inventory/store-transfers')).toBe(false);
   });
 
-  it('includes orders queue in cashier navigation', () => {
+  it('includes orders queue and inventory in cashier navigation', () => {
     expect(CASHIER_NAV_ITEMS.some((item) => item.path === '/orders-queue')).toBe(true);
+    expect(CASHIER_NAV_ITEMS.some((item) => item.path.includes('/inventory'))).toBe(true);
+    expect(resolveCashierNavItems(true).some((item) => item.path.includes('/inventory'))).toBe(true);
   });
 
   it('restaurant mode: cashier uses Restaurant FOH instead of retail POS', () => {
