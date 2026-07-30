@@ -18,6 +18,11 @@ import {
 import { DocumentFlowButton } from '../components/shared/DocumentFlowButton';
 import { VoidSaleModal } from '../components/sales/VoidSaleModal';
 import { RefundSaleModal } from '../components/sales/RefundSaleModal';
+import {
+  AdaptivePage,
+  AdaptiveSearch,
+  AdaptiveToolbar,
+} from '../components/adaptive';
 import { useBackendPermission } from '../hooks/useBackendPermission';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../components/ui/MobileSortSelect';
@@ -733,181 +738,142 @@ export default function SalesPage() {
 
   return (
     <Layout>
-      <div className="p-6 space-y-6">
-        {/* Header */}
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">
-              {isScopedSalesUser ? 'My Sales' : 'Sales Analytics'}
-            </h1>
-            <p className="text-gray-600 mt-1">
-              {isScopedSalesUser
-                ? 'View your sales transactions'
-                : 'Comprehensive sales reporting and insights'}
-            </p>
-          </div>
-          <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2">
+      <AdaptivePage
+        className="p-6"
+        title={isScopedSalesUser ? 'My Sales' : 'Sales Analytics'}
+        description={
+          isScopedSalesUser
+            ? 'View your sales transactions'
+            : 'Comprehensive sales reporting and insights'
+        }
+        primaryActions={
+          <button
+            type="button"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 min-h-[var(--layout-touch-target)]"
+          >
             <span>📥</span>
             Export Report
           </button>
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-lg shadow p-4 space-y-4">
-          {/* Date Filter Buttons */}
-          <div className="flex flex-wrap gap-2 pb-4 border-b border-gray-200">
-            <button
-              onClick={() => handleDateFilterChange('today')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'today'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-            >
-              Today
-            </button>
-            <button
-              onClick={() => handleDateFilterChange('yesterday')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'yesterday'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-            >
-              Yesterday
-            </button>
-            <button
-              onClick={() => handleDateFilterChange('this-week')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'this-week'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-            >
-              This Week
-            </button>
-            <button
-              onClick={() => handleDateFilterChange('last-week')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'last-week'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-            >
-              Last Week
-            </button>
-            <button
-              onClick={() => handleDateFilterChange('this-month')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'this-month'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-            >
-              This Month
-            </button>
-            <button
-              onClick={() => handleDateFilterChange('last-month')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'last-month'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-            >
-              Last Month
-            </button>
-            <button
-              onClick={() => handleDateFilterChange('custom')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${dateFilter === 'custom'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-            >
-              Custom Range
-            </button>
+        }
+        toolbar={
+          <div className="bg-white rounded-lg shadow p-4 space-y-4" data-sales-filters="true">
+            <AdaptiveToolbar
+              leading={
+                <AdaptiveSearch
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Sale # or Customer..."
+                  label="Search sales"
+                />
+              }
+              secondaryLabel="Filters"
+              secondary={
+                <div className="space-y-3 w-full min-w-[16rem]">
+                  <div className="flex flex-wrap gap-2">
+                    {(
+                      [
+                        ['today', 'Today'],
+                        ['yesterday', 'Yesterday'],
+                        ['this-week', 'This Week'],
+                        ['last-week', 'Last Week'],
+                        ['this-month', 'This Month'],
+                        ['last-month', 'Last Month'],
+                        ['custom', 'Custom Range'],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => handleDateFilterChange(key)}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors min-h-[var(--layout-touch-target)] ${
+                          dateFilter === key
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
+                        Start Date
+                      </label>
+                      <DatePicker
+                        value={startDate}
+                        onChange={(date) => {
+                          setStartDate(date);
+                          setDateFilter('custom');
+                        }}
+                        placeholder="Select start date"
+                        maxDate={endDate ? new Date(endDate) : undefined}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
+                        End Date
+                      </label>
+                      <DatePicker
+                        value={endDate}
+                        onChange={(date) => {
+                          setEndDate(date);
+                          setDateFilter('custom');
+                        }}
+                        placeholder="Select end date"
+                        minDate={startDate ? new Date(startDate) : undefined}
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="paymentMethod"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Payment Method
+                      </label>
+                      <select
+                        id="paymentMethod"
+                        value={paymentMethodFilter}
+                        onChange={(e) => setPaymentMethodFilter(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="ALL">All Methods</option>
+                        <option value="CASH">Cash</option>
+                        <option value="CARD">Card</option>
+                        <option value="MOBILE_MONEY">MTN Mobile Money</option>
+                        <option value="AIRTEL_MONEY">Airtel Money</option>
+                        <option value="CREDIT">Credit</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="statusFilter"
+                        className="block text-sm font-medium text-gray-700 mb-1"
+                      >
+                        Status
+                      </label>
+                      <select
+                        id="statusFilter"
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                      >
+                        <option value="ALL">All Status</option>
+                        <option value="COMPLETED">Completed</option>
+                        <option value="PENDING">Pending</option>
+                        <option value="CANCELLED">Cancelled</option>
+                        <option value="VOID">Voided</option>
+                        <option value="REFUNDED">Refunded</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              }
+            />
           </div>
-
-          {/* Date inputs and other filters */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div>
-              <label htmlFor="startDate" className="block text-sm font-medium text-gray-700 mb-1">
-                Start Date
-              </label>
-              <DatePicker
-                value={startDate}
-                onChange={(date) => {
-                  setStartDate(date);
-                  setDateFilter('custom');
-                }}
-                placeholder="Select start date"
-                maxDate={endDate ? new Date(endDate) : undefined}
-              />
-            </div>
-            <div>
-              <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
-                End Date
-              </label>
-              <DatePicker
-                value={endDate}
-                onChange={(date) => {
-                  setEndDate(date);
-                  setDateFilter('custom');
-                }}
-                placeholder="Select end date"
-                minDate={startDate ? new Date(startDate) : undefined}
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="paymentMethod"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
-                Payment Method
-              </label>
-              <select
-                id="paymentMethod"
-                value={paymentMethodFilter}
-                onChange={(e) => setPaymentMethodFilter(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="ALL">All Methods</option>
-                <option value="CASH">Cash</option>
-                <option value="CARD">Card</option>
-                <option value="MOBILE_MONEY">MTN Mobile Money</option>
-                <option value="AIRTEL_MONEY">Airtel Money</option>
-                <option value="CREDIT">Credit</option>
-              </select>
-            </div>
-            <div>
-              <label
-                htmlFor="statusFilter"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
-                Status
-              </label>
-              <select
-                id="statusFilter"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="ALL">All Status</option>
-                <option value="COMPLETED">Completed</option>
-                <option value="PENDING">Pending</option>
-                <option value="CANCELLED">Cancelled</option>
-                <option value="VOID">Voided</option>
-                <option value="REFUNDED">Refunded</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="searchQuery" className="block text-sm font-medium text-gray-700 mb-1">
-                Search
-              </label>
-              <input
-                id="searchQuery"
-                type="text"
-                placeholder="Sale # or Customer..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-          </div>
-        </div>
+        }
+      >
+        {/* Filters moved into AdaptiveToolbar — body starts with tabs / KPIs */}
 
         {/* KPI Cards - Overview Tab */}
         {activeTab === 'overview' && (
@@ -1178,7 +1144,7 @@ export default function SalesPage() {
             onSaleUpdated={() => { refetchSales(); }}
           />
         )}
-      </div>
+      </AdaptivePage>
     </Layout>
   );
 }

@@ -11,6 +11,12 @@ import { formatCurrency } from '../../utils/currency';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { accountingApi } from '../../services/api';
+import {
+  AdaptivePage,
+  AdaptiveReportShell,
+  AdaptiveReportSummary,
+  type AdaptiveReportMetric,
+} from '../../components/adaptive';
 
 interface TrialBalanceEntry {
   accountId: string;
@@ -207,11 +213,42 @@ const TrialBalancePage = () => {
     return ACCOUNT_TYPE_ORDER[a as keyof typeof ACCOUNT_TYPE_ORDER] - ACCOUNT_TYPE_ORDER[b as keyof typeof ACCOUNT_TYPE_ORDER];
   });
 
+  const balanceMetrics: AdaptiveReportMetric[] = trialBalance
+    ? [
+        {
+          id: 'debits',
+          label: 'Total Debits',
+          value: formatCurrency(trialBalance.totals?.totalDebits || 0),
+          toneClassName: 'text-red-600',
+          priority: 'primary',
+        },
+        {
+          id: 'credits',
+          label: 'Total Credits',
+          value: formatCurrency(trialBalance.totals?.totalCredits || 0),
+          toneClassName: 'text-green-600',
+          priority: 'primary',
+        },
+        {
+          id: 'status',
+          label: 'Status',
+          value: trialBalance.totals?.isBalanced ? 'Balanced' : 'Out of balance',
+          sub: trialBalance.totals?.isBalanced
+            ? 'All debits equal credits'
+            : `Difference ${formatCurrency(Math.abs(trialBalance.totals?.difference || trialBalance.totals?.netDifference || 0))}`,
+          toneClassName: trialBalance.totals?.isBalanced ? 'text-green-700' : 'text-red-700',
+          priority: 'secondary',
+        },
+      ]
+    : [];
+
   return (
-    <>
-      <div className="p-4 lg:p-6">
-        {/* Controls */}
-        <Card className="mb-6">
+    <AdaptivePage
+      className="p-4 lg:p-6"
+      title="Trial Balance"
+      description="Verify that total debits equal total credits as of a date"
+      toolbar={
+        <Card data-tb-filters="true">
           <CardHeader>
             <CardTitle>Report Options</CardTitle>
             <CardDescription>Configure your trial balance report parameters</CardDescription>
@@ -241,15 +278,15 @@ const TrialBalancePage = () => {
                 </Select>
               </div>
 
-              <div className="flex gap-2">
-                <Button onClick={() => loadTrialBalance()} disabled={loading}>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => loadTrialBalance()} disabled={loading} className="min-h-[var(--layout-touch-target)]">
                   {loading ? 'Generating...' : 'Generate Report'}
                 </Button>
-                <Button variant="outline" onClick={exportToPDF} disabled={!trialBalance || loading}>
+                <Button variant="outline" onClick={exportToPDF} disabled={!trialBalance || loading} className="min-h-[var(--layout-touch-target)]">
                   <FileText className="h-4 w-4 mr-2" />
                   Export PDF
                 </Button>
-                <Button variant="outline" onClick={exportToCSV} disabled={!trialBalance || loading}>
+                <Button variant="outline" onClick={exportToCSV} disabled={!trialBalance || loading} className="min-h-[var(--layout-touch-target)]">
                   <Download className="h-4 w-4 mr-2" />
                   Export CSV
                 </Button>
@@ -257,53 +294,57 @@ const TrialBalancePage = () => {
             </div>
           </CardContent>
         </Card>
-
-        {/* Balance Status */}
-        {trialBalance && (
-          <Card className={`mb-6 ${trialBalance.totals.isBalanced ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
-            <CardContent className="pt-6">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  {trialBalance.totals?.isBalanced ? (
-                    <TrendingUp className="h-6 w-6 text-green-600" />
-                  ) : (
-                    <AlertTriangle className="h-6 w-6 text-red-600" />
-                  )}
-                  <div>
-                    <h3 className={`text-lg font-semibold ${trialBalance.totals?.isBalanced ? 'text-green-900' : 'text-red-900'}`}>
-                      {trialBalance.totals?.isBalanced ? 'Books are Balanced' : 'Books are Out of Balance'}
-                    </h3>
-                    <p className={`text-sm ${trialBalance.totals?.isBalanced ? 'text-green-700' : 'text-red-700'}`}>
-                      {trialBalance.totals?.isBalanced
-                        ? 'All debits equal credits. Your books are in balance.'
-                        : `Difference of ${formatCurrency(Math.abs(trialBalance.totals?.difference || 0))} needs investigation.`
-                      }
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right w-full sm:w-auto">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-sm text-gray-500">Total Debits</p>
-                      <p className="text-lg font-mono font-semibold text-red-600">
-                        {formatCurrency(trialBalance.totals?.totalDebits || 0)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-gray-500">Total Credits</p>
-                      <p className="text-lg font-mono font-semibold text-green-600">
-                        {formatCurrency(trialBalance.totals?.totalCredits || 0)}
-                      </p>
+      }
+    >
+      {trialBalance ? (
+        <AdaptiveReportShell
+          detailLabel="Trial balance lines"
+          summary={<AdaptiveReportSummary metrics={balanceMetrics} />}
+          table={
+            <div className="space-y-6" data-tb-detail="table">
+              <Card className={`${trialBalance.totals.isBalanced ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+                <CardContent className="pt-6">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      {trialBalance.totals?.isBalanced ? (
+                        <TrendingUp className="h-6 w-6 text-green-600" />
+                      ) : (
+                        <AlertTriangle className="h-6 w-6 text-red-600" />
+                      )}
+                      <div>
+                        <h3 className={`text-lg font-semibold ${trialBalance.totals?.isBalanced ? 'text-green-900' : 'text-red-900'}`}>
+                          {trialBalance.totals?.isBalanced ? 'Books are Balanced' : 'Books are Out of Balance'}
+                        </h3>
+                        <p className={`text-sm ${trialBalance.totals?.isBalanced ? 'text-green-700' : 'text-red-700'}`}>
+                          {trialBalance.totals?.isBalanced
+                            ? 'All debits equal credits. Your books are in balance.'
+                            : `Difference of ${formatCurrency(Math.abs(trialBalance.totals?.difference || 0))} needs investigation.`
+                          }
+                        </p>
+                      </div>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+              {/* existing table card continues as sibling via remaining markup */}
+            </div>
+          }
+          cards={
+            <div className="space-y-3" data-tb-detail="cards">
+              {balanceMetrics.map((m) => (
+                <div key={m.id} className="rounded-lg border bg-white p-4 shadow-sm">
+                  <div className="text-xs font-medium uppercase tracking-wide text-gray-500">{m.label}</div>
+                  <div className={`mt-1 text-lg font-bold ${m.toneClassName || ''}`}>{m.value}</div>
+                  {m.sub ? <div className="mt-0.5 text-xs text-gray-500">{m.sub}</div> : null}
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              ))}
+            </div>
+          }
+        />
+      ) : null}
 
-        {/* Trial Balance Table */}
-        <Card>
+      {/* Trial Balance Table */}
+      <Card className="mt-4">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div>
@@ -484,8 +525,7 @@ const TrialBalancePage = () => {
             </CardContent>
           </Card>
         )}
-      </div>
-    </>
+      </AdaptivePage>
   );
 };
 

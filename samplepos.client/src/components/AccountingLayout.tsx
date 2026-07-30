@@ -387,7 +387,7 @@ export default function AccountingLayout({ children }: AccountingLayoutProps) {
   );
 
   return (
-    <AdaptiveAppShell className="h-full">
+    <AdaptiveAppShell className="h-full" pathname={location.pathname}>
     <div className="h-full bg-gray-50 flex">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col w-64 bg-white border-r shadow-sm">

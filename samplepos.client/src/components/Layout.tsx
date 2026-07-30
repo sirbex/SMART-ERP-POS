@@ -18,7 +18,9 @@ import {
   AdaptiveNavigation,
   AdaptiveShellBar,
   useAdaptiveLayout,
+  useAdaptiveWorkspaceOptional,
 } from './adaptive';
+import { shellNavChromeFromWorkspace } from '../lib/adaptiveShellNav';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -35,8 +37,9 @@ interface NavItem {
 }
 
 export default function Layout({ children }: LayoutProps) {
+  const { pathname } = useLocation();
   return (
-    <AdaptiveAppShell>
+    <AdaptiveAppShell pathname={pathname}>
       <LayoutChrome>{children}</LayoutChrome>
     </AdaptiveAppShell>
   );
@@ -44,8 +47,9 @@ export default function Layout({ children }: LayoutProps) {
 
 function LayoutChrome({ children }: LayoutProps) {
   const layout = useAdaptiveLayout();
-  const { tokens } = layout;
-  const [sidebarOpen, setSidebarOpen] = useState(() => tokens.showSidebarLabelsDefault);
+  const workspace = useAdaptiveWorkspaceOptional();
+  const shellNav = shellNavChromeFromWorkspace(workspace, layout.tier);
+  const [sidebarOpen, setSidebarOpen] = useState(() => shellNav.defaultExpanded);
   const { user, logout, permissions } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -55,8 +59,8 @@ function LayoutChrome({ children }: LayoutProps) {
   const userInitial = user?.fullName?.charAt(0).toUpperCase() || 'U';
 
   useEffect(() => {
-    setSidebarOpen(tokens.showSidebarLabelsDefault);
-  }, [layout.tier, tokens.showSidebarLabelsDefault]);
+    setSidebarOpen(shellNav.defaultExpanded);
+  }, [layout.tier, workspace?.id, workspace?.navPattern, shellNav.defaultExpanded]);
 
   const navItems: NavItem[] = [
     { name: 'Dashboard', path: '/dashboard', icon: '📊', color: 'text-blue-600' },
@@ -202,7 +206,12 @@ function LayoutChrome({ children }: LayoutProps) {
         trailing={<ServerClock />}
       />
 
-      <div className="app-body">
+      <div
+        className="app-body"
+        data-shell-nav={shellNav.pattern}
+        data-workspace={workspace?.id}
+        data-pos-panel={workspace?.posPanelMode ?? undefined}
+      >
         <AdaptiveNavigation
           brandName={brandName}
           items={allNavItems}

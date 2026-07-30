@@ -18,6 +18,12 @@ import { useAuth } from '../../contexts/AuthContext';
 import { getBusinessDate } from '../../utils/businessDate';
 import { formatCurrency } from '../../utils/currency';
 import {
+  AdaptivePage,
+  AdaptiveReportShell,
+  AdaptiveReportSummary,
+  type AdaptiveReportMetric,
+} from '../../components/adaptive';
+import {
   Columns3,
   Download,
   FileText,
@@ -337,22 +343,31 @@ export default function ExpenseReportsPage() {
   const summary = !Array.isArray(reportData) && reportData ? reportData : null;
   const tableRows = Array.isArray(reportData) ? reportData : null;
 
+  const summaryMetrics: AdaptiveReportMetric[] =
+    summary && selectedReport === 'SUMMARY'
+      ? SUMMARY_CARDS.map((card, idx) => {
+          const value = summary[card.id];
+          return {
+            id: card.id,
+            label: card.label,
+            value: card.money
+              ? formatCurrency(Number(value || 0))
+              : Number(value || 0).toLocaleString(),
+            sub: card.hint,
+            priority: (idx < 2 ? 'primary' : idx < 4 ? 'secondary' : 'tertiary') as AdaptiveReportMetric['priority'],
+          };
+        })
+      : [];
+
   return (
     <Layout>
-      <div className="mx-auto max-w-7xl space-y-5 p-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-slate-900">
-              <Receipt className="h-6 w-6" />
-              Expense reports
-            </h1>
-            <p className="mt-1 text-sm text-slate-600">
-              Recognized expense hits P&amp;L on approval; pay clears AP from Cash / Bank / MoMo /
-              Petty. Cancelled vouchers are excluded.
-            </p>
-          </div>
+      <AdaptivePage
+        className="mx-auto max-w-7xl p-6"
+        title="Expense reports"
+        description="Recognized expense hits P&L on approval; pay clears AP from Cash / Bank / MoMo / Petty. Cancelled vouchers are excluded."
+        primaryActions={
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => void generateReport()} disabled={loading}>
+            <Button variant="outline" size="sm" onClick={() => void generateReport()} disabled={loading} className="min-h-[var(--layout-touch-target)]">
               {loading ? (
                 <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
               ) : (
@@ -361,14 +376,15 @@ export default function ExpenseReportsPage() {
               Refresh
             </Button>
             {tableRows && visibleCols.length > 0 && (
-              <Button variant="outline" size="sm" onClick={exportVisibleCsv}>
+              <Button variant="outline" size="sm" onClick={exportVisibleCsv} className="min-h-[var(--layout-touch-target)]">
                 <Download className="mr-1.5 h-4 w-4" />
                 Export CSV
               </Button>
             )}
           </div>
-        </div>
-
+        }
+      >
+        <div className="space-y-5" data-expense-report-filters="true">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
             Report type
@@ -468,31 +484,29 @@ export default function ExpenseReportsPage() {
         )}
 
         {summary && selectedReport === 'SUMMARY' && (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {SUMMARY_CARDS.map((card) => {
-              const value = summary[card.id];
-              return (
-                <div
-                  key={card.id}
-                  className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    {card.label}
+          <AdaptiveReportShell
+            detailLabel="Expense summary"
+            summary={<AdaptiveReportSummary metrics={summaryMetrics} />}
+            table={<div className="text-sm text-slate-500 p-2">Summary KPIs shown above — switch report type for tabular detail.</div>}
+            cards={
+              <div className="space-y-3" data-expense-report-detail="cards">
+                {summaryMetrics.map((m) => (
+                  <div key={m.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{m.label}</div>
+                    <div className="mt-1 text-xl font-semibold tabular-nums text-slate-900">{m.value}</div>
+                    {m.sub ? <div className="mt-1 text-xs text-slate-500">{m.sub}</div> : null}
                   </div>
-                  <div className="mt-1 text-xl font-semibold tabular-nums text-slate-900">
-                    {card.money
-                      ? formatCurrency(Number(value || 0))
-                      : Number(value || 0).toLocaleString()}
-                  </div>
-                  <div className="mt-1 text-xs text-slate-500">{card.hint}</div>
-                </div>
-              );
-            })}
-          </div>
+                ))}
+              </div>
+            }
+          />
         )}
 
         {tableRows && (
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <AdaptiveReportShell
+            detailLabel="Expense report rows"
+            table={
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" data-expense-report-detail="table">
             <div className="overflow-auto">
               <table className="min-w-full text-sm">
                 <thead className="sticky top-0 z-10 border-b border-slate-200 bg-slate-50/95 backdrop-blur">
@@ -547,8 +561,42 @@ export default function ExpenseReportsPage() {
               </div>
             )}
           </div>
+            }
+            cards={
+              <div className="space-y-2 overflow-x-auto" data-expense-report-detail="cards">
+                <p className="text-xs text-slate-500 px-1">{tableRows.length} rows — scroll horizontally on small screens.</p>
+                <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="overflow-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="border-b border-slate-200 bg-slate-50">
+                        <tr>
+                          {visibleCols.slice(0, 4).map((col) => (
+                            <th key={col.id} className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase text-slate-500">
+                              {col.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {tableRows.slice(0, 25).map((row, idx) => (
+                          <tr key={idx}>
+                            {visibleCols.slice(0, 4).map((col) => (
+                              <td key={col.id} className="whitespace-nowrap px-3 py-2 text-slate-700">
+                                {formatCell(col, row[col.id])}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            }
+          />
         )}
-      </div>
+        </div>
+      </AdaptivePage>
     </Layout>
   );
 }

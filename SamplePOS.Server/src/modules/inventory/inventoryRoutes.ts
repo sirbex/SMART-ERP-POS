@@ -9,7 +9,7 @@ import { validateExpiryEdit } from './batchExpiryGovernanceService.js';
 import { correctLotExpiry } from '../inventory-lot/lotService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requirePermission } from '../../rbac/middleware.js';
+import { requireAnyPermission, requirePermission } from '../../rbac/middleware.js';
 import { stockCountRoutes } from './stockCountRoutes.js';
 import { storeTransferRoutes } from './warehouse/storeTransferRoutes.js';
 import { expiryAutomationRoutes } from './warehouse/expiryAutomationRoutes.js';
@@ -500,7 +500,14 @@ inventoryRoutes.get(
   requirePermission('inventory.read'),
   asyncHandler(inventoryController.getStoreLots),
 );
-inventoryRoutes.get('/pos/catalog', authenticate, requirePermission('pos.read'), asyncHandler(inventoryController.getPosCatalog));
+// FOH waiters have restaurant.read (not pos.read) but still need the shop catalog
+// for offline stock mirror — same selling projection retail POS uses.
+inventoryRoutes.get(
+  '/pos/catalog',
+  authenticate,
+  requireAnyPermission(['pos.read', 'restaurant.read']),
+  asyncHandler(inventoryController.getPosCatalog),
+);
 inventoryRoutes.get(
   '/pos/product-search',
   authenticate,

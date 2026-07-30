@@ -27,6 +27,11 @@ import { formatCurrency } from '../../utils/currency';
 import { accountingApi } from '../../services/api';
 import { format, parseISO } from 'date-fns';
 import toast from 'react-hot-toast';
+import {
+  AdaptivePage,
+  AdaptiveSearch,
+  AdaptiveToolbar,
+} from '../../components/adaptive';
 
 interface LedgerEntry {
   id: string;
@@ -365,93 +370,101 @@ const GeneralLedgerPage = () => {
   };
 
   return (
-    <>
-      <div className="p-4 lg:p-6">
-        {/* Controls */}
-        <Card className="mb-6">
+    <AdaptivePage
+      className="p-4 lg:p-6"
+      title="General Ledger"
+      description="Filter transactions by account, date range, or search terms"
+      toolbar={
+        <Card data-gl-filters="true">
           <CardHeader>
             <CardTitle>Filters & Search</CardTitle>
             <CardDescription>Filter transactions by account, date range, or search terms</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {/* First Row: Search and Account Filter */}
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                  <Input
-                    placeholder="Search by description, reference, or transaction ID..."
+              <AdaptiveToolbar
+                leading={
+                  <AdaptiveSearch
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                  />
-                </div>
-                <Select value={selectedAccount} onValueChange={setSelectedAccount}>
-                  <SelectTrigger className="w-full sm:w-64">
-                    <SelectValue placeholder="Filter by account" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ALL">All Accounts</SelectItem>
-                    {accounts.map(account => (
-                      <SelectItem key={account.id} value={account.id}>
-                        {account.accountNumber} - {account.accountName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Second Row: Date Range */}
-              <div className="flex flex-col sm:flex-row gap-4 items-end">
-                <div className="space-y-2">
-                  <Label>Date From</Label>
-                  <DatePicker
-                    value={dateFrom}
-                    onChange={(date) => {
-                      setDateFrom(date);
+                    onChange={(v) => {
+                      setSearchTerm(v);
                       setCurrentPage(1);
                     }}
-                    placeholder="Select date"
-                    className="w-full sm:w-48"
+                    placeholder="Search by description, reference, or transaction ID..."
+                    label="Search ledger"
                   />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Date To</Label>
-                  <DatePicker
-                    value={dateTo}
-                    onChange={(date) => {
-                      setDateTo(date);
-                      setCurrentPage(1);
-                    }}
-                    placeholder="Select date"
-                    className="w-full sm:w-48"
-                  />
-                </div>
-
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setDateFrom('');
-                      setDateTo('');
-                      setSearchTerm('');
-                      setSelectedAccount('ALL');
-                      setCurrentPage(1);
-                    }}
-                  >
-                    Clear Filters
-                  </Button>
-                  <Button variant="outline" onClick={exportToCSV} disabled={loading || entries.length === 0}>
-                    <Download className="h-4 w-4 mr-2" />
-                    Export CSV
-                  </Button>
-                </div>
-              </div>
+                }
+                secondaryLabel="Filters"
+                secondary={
+                  <div className="flex flex-col gap-3 min-w-[14rem]">
+                    <Select value={selectedAccount} onValueChange={(v) => { setSelectedAccount(v); setCurrentPage(1); }}>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Filter by account" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ALL">All Accounts</SelectItem>
+                        {accounts.map(account => (
+                          <SelectItem key={account.id} value={account.id}>
+                            {account.accountNumber} - {account.accountName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="space-y-2">
+                      <Label>Date From</Label>
+                      <DatePicker
+                        value={dateFrom}
+                        onChange={(date) => {
+                          setDateFrom(date);
+                          setCurrentPage(1);
+                        }}
+                        placeholder="Select date"
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Date To</Label>
+                      <DatePicker
+                        value={dateTo}
+                        onChange={(date) => {
+                          setDateTo(date);
+                          setCurrentPage(1);
+                        }}
+                        placeholder="Select date"
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                }
+              >
+                <Button
+                  variant="outline"
+                  className="min-h-[var(--layout-touch-target)]"
+                  onClick={() => {
+                    setDateFrom('');
+                    setDateTo('');
+                    setSearchTerm('');
+                    setSelectedAccount('ALL');
+                    setCurrentPage(1);
+                  }}
+                >
+                  Clear Filters
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={exportToCSV}
+                  disabled={loading || entries.length === 0}
+                  className="min-h-[var(--layout-touch-target)]"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
+              </AdaptiveToolbar>
             </div>
           </CardContent>
         </Card>
-
+      }
+    >
         {/* Ledger Table */}
         <Card>
           <CardHeader>
@@ -740,8 +753,7 @@ const GeneralLedgerPage = () => {
             )}
           </DialogContent>
         </Dialog>
-      </div>
-    </>
+    </AdaptivePage>
   );
 };
 

@@ -47,7 +47,6 @@ import {
 import { api } from '../../services/api';
 import { formatTimestampDate } from '../../utils/businessDate';
 import { ListSkeleton } from '../../components/ui/ListSkeleton';
-import { ResponsiveToolbar, ResponsiveToolbarActions } from '../../components/ui/ResponsiveActionBar';
 import { AdjustCustomerInvoiceModal } from '../../components/shared/AdjustCustomerInvoiceModal';
 import {
     CustomerNotesAdaptiveGrid,
@@ -57,6 +56,9 @@ import {
     AdaptiveDialog,
     AdaptiveFormField,
     AdaptiveFormLayout,
+    AdaptivePage,
+    AdaptiveSearch,
+    AdaptiveToolbar,
 } from '../../components/adaptive';
 
 /** Supplier notes use DRAFT/POSTED/APPLIED; customer notes use Draft/Posted. */
@@ -91,14 +93,11 @@ const CreditDebitNotesPage: React.FC = () => {
     const [activeTab, setActiveTab] = useState(initialTab);
 
     return (
-        <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-            <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-gray-900">Credit & Debit Notes</h1>
-                <p className="text-sm text-gray-500 mt-1">
-                    Manage credit notes (returns/allowances) and debit notes (additional charges)
-                </p>
-            </div>
-
+        <AdaptivePage
+            className="p-4 sm:p-6"
+            title="Credit & Debit Notes"
+            description="Manage credit notes (returns/allowances) and debit notes (additional charges)"
+        >
             <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList className="w-full sm:w-auto flex overflow-x-auto">
                     <TabsTrigger value="customer" className="flex-shrink-0">
@@ -119,7 +118,7 @@ const CreditDebitNotesPage: React.FC = () => {
                     <SupplierNotesTab />
                 </TabsContent>
             </Tabs>
-        </div>
+        </AdaptivePage>
     );
 };
 
@@ -216,34 +215,35 @@ function CustomerNotesTab() {
                 </p>
             </div>
 
-            <ResponsiveToolbar>
-                <div className="relative flex-1 min-w-0 sm:max-w-md">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                        placeholder="Search notes..."
+            <div data-cdn-filters="customer">
+            <AdaptiveToolbar
+                leading={
+                    <AdaptiveSearch
                         value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        className="pl-10"
+                        onChange={setSearch}
+                        placeholder="Search notes..."
+                        label="Search customer notes"
                     />
-                </div>
-
-                <Select value={typeFilter} onValueChange={(v: string) => setTypeFilter(v as 'ALL' | 'CREDIT_NOTE' | 'DEBIT_NOTE')}>
-                    <SelectTrigger className="w-full sm:w-48">
-                        <SelectValue placeholder="All Types" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="ALL">All Types</SelectItem>
-                        <SelectItem value="CREDIT_NOTE">Credit Notes</SelectItem>
-                        <SelectItem value="DEBIT_NOTE">Debit Notes</SelectItem>
-                    </SelectContent>
-                </Select>
-
-                <ResponsiveToolbarActions>
+                }
+                secondaryLabel="Type"
+                secondary={
+                    <Select value={typeFilter} onValueChange={(v: string) => setTypeFilter(v as 'ALL' | 'CREDIT_NOTE' | 'DEBIT_NOTE')}>
+                        <SelectTrigger className="w-full sm:w-48">
+                            <SelectValue placeholder="All Types" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="ALL">All Types</SelectItem>
+                            <SelectItem value="CREDIT_NOTE">Credit Notes</SelectItem>
+                            <SelectItem value="DEBIT_NOTE">Debit Notes</SelectItem>
+                        </SelectContent>
+                    </Select>
+                }
+            >
                     <Button
                         variant="outline"
                         size="sm"
                         onClick={() => setIsSmartCreditOpen(true)}
-                        className="flex items-center gap-1"
+                        className="flex items-center gap-1 min-h-[var(--layout-touch-target)]"
                     >
                         <Sparkles className="h-4 w-4" />
                         Credit Note
@@ -253,13 +253,13 @@ function CustomerNotesTab() {
                         variant="outline"
                         size="sm"
                         onClick={() => { setCreateType('DEBIT_NOTE'); setIsCreateModalOpen(true); }}
-                        className="flex items-center gap-1"
+                        className="flex items-center gap-1 min-h-[var(--layout-touch-target)]"
                     >
                         <FilePlus className="h-4 w-4" />
                         Debit Note
                     </Button>
-                </ResponsiveToolbarActions>
-            </ResponsiveToolbar>
+            </AdaptiveToolbar>
+            </div>
 
             {loading ? (
                 <div className="rounded-lg border border-gray-100 bg-white">
@@ -526,34 +526,35 @@ function SupplierNotesTab() {
                 </div>
             )}
 
-            <ResponsiveToolbar>
-                <div className="relative flex-1 min-w-0 sm:max-w-md">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <Input
-                        placeholder="Search supplier notes..."
+            <div data-cdn-filters="supplier">
+            <AdaptiveToolbar
+                leading={
+                    <AdaptiveSearch
                         value={search}
-                        onChange={e => setSearch(e.target.value)}
-                        className="pl-10"
+                        onChange={setSearch}
+                        placeholder="Search supplier notes..."
+                        label="Search supplier notes"
                     />
-                </div>
-
-                <Select value={typeFilter} onValueChange={(v: string) => setTypeFilter(v as 'ALL' | 'SUPPLIER_CREDIT_NOTE' | 'SUPPLIER_DEBIT_NOTE')}>
-                    <SelectTrigger className="w-full sm:w-52">
-                        <SelectValue placeholder="All Types" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="ALL">All Types</SelectItem>
-                        <SelectItem value="SUPPLIER_CREDIT_NOTE">Credit Notes</SelectItem>
-                        <SelectItem value="SUPPLIER_DEBIT_NOTE">Debit Notes</SelectItem>
-                    </SelectContent>
-                </Select>
-
-                <ResponsiveToolbarActions>
+                }
+                secondaryLabel="Type"
+                secondary={
+                    <Select value={typeFilter} onValueChange={(v: string) => setTypeFilter(v as 'ALL' | 'SUPPLIER_CREDIT_NOTE' | 'SUPPLIER_DEBIT_NOTE')}>
+                        <SelectTrigger className="w-full sm:w-52">
+                            <SelectValue placeholder="All Types" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="ALL">All Types</SelectItem>
+                            <SelectItem value="SUPPLIER_CREDIT_NOTE">Credit Notes</SelectItem>
+                            <SelectItem value="SUPPLIER_DEBIT_NOTE">Debit Notes</SelectItem>
+                        </SelectContent>
+                    </Select>
+                }
+            >
                     <Button
                         variant="outline"
                         size="sm"
                         onClick={() => { setCreateType('SUPPLIER_CREDIT_NOTE'); setIsCreateModalOpen(true); }}
-                        className="flex items-center gap-1"
+                        className="flex items-center gap-1 min-h-[var(--layout-touch-target)]"
                     >
                         <FileMinus className="h-4 w-4" />
                         Credit Note
@@ -563,13 +564,13 @@ function SupplierNotesTab() {
                         variant="outline"
                         size="sm"
                         onClick={() => { setCreateType('SUPPLIER_DEBIT_NOTE'); setIsCreateModalOpen(true); }}
-                        className="flex items-center gap-1"
+                        className="flex items-center gap-1 min-h-[var(--layout-touch-target)]"
                     >
                         <FilePlus className="h-4 w-4" />
                         Debit Note
                     </Button>
-                </ResponsiveToolbarActions>
-            </ResponsiveToolbar>
+            </AdaptiveToolbar>
+            </div>
 
             {(draftNotes.length > 0 || onAccountNotes.length > 0) && (
                 <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2">

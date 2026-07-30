@@ -17,6 +17,12 @@ import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapp
 import { formatCurrency } from '../../utils/currency';
 import { useBusinessPerformance } from '../../hooks/useApi';
 import { computeDateRange } from '../../utils/dateRangePresets';
+import {
+  AdaptivePage,
+  AdaptiveReportShell,
+  AdaptiveReportSummary,
+  type AdaptiveReportMetric,
+} from '../../components/adaptive';
 
 // ---------------------------------------------------------------------------
 // Types matching the new ledger-based API response
@@ -190,82 +196,85 @@ const BusinessPerformancePage: React.FC = () => {
     ]
     : [];
 
+  const kpiMetrics: AdaptiveReportMetric[] = summaryCards.map((card, idx) => ({
+    id: card.label,
+    label: card.label,
+    value: card.value,
+    sub: card.sub,
+    toneClassName: card.color,
+    priority: (idx < 2 ? 'primary' : idx < 4 ? 'secondary' : 'tertiary') as AdaptiveReportMetric['priority'],
+  }));
+
   return (
     <Layout>
-      <div className="p-6 max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Management P&amp;L by Category
-          </h1>
-          <p className="text-gray-500 mt-1">
-            Ledger-based report — where did money come from, and where did it go?
-          </p>
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-lg border shadow-sm p-4 space-y-4">
-          <DateRangeFilter
-            startDate={startDate}
-            endDate={endDate}
-            onStartDateChange={setStartDate}
-            onEndDateChange={setEndDate}
-            defaultPreset="THIS_MONTH"
-          />
-          <div className="flex flex-wrap gap-4 items-end">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Section
+      <AdaptivePage
+        className="p-6 max-w-7xl mx-auto"
+        title="Management P&L by Category"
+        description="Ledger-based report — where did money come from, and where did it go?"
+        toolbar={
+          <div className="bg-white rounded-lg border shadow-sm p-4 space-y-4" data-bp-filters="true">
+            <DateRangeFilter
+              startDate={startDate}
+              endDate={endDate}
+              onStartDateChange={setStartDate}
+              onEndDateChange={setEndDate}
+              defaultPreset="THIS_MONTH"
+            />
+            <div className="flex flex-wrap gap-4 items-end">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Section
+                </label>
+                <select
+                  value={visibleSection}
+                  onChange={(e) => setVisibleSection(e.target.value as SectionKey)}
+                  className="border rounded-md px-3 py-1.5 text-sm bg-white min-h-[var(--layout-touch-target)]"
+                >
+                  {SECTION_OPTIONS.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Payment Method
+                </label>
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  className="border rounded-md px-3 py-1.5 text-sm bg-white min-h-[var(--layout-touch-target)]"
+                >
+                  {PAYMENT_METHODS.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer min-h-[var(--layout-touch-target)]">
+                <input
+                  type="checkbox"
+                  checked={includeStockAdj}
+                  onChange={(e) => setIncludeStockAdj(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                Include Stock Adjustments
               </label>
-              <select
-                value={visibleSection}
-                onChange={(e) => setVisibleSection(e.target.value as SectionKey)}
-                className="border rounded-md px-3 py-1.5 text-sm bg-white"
-              >
-                {SECTION_OPTIONS.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Payment Method
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer min-h-[var(--layout-touch-target)]">
+                <input
+                  type="checkbox"
+                  checked={includeExpenses}
+                  onChange={(e) => setIncludeExpenses(e.target.checked)}
+                  className="rounded border-gray-300"
+                />
+                Include Expenses
               </label>
-              <select
-                value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-                className="border rounded-md px-3 py-1.5 text-sm bg-white"
-              >
-                {PAYMENT_METHODS.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
             </div>
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={includeStockAdj}
-                onChange={(e) => setIncludeStockAdj(e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              Include Stock Adjustments
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={includeExpenses}
-                onChange={(e) => setIncludeExpenses(e.target.checked)}
-                className="rounded border-gray-300"
-              />
-              Include Expenses
-            </label>
           </div>
-        </div>
-
+        }
+      >
         {/* Loading */}
         {isLoading && (
           <div className="text-center py-12 text-gray-500">Loading report…</div>
@@ -281,25 +290,13 @@ const BusinessPerformancePage: React.FC = () => {
         )}
 
         {report && !isLoading && (
-          <>
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-              {summaryCards.map((card) => (
-                <div key={card.label} className={`${card.bg} rounded-lg p-4 border`}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <card.icon className={`h-4 w-4 ${card.color}`} />
-                    <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                      {card.label}
-                    </span>
-                  </div>
-                  <div className={`text-lg font-bold ${card.color}`}>{card.value}</div>
-                  {card.sub && (
-                    <div className="text-xs text-gray-500 mt-0.5">{card.sub}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-
+          <AdaptiveReportShell
+            detailLabel="P&L detail"
+            summary={
+              kpiMetrics.length > 0 ? <AdaptiveReportSummary metrics={kpiMetrics} /> : null
+            }
+            table={
+              <div className="space-y-6" data-bp-detail="table">
             {/* ── Section 1: Money In ── */}
             {showSection('MONEY_IN') && (
               <div className="bg-white rounded-lg border shadow-sm">
@@ -911,9 +908,32 @@ const BusinessPerformancePage: React.FC = () => {
                 </div>
               </div>
             )}
-          </>
+              </div>
+            }
+            cards={
+              <div className="space-y-4" data-bp-detail="cards">
+                {kpiMetrics.map((m) => (
+                  <div
+                    key={m.id}
+                    className="rounded-lg border bg-white p-4 shadow-sm"
+                  >
+                    <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                      {m.label}
+                    </div>
+                    <div className={`mt-1 text-lg font-bold ${m.toneClassName || 'text-gray-900'}`}>
+                      {m.value}
+                    </div>
+                    {m.sub ? <div className="mt-0.5 text-xs text-gray-500">{m.sub}</div> : null}
+                  </div>
+                ))}
+                <p className="text-sm text-gray-500 px-1">
+                  Expand Details on larger screens for full P&amp;L sections, or switch workspace to desktop.
+                </p>
+              </div>
+            }
+          />
         )}
-      </div>
+      </AdaptivePage>
     </Layout>
   );
 };

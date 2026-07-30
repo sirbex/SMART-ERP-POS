@@ -1,4 +1,12 @@
-export { AdaptiveAppShell, useAdaptiveLayout, useAdaptiveLayoutOptional } from './AdaptiveAppShell';
+export {
+  AdaptiveAppShell,
+  useAdaptiveLayout,
+  useAdaptiveLayoutOptional,
+  useAdaptiveDeviceCapabilities,
+  useAdaptiveDeviceCapabilitiesOptional,
+  useAdaptiveWorkspace,
+  useAdaptiveWorkspaceOptional,
+} from './AdaptiveAppShell';
 export {
   AdaptiveNavigation,
   AdaptiveShellBar,
@@ -13,6 +21,11 @@ export { AdaptiveActionBar } from './AdaptiveActionBar';
 export { AdaptiveReportSummary } from './AdaptiveReportSummary';
 export type { AdaptiveReportMetric } from './AdaptiveReportSummary';
 export { AdaptiveReportShell } from './AdaptiveReportShell';
+export { AdaptivePage } from './AdaptivePage';
+export { AdaptiveToolbar } from './AdaptiveToolbar';
+export { AdaptiveSearch } from './AdaptiveSearch';
+export { AdaptiveScanner } from './AdaptiveScanner';
+export { AdaptivePrintPreview } from './AdaptivePrintPreview';
 export {
   resolveAdaptiveChrome,
   shouldShowCoach,
@@ -24,3 +37,44 @@ export {
   ADAPTIVE_ON_DEMAND_SURFACES,
 } from '../../lib/adaptiveChrome';
 export type { AdaptiveChrome } from '../../lib/adaptiveChrome';
+export {
+  buildDeviceCapabilities,
+  detectDeviceCapabilityExtras,
+  resolvePrinterCapability,
+  withDeviceCapabilityExtras,
+} from '../../lib/deviceCapabilities';
+export type {
+  DeviceCapabilities,
+  DeviceCapabilityExtras,
+  PrinterCapability,
+} from '../../lib/deviceCapabilities';
+export {
+  classifyTaskFamily,
+  resolveWorkspace,
+  workspaceDatasetValue,
+} from '../../lib/workspaces';
+export type {
+  WorkspaceId,
+  WorkspaceProfile,
+  WorkspaceTaskFamily,
+} from '../../lib/workspaces';
+export {
+  resolveShellNavChrome,
+  shellNavChromeFromWorkspace,
+} from '../../lib/adaptiveShellNav';
+export type { ShellNavChrome } from '../../lib/adaptiveShellNav';
+export {
+  resolvePageDensity,
+  resolveToolbarMode,
+  resolveSearchPresentation,
+  resolveScannerMode,
+  resolvePrintPreviewPresentation,
+  resolveFloorplanFromWorkspace,
+} from '../../lib/adaptiveFloorplan';
+export type {
+  AdaptivePageDensity,
+  AdaptiveToolbarMode,
+  AdaptiveSearchPresentation,
+  AdaptiveScannerMode,
+  AdaptivePrintPreviewPresentation,
+} from '../../lib/adaptiveFloorplan';

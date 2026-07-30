@@ -69,6 +69,11 @@ import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import { inventoryKeys } from '../../hooks/useInventory';
 import { DatePicker } from '../../components/ui/date-picker';
 import SlideDrawer from '../../components/ui/SlideDrawer';
+import {
+  AdaptivePage,
+  AdaptiveSearch,
+  AdaptiveToolbar,
+} from '../../components/adaptive';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -1354,104 +1359,102 @@ export default function GoodsReceiptsPage() {
 
   return (
     <div className="p-4 sm:p-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:justify-between sm:items-start mb-6">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Goods Receipts</h2>
-          <p className="text-sm sm:text-base text-gray-600 mt-1">
-            Receiving workflow with batch creation and cost change alerts
-          </p>
-        </div>
-        <div className="flex flex-col gap-3 w-full sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
-          <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
-            <span className="text-sm text-gray-600 shrink-0">Cost variance baseline:</span>
-            <select
-              aria-label="Cost variance baseline"
-              title="Cost variance baseline"
-              className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[2.75rem] sm:min-h-0"
-              value={baseline}
-              onChange={(e) => setBaseline(e.target.value as 'PO' | 'PRODUCT')}
-            >
-              <option value="PO">PO Cost</option>
-              <option value="PRODUCT">Product Cost</option>
-            </select>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:gap-2">
-          {canCreateGR && (
-            <div className="w-full sm:w-auto [&>button]:w-full sm:[&>button]:w-auto">
-              <ManualGRButton />
+      <AdaptivePage
+        title="Goods Receipts"
+        description="Receiving workflow with batch creation and cost change alerts"
+        primaryActions={
+          <div className="flex flex-col gap-3 w-full sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
+            <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
+              <span className="text-sm text-gray-600 shrink-0">Cost variance baseline:</span>
+              <select
+                aria-label="Cost variance baseline"
+                title="Cost variance baseline"
+                className="w-full sm:w-auto border border-gray-300 rounded-lg px-3 py-2 text-sm min-h-[var(--layout-touch-target)]"
+                value={baseline}
+                onChange={(e) => setBaseline(e.target.value as 'PO' | 'PRODUCT')}
+              >
+                <option value="PO">PO Cost</option>
+                <option value="PRODUCT">Product Cost</option>
+              </select>
             </div>
-          )}
-          {canCreateGR && (
-            <button
-              onClick={openCreateModal}
-              className={`${mobileActionBtnClass} px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex`}
-            >
-              + Create from PO
-            </button>
-          )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:gap-2">
+              {canCreateGR && (
+                <div className="w-full sm:w-auto [&>button]:w-full sm:[&>button]:w-auto">
+                  <ManualGRButton />
+                </div>
+              )}
+              {canCreateGR && (
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className={`${mobileActionBtnClass} px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex min-h-[var(--layout-touch-target)]`}
+                >
+                  + Create from PO
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
-          {/* Search */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Search
-            </label>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="GRN, PO number, supplier..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        }
+        toolbar={
+          <div className="bg-white rounded-lg border border-gray-200 p-4" data-gr-filters="true">
+            <AdaptiveToolbar
+              leading={
+                <AdaptiveSearch
+                  value={searchTerm}
+                  onChange={setSearchTerm}
+                  placeholder="GRN, PO number, supplier..."
+                  label="Search goods receipts"
+                />
+              }
+              secondaryLabel="Filters"
+              secondary={
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-[14rem]">
+                  <div>
+                    <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-2">
+                      Status
+                    </label>
+                    <select
+                      id="status-filter"
+                      value={statusFilter}
+                      onChange={(e) => {
+                        setStatusFilter(e.target.value);
+                        setPage(1);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                    >
+                      <option value="">All Statuses</option>
+                      <option value="DRAFT">Draft</option>
+                      <option value="COMPLETED">Completed</option>
+                      <option value="CANCELLED">Cancelled</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="billing-filter" className="block text-sm font-medium text-gray-700 mb-2">
+                      Supplier invoice
+                    </label>
+                    <select
+                      id="billing-filter"
+                      value={billingFilter}
+                      onChange={(e) => {
+                        setBillingFilter(e.target.value as '' | 'TO_INVOICE' | 'INVOICED');
+                        setPage(1);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
+                    >
+                      <option value="">All</option>
+                      <option value="TO_INVOICE">To invoice (not billed)</option>
+                      <option value="INVOICED">Invoiced (bill posted)</option>
+                    </select>
+                  </div>
+                </div>
+              }
             />
           </div>
-
-          {/* Status */}
-          <div>
-            <label htmlFor="status-filter" className="block text-sm font-medium text-gray-700 mb-2">
-              Status
-            </label>
-            <select
-              id="status-filter"
-              value={statusFilter}
-              onChange={(e) => {
-                setStatusFilter(e.target.value);
-                setPage(1);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">All Statuses</option>
-              <option value="DRAFT">Draft</option>
-              <option value="COMPLETED">Completed</option>
-              <option value="CANCELLED">Cancelled</option>
-            </select>
-          </div>
-
-          {/* Supplier invoice / billing (SAP GR/IR vs AP) */}
-          <div>
-            <label htmlFor="billing-filter" className="block text-sm font-medium text-gray-700 mb-2">
-              Supplier invoice
-            </label>
-            <select
-              id="billing-filter"
-              value={billingFilter}
-              onChange={(e) => {
-                setBillingFilter(e.target.value as '' | 'TO_INVOICE' | 'INVOICED');
-                setPage(1);
-              }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">All</option>
-              <option value="TO_INVOICE">To invoice (not billed)</option>
-              <option value="INVOICED">Invoiced (bill posted)</option>
-            </select>
-          </div>
-
+        }
+      >
+      {/* Date filters remain on-canvas; search/status/billing live in AdaptiveToolbar */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6" data-gr-date-filters="true">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Date Range Preset */}
           <div>
             <label htmlFor="grn-date-preset" className="block text-sm font-medium text-gray-700 mb-2">
@@ -1467,15 +1470,15 @@ export default function GoodsReceiptsPage() {
                 setStartDate(range.start);
                 setEndDate(range.end);
               }}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[var(--layout-touch-target)]"
             >
               <option value="custom">All Dates</option>
-              <option value="today">📅 Today</option>
-              <option value="yesterday">📅 Yesterday</option>
-              <option value="this_week">📅 This Week</option>
-              <option value="last_week">📅 Last Week</option>
-              <option value="this_month">📅 This Month</option>
-              <option value="last_month">📅 Last Month</option>
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="this_week">This Week</option>
+              <option value="last_week">Last Week</option>
+              <option value="this_month">This Month</option>
+              <option value="last_month">Last Month</option>
             </select>
           </div>
 
@@ -1705,6 +1708,7 @@ export default function GoodsReceiptsPage() {
           )}
         </div>
       )}
+      </AdaptivePage>
 
       {/* Details workspace */}
       {showDetailsModal && selectedGR && (

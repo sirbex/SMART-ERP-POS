@@ -21,6 +21,8 @@ import {
   AdaptiveDialog,
   AdaptiveFormField,
   AdaptiveFormLayout,
+  AdaptivePage,
+  AdaptiveSearch,
 } from '../components/adaptive';
 import { SortableTableHeader } from '../components/ui/SortableTableHeader';
 import { useServerTableSort } from '../hooks/useServerTableSort';
@@ -473,50 +475,50 @@ export default function SuppliersPage() {
 
   return (
     <Layout>
-      <div className="p-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Supplier Management</h2>
-              <WorkflowHelpTrigger title="Supplier Management">
-                <ul className="space-y-1">
-                  <li>
-                    • <strong>Payment Terms:</strong> Standard terms NET30 (30 days), NET60, NET90, COD, or Prepaid
-                  </li>
-                  <li>
-                    • <strong>Contact Information:</strong> Keep supplier details up-to-date for smooth communication
-                  </li>
-                  <li>
-                    • <strong>Active Status:</strong> Inactive suppliers won&apos;t appear in purchase order creation
-                  </li>
-                  <li>• <strong>BR-PO-001:</strong> Valid supplier required for all purchase orders</li>
-                  <li>
-                    • <strong>Search:</strong> Find suppliers quickly by name, contact person, email, or phone
-                  </li>
-                </ul>
-              </WorkflowHelpTrigger>
-            </div>
-            <p className="text-sm text-gray-600 mt-1">Manage your suppliers and vendor relationships</p>
-          </div>
-          <div className="flex gap-2 self-start sm:self-auto">
+      <AdaptivePage
+        className="p-6"
+        title={
+          <span className="inline-flex items-center gap-2">
+            Supplier Management
+            <WorkflowHelpTrigger title="Supplier Management">
+              <ul className="space-y-1 text-sm">
+                <li>• Keep contact details current for PO and payment workflows</li>
+                <li>• Inactive suppliers are hidden from new purchase orders</li>
+              </ul>
+            </WorkflowHelpTrigger>
+          </span>
+        }
+        description="Manage your suppliers and vendor relationships"
+        primaryActions={
+          <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => setShowExportOptions(!showExportOptions)}
-              className="px-3 sm:px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1 sm:gap-2 text-sm"
+              className="px-3 sm:px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1 sm:gap-2 text-sm min-h-[var(--layout-touch-target)]"
             >
-              📤 Export
+              Export
             </button>
             {canCreateSupplier && (
               <button
+                type="button"
                 onClick={() => setShowCreateModal(true)}
-                className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1 sm:gap-2 text-sm"
+                className="px-3 sm:px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-1 sm:gap-2 text-sm min-h-[var(--layout-touch-target)]"
               >
-                ➕ Add Supplier
+                Add Supplier
               </button>
             )}
           </div>
-        </div>
-
+        }
+        toolbar={
+          <AdaptiveSearch
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search suppliers by name, contact, email, phone, address..."
+            label="Search suppliers"
+            className={isFetching ? 'ring-2 ring-blue-200 rounded-md' : ''}
+          />
+        }
+      >
         {/* Export Options */}
         {showExportOptions && (
           <div className="mb-6 bg-white rounded-lg shadow p-4">
@@ -572,22 +574,11 @@ export default function SuppliersPage() {
           </div>
         </div>
 
-        {/* Search & Filters */}
-        <div className="bg-white rounded-lg shadow p-4 mb-6">
+        {/* Filters (search is in AdaptivePage toolbar) */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6" data-supplier-filters="true">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-            {/* Search */}
-            <div className="lg:col-span-5">
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search suppliers by name, contact, email, phone, address..."
-                className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${isFetching ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}
-              />
-            </div>
-
             {/* Payment Terms Filter */}
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-3">
               <label htmlFor="filter-payment-terms" className="sr-only">
                 Filter by Payment Terms
               </label>
@@ -1068,7 +1059,7 @@ export default function SuppliersPage() {
             onSubmit={editingSupplier ? handleUpdate : handleCreate}
           />
         )}
-      </div>
+      </AdaptivePage>
     </Layout>
   );
 }

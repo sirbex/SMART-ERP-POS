@@ -5,21 +5,25 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-describe('restaurant customer search (FOH primary)', () => {
-  it('shows CustomerSelector on every open ticket (including dine-in)', () => {
+describe('restaurant customer / waiter selector (single entry)', () => {
+  it('uses one header button — CustomerSelector only in the details dialog', () => {
     const page = readFileSync(
       resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'),
       'utf8',
     );
     expect(page).toContain("import CustomerSelector from '../../components/pos/CustomerSelector'");
-    expect(page).toContain('data-restaurant-customer="primary"');
-    expect(page).not.toMatch(
-      /serviceChannel\s*&&\s*chrome\.secondaryActions\s*===\s*'inline'\s*\?\s*\([\s\S]*CustomerSelector/,
-    );
-    expect(page).not.toMatch(
-      /\{serviceChannel \? \(\s*<div[\s\S]*data-restaurant-customer="primary"/,
-    );
+    expect(page).toContain('data-restaurant-party="open"');
+    expect(page).toContain('data-ticket-header-actions="true"');
+    expect(page).toContain('data-ticket-dialog="details"');
+    expect(page).toContain('data-restaurant-customer="dialog"');
     expect(page).toContain("'Customer (optional)'");
+    // No duplicated on-ticket CustomerSelector strip
+    expect(page).not.toContain('data-restaurant-customer="primary"');
+    expect(page).not.toMatch(
+      /data-restaurant-customer="primary"[\s\S]*CustomerSelector/,
+    );
+    // Exactly one CustomerSelector JSX usage (dialog)
+    expect(page.match(/<CustomerSelector/g)?.length).toBe(1);
   });
 
   it('renders compact customer results in-flow so overflow parents cannot clip them', () => {

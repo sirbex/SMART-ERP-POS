@@ -20,6 +20,9 @@ import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapp
 import Decimal from 'decimal.js';
 import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import SlideDrawer from '../../components/ui/SlideDrawer';
+import {
+  AdaptivePage,
+} from '../../components/adaptive';
 
 import { DatePicker } from '../../components/ui/date-picker';
 import { derivePOReceiptStatusBadge } from '../../../../shared/utils/purchaseOrderReceiptDisplay';
@@ -1585,52 +1588,31 @@ export default function PurchaseOrdersPage() {
 
   return (
     <div className="p-6">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-bold text-gray-900">Purchase Orders</h2>
+      <AdaptivePage
+        title={
+          <span className="inline-flex items-center gap-2">
+            Purchase Orders
             <WorkflowHelpTrigger title="Purchase Order Workflow">
-              <ul className="space-y-1">
-                <li>
-                  • <strong>PO Numbers:</strong> Auto-generated in format PO-YYYY-####
-                </li>
-                <li>
-                  • <strong>Status Flow:</strong> DRAFT → PENDING → APPROVED → COMPLETED
-                </li>
-                <li>
-                  • <strong>BR-PO-001:</strong> Supplier validation required for all purchase orders
-                </li>
-                <li>
-                  • <strong>BR-PO-003:</strong> Unit costs must be non-negative
-                </li>
-                <li>
-                  • <strong>BR-PO-005:</strong> Expected delivery date validated (warns if in the past)
-                </li>
-                <li>
-                  • <strong>Line Items:</strong> Add products with quantities and unit costs
-                </li>
-                <li>
-                  • <strong>Goods Receipts:</strong> Create GR when items are received to update inventory
-                </li>
-                <li>• <strong>DRAFT:</strong> Can edit, submit, or delete</li>
-                <li>• <strong>PENDING/APPROVED:</strong> Can cancel only</li>
-                <li>• <strong>COMPLETED:</strong> Immutable, linked to goods receipts</li>
-                <li>• <strong>CANCELLED:</strong> Excluded from total value calculations</li>
+              <ul className="space-y-1 text-sm">
+                <li>• <strong>Status Flow:</strong> DRAFT → PENDING → APPROVED → COMPLETED</li>
+                <li>• <strong>Goods Receipts:</strong> Create GR when items are received</li>
               </ul>
             </WorkflowHelpTrigger>
-          </div>
-          <p className="text-gray-600 mt-1">Manage supplier orders with full workflow tracking</p>
-        </div>
-        {canCreatePO && (
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-          >
-            ➕ Create PO
-          </button>
-        )}
-      </div>
+          </span>
+        }
+        description="Manage supplier orders with full workflow tracking"
+        primaryActions={
+          canCreatePO ? (
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 min-h-[var(--layout-touch-target)]"
+            >
+              Create PO
+            </button>
+          ) : null
+        }
+      >
 
       {/* Summary Statistics */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
@@ -1973,6 +1955,8 @@ export default function PurchaseOrdersPage() {
           </div>
         </div>
       )}
+
+      </AdaptivePage>
 
       {/* Create PO Modal */}
       {showCreateModal && (

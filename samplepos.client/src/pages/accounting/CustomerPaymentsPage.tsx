@@ -36,6 +36,11 @@ import { toast } from 'react-hot-toast';
 import { CUSTOMER_PAYMENT_METHODS as PAYMENT_METHODS } from '../../constants/paymentMethods';
 import { api } from '../../utils/api';
 import {
+  AdaptivePage,
+  AdaptiveSearch,
+  AdaptiveToolbar,
+} from '../../components/adaptive';
+import {
   arPaymentService,
   type ArCustomerPayment,
   type ArOpenInvoice,
@@ -474,23 +479,15 @@ const CustomerPaymentsPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Customer Payments</h1>
-          <p className="text-gray-600">
-            Collective receipts, open-item allocation, and unapplied balance tracking
-          </p>
-          {unappliedTotal > 0.01 && (
-            <p className="text-sm text-amber-700 mt-1">
-              Unapplied on account: {formatCurrency(unappliedTotal)}
-            </p>
-          )}
-        </div>
+    <AdaptivePage
+      className="space-y-6"
+      title="Customer Payments"
+      description="Collective receipts, open-item allocation, and unapplied balance tracking"
+      primaryActions={
         <div className="flex flex-wrap gap-2">
           {canCreate && (
             <Button
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 min-h-[var(--layout-touch-target)]"
               onClick={() => {
                 setShowObPanel(false);
                 setIsCreateModalOpen(true);
@@ -503,7 +500,7 @@ const CustomerPaymentsPage: React.FC = () => {
           {canManageOpeningBalance && (
             <Button
               variant="outline"
-              className="flex items-center gap-2"
+              className="flex items-center gap-2 min-h-[var(--layout-touch-target)]"
               onClick={() => {
                 setShowObPanel(true);
                 setIsCreateModalOpen(true);
@@ -517,35 +514,43 @@ const CustomerPaymentsPage: React.FC = () => {
             </Button>
           )}
         </div>
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
-          <Input
-            placeholder="Search payments..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
+      }
+      toolbar={
+        <div className="space-y-2" data-ar-payment-filters="true">
+          {unappliedTotal > 0.01 && (
+            <p className="text-sm text-amber-700">
+              Unapplied on account: {formatCurrency(unappliedTotal)}
+            </p>
+          )}
+          <AdaptiveToolbar
+            leading={
+              <AdaptiveSearch
+                value={searchTerm}
+                onChange={setSearchTerm}
+                placeholder="Search payments..."
+                label="Search payments"
+              />
+            }
+            secondaryLabel="Customer"
+            secondary={
+              <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+                <SelectTrigger className="w-full min-w-[12rem]">
+                  <SelectValue placeholder="All customers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All customers</SelectItem>
+                  {customers.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
           />
         </div>
-        <div className="w-full sm:w-64">
-          <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
-            <SelectTrigger>
-              <SelectValue placeholder="All customers" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All customers</SelectItem>
-              {customers.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
+      }
+    >
       <div className="grid gap-4">
         {payments.length === 0 ? (
           <Card>
@@ -1087,7 +1092,7 @@ const CustomerPaymentsPage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AdaptivePage>
   );
 };
 

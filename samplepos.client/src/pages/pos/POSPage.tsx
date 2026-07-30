@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import Decimal from 'decimal.js';
 import { ResponsiveTableWrapper } from '../../components/ui/ResponsiveTableWrapper';
 import POSProductSearch, { POSProductSearchHandle } from './POSProductSearch';
 import POSButton from '../../components/pos/POSButton';
 import POSModal from '../../components/pos/POSModal';
-import { AdaptiveAppShell } from '../../components/adaptive';
+import { AdaptiveAppShell, AdaptiveScanner, useAdaptiveWorkspaceOptional } from '../../components/adaptive';
 import { useLayoutTier } from '../../hooks/useLayoutTier';
 import { shouldShowCoach } from '../../lib/adaptiveChrome';
 import PrintReceiptDialog from '../../components/pos/PrintReceiptDialog';
@@ -45,7 +45,6 @@ import {
 import PosUnitPriceInput from '../../components/pos/PosUnitPriceInput';
 import { useCreatePOSSale } from '../../hooks/usePOSSales';
 import { useOfflineMode } from '../../hooks/useOfflineMode';
-import { useBarcodeScanner } from '../../hooks/useBarcodeScanner';
 import { useCreateInvoice } from '../../hooks/useApi';
 import { api } from '../../utils/api';
 import type { ReceiptData } from '../../lib/print';
@@ -353,6 +352,35 @@ function AtCostFifoHint({ item }: { item: LineItem }) {
   }
 
   return null;
+}
+
+/** Stamps workspace / POS panel attrs inside AdaptiveAppShell (Phase 3). */
+function PosWorkspaceSurface({
+  tier,
+  chrome,
+  children,
+}: {
+  tier: string;
+  chrome: { coach: string; numericPad: string; secondaryActions: string; actionLabels: string };
+  children: ReactNode;
+}) {
+  const workspace = useAdaptiveWorkspaceOptional();
+  return (
+    <div
+      className="flex flex-col h-screen bg-gray-50"
+      data-pos-tier={tier}
+      data-pos-panel={workspace?.posPanelMode ?? undefined}
+      data-workspace={workspace?.id}
+      data-workspace-nav={workspace?.navPattern}
+      data-shell-nav="minimal"
+      data-adaptive-coach={chrome.coach}
+      data-adaptive-pad={chrome.numericPad}
+      data-adaptive-secondary={chrome.secondaryActions}
+      data-adaptive-labels={chrome.actionLabels}
+    >
+      {children}
+    </div>
+  );
 }
 
 export default function POSPage() {
@@ -1089,13 +1117,8 @@ export default function POSPage() {
     }
   }, []);
 
-  useBarcodeScanner({
-    onScan: handleBarcodeScanned,
-    enabled: true,
-    minLength: 3,
-    maxLength: 50,
-    timeout: 100, // 100ms between chars for scanner detection
-  });
+  // Barcode scanning: AdaptiveScanner (HID + optional camera) → same handleBarcodeScanned
+  // (presentation only — product lookup stays in handleBarcodeScanned)
 
   // Auto-clear discounts when cart becomes empty
   useEffect(() => {
@@ -3415,15 +3438,8 @@ export default function POSPage() {
   }, [canAccessImport, canAccessSettings, canAccessRoles, user?.role, restaurantEnabled]);
 
   return (
-    <AdaptiveAppShell className="h-screen">
-    <div
-      className="flex flex-col h-screen bg-gray-50"
-      data-pos-tier={tier}
-      data-adaptive-coach={chrome.coach}
-      data-adaptive-pad={chrome.numericPad}
-      data-adaptive-secondary={chrome.secondaryActions}
-      data-adaptive-labels={chrome.actionLabels}
-    >
+    <AdaptiveAppShell className="h-screen" pathname={location.pathname}>
+    <PosWorkspaceSurface tier={tier} chrome={chrome}>
       {/* Navigation Drawer */}
       {showNavDrawer && (
         <>
@@ -3671,6 +3687,15 @@ export default function POSPage() {
       >
         {/* Left: Product search - Full width on mobile, 1/4 on desktop */}
         <section className="w-full lg:w-1/4 lg:min-w-[280px] bg-white border-b lg:border-b-0 lg:border-r p-3 sm:p-4 flex flex-col relative z-20 shrink-0 lg:max-h-none lg:overflow-y-visible">
+          <div className="mb-2" data-pos-adaptive-scanner="true">
+            <AdaptiveScanner
+              onScan={handleBarcodeScanned}
+              enabled
+              minLength={3}
+              maxLength={50}
+              timeout={100}
+            />
+          </div>
           <POSProductSearch
             ref={productSearchRef}
             onSelect={handleAddProduct}
@@ -5484,7 +5509,7 @@ export default function POSPage() {
           </div>
         </div>
       )}
-    </div>
+    </PosWorkspaceSurface>
     </AdaptiveAppShell>
   );
 }

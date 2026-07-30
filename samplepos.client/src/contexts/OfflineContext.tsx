@@ -22,7 +22,11 @@ import {
   STORES,
 } from '../lib/offlineDb';
 import { mapApiProduct, mapApiStockLevel, mapApiCustomer, mapApiBatch, type ApiRow } from '../lib/offlineMappers';
-import { getLastSyncTime, CATALOG_STALE_MS } from '../services/offlineCatalogService';
+import {
+  getLastSyncTime,
+  CATALOG_STALE_MS,
+  canSyncPosCatalogFromCache,
+} from '../services/offlineCatalogService';
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -165,6 +169,7 @@ async function prewarmStockLevels(): Promise<void> {
   try {
     // POS catalog sync already replicates stock-levels — skip duplicate download (Odoo/SAP pattern).
     if (Date.now() - getLastSyncTime() < CATALOG_STALE_MS) return;
+    if (!canSyncPosCatalogFromCache()) return;
 
     const res = await apiClient.get('/inventory/pos/catalog');
     const raw: ApiRow[] = res.data?.data || [];

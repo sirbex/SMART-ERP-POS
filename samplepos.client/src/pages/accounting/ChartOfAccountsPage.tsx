@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, Edit2, Trash2, Search, Download } from 'lucide-react';
+import { Plus, Edit2, Trash2, Download } from 'lucide-react';
 import {
   Button,
   Input,
@@ -29,6 +29,11 @@ import toast from 'react-hot-toast';
 import { accountingApi } from '../../services/api';
 import { handleApiError } from '../../utils/errorHandler';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
+import {
+  AdaptivePage,
+  AdaptiveSearch,
+  AdaptiveToolbar,
+} from '../../components/adaptive';
 
 interface Account {
   id: string;
@@ -256,69 +261,66 @@ const ChartOfAccountsPage = () => {
   useSubmitOnEnter(!!editingAccount, !!formData.accountNumber && !!formData.accountName, handleUpdateAccount);
 
   return (
-    <>
-      <div className="p-4 lg:p-6">
-        {/* Integration Status */}
-        <div className="mb-6 flex justify-end">
-          <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
-            <div className="flex items-center gap-2 text-green-700 font-medium">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              Integration Active
-            </div>
-            <div className="text-xs text-green-600 mt-1">
-              ✓ Customer AR • ✓ Supplier AP • ✓ Invoices
-            </div>
+    <AdaptivePage
+      className="p-4 lg:p-6"
+      title="Chart of Accounts"
+      description="Search, filter, and manage your chart of accounts"
+      primaryActions={
+        <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm">
+          <div className="flex items-center gap-2 text-green-700 font-medium">
+            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+            Integration Active
+          </div>
+          <div className="text-xs text-green-600 mt-1">
+            ✓ Customer AR • ✓ Supplier AP • ✓ Invoices
           </div>
         </div>
-
-        {/* Controls */}
-        <Card className="mb-6">
+      }
+      toolbar={
+        <Card data-coa-filters="true">
           <CardHeader>
             <CardTitle>Account Management</CardTitle>
             <CardDescription>Search, filter, and manage your chart of accounts</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-col sm:flex-row gap-4 mb-4">
-              {/* Search */}
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                <Input
-                  placeholder="Search accounts..."
+            <AdaptiveToolbar
+              leading={
+                <AdaptiveSearch
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  onChange={setSearchTerm}
+                  placeholder="Search accounts..."
+                  label="Search accounts"
                 />
-              </div>
-
-              {/* Filters */}
-              <Select value={filterType} onValueChange={setFilterType}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Filter by type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Types</SelectItem>
-                  {ACCOUNT_TYPES.map((type) => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={filterActive} onValueChange={setFilterActive}>
-                <SelectTrigger className="w-full sm:w-32">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All</SelectItem>
-                  <SelectItem value="ACTIVE">Active</SelectItem>
-                  <SelectItem value="INACTIVE">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap gap-2">
+              }
+              secondaryLabel="Filters"
+              secondary={
+                <div className="flex flex-col gap-2 min-w-[12rem] sm:flex-row">
+                  <Select value={filterType} onValueChange={setFilterType}>
+                    <SelectTrigger className="w-full sm:w-48">
+                      <SelectValue placeholder="Filter by type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All Types</SelectItem>
+                      {ACCOUNT_TYPES.map((type) => (
+                        <SelectItem key={type.value} value={type.value}>
+                          {type.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterActive} onValueChange={setFilterActive}>
+                    <SelectTrigger className="w-full sm:w-32">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All</SelectItem>
+                      <SelectItem value="ACTIVE">Active</SelectItem>
+                      <SelectItem value="INACTIVE">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              }
+            >
               <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogTrigger asChild>
                   <Button
@@ -326,6 +328,7 @@ const ChartOfAccountsPage = () => {
                       resetForm();
                       setShowCreateDialog(true);
                     }}
+                    className="min-h-[var(--layout-touch-target)]"
                   >
                     <Plus className="h-4 w-4 mr-2" />
                     Create Account
@@ -431,18 +434,25 @@ const ChartOfAccountsPage = () => {
                 variant="outline"
                 onClick={exportToCSV}
                 disabled={filteredAccounts.length === 0}
+                className="min-h-[var(--layout-touch-target)]"
               >
                 <Download className="h-4 w-4 mr-2" />
                 Export CSV
               </Button>
 
-              <Button variant="outline" onClick={loadAccounts} disabled={loading}>
+              <Button
+                variant="outline"
+                onClick={loadAccounts}
+                disabled={loading}
+                className="min-h-[var(--layout-touch-target)]"
+              >
                 Refresh
               </Button>
-            </div>
+            </AdaptiveToolbar>
           </CardContent>
         </Card>
-
+      }
+    >
         {/* Accounts Table */}
         <Card>
           <CardHeader>
@@ -640,8 +650,7 @@ const ChartOfAccountsPage = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
-    </>
+    </AdaptivePage>
   );
 };
 

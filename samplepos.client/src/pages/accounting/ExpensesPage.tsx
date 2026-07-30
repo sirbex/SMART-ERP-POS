@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
-import { Plus, Filter, Search, Download, FileText, Eye, CheckCircle, XCircle, Send, DollarSign, Wallet, Loader2, BarChart3 } from 'lucide-react';
+import { Plus, Download, FileText, Eye, CheckCircle, XCircle, Send, DollarSign, Wallet, Loader2, BarChart3 } from 'lucide-react';
 import { useExpenses, useSubmitExpense, useApproveExpense, useRejectExpense, useMarkAsPaid, useDeleteExpense, usePaymentAccounts, useExpenseCategories } from '../../hooks/useExpenses';
 import { ExpenseFilter, Expense } from '@shared/types/expense';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -22,6 +21,11 @@ import { formatTimestamp } from '../../utils/businessDate';
 import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 import { toast } from 'sonner';
 import { getErrorMessage } from '../../utils/api';
+import {
+  AdaptivePage,
+  AdaptiveSearch,
+  AdaptiveToolbar,
+} from '../../components/adaptive';
 
 const ExpensesPage: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -212,38 +216,97 @@ const ExpensesPage: React.FC = () => {
   }
 
   return (
-    <div className="p-4 lg:p-6">
-      <div className="mb-6 max-w-3xl">
-        <h1 className="text-2xl font-semibold tracking-tight text-gray-900">Expenses</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Create expense vouchers for approval, then mark them paid from bank or cash. Spending
-          from the petty float belongs under Banking → Petty cash — not here.
-        </p>
-      </div>
-
-      {/* Actions Bar */}
-      <div className="flex items-center justify-end gap-3 mb-6">
-        <Link to="/reports/expenses">
-          <Button variant="outline" className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4" />
-            View Reports
+    <AdaptivePage
+      className="p-4 lg:p-6"
+      title="Expenses"
+      description="Create expense vouchers for approval, then mark them paid from bank or cash. Spending from the petty float belongs under Banking → Petty cash — not here."
+      primaryActions={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Link to="/reports/expenses">
+            <Button variant="outline" className="flex items-center gap-2 min-h-[var(--layout-touch-target)]">
+              <BarChart3 className="h-4 w-4" />
+              View Reports
+            </Button>
+          </Link>
+          <Button variant="outline" className="flex items-center gap-2 min-h-[var(--layout-touch-target)]">
+            <Download className="h-4 w-4" />
+            Export
           </Button>
-        </Link>
-        <Button variant="outline" className="flex items-center gap-2">
-          <Download className="h-4 w-4" />
-          Export
-        </Button>
-        {canCreateExpense && (
-          <Button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
-          >
-            <Plus className="h-4 w-4" />
-            New Expense
-          </Button>
-        )}
-      </div>
-
+          {canCreateExpense && (
+            <Button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 min-h-[var(--layout-touch-target)]"
+            >
+              <Plus className="h-4 w-4" />
+              New Expense
+            </Button>
+          )}
+        </div>
+      }
+      toolbar={
+        <div className="bg-white rounded-lg border border-gray-200 p-4" data-expense-filters="true">
+          <AdaptiveToolbar
+            leading={
+              <AdaptiveSearch
+                value={filter.search || ''}
+                onChange={handleSearch}
+                placeholder="Search expenses..."
+                label="Search expenses"
+              />
+            }
+            secondaryLabel="Filters"
+            secondary={
+              <div className="grid grid-cols-1 gap-3 min-w-[14rem] sm:grid-cols-2">
+                <Select onValueChange={(value) => handleFilterChange('status', value === 'all' ? undefined : value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Statuses" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Statuses</SelectItem>
+                    {Object.entries(EXPENSE_STATUSES).map(([key, label]) => (
+                      <SelectItem key={key} value={key}>{label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select onValueChange={(value) => {
+                  if (value === 'all') {
+                    setFilter((prev) => ({
+                      ...prev,
+                      categoryId: undefined,
+                      category: undefined,
+                      page: 1,
+                    }));
+                    return;
+                  }
+                  const cat = dbCategories.find((c) => c.id === value || c.code === value);
+                  setFilter((prev) => ({
+                    ...prev,
+                    categoryId: cat?.id,
+                    category: cat?.code,
+                    page: 1,
+                  }));
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {dbCategories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <DatePicker
+                  value={filter.startDate || ''}
+                  onChange={(date) => handleFilterChange('startDate', date || undefined)}
+                  placeholder="Start Date"
+                />
+              </div>
+            }
+          />
+        </div>
+      }
+    >
       {/* Summary Cards */}
       {data?.summary && (
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -302,77 +365,6 @@ const ExpensesPage: React.FC = () => {
           </Card>
         </div>
       )}
-
-      {/* Filters */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="h-5 w-5" />
-            Filters
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            <div className="md:col-span-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="Search expenses..."
-                  className="pl-10"
-                  onChange={(e) => handleSearch(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <Select onValueChange={(value) => handleFilterChange('status', value === 'all' ? undefined : value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                {Object.entries(EXPENSE_STATUSES).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select onValueChange={(value) => {
-              if (value === 'all') {
-                setFilter((prev) => ({
-                  ...prev,
-                  categoryId: undefined,
-                  category: undefined,
-                  page: 1,
-                }));
-                return;
-              }
-              const cat = dbCategories.find((c) => c.id === value || c.code === value);
-              setFilter((prev) => ({
-                ...prev,
-                categoryId: cat?.id,
-                category: cat?.code,
-                page: 1,
-              }));
-            }}>
-              <SelectTrigger>
-                <SelectValue placeholder="All Categories" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {dbCategories.map((cat) => (
-                  <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <DatePicker
-              value={filter.startDate || ''}
-              onChange={(date) => handleFilterChange('startDate', date || undefined)}
-              placeholder="Start Date"
-            />
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Expenses Table */}
       <Card>
@@ -920,7 +912,7 @@ const ExpensesPage: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AdaptivePage>
   );
 };
 

@@ -1,6 +1,10 @@
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { useAdaptiveLayout } from './AdaptiveAppShell';
+import {
+  useAdaptiveLayout,
+  useAdaptiveWorkspaceOptional,
+} from './AdaptiveAppShell';
+import { shellNavChromeFromWorkspace } from '../../lib/adaptiveShellNav';
 
 export type AdaptiveNavItem = {
   name: string;
@@ -27,10 +31,12 @@ type AdaptiveNavigationProps = {
 };
 
 /**
- * Tier-driven side navigation:
- * - mobile: drawer overlay
- * - compact: icon rail (expandable labels)
- * - desktop/wide: expandable sidebar
+ * Workspace-driven side navigation (Phase 3):
+ * - bottom / drawer / minimal → overlay drawer
+ * - rail → icon rail (expandable labels)
+ * - sidebar → expandable sidebar
+ *
+ * Nav *items* are still filtered by Layout (RBAC / lockdown) — presentation only here.
  */
 export function AdaptiveNavigation({
   brandName,
@@ -43,9 +49,18 @@ export function AdaptiveNavigation({
   userInitial = 'U',
   footer,
 }: AdaptiveNavigationProps) {
-  const { isMobile, tokens } = useAdaptiveLayout();
-  const persistentNav = !isMobile;
-  const showLabels = expanded || isMobile;
+  const layout = useAdaptiveLayout();
+  const workspace = useAdaptiveWorkspaceOptional();
+  const chrome = shellNavChromeFromWorkspace(workspace, layout.tier);
+
+  if (!chrome.showSideNav) return null;
+
+  // Drawer patterns: hide from layout flow until opened
+  if (chrome.sideNavAsDrawer && !expanded) return null;
+
+  const persistentNav = chrome.persistentSideNav;
+  const asDrawer = chrome.sideNavAsDrawer;
+  const showLabels = expanded || asDrawer;
   const footerNode =
     typeof footer === 'function'
       ? footer({ showLabels, persistentNav })
@@ -57,15 +72,16 @@ export function AdaptiveNavigation({
         className={[
           'bg-white border-r border-gray-200 flex flex-col overflow-hidden',
           'transition-all duration-300 ease-in-out',
-          isMobile ? 'absolute inset-y-0 left-0 z-30 shadow-lg' : 'static z-auto shadow-none',
-          isMobile && !expanded ? '-translate-x-full' : 'translate-x-0',
+          asDrawer ? 'absolute inset-y-0 left-0 z-30 shadow-lg' : 'static z-auto shadow-none',
         ].join(' ')}
         style={{
-          width: expanded || isMobile
+          width: expanded || asDrawer
             ? 'var(--layout-sidebar-expanded)'
             : 'var(--layout-sidebar-rail)',
         }}
-        data-nav-mode={tokens.navMode}
+        data-nav-mode={chrome.pattern}
+        data-nav-drawer={asDrawer ? 'true' : 'false'}
+        data-workspace={workspace?.id}
         aria-label="Primary"
       >
         <div className="h-12 flex items-center justify-between px-4 border-b border-gray-200 flex-shrink-0">
@@ -82,7 +98,7 @@ export function AdaptiveNavigation({
               {expanded ? '◀' : '▶'}
             </button>
           )}
-          {isMobile && (
+          {asDrawer && (
             <button
               type="button"
               onClick={() => onExpandedChange(false)}
@@ -107,7 +123,7 @@ export function AdaptiveNavigation({
                   }`}
                   title={!showLabels && persistentNav ? item.name : undefined}
                   onClick={() => {
-                    if (isMobile) onExpandedChange(false);
+                    if (asDrawer) onExpandedChange(false);
                   }}
                 >
                   <span className={`text-xl flex-shrink-0 ${item.color}`}>{item.icon}</span>
@@ -134,7 +150,7 @@ export function AdaptiveNavigation({
         </div>
       </aside>
 
-      {isMobile && expanded && (
+      {asDrawer && expanded && (
         <div
           className="absolute inset-0 bg-black/50 z-20"
           onClick={() => onExpandedChange(false)}
@@ -152,37 +168,44 @@ type AdaptiveShellBarProps = {
   trailing?: ReactNode;
 };
 
-/** Top shell bar — menu affordance on mobile + compact. */
+/** Top shell bar — menu / brand visibility follows workspace nav chrome. */
 export function AdaptiveShellBar({
   brandName,
   userInitial = 'U',
   onMenuClick,
   trailing,
 }: AdaptiveShellBarProps) {
-  const { isMobile, isCompact, isDesktopLike } = useAdaptiveLayout();
+  const layout = useAdaptiveLayout();
+  const workspace = useAdaptiveWorkspaceOptional();
+  const chrome = shellNavChromeFromWorkspace(workspace, layout.tier);
 
   return (
-    <header className="h-12 flex-shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-40 shadow-sm">
+    <header
+      className="h-12 flex-shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-40 shadow-sm"
+      data-shell-nav={chrome.pattern}
+      data-workspace={workspace?.id}
+    >
       <div className="flex items-center gap-2">
-        {(isMobile || isCompact) && (
+        {chrome.showShellBarMenu && (
           <button
             type="button"
             onClick={onMenuClick}
             className="p-2 rounded-lg hover:bg-gray-100 min-h-[var(--layout-touch-target)] min-w-[var(--layout-touch-target)] flex items-center justify-center"
             aria-label="Toggle menu"
+            data-shell-menu="true"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
         )}
-        {!isDesktopLike && (
+        {chrome.showShellBarBrand && (
           <h1 className="text-lg font-bold text-gray-900">{brandName}</h1>
         )}
       </div>
       <div className="flex items-center gap-3">
         {trailing}
-        {!isDesktopLike && (
+        {chrome.showShellBarBrand && (
           <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold">
             {userInitial}
           </div>
@@ -199,16 +222,19 @@ type AdaptiveBottomNavProps = {
 };
 
 /**
- * Mobile primary destinations + More (opens full drawer).
- * Only rendered on mobile tier.
+ * Bottom destinations when workspace navPattern is `bottom`.
+ * Hidden for minimal POS / rail / sidebar workspaces.
  */
 export function AdaptiveBottomNav({
   items,
   isActive,
   onOpenFullMenu,
 }: AdaptiveBottomNavProps) {
-  const { isMobile } = useAdaptiveLayout();
-  if (!isMobile) return null;
+  const layout = useAdaptiveLayout();
+  const workspace = useAdaptiveWorkspaceOptional();
+  const chrome = shellNavChromeFromWorkspace(workspace, layout.tier);
+
+  if (!chrome.showBottomNav) return null;
 
   const primary = items.slice(0, 3);
 
@@ -216,6 +242,8 @@ export function AdaptiveBottomNav({
     <nav
       className="adaptive-bottom-nav flex-shrink-0 bg-white border-t border-gray-200 flex items-stretch z-40"
       aria-label="Primary destinations"
+      data-nav-mode="bottom"
+      data-workspace={workspace?.id}
     >
       {primary.map((item) => (
         <Link

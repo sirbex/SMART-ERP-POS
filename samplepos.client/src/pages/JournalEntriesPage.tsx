@@ -8,6 +8,7 @@ import { ClipboardCheck, Plus, RotateCcw, Search, RefreshCw, AlertTriangle, Chec
 import { formatCurrency } from '../utils/currency';
 import { DatePicker } from '../components/ui/date-picker';
 import { ResponsiveTableWrapper } from '../components/ui/ResponsiveTableWrapper';
+import { AdaptivePage, AdaptiveToolbar } from '../components/adaptive';
 import { api } from '../services/api';
 
 // API functions — axios with token refresh (ERP session policy)
@@ -436,65 +437,75 @@ export default function JournalEntriesPage() {
     };
 
     return (
-        <div className="p-4 lg:p-6">
-            {/* Actions Bar */}
-            <div className="flex items-center justify-end mb-4">
+        <AdaptivePage
+            className="p-4 lg:p-6"
+            title="Journal Entries"
+            description="Post and reverse general-ledger journal entries"
+            primaryActions={
                 <button
+                    type="button"
                     onClick={() => {
                         setShowCreateModal(true);
                         setError(null);
                     }}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2 shadow-sm"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2 shadow-sm min-h-[var(--layout-touch-target)]"
                 >
                     <Plus className="h-4 w-4" />
                     <span>New Journal Entry</span>
                 </button>
-            </div>
-
-            {/* Filters */}
-            <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
-                <div className="flex flex-wrap items-end gap-4">
-                    <div className="min-w-[180px]">
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">📅 From</label>
-                        <DatePicker
-                            value={dateFrom}
-                            onChange={(date) => setDateFrom(date)}
-                            placeholder="Select start date"
-                            maxDate={dateTo ? new Date(dateTo) : undefined}
-                        />
-                    </div>
-                    <div className="min-w-[180px]">
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">📅 To</label>
-                        <DatePicker
-                            value={dateTo}
-                            onChange={(date) => setDateTo(date)}
-                            placeholder="Select end date"
-                            minDate={dateFrom ? new Date(dateFrom) : undefined}
-                        />
-                    </div>
-                    <div className="min-w-[140px]">
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">Status</label>
-                        <select
-                            value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value as '' | 'POSTED' | 'REVERSED')}
-                            className="w-full px-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                            title="Status filter"
-                        >
-                            <option value="">All</option>
-                            <option value="POSTED">Posted</option>
-                            <option value="REVERSED">Reversed</option>
-                        </select>
-                    </div>
-                    <button
-                        onClick={() => refetch()}
-                        className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center space-x-2 transition-colors"
+            }
+            toolbar={
+                <div className="bg-white rounded-lg shadow-sm border p-4" data-je-filters="true">
+                    <AdaptiveToolbar
+                        secondaryLabel="Filters"
+                        secondary={
+                            <div className="flex flex-col gap-3 min-w-[14rem] sm:flex-row sm:flex-wrap sm:items-end">
+                                <div className="min-w-[160px]">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">From</label>
+                                    <DatePicker
+                                        value={dateFrom}
+                                        onChange={(date) => setDateFrom(date)}
+                                        placeholder="Select start date"
+                                        maxDate={dateTo ? new Date(dateTo) : undefined}
+                                    />
+                                </div>
+                                <div className="min-w-[160px]">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">To</label>
+                                    <DatePicker
+                                        value={dateTo}
+                                        onChange={(date) => setDateTo(date)}
+                                        placeholder="Select end date"
+                                        minDate={dateFrom ? new Date(dateFrom) : undefined}
+                                    />
+                                </div>
+                                <div className="min-w-[140px]">
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Status</label>
+                                    <select
+                                        value={statusFilter}
+                                        onChange={(e) => setStatusFilter(e.target.value as '' | 'POSTED' | 'REVERSED')}
+                                        className="w-full px-3 py-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                                        title="Status filter"
+                                    >
+                                        <option value="">All</option>
+                                        <option value="POSTED">Posted</option>
+                                        <option value="REVERSED">Reversed</option>
+                                    </select>
+                                </div>
+                            </div>
+                        }
                     >
-                        <Search className="h-4 w-4" />
-                        <span>Search</span>
-                    </button>
+                        <button
+                            type="button"
+                            onClick={() => refetch()}
+                            className="px-4 py-2.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center space-x-2 transition-colors min-h-[var(--layout-touch-target)]"
+                        >
+                            <Search className="h-4 w-4" />
+                            <span>Refresh</span>
+                        </button>
+                    </AdaptiveToolbar>
                 </div>
-            </div>
-
+            }
+        >
             {/* Entries List */}
             <div className="bg-white rounded-lg shadow-sm border">
                 {entriesLoading ? (
@@ -1032,6 +1043,6 @@ export default function JournalEntriesPage() {
                     </div>
                 </div>
             )}
-        </div>
+        </AdaptivePage>
     );
 }

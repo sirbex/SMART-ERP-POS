@@ -3575,8 +3575,8 @@ export default function RestaurantPosPage() {
           </div>
         ) : (
           <div className="relative flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 lg:grid-rows-1 overflow-hidden">
-            {/* Menu — phone: top half of split; desktop: left column */}
-            <div className="lg:col-span-8 flex flex-col min-h-0 min-w-0 flex-[1.15] lg:flex-1 lg:h-full border-b lg:border-b-0 lg:border-r border-stone-200 bg-white">
+            {/* Menu — phone: capped height so ticket KOT/Bill/Pay stay visible; desktop: left column */}
+            <div className="lg:col-span-8 flex flex-col min-h-0 min-w-0 flex-1 max-h-[42%] lg:max-h-none lg:flex-1 lg:h-full border-b lg:border-b-0 lg:border-r border-stone-200 bg-white">
               <div className="shrink-0 z-10 bg-white border-b border-stone-100 shadow-sm">
                 <div className="p-3 pb-2">
                   <label className="relative block">
@@ -3931,8 +3931,8 @@ export default function RestaurantPosPage() {
               </div>
             )}
 
-            {/* Order ticket — phone: bottom half always visible (split); desktop: sidebar */}
-            <div className="lg:col-span-4 flex flex-col min-h-0 min-w-0 lg:h-full overflow-hidden bg-stone-50 relative flex-1 lg:flex-1 min-h-[240px]">
+            {/* Order ticket — phone: majority of remaining height; desktop: sidebar */}
+            <div className="lg:col-span-4 flex flex-col min-h-0 min-w-0 lg:h-full overflow-hidden bg-stone-50 relative flex-1 lg:flex-1">
               <div className="px-3 sm:px-4 py-2 border-b border-stone-200 bg-white shrink-0">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -3944,16 +3944,15 @@ export default function RestaurantPosPage() {
                       {isCheckBilled ? (
                         <p className="text-[11px] text-rose-800 truncate">Guest bill printed</p>
                       ) : null}
-                      {(selectedCustomer?.name || guestDraft.guestName) && serviceChannel ? (
+                      {(selectedCustomer?.name || guestDraft.guestName) ? (
                         <p className="text-xs font-semibold text-emerald-800 truncate">
                           {selectedCustomer?.name || guestDraft.guestName}
                         </p>
                       ) : null}
                     </div>
                   </div>
-                  {/* Same header line as Ticket / order # — opens AdaptiveDialog (box), not full-screen */}
-                  {chrome.secondaryActions === 'sheet' ? (
-                    <div className="flex items-center gap-1.5 shrink-0" data-ticket-header-actions="true">
+                  {/* Single Waiter/Customer entry — editors live only in the dialog (no inline duplicate). */}
+                  <div className="flex items-center gap-1.5 shrink-0" data-ticket-header-actions="true">
                       {isCheckBilled ? (
                         <span className="text-[10px] uppercase tracking-wide font-bold text-rose-800 bg-rose-100 px-1.5 py-1 rounded-md">
                           Bill
@@ -3962,11 +3961,21 @@ export default function RestaurantPosPage() {
                       <button
                         type="button"
                         onClick={() => setMobileSheet('details')}
-                        className={`${touchBtnGhost} min-h-10 min-w-10 px-2 text-xs`}
+                        className={`${touchBtnGhost} min-h-10 px-2.5 text-xs inline-flex items-center gap-1.5 max-w-[11rem]`}
                         aria-label="Waiter and customer"
                         title="Waiter / Customer"
+                        data-restaurant-party="open"
                       >
-                        👤
+                        <span aria-hidden>👤</span>
+                        <span className="truncate font-semibold text-stone-800">
+                          {selectedCustomer?.name || guestDraft.guestName
+                            ? (selectedCustomer?.name || guestDraft.guestName)
+                            : shortWaiterLabel(
+                                waiters.find((w) => w.id === selectedWaiterId)?.fullName ||
+                                  user?.fullName ||
+                                  'Waiter',
+                              ) || 'Guest'}
+                        </span>
                       </button>
                       <button
                         type="button"
@@ -3978,12 +3987,6 @@ export default function RestaurantPosPage() {
                         ⋯
                       </button>
                     </div>
-                  ) : null}
-                  {isCheckBilled && chrome.secondaryActions === 'inline' ? (
-                    <span className="shrink-0 text-[10px] uppercase tracking-wide font-bold text-rose-800 bg-rose-100 px-2 py-1 rounded-lg">
-                      Bill printed
-                    </span>
-                  ) : null}
                 </div>
 
                 {ticketTabs.length > 1 && (
@@ -4027,91 +4030,11 @@ export default function RestaurantPosPage() {
                     </div>
                   </div>
                 )}
-
-                {chrome.secondaryActions === 'inline' ? (
-                <div className="flex mt-2 items-center gap-2">
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-stone-500 shrink-0">
-                    Waiter
-                  </label>
-                  <select
-                    className={`${touchField} min-h-10 py-1.5 text-sm`}
-                    value={selectedWaiterId}
-                    disabled={assignWaiterMutation.isPending || !canEditOthers}
-                    onChange={(e) => handleWaiterChange(e.target.value)}
-                  >
-                    {waiters.length === 0 && user ? (
-                      <option value={user.id}>{user.fullName || user.email}</option>
-                    ) : (
-                      waiters.map((w) => (
-                        <option key={w.id} value={w.id}>
-                          {w.fullName || w.email}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
-                ) : null}
               </div>
 
+              {/* Ticket lines — min-h-0 so KOT/Bill/Pay footer is never clipped on short phones */}
               <div
-                className="px-3 py-2.5 border-b border-stone-200 bg-violet-50/80 space-y-2 relative z-20 shrink-0"
-                data-restaurant-customer="primary"
-              >
-                {selectedCustomer || !guestDraft.guestName ? (
-                  <CustomerSelector
-                    compact
-                    required={
-                      serviceChannel &&
-                      !isQuickLane &&
-                      (channel === 'TAKEAWAY' || channel === 'DELIVERY')
-                    }
-                    label={
-                      channel === 'DELIVERY'
-                        ? 'Delivery customer'
-                        : channel === 'TAKEAWAY' && !isQuickLane
-                          ? 'Takeaway customer'
-                          : 'Customer (optional)'
-                    }
-                    selectedCustomer={selectedCustomer}
-                    saleTotal={Number(order?.totalAmount || 0)}
-                    onSelectCustomer={handleSelectServiceCustomer}
-                  />
-                ) : (
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-semibold uppercase tracking-wide text-stone-500">
-                      Customer
-                    </label>
-                    <div className="flex items-center gap-2 rounded-xl border-2 border-emerald-600 bg-emerald-50 px-3 py-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="font-bold text-base text-stone-900 truncate">
-                          {guestDraft.guestName}
-                        </div>
-                        {guestDraft.guestPhone ? (
-                          <div className="text-sm text-stone-600">{guestDraft.guestPhone}</div>
-                        ) : null}
-                      </div>
-                      <button
-                        type="button"
-                        className={`${touchBtnGhost} min-h-11 px-3 shrink-0`}
-                        onClick={() =>
-                          setGuestDraft({
-                            guestName: '',
-                            guestPhone: '',
-                            deliveryAddress: '',
-                            pickupLabel: '',
-                          })
-                        }
-                      >
-                        Change
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Ticket lines — basis-0 + min-h-0 so grid/flex parents can allocate real height */}
-              <div
-                className="flex-1 basis-0 min-h-[8rem] overflow-y-auto overscroll-contain px-3 sm:px-4 py-2 block"
+                className="flex-1 basis-0 min-h-0 overflow-y-auto overscroll-contain px-3 sm:px-4 py-2 block"
                 data-ticket-lines="true"
               >
                 {orderLines.length === 0 ? (
@@ -4639,7 +4562,8 @@ export default function RestaurantPosPage() {
               )}
 
               <div
-                className="border-t border-stone-200 bg-white p-3 space-y-2 shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex flex-col"
+                className="border-t border-stone-200 bg-white p-3 space-y-2 shrink-0 sticky bottom-0 z-20 pb-[max(0.75rem,env(safe-area-inset-bottom))] flex flex-col"
+                data-ticket-primary-actions="true"
               >
                 <div className="flex justify-between items-baseline gap-2">
                   <span className="text-sm text-stone-600">
@@ -4761,7 +4685,7 @@ export default function RestaurantPosPage() {
           </button>
         }
       >
-        <div className="space-y-3" data-ticket-dialog="details">
+        <div className="space-y-3" data-ticket-dialog="details" data-restaurant-customer="dialog">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-stone-600 uppercase tracking-wide">
               Waiter

@@ -22,6 +22,11 @@ import { SortableTableHeader } from '../../components/ui/SortableTableHeader';
 import { MobileSortSelect } from '../../components/ui/MobileSortSelect';
 import { useColumnSort } from '../../hooks/useColumnSort';
 import { applyTableSort } from '../../lib/tableSortUtils';
+import {
+  AdaptivePage,
+  AdaptiveSearch,
+  AdaptiveToolbar,
+} from '../../components/adaptive';
 
 function unwrapStockListPayload(payload: unknown): unknown[] {
   if (!payload) return [];
@@ -356,101 +361,98 @@ export default function StockLevelsPage() {
   }
 
   return (
-    <div className="p-6">
-      {/* Offline notice */}
-      {!isOnline && (
-        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2 text-amber-800 text-sm">
-          <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-          Offline — showing cached stock levels. Data may not reflect the latest changes.
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Stock Levels</h2>
-          <p className="text-gray-600 mt-1">
-            {isOnline ? 'Real-time inventory from database' : 'Cached inventory data (offline)'}
-          </p>
-        </div>
+    <AdaptivePage
+      className="p-6"
+      title="Stock Levels"
+      description={isOnline ? 'Real-time inventory from database' : 'Cached inventory data (offline)'}
+      primaryActions={
         <button
+          type="button"
           onClick={() => refetch()}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 min-h-[var(--layout-touch-target)]"
         >
           🔄 Refresh
         </button>
-      </div>
-
-      {canUseStoreFilter && (
-        <StockViewModeToggle mode={stockViewMode} onChange={handleStockViewModeChange} />
-      )}
-
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <div
-          className={`grid grid-cols-1 gap-4 ${byStoreView ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}
-        >
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Search Products</label>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by name or category..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          {byStoreView && (
-            <StoreLocationSelect
-              id="filter-store-location"
-              label="Location"
-              stores={storeLocations}
-              value={storeFilterId}
-              onChange={setStoreFilterId}
-            />
+      }
+      toolbar={
+        <div className="space-y-3" data-stock-filters="true">
+          {!isOnline && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center gap-2 text-amber-800 text-sm">
+              <span className="inline-block w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              Offline — showing cached stock levels. Data may not reflect the latest changes.
+            </div>
           )}
-          <div>
-            <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-2">
-              Category
-            </label>
-            <select
-              id="filter-category"
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Categories</option>
-              {uniqueCategories.map((cat) => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-2">
-              Status
-            </label>
-            <select
-              id="filter-status"
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value as 'all' | 'low' | 'expiring')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="all">All Products</option>
-              <option value="low">Low Stock Only</option>
-              <option value="expiring">Expiring Soon (≤ 30 days)</option>
-            </select>
+          {canUseStoreFilter && (
+            <StockViewModeToggle mode={stockViewMode} onChange={handleStockViewModeChange} />
+          )}
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <AdaptiveToolbar
+              leading={
+                <AdaptiveSearch
+                  value={searchTerm}
+                  onChange={setSearchTerm}
+                  placeholder="Search by name or category..."
+                  label="Search products"
+                />
+              }
+              secondaryLabel="Filters"
+              secondary={
+                <div className={`grid grid-cols-1 gap-3 min-w-[14rem] ${byStoreView ? 'sm:grid-cols-2' : ''}`}>
+                  {byStoreView && (
+                    <StoreLocationSelect
+                      id="filter-store-location"
+                      label="Location"
+                      stores={storeLocations}
+                      value={storeFilterId}
+                      onChange={setStoreFilterId}
+                    />
+                  )}
+                  <div>
+                    <label htmlFor="filter-category" className="block text-sm font-medium text-gray-700 mb-2">
+                      Category
+                    </label>
+                    <select
+                      id="filter-category"
+                      value={filterCategory}
+                      onChange={(e) => setFilterCategory(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[var(--layout-touch-target)]"
+                    >
+                      <option value="all">All Categories</option>
+                      {uniqueCategories.map((cat) => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="filter-status" className="block text-sm font-medium text-gray-700 mb-2">
+                      Status
+                    </label>
+                    <select
+                      id="filter-status"
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value as 'all' | 'low' | 'expiring')}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 min-h-[var(--layout-touch-target)]"
+                    >
+                      <option value="all">All Products</option>
+                      <option value="low">Low Stock Only</option>
+                      <option value="expiring">Expiring Soon (≤ 30 days)</option>
+                    </select>
+                  </div>
+                </div>
+              }
+            />
+            <MobileSortSelect
+              className="mt-4"
+              sortField={sortField}
+              sortOrder={sortOrder}
+              options={mobileSortOptions}
+              onFieldChange={handleColumnSort}
+              onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
+            />
           </div>
         </div>
-        <MobileSortSelect
-          className="mt-4"
-          sortField={sortField}
-          sortOrder={sortOrder}
-          options={mobileSortOptions}
-          onFieldChange={handleColumnSort}
-          onToggleOrder={() => setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))}
-        />
-      </div>
-
+      }
+    >
       {/* Stock Table */}
       <div className="bg-white rounded-lg shadow overflow-x-auto">
         {filterQtyOnly && (
@@ -687,6 +689,6 @@ export default function StockLevelsPage() {
           <div className="text-2xl font-bold text-blue-600 mt-1">{filteredStockLevels.length}</div>
         </div>
       </div>
-    </div>
+    </AdaptivePage>
   );
 }

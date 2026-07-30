@@ -23,7 +23,23 @@ export const CATALOG_STALE_MS = 5 * 60 * 1000;
 /** Fired on window after syncProductCatalog() succeeds — POS search listens. */
 export const POS_CATALOG_SYNCED_EVENT = 'pos:catalog-synced';
 
+/** Permissions that may call GET /inventory/pos/catalog (must match server). */
+const POS_CATALOG_PERMISSIONS = ['pos.read', 'restaurant.read'] as const;
+
 let catalogSyncInFlight: Promise<CachedProduct[]> | null = null;
+
+/** Skip catalog GET when cached RBAC clearly lacks access — avoids Access denied toasts. */
+export function canSyncPosCatalogFromCache(): boolean {
+    try {
+        const raw = localStorage.getItem('rbac_permissions');
+        if (!raw) return true; // unknown — let the server decide
+        const perms = JSON.parse(raw) as unknown;
+        if (!Array.isArray(perms) || perms.length === 0) return true;
+        return POS_CATALOG_PERMISSIONS.some((k) => (perms as string[]).includes(k));
+    } catch {
+        return true;
+    }
+}
 
 // ── Types ─────────────────────────────────────────────────────
 export interface CachedProductUom {
@@ -170,6 +186,9 @@ export async function syncProductCatalog(): Promise<CachedProduct[]> {
 
 async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
     try {
+        if (!canSyncPosCatalogFromCache()) {
+            return getCachedCatalog();
+        }
         const res = await apiClient.get('/inventory/pos/catalog');
         interface StockLevelRow {
             product_id: string;
