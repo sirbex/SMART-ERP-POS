@@ -157,7 +157,11 @@ export function useOfflineContext(): OfflineContextValue {
 
 async function prewarmProducts(): Promise<void> {
   try {
-    const res = await apiClient.get('/products?page=1&limit=5000&includeUoms=true');
+    // GET /products requires inventory.read — waiters/FOH use pos catalog instead.
+    if (!canSyncInventoryReadFromCache()) return;
+    const res = await apiClient.get('/products?page=1&limit=5000&includeUoms=true', {
+      silentForbidden: true,
+    });
     const raw: ApiRow[] = res.data?.data || [];
     await putProducts(raw.map(mapApiProduct));
   } catch {
@@ -171,7 +175,7 @@ async function prewarmStockLevels(): Promise<void> {
     if (Date.now() - getLastSyncTime() < CATALOG_STALE_MS) return;
     if (!canSyncPosCatalogFromCache()) return;
 
-    const res = await apiClient.get('/inventory/pos/catalog');
+    const res = await apiClient.get('/inventory/pos/catalog', { silentForbidden: true });
     const raw: ApiRow[] = res.data?.data || [];
     await putStockLevels(raw.map(mapApiStockLevel));
   } catch {
@@ -181,7 +185,8 @@ async function prewarmStockLevels(): Promise<void> {
 
 async function prewarmCustomers(): Promise<void> {
   try {
-    const res = await apiClient.get('/customers?page=1&limit=5000');
+    if (!canSyncCustomersReadFromCache()) return;
+    const res = await apiClient.get('/customers?page=1&limit=5000', { silentForbidden: true });
     const raw: ApiRow[] = res.data?.data || [];
     await putCustomers(raw.map(mapApiCustomer));
   } catch {
@@ -193,7 +198,7 @@ async function prewarmBatches(): Promise<void> {
   try {
     // inventory.read required — skip to avoid Access denied toast for waiters / guests.
     if (!canSyncInventoryReadFromCache()) return;
-    const res = await apiClient.get('/inventory/batches-all');
+    const res = await apiClient.get('/inventory/batches-all', { silentForbidden: true });
     const raw: ApiRow[] = res.data?.data || [];
     await putBatches(raw.map(mapApiBatch));
   } catch {
@@ -201,15 +206,31 @@ async function prewarmBatches(): Promise<void> {
   }
 }
 
-/** Matches GET /inventory/batches-all (inventory.read). */
-function canSyncInventoryReadFromCache(): boolean {
+function readCachedPermissionKeys(): string[] | null {
   try {
     const raw = localStorage.getItem('rbac_permissions');
-    if (!raw) return true;
+    if (!raw) return null;
     const perms = JSON.parse(raw) as unknown;
-    if (!Array.isArray(perms) || perms.length === 0) return true;
-    return (perms as string[]).includes('inventory.read');
+    if (!Array.isArray(perms) || perms.length === 0) return null;
+    return perms.filter((p): p is string => typeof p === 'string');
   } catch {
-    return true;
+    return null;
   }
+}
+
+/**
+ * Matches GET /products and /inventory/batches-all (inventory.read).
+ * Fail closed when RBAC cache is missing — avoids 403 toasts for waiters before perms load.
+ */
+export function canSyncInventoryReadFromCache(): boolean {
+  const perms = readCachedPermissionKeys();
+  if (!perms) return false;
+  return perms.includes('inventory.read');
+}
+
+/** Matches GET /customers (customers.read). */
+export function canSyncCustomersReadFromCache(): boolean {
+  const perms = readCachedPermissionKeys();
+  if (!perms) return false;
+  return perms.includes('customers.read');
 }

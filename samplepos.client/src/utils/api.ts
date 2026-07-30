@@ -45,6 +45,16 @@ import type {
 
 import { getApiBaseUrl } from '../lib/apiBase';
 
+/** Background/prewarm calls may set silentForbidden to avoid Access denied toasts. */
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    silentForbidden?: boolean;
+  }
+  export interface InternalAxiosRequestConfig {
+    silentForbidden?: boolean;
+  }
+}
+
 // API Configuration
 // Use relative URL in dev so requests go through Vite proxy (handles HTTPS)
 const API_BASE_URL = getApiBaseUrl();
@@ -239,8 +249,11 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 403) {
       // Forbidden — one standard toast; reject HandledApiError so catch blocks don't show Axios codes
       const msg = friendlyHttpErrorMessage(403, error.response.data?.error);
-      console.error('Access denied:', error.response.data?.error || msg);
-      window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
+      const silent = Boolean(error.config?.silentForbidden);
+      if (!silent) {
+        console.error('Access denied:', error.response.data?.error || msg);
+        window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
+      }
       return Promise.reject(new HandledApiError(msg));
     }
 

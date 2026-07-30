@@ -32,12 +32,12 @@ let catalogSyncInFlight: Promise<CachedProduct[]> | null = null;
 export function canSyncPosCatalogFromCache(): boolean {
     try {
         const raw = localStorage.getItem('rbac_permissions');
-        if (!raw) return true; // unknown — let the server decide
+        if (!raw) return false; // fail closed — wait for RBAC cache after login
         const perms = JSON.parse(raw) as unknown;
-        if (!Array.isArray(perms) || perms.length === 0) return true;
+        if (!Array.isArray(perms) || perms.length === 0) return false;
         return POS_CATALOG_PERMISSIONS.some((k) => (perms as string[]).includes(k));
     } catch {
-        return true;
+        return false;
     }
 }
 
@@ -189,7 +189,7 @@ async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
         if (!canSyncPosCatalogFromCache()) {
             return getCachedCatalog();
         }
-        const res = await apiClient.get('/inventory/pos/catalog');
+        const res = await apiClient.get('/inventory/pos/catalog', { silentForbidden: true });
         interface StockLevelRow {
             product_id: string;
             product_name: string;

@@ -49,6 +49,15 @@ describe('Role grant SSOT', () => {
     expect(sql).toContain("name = 'Waiter'");
     expect(sql).toContain("'restaurant.pay'");
   });
+
+  it('migration 576 heals inventory.read for cashier/accountant role copies', () => {
+    const sql = readFileSync(
+      resolve(here, '../../../shared/sql/576_rbac_inventory_read_cashier_accountant_heal.sql'),
+      'utf8',
+    );
+    expect(sql).toContain("'inventory.read'");
+    expect(sql).toContain("lower(name) IN ('cashier', 'accountant')");
+  });
 });
 
 describe('FOH + sales day policy', () => {
