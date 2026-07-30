@@ -4,8 +4,8 @@ import { Money } from '../../utils/money.js';
 import { BusinessError } from '../../middleware/errorHandler.js';
 import { checkAccountingPeriodOpen } from '../../utils/periodGuard.js';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
-import { safeParseInt } from '../../utils/safeParse.js';
 import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+import { allocateNextPrefixedDocumentNumber } from '../../utils/documentNumberAllocation.js';
 
 const SALES_SORT_COLUMNS: Record<string, string> = {
   saleNumber: 's.sale_number',
@@ -197,29 +197,18 @@ export interface CreateSaleItemData {
 
 export const salesRepository = {
   /**
-   * Generate next sale number (SALE-YYYY-NNNN format)
+   * Generate next sale number (SALE-YYYY-NNNN format).
    * Accepts Pool or PoolClient — MUST be called on the transaction client
    * so the advisory lock is held until COMMIT.
+   *
+   * SSOT: allocateNextPrefixedDocumentNumber (numeric MAX, digits-only).
    */
   async generateSaleNumber(pool: Pool | PoolClient): Promise<string> {
     const year = getBusinessYear();
-    // Advisory lock prevents concurrent duplicate sale number generation (held until TX commit)
-    await pool.query(`SELECT pg_advisory_xact_lock(hashtext('sale_number_seq'))`);
-    const result = await pool.query(
-      `SELECT sale_number FROM sales 
-       WHERE sale_number LIKE $1 
-       ORDER BY sale_number DESC 
-       LIMIT 1`,
-      [`SALE-${year}-%`]
-    );
-
-    if (result.rows.length === 0) {
-      return `SALE-${year}-0001`;
-    }
-
-    const lastNumber = result.rows[0].sale_number;
-    const sequence = parseInt(lastNumber.split('-')[2]) + 1;
-    return `SALE-${year}-${sequence.toString().padStart(4, '0')}`;
+    return allocateNextPrefixedDocumentNumber(pool, {
+      kind: 'sale',
+      prefix: `SALE-${year}-`,
+    });
   },
 
   /**
@@ -228,8 +217,6 @@ export const salesRepository = {
    * Maps to actual sales table schema from 001_initial_schema.sql
    */
   async createSale(pool: Pool | PoolClient, data: CreateSaleData): Promise<SaleRecord> {
-    const saleNumber = await this.generateSaleNumber(pool);
-
     // Schema fields: sale_number, customer_id, sale_date, subtotal, tax_amount,
     // discount_amount, total_amount, total_cost, profit, profit_margin,
     // payment_method, amount_paid, change_amount, status, notes, cashier_id
@@ -260,8 +247,15 @@ export const salesRepository = {
       // Period enforcement (replaces trg_enforce_period_sales)
       await checkAccountingPeriodOpen(pool, data.saleDate ?? getBusinessDate());
 
-      result = await pool.query(
-        `INSERT INTO sales (
+      // Savepoint retry: after a unique_violation PG aborts the TX unless we roll back to SP.
+      const maxAttempts = 3;
+      let saleNumber = await this.generateSaleNumber(pool);
+      let inserted: typeof result | undefined;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        await pool.query('SAVEPOINT sp_sale_number_insert');
+        try {
+          inserted = await pool.query(
+            `INSERT INTO sales (
         sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
         total_cost, profit, profit_margin,
         payment_method, amount_paid, change_amount, cashier_id, quote_id,
@@ -286,30 +280,54 @@ export const salesRepository = {
         quote_id as "quoteId",
         cash_register_session_id as "cashRegisterSessionId",
         created_at as "createdAt"`,
-        [
-          saleNumber,
-          data.customerId,
-          data.saleDate || getBusinessDate(), // YYYY-MM-DD in Africa/Kampala timezone
-          subtotal.toFixed(2), // $4 — string for PostgreSQL NUMERIC (bank-grade precision)
-          taxAmount.toFixed(2), // $5
-          discountAmount.toFixed(2), // $6
-          totalAmount.toFixed(2), // $7
-          totalCost.toFixed(2), // $8
-          profit.toFixed(2), // $9
-          profitMargin.toFixed(4), // 4 decimal places for margin (0.2500 = 25%)
-          data.paymentMethod,
-          data.paymentReceived,
-          data.changeAmount,
-          data.soldBy, // Maps to cashier_id
-          data.quoteId || null, // Link to quotation
-          data.idempotencyKey || null,
-          data.offlineId || null,
-          data.cashRegisterSessionId || null, // Link to cash register session
-        ]
-      );
+            [
+              saleNumber,
+              data.customerId,
+              data.saleDate || getBusinessDate(), // YYYY-MM-DD in Africa/Kampala timezone
+              subtotal.toFixed(2), // $4 — string for PostgreSQL NUMERIC (bank-grade precision)
+              taxAmount.toFixed(2), // $5
+              discountAmount.toFixed(2), // $6
+              totalAmount.toFixed(2), // $7
+              totalCost.toFixed(2), // $8
+              profit.toFixed(2), // $9
+              profitMargin.toFixed(4), // 4 decimal places for margin (0.2500 = 25%)
+              data.paymentMethod,
+              data.paymentReceived,
+              data.changeAmount,
+              data.soldBy, // Maps to cashier_id
+              data.quoteId || null, // Link to quotation
+              data.idempotencyKey || null,
+              data.offlineId || null,
+              data.cashRegisterSessionId || null, // Link to cash register session
+            ],
+          );
+          await pool.query('RELEASE SAVEPOINT sp_sale_number_insert');
+          break;
+        } catch (insertErr: unknown) {
+          const pgInsert = insertErr as { code?: string; constraint?: string };
+          await pool.query('ROLLBACK TO SAVEPOINT sp_sale_number_insert');
+          if (
+            pgInsert.code === '23505' &&
+            pgInsert.constraint === 'sales_sale_number_key' &&
+            attempt < maxAttempts
+          ) {
+            saleNumber = await this.generateSaleNumber(pool);
+            continue;
+          }
+          throw insertErr;
+        }
+      }
+      if (!inserted) {
+        throw new BusinessError(
+          'Could not allocate a unique sale number. Please retry payment.',
+          'ERR_SALE_NUMBER_CONFLICT',
+          { attempts: maxAttempts },
+        );
+      }
+      result = inserted;
     } catch (dbError: unknown) {
       // Convert PostgreSQL constraint violations to structured BusinessErrors
-      const pgError = dbError as { constraint?: string; message?: string };
+      const pgError = dbError as { code?: string; constraint?: string; message?: string };
       if (pgError.constraint === 'chk_sales_payment_valid') {
         throw new BusinessError(
           `Payment amount is invalid for this sale. Amount paid: ${data.paymentReceived}, Total: ${totalAmount.toFixed(2)}`,
@@ -319,6 +337,13 @@ export const salesRepository = {
             totalAmount: Money.toNumber(totalAmount),
             constraint: 'chk_sales_payment_valid',
           }
+        );
+      }
+      if (pgError.constraint === 'sales_sale_number_key') {
+        throw new BusinessError(
+          'Sale number conflict — please retry payment.',
+          'ERR_SALE_NUMBER_CONFLICT',
+          { constraint: pgError.constraint, pgCode: pgError.code },
         );
       }
       throw dbError; // Re-throw non-constraint DB errors
@@ -1431,25 +1456,14 @@ export const salesRepository = {
   /**
    * Generate next refund number (REF-YYYY-NNNN format).
    * Must be called inside a transaction for advisory lock safety.
+   * SSOT: allocateNextPrefixedDocumentNumber (numeric MAX, digits-only).
    */
   async generateRefundNumber(pool: Pool | PoolClient): Promise<string> {
     const year = getBusinessYear();
-    await pool.query(`SELECT pg_advisory_xact_lock(hashtext('refund_number_seq'))`);
-    const result = await pool.query(
-      `SELECT refund_number FROM sale_refunds
-       WHERE refund_number LIKE $1
-       ORDER BY refund_number DESC
-       LIMIT 1`,
-      [`REF-${year}-%`]
-    );
-
-    if (result.rows.length === 0) {
-      return `REF-${year}-0001`;
-    }
-
-    const lastNumber = result.rows[0].refund_number;
-    const sequence = safeParseInt(lastNumber.split('-')[2], 0) + 1;
-    return `REF-${year}-${sequence.toString().padStart(4, '0')}`;
+    return allocateNextPrefixedDocumentNumber(pool, {
+      kind: 'refund',
+      prefix: `REF-${year}-`,
+    });
   },
 
   /**

@@ -2,6 +2,7 @@ import { Pool, PoolClient } from 'pg';
 import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
 import { convertKeysToCamelCase } from '../../utils/caseConverter.js';
 import { tableHasColumn } from '../../db/schemaColumnCache.js';
+import { allocateNextPrefixedDocumentNumber } from '../../utils/documentNumberAllocation.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -126,26 +127,14 @@ export const ordersRepository = {
    * Generate next order number (ORD-YYYY-NNNN format).
    * Advisory lock prevents concurrent duplicate generation.
    * MUST be called on the transaction client so lock is held until COMMIT.
+   * SSOT: allocateNextPrefixedDocumentNumber (numeric MAX, digits-only).
    */
   async generateOrderNumber(client: Pool | PoolClient): Promise<string> {
     const year = getBusinessYear();
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext('order_number_seq'))`);
-
-    const result = await client.query(
-      `SELECT order_number FROM pos_orders
-       WHERE order_number LIKE $1
-       ORDER BY order_number DESC
-       LIMIT 1`,
-      [`ORD-${year}-%`]
-    );
-
-    if (result.rows.length === 0) {
-      return `ORD-${year}-0001`;
-    }
-
-    const lastNumber = result.rows[0].order_number;
-    const sequence = parseInt(lastNumber.split('-')[2]) + 1;
-    return `ORD-${year}-${sequence.toString().padStart(4, '0')}`;
+    return allocateNextPrefixedDocumentNumber(client, {
+      kind: 'order',
+      prefix: `ORD-${year}-`,
+    });
   },
 
   /**
