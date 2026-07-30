@@ -44,5 +44,7 @@ describe('restaurant mode hides retail POS', () => {
     const guard = readRepo('samplepos.client/src/components/auth/CashierPathGuard.tsx');
     expect(guard).toMatch(/shouldHideRetailPos\(restaurantEnabled\)/);
     expect(guard).toMatch(/Navigate to="\/restaurant"/);
+    expect(guard).toContain('RestaurantModeBoot');
+    expect(guard).toContain('!isReady');
   });
 });

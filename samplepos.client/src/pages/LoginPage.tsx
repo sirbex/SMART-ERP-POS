@@ -8,7 +8,13 @@ import type { UserRole } from '../types';
 import { Shield, Eye, EyeOff, Loader2, AlertCircle, Store, WifiOff, Fingerprint } from 'lucide-react';
 import { useTenant } from '../contexts/TenantContext';
 import { MathCaptcha } from '../components/auth/MathCaptcha';
-import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
+import {
+  fetchRestaurantEnabled,
+  restaurantEnabledQueryKey,
+  useRestaurantModeForRouting,
+} from '../hooks/useRestaurantEnabled';
+import { RestaurantModeBoot } from '../components/auth/RestaurantModeBoot';
+import { useQueryClient } from '@tanstack/react-query';
 
 function readCachedPermissionKeys(): string[] {
   try {
@@ -209,10 +215,22 @@ export default function LoginPage() {
   const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const { login, isAuthenticated, user } = useAuth();
   const { config } = useTenant();
-  const { data: restaurantEnabled = false } = useRestaurantEnabled();
+  const queryClient = useQueryClient();
+  const { restaurantEnabled, isReady } = useRestaurantModeForRouting();
   const brandName = config.branding.companyName || config.name || 'SMART ERP';
   const navigate = useNavigate();
   const location = useLocation();
+
+  const resolveHomeAfterAuth = async (
+    role: string | undefined,
+    intended?: string,
+  ): Promise<string> => {
+    const enabled = await queryClient.fetchQuery({
+      queryKey: restaurantEnabledQueryKey,
+      queryFn: fetchRestaurantEnabled,
+    });
+    return homeAfterLogin(role, intended, enabled);
+  };
 
   useEffect(() => {
     const goOnline = () => setIsOnline(true);
@@ -240,8 +258,11 @@ export default function LoginPage() {
     return (location.state as { sessionExpired?: boolean } | null)?.sessionExpired === true;
   });
 
-  // Redirect if already authenticated
+  // Redirect if already authenticated — wait for restaurant flag so we never flash retail POS
   if (isAuthenticated) {
+    if (!isReady) {
+      return <RestaurantModeBoot />;
+    }
     return <Navigate to={homeAfterLogin(user?.role, from, restaurantEnabled)} replace />;
   }
   const handleSubmit = async (e: React.FormEvent) => {
@@ -263,7 +284,7 @@ export default function LoginPage() {
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             await login(offlineUser, existingToken);
-            navigate(homeAfterLogin(offlineUser.role, from, restaurantEnabled), { replace: true });
+            navigate(await resolveHomeAfterAuth(offlineUser.role, from), { replace: true });
             return;
           }
         } catch {
@@ -308,7 +329,7 @@ export default function LoginPage() {
         await login(user, accessToken || token, refreshToken, expiresIn);
         // Cache for offline login
         await cacheLoginCredential(email, password, user);
-        navigate(homeAfterLogin(user.role, from, restaurantEnabled), { replace: true });
+        navigate(await resolveHomeAfterAuth(user.role, from), { replace: true });
       } else {
         setError(response.data.error || 'Login failed');
       }
@@ -330,7 +351,7 @@ export default function LoginPage() {
           if (offlineUser) {
             const existingToken = localStorage.getItem('auth_token') || generateOfflineToken();
             await login(offlineUser, existingToken);
-            navigate(homeAfterLogin(offlineUser.role, from, restaurantEnabled), { replace: true });
+            navigate(await resolveHomeAfterAuth(offlineUser.role, from), { replace: true });
             return;
           }
         } catch {
@@ -385,7 +406,7 @@ export default function LoginPage() {
     if (email && password) {
       cacheLoginCredential(email, password, authUser).catch(() => { });
     }
-    navigate(homeAfterLogin(authUser.role, from, restaurantEnabled), { replace: true });
+    navigate(await resolveHomeAfterAuth(authUser.role, from), { replace: true });
   };
 
   const handle2FACancel = () => {

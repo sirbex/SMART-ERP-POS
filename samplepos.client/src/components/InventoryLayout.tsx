@@ -16,7 +16,8 @@ import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 
 import { isCashierRole, resolveCashierHomePath } from '../utils/cashierLockdown';
 
-import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
+import { useRestaurantModeForRouting } from '../hooks/useRestaurantEnabled';
+import { RestaurantModeBoot } from './auth/RestaurantModeBoot';
 
 import {
 
@@ -84,7 +85,7 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
 
   const { user, permissions } = useAuth();
 
-  const { data: restaurantEnabled = false } = useRestaurantEnabled();
+  const { restaurantEnabled, isReady } = useRestaurantModeForRouting();
 
   const { isMultistoreEnabled } = useMultistoreEnabled();
 
@@ -177,9 +178,10 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
 
 
   if (isCashierRole(user?.role)) {
-
+    if (!isReady) {
+      return <RestaurantModeBoot />;
+    }
     return <Navigate to={resolveCashierHomePath(restaurantEnabled)} replace />;
-
   }
 
 

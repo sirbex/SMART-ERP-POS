@@ -9,7 +9,11 @@ import { toast } from 'react-hot-toast';
 import { resolvePostLoginPath } from '../../utils/cashierLockdown';
 import { takeRestaurantPostQuickLoginPath } from '../../utils/restaurantFohAutoLogout';
 import { useAuth } from '../../contexts/AuthContext';
-import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
+import {
+  fetchRestaurantEnabled,
+  restaurantEnabledQueryKey,
+} from '../../hooks/useRestaurantEnabled';
+import { useQueryClient } from '@tanstack/react-query';
 
 // ============================================================
 // PIN Input Component
@@ -250,7 +254,7 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
 export default function QuickLoginScreen() {
     const navigate = useNavigate();
     const { permissions } = useAuth();
-    const { data: restaurantEnabled = false } = useRestaurantEnabled();
+    const queryClient = useQueryClient();
     const {
         isLoading,
         error,
@@ -266,9 +270,13 @@ export default function QuickLoginScreen() {
         try {
             const result = await loginWithPinOnly(pin);
             toast.success(`Welcome, ${result.user.fullName}!`);
+            const enabled = await queryClient.fetchQuery({
+                queryKey: restaurantEnabledQueryKey,
+                queryFn: fetchRestaurantEnabled,
+            });
             // Restaurant FOH auto-logout stashes /restaurant; waiters land back on tables.
             const intended = takeRestaurantPostQuickLoginPath(
-              restaurantEnabled ? '/restaurant' : '/pos',
+              enabled ? '/restaurant' : '/pos',
             );
             let perms: string[] = [];
             try {
@@ -282,7 +290,7 @@ export default function QuickLoginScreen() {
             }
             navigate(
               resolvePostLoginPath(
-                { role: result.user.role, permissions: perms, restaurantEnabled },
+                { role: result.user.role, permissions: perms, restaurantEnabled: enabled },
                 intended,
               ),
               { replace: true },
@@ -290,7 +298,7 @@ export default function QuickLoginScreen() {
         } catch {
             // Error is handled by hook, shown in PinInput
         }
-    }, [loginWithPinOnly, navigate, permissions, restaurantEnabled]);
+    }, [loginWithPinOnly, navigate, permissions, queryClient]);
 
     const handlePasswordLogin = useCallback(() => {
         navigate('/login');

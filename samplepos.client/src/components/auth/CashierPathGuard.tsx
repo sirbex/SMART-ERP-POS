@@ -1,6 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
-import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
+import { useRestaurantModeForRouting } from '../../hooks/useRestaurantEnabled';
 import {
   isCashierAllowedPath,
   isCashierRole,
@@ -12,6 +12,7 @@ import {
   WAITER_HOME_PATH,
 } from '../../utils/restaurantWaiterLockdown';
 import { shouldHideRetailPos } from '../../utils/retailPosVisibility';
+import { RestaurantModeBoot } from './RestaurantModeBoot';
 
 /**
  * Blocks cashiers from non-POS routes and waiters from kitchen/config/ERP surfaces.
@@ -21,7 +22,15 @@ import { shouldHideRetailPos } from '../../utils/retailPosVisibility';
 export function CashierPathGuard() {
   const { user, permissions } = useAuth();
   const location = useLocation();
-  const { data: restaurantEnabled = false } = useRestaurantEnabled();
+  const { restaurantEnabled, isReady } = useRestaurantModeForRouting();
+
+  const onRetailPos =
+    location.pathname === '/pos' || location.pathname.startsWith('/pos/');
+
+  // Never mount retail POS until the flag is settled — prevents restaurant→retail flash.
+  if (onRetailPos && !isReady) {
+    return <RestaurantModeBoot />;
+  }
 
   if (
     isCashierRole(user?.role) &&
@@ -42,10 +51,7 @@ export function CashierPathGuard() {
   }
 
   // Restaurant tenant: do not leave anyone on retail POS.
-  if (
-    shouldHideRetailPos(restaurantEnabled) &&
-    (location.pathname === '/pos' || location.pathname.startsWith('/pos/'))
-  ) {
+  if (shouldHideRetailPos(restaurantEnabled) && onRetailPos) {
     return <Navigate to="/restaurant" replace />;
   }
 

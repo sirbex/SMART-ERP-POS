@@ -12,7 +12,8 @@ import { UserRole } from '../../types';
 import { isCashierRole, resolveCashierHomePath } from '../../utils/cashierLockdown';
 import { createClientAuthorization } from '../../authorization/authorizationService';
 import { useCanAccess } from '../../authorization/useAuthorization';
-import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
+import { useRestaurantModeForRouting } from '../../hooks/useRestaurantEnabled';
+import { RestaurantModeBoot } from './RestaurantModeBoot';
 
 interface ProtectedRouteProps {
     children: React.ReactNode;
@@ -39,7 +40,7 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
     const { isAuthenticated, user, permissions } = useAuth();
     const location = useLocation();
-    const { data: restaurantEnabled = false } = useRestaurantEnabled();
+    const { restaurantEnabled, isReady } = useRestaurantModeForRouting();
 
     if (!isAuthenticated || !user) {
         return <Navigate to={fallbackPath} state={{ from: location }} replace />;
@@ -89,6 +90,10 @@ export function ProtectedRoute({
                 </div>
             </div>
         );
+    }
+
+    if (isCashierRole(user.role) && !isReady) {
+      return <RestaurantModeBoot />;
     }
 
     return (

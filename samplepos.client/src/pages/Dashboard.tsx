@@ -20,7 +20,8 @@ import {
   isRestaurantWaiterProfile,
   WAITER_HOME_PATH,
 } from '../utils/restaurantWaiterLockdown';
-import { useRestaurantEnabled } from '../hooks/useRestaurantEnabled';
+import { useRestaurantEnabled, useRestaurantModeForRouting } from '../hooks/useRestaurantEnabled';
+import { RestaurantModeBoot } from '../components/auth/RestaurantModeBoot';
 import { shouldHideRetailPos } from '../utils/retailPosVisibility';
 import {
   ShoppingCart,
@@ -180,7 +181,10 @@ function PaymentMethodIcon({ method }: { method: string }) {
 
 export default function Dashboard() {
   const { user, permissions } = useAuth();
-  const { data: restaurantEnabled = false } = useRestaurantEnabled();
+  const { restaurantEnabled, isReady } = useRestaurantModeForRouting();
+  if (!isReady) {
+    return <RestaurantModeBoot />;
+  }
   if (isCashierRole(user?.role)) {
     return <Navigate to={resolveCashierHomePath(restaurantEnabled)} replace />;
   }

@@ -10,7 +10,8 @@ import NetworkStatusBanner from './components/NetworkStatusBanner';
 import BusinessDateSync from './components/BusinessDateSync';
 import { isCashierRole, resolveCashierHomePath, resolvePostLoginPath } from './utils/cashierLockdown';
 import OfflineAutoSync from './components/OfflineAutoSync';
-import { useRestaurantEnabled } from './hooks/useRestaurantEnabled';
+import { useRestaurantModeForRouting } from './hooks/useRestaurantEnabled';
+import { RestaurantModeBoot } from './components/auth/RestaurantModeBoot';
 
 // Layouts stay static (small, shared across routes)
 import InventoryLayout from './components/InventoryLayout';
@@ -178,10 +179,13 @@ const TenantsPage = lazyWithRetry(() => import('./pages/platform/TenantsPage'));
 const AdminsPage = lazyWithRetry(() => import('./pages/platform/AdminsPage'));
 const PlatformHealthPage = lazyWithRetry(() => import('./pages/platform/PlatformHealthPage'));
 
-// Redirect home: cashiers → POS, waiters → Restaurant FOH, else dashboard
+// Redirect home: cashiers → POS / Restaurant FOH, waiters → Restaurant FOH, else dashboard
 function HomeRedirect() {
   const { user, permissions } = useAuth();
-  const { data: restaurantEnabled = false } = useRestaurantEnabled();
+  const { restaurantEnabled, isReady } = useRestaurantModeForRouting();
+  if (!isReady) {
+    return <RestaurantModeBoot />;
+  }
   if (isCashierRole(user?.role)) {
     return <Navigate to={resolveCashierHomePath(restaurantEnabled)} replace />;
   }
