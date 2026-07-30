@@ -242,7 +242,7 @@ export const salesRepository = {
       ? profit.dividedBy(revenueBeforeTax)
       : new Decimal(0);
 
-    let result;
+    let result: { rows: SaleRecord[] } | undefined;
     try {
       // Period enforcement (replaces trg_enforce_period_sales)
       await checkAccountingPeriodOpen(pool, data.saleDate ?? getBusinessDate());
@@ -250,7 +250,7 @@ export const salesRepository = {
       // Savepoint retry: after a unique_violation PG aborts the TX unless we roll back to SP.
       const maxAttempts = 3;
       let saleNumber = await this.generateSaleNumber(pool);
-      let inserted: typeof result | undefined;
+      let inserted: { rows: SaleRecord[] } | undefined;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         await pool.query('SAVEPOINT sp_sale_number_insert');
         try {
