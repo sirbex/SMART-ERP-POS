@@ -618,6 +618,14 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(service).toMatch(/listPendingOrdersForTable/);
     expect(service).toMatch(/cloneOrderItemPartial/);
     expect(service).not.toMatch(/CREATE TABLE.*restaurant_orders/i);
+    // Stale paid/cancelled orderId on addItems: open new check when no PENDING siblings.
+    const addItems = service.slice(
+      service.indexOf('async addItemsToTable'),
+      service.indexOf('async sendKot'),
+    );
+    expect(addItems).toMatch(/closed orderId with no open siblings/);
+    expect(addItems).toMatch(/openOrderIds/);
+    expect(addItems).toMatch(/ERR_RESTAURANT_CHECK_CLOSED/);
 
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     expect(repo).toMatch(/moveOrderItems/);
@@ -637,6 +645,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     // Merge is same-table only (Samba).
     expect(pos).toMatch(/merge only other tickets on the same table/);
     expect(service).toMatch(/same table/);
+    // Client recovers from closed check on add (retry once without orderId).
+    expect(pos).toMatch(/isRestaurantCheckClosedError/);
+    expect(pos).toMatch(/openOrderIds/);
   });
 
   it('Phase 5.1 restaurant offline uses existing event journal', () => {
@@ -796,7 +807,8 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/CustomerSelector/);
     expect(pos).toMatch(/appendOptimisticMenuItem/);
     expect(pos).toMatch(/mergeInFlightOptimisticLines/);
-    expect(pos).toMatch(/orderId: apiOrderId/);
+    expect(pos).toMatch(/orderId: orderIdForApi/);
+    expect(pos).toMatch(/isRestaurantCheckClosedError/);
     expect(pos).not.toMatch(/disabled=\{addItemMutation\.isPending\}/);
     // ofl_ord_* journal-first; server UUID checks use API online (void needs real line UUIDs).
     expect(pos).toMatch(

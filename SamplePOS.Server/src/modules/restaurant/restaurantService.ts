@@ -584,12 +584,33 @@ export const restaurantService = {
         if (!meta || meta.tableId !== input.tableId) {
           throw new ValidationError('Order does not belong to this table');
         }
-        requireCheckMutationAccess(meta.waiterId, actor);
         const existing = await ordersRepository.getById(pool, input.orderId);
         if (!existing || existing.status !== 'PENDING') {
-          throw new ValidationError('Check is not open');
+          // Stale client orderId after pay/cancel — FOH often still paints the old ticket.
+          // If this table has no other open check, open a new one instead of blocking adds.
+          // Do not enforce ownership on the closed ticket (new check is owned by the actor).
+          const pending = await restaurantRepository.listPendingOrdersForTable(
+            pool,
+            input.tableId,
+          );
+          if (pending.length === 0) {
+            logger.info('addItems: closed orderId with no open siblings — opening new check', {
+              tableId: input.tableId,
+              closedOrderId: input.orderId,
+              status: existing?.status ?? null,
+            });
+            orderId = null;
+          } else {
+            throw new BusinessError('Check is not open', 'ERR_RESTAURANT_CHECK_CLOSED', {
+              orderId: input.orderId,
+              status: existing?.status ?? null,
+              openOrderIds: pending.map((p) => p.id),
+            });
+          }
+        } else {
+          requireCheckMutationAccess(meta.waiterId, actor);
+          orderId = input.orderId;
         }
-        orderId = input.orderId;
       } else {
         orderId = table.currentOrderId;
         if (orderId) {

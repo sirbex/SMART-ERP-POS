@@ -403,6 +403,15 @@ function apiErr(err: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Closed/paid check still painted on FOH — retry add without orderId. */
+function isRestaurantCheckClosedError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  const data = err.response?.data as { error?: string; error_code?: string; message?: string } | undefined;
+  if (data?.error_code === 'ERR_RESTAURANT_CHECK_CLOSED') return true;
+  const msg = (data?.error || data?.message || '').toLowerCase();
+  return msg.includes('check is not open') || msg.includes('table check is not open');
+}
+
 /** Map journal-derived check → UI shape (offline + crash restore). */
 function uiFromDerivedCheck(
   derived: DerivedOrder,
@@ -1301,27 +1310,44 @@ export default function RestaurantPosPage() {
       const apiOrderId = toServerRestaurantOrderId(targetOrderId);
 
       try {
-        await api.restaurant.addItems({
-          tableId: selectedTableId,
-          orderId: apiOrderId,
-          waiterId: selectedWaiterId,
-          customerId: selectedCustomer?.id || null,
-          guestName,
-          guestPhone,
-          deliveryAddress,
-          pickupLabel: guestDraft.pickupLabel.trim() || null,
-          items: [{ productId: product.id, quantity }],
-        });
+        const postItems = async (orderIdForApi: string | null | undefined) => {
+          await api.restaurant.addItems({
+            tableId: selectedTableId,
+            orderId: orderIdForApi,
+            waiterId: selectedWaiterId,
+            customerId: selectedCustomer?.id || null,
+            guestName,
+            guestPhone,
+            deliveryAddress,
+            pickupLabel: guestDraft.pickupLabel.trim() || null,
+            items: [{ productId: product.id, quantity }],
+          });
+        };
+        try {
+          await postItems(apiOrderId);
+        } catch (firstErr) {
+          if (!apiOrderId || !isRestaurantCheckClosedError(firstErr)) throw firstErr;
+          // Paid/cancelled ticket still in cache — clear paint and retry only when
+          // the table has no other open check (siblings → refresh UI, don't open a 3rd).
+          setActiveOrderId(null);
+          void queryClient.invalidateQueries({
+            queryKey: ['restaurant', 'check', selectedTableId],
+          });
+          const details = axios.isAxiosError(firstErr)
+            ? (firstErr.response?.data as { details?: { openOrderIds?: string[] } } | undefined)
+                ?.details
+            : undefined;
+          const openIds = details?.openOrderIds;
+          if (Array.isArray(openIds) && openIds.length > 0) throw firstErr;
+          await postItems(undefined);
+        }
         if (selectedTableId) {
           clearRestaurantBillRequestedOffline(selectedTableId, order?.id ?? undefined);
         }
-        const res = await api.restaurant.getTableCheck(
-          selectedTableId,
-          apiOrderId ? { orderId: apiOrderId } : undefined,
-        );
+        const res = await api.restaurant.getTableCheck(selectedTableId);
         const data = res.data.data as CheckUiPayload;
         inFlightOptimisticLinesRef.current.delete(tempLineId);
-        paintServerCheckWithInFlight(selectedTableId, data, targetOrderId);
+        paintServerCheckWithInFlight(selectedTableId, data, data.order?.id ?? null);
         if (data.order?.id) setActiveOrderId(data.order.id);
         const newest = [...(data.order?.items || [])]
           .reverse()
@@ -1340,13 +1366,11 @@ export default function RestaurantPosPage() {
       } catch (err) {
         inFlightOptimisticLinesRef.current.delete(tempLineId);
         try {
-          const res = await api.restaurant.getTableCheck(
-            selectedTableId,
-            apiOrderId ? { orderId: apiOrderId } : undefined,
-          );
+          const res = await api.restaurant.getTableCheck(selectedTableId);
           const data = res.data.data as CheckUiPayload;
-          paintServerCheckWithInFlight(selectedTableId, data, targetOrderId);
+          paintServerCheckWithInFlight(selectedTableId, data, data.order?.id ?? null);
           if (data.order?.id) setActiveOrderId(data.order.id);
+          else setActiveOrderId(null);
         } catch {
           queryClient.setQueryData(checkKey, prevSnapshot);
         }
@@ -2908,31 +2932,45 @@ export default function RestaurantPosPage() {
     setLineSheet(null);
     const apiOrderId = toServerRestaurantOrderId(targetOrderId);
     try {
-      await api.restaurant.addItems({
-        tableId: selectedTableId,
-        orderId: apiOrderId,
-        waiterId: selectedWaiterId,
-        items: [{ productId, quantity: 1 }],
-      });
+      const postItems = async (orderIdForApi: string | null | undefined) => {
+        await api.restaurant.addItems({
+          tableId: selectedTableId,
+          orderId: orderIdForApi,
+          waiterId: selectedWaiterId,
+          items: [{ productId, quantity: 1 }],
+        });
+      };
+      try {
+        await postItems(apiOrderId);
+      } catch (firstErr) {
+        if (!apiOrderId || !isRestaurantCheckClosedError(firstErr)) throw firstErr;
+        setActiveOrderId(null);
+        void queryClient.invalidateQueries({
+          queryKey: ['restaurant', 'check', selectedTableId],
+        });
+        const details = axios.isAxiosError(firstErr)
+          ? (firstErr.response?.data as { details?: { openOrderIds?: string[] } } | undefined)
+              ?.details
+          : undefined;
+        const openIds = details?.openOrderIds;
+        if (Array.isArray(openIds) && openIds.length > 0) throw firstErr;
+        await postItems(undefined);
+      }
       if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId, order?.id ?? undefined);
-      const res = await api.restaurant.getTableCheck(
-        selectedTableId,
-        apiOrderId ? { orderId: apiOrderId } : undefined,
-      );
+      const res = await api.restaurant.getTableCheck(selectedTableId);
       const data = res.data.data as CheckUiPayload;
       inFlightOptimisticLinesRef.current.delete(tempLineId);
-      paintServerCheckWithInFlight(selectedTableId, data, targetOrderId);
+      paintServerCheckWithInFlight(selectedTableId, data, data.order?.id ?? null);
       if (data.order?.id) setActiveOrderId(data.order.id);
       toast.success('+1 added');
     } catch (err) {
       inFlightOptimisticLinesRef.current.delete(tempLineId);
       try {
-        const res = await api.restaurant.getTableCheck(
-          selectedTableId,
-          apiOrderId ? { orderId: apiOrderId } : undefined,
-        );
+        const res = await api.restaurant.getTableCheck(selectedTableId);
         const data = res.data.data as CheckUiPayload;
-        paintServerCheckWithInFlight(selectedTableId, data, targetOrderId);
+        paintServerCheckWithInFlight(selectedTableId, data, data.order?.id ?? null);
+        if (data.order?.id) setActiveOrderId(data.order.id);
+        else setActiveOrderId(null);
       } catch {
         queryClient.setQueryData(checkKey, prevSnapshot);
       }
