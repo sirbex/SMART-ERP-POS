@@ -30,6 +30,8 @@
     "proof:po-sibling-bill": "node scripts/proof-po-sibling-bill.mjs",
     "proof:warehouse-layer-coupling": "node scripts/proof-warehouse-layer-coupling.mjs",
     "proof:inventory-lot-foundation": "node scripts/proof-inventory-lot-foundation.mjs",
+    "proof:order-complete-soak": "node scripts/proof-order-complete-soak.mjs",
+    "proof:order-complete-soak:live": "node scripts/proof-order-complete-soak.mjs --live",
     "proof:inventory-supplier-inconsistencies": "node scripts/proof-inventory-supplier-inconsistencies.mjs",
     "proof:ap-reconciliation": "node ../scripts/proof-ap-reconciliation.mjs",
     "proof:scn-cancel-bill-ssot": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/tests/scnCancelBillLedgerSsotProof.test.ts --no-coverage --testTimeout=120000 --forceExit",

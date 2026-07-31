@@ -11,6 +11,11 @@ import { asyncHandler, BusinessError } from '../../middleware/errorHandler.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
 import { userHasPermission } from '../../authorization/serviceAuth.js';
+import {
+  findSaleByIdempotencyKey,
+  isIdempotencyUniqueViolation,
+  resolveExistingCompleteSale,
+} from './orderCompleteIdempotency.js';
 
 // ── Validation Schemas ────────────────────────────────────────────────
 
@@ -52,6 +57,8 @@ const CompleteOrderSchema = z.object({
   cashRegisterSessionId: z.string().uuid().optional(),
   // Optional additional discount the cashier can apply at payment time
   extraDiscountAmount: z.number().nonnegative().optional(),
+  /** Required for integrity: retries / double-submit must reuse the same key. */
+  idempotencyKey: z.string().min(1).max(100),
 });
 
 const CancelOrderSchema = z.object({
@@ -238,12 +245,34 @@ router.post(
   requireAnyPermission(['orders.pay', 'restaurant.pay']),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const paymentData = CompleteOrderSchema.parse(req.body);
+    const headerKey =
+      typeof req.headers['x-idempotency-key'] === 'string'
+        ? req.headers['x-idempotency-key'].trim()
+        : '';
+    const paymentData = CompleteOrderSchema.parse({
+      ...req.body,
+      // Header fills body when client retries via X-Idempotency-Key only
+      idempotencyKey: req.body?.idempotencyKey ?? (headerKey || undefined),
+    });
     const userId = req.user!.id;
     const orderId = req.params.id;
+    const idempotencyKey = paymentData.idempotencyKey;
 
-    // 1. Validate the order is PENDING and get its items
-    const order = await ordersService.prepareOrderForPayment(pool, orderId);
+    // 0. Idempotent replay: same key already produced a sale
+    const keyedSale = await findSaleByIdempotencyKey(pool, idempotencyKey);
+    if (keyedSale) {
+      const order = await ordersService.getOrder(pool, orderId);
+      res.status(200).json({
+        success: true,
+        data: {
+          order: order ? { ...order, status: order.status } : { id: orderId, status: 'COMPLETED' },
+          sale: { id: keyedSale.id, saleNumber: keyedSale.saleNumber },
+          alreadyCompleted: true,
+        },
+        message: 'Order already completed (idempotent)',
+      });
+      return;
+    }
 
     // Restaurant settlement must use restaurant.pay (not orders.pay alone).
     const isRestaurantCheck = await restaurantService.isRestaurantCheck(pool, orderId);
@@ -257,6 +286,32 @@ router.post(
         'ERR_PERMISSION_DENIED',
         { orderId, permission: needed },
       );
+    }
+
+    // 1. Validate PENDING — if already settled, return linked sale (retry after commit)
+    let order;
+    try {
+      order = await ordersService.prepareOrderForPayment(pool, orderId);
+    } catch (prepErr: unknown) {
+      if (prepErr instanceof BusinessError && prepErr.errorCode === 'ERR_ORDER_003') {
+        const existing = await resolveExistingCompleteSale(pool, { orderId, idempotencyKey });
+        if (existing) {
+          const settled = await ordersService.getOrder(pool, orderId);
+          res.status(200).json({
+            success: true,
+            data: {
+              order: settled
+                ? { ...settled, status: settled.status }
+                : { id: orderId, status: 'COMPLETED' },
+              sale: { id: existing.id, saleNumber: existing.saleNumber },
+              alreadyCompleted: true,
+            },
+            message: 'Order already completed (idempotent)',
+          });
+          return;
+        }
+      }
+      throw prepErr;
     }
 
     // 2. Build CreateSaleInput from order items
@@ -310,10 +365,47 @@ router.post(
       // Atomically mark the order COMPLETED within the same sale transaction
       fromOrderId: orderId,
       quoteId: order.quoteId ?? undefined,
+      idempotencyKey,
     };
 
     // 3. Create the sale AND atomically mark order completed (single transaction)
-    const result = await salesService.createSale(pool, saleInput);
+    let result;
+    try {
+      result = await salesService.createSale(pool, saleInput);
+    } catch (createErr: unknown) {
+      if (isIdempotencyUniqueViolation(createErr)) {
+        const dup = await resolveExistingCompleteSale(pool, { orderId, idempotencyKey });
+        if (dup) {
+          res.status(200).json({
+            success: true,
+            data: {
+              order: { ...order, status: 'COMPLETED' },
+              sale: { id: dup.id, saleNumber: dup.saleNumber },
+              alreadyCompleted: true,
+            },
+            message: 'Order already completed (idempotent)',
+          });
+          return;
+        }
+      }
+      const biz = createErr instanceof BusinessError ? createErr : null;
+      if (biz?.errorCode === 'ERR_ORDER_003') {
+        const existing = await resolveExistingCompleteSale(pool, { orderId, idempotencyKey });
+        if (existing) {
+          res.status(200).json({
+            success: true,
+            data: {
+              order: { ...order, status: 'COMPLETED' },
+              sale: { id: existing.id, saleNumber: existing.saleNumber },
+              alreadyCompleted: true,
+            },
+            message: 'Order already completed (idempotent)',
+          });
+          return;
+        }
+      }
+      throw createErr;
+    }
 
     // 4. Restaurant SSOT: free floor + clear FIRE/VOID KOTs from KDS after payment
     try {
@@ -333,6 +425,7 @@ router.post(
       data: {
         order: { ...order, status: 'COMPLETED' },
         sale: result.sale,
+        alreadyCompleted: false,
         ...(atCostRepriceMeta?.hasDrift
           ? { atCostReprice: atCostRepriceMeta }
           : {}),

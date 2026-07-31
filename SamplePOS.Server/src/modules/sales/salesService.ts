@@ -170,6 +170,25 @@ export const salesService = {
       // Maintenance mode guard (replaces trg_maintenance_check_sales)
       await checkMaintenanceMode(client);
 
+      // Exactly-one settlement: lock order row before inserting sale (order-scoped, not tenant-wide)
+      if (input.fromOrderId) {
+        const locked = await client.query<{ id: string; status: string; order_number: string }>(
+          `SELECT id, status, order_number FROM pos_orders WHERE id = $1 FOR UPDATE`,
+          [input.fromOrderId],
+        );
+        const orderRow = locked.rows[0];
+        if (!orderRow) {
+          throw new NotFoundError('Order');
+        }
+        if (orderRow.status !== 'PENDING') {
+          throw new BusinessError(
+            `Cannot complete order ${orderRow.order_number} — status is ${orderRow.status}`,
+            'ERR_ORDER_003',
+            { orderId: input.fromOrderId, currentStatus: orderRow.status },
+          );
+        }
+      }
+
       const multistoreEnabled = await isMultistoreEnabled(client);
       let sellingStoreId: string | null = null;
       if (multistoreEnabled) {
@@ -2258,11 +2277,19 @@ export const salesService = {
       // status update are a single atomic unit (prevents duplicate sale risk)
       // ============================================================
       if (input.fromOrderId) {
-        await client.query(
+        const completed = await client.query<{ id: string }>(
           `UPDATE pos_orders SET status = 'COMPLETED', completed_at = NOW()
-           WHERE id = $1 AND status = 'PENDING'`,
-          [input.fromOrderId]
+           WHERE id = $1 AND status = 'PENDING'
+           RETURNING id`,
+          [input.fromOrderId],
         );
+        if (completed.rowCount === 0) {
+          throw new BusinessError(
+            `Cannot complete order — status is no longer PENDING`,
+            'ERR_ORDER_003',
+            { orderId: input.fromOrderId, currentStatus: 'NOT_PENDING' },
+          );
+        }
         await client.query(
           `UPDATE sales SET from_order_id = $1 WHERE id = $2`,
           [input.fromOrderId, sale.id]

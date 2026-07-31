@@ -32,6 +32,37 @@ import {
 } from '../../lib/receiptFromSale';
 import { useAuth } from '../../contexts/AuthContext';
 
+/** Stable complete key per order for retries / double-submit (session-scoped). */
+function getOrCreateOrderCompleteIdempotencyKey(orderId: string): string {
+  const storageKey = `order_complete_idem:${orderId}`;
+  try {
+    const existing = sessionStorage.getItem(storageKey);
+    if (existing && existing.length > 0 && existing.length <= 100) return existing;
+  } catch {
+    /* private mode — fall through */
+  }
+  const compactOrder = orderId.replace(/-/g, '').slice(0, 32);
+  const rand =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID().replace(/-/g, '')
+      : `${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+  const key = `ordc_${compactOrder}_${rand}`.slice(0, 100);
+  try {
+    sessionStorage.setItem(storageKey, key);
+  } catch {
+    /* ignore */
+  }
+  return key;
+}
+
+function clearOrderCompleteIdempotencyKey(orderId: string): void {
+  try {
+    sessionStorage.removeItem(`order_complete_idem:${orderId}`);
+  } catch {
+    /* ignore */
+  }
+}
+
 // ── Types ────────────────────────────────────────────────────────────
 
 interface AtCostOrderLinePreview {
@@ -351,6 +382,7 @@ export default function OrderPaymentPage() {
         paymentLines?: { paymentMethod: string; amount: number; reference?: string }[];
         extraDiscountAmount?: number;
         cashRegisterSessionId?: string;
+        idempotencyKey: string;
       } = {
         paymentMethod: effectiveMethod,
         paymentReceived: totalPaidAmount,
@@ -362,12 +394,14 @@ export default function OrderPaymentPage() {
         })),
         ...(cashierDiscount > 0 ? { extraDiscountAmount: cashierDiscount } : {}),
         ...(currentSession?.id ? { cashRegisterSessionId: currentSession.id } : {}),
+        idempotencyKey: getOrCreateOrderCompleteIdempotencyKey(id!),
       };
 
       const resp = await api.orders.complete(id!, payload);
       return resp.data;
     },
     onSuccess: async (data) => {
+      if (id) clearOrderCompleteIdempotencyKey(id);
       const result = data.data as {
         order?: OrderDetail;
         sale?: { saleNumber?: string };

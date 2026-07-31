@@ -519,7 +519,12 @@ export const api = {
       customerId?: string | null;
       cashRegisterSessionId?: string;
       extraDiscountAmount?: number;
-    }) => apiClient.post<ApiResponse>(`orders/${id}/complete`, data),
+      /** Stable per payment attempt — retries must reuse the same key. */
+      idempotencyKey: string;
+    }) =>
+      apiClient.post<ApiResponse>(`orders/${id}/complete`, data, {
+        headers: { 'X-Idempotency-Key': data.idempotencyKey },
+      }),
     cancel: (id: string, data: { reason: string }) =>
       apiClient.post<ApiResponse>(`orders/${id}/cancel`, data),
   },
