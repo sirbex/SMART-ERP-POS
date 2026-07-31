@@ -1564,7 +1564,10 @@ function App() {
                   <Route
                     path="/inventory/adjustments"
                     element={
-                      <ProtectedRoute requiredPermissions={['inventory.adjust']} requiredFeature="inventory">
+                      <ProtectedRoute
+                        requiredPermissions={['inventory.adjust', 'inventory.approve']}
+                        requiredFeature="inventory"
+                      >
                         <InventoryLayout>
                           <InventoryAdjustmentsPage />
                         </InventoryLayout>

@@ -1,7 +1,7 @@
 /**
  * @module InventoryAdjustmentsPage
  * @description Manual inventory adjustment interface - creates ADJUSTMENT_IN/ADJUSTMENT_OUT movements
- * @requires inventory.adjust permission
+ * @requires inventory.adjust OR inventory.approve permission
  * @architecture Uses unified StockMovementHandler on backend
  * @note Audit trail view is in StockMovementsPage to avoid duplication
  *
@@ -21,9 +21,10 @@ import { StoreLocationSelect } from '../../components/inventory/StoreLocationSel
 import { useProducts } from '../../hooks/useProducts';
 import { useStockMovements } from '../../hooks/useStockMovements';
 import { BatchAdjustmentSchema } from '@shared/zod/inventory';
+import { INVENTORY_STOCK_ADJUST_PERMISSIONS } from '@shared/authorization/inventoryAdjustPermissions';
 import apiClient from '../../utils/api';
 import { handleApiError } from '../../utils/errorHandler';
-import { useHasPermission } from '../../authorization/useAuthorization';
+import { useHasAnyPermission } from '../../authorization/useAuthorization';
 import Decimal from 'decimal.js';
 import { z } from 'zod';
 import { getBusinessDate } from '../../utils/businessDate';
@@ -239,7 +240,7 @@ export default function InventoryAdjustmentsPage() {
     }
   }, [showAdjustModal]);
 
-  const canAdjust = useHasPermission('inventory.adjust');
+  const canAdjust = useHasAnyPermission([...INVENTORY_STOCK_ADJUST_PERMISSIONS]);
 
   const adjustmentStores = useMemo(
     () => stores.filter((s) => s.isActive && ['MAIN', 'SELLING', 'DAMAGE', 'EXPIRED', 'RETURN'].includes(s.storeType)),
@@ -558,7 +559,9 @@ export default function InventoryAdjustmentsPage() {
   // Handle adjustment modal open — resolve a real inventory_batches row (FEFO) for GL/batch coupling
   const handleOpenAdjustModal = async (batch: Batch) => {
     if (!canAdjust) {
-      alert('You do not have permission to adjust inventory. inventory.adjust permission required.');
+      alert(
+        'You do not have permission to adjust inventory. Need inventory.adjust or inventory.approve.',
+      );
       return;
     }
 
@@ -803,7 +806,8 @@ export default function InventoryAdjustmentsPage() {
           <p className="text-yellow-800">
             You do not have permission to access inventory adjustments.
             <br />
-            Required permission: <strong>inventory.adjust</strong>
+            Required permission: <strong>inventory.adjust</strong> or{' '}
+            <strong>inventory.approve</strong>
           </p>
         </div>
       </div>
@@ -825,7 +829,9 @@ export default function InventoryAdjustmentsPage() {
                 <li>• <strong>Physical Count:</strong> Compare physical stock vs system, auto-create adjustments for discrepancies</li>
                 <li>• All records create immutable stock movement entries for full audit trail</li>
                 <li>• View <strong>Movement History</strong> for the complete audit trail</li>
-                <li>• <strong>Permission Required:</strong> inventory.adjust</li>
+                <li>
+                  • <strong>Permission Required:</strong> inventory.adjust or inventory.approve
+                </li>
               </ul>
             </WorkflowHelpTrigger>
           </div>

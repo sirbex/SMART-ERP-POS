@@ -1293,6 +1293,7 @@ export const api = {
       seats?: number;
       sortOrder?: number;
     }) => apiClient.post<ApiResponse>('restaurant/tables', data),
+    ensureServiceLanes: () => apiClient.post<ApiResponse>('restaurant/service-lanes/ensure'),
     updateTable: (
       id: string,
       data: Partial<{

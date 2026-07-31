@@ -1406,10 +1406,9 @@ export default function RestaurantPosPage() {
       );
       return;
     }
-    if (!canManage) {
-      toast.error(
-        `${def.name} lane missing. Ask a manager to create table ${def.code} (zone SERVICE), or enable once online.`,
-      );
+    // Waiters have restaurant.order (not manage) — ensure TA/DL/QK via dedicated endpoint.
+    if (!canOrder) {
+      toast.error('You need restaurant.order permission for takeaway / delivery');
       return;
     }
     if (!isOnline) {
@@ -1417,23 +1416,28 @@ export default function RestaurantPosPage() {
       return;
     }
     try {
-      const res = await api.restaurant.createTable({
-        code: def.code,
-        name: def.name,
-        zone: def.zone,
-        seats: 0,
-      });
-      const created = res.data.data as RestaurantTable;
+      const res = await api.restaurant.ensureServiceLanes();
+      const tables = (res.data.data || []) as RestaurantTable[];
       await queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
       const refreshed = await api.restaurant.listTables();
-      const tables = (refreshed.data.data || []) as RestaurantTable[];
+      const listed = (refreshed.data.data || []) as RestaurantTable[];
       const { cacheRestaurantTables } = await import('../../lib/restaurantOfflineCache');
-      cacheRestaurantTables(tables);
-      const opened = tables.find((t) => t.code.toUpperCase() === def.code) || created;
+      cacheRestaurantTables(listed.length ? listed : tables);
+      const opened =
+        listed.find((t) => t.code.toUpperCase() === def.code) ||
+        tables.find((t) => t.code.toUpperCase() === def.code);
+      if (!opened) {
+        toast.error(`${def.name} lane could not be created`);
+        return;
+      }
       pendingMobileSheetRef.current = sheetAfterSelect;
       setSelectedTableId(opened.id);
       setActiveOrderId(null);
-      toast.success(`${def.name} lane ready`);
+      toast.success(
+        kind === 'QUICK'
+          ? `${def.name} — add items`
+          : `${def.name} — select customer, then add items`,
+      );
     } catch (err) {
       toast.error(apiErr(err, `Failed to open ${def.name}`));
     }

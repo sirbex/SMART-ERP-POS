@@ -340,6 +340,42 @@ export const restaurantService = {
     return restaurantRepository.createTable(pool, data);
   },
 
+  /**
+   * Ensure Takeaway / Delivery / Quick service lanes exist.
+   * Waiters with restaurant.order may call this — not full restaurant.manage.
+   * Idempotent: returns existing rows when already present.
+   */
+  async ensureServiceLanes(pool: Pool): Promise<RestaurantTableRecord[]> {
+    await assertRestaurantEnabled(pool);
+    const defs = [
+      { code: 'TA', name: 'Takeaway', zone: 'SERVICE', seats: 0, sortOrder: 9001 },
+      { code: 'DL', name: 'Delivery', zone: 'SERVICE', seats: 0, sortOrder: 9002 },
+      { code: 'QK', name: 'Quick order', zone: 'SERVICE', seats: 0, sortOrder: 9003 },
+    ] as const;
+
+    const out: RestaurantTableRecord[] = [];
+    for (const def of defs) {
+      const existing = await restaurantRepository.getTableByCode(pool, def.code);
+      if (existing && existing.isActive !== false) {
+        out.push(existing);
+        continue;
+      }
+      if (existing && existing.isActive === false) {
+        const revived = await restaurantRepository.updateTable(pool, existing.id, {
+          isActive: true,
+          name: def.name,
+          zone: def.zone,
+        });
+        if (revived) {
+          out.push(revived);
+          continue;
+        }
+      }
+      out.push(await restaurantRepository.createTable(pool, { ...def }));
+    }
+    return out;
+  },
+
   async updateTable(
     pool: Pool,
     id: string,

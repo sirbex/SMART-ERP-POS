@@ -20,6 +20,7 @@ import { productStoreDistributionService } from './warehouse/productStoreDistrib
 import { productDistributionService } from './warehouse/productDistributionService.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { BatchAdjustmentSchema } from '../../../../shared/zod/inventory.js';
+import { INVENTORY_STOCK_ADJUST_PERMISSIONS } from '../../../../shared/authorization/inventoryAdjustPermissions.js';
 
 const UpdateProductDistributionPolicySchema = z.object({
   distributionPolicy: z.enum(['GLOBAL', 'RESTRICTED']),
@@ -545,11 +546,11 @@ inventoryRoutes.get(
   asyncHandler(inventoryController.getInventoryValue),
 );
 
-// Adjustment route - requires inventory.approve permission
+// Adjustment routes — accept inventory.adjust OR inventory.approve (Role UI SSOT).
 inventoryRoutes.post(
   '/adjust',
   authenticate,
-  requirePermission('inventory.approve'),
+  requireAnyPermission([...INVENTORY_STOCK_ADJUST_PERMISSIONS]),
   asyncHandler(inventoryController.adjustInventory)
 );
 
@@ -557,7 +558,7 @@ inventoryRoutes.post(
 inventoryRoutes.post(
   '/adjust-batch',
   authenticate,
-  requirePermission('inventory.approve'),
+  requireAnyPermission([...INVENTORY_STOCK_ADJUST_PERMISSIONS]),
   asyncHandler(inventoryController.adjustBatch)
 );
 

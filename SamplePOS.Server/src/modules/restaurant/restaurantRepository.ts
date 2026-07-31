@@ -218,6 +218,23 @@ export const restaurantRepository = {
     return result.rows[0] ? mapTable(result.rows[0]) : null;
   },
 
+  async getTableByCode(conn: DbConn, code: string): Promise<RestaurantTableRecord | null> {
+    const result = await conn.query(
+      `SELECT
+         t.id, t.code, t.name, t.zone, t.seats, t.sort_order, t.is_active,
+         t.status, t.current_order_id, t.created_at, t.updated_at,
+         NULL::text AS order_number, NULL::numeric AS order_total,
+         NULL::uuid AS waiter_id, NULL::text AS waiter_name,
+         NULL::timestamptz AS check_opened_at,
+         NULL::text AS guest_name, NULL::text AS order_channel
+       FROM restaurant_tables t
+       WHERE UPPER(t.code) = UPPER($1)
+       LIMIT 1`,
+      [code.trim()],
+    );
+    return result.rows[0] ? mapTable(result.rows[0]) : null;
+  },
+
   async createTable(
     conn: DbConn,
     data: { code: string; name: string; zone?: string; seats?: number; sortOrder?: number },

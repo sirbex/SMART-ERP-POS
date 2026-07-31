@@ -131,6 +131,17 @@ router.post(
   }),
 );
 
+/** Waiters may ensure TA/DL/QK lanes exist (not full table management). */
+router.post(
+  '/service-lanes/ensure',
+  requirePermission('restaurant.order'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const tables = await restaurantService.ensureServiceLanes(pool);
+    res.json({ success: true, data: tables });
+  }),
+);
+
 router.patch(
   '/tables/:id',
   requirePermission('restaurant.manage'),
