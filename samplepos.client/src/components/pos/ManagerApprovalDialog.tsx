@@ -1,7 +1,9 @@
 // ManagerApprovalDialog - Manager PIN entry for discount approval
+// Uses in-app number pad so Windows/touch POS does not depend on OS soft keyboard.
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Shield, X } from 'lucide-react';
+import { PinNumPad } from '../auth/PinNumPad';
 
 interface ManagerApprovalDialogProps {
   isOpen: boolean;
@@ -22,54 +24,42 @@ export default function ManagerApprovalDialog({
   reason,
   isProcessing = false,
 }: ManagerApprovalDialogProps) {
-  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
-  const pinInputRef = useRef<HTMLInputElement>(null);
+  const [padKey, setPadKey] = useState(0);
 
-  // Reset and focus when opened
   useEffect(() => {
     if (isOpen) {
-      setPin('');
       setError('');
-      setTimeout(() => pinInputRef.current?.focus(), 100);
+      setPadKey((k) => k + 1);
     }
   }, [isOpen]);
 
-  // Keyboard shortcuts
   useEffect(() => {
     if (!isOpen) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleApprove();
-      }
+      if (e.key === 'Escape') onClose();
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, pin]);
+  }, [isOpen, onClose]);
 
-  const handleApprove = () => {
-    setError('');
-
-    if (!pin || pin.length < 4) {
-      setError('Please enter a valid PIN (minimum 4 digits)');
-      return;
-    }
-
-    onApprove(pin);
-  };
+  const handleComplete = useCallback(
+    (pin: string) => {
+      setError('');
+      if (!pin || pin.length < 4) {
+        setError('Please enter a valid PIN (minimum 4 digits)');
+        return;
+      }
+      onApprove(pin);
+    },
+    [onApprove],
+  );
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]" onClick={onClose}>
       <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Shield className="w-6 h-6 text-yellow-600" />
@@ -85,7 +75,6 @@ export default function ManagerApprovalDialog({
           </button>
         </div>
 
-        {/* Info */}
         <div className="bg-yellow-50 border border-yellow-200 rounded p-4 mb-4">
           <p className="text-sm text-yellow-900 mb-2">
             This discount exceeds standard limits and requires manager authorization.
@@ -106,74 +95,32 @@ export default function ManagerApprovalDialog({
           </div>
         </div>
 
-        {/* PIN Input */}
-        <div className="mb-4">
-          <label htmlFor="manager-pin" className="block text-sm font-medium text-gray-700 mb-1">
-            Manager PIN <span className="text-red-500">*</span>
-          </label>
-          <input
-            ref={pinInputRef}
-            id="manager-pin"
-            type="password"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={6}
-            value={pin}
-            onChange={(e) => {
-              // Only allow numbers
-              const value = e.target.value.replace(/\D/g, '');
-              setPin(value);
-              setError('');
-            }}
-            className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-center text-2xl tracking-widest"
-            placeholder="••••"
-            disabled={isProcessing}
+        <div className="mb-4 flex justify-center">
+          <PinNumPad
+            key={padKey}
+            length={6}
+            minLength={4}
+            doneLabel="Approve Discount"
+            onComplete={handleComplete}
+            error={error}
+            isLoading={isProcessing}
+            label="Manager PIN"
           />
-          <p className="text-xs text-gray-500 mt-1 text-center">
-            Enter your manager PIN to approve this discount
-          </p>
         </div>
 
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
-            <p className="text-sm text-red-800">{error}</p>
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            disabled={isProcessing}
-            className="flex-1 py-2 px-4 border border-gray-300 rounded text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleApprove}
-            disabled={!pin || pin.length < 4 || isProcessing}
-            className="flex-1 py-2 px-4 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {isProcessing ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Approving...</span>
-              </>
-            ) : (
-              <>
-                <Shield className="w-4 h-4" />
-                <span>Approve Discount</span>
-              </>
-            )}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={isProcessing}
+          className="w-full py-2 px-4 border border-gray-300 rounded text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Cancel
+        </button>
 
         <p className="text-xs text-gray-500 mt-3 text-center">
-          Keyboard: <kbd>Enter</kbd> to approve, <kbd>Esc</kbd> to cancel
+          Number pad or keyboard digits · <kbd>Esc</kbd> to cancel
         </p>
 
-        {/* Security Note */}
         <div className="mt-4 pt-4 border-t border-gray-200">
           <p className="text-xs text-gray-500 text-center">
             🔒 This action will be logged in the audit trail with your user ID and timestamp.

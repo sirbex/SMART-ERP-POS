@@ -1,7 +1,8 @@
 // QuickLoginScreen - SAP-style POS quick login page
 // Direct PIN entry — system identifies user by unique PIN
+// In-app number pad (Windows/OS soft keyboard is unreliable on POS tablets)
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuickLogin, useTrustedDevices } from '../../hooks/useQuickLogin';
 import { useHasPermission } from '../../authorization/useAuthorization';
@@ -14,120 +15,8 @@ import {
   restaurantEnabledQueryKey,
 } from '../../hooks/useRestaurantEnabled';
 import { useQueryClient } from '@tanstack/react-query';
-
-// ============================================================
-// PIN Input Component
-// ============================================================
-
-function PinInput({ length, onComplete, error, isLoading }: {
-    length: number;
-    onComplete: (pin: string) => void;
-    error: string | null;
-    isLoading: boolean;
-}) {
-    const [digits, setDigits] = useState<string[]>(Array(length).fill(''));
-    const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
-
-    useEffect(() => {
-        inputsRef.current[0]?.focus();
-    }, []);
-
-    // Clear on error
-    useEffect(() => {
-        if (error) {
-            setDigits(Array(length).fill(''));
-            inputsRef.current[0]?.focus();
-        }
-    }, [error, length]);
-
-    // Reset digits when length changes
-    useEffect(() => {
-        setDigits(Array(length).fill(''));
-        inputsRef.current[0]?.focus();
-    }, [length]);
-
-    const handleChange = (index: number, value: string) => {
-        if (!/^\d?$/.test(value)) return;
-
-        const newDigits = [...digits];
-        newDigits[index] = value;
-        setDigits(newDigits);
-
-        if (value && index < length - 1) {
-            inputsRef.current[index + 1]?.focus();
-        }
-
-        // Auto-submit when all digits entered
-        if (value && index === length - 1) {
-            const pin = newDigits.join('');
-            if (pin.length === length) {
-                onComplete(pin);
-            }
-        }
-    };
-
-    const handleKeyDown = (index: number, e: React.KeyboardEvent) => {
-        if (e.key === 'Backspace' && !digits[index] && index > 0) {
-            inputsRef.current[index - 1]?.focus();
-        }
-    };
-
-    const handlePaste = (e: React.ClipboardEvent) => {
-        e.preventDefault();
-        const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, length);
-        if (pasted.length > 0) {
-            const newDigits = Array(length).fill('');
-            for (let i = 0; i < pasted.length; i++) {
-                newDigits[i] = pasted[i];
-            }
-            setDigits(newDigits);
-            if (pasted.length === length) {
-                onComplete(pasted);
-            } else {
-                inputsRef.current[pasted.length]?.focus();
-            }
-        }
-    };
-
-    return (
-        <div className="flex flex-col items-center gap-4">
-            <div className="flex gap-3" onPaste={handlePaste}>
-                {digits.map((digit, i) => (
-                    <input
-                        key={i}
-                        ref={(el) => { inputsRef.current[i] = el; }}
-                        type="password"
-                        inputMode="numeric"
-                        maxLength={1}
-                        value={digit}
-                        onChange={(e) => handleChange(i, e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(i, e)}
-                        disabled={isLoading}
-                        className="w-14 h-16 text-center text-2xl font-bold border-2 rounded-xl
-                       focus:border-blue-500 focus:ring-2 focus:ring-blue-200
-                       disabled:opacity-50 bg-white dark:bg-gray-800
-                       border-gray-300 dark:border-gray-600"
-                        aria-label={`PIN digit ${i + 1}`}
-                    />
-                ))}
-            </div>
-
-            {error && (
-                <p className="text-red-500 text-sm font-medium animate-pulse" role="alert">{error}</p>
-            )}
-
-            {isLoading && (
-                <div className="flex items-center gap-2 text-gray-500">
-                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    <span>Verifying...</span>
-                </div>
-            )}
-        </div>
-    );
-}
+import { PinNumPad } from '../../components/auth/PinNumPad';
+import { requestSoftKeyboard } from '../../lib/softKeyboard';
 
 // ============================================================
 // Untrusted Device Screen (with admin self-registration)
@@ -150,7 +39,6 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
             await registerThisDevice(deviceName.trim(), locationName.trim() || undefined);
             toast.success('Device registered! Refreshing...');
             setShowForm(false);
-            // Re-check device trust
             onRegistered();
         } catch {
             // Error shown via hook
@@ -172,7 +60,6 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
                         : ' Ask an administrator to register this device.'}
                 </p>
 
-                {/* Admin self-registration */}
                 {canManageTrustedDevices && !showForm && (
                     <button
                         onClick={() => setShowForm(true)}
@@ -191,8 +78,12 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
                             </label>
                             <input
                                 type="text"
+                                inputMode="text"
+                                enterKeyHint="next"
+                                autoComplete="off"
                                 value={deviceName}
                                 onChange={(e) => setDeviceName(e.target.value)}
+                                onFocus={(e) => requestSoftKeyboard(e.currentTarget)}
                                 maxLength={255}
                                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
                            bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
@@ -207,8 +98,12 @@ function UntrustedDeviceScreen({ onPasswordLogin, onRegistered }: { onPasswordLo
                             </label>
                             <input
                                 type="text"
+                                inputMode="text"
+                                enterKeyHint="done"
+                                autoComplete="off"
                                 value={locationName}
                                 onChange={(e) => setLocationName(e.target.value)}
+                                onFocus={(e) => requestSoftKeyboard(e.currentTarget)}
                                 maxLength={255}
                                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
                            bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100
@@ -274,7 +169,6 @@ export default function QuickLoginScreen() {
                 queryKey: restaurantEnabledQueryKey,
                 queryFn: fetchRestaurantEnabled,
             });
-            // Restaurant FOH auto-logout stashes /restaurant; waiters land back on tables.
             const intended = takeRestaurantPostQuickLoginPath(
               enabled ? '/restaurant' : '/pos',
             );
@@ -296,7 +190,7 @@ export default function QuickLoginScreen() {
               { replace: true },
             );
         } catch {
-            // Error is handled by hook, shown in PinInput
+            // Error is handled by hook, shown in PinNumPad
         }
     }, [loginWithPinOnly, navigate, permissions, queryClient]);
 
@@ -304,12 +198,10 @@ export default function QuickLoginScreen() {
         navigate('/login');
     }, [navigate]);
 
-    // Untrusted device state
     if (isDeviceTrusted === false) {
         return <UntrustedDeviceScreen onPasswordLogin={handlePasswordLogin} onRegistered={refresh} />;
     }
 
-    // Loading state
     if (isDeviceTrusted === null) {
         return (
             <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950
@@ -328,8 +220,7 @@ export default function QuickLoginScreen() {
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-950
                     flex flex-col items-center justify-center p-8">
-            {/* Header */}
-            <div className="text-center mb-10">
+            <div className="text-center mb-8">
                 <div className="text-5xl mb-4">🔐</div>
                 <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
                     POS Quick Login
@@ -339,23 +230,21 @@ export default function QuickLoginScreen() {
                 </p>
             </div>
 
-            {/* PIN Entry */}
             <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-xl p-8 max-w-md w-full">
-                <div className="flex flex-col items-center py-4">
-                    <p className="text-sm text-gray-500 mb-6 font-medium">Enter your personal PIN</p>
-
-                    <PinInput
+                <div className="flex flex-col items-center py-2">
+                    <PinNumPad
                         length={pinLength}
                         onComplete={handlePinComplete}
                         error={error}
                         isLoading={isLoading}
+                        label="Enter your personal PIN"
                     />
 
-                    {/* PIN length toggle */}
                     <div className="flex gap-2 mt-6">
                         {[4, 5, 6].map((len) => (
                             <button
                                 key={len}
+                                type="button"
                                 onClick={() => { setPinLength(len); clearError(); }}
                                 className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${pinLength === len
                                         ? 'bg-blue-100 text-blue-700 font-medium'
@@ -368,9 +257,9 @@ export default function QuickLoginScreen() {
                     </div>
                 </div>
 
-                {/* Actions */}
                 <div className="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700 text-center">
                     <button
+                        type="button"
                         onClick={handlePasswordLogin}
                         className="text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 font-medium"
                     >
@@ -379,7 +268,6 @@ export default function QuickLoginScreen() {
                 </div>
             </div>
 
-            {/* Footer */}
             <p className="mt-6 text-xs text-gray-400 dark:text-gray-600">
                 Trusted POS Terminal • Individual accountability enforced
             </p>

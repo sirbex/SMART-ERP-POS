@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, Navigate, Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { resolvePostLoginPath } from '../utils/cashierLockdown';
@@ -15,6 +15,7 @@ import {
 } from '../hooks/useRestaurantEnabled';
 import { RestaurantModeBoot } from '../components/auth/RestaurantModeBoot';
 import { useQueryClient } from '@tanstack/react-query';
+import { requestSoftKeyboard, softKeyboardAttrs } from '../lib/softKeyboard';
 
 function readCachedPermissionKeys(): string[] {
   try {
@@ -220,6 +221,14 @@ export default function LoginPage() {
   const brandName = config.branding.companyName || config.name || 'SMART ERP';
   const navigate = useNavigate();
   const location = useLocation();
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  // Open system soft keyboard on mount (tablets / Windows touch / PWA).
+  useEffect(() => {
+    const t = window.setTimeout(() => requestSoftKeyboard(emailRef.current), 50);
+    return () => window.clearTimeout(t);
+  }, []);
 
   const resolveHomeAfterAuth = async (
     role: string | undefined,
@@ -481,14 +490,23 @@ export default function LoginPage() {
                 Email address
               </label>
               <input
+                ref={emailRef}
                 id="email"
                 name="email"
                 type="email"
                 autoComplete="email"
                 autoFocus
                 required
+                {...softKeyboardAttrs('email', 'next')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onFocus={(e) => requestSoftKeyboard(e.currentTarget)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    requestSoftKeyboard(passwordRef.current);
+                  }
+                }}
                 className="block w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm shadow-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                 placeholder="you@company.com"
               />
@@ -501,13 +519,16 @@ export default function LoginPage() {
               </label>
               <div className="relative">
                 <input
+                  ref={passwordRef}
                   id="password"
                   name="password"
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="current-password"
                   required
+                  {...softKeyboardAttrs('text', 'go')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  onFocus={(e) => requestSoftKeyboard(e.currentTarget)}
                   className="block w-full px-3 py-2.5 pr-10 border border-gray-300 rounded-lg text-sm shadow-sm placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
                   placeholder="••••••••"
                 />
