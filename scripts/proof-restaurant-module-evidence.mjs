@@ -218,12 +218,13 @@ ok(
     /getGuestBillPrinter/.test(read('samplepos.client/src/utils/api.ts')),
 );
 ok(
-  'Print: KOT named bridge then browser fallback (ticket still prints)',
+  'Print: KOT/Bill silent via agent (browser emergency opt-in only)',
   /resolveStationPrinterName/.test(printRest) &&
     /X-Printer-Name/.test(printRest) &&
-    /LOCAL_PRINT_BRIDGE_ORIGINS|localhost:1811/.test(printRest) &&
-    /postToPrintBridge[\s\S]*printHtmlDocument/.test(printRest) &&
-    /Waiters never choose a printer|waiters never choose/i.test(printRest),
+    /isRestaurantBrowserPrintFallbackEnabled/.test(printRest) &&
+    /silentPrintFailureMessage/.test(printRest) &&
+    exists('samplepos.client/src/lib/restaurantPrintPolicy.ts') &&
+    /Silent print/.test(read('samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx')),
 );
 ok(
   'Print: Stations maps guest bill + station printers',

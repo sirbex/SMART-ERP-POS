@@ -3,9 +3,9 @@
  * KOT must never include prices.
  * Guest BILL HTML is SSOT with RECEIPT via thermalGuestDocument.
  *
- * Waiters never choose a printer in the Stations UI — mappings drive routing.
- * Print order: named bridge → default bridge → browser last resort (so kitchen
- * still gets paper when the local agent is down).
+ * Expert FOH rule: waiters never choose a printer. Manager maps stations /
+ * guest bill once. Print is silent via local agent (:1811 + X-Printer-Name).
+ * Browser print dialog is emergency-only (Stations toggle, off by default).
  */
 
 import { consolidateKotLines } from '@shared/utils/consolidateKotLines';
@@ -22,6 +22,10 @@ import {
 import { buildThermalPrintCss } from './thermalPrintCss';
 import { getCachedRestaurantStations } from './restaurantOfflineCache';
 import { LOCAL_PRINT_BRIDGE_ORIGINS } from './localPrintBridge';
+import {
+  isRestaurantBrowserPrintFallbackEnabled,
+  silentPrintFailureMessage,
+} from './restaurantPrintPolicy';
 
 async function postToPrintBridge(
   html: string,
@@ -39,7 +43,7 @@ async function postToPrintBridge(
         method: 'POST',
         headers,
         body: html,
-        signal: AbortSignal.timeout(2500),
+        signal: AbortSignal.timeout(3500),
       });
       return bridgeRes.ok;
     } catch {
@@ -69,20 +73,24 @@ export function resolveStationPrinterName(stationCode: string | null | undefined
 }
 
 /**
- * Restaurant print: prefer mapped bridge printer, then default bridge, then browser.
- * Mapping is manager SSOT — waiters never choose a printer in FOH UI.
+ * Silent restaurant print SSOT.
+ * 1) Mapped name → bridge only (never send a kitchen ticket to the wrong default printer)
+ * 2) Unmapped → default bridge printer
+ * 3) Browser dialog only if emergency fallback is enabled on this terminal
  */
 async function printHtml(html: string, printerName?: string | null): Promise<void> {
   const name = printerName?.trim() || null;
+  const allowBrowser = isRestaurantBrowserPrintFallbackEnabled();
 
-  // 1) Station/guest mapped Windows printer via local agent
-  if (name && (await postToPrintBridge(html, name))) return;
+  if (name) {
+    if (await postToPrintBridge(html, name)) return;
+    if (allowBrowser) return printHtmlDocument(html);
+    throw new Error(silentPrintFailureMessage(name));
+  }
 
-  // 2) Default bridge printer (agent online but name missing/wrong)
   if (await postToPrintBridge(html, null)) return;
-
-  // 3) Browser print — ensures KOT/bill still come out when :1811 is down
-  return printHtmlDocument(html);
+  if (allowBrowser) return printHtmlDocument(html);
+  throw new Error(silentPrintFailureMessage(null));
 }
 
 export interface KotPrintData extends DocumentCompanyBranding {

@@ -2031,8 +2031,8 @@ export default function RestaurantPosPage() {
         );
       } else {
         toast.success(
-          `KOT sent to kitchen (${kotCount}) — ${printFailures} print(s) failed; use KDS / reprint`,
-          { duration: 5000 },
+          `KOT recorded (${kotCount}) — ${printFailures} printer offline. Start agent on :1811 / check station mapping. Use KDS until fixed.`,
+          { duration: 6000 },
         );
       }
       // Shared FOH: auto-logout after KOT for waiters / cashiers / staff (not admin/manager).

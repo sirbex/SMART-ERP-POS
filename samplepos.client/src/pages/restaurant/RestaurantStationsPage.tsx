@@ -2,7 +2,7 @@
  * Phase 2.2 — Kitchen/bar stations + printer routing + menu station assignment.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
@@ -16,6 +16,11 @@ import {
   isRestaurantFohAutoLogoutEnabled,
   setRestaurantFohAutoLogoutEnabled,
 } from '../../utils/restaurantFohAutoLogout';
+import {
+  isRestaurantBrowserPrintFallbackEnabled,
+  setRestaurantBrowserPrintFallbackEnabled,
+} from '../../lib/restaurantPrintPolicy';
+import { listLocalPrintBridgePrinters } from '../../lib/localPrintBridge';
 import {
   readCachedGuestBillPrinter,
   writeCachedGuestBillPrinter,
@@ -56,6 +61,10 @@ export default function RestaurantStationsPage() {
   const [autoLogoutAfterPrint, setAutoLogoutAfterPrint] = useState(() =>
     isRestaurantFohAutoLogoutEnabled(),
   );
+  const [browserPrintFallback, setBrowserPrintFallback] = useState(() =>
+    isRestaurantBrowserPrintFallbackEnabled(),
+  );
+  const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
 
   const [form, setForm] = useState({
     code: '',
@@ -65,6 +74,16 @@ export default function RestaurantStationsPage() {
     isDefault: false,
   });
   const [menuFilter, setMenuFilter] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    void listLocalPrintBridgePrinters({ timeoutMs: 800 }).then((res) => {
+      if (!cancelled) setBridgeOnline(res.bridgeOnline);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const stationsQuery = useQuery({
     queryKey: ['restaurant', 'stations', true],
@@ -274,11 +293,57 @@ export default function RestaurantStationsPage() {
               pizza to PIZZA, food to KITCHEN (etc.).
             </li>
             <li>
-              <strong>Send Order / KOT / Bill</strong> — waiters press the button; the system
-              routes each ticket from these maps. Start the print agent on{' '}
-              <code className="text-xs">localhost:1811</code> on the FOH PC (no printer dialog).
+              <strong>Send Order / KOT / Bill</strong> — waiters press the button; tickets print{' '}
+              <em>silently</em> via the print agent on{' '}
+              <code className="text-xs">localhost:1811</code> (no browser dialog). Keep the agent
+              running on the FOH PC. Use KDS if paper fails.
             </li>
           </ol>
+        </section>
+
+        <section className="bg-white border border-stone-200 rounded-lg p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-stone-800">Silent print (this terminal)</h2>
+          <p className="text-xs text-stone-600">
+            KOT and guest bill use the local agent only — no browser preview. Bridge:{' '}
+            <span
+              className={
+                bridgeOnline === true
+                  ? 'text-emerald-700 font-medium'
+                  : bridgeOnline === false
+                    ? 'text-amber-700 font-medium'
+                    : ''
+              }
+            >
+              {bridgeOnline === null
+                ? 'checking…'
+                : bridgeOnline
+                  ? 'online'
+                  : 'offline — start agent on port 1811'}
+            </span>
+          </p>
+          <label className="flex items-start gap-2 text-sm text-stone-800">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={browserPrintFallback}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setBrowserPrintFallback(next);
+                setRestaurantBrowserPrintFallbackEnabled(next);
+                toast.success(
+                  next
+                    ? 'Emergency browser print ON (this terminal only)'
+                    : 'Silent print only — browser dialog OFF',
+                );
+              }}
+            />
+            <span>
+              Emergency: allow browser print dialog if the agent fails
+              <span className="block text-xs text-stone-500 font-normal">
+                Leave off for normal FOH. Waiters still never pick a printer in the app.
+              </span>
+            </span>
+          </label>
         </section>
 
         <section className="bg-white border border-stone-200 rounded-lg p-4 space-y-3">
