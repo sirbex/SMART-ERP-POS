@@ -29,6 +29,8 @@ export interface SystemSettings {
     // Printing Settings - Receipt
     receiptPrinterEnabled: boolean;
     receiptPrinterName?: string;
+    /** FOH guest check / restaurant bill — routed via print bridge X-Printer-Name */
+    guestBillPrinterName?: string;
     receiptPaperWidth: number;
     receiptAutoPrint: boolean;
     receiptShowLogo: boolean;
@@ -104,6 +106,7 @@ export interface SystemSettingsDbRow {
     tax_rates: TaxRate[];
     receipt_printer_enabled: boolean;
     receipt_printer_name?: string;
+    guest_bill_printer_name?: string | null;
     receipt_paper_width: number;
     receipt_auto_print: boolean;
     receipt_show_logo: boolean;
@@ -154,6 +157,7 @@ export interface UpdateSystemSettingsDto {
     taxRates?: TaxRate[];
     receiptPrinterEnabled?: boolean;
     receiptPrinterName?: string;
+    guestBillPrinterName?: string | null;
     receiptPaperWidth?: number;
     receiptAutoPrint?: boolean;
     receiptShowLogo?: boolean;
@@ -204,6 +208,7 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
         taxRates: dbRow.tax_rates || [],
         receiptPrinterEnabled: dbRow.receipt_printer_enabled,
         receiptPrinterName: dbRow.receipt_printer_name,
+        guestBillPrinterName: dbRow.guest_bill_printer_name?.trim() || undefined,
         receiptPaperWidth: dbRow.receipt_paper_width,
         receiptAutoPrint: dbRow.receipt_auto_print,
         receiptShowLogo: dbRow.receipt_show_logo,

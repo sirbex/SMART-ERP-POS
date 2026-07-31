@@ -1431,6 +1431,15 @@ export const api = {
       apiClient.post<ApiResponse>(`restaurant/kitchen/tickets/${kotId}/advance`, data ?? {}),
     listStations: (params?: { includeInactive?: boolean }) =>
       apiClient.get<ApiResponse>('restaurant/stations', { params }),
+    getGuestBillPrinter: () =>
+      apiClient.get<ApiResponse<{ printerName: string | null; resolvedPrinterName: string | null }>>(
+        'restaurant/guest-bill-printer',
+      ),
+    setGuestBillPrinter: (printerName: string | null) =>
+      apiClient.patch<ApiResponse<{ printerName: string | null; resolvedPrinterName: string | null }>>(
+        'restaurant/guest-bill-printer',
+        { printerName },
+      ),
     createStation: (data: {
       code: string;
       name: string;

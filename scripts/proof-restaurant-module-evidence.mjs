@@ -201,6 +201,50 @@ ok(
   /buildThermalGuestDocumentHtml/.test(read('samplepos.client/src/lib/print.ts')) &&
     /buildThermalGuestDocumentHtml|billToThermalGuestDocument/.test(printRest),
 );
+
+// ── Printer routing SSOT (stations + guest bill; waiters never pick) ──
+ok(
+  'Print: guest bill printer migration 579',
+  exists('shared/sql/579_guest_bill_printer.sql') &&
+    /guest_bill_printer_name/.test(read('shared/sql/579_guest_bill_printer.sql')) &&
+    /CURRENT_SCHEMA_VERSION\s*=\s*579/.test(
+      read('SamplePOS.Server/src/constants/schemaVersion.ts'),
+    ),
+);
+ok(
+  'Print: restaurant guest-bill-printer API',
+  /\/guest-bill-printer/.test(routes) &&
+    /guestBillPrinterName/.test(routes) &&
+    /getGuestBillPrinter/.test(read('samplepos.client/src/utils/api.ts')),
+);
+ok(
+  'Print: KOT silent named bridge (no waiter printer dialog)',
+  /allowBrowserFallback:\s*false/.test(printRest) &&
+    /resolveStationPrinterName/.test(printRest) &&
+    /X-Printer-Name/.test(printRest) &&
+    /waiters do not select printers|Waiters never choose a printer/i.test(printRest),
+);
+ok(
+  'Print: Stations maps guest bill + station printers',
+  /Guest bill printer/.test(read('samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx')) &&
+    /never pick a printer|Waiters only press/i.test(
+      read('samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx'),
+    ) &&
+    /StationPrinterPicker/.test(
+      read('samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx'),
+    ),
+);
+ok(
+  'Print: POS Bill resolves guestBillPrinterName',
+  /getGuestBillPrinter/.test(posPage) && /printerName:\s*guestBillPrinterName/.test(posPage),
+);
+ok(
+  'Print: evidence suites present',
+  exists('samplepos.client/src/__tests__/guest-bill-printer.evidence.test.ts') &&
+    exists('samplepos.client/src/__tests__/station-printer-picker.evidence.test.ts') &&
+    exists('samplepos.client/src/__tests__/thermal-80mm-print.evidence.test.ts'),
+);
+
 ok('P5.x: POS pay uses journal cash path', /payRestaurantCheckOffline/.test(posPage));
 ok('P5.x POS cache warm logs failure', /Offline cache warm failed/.test(posPage));
 ok('ADR offline doc', exists('docs/architecture/RESTAURANT_OFFLINE_ADR.md'));

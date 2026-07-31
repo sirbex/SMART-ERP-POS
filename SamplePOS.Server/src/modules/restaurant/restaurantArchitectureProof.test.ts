@@ -152,9 +152,20 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     ).toBe(true);
     const stationsPage = readRepo('samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx');
     expect(stationsPage).toMatch(/StationPrinterPicker/);
+    expect(stationsPage).toMatch(/guest-bill-printer|Guest bill printer/);
+    expect(stationsPage).toMatch(/never pick a printer|Waiters only press/i);
     const bridge = readRepo('samplepos.client/src/lib/localPrintBridge.ts');
     expect(bridge).toMatch(/listLocalPrintBridgePrinters/);
     expect(bridge).toMatch(/localhost:1811/);
+    expect(bridge).toMatch(/readCachedBridgePrinters|writeCachedBridgePrinters/);
+
+    // Guest bill default printer SSOT (migration 579) — Bill knows where to print
+    const guestBillSql = readRepo('shared/sql/579_guest_bill_printer.sql');
+    expect(guestBillSql).toMatch(/guest_bill_printer_name/);
+    expect(routes).toMatch(/\/guest-bill-printer/);
+    expect(print).toMatch(/allowBrowserFallback:\s*false/);
+    expect(print).toMatch(/resolveStationPrinterName/);
+    expect(print).toMatch(/waiters do not select printers|Waiters never choose a printer/i);
   });
 
   it('Phase 2.3 takeaway/delivery guest details on checks', () => {
@@ -432,6 +443,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(billHandler).toMatch(/Bill printed|Bill marked/);
     expect(billHandler).toMatch(/printOk/);
     expect(billHandler).toMatch(/printRestaurantBill/);
+    expect(billHandler).toMatch(/getGuestBillPrinter|guestBillPrinterName/);
     expect(billHandler).toMatch(/shouldUseLocalRestaurantMutation|isJournalLocalOrderId/);
     expect(billHandler).not.toMatch(/Print the guest bill anyway/);
     // Multi-ticket: bill selected order only; stay on table when siblings remain.

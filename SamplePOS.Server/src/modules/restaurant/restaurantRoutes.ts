@@ -5,6 +5,7 @@ import { authenticate } from '../../middleware/auth.js';
 import { requirePermission, requireAnyPermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { restaurantService } from './restaurantService.js';
+import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import type { OwnershipActor } from '../../../../shared/utils/restaurantCheckOwnership.js';
 
 function ownershipActorFromReq(req: Request): OwnershipActor {
@@ -451,6 +452,51 @@ const StationCreateSchema = z.object({
 const StationUpdateSchema = StationCreateSchema.partial().extend({
   isActive: z.boolean().optional(),
 });
+
+const GuestBillPrinterSchema = z.object({
+  printerName: z.string().max(200).nullable(),
+});
+
+router.get(
+  '/guest-bill-printer',
+  requireAnyPermission(['restaurant.read', 'restaurant.order', 'restaurant.manage']),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const settings = await systemSettingsService.getSettings(pool);
+    const dedicated = settings.guestBillPrinterName?.trim() || null;
+    const resolved = (await systemSettingsService.getGuestBillPrintConfig(pool)).printerName;
+    res.json({
+      success: true,
+      data: {
+        printerName: dedicated,
+        resolvedPrinterName: resolved,
+      },
+    });
+  }),
+);
+
+router.patch(
+  '/guest-bill-printer',
+  requirePermission('restaurant.manage'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const body = GuestBillPrinterSchema.parse(req.body);
+    const result = await systemSettingsService.updateSettings(
+      pool,
+      { guestBillPrinterName: body.printerName },
+      req.user?.id,
+    );
+    const dedicated = result.settings.guestBillPrinterName?.trim() || null;
+    const resolved = (await systemSettingsService.getGuestBillPrintConfig(pool)).printerName;
+    res.json({
+      success: true,
+      data: {
+        printerName: dedicated,
+        resolvedPrinterName: resolved,
+      },
+    });
+  }),
+);
 
 const RecipeUpsertSchema = z.object({
   parentProductId: z.string().uuid(),

@@ -90,6 +90,10 @@ export const systemSettingsRepository = {
             setClauses.push(`receipt_printer_name = $${paramIndex++}`);
             values.push(updates.receiptPrinterName);
         }
+        if (updates.guestBillPrinterName !== undefined) {
+            setClauses.push(`guest_bill_printer_name = $${paramIndex++}`);
+            values.push(updates.guestBillPrinterName?.trim() || null);
+        }
         if (updates.receiptPaperWidth !== undefined) {
             setClauses.push(`receipt_paper_width = $${paramIndex++}`);
             values.push(updates.receiptPaperWidth);

@@ -103,6 +103,7 @@ export const systemSettingsService = {
     async getReceiptPrintConfig(pool: Pool): Promise<{
         enabled: boolean;
         printerName?: string;
+        guestBillPrinterName?: string;
         paperWidth: number;
         autoPrint: boolean;
         showLogo: boolean;
@@ -117,6 +118,7 @@ export const systemSettingsService = {
         return {
             enabled: settings.receiptPrinterEnabled,
             printerName: settings.receiptPrinterName,
+            guestBillPrinterName: settings.guestBillPrinterName,
             paperWidth: settings.receiptPaperWidth,
             autoPrint: settings.receiptAutoPrint,
             showLogo: settings.receiptShowLogo,
@@ -126,6 +128,19 @@ export const systemSettingsService = {
             showTaxBreakdown: settings.receiptShowTaxBreakdown,
             showQrCode: settings.receiptShowQrCode,
         };
+    },
+
+    /**
+     * Guest bill / check printer — FOH restaurant bill destination.
+     * Falls back to receipt printer when guest bill name is unset.
+     */
+    async getGuestBillPrintConfig(pool: Pool): Promise<{
+        printerName: string | null;
+    }> {
+        const settings = await this.getSettings(pool);
+        const dedicated = settings.guestBillPrinterName?.trim() || null;
+        const receipt = settings.receiptPrinterName?.trim() || null;
+        return { printerName: dedicated || receipt };
     },
 
     /**

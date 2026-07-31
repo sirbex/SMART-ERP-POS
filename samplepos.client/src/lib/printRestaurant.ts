@@ -2,6 +2,9 @@
  * Kitchen ticket (KOT) and restaurant bill printing.
  * KOT must never include prices.
  * Guest BILL HTML is SSOT with RECEIPT via thermalGuestDocument.
+ *
+ * Waiters never choose a printer: station/guest-bill mappings drive
+ * X-Printer-Name on the local bridge. KOT never opens the browser print dialog.
  */
 
 import { consolidateKotLines } from '@shared/utils/consolidateKotLines';
@@ -16,26 +19,79 @@ import {
   formatGuestDocMoney,
 } from './thermalGuestDocument';
 import { buildThermalPrintCss } from './thermalPrintCss';
+import { getCachedRestaurantStations } from './restaurantOfflineCache';
 
-async function printHtml(html: string, printerName?: string | null): Promise<void> {
-  // Named printer: try bridge with X-Printer-Name, then shared browser path
-  if (printerName?.trim()) {
-    try {
-      const bridgeRes = await fetch('http://localhost:1811/print', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/html; charset=utf-8',
-          'X-Printer-Name': printerName.trim(),
-        },
-        body: html,
-        signal: AbortSignal.timeout(1500),
-      });
-      if (bridgeRes.ok) return;
-    } catch {
-      // fall through
-    }
+async function postToPrintBridge(
+  html: string,
+  printerName?: string | null,
+): Promise<boolean> {
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/html; charset=utf-8',
+    };
+    const name = printerName?.trim();
+    if (name) headers['X-Printer-Name'] = name;
+    const bridgeRes = await fetch('http://localhost:1811/print', {
+      method: 'POST',
+      headers,
+      body: html,
+      signal: AbortSignal.timeout(2500),
+    });
+    return bridgeRes.ok;
+  } catch {
+    return false;
   }
-  // Shared path: bridge (no name) + browser iframe that stays alive until afterprint
+}
+
+/**
+ * Resolve printer for a kitchen station from the offline-cached registry
+ * (same SSOT managers map on Stations page). Used when the API omits printerName.
+ */
+export function resolveStationPrinterName(stationCode: string | null | undefined): string | null {
+  const code = String(stationCode || '')
+    .trim()
+    .toUpperCase();
+  const stations = getCachedRestaurantStations().filter((s) => s.isActive);
+  if (code) {
+    const match = stations.find((s) => s.code.toUpperCase() === code);
+    if (match?.printerName?.trim()) return match.printerName.trim();
+  }
+  const def = stations.find((s) => s.isDefault) || stations[0];
+  return def?.printerName?.trim() || null;
+}
+
+type RestaurantPrintOptions = {
+  /**
+   * When false (KOT default), never open Windows/browser print UI —
+   * waiters must not pick a printer; mapping + bridge only.
+   */
+  allowBrowserFallback?: boolean;
+};
+
+async function printHtml(
+  html: string,
+  printerName?: string | null,
+  opts?: RestaurantPrintOptions,
+): Promise<void> {
+  const allowBrowser = opts?.allowBrowserFallback === true;
+  const name = printerName?.trim() || null;
+
+  if (name) {
+    if (await postToPrintBridge(html, name)) return;
+    if (!allowBrowser) {
+      throw new Error(
+        `Kitchen printer "${name}" unavailable — start the print agent on :1811 (waiters do not select printers).`,
+      );
+    }
+  } else if (await postToPrintBridge(html, null)) {
+    return;
+  } else if (!allowBrowser) {
+    throw new Error(
+      'Print bridge offline — start the agent on :1811. Map station printers on Kitchen stations (waiters do not select printers).',
+    );
+  }
+
+  // Bills without a mapped printer may still use browser print as last resort
   return printHtmlDocument(html);
 }
 
@@ -154,7 +210,9 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   <div style="text-align:center;font-size:14px;font-weight:900">${isVoid ? 'STOP / DO NOT PREPARE' : 'NO PRICES'}</div>
 </body></html>`;
 
-  await printHtml(html, data.printerName);
+  await printHtml(html, data.printerName || resolveStationPrinterName(data.station), {
+    allowBrowserFallback: false,
+  });
 }
 
 export interface BillPrintData extends DocumentCompanyBranding {
@@ -169,6 +227,8 @@ export interface BillPrintData extends DocumentCompanyBranding {
   guestPhone?: string | null;
   deliveryAddress?: string | null;
   pickupLabel?: string | null;
+  /** Default guest-bill printer — same bridge routing as KOT (X-Printer-Name). */
+  printerName?: string | null;
   items: Array<{
     productId?: string | null;
     productName: string;
@@ -195,7 +255,10 @@ export function buildRestaurantBillHtml(data: BillPrintData): string {
 }
 
 export async function printRestaurantBill(data: BillPrintData): Promise<void> {
-  await printHtmlDocument(buildRestaurantBillHtml(data));
+  // Mapped guest-bill printer → silent bridge only; unmapped may use browser last resort
+  await printHtml(buildRestaurantBillHtml(data), data.printerName, {
+    allowBrowserFallback: !data.printerName?.trim(),
+  });
 }
 
 function escapeHtml(s: string): string {

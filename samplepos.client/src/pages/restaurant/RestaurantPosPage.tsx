@@ -27,6 +27,10 @@ import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
 import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
 import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
 import { printReceipt } from '../../lib/print';
+import {
+  readCachedGuestBillPrinter,
+  writeCachedGuestBillPrinter,
+} from '../../lib/guestBillPrinter';
 import { brandingFromTenant, mergeDocumentCompanyBranding } from '../../lib/documentCompanyBranding';
 import {
   fetchInvoiceSettingsForReceipt,
@@ -2106,6 +2110,21 @@ export default function RestaurantPosPage() {
             totalAmount: Number(order.totalAmount),
           };
 
+      let guestBillPrinterName: string | null = readCachedGuestBillPrinter();
+      try {
+        const printerRes = await api.restaurant.getGuestBillPrinter();
+        const data = printerRes.data.data as
+          | { printerName?: string | null; resolvedPrinterName?: string | null }
+          | undefined;
+        guestBillPrinterName =
+          data?.resolvedPrinterName?.trim() ||
+          data?.printerName?.trim() ||
+          guestBillPrinterName;
+        writeCachedGuestBillPrinter(guestBillPrinterName);
+      } catch {
+        // offline — use last known guest bill printer
+      }
+
       const billPayload = {
         orderNumber: derivedAfterKot?.offlineId || order.orderNumber,
         tableLabel: meta?.tableName || meta?.tableCode || selectedTable?.name || 'Table',
@@ -2127,6 +2146,7 @@ export default function RestaurantPosPage() {
         companyName: companyBranding.companyName,
         companyAddress: companyBranding.companyAddress,
         companyPhone: companyBranding.companyPhone,
+        printerName: guestBillPrinterName,
         items: billLines,
         subtotal: Number(billTotals.subtotal),
         discountAmount: Number(
@@ -2215,6 +2235,7 @@ export default function RestaurantPosPage() {
           companyName: companyBranding.companyName,
           companyAddress: companyBranding.companyAddress,
           companyPhone: companyBranding.companyPhone,
+          printerName: guestBillPrinterName,
           items: (bill.order.items || []).map((it) => ({
             productId: it.productId,
             productName: it.productName,

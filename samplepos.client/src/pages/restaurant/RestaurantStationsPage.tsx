@@ -16,6 +16,11 @@ import {
   isRestaurantFohAutoLogoutEnabled,
   setRestaurantFohAutoLogoutEnabled,
 } from '../../utils/restaurantFohAutoLogout';
+import {
+  readCachedGuestBillPrinter,
+  writeCachedGuestBillPrinter,
+} from '../../lib/guestBillPrinter';
+import { cacheRestaurantStations } from '../../lib/restaurantOfflineCache';
 
 interface Station {
   id: string;
@@ -65,9 +70,62 @@ export default function RestaurantStationsPage() {
     queryKey: ['restaurant', 'stations', true],
     queryFn: async () => {
       const res = await api.restaurant.listStations({ includeInactive: true });
-      return (res.data.data || []) as Station[];
+      const stations = (res.data.data || []) as Station[];
+      cacheRestaurantStations(
+        stations.map((s) => ({
+          id: s.id,
+          code: s.code,
+          name: s.name,
+          printerName: s.printerName,
+          sortOrder: s.sortOrder,
+          isActive: s.isActive,
+          isDefault: s.isDefault,
+        })),
+      );
+      return stations;
     },
     enabled: !!restaurantEnabled,
+  });
+
+  const guestBillPrinterQuery = useQuery({
+    queryKey: ['restaurant', 'guest-bill-printer'],
+    queryFn: async () => {
+      const res = await api.restaurant.getGuestBillPrinter();
+      const data = res.data.data as
+        | { printerName?: string | null; resolvedPrinterName?: string | null }
+        | undefined;
+      const dedicated = data?.printerName?.trim() || null;
+      const resolved = data?.resolvedPrinterName?.trim() || dedicated;
+      writeCachedGuestBillPrinter(resolved);
+      return { printerName: dedicated, resolvedPrinterName: resolved };
+    },
+    enabled: !!restaurantEnabled && canManage,
+    placeholderData: () => {
+      const cached = readCachedGuestBillPrinter();
+      return cached
+        ? { printerName: cached, resolvedPrinterName: cached }
+        : undefined;
+    },
+  });
+
+  const guestBillPrinterMutation = useMutation({
+    mutationFn: async (printerName: string | null) => {
+      const res = await api.restaurant.setGuestBillPrinter(printerName);
+      return res.data.data as {
+        printerName: string | null;
+        resolvedPrinterName: string | null;
+      };
+    },
+    onSuccess: (data) => {
+      writeCachedGuestBillPrinter(data.resolvedPrinterName || data.printerName);
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'guest-bill-printer'] });
+      toast.success(
+        data.printerName
+          ? `Guest bill printer → ${data.printerName}`
+          : 'Guest bill printer cleared (uses receipt printer if set)',
+      );
+    },
+    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to save guest bill printer')),
   });
 
   const productsQuery = useQuery({
@@ -186,9 +244,8 @@ export default function RestaurantStationsPage() {
           <div>
             <h1 className="text-xl font-semibold text-stone-900">Kitchen stations</h1>
             <p className="text-sm text-stone-600">
-              Route KOTs by station (Kitchen / Bar / Pizza). Pick a printer from the local
-              print bridge list (<code className="text-xs">localhost:1811</code>) — sent as{' '}
-              <code className="text-xs">X-Printer-Name</code>.
+              One-time manager setup: map printers and menu routing here. Waiters only press Order /
+              KOT / Bill — they never pick a printer.
             </p>
           </div>
           <div className="flex gap-2 text-sm">
@@ -200,6 +257,63 @@ export default function RestaurantStationsPage() {
             </Link>
           </div>
         </div>
+
+        <section className="bg-sky-50 border border-sky-200 rounded-lg p-4 space-y-2 text-sm text-stone-800">
+          <h2 className="font-semibold text-stone-900">How station printing works</h2>
+          <ol className="list-decimal list-inside space-y-1 text-stone-700 text-xs sm:text-sm">
+            <li>
+              <strong>Map guest bill printer</strong> — set the FOH check printer below so Bill
+              always knows where to print.
+            </li>
+            <li>
+              <strong>Map kitchen printers</strong> — for KITCHEN, BAR, and PIZZA pick a discovered name
+              or type the exact Windows printer name and click Save (does not require bridge online).
+            </li>
+            <li>
+              <strong>Route the menu</strong> — in “Menu → station routing” below, set drinks to BAR,
+              pizza to PIZZA, food to KITCHEN (etc.).
+            </li>
+            <li>
+              <strong>Send Order / KOT / Bill</strong> — waiters press the button; the system
+              routes each ticket from these maps. Start the print agent on{' '}
+              <code className="text-xs">localhost:1811</code> on the FOH PC (no printer dialog).
+            </li>
+          </ol>
+        </section>
+
+        <section className="bg-white border border-stone-200 rounded-lg p-4 space-y-3">
+          <h2 className="text-sm font-semibold text-stone-800">Guest bill printer (FOH)</h2>
+          <p className="text-xs text-stone-600">
+            Default printer for guest checks when staff print Bill. Same bridge routing as kitchen
+            stations (<code className="text-xs">X-Printer-Name</code>). If empty, falls back to the
+            system receipt printer name when set.
+          </p>
+          <div className="max-w-md">
+            <StationPrinterPicker
+              value={guestBillPrinterQuery.data?.printerName ?? null}
+              knownPrinters={[
+                ...knownPrinters,
+                guestBillPrinterQuery.data?.printerName,
+                guestBillPrinterQuery.data?.resolvedPrinterName,
+              ]}
+              disabled={guestBillPrinterMutation.isPending}
+              onCommit={(next) => {
+                if (next !== (guestBillPrinterQuery.data?.printerName || null)) {
+                  guestBillPrinterMutation.mutate(next);
+                }
+              }}
+            />
+            {guestBillPrinterQuery.data?.resolvedPrinterName ? (
+              <p className="text-[10px] text-emerald-700 mt-1">
+                Bill prints → {guestBillPrinterQuery.data.resolvedPrinterName}
+              </p>
+            ) : (
+              <p className="text-[10px] text-amber-700 mt-1">
+                No guest bill printer mapped — Bill uses the default bridge printer
+              </p>
+            )}
+          </div>
+        </section>
 
         <section className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-2">
           <h2 className="text-sm font-semibold text-stone-800">FOH terminal — auto logout after print</h2>
@@ -278,7 +392,14 @@ export default function RestaurantStationsPage() {
         </section>
 
         <section className="bg-white border border-stone-200 rounded-lg overflow-hidden">
-          <div className="px-4 py-3 border-b border-stone-100 font-semibold text-sm">Stations</div>
+          <div className="px-4 py-3 border-b border-stone-100 font-semibold text-sm">
+            Stations
+            {(stationsQuery.data || []).some((s) => s.isActive && !s.printerName) && (
+              <span className="ml-2 font-normal text-amber-700 text-xs">
+                — map a printer on every active station so KOT routes automatically
+              </span>
+            )}
+          </div>
           <div className="divide-y divide-stone-100">
             {(stationsQuery.data || []).map((station) => (
               <div key={station.id} className="p-4 grid grid-cols-1 lg:grid-cols-6 gap-2 items-center">
@@ -302,13 +423,24 @@ export default function RestaurantStationsPage() {
                   <StationPrinterPicker
                     value={station.printerName}
                     knownPrinters={knownPrinters}
-                    disabled={updateMutation.isPending}
+                    disabled={
+                      updateMutation.isPending && updateMutation.variables?.id === station.id
+                    }
                     onCommit={(next) => {
                       if (next !== (station.printerName || null)) {
                         updateMutation.mutate({ id: station.id, data: { printerName: next } });
                       }
                     }}
                   />
+                  {station.printerName ? (
+                    <p className="text-[10px] text-emerald-700 mt-0.5">
+                      Mapped → {station.printerName}
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-amber-700 mt-0.5">
+                      No printer mapped — KOTs use the default bridge printer
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
