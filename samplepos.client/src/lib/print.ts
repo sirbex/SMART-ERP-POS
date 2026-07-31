@@ -8,6 +8,7 @@ import {
   buildThermalGuestDocumentHtml,
   receiptToThermalGuestDocument,
 } from './thermalGuestDocument';
+import { ensureThermalPrintCss } from './thermalPrintCss';
 
 export type PrintFormat = 'detailed' | 'compact';
 
@@ -95,18 +96,23 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
 /**
  * Shared HTML print path for receipts (fallback) and report documents.
  * Does not invent printers — reuses the existing bridge + browser print chain.
+ *
+ * Browser fallback: inject 80mm @page (height: auto) and keep the iframe alive
+ * until afterprint — removing it too early cancels the spooler job on Windows.
  */
 export async function printHtmlDocument(html: string): Promise<void> {
   if (!html || !html.trim()) {
     throw new Error('Invalid print document: HTML is required');
   }
 
+  const printHtml = ensureThermalPrintCss(html, 80);
+
   // Strategy 1: local print bridge (Sunmi ESC/POS agent, etc.)
   try {
     const bridgeRes = await fetch('http://localhost:1811/print', {
       method: 'POST',
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
-      body: html,
+      body: printHtml,
       signal: AbortSignal.timeout(1500),
     });
     if (bridgeRes.ok) return;
@@ -114,14 +120,21 @@ export async function printHtmlDocument(html: string): Promise<void> {
     // Bridge not reachable — fall through
   }
 
-  // Strategy 2: browser window.print() via hidden iframe
+  // Strategy 2: browser window.print() via laid-out iframe
   return new Promise((resolve, reject) => {
     try {
       const printFrame = document.createElement('iframe');
-      printFrame.style.position = 'absolute';
-      printFrame.style.width = '0';
-      printFrame.style.height = '0';
+      printFrame.setAttribute('title', 'Thermal print');
+      // Off-screen but real layout size (0×0 iframes often produce empty print jobs)
+      printFrame.style.position = 'fixed';
+      printFrame.style.left = '0';
+      printFrame.style.top = '0';
+      printFrame.style.width = '80mm';
+      printFrame.style.height = '100vh';
       printFrame.style.border = 'none';
+      printFrame.style.opacity = '0.01';
+      printFrame.style.pointerEvents = 'none';
+      printFrame.style.zIndex = '-1';
       document.body.appendChild(printFrame);
 
       const printWindow = printFrame.contentWindow;
@@ -129,34 +142,67 @@ export async function printHtmlDocument(html: string): Promise<void> {
         throw new Error('Unable to create print window');
       }
 
-      printWindow.document.open();
-      printWindow.document.write(html);
-      printWindow.document.close();
+      let finished = false;
+      let printStarted = false;
+      const cleanup = () => {
+        if (document.body.contains(printFrame)) {
+          document.body.removeChild(printFrame);
+        }
+      };
 
-      printWindow.onload = () => {
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        resolve();
+      };
+
+      const doPrint = () => {
+        if (finished || printStarted) return;
+        printStarted = true;
         try {
+          const body = printWindow.document.body;
+          const docEl = printWindow.document.documentElement;
+          const contentH = Math.max(
+            body?.scrollHeight || 0,
+            docEl?.scrollHeight || 0,
+            600,
+          );
+          printFrame.style.height = `${Math.min(contentH + 40, 20000)}px`;
+
+          const onAfterPrint = () => {
+            printWindow.removeEventListener('afterprint', onAfterPrint);
+            // Keep frame briefly so the spooler can read the document
+            setTimeout(finish, 500);
+          };
+          printWindow.addEventListener('afterprint', onAfterPrint);
+
           printWindow.focus();
           printWindow.print();
-          setTimeout(() => {
-            if (document.body.contains(printFrame)) {
-              document.body.removeChild(printFrame);
-            }
-            resolve();
-          }, 100);
+
+          // Browsers that never fire afterprint (or user cancels silently)
+          setTimeout(finish, 120_000);
         } catch (error) {
-          if (document.body.contains(printFrame)) {
-            document.body.removeChild(printFrame);
-          }
+          finished = true;
+          cleanup();
           reject(error);
         }
       };
 
+      printWindow.document.open();
+      printWindow.document.write(printHtml);
+      printWindow.document.close();
+
+      printWindow.onload = () => {
+        requestAnimationFrame(() => setTimeout(doPrint, 100));
+      };
+
+      // Fallback if onload already fired
       setTimeout(() => {
-        if (document.body.contains(printFrame)) {
-          document.body.removeChild(printFrame);
-          resolve();
+        if (!finished && printWindow.document.readyState === 'complete') {
+          doPrint();
         }
-      }, 5000);
+      }, 400);
     } catch (error) {
       reject(error);
     }

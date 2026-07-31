@@ -54,15 +54,15 @@ export const PAPER_DEFINITIONS: Record<PaperSize, PaperDefinition> = {
     },
     RECEIPT_80MM: {
         size: 'RECEIPT_80MM',
-        // 80mm wide × auto-height. 80mm = 226.77 pt; height grows with content.
-        pdfkitSize: [227, 800],
+        // 80mm ≈ 227pt; ~600mm tall (~1701pt) — long ticket, driver-safe.
+        pdfkitSize: [227, 1701],
         margin: { top: 8, right: 8, bottom: 8, left: 8 },
         widthPt: 227,
         isReceipt: true,
     },
     RECEIPT_58MM: {
         size: 'RECEIPT_58MM',
-        pdfkitSize: [164, 800],
+        pdfkitSize: [164, 1701],
         margin: { top: 6, right: 6, bottom: 6, left: 6 },
         widthPt: 164,
         isReceipt: true,

@@ -15,45 +15,28 @@ import {
   buildThermalGuestDocumentHtml,
   formatGuestDocMoney,
 } from './thermalGuestDocument';
+import { buildThermalPrintCss } from './thermalPrintCss';
 
 async function printHtml(html: string, printerName?: string | null): Promise<void> {
-  try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'text/html; charset=utf-8',
-    };
-    if (printerName?.trim()) {
-      headers['X-Printer-Name'] = printerName.trim();
+  // Named printer: try bridge with X-Printer-Name, then shared browser path
+  if (printerName?.trim()) {
+    try {
+      const bridgeRes = await fetch('http://localhost:1811/print', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'X-Printer-Name': printerName.trim(),
+        },
+        body: html,
+        signal: AbortSignal.timeout(1500),
+      });
+      if (bridgeRes.ok) return;
+    } catch {
+      // fall through
     }
-    const bridgeRes = await fetch('http://localhost:1811/print', {
-      method: 'POST',
-      headers,
-      body: html,
-      signal: AbortSignal.timeout(1500),
-    });
-    if (bridgeRes.ok) return;
-  } catch {
-    // fall through to browser print
   }
-
-  const iframe = document.createElement('iframe');
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  document.body.appendChild(iframe);
-  const doc = iframe.contentDocument || iframe.contentWindow?.document;
-  if (!doc) {
-    document.body.removeChild(iframe);
-    throw new Error('Unable to open print frame');
-  }
-  doc.open();
-  doc.write(html);
-  doc.close();
-  iframe.contentWindow?.focus();
-  iframe.contentWindow?.print();
-  setTimeout(() => document.body.removeChild(iframe), 1000);
+  // Shared path: bridge (no name) + browser iframe that stays alive until afterprint
+  return printHtmlDocument(html);
 }
 
 export interface KotPrintData extends DocumentCompanyBranding {
@@ -147,7 +130,8 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   });
   const html = `<!DOCTYPE html><html><head><title>${isVoid ? 'VOID' : 'KOT'} ${escapeHtml(data.kotNumber)} · ${escapeHtml(data.station)}</title>
 <style>
-  body { font-family: monospace; font-size: 14px; width: 280px; margin: 0; padding: 8px; }
+  ${buildThermalPrintCss(80)}
+  body { font-size: 14px; padding: 8px; }
   h1 { font-size: 18px; margin: 0 0 8px; text-align: center; ${isVoid ? 'border: 2px solid #000; padding: 6px;' : ''} }
   .meta { font-size: 12px; margin-bottom: 8px; }
   hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }

@@ -10,6 +10,7 @@ import {
   documentCompanyHeaderHtml,
   type DocumentCompanyBranding,
 } from './documentCompanyBranding';
+import { buildThermalPrintCss } from './thermalPrintCss';
 
 export type ThermalGuestMetaRow = { label: string; value: string };
 
@@ -135,17 +136,10 @@ export function buildThermalGuestDocumentHtml(doc: ThermalGuestDocument): string
 
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>${escapeHtml(doc.title)} ${escapeHtml(doc.documentNumber)}</title>
 <style>
-  @media print { @page { margin: 0; } body { margin: 0; } }
+  ${buildThermalPrintCss(80)}
   body {
-    font-family: 'Courier New', Courier, monospace;
     font-size: 12px;
-    width: 280px;
-    max-width: 80mm;
-    margin: 0 auto;
     padding: 10px 8px;
-    color: #000;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
   }
   h1 { font-size: 16px; margin: 6px 0 8px; text-align: center; letter-spacing: 1px; }
   .reprint { text-align: center; border: 2px solid #000; padding: 4px 0; margin-bottom: 8px; font-weight: bold; letter-spacing: 1px; }
