@@ -137,29 +137,32 @@ export function buildThermalGuestDocumentHtml(doc: ThermalGuestDocument): string
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>${escapeHtml(doc.title)} ${escapeHtml(doc.documentNumber)}</title>
 <style>
   ${buildThermalPrintCss(80)}
+  /* Larger + bold black — thermal drivers wash out thin/light type */
   body {
-    font-size: 12px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #000;
     padding: 10px 8px;
   }
-  h1 { font-size: 16px; margin: 6px 0 8px; text-align: center; letter-spacing: 1px; }
-  .reprint { text-align: center; border: 2px solid #000; padding: 4px 0; margin-bottom: 8px; font-weight: bold; letter-spacing: 1px; }
-  .channel { text-align: center; font-size: 11px; font-weight: bold; margin-bottom: 6px; }
-  .meta { font-size: 11px; margin-bottom: 6px; }
+  h1 { font-size: 20px; font-weight: 900; margin: 6px 0 8px; text-align: center; letter-spacing: 1px; color: #000; }
+  .reprint { text-align: center; border: 2px solid #000; padding: 4px 0; margin-bottom: 8px; font-weight: 900; letter-spacing: 1px; }
+  .channel { text-align: center; font-size: 14px; font-weight: 900; margin-bottom: 6px; }
+  .meta { font-size: 13px; margin-bottom: 6px; font-weight: 700; }
   .meta-row { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; }
-  .meta-row span:last-child { text-align: right; font-weight: bold; }
-  hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+  .meta-row span:last-child { text-align: right; font-weight: 900; }
+  hr { border: none; border-top: 2px dashed #000; margin: 8px 0; }
   .line { margin: 8px 0; }
-  .name { font-weight: bold; font-size: 12px; word-break: break-word; }
-  .note { font-size: 10px; padding-left: 6px; margin-top: 2px; }
-  .row { display: flex; justify-content: space-between; gap: 10px; margin-top: 3px; font-size: 11px; }
-  .amt { white-space: nowrap; font-weight: bold; }
-  .tot-row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; font-size: 12px; }
-  .tot-row.grand { font-weight: bold; font-size: 14px; margin-top: 6px; }
-  .footer { text-align: center; font-size: 11px; margin-top: 4px; }
-  .accounts { text-align: left; font-size: 10px; margin-top: 8px; border-top: 1px dashed #000; padding-top: 8px; }
-  .accounts-title { font-weight: bold; margin-bottom: 4px; }
+  .name { font-weight: 900; font-size: 15px; word-break: break-word; color: #000; }
+  .note { font-size: 13px; font-weight: 700; padding-left: 6px; margin-top: 2px; }
+  .row { display: flex; justify-content: space-between; gap: 10px; margin-top: 3px; font-size: 14px; font-weight: 700; }
+  .amt { white-space: nowrap; font-weight: 900; }
+  .tot-row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; font-size: 15px; font-weight: 700; }
+  .tot-row.grand { font-weight: 900; font-size: 18px; margin-top: 6px; }
+  .footer { text-align: center; font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .accounts { text-align: left; font-size: 13px; font-weight: 700; margin-top: 8px; border-top: 2px dashed #000; padding-top: 8px; }
+  .accounts-title { font-weight: 900; margin-bottom: 4px; }
   .account { margin-bottom: 4px; }
-  .custom-note { text-align: left; font-size: 10px; white-space: pre-line; margin-top: 8px; border-top: 1px dashed #000; padding-top: 8px; }
+  .custom-note { text-align: left; font-size: 13px; font-weight: 700; white-space: pre-line; margin-top: 8px; border-top: 2px dashed #000; padding-top: 8px; }
 </style></head><body>
   ${doc.isReprint ? `<div class="reprint">*** REPRINTED COPY ***</div>` : ''}
   ${companyBlock}

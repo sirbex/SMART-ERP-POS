@@ -47,6 +47,9 @@ describe('thermal 80mm continuous-roll print SSOT', () => {
     expect(html).toContain('80mm');
     expect(html).toContain(`${THERMAL_ROLL_HEIGHT_MM}mm`);
     expect(html).toMatch(/page-break-inside:\s*avoid/);
+    expect(html).toMatch(/font-size:\s*15px/);
+    expect(html).toMatch(/font-weight:\s*700/);
+    expect(html).toMatch(/color:\s*#000/);
   });
 
   it('ensureThermalPrintCss injects when missing; idempotent when present', () => {

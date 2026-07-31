@@ -61,13 +61,13 @@ export function documentCompanyHeaderHtml(
   if (!name) return '';
   const esc = opts.escapeHtml;
   if (opts.mode === 'kitchen') {
-    return `<div style="text-align:center;font-size:11px;font-weight:bold;margin-bottom:6px">${esc(name)}</div>`;
+    return `<div style="text-align:center;font-size:14px;font-weight:900;color:#000;margin-bottom:6px">${esc(name)}</div>`;
   }
   const addr = branding?.companyAddress?.trim();
   const phone = branding?.companyPhone?.trim();
-  return `<div style="text-align:center;margin-bottom:8px">
-    <div style="font-size:15px;font-weight:bold">${esc(name)}</div>
-    ${addr ? `<div style="font-size:10px">${esc(addr)}</div>` : ''}
-    ${phone ? `<div style="font-size:10px">${esc(phone)}</div>` : ''}
+  return `<div style="text-align:center;margin-bottom:8px;color:#000">
+    <div style="font-size:18px;font-weight:900;color:#000">${esc(name)}</div>
+    ${addr ? `<div style="font-size:13px;font-weight:700;color:#000">${esc(addr)}</div>` : ''}
+    ${phone ? `<div style="font-size:13px;font-weight:700;color:#000">${esc(phone)}</div>` : ''}
   </div>`;
 }

@@ -42,11 +42,13 @@ export function buildThermalPrintCss(paperMm: ThermalPaperMm = 80): string {
     height: auto !important;
     margin: 0 !important;
     overflow: visible !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   * {
     box-sizing: border-box;
+    color: #000 !important;
   }
   .line, .meta-row, .tot-row, hr {
     page-break-inside: avoid;
@@ -55,11 +57,13 @@ export function buildThermalPrintCss(paperMm: ThermalPaperMm = 80): string {
 }
 html, body {
   font-family: 'Courier New', Courier, monospace;
+  font-weight: 700;
   width: ${contentPx}px;
   max-width: ${contentMm}mm;
   margin: 0 auto;
   color: #000;
   background: #fff;
+  -webkit-font-smoothing: none;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }

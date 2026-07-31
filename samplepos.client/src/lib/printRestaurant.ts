@@ -90,9 +90,9 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   const lines = consolidated
     .map((it) => {
       const note = it.lineNotes
-        ? `<div style="font-size:11px;padding-left:8px">* ${escapeHtml(it.lineNotes)}</div>`
+        ? `<div style="font-size:14px;font-weight:700;padding-left:8px">* ${escapeHtml(it.lineNotes)}</div>`
         : '';
-      return `<div style="margin:6px 0"><strong>${escapeHtml(String(it.quantity))}</strong> × ${escapeHtml(it.productName)}</div>${note}`;
+      return `<div style="margin:6px 0;font-weight:900"><strong style="font-size:18px">${escapeHtml(String(it.quantity))}</strong> × <span style="font-size:16px">${escapeHtml(it.productName)}</span></div>${note}`;
     })
     .join('');
 
@@ -131,10 +131,10 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   const html = `<!DOCTYPE html><html><head><title>${isVoid ? 'VOID' : 'KOT'} ${escapeHtml(data.kotNumber)} · ${escapeHtml(data.station)}</title>
 <style>
   ${buildThermalPrintCss(80)}
-  body { font-size: 14px; padding: 8px; }
-  h1 { font-size: 18px; margin: 0 0 8px; text-align: center; ${isVoid ? 'border: 2px solid #000; padding: 6px;' : ''} }
-  .meta { font-size: 12px; margin-bottom: 8px; }
-  hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+  body { font-size: 16px; font-weight: 700; color: #000; padding: 8px; }
+  h1 { font-size: 22px; font-weight: 900; margin: 0 0 8px; text-align: center; color: #000; ${isVoid ? 'border: 2px solid #000; padding: 6px;' : ''} }
+  .meta { font-size: 14px; font-weight: 700; margin-bottom: 8px; color: #000; }
+  hr { border: none; border-top: 2px dashed #000; margin: 8px 0; }
 </style></head><body>
   ${companyBlock}
   <h1>${title}</h1>
@@ -151,7 +151,7 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   <hr/>
   ${lines}
   <hr/>
-  <div style="text-align:center;font-size:11px">${isVoid ? 'STOP / DO NOT PREPARE' : 'NO PRICES'}</div>
+  <div style="text-align:center;font-size:14px;font-weight:900">${isVoid ? 'STOP / DO NOT PREPARE' : 'NO PRICES'}</div>
 </body></html>`;
 
   await printHtml(html, data.printerName);
