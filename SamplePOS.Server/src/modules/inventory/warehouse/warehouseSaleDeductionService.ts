@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { BusinessError } from '../../../middleware/errorHandler.js';
 import { Money } from '../../../utils/money.js';
-import { getBusinessDate, getBusinessYear } from '../../../utils/dateRange.js';
+import { getBusinessDate } from '../../../utils/dateRange.js';
 import { syncProductQuantity } from '../../../utils/inventorySync.js';
 import { posProductSearchService } from './posProductSearchService.js';
 import {
@@ -13,6 +13,7 @@ import { storeLocationRepository } from './storeLocationRepository.js';
 import { lotService } from '../../inventory-lot/lotService.js';
 import { loadStoreSelectableLots } from '../../inventory-lot/postgresLotSelector.js';
 import { selectLots } from '@shared/inventory-lot/index.js';
+import { allocateNextMovementNumber } from '../../../utils/documentNumberAllocation.js';
 
 export interface MultistoreSaleDeductionResult {
     storeLocationId: string;
@@ -20,6 +21,7 @@ export interface MultistoreSaleDeductionResult {
     primaryBatchId: string | null;
     actualBatchCost: Decimal;
     movementCount: number;
+    /** @deprecated Sequence allocation is via nextval; retained for call-site compat. */
     nextMovementSeq: number;
 }
 
@@ -42,7 +44,8 @@ export interface MultistoreStockDeductionParams {
     enteredQty?: number;
     baseUomId?: string;
     conversionFactor?: string;
-    movementSeqStart: number;
+    /** @deprecated Ignored — movement numbers use doc_movement_number_seq. */
+    movementSeqStart?: number;
 }
 
 async function insertStockMovement(
@@ -222,13 +225,11 @@ export const warehouseSaleDeductionService = {
             syncProduct: false,
         });
 
-        let movementSeq = params.movementSeqStart;
         let primaryProductLotId: string | null = null;
         let primaryBatchId: string | null = null;
 
         for (const layer of consumeResult.layers) {
-            const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
-            movementSeq++;
+            const movementNumber = await allocateNextMovementNumber(client);
 
             await insertStockMovement(client, {
                 movementNumber,
@@ -260,7 +261,7 @@ export const warehouseSaleDeductionService = {
             primaryBatchId,
             actualBatchCost: Money.parseDb(consumeResult.totalCost),
             movementCount: consumeResult.layers.length,
-            nextMovementSeq: movementSeq,
+            nextMovementSeq: 0,
         };
     },
 
@@ -277,7 +278,7 @@ export const warehouseSaleDeductionService = {
             enteredQty: number;
             baseUomId: string;
             conversionFactor: string;
-            movementSeqStart: number;
+            movementSeqStart?: number;
         },
     ): Promise<MultistoreSaleDeductionResult> {
         return this.deductAtStore(client, {

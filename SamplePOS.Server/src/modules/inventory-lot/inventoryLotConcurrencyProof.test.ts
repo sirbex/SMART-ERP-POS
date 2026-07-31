@@ -28,9 +28,10 @@ describe('Inventory lot concurrency proof (structural)', () => {
     expect(selector).toContain('FOR UPDATE OF ib_bal');
   });
 
-  it('salesService serializes movement numbers via advisory lock before batch deduct', () => {
+  it('salesService allocates movement numbers via SEQUENCE (not advisory lock across FEFO)', () => {
     const sales = src('src/modules/sales/salesService.ts');
-    expect(sales).toContain("pg_advisory_xact_lock(hashtext('movement_number_seq'))");
+    expect(sales).toContain('allocateNextMovementNumber');
+    expect(sales).not.toContain("pg_advisory_xact_lock(hashtext('movement_number_seq'))");
     expect(sales).toContain('lotService.consumeLot');
   });
 

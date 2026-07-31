@@ -8,8 +8,9 @@ import {
   RecordMovementData,
   MovementFilters,
 } from './types.js';
-import { getBusinessYear } from '../../utils/dateRange.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
 import { pickSortColumn, sqlSortOrder } from '../../utils/enterpriseListQuery.js';
+import { allocateNextMovementNumber } from '../../utils/documentNumberAllocation.js';
 
 const MOVEMENT_SORT_COLUMNS: Record<string, string> = {
   dateTime: 'sm.created_at',
@@ -27,22 +28,10 @@ const MOVEMENT_SORT_COLUMNS: Record<string, string> = {
 /**
  * Record stock movement
  * Accepts Pool or PoolClient to participate in caller's transaction.
- * Generates movement_number atomically with advisory lock.
+ * Movement numbers use Postgres SEQUENCE (nextval) — no advisory lock across TX.
  */
 export async function recordMovement(pool: Pool | PoolClient, data: RecordMovementData): Promise<StockMovement> {
-  // Generate movement number with advisory lock to prevent duplicates
-  await pool.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-  const movNumRes = await pool.query(
-    `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
-     CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-          THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-          ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-     END
-     AS movement_number
-     FROM stock_movements 
-     WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
-  );
-  const movementNumber = movNumRes.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
+  const movementNumber = await allocateNextMovementNumber(pool);
 
   const result = await pool.query(
     `INSERT INTO stock_movements (

@@ -186,7 +186,8 @@ async function prewarmStockLevels(): Promise<void> {
 async function prewarmCustomers(): Promise<void> {
   try {
     if (!canSyncCustomersReadFromCache()) return;
-    const res = await apiClient.get('/customers?page=1&limit=5000', { silentForbidden: true });
+    // Lean offline seed — avoid limit=5000 + LATERAL deposits (30s timeouts on large tenants).
+    const res = await apiClient.get('/customers?page=1&limit=200', { silentForbidden: true });
     const raw: ApiRow[] = res.data?.data || [];
     await putCustomers(raw.map(mapApiCustomer));
   } catch {

@@ -115,9 +115,10 @@ describe('Lock ordering proof (structural)', () => {
     expect(consumeBlock).toContain('selection.totalAllocated + 0.001 < input.quantity');
   });
 
-  it('movement number advisory lock is separate from batch row locks', () => {
+  it('movement numbers use Postgres SEQUENCE (no TX-scoped advisory lock)', () => {
     const movementRepo = src('src/modules/stock-movements/stockMovementRepository.ts');
-    expect(movementRepo).toContain("pg_advisory_xact_lock(hashtext('movement_number_seq'))");
+    expect(movementRepo).toContain('allocateNextMovementNumber');
+    expect(movementRepo).not.toContain("pg_advisory_xact_lock(hashtext('movement_number_seq'))");
   });
 });
 

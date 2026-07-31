@@ -1,25 +1,27 @@
 /**
- * Prefixed document number allocation (SALE-/ORD-/REF-YYYY-NNNN).
+ * Prefixed document number allocation (SALE-/ORD-/REF-/MOV-YYYY-NNNN).
  *
- * SSOT for sales, orders, and refunds — never duplicate the MAX+1 SQL inline.
+ * Scale path: Postgres SEQUENCE via nextval() — concurrency-safe, no advisory
+ * lock held across FEFO/GL. Values are not rolled back (gaps on aborted sales OK).
  *
- * Permanent fix for production 409 sales_sale_number_key:
- * lexicographic ORDER BY … DESC picks SALE-YYYY-999 over SALE-YYYY-4872 and
- * regenerates colliding numbers. Always use numeric MAX of digits-only suffixes.
- *
- * Must run on a transaction client so pg_advisory_xact_lock is held until COMMIT.
+ * Also keeps pure helpers for regression proofs (lex trap, digits-only).
  */
 import type { Pool, PoolClient } from 'pg';
+import { getBusinessYear } from './dateRange.js';
 
 export const DOCUMENT_NUMBER_TARGETS = {
-  sale: { table: 'sales', column: 'sale_number' },
-  order: { table: 'pos_orders', column: 'order_number' },
-  refund: { table: 'sale_refunds', column: 'refund_number' },
+  sale: { table: 'sales', column: 'sale_number', sequence: 'doc_sale_number_seq' },
+  order: { table: 'pos_orders', column: 'order_number', sequence: 'doc_order_number_seq' },
+  refund: { table: 'sale_refunds', column: 'refund_number', sequence: 'doc_refund_number_seq' },
+  movement: { table: 'stock_movements', column: 'movement_number', sequence: 'doc_movement_number_seq' },
 } as const;
 
 export type DocumentNumberKind = keyof typeof DOCUMENT_NUMBER_TARGETS;
 
 const DIGITS_ONLY = /^[0-9]+$/;
+const ALLOWED_SEQUENCES = new Set<string>(
+  Object.values(DOCUMENT_NUMBER_TARGETS).map((t) => t.sequence),
+);
 
 /**
  * Extract trailing numeric sequence after a fixed prefix.
@@ -34,8 +36,7 @@ export function extractNumericSuffix(documentNumber: string, prefix: string): nu
 }
 
 /**
- * Pure numeric next-number (mirrors SQL MAX(digits)+1). Used by unit proofs
- * and to document the algorithm without a database.
+ * Pure numeric next-number (mirrors historical MAX(digits)+1). Unit proofs only.
  */
 export function nextPrefixedDocumentNumber(
   existing: readonly string[],
@@ -51,7 +52,7 @@ export function nextPrefixedDocumentNumber(
 }
 
 /**
- * Historical broken allocator (lexicographic DESC). Kept for regression evidence only.
+ * Historical broken allocator (lexicographic DESC). Regression evidence only.
  */
 export function lexNextBrokenDocumentNumber(
   existing: readonly string[],
@@ -68,14 +69,27 @@ export function lexNextBrokenDocumentNumber(
   return `${prefix}${String(sequence).padStart(pad, '0')}`;
 }
 
+async function nextvalAllowlisted(
+  client: Pool | PoolClient,
+  sequence: string,
+): Promise<number> {
+  if (!ALLOWED_SEQUENCES.has(sequence)) {
+    throw new Error(`Unknown document number sequence: ${sequence}`);
+  }
+  const result = await client.query<{ n: string | number }>(
+    `SELECT nextval('${sequence}') AS n`,
+  );
+  return Number(result.rows[0]?.n ?? 1);
+}
+
 /**
- * Allocate the next document number under an advisory xact lock.
- * Digits-only filter ignores malformed historical values (e.g. SALE-2026-TEST).
+ * Allocate next SALE-/ORD-/REF- number via sequence (no TX-scoped advisory lock).
+ * Safe to call on the sale transaction client — nextval does not serialize FEFO/GL.
  */
 export async function allocateNextPrefixedDocumentNumber(
   client: Pool | PoolClient,
   opts: {
-    kind: DocumentNumberKind;
+    kind: Exclude<DocumentNumberKind, 'movement'>;
     prefix: string;
     pad?: number;
   },
@@ -90,24 +104,20 @@ export async function allocateNextPrefixedDocumentNumber(
     throw new Error('Invalid document number prefix');
   }
 
-  // Serialize allocation for this prefix until TX commit
-  await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [prefix]);
+  const nextNum = await nextvalAllowlisted(client, target.sequence);
+  return `${prefix}${String(nextNum).padStart(pad, '0')}`;
+}
 
-  // Table/column from allowlist only — never interpolate untrusted identifiers.
-  // substr(string, int): do not use SUBSTRING(... FROM $n) (regex form returns NULL).
-  const sql = `
-    SELECT COALESCE(
-      MAX(CAST(substr(${target.column}, $2) AS INTEGER)),
-      0
-    ) + 1 AS next_num
-    FROM ${target.table}
-    WHERE ${target.column} LIKE $1
-      AND substr(${target.column}, $2) ~ '^[0-9]+$'`;
-
-  const result = await client.query<{ next_num: number | string }>(sql, [
-    `${prefix}%`,
-    prefix.length + 1,
-  ]);
-  const nextNum = Number(result.rows[0]?.next_num ?? 1);
+/**
+ * Allocate next MOV-YYYY-NNNN via sequence — used on sale complete / stock paths.
+ * Must NOT use advisory_xact_lock held until COMMIT (that serialized all completes).
+ */
+export async function allocateNextMovementNumber(
+  client: Pool | PoolClient,
+  pad = 4,
+): Promise<string> {
+  const year = getBusinessYear();
+  const prefix = `MOV-${year}-`;
+  const nextNum = await nextvalAllowlisted(client, DOCUMENT_NUMBER_TARGETS.movement.sequence);
   return `${prefix}${String(nextNum).padStart(pad, '0')}`;
 }

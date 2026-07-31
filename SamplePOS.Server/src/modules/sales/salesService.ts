@@ -57,6 +57,7 @@ import { loadGlobalSelectableLots } from '../inventory-lot/postgresLotSelector.j
 import { selectLots } from '@shared/inventory-lot/index.js';
 import { warehouseReturnInventoryService } from '../inventory/warehouse/warehouseReturnInventoryService.js';
 import { warehouseSaleVoidRestoreService } from '../inventory/warehouse/warehouseSaleVoidRestoreService.js';
+import { allocateNextMovementNumber } from '../../utils/documentNumberAllocation.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import {
   assertSaleHeaderMatchesCalculatedTotal,
@@ -1362,18 +1363,8 @@ export const salesService = {
           });
         }
 
-        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-        const movNumRes = await client.query(
-          `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
-           CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-                THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-                ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-           END
-           AS movement_number
-           FROM stock_movements 
-           WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
-        );
-        let movementSeq = parseInt(movNumRes.rows[0]?.movement_number?.split('-')[2] || '1');
+        // Movement numbers: Postgres SEQUENCE (nextval) — do NOT hold advisory_xact_lock
+        // across FEFO/GL (that serialized concurrent order completes past the 30s timeout).
 
         let lineActualCost = new Decimal(0);
 
@@ -1410,9 +1401,7 @@ export const salesService = {
               enteredQty: target.enteredQty,
               baseUomId: target.baseUomId,
               conversionFactor: target.conversionFactor.toFixed(6),
-              movementSeqStart: movementSeq,
             });
-            movementSeq = deductResult.nextMovementSeq;
             lineActualCost = lineActualCost.plus(deductResult.actualBatchCost);
             if (!warehouseTraces.has(lineIdx)) {
               warehouseTraces.set(lineIdx, {
@@ -1482,8 +1471,7 @@ export const salesService = {
           });
 
           for (const layer of consumeResult.layers) {
-            const movementNumber = `MOV-${getBusinessYear()}-${String(movementSeq).padStart(4, '0')}`;
-            movementSeq++;
+            const movementNumber = await allocateNextMovementNumber(client);
 
             const batchCostDec = Money.parseDb(layer.costPrice);
             const qtyToDeduct = new Decimal(layer.quantity);
@@ -2895,21 +2883,8 @@ export const salesService = {
         // App-layer sync: update BOTH product_inventory and products.quantity_on_hand
         await syncProductQuantity(client, productId);
 
-        // 3. Record stock movement (VOID reversal)
-        // Advisory lock prevents concurrent duplicate movement number generation
-        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-        const movNumRes = await client.query(
-          `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
-           CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-                THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-                ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-           END
-           AS movement_number
-           FROM stock_movements 
-           WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
-        );
-        const movementNumber =
-          movNumRes.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
+        // 3. Record stock movement (VOID reversal) — SEQUENCE, no advisory lock
+        const movementNumber = await allocateNextMovementNumber(client);
 
         await client.query(
           `INSERT INTO stock_movements (
@@ -3463,20 +3438,8 @@ export const salesService = {
         // 5c. Sync product_inventory and products.quantity_on_hand
         await syncProductQuantity(client, productId);
 
-        // 5d. Record stock movement (RETURN type)
-        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-        const movNumRes = await client.query(
-          `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' ||
-           CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-                THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-                ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-           END
-           AS movement_number
-           FROM stock_movements
-           WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
-        );
-        const movementNumber =
-          movNumRes.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
+        // 5d. Record stock movement (RETURN type) — SEQUENCE, no advisory lock
+        const movementNumber = await allocateNextMovementNumber(client);
 
         await client.query(
           `INSERT INTO stock_movements (
