@@ -366,6 +366,9 @@ router.post(
       fromOrderId: orderId,
       quoteId: order.quoteId ?? undefined,
       idempotencyKey,
+      profileCheckout:
+        process.env.CHECKOUT_PROFILE === '1' ||
+        req.headers['x-checkout-profile'] === '1',
     };
 
     // 3. Create the sale AND atomically mark order completed (single transaction)
@@ -426,6 +429,7 @@ router.post(
         order: { ...order, status: 'COMPLETED' },
         sale: result.sale,
         alreadyCompleted: false,
+        ...(result.checkoutProfile ? { checkoutProfile: result.checkoutProfile } : {}),
         ...(atCostRepriceMeta?.hasDrift
           ? { atCostReprice: atCostRepriceMeta }
           : {}),

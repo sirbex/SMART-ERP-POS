@@ -1313,7 +1313,7 @@ export default function RestaurantPosPage() {
         const postItems = async (orderIdForApi: string | null | undefined) => {
           await api.restaurant.addItems({
             tableId: selectedTableId,
-            orderId: orderIdForApi,
+            orderId: orderIdForApi ?? undefined,
             waiterId: selectedWaiterId,
             customerId: selectedCustomer?.id || null,
             guestName,
@@ -2935,7 +2935,7 @@ export default function RestaurantPosPage() {
       const postItems = async (orderIdForApi: string | null | undefined) => {
         await api.restaurant.addItems({
           tableId: selectedTableId,
-          orderId: orderIdForApi,
+          orderId: orderIdForApi ?? undefined,
           waiterId: selectedWaiterId,
           items: [{ productId, quantity: 1 }],
         });

@@ -513,7 +513,8 @@ export async function repairAllOrphanedPurchaseUoms(
 
 /**
  * Persist canonical edges from product_uoms (repairs legacy/partial item_uom_conversions).
- * Idempotent — safe before PO/GR/sales posting.
+ * Call on product UoM **writes** only — never on sale/checkout resolve (P5: write amplification
+ * under concurrent completes caused lock waits attributed to the mislabeled "pricing" phase).
  */
 export async function repairCanonicalConversionsFromProductUoms(
   productId: string,
@@ -722,7 +723,8 @@ export async function resolveCanonicalProductUom(
   db: Queryable,
 ): Promise<{ baseUomId: string | null; conversionFactor: number }> {
   await ensureProductBaseUomContext(productId, db);
-  await repairCanonicalConversionsFromProductUoms(productId, db);
+  // Read-only resolve via merged product_uoms + item_uom_conversions.
+  // Do NOT repair/upsert conversions here — that serializes concurrent checkouts.
 
   const baseUomId = await repo.getProductBaseUomId(productId, db);
   if (!baseUomId) {

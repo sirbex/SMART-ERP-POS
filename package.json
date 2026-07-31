@@ -82,6 +82,7 @@
     "proof:order-complete-discount": "node scripts/proof-order-complete-discount.mjs",
     "proof:order-complete-soak": "node SamplePOS.Server/scripts/proof-order-complete-soak.mjs",
     "proof:order-complete-soak:live": "node SamplePOS.Server/scripts/proof-order-complete-soak.mjs --live",
+    "proof:checkout-profile": "node scripts/proof-checkout-profile.mjs",
     "proof:order-at-cost-fefo": "node scripts/proof-order-at-cost-fefo.mjs",
     "proof:sale-below-cost:local": "node scripts/proof-sale-below-cost-local.mjs",
     "proof:pos-at-cost-reprice:local": "node scripts/proof-pos-at-cost-reprice-local.mjs",

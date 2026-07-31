@@ -14,6 +14,11 @@ import * as costLayerService from '../../services/costLayerService.js';
 import { BankingService } from '../../services/bankingService.js';
 import { jobQueue } from '../../services/jobQueue.js';
 import { incrementMetric } from '../../routes/health.js';
+import {
+  createCheckoutProfiler,
+  isCheckoutProfileEnabled,
+  type CheckoutProfileSnapshot,
+} from './checkoutProfiler.js';
 import { cashRegisterService, cashRegisterRepository } from '../cash-register/index.js';
 import { ValidationError, BusinessError, NotFoundError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
@@ -111,6 +116,8 @@ export interface CreateSaleInput {
   exchangeRefundId?: string;
   /** Optional audit context for price-edit / below-cost audit rows */
   auditContext?: AuditContext;
+  /** P4: opt-in phase timings (also CHECKOUT_PROFILE=1 / X-Checkout-Profile). */
+  profileCheckout?: boolean;
 }
 
 export interface RefundItemInput {
@@ -160,12 +167,15 @@ export const salesService = {
     items: SaleItemRecord[];
     paymentLines: PaymentLineInput[];
     warnings?: string[];
+    checkoutProfile?: CheckoutProfileSnapshot;
   }> {
     const client = await pool.connect();
     const warnings: string[] = [];
+    const profiler = createCheckoutProfiler(isCheckoutProfileEnabled(input.profileCheckout));
 
     try {
       await client.query('BEGIN');
+      profiler.mark('begin');
 
       // Maintenance mode guard (replaces trg_maintenance_check_sales)
       await checkMaintenanceMode(client);
@@ -188,6 +198,7 @@ export const salesService = {
           );
         }
       }
+      profiler.mark('order_lock');
 
       const multistoreEnabled = await isMultistoreEnabled(client);
       let sellingStoreId: string | null = null;
@@ -276,6 +287,7 @@ export const salesService = {
           validatedSessionId = input.cashRegisterSessionId;
         }
       }
+      profiler.mark('session_policy');
 
       // Suppress the inventory_batches trigger that auto-creates SM- stock_movements
       // Sales code already creates proper MOV- movements for each batch deduction
@@ -355,6 +367,7 @@ export const salesService = {
       const [productsMap] = await Promise.all([
         batchFetchProducts(client, regularProductIds),
       ]);
+      profiler.mark('product_prefetch');
 
       // Wave 4 MUoM SSOT: resolve canonical UoM once per line (no silent factor=1 fallback).
       const saleUomSnapshots = new Map<number, SaleItemUomSnapshot>();
@@ -366,6 +379,7 @@ export const salesService = {
           await resolveSaleItemUom(line.productId, line, client),
         );
       }
+      profiler.mark('uom_resolve');
 
       // Phase 3: pre-resolve recipe BOM explosion per sale line (null = direct product stock)
       const recipeExplosionByLine = new Map<number, RecipeExplosionLine[] | null>();
@@ -379,6 +393,7 @@ export const salesService = {
           await explodeActiveRecipe(client, line.productId, new Decimal(snap.baseQuantity)),
         );
       }
+      profiler.mark('recipe_explode');
 
       // ========== PRICING ENGINE RESOLUTION ==========
       // Resolve prices through the full cascade (tier → rule → group discount → formula → base)
@@ -466,6 +481,7 @@ export const salesService = {
           itemCount: input.items.length,
         });
       }
+      profiler.mark('pricing_engine');
 
       for (let lineIdx = 0; lineIdx < input.items.length; lineIdx++) {
         const item = input.items[lineIdx];
@@ -1194,7 +1210,9 @@ export const salesService = {
         cashRegisterSessionId: validatedSessionId || undefined,
       };
 
+      profiler.mark('line_prep');
       const sale = await salesRepository.createSale(client, saleData);
+      profiler.mark('persist_sale_header');
 
       // ============================================================
       // CRITICAL: DISCOUNT ALLOCATION TO ITEM-LEVEL PROFITS
@@ -1274,6 +1292,7 @@ export const salesService = {
 
       // Create sale items
       const items = await salesRepository.addSaleItems(client, itemsWithCosts);
+      profiler.mark('persist_sale_items');
 
       // Map to accumulate actual FEFO batch deduction costs per productId.
       // Used after all deductions to verify GL COGS matches actual batch costs (drift guard).
@@ -1616,6 +1635,7 @@ export const salesService = {
       sale.totalCost = exactInventoryIssueCost;
 
       const actualInventoryCost = exactInventoryIssueCost;
+      profiler.mark('fefo_stock');
 
       // GL POSTING: AFTER physical FEFO deduction so COGS credits 1300 at actual batch cost.
       try {
@@ -1651,6 +1671,7 @@ export const salesService = {
         });
         throw glError;
       }
+      profiler.mark('gl_posting');
 
       if (input.exchangeRefundId && saleDiscountDec.greaterThan(0)) {
         const creditApplied = Money.toNumber(saleDiscountDec);
@@ -2115,6 +2136,7 @@ export const salesService = {
           );
         }
       }
+      profiler.mark('payments_ar');
 
       // ============================================================
       // PRE-COMMIT: Deduct from cost layers (FIFO products)
@@ -2270,6 +2292,7 @@ export const salesService = {
           error: stateError instanceof Error ? stateError.message : String(stateError),
         });
       }
+      profiler.mark('cost_layers_summaries');
 
       // ============================================================
       // ATOMIC ORDER COMPLETION: Mark POS order COMPLETED and link
@@ -2307,8 +2330,10 @@ export const salesService = {
         await captureInventoryCoupling(client),
         `sale ${sale.saleNumber}`,
       );
+      profiler.mark('order_complete_coupling');
 
       await client.query('COMMIT');
+      profiler.mark('commit');
 
       // NOTE: Audit logging is now handled in the controller layer
       // where we have access to request context (IP, user agent, session ID)
@@ -2487,6 +2512,7 @@ export const salesService = {
         items,
         paymentLines: input.paymentLines || [],
         warnings: warnings.length > 0 ? warnings : undefined,
+        checkoutProfile: profiler.snapshot(),
       };
 
       // GL POSTING: Done above via glEntryService.recordSaleToGL()
@@ -2501,6 +2527,11 @@ export const salesService = {
       // ============================================================
 
       incrementMetric('salesCreatedTotal');
+      profiler.mark('post_commit');
+      // Refresh snapshot so post_commit is included when profile enabled
+      if (result.checkoutProfile) {
+        result.checkoutProfile = profiler.snapshot()!;
+      }
       return result;
     } catch (error) {
       await client.query('ROLLBACK');

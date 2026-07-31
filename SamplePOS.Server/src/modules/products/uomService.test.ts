@@ -254,14 +254,8 @@ describe('resolveCanonicalProductUom', () => {
 
     const result = await resolveCanonicalProductUom(productId, packUomId, mockDb as unknown as Pool);
     expect(result.conversionFactor).toBe(12);
-    expect(mockRepo.upsertItemUomConversion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        fromUomId: packUomId,
-        toUomId: baseUomId,
-        factor: 12,
-      }),
-      expect.anything(),
-    );
+    expect(mockRepo.upsertItemUomConversion).not.toHaveBeenCalled();
+    expect(mockRepo.deleteItemUomConversionBySource).not.toHaveBeenCalled();
   });
 
   it('maps legacy product_uoms row id to master uom id', async () => {
