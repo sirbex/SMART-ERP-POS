@@ -163,9 +163,10 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const guestBillSql = readRepo('shared/sql/579_guest_bill_printer.sql');
     expect(guestBillSql).toMatch(/guest_bill_printer_name/);
     expect(routes).toMatch(/\/guest-bill-printer/);
-    expect(print).toMatch(/allowBrowserFallback:\s*false/);
     expect(print).toMatch(/resolveStationPrinterName/);
-    expect(print).toMatch(/waiters do not select printers|Waiters never choose a printer/i);
+    expect(print).toMatch(/LOCAL_PRINT_BRIDGE_ORIGINS|localhost:1811/);
+    expect(print).toMatch(/postToPrintBridge[\s\S]*printHtmlDocument/);
+    expect(print).toMatch(/Waiters never choose a printer|waiters never choose/i);
   });
 
   it('Phase 2.3 takeaway/delivery guest details on checks', () => {

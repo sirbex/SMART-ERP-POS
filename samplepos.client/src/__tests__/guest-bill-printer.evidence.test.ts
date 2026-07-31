@@ -42,14 +42,12 @@ describe('Guest bill default printer SSOT', () => {
   it('printRestaurantBill passes printerName through printHtml (named bridge)', () => {
     const print = readClient('lib/printRestaurant.ts');
     expect(print).toMatch(/printerName\?:\s*string\s*\|\s*null/);
-    expect(print).toMatch(/printRestaurantBill[\s\S]*allowBrowserFallback/);
-    expect(print).toMatch(
-      /printKitchenTicket[\s\S]*allowBrowserFallback:\s*false/,
-    );
     expect(print).toContain('resolveStationPrinterName');
-    expect(print).toMatch(
-      /waiters do not select printers|Waiters never choose a printer/i,
-    );
+    expect(print).toContain('X-Printer-Name');
+    expect(print).toContain('LOCAL_PRINT_BRIDGE_ORIGINS');
+    // Named bridge → default bridge → browser so KOT still prints if agent is down
+    expect(print).toMatch(/postToPrintBridge[\s\S]*printHtmlDocument/);
+    expect(print).toMatch(/Waiters never choose a printer|waiters never choose/i);
   });
 
   it('Stations page maps guest bill printer; POS resolves it on Bill', () => {

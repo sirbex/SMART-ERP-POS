@@ -218,11 +218,12 @@ ok(
     /getGuestBillPrinter/.test(read('samplepos.client/src/utils/api.ts')),
 );
 ok(
-  'Print: KOT silent named bridge (no waiter printer dialog)',
-  /allowBrowserFallback:\s*false/.test(printRest) &&
-    /resolveStationPrinterName/.test(printRest) &&
+  'Print: KOT named bridge then browser fallback (ticket still prints)',
+  /resolveStationPrinterName/.test(printRest) &&
     /X-Printer-Name/.test(printRest) &&
-    /waiters do not select printers|Waiters never choose a printer/i.test(printRest),
+    /LOCAL_PRINT_BRIDGE_ORIGINS|localhost:1811/.test(printRest) &&
+    /postToPrintBridge[\s\S]*printHtmlDocument/.test(printRest) &&
+    /Waiters never choose a printer|waiters never choose/i.test(printRest),
 );
 ok(
   'Print: Stations maps guest bill + station printers',
