@@ -13,10 +13,17 @@ import {
   printerServiceStatusLabel,
   requestPrinterTestPrint,
   restartPrinterService,
+  startPrinterService,
   startPrinterServiceHeartbeat,
   subscribePrinterServiceHealth,
   type PrinterServiceHealth,
 } from '../../lib/printAgentHealth';
+import {
+  applyProductUpdate,
+  checkProductUpdate,
+  fetchServiceHelperHealth,
+  type UpdateCheckResult,
+} from '../../lib/serviceHelper';
 import { listLocalPrintBridgePrinters } from '../../lib/localPrintBridge';
 import { getCachedRestaurantStations } from '../../lib/restaurantOfflineCache';
 import { readCachedGuestBillPrinter } from '../../lib/guestBillPrinter';
@@ -32,6 +39,15 @@ function formatUptime(sec: number | null): string {
   return rm ? `${h}h ${rm}m` : `${h}h`;
 }
 
+function formatHeartbeatAgo(iso: string | null | undefined, checkedAt: number | null): string {
+  const t = iso ? Date.parse(iso) : checkedAt;
+  if (!t || !Number.isFinite(t)) return '—';
+  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (sec < 2) return 'just now';
+  if (sec < 60) return `${sec} seconds ago`;
+  return `${Math.floor(sec / 60)} min ago`;
+}
+
 export default function RestaurantPrinterDiagnosticsPage() {
   const { data: restaurantEnabled, isLoading: flagLoading } = useRestaurantEnabled();
   const canManage = useCanAccess(undefined, ['restaurant.manage']);
@@ -40,6 +56,8 @@ export default function RestaurantPrinterDiagnosticsPage() {
   const [logs, setLogs] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [updateInfo, setUpdateInfo] = useState<UpdateCheckResult | null>(null);
+  const [helperOnline, setHelperOnline] = useState(false);
 
   useEffect(() => {
     const stop = startPrinterServiceHeartbeat();
@@ -55,12 +73,16 @@ export default function RestaurantPrinterDiagnosticsPage() {
     setBusy('refresh');
     setMessage('');
     try {
-      const [h, list] = await Promise.all([
+      const [h, list, helper, update] = await Promise.all([
         fetchPrinterServiceHealth({ timeoutMs: 2000 }),
         listLocalPrintBridgePrinters({ timeoutMs: 2000 }),
+        fetchServiceHelperHealth(),
+        checkProductUpdate(),
       ]);
       setHealth(h);
       setPrinters(list.printers);
+      setHelperOnline(helper.status === 'online');
+      setUpdateInfo(update);
       if (h.status === 'online') {
         const log = await fetchPrinterServiceLogs(150);
         setLogs(log.text);
@@ -77,6 +99,28 @@ export default function RestaurantPrinterDiagnosticsPage() {
     setMessage(res.ok ? 'Restarting Printer Service…' : res.error || 'Restart failed');
     setBusy(null);
     setTimeout(() => void refreshAll(), 2000);
+  };
+
+  const onStart = async () => {
+    setBusy('start');
+    setMessage('');
+    const res = await startPrinterService();
+    setMessage(res.ok ? 'Starting Printer Service…' : res.error || 'Start failed');
+    setBusy(null);
+    setTimeout(() => void refreshAll(), 2500);
+  };
+
+  const onUpdate = async () => {
+    setBusy('update');
+    setMessage('');
+    const res = await applyProductUpdate();
+    setMessage(
+      res.ok
+        ? 'Update applied — Print Service restarted.'
+        : res.error || 'Update failed',
+    );
+    setBusy(null);
+    setTimeout(() => void refreshAll(), 3000);
   };
 
   const onTest = async (printerName?: string | null, label?: string) => {
@@ -187,10 +231,38 @@ export default function RestaurantPrinterDiagnosticsPage() {
               {printerServiceStatusLabel(status)}
             </span>
           </div>
-          <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+          <dl className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
             <div>
               <dt className="text-stone-500">Version</dt>
               <dd className="font-medium text-stone-900">{health?.version || '—'}</dd>
+            </div>
+            <div>
+              <dt className="text-stone-500">Status</dt>
+              <dd className="font-medium text-stone-900">{printerServiceStatusLabel(status)}</dd>
+            </div>
+            <div>
+              <dt className="text-stone-500">Windows Service</dt>
+              <dd className="font-medium text-stone-900">
+                {health?.windowsService === 'installed'
+                  ? status === 'online'
+                    ? 'Running'
+                    : 'Installed'
+                  : health?.windowsService === 'not_applicable'
+                    ? 'Dev / manual'
+                    : '—'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-stone-500">Auto Start</dt>
+              <dd className="font-medium text-stone-900">
+                {health?.autoStart === true ? 'Enabled' : health?.autoStart === false ? 'Off' : '—'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-stone-500">Last Heartbeat</dt>
+              <dd className="font-medium text-stone-900">
+                {formatHeartbeatAgo(health?.heartbeatAt, health?.checkedAt ?? null)}
+              </dd>
             </div>
             <div>
               <dt className="text-stone-500">Uptime</dt>
@@ -211,10 +283,75 @@ export default function RestaurantPrinterDiagnosticsPage() {
           </dl>
 
           {status === 'offline' ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-              Printer Service is not running on this PC. An administrator should install it once (Start
-              Menu → SMART Print Service, or run the Print Service installer). It then starts with
-              Windows — no terminal.
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950 space-y-2">
+              <p>
+                Printer Service is offline on this PC. Use <strong>Start Service</strong> (via Service
+                Helper), or open <strong>Start Menu → SMART-ERP-POS → SMART Print Service</strong>.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-md bg-amber-900 text-white text-sm disabled:opacity-50"
+                  disabled={!!busy}
+                  onClick={() => void onStart()}
+                >
+                  {busy === 'start' ? 'Starting…' : 'Start Service'}
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-md border border-amber-800 text-sm disabled:opacity-50"
+                  disabled={!!busy}
+                  onClick={() => void onRestart()}
+                >
+                  Restart Service
+                </button>
+                <a
+                  className="px-3 py-1.5 rounded-md border border-amber-800 text-sm"
+                  href="http://127.0.0.1:1811/setup"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open Diagnostics / Setup
+                </a>
+              </div>
+              {!helperOnline ? (
+                <p className="text-xs">
+                  Service Helper is also offline — re-run <strong>SMART-ERP-POS-Setup.exe</strong>.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {updateInfo?.updateAvailable && updateInfo.latest ? (
+            <div className="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm text-indigo-950 space-y-2">
+              <p className="font-medium">Update Available</p>
+              <p>
+                {updateInfo.current.productVersion} → {updateInfo.latest.productVersion}
+                {updateInfo.latest.notes ? ` — ${updateInfo.latest.notes}` : ''}
+              </p>
+              {updateInfo.channel?.channel || updateInfo.source ? (
+                <p className="text-xs opacity-80">
+                  Channel: {updateInfo.channel?.channel || '—'}
+                  {updateInfo.source ? ` · ${updateInfo.source}` : ''}
+                </p>
+              ) : null}
+              <button
+                type="button"
+                className="px-3 py-1.5 rounded-md bg-indigo-900 text-white text-sm disabled:opacity-50"
+                disabled={!!busy || !helperOnline}
+                onClick={() => void onUpdate()}
+              >
+                {busy === 'update' ? 'Updating…' : 'Update'}
+              </button>
+            </div>
+          ) : null}
+
+          {status === 'online' && health?.setupComplete === false ? (
+            <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+              Printer Setup Wizard has not finished on this PC.{' '}
+              <a className="underline font-medium" href="http://127.0.0.1:1811/setup" target="_blank" rel="noreferrer">
+                Open wizard
+              </a>
             </div>
           ) : null}
 
@@ -238,6 +375,40 @@ export default function RestaurantPrinterDiagnosticsPage() {
             <button
               type="button"
               className="px-3 py-2 rounded-md border border-stone-300 text-sm disabled:opacity-50"
+              disabled={!!busy || status === 'offline' || !health?.printerRoles?.kitchen}
+              onClick={() => void onTest(health?.printerRoles?.kitchen, 'test-kitchen')}
+            >
+              Test Kitchen
+            </button>
+            <button
+              type="button"
+              className="px-3 py-2 rounded-md border border-stone-300 text-sm disabled:opacity-50"
+              disabled={!!busy || status === 'offline' || !health?.printerRoles?.bar}
+              onClick={() => void onTest(health?.printerRoles?.bar, 'test-bar')}
+            >
+              Test Bar
+            </button>
+            <button
+              type="button"
+              className="px-3 py-2 rounded-md border border-stone-300 text-sm disabled:opacity-50"
+              disabled={!!busy || status === 'offline'}
+              onClick={() =>
+                void onTest(health?.printerRoles?.receipt || null, 'test-receipt')
+              }
+            >
+              Test Receipt
+            </button>
+            <button
+              type="button"
+              className="px-3 py-2 rounded-md border border-stone-300 text-sm disabled:opacity-50"
+              disabled={!!busy}
+              onClick={() => void onStart()}
+            >
+              {busy === 'start' ? 'Starting…' : 'Start Service'}
+            </button>
+            <button
+              type="button"
+              className="px-3 py-2 rounded-md border border-stone-300 text-sm disabled:opacity-50"
               disabled={!!busy || status === 'offline'}
               onClick={() => void onRestart()}
             >
@@ -252,6 +423,11 @@ export default function RestaurantPrinterDiagnosticsPage() {
               Test Print
             </button>
           </div>
+          <p className="text-xs text-stone-500">
+            Service Helper: {helperOnline ? 'Online (:1812)' : 'Offline'}. Updates: drop a package +{' '}
+            <code className="text-[11px]">updates/manifest.json</code> or set{' '}
+            <code className="text-[11px]">SMART_UPDATE_MANIFEST_URL</code>. View logs below.
+          </p>
         </section>
 
         <section className="rounded-lg border border-stone-200 bg-white p-4 space-y-3">

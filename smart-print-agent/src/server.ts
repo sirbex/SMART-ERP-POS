@@ -1,5 +1,7 @@
 import cors from 'cors';
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { AGENT_NAME, AGENT_VERSION } from './config.js';
 import { openCashDrawer } from './cashdrawer.js';
 import { printTestPage } from './printHtml.js';
@@ -18,6 +20,16 @@ import {
   getQueueSnapshot,
   isPrinting,
 } from './printQueue.js';
+import {
+  isSetupComplete,
+  markSetupComplete,
+  readInstallMeta,
+  readPrinterRoles,
+  writePrinterRoles,
+} from './printerRoles.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = path.resolve(__dirname, '..', 'public');
 
 function asyncRoute(
   fn: (req: Request, res: Response, next: NextFunction) => Promise<void>,
@@ -69,6 +81,10 @@ export function createAgentApp(): Express {
   // Fast /health — never block on Windows Get-Printer (that made Stations look Offline).
   app.get('/health', (_req, res) => {
     refreshPrinterCountBackground();
+    const meta = readInstallMeta();
+    const channel =
+      process.env.SMART_PRINT_CHANNEL ||
+      (typeof meta?.channel === 'string' ? meta.channel : 'dev');
     res.json({
       status: 'online',
       version: AGENT_VERSION,
@@ -79,7 +95,63 @@ export function createAgentApp(): Express {
       printing: isPrinting(),
       queue: getQueueSnapshot(),
       formats: ['html', 'escpos'],
+      channel,
+      bundledRuntime: channel === 'commercial' || meta?.bundledNode === true,
+      autoStart: channel === 'commercial',
+      windowsService: channel === 'commercial' ? 'installed' : 'not_applicable',
+      setupComplete: isSetupComplete(),
+      printerRoles: readPrinterRoles(),
+      heartbeatAt: new Date().toISOString(),
     });
+  });
+
+  app.use('/setup', express.static(path.join(PUBLIC_DIR, 'setup'), { index: 'index.html' }));
+
+  app.get('/setup/roles', (_req, res) => {
+    res.json({ success: true, data: readPrinterRoles() });
+  });
+
+  app.post(
+    '/setup/roles',
+    express.json({ limit: '32kb' }),
+    asyncRoute(async (req, res) => {
+      const data = writePrinterRoles({
+        receipt: typeof req.body?.receipt === 'string' ? req.body.receipt : null,
+        kitchen: typeof req.body?.kitchen === 'string' ? req.body.kitchen : null,
+        bar: typeof req.body?.bar === 'string' ? req.body.bar : null,
+      });
+      appendAgentLog(
+        `[setup] roles receipt=${data.receipt || '-'} kitchen=${data.kitchen || '-'} bar=${data.bar || '-'}`,
+      );
+      res.json({ success: true, data });
+    }),
+  );
+
+  app.post(
+    '/setup/test',
+    express.json({ limit: '32kb' }),
+    asyncRoute(async (req, res) => {
+      const role = String(req.body?.role || '').toLowerCase();
+      const roles = readPrinterRoles();
+      const map: Record<string, string | null> = {
+        receipt: roles.receipt,
+        kitchen: roles.kitchen,
+        bar: roles.bar,
+      };
+      const printer = map[role] || null;
+      if (!printer) {
+        res.status(400).json({ success: false, error: `No ${role || 'role'} printer selected` });
+        return;
+      }
+      await printTestPage(printer);
+      res.json({ success: true, role, printer });
+    }),
+  );
+
+  app.post('/setup/complete', (_req, res) => {
+    markSetupComplete();
+    appendAgentLog('[setup] wizard complete');
+    res.json({ success: true, setupComplete: true });
   });
 
   const listPrintersHandler = asyncRoute(async (_req, res) => {

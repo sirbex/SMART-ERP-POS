@@ -42,6 +42,12 @@ describe('SMART Print Agent (platform component)', () => {
     const rootPkg = readRepo('package.json');
     expect(rootPkg).toMatch(/"print-agent"/);
     expect(rootPkg).toMatch(/print-agent:setup/);
+    expect(rootPkg).toMatch(/print-agent:bundle/);
+    expect(existsSync(resolve(repoRoot, 'installer/SMART-ERP-POS-PrintService.iss'))).toBe(true);
+    expect(existsSync(resolve(repoRoot, 'installer/print-service/build-bundle.ps1'))).toBe(true);
+    expect(existsSync(resolve(repoRoot, 'smart-print-agent/public/setup/index.html'))).toBe(true);
+    expect(readRepo('smart-print-agent/src/server.ts')).toMatch(/\/setup/);
+    expect(readRepo('smart-print-agent/src/server.ts')).toMatch(/windowsService/);
     const stations = readRepo('samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx');
     expect(stations).toMatch(/Printer Service/);
     expect(stations).toMatch(/printAgentHealth|subscribePrinterServiceHealth|fetchPrinterServiceHealth/);

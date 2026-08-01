@@ -28,6 +28,9 @@ npm-global/
 node_modules
 dist
 dist-ssr
+installer/dist/
+installer/smart-erp-shell/dist/
+installer/service-helper/dist/
 *.local
 
 # Editor directories and files

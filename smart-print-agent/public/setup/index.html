@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SMART ERP — Printer Setup</title>
+    <style>
+      :root {
+        --bg: #f6f3ee;
+        --ink: #1c1917;
+        --muted: #78716c;
+        --card: #fff;
+        --line: #e7e5e4;
+        --accent: #0f766e;
+        --accent-ink: #fff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        background: radial-gradient(1200px 600px at 10% -10%, #d9f3ef, transparent),
+          linear-gradient(180deg, #fafaf9, var(--bg));
+        color: var(--ink);
+        min-height: 100vh;
+      }
+      main {
+        max-width: 520px;
+        margin: 0 auto;
+        padding: 48px 20px 64px;
+      }
+      h1 {
+        font-size: 1.65rem;
+        margin: 0 0 6px;
+        letter-spacing: -0.02em;
+      }
+      .sub {
+        color: var(--muted);
+        margin: 0 0 28px;
+        font-size: 0.95rem;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 22px;
+        box-shadow: 0 10px 30px rgba(28, 25, 23, 0.06);
+      }
+      .step {
+        display: none;
+      }
+      .step.active {
+        display: block;
+      }
+      label {
+        display: block;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 8px;
+      }
+      select {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        font-size: 1rem;
+        background: #fff;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 22px;
+        flex-wrap: wrap;
+      }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 12px 18px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+      button.ghost {
+        background: #f5f5f4;
+        color: var(--ink);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .progress {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 18px;
+      }
+      .progress span {
+        height: 4px;
+        flex: 1;
+        border-radius: 99px;
+        background: #e7e5e4;
+      }
+      .progress span.on {
+        background: var(--accent);
+      }
+      .msg {
+        margin-top: 14px;
+        font-size: 0.9rem;
+        color: var(--muted);
+        min-height: 1.2em;
+      }
+      .msg.err {
+        color: #b91c1c;
+      }
+      .msg.ok {
+        color: #047857;
+      }
+      .done-check {
+        font-size: 2rem;
+        margin-bottom: 8px;
+      }
+      .meta {
+        margin-top: 18px;
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+      .test-grid {
+        display: grid;
+        gap: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Welcome to SMART ERP</h1>
+      <p class="sub">Set up printers on this PC. No terminal required.</p>
+
+      <div class="card">
+        <div class="progress" id="progress"></div>
+
+        <section class="step active" data-step="0">
+          <label for="receipt">Step 1 — Receipt printer</label>
+          <select id="receipt"></select>
+          <div class="actions">
+            <button type="button" class="primary" data-next>Next</button>
+          </div>
+        </section>
+
+        <section class="step" data-step="1">
+          <label for="kitchen">Step 2 — Kitchen printer</label>
+          <select id="kitchen"></select>
+          <div class="actions">
+            <button type="button" class="ghost" data-back>Back</button>
+            <button type="button" class="primary" data-next>Next</button>
+          </div>
+        </section>
+
+        <section class="step" data-step="2">
+          <label for="bar">Step 3 — Bar printer</label>
+          <select id="bar"></select>
+          <div class="actions">
+            <button type="button" class="ghost" data-back>Back</button>
+            <button type="button" class="primary" data-next>Next</button>
+          </div>
+        </section>
+
+        <section class="step" data-step="3">
+          <label>Step 4 — Print test</label>
+          <div class="test-grid">
+            <button type="button" class="ghost" data-test="kitchen">Test Kitchen</button>
+            <button type="button" class="ghost" data-test="bar">Test Bar</button>
+            <button type="button" class="ghost" data-test="receipt">Test Receipt</button>
+          </div>
+          <div class="actions">
+            <button type="button" class="ghost" data-back>Back</button>
+            <button type="button" class="primary" id="finish">Finish</button>
+          </div>
+        </section>
+
+        <section class="step" data-step="4">
+          <div class="done-check">✓</div>
+          <h2 style="margin: 0 0 8px; font-size: 1.25rem">Installation complete</h2>
+          <p class="sub" style="margin-bottom: 8px">
+            Print Service is running. Open SMART ERP → Restaurant → Printers to confirm Online.
+          </p>
+          <div class="meta" id="doneMeta"></div>
+        </section>
+
+        <p class="msg" id="msg"></p>
+      </div>
+    </main>
+    <script>
+      const steps = [...document.querySelectorAll('.step')];
+      const progress = document.getElementById('progress');
+      const msg = document.getElementById('msg');
+      let step = 0;
+      let printers = [];
+
+      function paintProgress() {
+        progress.innerHTML = '';
+        for (let i = 0; i < 4; i++) {
+          const s = document.createElement('span');
+          if (i <= Math.min(step, 3)) s.classList.add('on');
+          progress.appendChild(s);
+        }
+      }
+
+      function showStep(n) {
+        step = n;
+        steps.forEach((el) => el.classList.toggle('active', Number(el.dataset.step) === n));
+        paintProgress();
+        msg.textContent = '';
+        msg.className = 'msg';
+      }
+
+      function fillSelect(id, optionalNone) {
+        const el = document.getElementById(id);
+        el.innerHTML = '';
+        if (optionalNone) {
+          const o = document.createElement('option');
+          o.value = '';
+          o.textContent = '(None / skip)';
+          el.appendChild(o);
+        }
+        for (const name of printers) {
+          const o = document.createElement('option');
+          o.value = name;
+          o.textContent = name;
+          el.appendChild(o);
+        }
+      }
+
+      async function loadPrinters() {
+        const res = await fetch('/printers');
+        if (!res.ok) throw new Error('Could not list printers — is Print Service running?');
+        const data = await res.json();
+        printers = data.printers || [];
+        if (!printers.length) throw new Error('No Windows printers found on this PC.');
+        fillSelect('receipt', false);
+        fillSelect('kitchen', true);
+        fillSelect('bar', true);
+      }
+
+      async function saveRoles() {
+        const body = {
+          receipt: document.getElementById('receipt').value || null,
+          kitchen: document.getElementById('kitchen').value || null,
+          bar: document.getElementById('bar').value || null,
+        };
+        const res = await fetch('/setup/roles', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error('Could not save printer selection');
+      }
+
+      async function testRole(role) {
+        msg.className = 'msg';
+        msg.textContent = 'Sending test…';
+        const res = await fetch('/setup/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          msg.className = 'msg err';
+          msg.textContent = data.error || 'Test failed';
+          return;
+        }
+        msg.className = 'msg ok';
+        msg.textContent = 'Test sent to ' + (data.printer || role);
+      }
+
+      document.querySelectorAll('[data-next]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          try {
+            await saveRoles();
+            showStep(step + 1);
+          } catch (e) {
+            msg.className = 'msg err';
+            msg.textContent = e.message || String(e);
+          }
+        });
+      });
+      document.querySelectorAll('[data-back]').forEach((btn) => {
+        btn.addEventListener('click', () => showStep(Math.max(0, step - 1)));
+      });
+      document.querySelectorAll('[data-test]').forEach((btn) => {
+        btn.addEventListener('click', () => testRole(btn.getAttribute('data-test')));
+      });
+      document.getElementById('finish').addEventListener('click', async () => {
+        try {
+          await saveRoles();
+          const res = await fetch('/setup/complete', { method: 'POST' });
+          const health = await fetch('/health').then((r) => r.json());
+          if (!res.ok) throw new Error('Could not finish setup');
+          document.getElementById('doneMeta').textContent =
+            'Print Service Running · Version ' + (health.version || '') + ' · Status Online';
+          showStep(4);
+        } catch (e) {
+          msg.className = 'msg err';
+          msg.textContent = e.message || String(e);
+        }
+      });
+
+      paintProgress();
+      loadPrinters().catch((e) => {
+        msg.className = 'msg err';
+        msg.textContent = e.message || String(e);
+      });
+    </script>
+  </body>
+</html>

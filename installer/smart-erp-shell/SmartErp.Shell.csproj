@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>SMART ERP</AssemblyName>
+    <RootNamespace>SmartErp.Shell</RootNamespace>
+    <ApplicationIcon />
+    <Version>2.0.0</Version>
+    <Authors>SMART-ERP-POS</Authors>
+    <Description>SMART ERP desktop launcher — opens configured URL in an app window</Description>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,6 @@
+{
+  "manifestUrl": "",
+  "channel": "stable",
+  "checkIntervalMinutes": 60,
+  "notes": "Set manifestUrl to your HTTPS update manifest (CDN). Example: https://downloads.example.com/smart-erp/stable/manifest.json"
+}

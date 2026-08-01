@@ -178,7 +178,7 @@ export async function listLocalPrintBridgePrinters(
     source: healthOnline ? 'bridge' : 'none',
     error: healthOnline
       ? 'Printer Service online — printer list still loading. Type a Windows name if needed.'
-      : 'Printer Service offline — install SMART Print Service on this PC (starts with Windows).',
+      : 'Printer Service offline — install SMART-ERP-POS-PrintService-Setup.exe on this PC (starts with Windows).',
   };
 }
 

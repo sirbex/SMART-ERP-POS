@@ -1,38 +1,19 @@
 # SMART Print Service (Print Agent)
 
-Official local printing component for SMART-ERP-POS. Cashiers never open a terminal.
+Official local printing for SMART-ERP-POS.
 
-## Install once (this POS PC)
+## Managers
 
-From the repo root (admin / IT):
+Install **`SMART-ERP-POS-Setup.exe`** (full product) or **`SMART-ERP-POS-PrintService-Setup.exe`** (print only).
 
-```powershell
-npm run print-agent:setup
-```
+See `installer/README.md` — no Node.js, no PowerShell.
 
-Or:
+## Engineers
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File smart-print-agent/scripts/install-print-service.ps1
+npm run print-agent          # dev
+npm run print-agent:bundle   # print-only commercial bundle
+npm run product:bundle       # Phase 2 product bundle
 ```
 
-This registers:
-
-- Start Menu → **SMART Print Service**
-- Login auto-start
-- Scheduled Task with restart-on-failure
-- Watchdog (crash → restart)
-
-Then cashiers only see **Printer Service Online** on Restaurant POS.
-
-## Manager tools
-
-Restaurant → **Printers** (diagnostics): health, Test Print, Restart Service, logs.
-
-## Dev only
-
-```powershell
-npm run print-agent
-```
-
-Listens on `http://127.0.0.1:1811` (local only; works offline).
+Agent: `http://127.0.0.1:1811` · Setup wizard: `/setup` · Service Helper: `:1812`

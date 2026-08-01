@@ -1,0 +1,22 @@
+<service>
+  <id>SMART-Service-Helper</id>
+  <name>SMART Service Helper</name>
+  <description>SMART-ERP-POS local helper — start/stop Print Service and apply updates (127.0.0.1:1812).</description>
+  <executable>%BASE%\runtime\node.exe</executable>
+  <arguments>"%BASE%\app\dist\index.js"</arguments>
+  <workingdirectory>%BASE%\app</workingdirectory>
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>1024</sizeThreshold>
+    <keepFiles>6</keepFiles>
+  </log>
+  <env name="SMART_HELPER_HOST" value="127.0.0.1"/>
+  <env name="SMART_HELPER_PORT" value="1812"/>
+  <env name="SMART_PRODUCT_ROOT" value="%BASE%\.."/>
+  <env name="SMART_PRINT_SERVICE_DIR" value="%BASE%\..\Print Service"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <stoptimeout>15 sec</stoptimeout>
+</service>

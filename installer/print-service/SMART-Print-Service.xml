@@ -1,0 +1,24 @@
+<!-- WinSW 2.x service definition. Exe must be named "SMART Print Service.exe" beside this file. -->
+<service>
+  <id>SMART-Print-Service</id>
+  <name>SMART Print Service</name>
+  <description>SMART-ERP-POS local Printer Service (127.0.0.1:1811). Silent kitchen/bill printing.</description>
+  <executable>%BASE%\runtime\node.exe</executable>
+  <arguments>"%BASE%\app\dist\index.js"</arguments>
+  <workingdirectory>%BASE%\app</workingdirectory>
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>2048</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+  <env name="SMART_PRINT_CHANNEL" value="commercial"/>
+  <env name="SMART_PRINT_HOST" value="127.0.0.1"/>
+  <env name="SMART_PRINT_PORT" value="1811"/>
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <stoptimeout>15 sec</stoptimeout>
+</service>

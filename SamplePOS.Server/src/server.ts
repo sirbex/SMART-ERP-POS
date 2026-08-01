@@ -11,6 +11,7 @@ import { testConnection } from './db/pool.js';
 import logger from './utils/logger.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { businessRuleErrorHandler } from './middleware/businessRules.js';
+import { mountFrontendSpa } from './middleware/serveFrontend.js';
 import { globalRateLimit, authRateLimit } from './middleware/security.js';
 import { productRoutes } from './modules/products/productRoutes.js';
 import { customerRoutes } from './modules/customers/customerRoutes.js';
@@ -441,6 +442,9 @@ app.use('/api/assets', requireFeature('accounting'), assetRoutes);
 app.use('/api/je-approval', requireFeature('accounting'), jeApprovalRoutes);
 app.use('/api/payment-program', requireFeature('accounting'), paymentProgramRoutes);
 app.use('/api/currency', requireFeature('accounting'), currencyRoutes);
+
+// On-prem / commercial: serve Vite build from the same origin as the API
+mountFrontendSpa(app);
 
 // ============================================================
 // ERROR HANDLERS

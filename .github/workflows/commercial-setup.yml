@@ -1,0 +1,80 @@
+name: Commercial Setup.exe
+
+# Phase 3 — build SMART-ERP-POS product bundle + Inno Setup artifact on Windows.
+# Optional code signing via secrets: CODESIGN_PFX_BASE64, CODESIGN_PASSWORD
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'setup-v*'
+    paths:
+      - 'installer/**'
+      - 'smart-print-agent/**'
+      - 'samplepos.client/**'
+      - '.github/workflows/commercial-setup.yml'
+      - 'package.json'
+
+jobs:
+  build-setup:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            smart-print-agent/package-lock.json
+            samplepos.client/package-lock.json
+            installer/service-helper/package-lock.json
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Build product bundle
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer/build-product.ps1
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile Setup.exe
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw 'ISCC.exe not found' }
+          & $iscc installer\SMART-ERP-POS-Setup.iss
+          Get-ChildItem installer\dist\SMART-ERP-POS-Setup.exe | Format-List Name, Length, LastWriteTime
+
+      - name: Optional Authenticode sign
+        if: ${{ secrets.CODESIGN_PFX_BASE64 != '' }}
+        shell: pwsh
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          CODESIGN_PASSWORD: ${{ secrets.CODESIGN_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'smart-codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+          $env:SMART_CODESIGN_PFX = $pfx
+          $env:SMART_CODESIGN_PASSWORD = $env:CODESIGN_PASSWORD
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer/scripts/codesign.ps1 -Path installer\dist\SMART-ERP-POS-Setup.exe
+          Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+
+      - name: Upload Setup.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: SMART-ERP-POS-Setup
+          path: installer/dist/SMART-ERP-POS-Setup.exe
+          if-no-files-found: error
+          retention-days: 30

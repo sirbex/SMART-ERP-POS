@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SMART ERP — Connection Setup</title>
+    <style>
+      :root {
+        --bg: #f4f7fb;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --card: #fff;
+        --line: #e2e8f0;
+        --accent: #1d4ed8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        color: var(--ink);
+        min-height: 100vh;
+        background:
+          radial-gradient(900px 480px at 90% -10%, #dbeafe, transparent),
+          linear-gradient(180deg, #f8fafc, var(--bg));
+      }
+      main { max-width: 520px; margin: 0 auto; padding: 48px 20px; }
+      h1 { margin: 0 0 6px; font-size: 1.6rem; letter-spacing: -0.02em; }
+      .sub { color: var(--muted); margin: 0 0 24px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 22px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+      }
+      label {
+        display: block;
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 14px 0 8px;
+      }
+      .choices { display: grid; gap: 10px; }
+      .choice {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px;
+        cursor: pointer;
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+      }
+      .choice:has(input:checked) {
+        border-color: var(--accent);
+        background: #eff6ff;
+      }
+      input[type='text'], input[type='url'] {
+        width: 100%;
+        padding: 12px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        font-size: 1rem;
+      }
+      .actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 12px 18px;
+        font-weight: 650;
+        cursor: pointer;
+      }
+      button.primary { background: var(--accent); color: #fff; }
+      button.ghost { background: #f1f5f9; }
+      .msg { margin-top: 12px; min-height: 1.2em; font-size: 0.9rem; color: var(--muted); }
+      .msg.ok { color: #047857; }
+      .msg.err { color: #b91c1c; }
+      #customWrap { display: none; }
+      #customWrap.show { display: block; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Welcome to SMART ERP</h1>
+      <p class="sub">Choose where this PC opens SMART ERP. You can change this later.</p>
+      <div class="card">
+        <label>Connection</label>
+        <div class="choices">
+          <label class="choice">
+            <input type="radio" name="mode" value="local" checked />
+            <span>
+              <strong>This PC (on-prem)</strong><br />
+              <span style="color:var(--muted);font-size:0.9rem">http://127.0.0.1:3001</span>
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="mode" value="cloud" />
+            <span>
+              <strong>Cloud / hosted</strong><br />
+              <span style="color:var(--muted);font-size:0.9rem">Your company SMART ERP URL</span>
+            </span>
+          </label>
+        </div>
+        <div id="customWrap">
+          <label for="customUrl">SMART ERP URL</label>
+          <input id="customUrl" type="url" placeholder="https://your-company.example.com" />
+        </div>
+        <div class="actions">
+          <button type="button" class="ghost" id="skip">Skip for now</button>
+          <button type="button" class="primary" id="save">Save &amp; Open</button>
+        </div>
+        <p class="msg" id="msg"></p>
+      </div>
+    </main>
+    <script>
+      const customWrap = document.getElementById('customWrap');
+      const customUrl = document.getElementById('customUrl');
+      const msg = document.getElementById('msg');
+      function mode() {
+        return document.querySelector('input[name="mode"]:checked').value;
+      }
+      function sync() {
+        customWrap.classList.toggle('show', mode() === 'cloud');
+      }
+      document.querySelectorAll('input[name="mode"]').forEach((el) => el.addEventListener('change', sync));
+      sync();
+
+      async function save(openAfter) {
+        msg.className = 'msg';
+        msg.textContent = 'Saving…';
+        let url = 'http://127.0.0.1:3001';
+        if (mode() === 'cloud') {
+          url = (customUrl.value || '').trim();
+          if (!/^https?:\/\//i.test(url)) {
+            msg.className = 'msg err';
+            msg.textContent = 'Enter a full URL starting with https:// or http://';
+            return;
+          }
+        }
+        const res = await fetch('/erp-setup/url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          msg.className = 'msg err';
+          msg.textContent = data.error || 'Could not save';
+          return;
+        }
+        msg.className = 'msg ok';
+        msg.textContent = 'Saved.';
+        if (openAfter) window.location.href = url;
+      }
+      document.getElementById('save').addEventListener('click', () => save(true));
+      document.getElementById('skip').addEventListener('click', async () => {
+        await save(false);
+        window.location.href = 'http://127.0.0.1:3001';
+      });
+      fetch('/erp-setup/url')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.data?.url) {
+            const u = data.data.url;
+            if (u.includes('127.0.0.1') || u.includes('localhost')) {
+              document.querySelector('input[value="local"]').checked = true;
+            } else {
+              document.querySelector('input[value="cloud"]').checked = true;
+              customUrl.value = u;
+            }
+            sync();
+          }
+        })
+        .catch(() => {});
+    </script>
+  </body>
+</html>
