@@ -14,6 +14,11 @@
   <env name="SMART_PRINT_CHANNEL" value="commercial"/>
   <env name="SMART_PRINT_HOST" value="127.0.0.1"/>
   <env name="SMART_PRINT_PORT" value="1811"/>
+  <!-- LocalSystem-writable paths (avoid C:\Windows\TEMP + Program Files locks). -->
+  <env name="TMP" value="C:\ProgramData\SMART-ERP-POS\print-service\temp"/>
+  <env name="TEMP" value="C:\ProgramData\SMART-ERP-POS\print-service\temp"/>
+  <env name="SMART_PRINT_TEMP" value="C:\ProgramData\SMART-ERP-POS\print-service\temp"/>
+  <env name="SMART_PRINT_BROWSER_PROFILE" value="C:\ProgramData\SMART-ERP-POS\print-service\browser-profile"/>
   <onfailure action="restart" delay="5 sec"/>
   <onfailure action="restart" delay="10 sec"/>
   <onfailure action="restart" delay="30 sec"/>
