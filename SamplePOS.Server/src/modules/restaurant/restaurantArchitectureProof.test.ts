@@ -633,6 +633,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(service).toMatch(/async voidCheckItems\(/);
     expect(service).toMatch(/ticketKind: 'VOID'/);
     expect(service).toMatch(/reduceOrderItemQuantity/);
+    expect(service).toMatch(/resolveStationForVoidItem/);
     expect(service).toMatch(/cancelCheck[\s\S]*ticketKind: 'VOID'/s);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');

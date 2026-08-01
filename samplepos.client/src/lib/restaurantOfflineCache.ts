@@ -215,25 +215,35 @@ export function isRestaurantOrderBillRequestedOffline(
  */
 type ApiListResult<T> = { data: { data?: T[] | unknown } };
 
+type SilentOpts = { silentErrorToast?: boolean };
+
 export async function refreshRestaurantOfflineCache(api: {
-  listTables: () => Promise<ApiListResult<CachedRestaurantTable>>;
-  listStations: () => Promise<ApiListResult<CachedStation>>;
-  menuProducts: () => Promise<ApiListResult<CachedMenuProduct>>;
-  menuCategories: () => Promise<ApiListResult<CachedCategory>>;
-  listWaiters: () => Promise<ApiListResult<CachedWaiter>>;
+  listTables: (params?: { includeInactive?: boolean }, config?: SilentOpts) => Promise<ApiListResult<CachedRestaurantTable>>;
+  listStations: (params?: { includeInactive?: boolean }, config?: SilentOpts) => Promise<ApiListResult<CachedStation>>;
+  menuProducts: (params?: { categoryId?: string }, config?: SilentOpts) => Promise<ApiListResult<CachedMenuProduct>>;
+  menuCategories: (config?: SilentOpts) => Promise<ApiListResult<CachedCategory>>;
+  listWaiters: (config?: SilentOpts) => Promise<ApiListResult<CachedWaiter>>;
 }): Promise<void> {
-  const [tables, stations, products, categories, waiters] = await Promise.all([
-    api.listTables(),
-    api.listStations(),
-    api.menuProducts(),
-    api.menuCategories(),
-    api.listWaiters(),
+  // Per-call isolation — one failing endpoint must not blank the whole FOH warm
+  // or spam global "Server error" toasts on partial failures.
+  const quiet = { silentErrorToast: true } as const;
+  const settled = await Promise.allSettled([
+    api.listTables(undefined, quiet),
+    api.listStations(undefined, quiet),
+    api.menuProducts(undefined, quiet),
+    api.menuCategories(quiet),
+    api.listWaiters(quiet),
   ]);
-  cacheRestaurantTables((tables.data.data as CachedRestaurantTable[] | undefined) || []);
-  cacheRestaurantStations((stations.data.data as CachedStation[] | undefined) || []);
-  cacheRestaurantMenu((products.data.data as CachedMenuProduct[] | undefined) || []);
-  cacheRestaurantCategories((categories.data.data as CachedCategory[] | undefined) || []);
-  cacheRestaurantWaiters((waiters.data.data as CachedWaiter[] | undefined) || []);
+  const val = <T,>(i: number): T[] => {
+    const r = settled[i];
+    if (r.status !== 'fulfilled') return [];
+    return ((r.value.data.data as T[] | undefined) || []) as T[];
+  };
+  cacheRestaurantTables(val<CachedRestaurantTable>(0));
+  cacheRestaurantStations(val<CachedStation>(1));
+  cacheRestaurantMenu(val<CachedMenuProduct>(2));
+  cacheRestaurantCategories(val<CachedCategory>(3));
+  cacheRestaurantWaiters(val<CachedWaiter>(4));
 
   // Multistore: keep offline stock mirror on the shop/SELLING catalog (same as retail POS).
   try {

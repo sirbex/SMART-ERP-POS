@@ -26,7 +26,7 @@ import {
 } from '../../lib/restaurantVoidQuantity';
 import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
 import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
-import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
+import { printKitchenTicket, printRestaurantBill, resolveStationPrinterName } from '../../lib/printRestaurant';
 import { kotPrintPartialSuccessMessage } from '../../lib/restaurantPrintPolicy';
 import {
   dispatchPrintJobs,
@@ -51,6 +51,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useOfflineContext } from '../../contexts/OfflineContext';
 import { useCanAccess } from '../../authorization/useAuthorization';
 import {
+  decideRestaurantFohAutoLogout,
   performRestaurantFohAutoLogout,
 } from '../../utils/restaurantFohAutoLogout';
 import { isRestaurantWaiterProfile } from '../../utils/restaurantWaiterLockdown';
@@ -829,18 +830,26 @@ export default function RestaurantPosPage() {
     });
   }, [restaurantEnabled, isOnline]);
 
-  // Enterprise: when the terminal comes online, retry undelivered print jobs
-  // (offline queue + server PENDING/ERROR) without waiter action.
+  // Retry undelivered jobs once per online session (not on every branding reload —
+  // that re-fired flush and could re-paper after FOH re-login).
+  const printFlushOnceRef = useRef(false);
+  const companyBrandingRef = useRef(companyBranding);
+  companyBrandingRef.current = companyBranding;
   useEffect(() => {
-    if (!restaurantEnabled || !isOnline) return;
-    void flushPendingPrintJobs({ branding: companyBranding, online: true }).then((r) => {
+    if (!isOnline) {
+      printFlushOnceRef.current = false;
+      return;
+    }
+    if (!restaurantEnabled || printFlushOnceRef.current) return;
+    printFlushOnceRef.current = true;
+    void flushPendingPrintJobs({ branding: companyBrandingRef.current, online: true }).then((r) => {
       if (r.delivered > 0) {
         toast.success(`Printed ${r.delivered} queued ticket(s)`, {
           id: 'print-jobs-flush',
         });
       }
     });
-  }, [restaurantEnabled, isOnline, companyBranding]);
+  }, [restaurantEnabled, isOnline]);
 
   // Same-origin tabs (POS + KDS): refresh floor when journal changes elsewhere.
   useEffect(() => {
@@ -982,15 +991,50 @@ export default function RestaurantPosPage() {
       }
 
       const serverOrderId = toServerRestaurantOrderId(activeOrderId);
-      const res = await api.restaurant.getTableCheck(
-        selectedTableId,
-        serverOrderId ? { orderId: serverOrderId } : undefined,
-      );
-      const data = res.data.data as CheckUiPayload;
-      return attachSiblingTabs(
-        checkUiAfterServerSeed(selectedTableId, data),
-        tableTicketsRef.current.tabs,
-      );
+      try {
+        const res = await api.restaurant.getTableCheck(
+          selectedTableId,
+          serverOrderId ? { orderId: serverOrderId } : undefined,
+          // Expected peer-table deny — don't toast as generic "Server error".
+          { silentForbidden: true },
+        );
+        const data = res.data.data as CheckUiPayload;
+        return attachSiblingTabs(
+          checkUiAfterServerSeed(selectedTableId, data),
+          tableTicketsRef.current.tabs,
+        );
+      } catch (err: unknown) {
+        const structured = getStructuredError(err);
+        const msg =
+          structured.message ||
+          (err instanceof Error ? err.message : '') ||
+          '';
+        const status =
+          structured.status ??
+          (err as { response?: { status?: number } })?.response?.status;
+        // silentForbidden → HandledApiError (no .response); match ownership copy.
+        if (
+          status === 403 ||
+          /belongs to another waiter|another waiter|edit others|reassign/i.test(msg)
+        ) {
+          toast.error(
+            /another waiter|edit others|reassign/i.test(msg)
+              ? msg
+              : 'This table belongs to another waiter. Ask a cashier or manager to open it.',
+            { id: 'restaurant-check-owned', duration: 4500 },
+          );
+          return attachSiblingTabs(
+            {
+              table: (cachedTable || { id: selectedTableId }) as RestaurantTable,
+              order: null,
+              meta: null,
+              siblingChecks: [],
+            },
+            tableTicketsRef.current.tabs,
+          );
+        }
+        throw err;
+      }
     },
     // Instant ticket switch: show journal/cache for the target order — never flash the previous ticket.
     placeholderData: () => {
@@ -1954,8 +1998,14 @@ export default function RestaurantPosPage() {
 
     const awaitPrint = opts?.awaitPrint === true;
 
-    const deliverJobs = async (jobs: ClientPrintJob[]): Promise<number> => {
-      const dispatched = await dispatchPrintJobs(jobs, { branding: companyBranding });
+    const deliverJobs = async (
+      jobs: ClientPrintJob[],
+      deliverOpts?: { awaitStatusSync?: boolean },
+    ): Promise<number> => {
+      const dispatched = await dispatchPrintJobs(jobs, {
+        branding: companyBranding,
+        awaitStatusSync: deliverOpts?.awaitStatusSync,
+      });
       return dispatched.failures;
     };
 
@@ -2003,7 +2053,7 @@ export default function RestaurantPosPage() {
       );
 
       if (awaitPrint) {
-        const printFailures = await deliverJobs(offlineJobs);
+        const printFailures = await deliverJobs(offlineJobs, { awaitStatusSync: true });
         publishLanKdsBoardChanged('KOT_FIRED_OFFLINE');
         return { kotCount: tickets.length, printFailures };
       }
@@ -2090,7 +2140,7 @@ export default function RestaurantPosPage() {
     if (awaitPrint) {
       let printFailures = 0;
       if (printJobs && printJobs.length > 0) {
-        printFailures = await deliverJobs(printJobs);
+        printFailures = await deliverJobs(printJobs, { awaitStatusSync: true });
       } else {
         printFailures = await runLegacyPrint();
       }
@@ -2135,7 +2185,16 @@ export default function RestaurantPosPage() {
         return;
       }
 
-      const { kotCount, printFailures } = await fireUnsentKotTickets();
+      // When FOH will auto-logout, await paper + PRINTED status so re-login
+      // flushPendingPrintJobs does not reprint the same tickets.
+      const willAutoLogout = decideRestaurantFohAutoLogout({
+        kind: 'kot',
+        role: user?.role,
+        permissions,
+      });
+      const { kotCount, printFailures } = await fireUnsentKotTickets({
+        awaitPrint: willAutoLogout,
+      });
       if (kotCount === 0) {
         toast.success('Nothing new for kitchen — back to tables');
         returnToFloor();
@@ -2337,7 +2396,20 @@ export default function RestaurantPosPage() {
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
       invalidateCheck();
 
-      // Kitchen/bill SSOT is already committed — do not block floor return on paper.
+      // When FOH auto-logout will navigate away, await PRINTED so re-login cannot re-paper.
+      const willAutoLogoutBill =
+        decideRestaurantFohAutoLogout({
+          kind: 'bill',
+          role: user?.role,
+          permissions,
+        }) ||
+        (kotFired > 0 &&
+          decideRestaurantFohAutoLogout({
+            kind: 'kot',
+            role: user?.role,
+            permissions,
+          }));
+
       if (bill.printJobs && bill.printJobs.length > 0) {
         const jobs = bill.printJobs.map((j) => ({
           ...j,
@@ -2356,14 +2428,54 @@ export default function RestaurantPosPage() {
             currencySymbol: config.currency?.symbol,
           },
         }));
-        void dispatchPrintJobs(jobs, { branding: companyBranding }).then((dispatched) => {
+        if (willAutoLogoutBill) {
+          const dispatched = await dispatchPrintJobs(jobs, {
+            branding: companyBranding,
+            awaitStatusSync: true,
+          });
           if (dispatched.failures > 0) {
             toast.error('Bill marked (print unavailable)', {
               duration: 5000,
               id: 'bill-print-bg-fail',
             });
           }
-        });
+        } else {
+          void dispatchPrintJobs(jobs, { branding: companyBranding }).then((dispatched) => {
+            if (dispatched.failures > 0) {
+              toast.error('Bill marked (print unavailable)', {
+                duration: 5000,
+                id: 'bill-print-bg-fail',
+              });
+            }
+          });
+        }
+      } else if (willAutoLogoutBill) {
+        try {
+          await printRestaurantBill({
+            orderNumber: bill.order.orderNumber,
+            tableLabel: selectedTable?.name || selectedTable?.code || 'Table',
+            waiterName: user?.fullName || user?.email || null,
+            printedAt: new Date().toLocaleString(),
+            taxName,
+            currencySymbol: config.currency?.symbol,
+            printerName: guestBillPrinterName,
+            companyName: companyBranding.companyName,
+            companyAddress: companyBranding.companyAddress,
+            companyPhone: companyBranding.companyPhone,
+            items: billLines,
+            subtotal: Number(billTotals.subtotal),
+            discountAmount: Number(
+              'discountAmount' in billTotals ? billTotals.discountAmount : order.discountAmount,
+            ),
+            taxAmount: Number(billTotals.taxAmount),
+            totalAmount: Number(billTotals.totalAmount),
+          });
+        } catch {
+          toast.error('Bill marked (print unavailable)', {
+            duration: 5000,
+            id: 'bill-print-bg-fail',
+          });
+        }
       } else {
         void printRestaurantBill({
           orderNumber: bill.order.orderNumber,
@@ -2792,14 +2904,26 @@ export default function RestaurantPosPage() {
     printJobs?: ClientPrintJob[],
   ) => {
     // VOID paper is best-effort — never block void UX on HTML→PDF.
+    // Preserve per-station targetPrinter (kitchen vs bar) — never collapse to one printer.
     if (printJobs && printJobs.length > 0) {
-      void dispatchPrintJobs(printJobs, { branding: companyBranding });
+      void dispatchPrintJobs(
+        printJobs.map((j) => ({
+          ...j,
+          targetPrinter:
+            j.targetPrinter ||
+            resolveStationPrinterName(
+              j.stationCode ||
+                (typeof j.payloadJson?.station === 'string' ? j.payloadJson.station : null),
+            ),
+        })),
+        { branding: companyBranding },
+      );
       return;
     }
     const jobs = voidKots.map((kot) =>
       enqueueOfflinePrintJob({
         documentType: 'VOID_KOT',
-        targetPrinter: kot.printerName ?? null,
+        targetPrinter: kot.printerName || resolveStationPrinterName(kot.station),
         stationCode: kot.station,
         payloadJson: {
           kotNumber: kot.kotNumber,
@@ -2908,10 +3032,45 @@ export default function RestaurantPosPage() {
         return;
       }
       try {
-        const next = removeRestaurantLinesOffline(derived, voidLineIds, qtyMap, {
-          reason,
-          allowKitchenSent: hasKot,
-        });
+        const { order: next, voidTickets } = removeRestaurantLinesOffline(
+          derived,
+          voidLineIds,
+          qtyMap,
+          {
+            reason,
+            allowKitchenSent: hasKot,
+          },
+        );
+        if (voidTickets.length > 0) {
+          const jobs = voidTickets.map((kot) =>
+            enqueueOfflinePrintJob({
+              documentType: 'VOID_KOT',
+              targetPrinter: kot.printerName,
+              stationCode: kot.station,
+              payloadJson: {
+                kotNumber: kot.kotOfflineId,
+                station: kot.station,
+                tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
+                sentByName: user?.fullName || user?.email || null,
+                waiterName: user?.fullName || user?.email || derived.waiterName || null,
+                firedAt: new Date().toISOString(),
+                ticketKind: 'VOID',
+                voidReason: reason,
+                orderChannel: derived.channel,
+                guestName: derived.guestName,
+                guestPhone: derived.guestPhone,
+                deliveryAddress: derived.deliveryAddress,
+                pickupLabel: derived.pickupLabel,
+                items: kot.lines.map((it) => ({
+                  productName: it.productName,
+                  quantity: it.quantity,
+                  lineNotes: it.lineNotes ?? null,
+                })),
+              },
+            }),
+          );
+          void dispatchPrintJobs(jobs, { branding: companyBranding });
+        }
         setLineSheet(null);
         setQtyPadSheet(null);
         setSelectedLineIds([]);
@@ -2929,9 +3088,11 @@ export default function RestaurantPosPage() {
           paintJournalCheck(selectedTableId, next.orderId);
           toast.success(
             hasKot
-              ? voidQty < totalQty
-                ? `Voided ${voidQty} (will sync)`
-                : 'Voided — kitchen notified (will sync)'
+              ? voidTickets.length > 0
+                ? `Voided ${voidQty} — ${voidTickets.length} VOID ticket(s)`
+                : voidQty < totalQty
+                  ? `Voided ${voidQty} (will sync)`
+                  : 'Voided — kitchen notified (will sync)'
               : voidQty < totalQty
                 ? `Removed ${voidQty}`
                 : 'Line(s) removed',
@@ -2988,7 +3149,7 @@ export default function RestaurantPosPage() {
       } else {
         toast.success(
           hasKot && (data.voidKots?.length || 0) > 0
-            ? `Voided ${voidQty} — ${data.voidKots!.length} VOID ticket(s) to kitchen`
+            ? `Voided ${voidQty} — ${data.voidKots!.length} VOID ticket(s)`
             : hasKot
               ? `Voided ${voidQty}`
               : `Removed ${voidQty}`,
@@ -3357,12 +3518,46 @@ export default function RestaurantPosPage() {
         // Fall through to online cancel for server-backed checks
       } else {
         try {
-          cancelRestaurantCheckOffline(derived, reason);
+          const { voidTickets } = cancelRestaurantCheckOffline(derived, reason);
+          if (voidTickets.length > 0) {
+            const jobs = voidTickets.map((kot) =>
+              enqueueOfflinePrintJob({
+                documentType: 'VOID_KOT',
+                targetPrinter: kot.printerName,
+                stationCode: kot.station,
+                payloadJson: {
+                  kotNumber: kot.kotOfflineId,
+                  station: kot.station,
+                  tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
+                  sentByName: user?.fullName || user?.email || null,
+                  waiterName: user?.fullName || user?.email || derived.waiterName || null,
+                  firedAt: new Date().toISOString(),
+                  ticketKind: 'VOID',
+                  voidReason: reason,
+                  orderChannel: derived.channel,
+                  guestName: derived.guestName,
+                  guestPhone: derived.guestPhone,
+                  deliveryAddress: derived.deliveryAddress,
+                  pickupLabel: derived.pickupLabel,
+                  items: kot.lines.map((it) => ({
+                    productName: it.productName,
+                    quantity: it.quantity,
+                    lineNotes: it.lineNotes ?? null,
+                  })),
+                },
+              }),
+            );
+            void dispatchPrintJobs(jobs, { branding: companyBranding });
+          }
           settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', { reason });
           setSelectedTableId(null);
           setActiveOrderId(null);
           toast.success(
-            isOnline ? 'Check cancelled (will sync)' : 'Check cancelled (offline — will sync)',
+            voidTickets.length > 0
+              ? `Check cancelled — ${voidTickets.length} VOID ticket(s)`
+              : isOnline
+                ? 'Check cancelled (will sync)'
+                : 'Check cancelled (offline — will sync)',
           );
         } catch (err) {
           toast.error(err instanceof Error ? err.message : 'Cancel failed');

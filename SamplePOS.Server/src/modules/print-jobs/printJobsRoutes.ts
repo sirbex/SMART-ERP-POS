@@ -20,7 +20,13 @@ const StatusSchema = z.object({
  */
 router.get(
   '/pending',
-  requireAnyPermission(['restaurant.order', 'restaurant.kitchen', 'pos.sale', 'sales.read']),
+  requireAnyPermission([
+    'restaurant.read',
+    'restaurant.order',
+    'restaurant.kitchen',
+    'pos.sale',
+    'sales.read',
+  ]),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const limit = req.query.limit ? Number(req.query.limit) : 50;
@@ -31,7 +37,13 @@ router.get(
 
 router.get(
   '/:id',
-  requireAnyPermission(['restaurant.order', 'restaurant.kitchen', 'pos.sale', 'sales.read']),
+  requireAnyPermission([
+    'restaurant.read',
+    'restaurant.order',
+    'restaurant.kitchen',
+    'pos.sale',
+    'sales.read',
+  ]),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const job = await printJobsService.getById(pool, req.params.id);
@@ -45,7 +57,13 @@ router.get(
  */
 router.patch(
   '/:id/status',
-  requireAnyPermission(['restaurant.order', 'restaurant.kitchen', 'pos.sale', 'sales.read']),
+  requireAnyPermission([
+    'restaurant.read',
+    'restaurant.order',
+    'restaurant.kitchen',
+    'pos.sale',
+    'sales.read',
+  ]),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const body = StatusSchema.parse(req.body);
@@ -62,7 +80,13 @@ router.patch(
  */
 router.post(
   '/:id/requeue',
-  requireAnyPermission(['restaurant.order', 'restaurant.kitchen', 'pos.sale', 'sales.read']),
+  requireAnyPermission([
+    'restaurant.read',
+    'restaurant.order',
+    'restaurant.kitchen',
+    'pos.sale',
+    'sales.read',
+  ]),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const job = await printJobsService.requeue(pool, req.params.id);

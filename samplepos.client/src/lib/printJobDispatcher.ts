@@ -1,6 +1,11 @@
 /**
  * Print Job dispatcher — delivers print_jobs SSOT to the local agent (:1811).
  * Reuses existing thermal HTML renderers; browser never picks a printer.
+ *
+ * Idempotency:
+ * - Local delivered-id cache prevents re-paper on re-login when PRINTED PATCH was aborted
+ *   by FOH auto-logout (hard navigation clears auth mid-flight).
+ * - awaitStatusSync + keepalive PATCH close the logout race for the current action.
  */
 
 import { api } from '../utils/api';
@@ -12,6 +17,7 @@ import {
 } from './printRestaurant';
 import { brandingFromTenant } from './documentCompanyBranding';
 import { startPrintPathTrace } from './printPathTiming';
+import { getApiBaseUrl } from './apiBase';
 
 export type ClientPrintDocumentType = 'KOT' | 'VOID_KOT' | 'GUEST_BILL' | 'RECEIPT';
 
@@ -27,7 +33,52 @@ export interface ClientPrintJob {
 }
 
 const OFFLINE_QUEUE_KEY = 'pos.printJobs.offlineQueue.v1';
+/** Job IDs already printed on this terminal — survives logout; TTL 24h. */
+const DELIVERED_KEY = 'pos.printJobs.delivered.v1';
+const DELIVERED_TTL_MS = 24 * 60 * 60 * 1000;
 const DOC_TYPES = new Set<string>(['KOT', 'VOID_KOT', 'GUEST_BILL', 'RECEIPT']);
+
+type DeliveredMap = Record<string, number>;
+
+function readDeliveredMap(): DeliveredMap {
+  try {
+    const raw = localStorage.getItem(DELIVERED_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as DeliveredMap;
+    if (!parsed || typeof parsed !== 'object') return {};
+    const now = Date.now();
+    const kept: DeliveredMap = {};
+    for (const [id, ts] of Object.entries(parsed)) {
+      if (typeof ts === 'number' && now - ts < DELIVERED_TTL_MS) kept[id] = ts;
+    }
+    return kept;
+  } catch {
+    return {};
+  }
+}
+
+function writeDeliveredMap(map: DeliveredMap): void {
+  try {
+    localStorage.setItem(DELIVERED_KEY, JSON.stringify(map));
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Mark a job as already printed on this device (idempotent flush). */
+export function rememberPrintJobDelivered(jobId: string): void {
+  const id = String(jobId || '').trim();
+  if (!id) return;
+  const map = readDeliveredMap();
+  map[id] = Date.now();
+  writeDeliveredMap(map);
+}
+
+export function wasPrintJobDeliveredLocally(jobId: string): boolean {
+  const id = String(jobId || '').trim();
+  if (!id) return false;
+  return Boolean(readDeliveredMap()[id]);
+}
 
 function readOfflineQueue(): ClientPrintJob[] {
   try {
@@ -102,11 +153,34 @@ export function enqueueOfflinePrintJob(
   return full;
 }
 
+/** Keepalive PATCH — survives FOH hard navigation to /quick-login. */
+function patchPrintedKeepalive(jobId: string): void {
+  try {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+    const url = `${getApiBaseUrl()}/print-jobs/${encodeURIComponent(jobId)}/status`;
+    void fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ status: 'PRINTED' }),
+      keepalive: true,
+    }).catch(() => undefined);
+  } catch {
+    /* ignore */
+  }
+}
+
 async function markJobStatus(
   job: ClientPrintJob,
   status: 'PRINTING' | 'PRINTED' | 'ERROR',
   errorMessage?: string | null,
 ): Promise<void> {
+  if (status === 'PRINTED') {
+    rememberPrintJobDelivered(job.id);
+  }
   if (job.offline) {
     const q = readOfflineQueue().filter((j) => j.id !== job.id);
     if (status !== 'PRINTED') {
@@ -116,14 +190,20 @@ async function markJobStatus(
     return;
   }
   try {
-    // Short timeout — never let a hung PATCH burn the KOT UX (API default is 30s).
     await api.printJobs.updateStatus(
       job.id,
       { status, errorMessage: errorMessage ?? null },
-      { timeout: 2500 },
+      {
+        timeout: status === 'PRINTED' ? 4000 : 2500,
+        // Best-effort SSOT sync — never toast "Server error" on FOH.
+        silentErrorToast: true,
+      },
     );
   } catch {
-    // Status sync is best-effort; delivery already happened or failed locally.
+    if (status === 'PRINTED') {
+      // Last chance before logout clears auth — browser may still send this.
+      patchPrintedKeepalive(job.id);
+    }
   }
 }
 
@@ -222,14 +302,20 @@ function asBillPrintData(
 /**
  * Deliver one or more print jobs to the local agent. Returns failure count.
  * Each job keeps its own targetPrinter (Kitchen vs Bar vs cashier).
- * Status PATCHes are background; jobs for different stations run in parallel.
+ *
+ * @param opts.awaitStatusSync When true (FOH auto-logout path), await PRINTED PATCH
+ *   so the server row is closed before hard navigation to quick-login.
  */
 export async function dispatchPrintJobs(
   jobs: ClientPrintJob[],
-  opts?: { branding?: ReturnType<typeof brandingFromTenant> | null },
+  opts?: {
+    branding?: ReturnType<typeof brandingFromTenant> | null;
+    awaitStatusSync?: boolean;
+  },
 ): Promise<{ delivered: number; failures: number }> {
   const trace = startPrintPathTrace('dispatchPrintJobs');
   const branding = opts?.branding || {};
+  const awaitStatus = opts?.awaitStatusSync === true;
   let delivered = 0;
   let failures = 0;
 
@@ -240,6 +326,13 @@ export async function dispatchPrintJobs(
       if (!j) return false;
       if (seen.has(j.id)) return false;
       seen.add(j.id);
+      // Already printed on this terminal — never re-paper (re-login race).
+      if (wasPrintJobDeliveredLocally(j.id)) {
+        if (!j.offline && j.status !== 'PRINTED') {
+          markJobStatusBackground(j, 'PRINTED');
+        }
+        return false;
+      }
       return true;
     });
   trace.mark(`normalized_${normalized.length}`);
@@ -260,7 +353,12 @@ export async function dispatchPrintJobs(
         } else {
           await printKitchenTicket(asKotPrintData(job, branding));
         }
-        markJobStatusBackground(job, 'PRINTED');
+        rememberPrintJobDelivered(job.id);
+        if (awaitStatus) {
+          await markJobStatus(job, 'PRINTED');
+        } else {
+          markJobStatusBackground(job, 'PRINTED');
+        }
         delivered += 1;
       } catch (err) {
         failures += 1;
@@ -277,23 +375,34 @@ export async function dispatchPrintJobs(
   return { delivered, failures };
 }
 
-/** Retry offline + server pending jobs (agent back online). */
+/** Retry offline + server pending jobs (agent back online). Skips locally delivered IDs. */
 export async function flushPendingPrintJobs(opts?: {
   branding?: ReturnType<typeof brandingFromTenant> | null;
   online?: boolean;
 }): Promise<{ delivered: number; failures: number }> {
   const offline = readOfflineQueue()
     .map((j) => normalizePrintJob(j))
-    .filter((j): j is ClientPrintJob => !!j && j.status !== 'PRINTED');
+    .filter(
+      (j): j is ClientPrintJob =>
+        !!j && j.status !== 'PRINTED' && !wasPrintJobDeliveredLocally(j.id),
+    );
 
   let serverJobs: ClientPrintJob[] = [];
   if (opts?.online !== false) {
     try {
-      const res = await api.printJobs.listPending();
+      const res = await api.printJobs.listPending(undefined, { silentErrorToast: true });
       const rows = (res.data.data || []) as unknown[];
       serverJobs = rows
         .map((j) => normalizePrintJob(j))
-        .filter((j): j is ClientPrintJob => !!j);
+        .filter((j): j is ClientPrintJob => !!j && !wasPrintJobDeliveredLocally(j.id));
+
+      // Heal server rows for jobs we already printed locally (PATCH aborted by logout).
+      for (const row of rows) {
+        const n = normalizePrintJob(row);
+        if (n && wasPrintJobDeliveredLocally(n.id) && n.status !== 'PRINTED') {
+          markJobStatusBackground(n, 'PRINTED');
+        }
+      }
     } catch {
       serverJobs = [];
     }

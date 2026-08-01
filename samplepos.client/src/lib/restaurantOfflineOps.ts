@@ -856,8 +856,20 @@ export function payRestaurantCheckOffline(
 export function cancelRestaurantCheckOffline(
   order: DerivedOrder,
   reason = 'Cancelled from restaurant POS (offline)',
-): void {
+  opts?: { emitVoidTickets?: boolean },
+): { voidTickets: OfflineKotTicket[] } {
   if (!order.tableId) throw new Error('Restaurant check missing table');
+  // Default: VOID each station that had a FIRE ticket (same as online cancelCheck).
+  // Callers that already emitted voids (e.g. void-last-line) pass emitVoidTickets: false.
+  const voidTickets =
+    opts?.emitVoidTickets === false
+      ? []
+      : emitVoidKotTicketsOffline(
+          order,
+          order.lines.filter((l) => l.lineId && l.kitchenSentAt),
+          undefined,
+          reason,
+        );
   appendEvent({
     eventType: 'ORDER_CANCELLED',
     key: generateEventKey(),
@@ -869,6 +881,7 @@ export function cancelRestaurantCheckOffline(
     ts: Date.now(),
   });
   publishLanKdsBoardChanged('ORDER_CANCELLED');
+  return { voidTickets };
 }
 
 /**
@@ -966,9 +979,75 @@ export function reconcileRestaurantJournalWithServerTables(
 }
 
 /**
+ * VOID tickets must follow the same station→printer split as FIRE KOT
+ * (kitchen items → kitchen printer, bar → bar). Never collapse to KITCHEN.
+ */
+function emitVoidKotTicketsOffline(
+  order: DerivedOrder,
+  sentLines: DerivedOrder['lines'],
+  quantityByLineId: Record<string, number> | undefined,
+  reason: string,
+): OfflineKotTicket[] {
+  const byStation = new Map<
+    string,
+    { station: string; printerName: string | null; items: typeof sentLines }
+  >();
+  for (const line of sentLines) {
+    if (!line.lineId) continue;
+    const voidQty = quantityByLineId?.[line.lineId] ?? line.quantity;
+    const qty = Math.min(line.quantity, Math.max(0, voidQty));
+    if (qty <= 0) continue;
+    const resolved = resolveOfflineKotStation(line.productId);
+    const key = resolved.code;
+    const bucket = byStation.get(key) || {
+      station: key,
+      printerName: resolved.printerName,
+      items: [],
+    };
+    bucket.items.push({ ...line, quantity: qty });
+    byStation.set(key, bucket);
+  }
+
+  const tickets: OfflineKotTicket[] = [];
+  for (const bucket of byStation.values()) {
+    const kotOfflineId = newKotOfflineId();
+    const kotLines = bucket.items.map((l) => ({
+      lineId: l.lineId!,
+      productName: l.productName,
+      quantity: l.quantity,
+      lineNotes: l.lineNotes ?? null,
+    }));
+    appendEvent({
+      eventType: 'RESTAURANT_KOT_FIRED',
+      key: generateEventKey(),
+      orderId: order.orderId,
+      kotOfflineId,
+      tableCode: order.tableCode,
+      tableName: order.tableName,
+      waiterName: order.waiterName,
+      station: bucket.station,
+      orderChannel: order.channel,
+      guestName: order.guestName,
+      ticketKind: 'VOID',
+      voidReason: reason,
+      lines: kotLines,
+      ts: Date.now(),
+    });
+    tickets.push({
+      kotOfflineId,
+      station: bucket.station,
+      printerName: bucket.printerName,
+      lines: kotLines,
+    });
+  }
+  if (tickets.length > 0) publishLanKdsBoardChanged('KOT_VOIDED');
+  return tickets;
+}
+
+/**
  * Remove or reduce lines locally.
  * - Unsent: quiet remove (no VOID ticket).
- * - Kitchen-sent: append VOID KOT journal event then remove/reduce (never call server with ofl ids).
+ * - Kitchen-sent: one VOID KOT per station (same printers as FIRE), then remove/reduce.
  * `quantityByLineId` voids/reduces only that many units (Toast/Samba −1).
  */
 export function removeRestaurantLinesOffline(
@@ -976,7 +1055,7 @@ export function removeRestaurantLinesOffline(
   lineIds: string[],
   quantityByLineId?: Record<string, number>,
   opts?: { reason?: string; allowKitchenSent?: boolean },
-): DerivedOrder {
+): { order: DerivedOrder; voidTickets: OfflineKotTicket[] } {
   if (!order.tableId) throw new Error('Restaurant check missing table');
   const idSet = new Set(lineIds);
   const touching = order.lines.filter((l) => l.lineId && idSet.has(l.lineId));
@@ -986,40 +1065,15 @@ export function removeRestaurantLinesOffline(
     throw new Error('Kitchen-sent lines require Void (VOID ticket)');
   }
 
-  if (hasKot) {
-    const voidLines = touching
-      .filter((l) => l.lineId && l.kitchenSentAt)
-      .map((l) => {
-        const voidQty = quantityByLineId?.[l.lineId!] ?? l.quantity;
-        const qty = Math.min(l.quantity, Math.max(0, voidQty));
-        return {
-          lineId: l.lineId!,
-          productName: l.productName,
-          quantity: qty,
-          lineNotes: l.lineNotes ?? null,
-        };
-      })
-      .filter((l) => l.quantity > 0);
-    if (voidLines.length > 0) {
-      appendEvent({
-        eventType: 'RESTAURANT_KOT_FIRED',
-        key: generateEventKey(),
-        orderId: order.orderId,
-        kotOfflineId: newKotOfflineId(),
-        tableCode: order.tableCode,
-        tableName: order.tableName,
-        waiterName: order.waiterName,
-        station: 'KITCHEN',
-        orderChannel: order.channel,
-        guestName: order.guestName,
-        ticketKind: 'VOID',
-        voidReason: opts?.reason?.trim() || 'Voided from restaurant POS',
-        lines: voidLines,
-        ts: Date.now(),
-      });
-      publishLanKdsBoardChanged('KOT_VOIDED');
-    }
-  }
+  const reason = opts?.reason?.trim() || 'Voided from restaurant POS';
+  const voidTickets = hasKot
+    ? emitVoidKotTicketsOffline(
+        order,
+        touching.filter((l) => !!l.kitchenSentAt),
+        quantityByLineId,
+        reason,
+      )
+    : [];
 
   const nextLines: typeof order.lines = [];
   for (const line of order.lines) {
@@ -1042,7 +1096,10 @@ export function removeRestaurantLinesOffline(
   }
 
   if (nextLines.length === 0) {
-    cancelRestaurantCheckOffline(order, opts?.reason || 'Removed last lines');
+    // Voids already emitted above — do not emit a second set on cancel.
+    cancelRestaurantCheckOffline(order, opts?.reason || 'Removed last lines', {
+      emitVoidTickets: false,
+    });
     const gone = deriveRestaurantCheckForTable(
       order.tableId,
       getAllEvents(),
@@ -1050,7 +1107,7 @@ export function removeRestaurantLinesOffline(
       order.orderId,
     );
     if (gone) throw new Error('Failed to cancel check after removing all lines');
-    return { ...order, lines: [] };
+    return { order: { ...order, lines: [] }, voidTickets };
   }
 
   appendEvent({
@@ -1081,7 +1138,7 @@ export function removeRestaurantLinesOffline(
     order.orderId,
   );
   if (!next) throw new Error('Failed to derive check after line remove');
-  return next;
+  return { order: next, voidTickets };
 }
 
 /**

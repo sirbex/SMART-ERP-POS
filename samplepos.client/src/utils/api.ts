@@ -46,13 +46,19 @@ import type {
 
 import { getApiBaseUrl } from '../lib/apiBase';
 
-/** Background/prewarm calls may set silentForbidden to avoid Access denied toasts. */
+/**
+ * Background/prewarm calls may set:
+ * - silentForbidden — skip Access denied toasts (expected peer-table deny)
+ * - silentErrorToast — skip global Server error / api-error toasts (caller handles)
+ */
 declare module 'axios' {
   export interface AxiosRequestConfig {
     silentForbidden?: boolean;
+    silentErrorToast?: boolean;
   }
   export interface InternalAxiosRequestConfig {
     silentForbidden?: boolean;
+    silentErrorToast?: boolean;
   }
 }
 
@@ -259,7 +265,8 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 403) {
       // Forbidden — one standard toast; reject HandledApiError so catch blocks don't show Axios codes
       const msg = friendlyHttpErrorMessage(403, error.response.data?.error);
-      const silent = Boolean(error.config?.silentForbidden);
+      const silent =
+        Boolean(error.config?.silentForbidden) || Boolean(error.config?.silentErrorToast);
       if (!silent) {
         console.error('Access denied:', error.response.data?.error || msg);
         window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
@@ -271,6 +278,9 @@ apiClient.interceptors.response.use(
     if (error.response?.status) {
       // Soft-confirm gates: caller shows impact dialog and may retry — do not toast here.
       if (brvCode === 'OB_REPLACE_CONFIRM_REQUIRED') {
+        return Promise.reject(error);
+      }
+      if (error.config?.silentErrorToast) {
         return Promise.reject(error);
       }
       return Promise.reject(dispatchUserFacingApiNotification(error));
@@ -285,15 +295,17 @@ apiClient.interceptors.response.use(
       const msg = navigator.onLine
         ? 'Could not reach the server. Please try again.'
         : 'You appear to be offline. Check your connection and try again.';
-      window.dispatchEvent(
-        new CustomEvent('app:api-error', {
-          detail: {
-            title: 'Connection problem',
-            message: msg,
-            toastId: 'app-network',
-          },
-        })
-      );
+      if (!error.config?.silentErrorToast) {
+        window.dispatchEvent(
+          new CustomEvent('app:api-error', {
+            detail: {
+              title: 'Connection problem',
+              message: msg,
+              toastId: 'app-network',
+            },
+          })
+        );
+      }
       return Promise.reject(new HandledApiError(msg));
     }
 
@@ -1294,8 +1306,8 @@ export const api = {
 
   restaurant: {
     getEnabled: () => apiClient.get<ApiResponse<{ enabled: boolean }>>('restaurant/enabled'),
-    listTables: (params?: { includeInactive?: boolean }) =>
-      apiClient.get<ApiResponse>('restaurant/tables', { params }),
+    listTables: (params?: { includeInactive?: boolean }, config?: AxiosRequestConfig) =>
+      apiClient.get<ApiResponse>('restaurant/tables', { params, ...config }),
     createTable: (data: {
       code: string;
       name: string;
@@ -1315,13 +1327,21 @@ export const api = {
         isActive: boolean;
       }>,
     ) => apiClient.patch<ApiResponse>(`restaurant/tables/${id}`, data),
-    getTableCheck: (tableId: string, params?: { orderId?: string }) =>
-      apiClient.get<ApiResponse>(`restaurant/tables/${tableId}/check`, { params }),
+    getTableCheck: (
+      tableId: string,
+      params?: { orderId?: string },
+      config?: AxiosRequestConfig,
+    ) =>
+      apiClient.get<ApiResponse>(`restaurant/tables/${tableId}/check`, {
+        params,
+        ...config,
+      }),
     activateCheck: (tableId: string, data: { orderId: string }) =>
       apiClient.post<ApiResponse>(`restaurant/tables/${tableId}/activate-check`, data),
-    menuCategories: () => apiClient.get<ApiResponse>('restaurant/menu/categories'),
-    menuProducts: (params?: { categoryId?: string }) =>
-      apiClient.get<ApiResponse>('restaurant/menu/products', { params }),
+    menuCategories: (config?: AxiosRequestConfig) =>
+      apiClient.get<ApiResponse>('restaurant/menu/categories', config),
+    menuProducts: (params?: { categoryId?: string }, config?: AxiosRequestConfig) =>
+      apiClient.get<ApiResponse>('restaurant/menu/products', { params, ...config }),
     setProductFlags: (
       id: string,
       data: { availableInRestaurant?: boolean; kitchenStation?: string | null },
@@ -1401,7 +1421,8 @@ export const api = {
         pickupLabel?: string | null;
       },
     ) => apiClient.patch<ApiResponse>(`restaurant/checks/${orderId}/guest`, data),
-    listWaiters: () => apiClient.get<ApiResponse>('restaurant/waiters'),
+    listWaiters: (config?: AxiosRequestConfig) =>
+      apiClient.get<ApiResponse>('restaurant/waiters', config),
     assignWaiter: (orderId: string, data: { waiterId: string }) =>
       apiClient.patch<ApiResponse>(`restaurant/checks/${orderId}/waiter`, data),
     transferCheck: (orderId: string, data: { toTableId: string }) =>
@@ -1439,8 +1460,8 @@ export const api = {
       apiClient.get<ApiResponse>('restaurant/kitchen/board', { params }),
     advanceKot: (kotId: string, data?: { status?: 'SENT' | 'PREPARING' | 'READY' | 'BUMPED' }) =>
       apiClient.post<ApiResponse>(`restaurant/kitchen/tickets/${kotId}/advance`, data ?? {}),
-    listStations: (params?: { includeInactive?: boolean }) =>
-      apiClient.get<ApiResponse>('restaurant/stations', { params }),
+    listStations: (params?: { includeInactive?: boolean }, config?: AxiosRequestConfig) =>
+      apiClient.get<ApiResponse>('restaurant/stations', { params, ...config }),
     getGuestBillPrinter: () =>
       apiClient.get<ApiResponse<{ printerName: string | null; resolvedPrinterName: string | null }>>(
         'restaurant/guest-bill-printer',
@@ -1483,15 +1504,17 @@ export const api = {
 
   /** Print Job SSOT — enqueue on server; device agent delivers via :1811 */
   printJobs: {
-    listPending: (params?: { limit?: number }) =>
-      apiClient.get<ApiResponse>('print-jobs/pending', { params }),
-    getById: (id: string) => apiClient.get<ApiResponse>(`print-jobs/${id}`),
+    listPending: (params?: { limit?: number }, config?: AxiosRequestConfig) =>
+      apiClient.get<ApiResponse>('print-jobs/pending', { params, ...config }),
+    getById: (id: string, config?: AxiosRequestConfig) =>
+      apiClient.get<ApiResponse>(`print-jobs/${id}`, config),
     updateStatus: (
       id: string,
       data: { status: 'PENDING' | 'PRINTING' | 'PRINTED' | 'ERROR'; errorMessage?: string | null },
       config?: AxiosRequestConfig,
     ) => apiClient.patch<ApiResponse>(`print-jobs/${id}/status`, data, config),
-    requeue: (id: string) => apiClient.post<ApiResponse>(`print-jobs/${id}/requeue`),
+    requeue: (id: string, config?: AxiosRequestConfig) =>
+      apiClient.post<ApiResponse>(`print-jobs/${id}/requeue`, undefined, config),
   },
 
   assets: {

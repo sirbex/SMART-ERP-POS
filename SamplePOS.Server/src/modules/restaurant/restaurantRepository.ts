@@ -1424,6 +1424,36 @@ export const restaurantRepository = {
     return convertKeysToCamelCase(result.rows[0]) as RestaurantStationRecord;
   },
 
+  /**
+   * VOID must reprint to the same station that received the FIRE KOT for this line.
+   * Falls back to line/product kitchen_station when no FIRE ticket exists.
+   */
+  async resolveStationForVoidItem(
+    conn: DbConn,
+    orderItemId: string,
+    fallbackStation: string | null | undefined,
+  ): Promise<RestaurantStationRecord> {
+    const hasKind = await tableHasColumn(conn, 'restaurant_kot', 'ticket_kind');
+    const result = await conn.query<{ station: string }>(
+      hasKind
+        ? `SELECT rk.station
+           FROM restaurant_kot_items rki
+           INNER JOIN restaurant_kot rk ON rk.id = rki.kot_id
+           WHERE rki.order_item_id = $1
+             AND COALESCE(rk.ticket_kind, 'FIRE') = 'FIRE'
+           ORDER BY rk.fired_at DESC NULLS LAST
+           LIMIT 1`
+        : `SELECT rk.station
+           FROM restaurant_kot_items rki
+           INNER JOIN restaurant_kot rk ON rk.id = rki.kot_id
+           WHERE rki.order_item_id = $1
+           ORDER BY rk.fired_at DESC NULLS LAST
+           LIMIT 1`,
+      [orderItemId],
+    );
+    return this.resolveStation(conn, result.rows[0]?.station || fallbackStation);
+  },
+
   async createStation(
     conn: DbConn,
     data: {

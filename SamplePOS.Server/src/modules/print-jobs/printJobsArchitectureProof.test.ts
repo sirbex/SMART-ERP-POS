@@ -45,6 +45,9 @@ describe('Print Job SSOT architecture', () => {
     expect(routes).toMatch(/\/pending/);
     expect(routes).toMatch(/\/:id\/status/);
     expect(routes).toMatch(/\/:id\/requeue/);
+    // FOH waiters with restaurant.read (or order) must pull/ack jobs without 403 spam.
+    expect(routes).toMatch(/restaurant\.read/);
+    expect(routes).toMatch(/restaurant\.order/);
 
     const server = readRepo('SamplePOS.Server/src/server.ts');
     expect(server).toMatch(/printJobsRoutes/);
@@ -64,6 +67,9 @@ describe('Print Job SSOT architecture', () => {
     expect(dispatcher).toMatch(/targetPrinter/);
     expect(dispatcher).toMatch(/printKitchenTicket|printRestaurantBill/);
     expect(dispatcher).toMatch(/enqueueOfflinePrintJob/);
+    expect(dispatcher).toMatch(/rememberPrintJobDelivered|wasPrintJobDeliveredLocally/);
+    expect(dispatcher).toMatch(/awaitStatusSync/);
+    expect(dispatcher).toMatch(/keepalive:\s*true/);
     expect(dispatcher).not.toMatch(/window\.print\(/);
 
     const api = readRepo('samplepos.client/src/utils/api.ts');
@@ -75,6 +81,9 @@ describe('Print Job SSOT architecture', () => {
     expect(pos).toMatch(/dispatchPrintJobs/);
     expect(pos).toMatch(/flushPendingPrintJobs/);
     expect(pos).toMatch(/printJobs/);
+    expect(pos).toMatch(/decideRestaurantFohAutoLogout/);
+    expect(pos).toMatch(/awaitPrint:\s*willAutoLogout/);
+    expect(pos).toMatch(/printFlushOnceRef/);
   });
 
   it('updateStatus SQL uses explicit casts (no ambiguous $2 CASE reuse)', () => {

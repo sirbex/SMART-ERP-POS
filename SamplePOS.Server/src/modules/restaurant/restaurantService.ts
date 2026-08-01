@@ -1156,7 +1156,11 @@ export const restaurantService = {
           { station: RestaurantStationRecord; items: VoidSlice[] }
         >();
         for (const item of sentSlices) {
-          const resolved = await restaurantRepository.resolveStation(client, item.kitchenStation);
+          const resolved = await restaurantRepository.resolveStationForVoidItem(
+            client,
+            item.id,
+            item.kitchenStation,
+          );
           const key = resolved.code.toUpperCase();
           const bucket = byStation.get(key) || { station: resolved, items: [] };
           bucket.items.push(item);
@@ -1582,7 +1586,11 @@ export const restaurantService = {
         { station: RestaurantStationRecord; items: typeof sent }
       >();
       for (const item of sent) {
-        const resolved = await restaurantRepository.resolveStation(client, item.kitchenStation);
+        const resolved = await restaurantRepository.resolveStationForVoidItem(
+          client,
+          item.id,
+          item.kitchenStation,
+        );
         const key = resolved.code.toUpperCase();
         const bucket = byStation.get(key) || { station: resolved, items: [] };
         bucket.items.push(item);

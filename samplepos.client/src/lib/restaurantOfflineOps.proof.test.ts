@@ -138,10 +138,10 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(withTwo.lines).toHaveLength(2);
 
     const afterOne = removeRestaurantLinesOffline(withTwo, [withTwo.lines[0].lineId!]);
-    expect(afterOne.lines).toHaveLength(1);
+    expect(afterOne.order.lines).toHaveLength(1);
 
-    const emptied = removeRestaurantLinesOffline(afterOne, [afterOne.lines[0].lineId!]);
-    expect(emptied.lines).toHaveLength(0);
+    const emptied = removeRestaurantLinesOffline(afterOne.order, [afterOne.order.lines[0].lineId!]);
+    expect(emptied.order.lines).toHaveLength(0);
     expect(deriveRestaurantCheckForTable('t-proof-3', getAllEvents(), getAllSyncState())).toBeNull();
   });
 
@@ -509,6 +509,88 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(
       getUnsyncedEvents().filter((e) => e.eventType === 'RESTAURANT_KOT_FIRED'),
     ).toHaveLength(2);
+  });
+
+  it('EVIDENCE: VOID of kitchen+bar lines emits one VOID ticket per station printer', () => {
+    cacheRestaurantStations([
+      {
+        id: 's-kitchen',
+        code: 'KITCHEN',
+        name: 'Kitchen',
+        printerName: 'KitchenPrinter',
+        sortOrder: 10,
+        isActive: true,
+        isDefault: true,
+      },
+      {
+        id: 's-bar',
+        code: 'BAR',
+        name: 'Bar',
+        printerName: 'BarPrinter',
+        sortOrder: 20,
+        isActive: true,
+        isDefault: false,
+      },
+    ]);
+    cacheRestaurantMenu([
+      {
+        id: 'food-void',
+        name: 'Burger',
+        sellingPrice: '10',
+        categoryId: null,
+        categoryName: null,
+        kitchenStation: 'KITCHEN',
+        productType: 'service',
+      },
+      {
+        id: 'drink-void',
+        name: 'Beer',
+        sellingPrice: '5',
+        categoryId: null,
+        categoryName: null,
+        kitchenStation: 'BAR',
+        productType: 'service',
+      },
+    ]);
+
+    appendRestaurantItemOffline({
+      tableId: 't-void-split',
+      tableCode: 'V1',
+      tableName: 'VoidSplit',
+      channel: 'DINE_IN',
+      productId: 'food-void',
+      productName: 'Burger',
+      unitPrice: 10,
+      productType: 'service',
+    });
+    const open = appendRestaurantItemOffline({
+      tableId: 't-void-split',
+      tableCode: 'V1',
+      tableName: 'VoidSplit',
+      channel: 'DINE_IN',
+      productId: 'drink-void',
+      productName: 'Beer',
+      unitPrice: 5,
+      productType: 'service',
+    });
+    fireRestaurantKotOffline(open);
+    const afterFire = deriveRestaurantCheckForTable(
+      't-void-split',
+      getAllEvents(),
+      getAllSyncState(),
+    )!;
+    const { voidTickets } = removeRestaurantLinesOffline(
+      afterFire,
+      afterFire.lines.map((l) => l.lineId!),
+      undefined,
+      { reason: 'Guest left', allowKitchenSent: true },
+    );
+    expect(voidTickets).toHaveLength(2);
+    const byStation = Object.fromEntries(voidTickets.map((t) => [t.station, t]));
+    expect(byStation.KITCHEN?.printerName).toBe('KitchenPrinter');
+    expect(byStation.BAR?.printerName).toBe('BarPrinter');
+    expect(byStation.KITCHEN?.lines.some((l) => l.productName === 'Burger')).toBe(true);
+    expect(byStation.BAR?.lines.some((l) => l.productName === 'Beer')).toBe(true);
   });
 
   it('updateRestaurantGuestOffline links customers SSOT customerId', () => {

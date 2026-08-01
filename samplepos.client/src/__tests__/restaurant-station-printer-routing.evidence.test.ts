@@ -94,12 +94,22 @@ describe('Station printer routing (no default collapse)', () => {
     expect(sendKot).toMatch(/printJobsService\.enqueue/);
     expect(sendKot).toMatch(/targetPrinter: station\.printerName/);
 
+    const voidFn = service.slice(service.indexOf('async voidCheckItems('));
+    expect(voidFn).toMatch(/resolveStationForVoidItem/);
+    expect(voidFn).toMatch(/targetPrinter: station\.printerName/);
+
     const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
     expect(repo).toMatch(/COALESCE\(\s*NULLIF\(BTRIM\(oi\.kitchen_station\)/);
     expect(repo).toMatch(/healUnsentLineKitchenStations/);
+    expect(repo).toMatch(/resolveStationForVoidItem/);
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/kitchenStation: menuProduct\?\.kitchenStation/);
     expect(pos).toMatch(/dispatchPrintJobs/);
+
+    const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
+    expect(ops).toMatch(/emitVoidKotTicketsOffline/);
+    expect(ops).toMatch(/resolveOfflineKotStation/);
+    expect(ops).toMatch(/station: bucket\.station/);
   });
 });

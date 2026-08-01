@@ -288,8 +288,19 @@ function classifyPlainError(message: string): {
   ) {
     return { status: 401, errorCode: 'ERR_AUTH', details: { reason: message } };
   }
-  if (msg.includes('only admin') || msg.includes('only manager') || msg.includes('permission')) {
+  if (
+    msg.includes('only admin') ||
+    msg.includes('only manager') ||
+    msg.includes('permission') ||
+    msg.includes('belongs to another waiter') ||
+    msg.includes('another waiter')
+  ) {
     return { status: 403, errorCode: 'ERR_FORBIDDEN', details: { reason: message } };
+  }
+
+  // Schema / migration gates — not a waiter bug; surface as service unavailable.
+  if (msg.includes('migration') && msg.includes('required')) {
+    return { status: 503, errorCode: 'ERR_SCHEMA', details: { reason: message } };
   }
 
   // Validation patterns

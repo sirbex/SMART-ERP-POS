@@ -59,6 +59,14 @@ export function friendlyHttpErrorMessage(
   const resolvedStatus = status ?? (statusFromAxiosMsg ? Number(statusFromAxiosMsg) : undefined);
 
   if (resolvedStatus === 403 || isGenericPermissionMessage(apiError)) {
+    // Preserve specific ownership / floor messages — not generic "Access denied".
+    if (
+      apiError &&
+      !AXIOS_STATUS_CODE_MESSAGE.test(apiError) &&
+      /another waiter|belongs to another|edit others|reassign/i.test(apiError)
+    ) {
+      return apiError;
+    }
     return ACCESS_DENIED_MESSAGE;
   }
   if (apiError && !AXIOS_STATUS_CODE_MESSAGE.test(apiError)) {
