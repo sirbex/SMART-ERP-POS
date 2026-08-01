@@ -82,9 +82,67 @@ async function nextvalAllowlisted(
   return Number(result.rows[0]?.n ?? 1);
 }
 
+const SEQUENCE_MAX_SQL: Record<DocumentNumberKind, string> = {
+  sale: `SELECT COALESCE(MAX(CAST(substring(sale_number from '[0-9]+$') AS INTEGER)), 0) AS m
+         FROM sales WHERE sale_number ~ '^SALE-[0-9]{4}-[0-9]+$'`,
+  order: `SELECT COALESCE(MAX(CAST(substring(order_number from '[0-9]+$') AS INTEGER)), 0) AS m
+          FROM pos_orders WHERE order_number ~ '^ORD-[0-9]{4}-[0-9]+$'`,
+  refund: `SELECT COALESCE(MAX(CAST(substring(refund_number from '[0-9]+$') AS INTEGER)), 0) AS m
+           FROM sale_refunds WHERE refund_number ~ '^REF-[0-9]{4}-[0-9]+$'`,
+  movement: `SELECT COALESCE(MAX(CAST(substring(movement_number from '[0-9]+$') AS INTEGER)), 0) AS m
+             FROM stock_movements WHERE movement_number ~ '^MOV-[0-9]{4}-[0-9]+$'`,
+};
+
+/**
+ * Catch up doc_* sequences to MAX(digits) so nextval cannot collide with
+ * legacy MAX+1 writers (GR / quote / delivery / adjustments).
+ */
+export async function resyncDocumentNumberSequences(
+  client: Pool | PoolClient,
+  kinds: readonly DocumentNumberKind[] = ['sale', 'order', 'refund', 'movement'],
+): Promise<void> {
+  for (const kind of kinds) {
+    const target = DOCUMENT_NUMBER_TARGETS[kind];
+    if (!ALLOWED_SEQUENCES.has(target.sequence)) {
+      throw new Error(`Unknown document number sequence: ${target.sequence}`);
+    }
+    const maxRes = await client.query<{ m: string | number }>(SEQUENCE_MAX_SQL[kind]);
+    const max = Number(maxRes.rows[0]?.m ?? 0);
+    if (max > 0) {
+      await client.query(`SELECT setval('${target.sequence}', $1, true)`, [max]);
+    } else {
+      await client.query(`SELECT setval('${target.sequence}', 1, false)`);
+    }
+  }
+}
+
+async function allocateUniquePrefixedNumber(
+  client: Pool | PoolClient,
+  opts: {
+    kind: DocumentNumberKind;
+    prefix: string;
+    pad: number;
+    existsSql: string;
+  },
+): Promise<string> {
+  const { kind, prefix, pad, existsSql } = opts;
+  const target = DOCUMENT_NUMBER_TARGETS[kind];
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    const nextNum = await nextvalAllowlisted(client, target.sequence);
+    const candidate = `${prefix}${String(nextNum).padStart(pad, '0')}`;
+    // EXISTS AS exists — mocks that only stub nextval ({n}) treat as free.
+    const exists = await client.query<{ exists?: boolean }>(existsSql, [candidate]);
+    if (!exists.rows[0]?.exists) return candidate;
+    // Sequence lagged behind a legacy MAX+1 writer — catch up and retry.
+    await resyncDocumentNumberSequences(client, [kind]);
+  }
+  throw new Error(`Unable to allocate unique ${kind} document number`);
+}
+
 /**
  * Allocate next SALE-/ORD-/REF- number via sequence (no TX-scoped advisory lock).
  * Safe to call on the sale transaction client — nextval does not serialize FEFO/GL.
+ * Self-heals when sequence lags behind MAX (legacy writers / failed TX gaps).
  */
 export async function allocateNextPrefixedDocumentNumber(
   client: Pool | PoolClient,
@@ -104,13 +162,20 @@ export async function allocateNextPrefixedDocumentNumber(
     throw new Error('Invalid document number prefix');
   }
 
-  const nextNum = await nextvalAllowlisted(client, target.sequence);
-  return `${prefix}${String(nextNum).padStart(pad, '0')}`;
+  const existsSql =
+    kind === 'sale'
+      ? `SELECT EXISTS(SELECT 1 FROM sales WHERE sale_number = $1) AS exists`
+      : kind === 'order'
+        ? `SELECT EXISTS(SELECT 1 FROM pos_orders WHERE order_number = $1) AS exists`
+        : `SELECT EXISTS(SELECT 1 FROM sale_refunds WHERE refund_number = $1) AS exists`;
+
+  return allocateUniquePrefixedNumber(client, { kind, prefix, pad, existsSql });
 }
 
 /**
  * Allocate next MOV-YYYY-NNNN via sequence — used on sale complete / stock paths.
  * Must NOT use advisory_xact_lock held until COMMIT (that serialized all completes).
+ * Self-heals when legacy MAX+1 paths raced the sequence ahead.
  */
 export async function allocateNextMovementNumber(
   client: Pool | PoolClient,
@@ -118,6 +183,10 @@ export async function allocateNextMovementNumber(
 ): Promise<string> {
   const year = getBusinessYear();
   const prefix = `MOV-${year}-`;
-  const nextNum = await nextvalAllowlisted(client, DOCUMENT_NUMBER_TARGETS.movement.sequence);
-  return `${prefix}${String(nextNum).padStart(pad, '0')}`;
+  return allocateUniquePrefixedNumber(client, {
+    kind: 'movement',
+    prefix,
+    pad,
+    existsSql: `SELECT EXISTS(SELECT 1 FROM stock_movements WHERE movement_number = $1) AS exists`,
+  });
 }

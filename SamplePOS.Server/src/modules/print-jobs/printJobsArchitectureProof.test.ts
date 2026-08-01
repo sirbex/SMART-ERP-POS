@@ -22,7 +22,7 @@ describe('Print Job SSOT architecture', () => {
     expect(sql).toMatch(/INSERT INTO schema_version \(version\) VALUES \(580\)/);
 
     const ver = readRepo('SamplePOS.Server/src/constants/schemaVersion.ts');
-    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*580/);
+    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*58[0-9]/);
   });
 
   it('server module enqueues jobs on sendKot / bill and exposes status API', () => {

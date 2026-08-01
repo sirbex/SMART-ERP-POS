@@ -26,6 +26,7 @@ import * as glEntryService from './glEntryService.js';
 import * as AccountingCore from './accountingCore.js';
 import logger from '../utils/logger.js';
 import { getBusinessDate } from '../utils/dateRange.js';
+import { allocateNextMovementNumber } from '../utils/documentNumberAllocation.js';
 import { lotService } from '../modules/inventory-lot/lotService.js';
 import { postgresLotRepository } from '../modules/inventory-lot/postgresLotRepository.js';
 import { loadGlobalSelectableLots } from '../modules/inventory-lot/postgresLotSelector.js';
@@ -408,19 +409,8 @@ export async function createOpeningStockEntry(
             throw new ValidationError(`Product "${product.name}" is inactive`);
         }
 
-        // 2. Generate movement number — same advisory-lock + MAX pattern used by stockMovementRepository
-        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-        const seqRes = await client.query<{ movement_number: string }>(
-            `SELECT 'OPST-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' ||
-       CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 11) AS INTEGER)), 0) + 1) <= 9999
-            THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 11) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-            ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 11) AS INTEGER)), 0) + 1)::TEXT
-       END
-       AS movement_number
-       FROM stock_movements
-       WHERE movement_number LIKE 'OPST-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`,
-        );
-        const movementNumber = seqRes.rows[0]?.movement_number ?? `OPST-${new Date().getFullYear()}-0001`;
+        // 2. Generate movement number via doc_movement_number_seq
+        const movementNumber = await allocateNextMovementNumber(client);
         const today = getBusinessDate();
 
         const openingResult = await lotService.receiveOpeningLot(client, {

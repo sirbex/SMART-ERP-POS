@@ -646,18 +646,6 @@ export async function deductStockFEFO(
     );
     const productName = pResult.rows[0]?.name ?? productId;
 
-    await conn.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-    const movNumRes = await conn.query(
-      `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' ||
-       CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-            THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-            ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-       END AS movement_number
-       FROM stock_movements
-       WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`,
-    );
-    const movementSeq = parseInt(movNumRes.rows[0]?.movement_number?.split('-')[2] || '1', 10);
-
     const deductResult = await warehouseSaleDeductionService.deductAtStore(conn as PoolClient, {
       storeLocationId: mainStoreId,
       productId,
@@ -668,7 +656,6 @@ export async function deductStockFEFO(
       referenceId,
       notes: `Distribution delivery ${referenceId}`,
       userId: createdBy,
-      movementSeqStart: movementSeq,
     });
     return { totalCost: Money.toNumber(deductResult.actualBatchCost) };
   }

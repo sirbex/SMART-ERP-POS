@@ -22,7 +22,8 @@ import * as glEntryService from '../../services/glEntryService.js';
 import * as costLayerService from '../../services/costLayerService.js';
 import * as masterDataGuard from '../../services/masterDataGuard.js';
 import logger from '../../utils/logger.js';
-import { getBusinessDate, getBusinessYear } from '../../utils/dateRange.js';
+import { getBusinessDate } from '../../utils/dateRange.js';
+import { allocateNextMovementNumber } from '../../utils/documentNumberAllocation.js';
 import { syncProductQuantity } from '../../utils/inventorySync.js';
 import {
   assertInventoryCouplingUnchanged,
@@ -587,24 +588,11 @@ export class StockMovementHandler {
   }
 
   /**
-   * Generate sequential movement number
+   * Generate sequential movement number — doc_movement_number_seq SSOT.
    * Format: MOV-YYYY-####
    */
   private async generateMovementNumber(client: PoolClient): Promise<string> {
-    // Advisory lock prevents concurrent duplicate movement number generation (held until COMMIT)
-    await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-    const result = await client.query(
-      `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' || 
-       CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-            THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-            ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-       END
-       AS movement_number
-       FROM stock_movements 
-       WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`
-    );
-
-    return result.rows[0]?.movement_number || `MOV-${getBusinessYear()}-0001`;
+    return allocateNextMovementNumber(client);
   }
 
   /**

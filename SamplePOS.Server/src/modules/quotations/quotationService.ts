@@ -962,19 +962,8 @@ export const quotationService = {
         ? await warehouseSaleDeductionService.resolveSellingStoreId(client)
         : null;
 
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-      const movNumRes = await client.query(
-        `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' ||
-         CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-              THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-              ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-         END AS movement_number
-         FROM stock_movements
-         WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`,
-      );
-      let movementSeq = parseInt(movNumRes.rows[0]?.movement_number?.split('-')[2] || '1', 10);
-
       // FEFO / multistore store deduction — base_quantity SSOT (Rule 2).
+      // Movement numbers: doc_movement_number_seq only (never legacy MAX+1).
       for (let index = 0; index < saleItems.length; index++) {
         const item = saleItems[index];
         const isServiceItem = !item.productId || item.productId.startsWith('custom_');
@@ -1009,9 +998,7 @@ export const quotationService = {
             enteredQty: item.quantity,
             baseUomId: snap?.baseUomId ?? item.uomId ?? '',
             conversionFactor: snap ? String(snap.conversionFactor) : '1',
-            movementSeqStart: movementSeq,
           });
-          movementSeq = deductResult.nextMovementSeq;
           const posted = postedSaleItems[index];
           if (posted?.id) {
             await salesRepository.updateSaleItemWarehouseTrace(client, posted.id, {

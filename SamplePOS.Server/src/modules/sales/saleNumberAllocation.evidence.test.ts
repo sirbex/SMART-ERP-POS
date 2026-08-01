@@ -56,11 +56,21 @@ describe('document number SEQUENCE SSOT (complete-path scale)', () => {
     expect(mig).toContain('setval');
   });
 
-  it('EVIDENCE gate: allocator uses nextval — no advisory lock on sale/order/refund', () => {
+  it('EVIDENCE: migration 581 resyncs sequences to MAX (order-complete 409 heal)', () => {
+    const mig = readRepo('shared/sql/581_resync_doc_number_sequences.sql');
+    expect(mig).toContain('doc_movement_number_seq');
+    expect(mig).toContain('setval');
+    expect(mig).toContain('581');
+    const ver = readRepo('SamplePOS.Server/src/constants/schemaVersion.ts');
+    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*581/);
+  });
+
+  it('EVIDENCE gate: allocator uses nextval + self-heal — no advisory lock on sale/order/refund', () => {
     const util = readRepo('SamplePOS.Server/src/utils/documentNumberAllocation.ts');
     expect(util).toContain('nextval(');
     expect(util).toContain('doc_sale_number_seq');
     expect(util).toContain('allocateNextMovementNumber');
+    expect(util).toContain('resyncDocumentNumberSequences');
     expect(util).not.toContain('pg_advisory_xact_lock');
     expect(util).not.toMatch(/ORDER BY \w+ DESC/);
 
@@ -80,6 +90,20 @@ describe('document number SEQUENCE SSOT (complete-path scale)', () => {
     const movRepo = readRepo('SamplePOS.Server/src/modules/stock-movements/stockMovementRepository.ts');
     expect(movRepo).toContain('allocateNextMovementNumber');
     expect(movRepo).not.toContain("pg_advisory_xact_lock(hashtext('movement_number_seq'))");
+
+    // Legacy MAX+1 writers must be gone — they raced the sequence → 409 on complete
+    for (const rel of [
+      'SamplePOS.Server/src/modules/quotations/quotationService.ts',
+      'SamplePOS.Server/src/modules/goods-receipts/goodsReceiptService.ts',
+      'SamplePOS.Server/src/modules/inventory/stockMovementHandler.ts',
+      'SamplePOS.Server/src/modules/inventory/warehouse/warehouseSaleVoidRestoreService.ts',
+      'SamplePOS.Server/src/modules/delivery-notes/deliveryNoteService.ts',
+      'SamplePOS.Server/src/modules/distribution/distRepository.ts',
+      'SamplePOS.Server/src/services/masterDataGuard.ts',
+    ]) {
+      const src = readRepo(rel);
+      expect(src).not.toContain("pg_advisory_xact_lock(hashtext('movement_number_seq'))");
+    }
   });
 
   it('allocator rejects dangerous prefixes', async () => {

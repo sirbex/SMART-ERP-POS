@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { syncProductQuantity } from '../../../utils/inventorySync.js';
-import { getBusinessYear } from '../../../utils/dateRange.js';
+import { allocateNextMovementNumber } from '../../../utils/documentNumberAllocation.js';
 import { isMultistoreEnabled } from './multistoreSettings.js';
 import { posProductSearchService } from './posProductSearchService.js';
 import { lotService } from '../../inventory-lot/lotService.js';
@@ -73,18 +73,7 @@ export const warehouseSaleVoidRestoreService = {
             userId: params.voidedById,
         });
 
-        await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-        const movNumRes = await client.query<{ movement_number: string }>(
-            `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' ||
-             CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-                  THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-                  ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-             END AS movement_number
-             FROM stock_movements
-             WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`,
-        );
-        const movementNumber =
-            movNumRes.rows[0]?.movement_number ?? `MOV-${getBusinessYear()}-0001`;
+        const movementNumber = await allocateNextMovementNumber(client);
 
         await client.query(
             `INSERT INTO stock_movements (

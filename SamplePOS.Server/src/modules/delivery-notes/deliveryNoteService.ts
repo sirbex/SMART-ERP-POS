@@ -447,18 +447,6 @@ export const deliveryNoteService = {
         ? await warehouseSaleDeductionService.resolveMainStoreId(client)
         : null;
 
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext('movement_number_seq'))`);
-      const movNumRes = await client.query(
-        `SELECT 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-' ||
-         CASE WHEN (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1) <= 9999
-              THEN LPAD((COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT, 4, '0')
-              ELSE (COALESCE(MAX(CAST(SUBSTRING(movement_number FROM 10) AS INTEGER)), 0) + 1)::TEXT
-         END AS movement_number
-         FROM stock_movements
-         WHERE movement_number LIKE 'MOV-' || TO_CHAR(CURRENT_DATE, 'YYYY') || '-%'`,
-      );
-      let movementSeq = parseInt(movNumRes.rows[0]?.movement_number?.split('-')[2] || '1', 10);
-
       for (const line of linesResult.rows) {
         const productId = line.product_id as string;
 
@@ -487,9 +475,7 @@ export const deliveryNoteService = {
             notes: `DN ${dn.delivery_note_number} PGI`,
             userId: postedById,
             enteredQty,
-            movementSeqStart: movementSeq,
           });
-          movementSeq = deductResult.nextMovementSeq;
           documentCostEstimate = documentCostEstimate.plus(deductResult.actualBatchCost);
         } else {
         const fefoResult = await sharedDeductStockFEFO(client, {
