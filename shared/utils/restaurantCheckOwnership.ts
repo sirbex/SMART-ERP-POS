@@ -34,6 +34,10 @@ export function canEditOtherWaitersChecks(actor: OwnershipActor): boolean {
 
   const perms = permissionSet(actor.permissions);
   if (perms.has('*')) return true;
+  // Super-Admin RBAC with a mis-seeded users.role (e.g. STAFF) still edits peers.
+  for (const key of perms) {
+    if (key.startsWith('admin.')) return true;
+  }
   if (perms.has('restaurant.manage')) return true;
   if (perms.has(RESTAURANT_EDIT_OTHERS_PERMISSION)) return true;
   // Cashiers settle the floor — they must see every open check.

@@ -61,6 +61,26 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     ).toBe(true);
   });
 
+  it('EVIDENCE: Super-Admin RBAC (admin.*) edits peers even if users.role is STAFF', () => {
+    expect(
+      canEditOtherWaitersChecks({
+        userId: 'misseeded-admin',
+        role: 'STAFF',
+        permissions: ['admin.read', 'admin.update', 'restaurant.order'],
+      }),
+    ).toBe(true);
+    expect(
+      canMutateRestaurantCheck({
+        checkWaiterId: otherWaiterId,
+        actor: {
+          userId: 'misseeded-admin',
+          role: 'STAFF',
+          permissions: ['admin.read'],
+        },
+      }),
+    ).toBe(true);
+  });
+
   it('EVIDENCE: Waiter owns own check and can claim unassigned', () => {
     expect(ownsRestaurantCheck(waiter.userId, waiter.userId)).toBe(true);
     expect(ownsRestaurantCheck(null, waiter.userId)).toBe(true);

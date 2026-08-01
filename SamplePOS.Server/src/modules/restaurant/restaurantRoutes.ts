@@ -10,14 +10,17 @@ import type { OwnershipActor } from '../../../../shared/utils/restaurantCheckOwn
 import { legacyRoleGrantsPermission } from '../../../../shared/authorization/legacyRoleFallback.js';
 
 /**
- * Ownership must match route gates: RBAC perms when present, else legacy role
- * fallback (same as GET /rbac/me/permissions). Otherwise cashiers with only
- * users.role=CASHIER see all tables in the UI but get 403 on mutate.
+ * Ownership must match route gates: RBAC perms when present, unioned with
+ * legacy users.role grants for floor override (ADMIN/MANAGER/CASHIER).
+ *
+ * Do NOT gate legacy merge on `permissions.size === 0` — if authContext is
+ * missing/partial, a Super-Admin who still has users.role=STAFF (mis-seeded
+ * admin@test.com) would be blocked from peer tables.
  */
 function ownershipActorFromReq(req: Request): OwnershipActor {
   const rbac = req.authContext?.permissions;
   const permissions = new Set<string>(rbac ? [...rbac] : []);
-  if (permissions.size === 0 && req.user?.role) {
+  if (req.user?.role) {
     for (const key of [
       'restaurant.pay',
       'restaurant.manage',
