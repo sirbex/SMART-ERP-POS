@@ -31,7 +31,7 @@ describe('SMART Print Agent (platform component)', () => {
     expect(readRepo('smart-print-agent/src/printers.ts')).toMatch(/assertPrinterExists/);
     expect(readRepo('smart-print-agent/src/rawPrint.ts')).toMatch(/assertPrinterExists/);
     expect(readRepo('smart-print-agent/src/config.ts')).toMatch(/DEFAULT_PORT = 1811/);
-    expect(readRepo('smart-print-agent/src/config.ts')).toMatch(/1\.3\.0/);
+    expect(readRepo('smart-print-agent/src/config.ts')).toMatch(/1\.3\.1/);
   });
 
   it('EVIDENCE: cashiers never need npm — installer + FOH status', () => {

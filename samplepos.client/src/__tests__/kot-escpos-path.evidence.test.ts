@@ -145,6 +145,6 @@ describe('KOT ESC/POS dual-path architecture', () => {
     expect(queue).toMatch(/format === 'escpos'/);
 
     const config = readRepo('smart-print-agent/src/config.ts');
-    expect(config).toMatch(/1\.3\.0/);
+    expect(config).toMatch(/1\.3\.\d+/);
   });
 });

@@ -62,7 +62,7 @@ export function readLocalVersion(): { productVersion: string; printServiceVersio
   } catch {
     /* ignore */
   }
-  return { productVersion: '2.0.0', printServiceVersion: '1.3.0' };
+  return { productVersion: '2.0.0', printServiceVersion: '1.3.1' };
 }
 
 async function runWinsw(args: string[]): Promise<{ ok: boolean; stdout: string; stderr: string }> {
