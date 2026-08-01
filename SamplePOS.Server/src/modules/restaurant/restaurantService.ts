@@ -2052,11 +2052,11 @@ export const restaurantService = {
           const remainDiscount =
             slice.onHand > 0
               ? Number(
-                  new Decimal(slice.discountAmount)
-                    .times(remainQty)
-                    .div(slice.onHand)
-                    .toFixed(2),
-                )
+                new Decimal(slice.discountAmount)
+                  .times(remainQty)
+                  .div(slice.onHand)
+                  .toFixed(2),
+              )
               : 0;
           const reduced = await restaurantRepository.reduceOrderItemQuantity(
             client,
