@@ -6,21 +6,37 @@ export const ScopeTypeSchema = z.enum(['global', 'organization', 'branch', 'ware
 export const CreateRoleSchema = z.object({
   name: z.string().min(2).max(100).regex(/^[a-zA-Z0-9_\-\s]+$/, 'Name can only contain letters, numbers, underscores, hyphens, and spaces'),
   description: z.string().min(1).max(500),
-  permissionKeys: z.array(z.string()).min(1, 'At least one permission is required').refine(
-    (keys) => keys.every(key => PERMISSION_KEYS.includes(key)),
-    { message: 'Invalid permission key provided' }
-  ),
+  permissionKeys: z
+    .array(z.string())
+    .min(1, 'At least one permission is required')
+    .superRefine((keys, ctx) => {
+      const invalid = keys.filter((key) => !PERMISSION_KEYS.includes(key));
+      if (invalid.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Invalid permission key(s): ${invalid.join(', ')}`,
+        });
+      }
+    }),
 });
 
 export const UpdateRoleSchema = z.object({
   name: z.string().min(2).max(100).regex(/^[a-zA-Z0-9_\-\s]+$/).optional(),
   description: z.string().min(1).max(500).optional(),
-  permissionKeys: z.array(z.string()).min(1).refine(
-    (keys) => keys.every(key => PERMISSION_KEYS.includes(key)),
-    { message: 'Invalid permission key provided' }
-  ).optional(),
+  permissionKeys: z
+    .array(z.string())
+    .min(1)
+    .superRefine((keys, ctx) => {
+      const invalid = keys.filter((key) => !PERMISSION_KEYS.includes(key));
+      if (invalid.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Invalid permission key(s): ${invalid.join(', ')}`,
+        });
+      }
+    })
+    .optional(),
 });
-
 export const AssignUserRoleSchema = z.object({
   userId: z.string().uuid(),
   roleId: z.string().uuid(),

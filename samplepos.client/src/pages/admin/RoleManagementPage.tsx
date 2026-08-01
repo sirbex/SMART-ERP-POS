@@ -21,9 +21,9 @@ import { useSubmitOnEnter } from '../../hooks/useSubmitOnEnter';
 
 // Module display order (enterprise: most critical first)
 const MODULE_ORDER: string[] = [
-  'system', 'admin', 'sales', 'pos', 'quotations', 'inventory', 'purchasing',
-  'accounting', 'expenses', 'banking', 'customers', 'suppliers', 'delivery',
-  'reports', 'settings', 'crm', 'hr',
+  'system', 'admin', 'sales', 'pos', 'orders', 'restaurant', 'quotations', 'inventory', 'purchasing',
+  'accounting', 'expenses', 'banking', 'customers', 'suppliers', 'delivery', 'distribution',
+  'corrections', 'reports', 'settings', 'crm', 'hr',
 ];
 
 // Module descriptions for admin context
@@ -32,6 +32,8 @@ const MODULE_DESCRIPTIONS: Record<string, string> = {
   admin: 'Administrative panel access',
   sales: 'Sales transactions & invoicing',
   pos: 'Point of Sale terminal',
+  orders: 'POS order queue (dispenser / cashier)',
+  restaurant: 'Restaurant floor, KOT, bill & settle',
   quotations: 'Sales quotations & estimates',
   inventory: 'Stock & batch management',
   purchasing: 'Purchase orders & goods receipts',
@@ -41,6 +43,8 @@ const MODULE_DESCRIPTIONS: Record<string, string> = {
   customers: 'Customer records & groups',
   suppliers: 'Supplier records',
   delivery: 'Delivery orders & routing',
+  distribution: 'Sales orders, deliveries & invoices',
+  corrections: 'Correction wizards (wrong product / supplier)',
   reports: 'Business reports & analytics',
   settings: 'Application configuration',
   crm: 'Leads, opportunities & pipeline',

@@ -65,14 +65,19 @@ describe('systemRoleGrants SSOT', () => {
     ).toBe(true);
   });
 
-  it('Cashier gets inventory.read + restaurant.pay; Waiter never gets pay', () => {
+  it('Cashier gets inventory.read + restaurant.pay + edit_others; Waiter never gets pay', () => {
     expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('inventory.read');
     expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('restaurant.pay');
+    expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('restaurant.edit_others');
     expect(isSystemCashierPermission({ key: 'inventory.read', module: 'inventory' })).toBe(true);
     expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.pay');
     expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.kitchen');
+    expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.edit_others');
     expect(isSystemWaiterPermission({ key: 'restaurant.pay', module: 'restaurant' })).toBe(false);
     expect(isSystemWaiterPermission({ key: 'restaurant.order', module: 'restaurant' })).toBe(true);
+    expect(
+      isSystemManagerPermission({ key: 'restaurant.edit_others', module: 'restaurant' }),
+    ).toBe(true);
   });
 
   it('Accountant gets full restaurant operate keys (order + kitchen + pay)', () => {

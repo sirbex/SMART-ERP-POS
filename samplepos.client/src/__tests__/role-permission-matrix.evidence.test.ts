@@ -25,9 +25,11 @@ describe('Role grant SSOT', () => {
   it('cashier includes inventory.read and restaurant.pay; waiter never has pay', () => {
     expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('inventory.read');
     expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('restaurant.pay');
+    expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('restaurant.edit_others');
     expect(SYSTEM_CASHIER_PERMISSION_KEYS).toContain('restaurant.order');
     expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.pay');
     expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.kitchen');
+    expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.edit_others');
     expect(isSystemCashierPermission({ key: 'inventory.read', module: 'inventory' })).toBe(true);
     expect(isSystemWaiterPermission({ key: 'restaurant.pay', module: 'restaurant' })).toBe(false);
   });

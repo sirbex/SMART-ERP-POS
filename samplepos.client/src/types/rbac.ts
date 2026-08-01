@@ -10,6 +10,8 @@ export type PermissionModule =
   | 'accounting'
   | 'admin'
   | 'pos'
+  | 'orders'
+  | 'restaurant'
   | 'purchasing'
   | 'customers'
   | 'suppliers'
@@ -21,7 +23,9 @@ export type PermissionModule =
   | 'crm'
   | 'hr'
   | 'expenses'
-  | 'quotations';
+  | 'quotations'
+  | 'distribution'
+  | 'corrections';
 
 // Permission Action Types
 export type PermissionAction =
@@ -31,7 +35,10 @@ export type PermissionAction =
   | 'delete'
   | 'approve'
   | 'void'
+  | 'pay'
+  | 'cancel'
   | 'refund'
+  | 'exchange'
   | 'export'
   | 'import'
   | 'post'
@@ -40,6 +47,7 @@ export type PermissionAction =
   | 'payroll_process'
   | 'payroll_post'
   | 'adjust'
+  | 'execute'
   | 'sales_view'
   | 'inventory_view'
   | 'financial_view'
@@ -48,7 +56,8 @@ export type PermissionAction =
   | 'banking_view'
   | 'hr_view'
   | 'period_manage'
-  | 'chart_manage';
+  | 'chart_manage'
+  | 'reprint';
 
 // Scope Types for multi-tenant permissions
 export type ScopeType = 'global' | 'organization' | 'branch' | 'warehouse';

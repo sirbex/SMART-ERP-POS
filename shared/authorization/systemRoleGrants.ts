@@ -86,6 +86,7 @@ export const SYSTEM_CASHIER_PERMISSION_KEYS = [
   'restaurant.order',
   'restaurant.kitchen',
   'restaurant.pay',
+  'restaurant.edit_others',
   'reports.sales_view',
   'expenses.read',
   'expenses.create',

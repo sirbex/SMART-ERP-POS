@@ -54,6 +54,7 @@ export const LEGACY_CASHIER_PERMISSIONS = [
   'restaurant.order',
   'restaurant.kitchen',
   'restaurant.pay',
+  'restaurant.edit_others',
   'sales.reprint',
   'distribution.read',
   'distribution.create',
