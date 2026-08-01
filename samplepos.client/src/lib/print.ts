@@ -109,13 +109,13 @@ export async function printHtmlDocument(html: string): Promise<void> {
 
   // Strategy 1: local print bridge (Sunmi ESC/POS agent, etc.)
   try {
-    const bridgeRes = await fetch('http://localhost:1811/print', {
+    const bridgeRes = await fetch('http://127.0.0.1:1811/print', {
       method: 'POST',
       headers: { 'Content-Type': 'text/html; charset=utf-8' },
       body: printHtml,
       signal: AbortSignal.timeout(1500),
     });
-    if (bridgeRes.ok) return;
+    if (bridgeRes.ok || bridgeRes.status === 202) return;
   } catch {
     // Bridge not reachable — fall through
   }

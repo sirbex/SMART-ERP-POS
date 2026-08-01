@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import * as Tabs from '@radix-ui/react-tabs';
 import InvoiceSettingsTab from './tabs/InvoiceSettingsTab';
@@ -7,14 +7,26 @@ import UserManagementTab from './tabs/UserManagementTab';
 import SystemSettingsTab from './tabs/SystemSettingsTab';
 import DataManagementTab from './tabs/DataManagementTab';
 import BrandingSettingsTab from './tabs/BrandingSettingsTab';
+import PrintingSettingsTab from './tabs/PrintingSettingsTab';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
 import GLIntegrityPanel from '../../components/GLIntegrityPanel';
 import { useHasPermission } from '../../authorization/useAuthorization';
 
-const VALID_TABS = ['invoice', 'company', 'users', 'system', 'branding', 'data', 'offline', 'gl-integrity'] as const;
+const VALID_TABS = [
+  'invoice',
+  'company',
+  'users',
+  'system',
+  'branding',
+  'printing',
+  'data',
+  'offline',
+  'gl-integrity',
+] as const;
 
 export default function SettingsPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const tabParam = searchParams.get('tab');
   const initialTab = tabParam && (VALID_TABS as readonly string[]).includes(tabParam) ? tabParam : 'invoice';
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -22,6 +34,8 @@ export default function SettingsPage() {
   const canReadAccounting = useHasPermission('accounting.read');
   const canReconcileAccounting = useHasPermission('accounting.reconcile');
   const canViewGLIntegrity = canReadAccounting || canReconcileAccounting;
+  const canReadSystem = useHasPermission('system.read');
+  const canConfigurePrinting = canReadSystem;
 
   // Update tab if the URL search param changes (e.g. navigating from POS badge)
   useEffect(() => {
@@ -29,6 +43,11 @@ export default function SettingsPage() {
       setActiveTab(tabParam);
     }
   }, [tabParam]);
+
+  const onTabChange = (next: string) => {
+    setActiveTab(next);
+    navigate(next === 'invoice' ? '/settings' : `/settings?tab=${next}`, { replace: true });
+  };
 
   return (
     <Layout>
@@ -43,7 +62,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Tabs */}
-          <Tabs.Root value={activeTab} onValueChange={setActiveTab}>
+          <Tabs.Root value={activeTab} onValueChange={onTabChange}>
             <Tabs.List className="flex gap-1 sm:gap-2 border-b border-gray-200 mb-8 overflow-x-auto">
               <Tabs.Trigger
                 value="invoice"
@@ -75,6 +94,14 @@ export default function SettingsPage() {
               >
                 Branding
               </Tabs.Trigger>
+              {canConfigurePrinting && (
+                <Tabs.Trigger
+                  value="printing"
+                  className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-blue-600 data-[state=active]:border-blue-600 transition-colors whitespace-nowrap"
+                >
+                  Printing
+                </Tabs.Trigger>
+              )}
               <Tabs.Trigger
                 value="data"
                 className="px-3 sm:px-6 py-3 text-sm font-medium text-gray-600 border-b-2 border-transparent hover:text-gray-900 hover:border-gray-300 data-[state=active]:text-red-600 data-[state=active]:border-red-600 transition-colors whitespace-nowrap"
@@ -119,6 +146,12 @@ export default function SettingsPage() {
             <Tabs.Content value="branding">
               <BrandingSettingsTab />
             </Tabs.Content>
+
+            {canConfigurePrinting && (
+              <Tabs.Content value="printing">
+                <PrintingSettingsTab />
+              </Tabs.Content>
+            )}
 
             <Tabs.Content value="data">
               <DataManagementTab />

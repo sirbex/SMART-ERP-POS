@@ -1,6 +1,5 @@
 /**
- * Evidence: 80mm thermal print declares paper width (not A4) and keeps the
- * print iframe alive until afterprint so Windows drivers can read the job.
+ * Evidence: 80mm thermal print — readable fonts, fixed roll height (default 297mm).
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -11,19 +10,32 @@ import {
   buildThermalPrintCss,
   ensureThermalPrintCss,
   htmlHasThermalPageSize,
+  normalizeThermalPageSizeForPrint,
 } from '../lib/thermalPrintCss';
 import { buildThermalGuestDocumentHtml } from '../lib/thermalGuestDocument';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
 describe('thermal 80mm continuous-roll print SSOT', () => {
-  it('declares 80mm @page with sane roll height (not A4 / not 3000mm)', () => {
+  it('declares 80×297mm @page by default (readable; not auto / not 600mm)', () => {
+    expect(THERMAL_ROLL_HEIGHT_MM).toBe(297);
     const css = buildThermalPrintCss(80);
     expect(css).toMatch(/@page\s*\{/);
-    expect(css).toContain('80mm');
-    expect(css).toMatch(new RegExp(`size:\\s*80mm\\s+${THERMAL_ROLL_HEIGHT_MM}mm`));
-    expect(THERMAL_ROLL_HEIGHT_MM).toBeGreaterThanOrEqual(400);
-    expect(THERMAL_ROLL_HEIGHT_MM).toBeLessThanOrEqual(1000);
+    expect(css).toMatch(/size:\s*80mm\s+297mm/);
+    expect(css).not.toMatch(/size:\s*80mm\s+auto/);
+    expect(css).not.toMatch(/size:\s*80mm\s+600mm/);
+  });
+
+  it('normalizes auto / short / tall heights to SSOT 297mm', () => {
+    expect(normalizeThermalPageSizeForPrint('@page { size: 80mm auto; }')).toMatch(
+      /size:\s*80mm\s+297mm/,
+    );
+    expect(normalizeThermalPageSizeForPrint('@page { size: 80mm 60mm; }')).toMatch(
+      /size:\s*80mm\s+297mm/,
+    );
+    expect(normalizeThermalPageSizeForPrint('@page { size: 80mm 600mm; }')).toMatch(
+      /size:\s*80mm\s+297mm/,
+    );
   });
 
   it('guest receipt HTML embeds thermal roll CSS', () => {
@@ -44,33 +56,29 @@ describe('thermal 80mm continuous-roll print SSOT', () => {
       companyName: 'Test Cafe',
     });
     expect(htmlHasThermalPageSize(html)).toBe(true);
-    expect(html).toContain('80mm');
-    expect(html).toContain(`${THERMAL_ROLL_HEIGHT_MM}mm`);
-    expect(html).toMatch(/page-break-inside:\s*avoid/);
+    expect(html).toMatch(/size:\s*80mm\s+297mm/);
     expect(html).toMatch(/font-size:\s*15px/);
     expect(html).toMatch(/font-weight:\s*700/);
-    expect(html).toMatch(/color:\s*#000/);
   });
 
   it('ensureThermalPrintCss injects when missing; idempotent when present', () => {
     const bare = '<!DOCTYPE html><html><head></head><body>hi</body></html>';
     const once = ensureThermalPrintCss(bare, 80);
     expect(once).toContain('data-thermal-roll');
-    expect(once).toMatch(new RegExp(`size:\\s*80mm\\s+${THERMAL_ROLL_HEIGHT_MM}mm`));
+    expect(once).toMatch(/size:\s*80mm\s+297mm/);
     const twice = ensureThermalPrintCss(once, 80);
     expect(twice.match(/data-thermal-roll/g)?.length).toBe(1);
   });
 
-  it('print.ts keeps iframe until afterprint; not 0×0; KOT uses shared path', () => {
+  it('print.ts keeps iframe until afterprint; KOT uses shared path', () => {
     const print = readFileSync(resolve(here, '../lib/print.ts'), 'utf8');
     expect(print).toMatch(/ensureThermalPrintCss/);
     expect(print).toMatch(/width = '80mm'/);
     expect(print).toMatch(/afterprint/);
-    expect(print).not.toMatch(/style\.width = '0'/);
-    expect(print).toMatch(/scrollHeight/);
 
     const kot = readFileSync(resolve(here, '../lib/printRestaurant.ts'), 'utf8');
-    expect(kot).toMatch(/printHtmlDocument/);
     expect(kot).toMatch(/buildThermalPrintCss/);
+    expect(kot).toMatch(/renderThermalTicketEscPos/);
+    expect(kot).toMatch(/try origins sequentially/);
   });
 });

@@ -28,7 +28,9 @@ function permissionSet(permissions?: Iterable<string> | null): Set<string> {
  */
 export function canEditOtherWaitersChecks(actor: OwnershipActor): boolean {
   const role = (actor.role || '').toUpperCase();
-  if (role === 'ADMIN' || role === 'MANAGER') return true;
+  // Legacy users.role SSOT — cashiers settle every open check even when RBAC
+  // permissions were omitted on the actor (ownershipActor must still pass role).
+  if (role === 'ADMIN' || role === 'MANAGER' || role === 'CASHIER') return true;
 
   const perms = permissionSet(actor.permissions);
   if (perms.has('*')) return true;

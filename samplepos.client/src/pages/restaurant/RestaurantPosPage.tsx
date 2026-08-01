@@ -10,6 +10,7 @@ import { Search, X } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { AdaptiveDialog } from '../../components/adaptive';
 import { api, getStructuredError } from '../../utils/api';
+import { isBackendUnavailableError } from '../../lib/isBackendUnavailableError';
 import { formatCurrency } from '../../utils/currency';
 import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 import { useLayoutTier } from '../../hooks/useLayoutTier';
@@ -26,7 +27,15 @@ import {
 import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
 import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
 import { printKitchenTicket, printRestaurantBill } from '../../lib/printRestaurant';
+import { kotPrintPartialSuccessMessage } from '../../lib/restaurantPrintPolicy';
+import {
+  dispatchPrintJobs,
+  enqueueOfflinePrintJob,
+  flushPendingPrintJobs,
+  type ClientPrintJob,
+} from '../../lib/printJobDispatcher';
 import { printReceipt } from '../../lib/print';
+import PrinterServiceStatusChip from '../../components/restaurant/PrinterServiceStatusChip';
 import {
   readCachedGuestBillPrinter,
   writeCachedGuestBillPrinter,
@@ -820,6 +829,19 @@ export default function RestaurantPosPage() {
     });
   }, [restaurantEnabled, isOnline]);
 
+  // Enterprise: when the terminal comes online, retry undelivered print jobs
+  // (offline queue + server PENDING/ERROR) without waiter action.
+  useEffect(() => {
+    if (!restaurantEnabled || !isOnline) return;
+    void flushPendingPrintJobs({ branding: companyBranding, online: true }).then((r) => {
+      if (r.delivered > 0) {
+        toast.success(`Printed ${r.delivered} queued ticket(s)`, {
+          id: 'print-jobs-flush',
+        });
+      }
+    });
+  }, [restaurantEnabled, isOnline, companyBranding]);
+
   // Same-origin tabs (POS + KDS): refresh floor when journal changes elsewhere.
   useEffect(() => {
     if (!restaurantEnabled) return;
@@ -850,15 +872,31 @@ export default function RestaurantPosPage() {
       if (!isOnline) {
         return getCachedRestaurantTables() as RestaurantTable[];
       }
-      const res = await api.restaurant.listTables();
-      const tables = (res.data.data || []) as RestaurantTable[];
-      // keep cache warm
-      const { cacheRestaurantTables } = await import('../../lib/restaurantOfflineCache');
-      cacheRestaurantTables(tables);
-      return tables;
+      try {
+        const res = await api.restaurant.listTables();
+        const tables = (res.data.data || []) as RestaurantTable[];
+        // keep cache warm
+        const { cacheRestaurantTables } = await import('../../lib/restaurantOfflineCache');
+        cacheRestaurantTables(tables);
+        return tables;
+      } catch (err) {
+        // Permanent UX: never blank the floor for a brief Node restart / proxy gap.
+        if (isBackendUnavailableError(err)) {
+          const cached = getCachedRestaurantTables() as RestaurantTable[];
+          if (cached.length > 0) return cached;
+        }
+        throw err;
+      }
     },
     enabled: !!restaurantEnabled,
     refetchInterval: isOnline ? 15_000 : false,
+    retry: (failureCount, error) => {
+      if (isBackendUnavailableError(error)) return failureCount < 6;
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status && status >= 400 && status < 500) return false;
+      return failureCount < 1;
+    },
+    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 8_000),
   });
 
   // Reconcile journal ghosts against live server floor (FREE tables must not look busy).
@@ -1612,7 +1650,25 @@ export default function RestaurantPosPage() {
           orderChannel: check.channel,
         };
       }
-      // No open journal check: prefer cached FREE after local pay/cancel/void.
+      // No open journal check.
+      // Online: trust server occupancy — cached FREE must not hide a live peer check
+      // (waiters would open it and hit "belongs to another waiter").
+      if (isOnline) {
+        if (t.status === 'FREE') {
+          return {
+            ...t,
+            status: 'FREE' as const,
+            currentOrderId: null,
+            orderNumber: null,
+            orderTotal: null,
+            guestName: null,
+            waiterId: null,
+            waiterName: null,
+          };
+        }
+        return t;
+      }
+      // Offline: prefer cached FREE after local pay/cancel/void.
       const cached = cachedById.get(t.id);
       if (cached?.status === 'FREE' || t.status === 'FREE') {
         return {
@@ -1622,6 +1678,8 @@ export default function RestaurantPosPage() {
           orderNumber: null,
           orderTotal: null,
           guestName: null,
+          waiterId: null,
+          waiterName: null,
         };
       }
       return t;
@@ -1726,7 +1784,8 @@ export default function RestaurantPosPage() {
     }
     if (!selectedWaiterId || !waiters.some((w) => w.id === selectedWaiterId)) {
       const mine = waiters.find((w) => w.id === user.id);
-      setSelectedWaiterId(mine?.id || waiters[0].id);
+      // Prefer the signed-in user — never steal waiters[0] identity (wrong ownership).
+      setSelectedWaiterId(mine?.id || user.id);
     }
   }, [user?.id, waiters, selectedWaiterId]);
 
@@ -1881,12 +1940,24 @@ export default function RestaurantPosPage() {
 
   /**
    * Fire unsent lines to kitchen + best-effort KOT print.
+   * Kitchen commit is awaited (SSOT). Print delivery is background by default so
+   * the steward is never blocked on Get-Printer / PDF / spooler.
    * Does not return to floor (caller decides). Returns how many tickets were produced.
    */
-  const fireUnsentKotTickets = async (): Promise<{ kotCount: number; printFailures: number }> => {
+  const fireUnsentKotTickets = async (opts?: {
+    /** When false (default), POST /print accept runs in background after kitchen commit. */
+    awaitPrint?: boolean;
+  }): Promise<{ kotCount: number; printFailures: number }> => {
     if (!order) return { kotCount: 0, printFailures: 0 };
     const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
     if (unsentCount === 0) return { kotCount: 0, printFailures: 0 };
+
+    const awaitPrint = opts?.awaitPrint === true;
+
+    const deliverJobs = async (jobs: ClientPrintJob[]): Promise<number> => {
+      const dispatched = await dispatchPrintJobs(jobs, { branding: companyBranding });
+      return dispatched.failures;
+    };
 
     const useLocalKot = shouldUseLocalRestaurantMutation(isOnline, order.id);
     if (useLocalKot) {
@@ -1899,13 +1970,14 @@ export default function RestaurantPosPage() {
       const { tickets } = fireRestaurantKotOffline(derived);
       paintJournalCheck(selectedTableId, derived.orderId);
 
-      let printFailures = 0;
-      for (const kot of tickets) {
-        try {
-          await printKitchenTicket({
+      const offlineJobs: ClientPrintJob[] = tickets.map((kot) =>
+        enqueueOfflinePrintJob({
+          documentType: 'KOT',
+          targetPrinter: kot.printerName,
+          stationCode: kot.station,
+          payloadJson: {
             kotNumber: kot.kotOfflineId,
             station: kot.station,
-            printerName: kot.printerName,
             tableLabel: derived.tableName || derived.tableCode || selectedTable?.name || 'Table',
             sentByName: user?.fullName || user?.email || null,
             serverName:
@@ -1914,31 +1986,47 @@ export default function RestaurantPosPage() {
                 ? derived.waiterName
                 : null,
             waiterName: user?.fullName || user?.email || derived.waiterName || null,
-            firedAt: new Date().toLocaleString(),
+            firedAt: new Date().toISOString(),
+            ticketKind: 'FIRE',
             orderChannel: derived.channel,
             guestName: derived.guestName,
             guestPhone: derived.guestPhone,
             deliveryAddress: derived.deliveryAddress,
             pickupLabel: derived.pickupLabel,
-            companyName: companyBranding.companyName,
-            companyAddress: companyBranding.companyAddress,
-            companyPhone: companyBranding.companyPhone,
             items: kot.lines.map((it) => ({
               productName: it.productName,
               quantity: it.quantity,
               lineNotes: it.lineNotes ?? null,
             })),
-          });
-        } catch {
-          printFailures += 1;
-        }
+          },
+        }),
+      );
+
+      if (awaitPrint) {
+        const printFailures = await deliverJobs(offlineJobs);
+        publishLanKdsBoardChanged('KOT_FIRED_OFFLINE');
+        return { kotCount: tickets.length, printFailures };
       }
+
+      void deliverJobs(offlineJobs).then((printFailures) => {
+        if (printFailures > 0) {
+          toast.error(kotPrintPartialSuccessMessage(tickets.length, printFailures), {
+            duration: 7000,
+            id: 'kot-print-bg-fail',
+          });
+        }
+      });
       publishLanKdsBoardChanged('KOT_FIRED_OFFLINE');
-      return { kotCount: tickets.length, printFailures };
+      return { kotCount: tickets.length, printFailures: 0 };
     }
 
     const res = await api.restaurant.sendKot(order.id);
-    const kots = (res.data.data || []) as Array<{
+    const payload = res.data.data as
+      | { kots?: unknown[]; printJobs?: ClientPrintJob[] }
+      | unknown[];
+    // Backward-compatible: older servers returned a bare KOT array.
+    const legacyArray = Array.isArray(payload);
+    const kots = (legacyArray ? payload : payload?.kots || []) as Array<{
       kotNumber: string;
       station: string;
       printerName?: string | null;
@@ -1955,43 +2043,76 @@ export default function RestaurantPosPage() {
       pickupLabel?: string | null;
       items: Array<{ productName: string; quantity: string; lineNotes: string | null }>;
     }>;
+    const printJobs = (!legacyArray ? payload?.printJobs : undefined) as
+      | ClientPrintJob[]
+      | undefined;
 
-    if (kots.length === 0) return { kotCount: 0, printFailures: 0 };
+    if (kots.length === 0 && !(printJobs?.length)) return { kotCount: 0, printFailures: 0 };
 
-    let printFailures = 0;
-    for (const kot of kots) {
-      try {
-        await printKitchenTicket({
-          kotNumber: kot.kotNumber,
-          station: kot.station,
-          printerName: kot.printerName,
-          tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
-          sentByName: kot.firedByName || kot.waiterName || user?.fullName || user?.email || null,
-          serverName: kot.serverName || null,
-          waiterName: kot.firedByName || kot.waiterName,
-          firedAt: new Date(kot.firedAt).toLocaleString(),
-          orderChannel: meta?.orderChannel || kot.orderChannel,
-          guestName: meta?.guestName || kot.guestName,
-          guestPhone: meta?.guestPhone || kot.guestPhone,
-          deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
-          pickupLabel: meta?.pickupLabel || kot.pickupLabel,
-          companyName: companyBranding.companyName,
-          companyAddress: companyBranding.companyAddress,
-          companyPhone: companyBranding.companyPhone,
-          items: kot.items.map((it) => ({
-            productName: it.productName,
-            quantity: Number(it.quantity),
-            lineNotes: it.lineNotes,
-          })),
-        });
-      } catch {
-        printFailures += 1;
+    const kotCount = Math.max(kots.length, printJobs?.length || 0);
+
+    const runLegacyPrint = async (): Promise<number> => {
+      let printFailures = 0;
+      await Promise.all(
+        kots.map(async (kot) => {
+          try {
+            await printKitchenTicket({
+              kotNumber: kot.kotNumber,
+              station: kot.station,
+              printerName: kot.printerName,
+              tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
+              sentByName: kot.firedByName || kot.waiterName || user?.fullName || user?.email || null,
+              serverName: kot.serverName || null,
+              waiterName: kot.firedByName || kot.waiterName,
+              firedAt: new Date(kot.firedAt).toLocaleString(),
+              orderChannel: meta?.orderChannel || kot.orderChannel,
+              guestName: meta?.guestName || kot.guestName,
+              guestPhone: meta?.guestPhone || kot.guestPhone,
+              deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
+              pickupLabel: meta?.pickupLabel || kot.pickupLabel,
+              companyName: companyBranding.companyName,
+              companyAddress: companyBranding.companyAddress,
+              companyPhone: companyBranding.companyPhone,
+              items: kot.items.map((it) => ({
+                productName: it.productName,
+                quantity: Number(it.quantity),
+                lineNotes: it.lineNotes,
+              })),
+            });
+          } catch {
+            printFailures += 1;
+          }
+        }),
+      );
+      return printFailures;
+    };
+
+    if (awaitPrint) {
+      let printFailures = 0;
+      if (printJobs && printJobs.length > 0) {
+        printFailures = await deliverJobs(printJobs);
+      } else {
+        printFailures = await runLegacyPrint();
       }
+      publishLanKdsBoardChanged('KOT_FIRED_ONLINE');
+      invalidateCheck();
+      return { kotCount, printFailures };
     }
 
+    // Default: steward continues immediately after kitchen commit.
+    void (printJobs && printJobs.length > 0 ? deliverJobs(printJobs) : runLegacyPrint()).then(
+      (printFailures) => {
+        if (printFailures > 0) {
+          toast.error(kotPrintPartialSuccessMessage(kotCount, printFailures), {
+            duration: 7000,
+            id: 'kot-print-bg-fail',
+          });
+        }
+      },
+    );
     publishLanKdsBoardChanged('KOT_FIRED_ONLINE');
     invalidateCheck();
-    return { kotCount: kots.length, printFailures };
+    return { kotCount, printFailures: 0 };
   };
 
   /**
@@ -2030,10 +2151,9 @@ export default function RestaurantPosPage() {
             : `Sent ${kotCount} KOT ticket(s)`,
         );
       } else {
-        toast.success(
-          `KOT recorded (${kotCount}) — ${printFailures} printer offline. Start agent on :1811 / check station mapping. Use KDS until fixed.`,
-          { duration: 6000 },
-        );
+        toast.success(kotPrintPartialSuccessMessage(kotCount, printFailures), {
+          duration: 7000,
+        });
       }
       // Shared FOH: auto-logout after KOT for waiters / cashiers / staff (not admin/manager).
       if (maybeAutoLogoutAfterPrint('kot')) return;
@@ -2197,24 +2317,55 @@ export default function RestaurantPosPage() {
       };
 
       if (shouldUseLocalRestaurantMutation(isOnline, order.id)) {
-        let printOk = true;
-        try {
-          await printRestaurantBill(billPayload);
-        } catch {
-          printOk = false;
-        }
-        await finishAfterBill(printOk);
+        // Bill commit (offline mark) unlocks steward; paper is best-effort background.
+        void printRestaurantBill(billPayload).catch(() => {
+          toast.error('Bill marked (print unavailable)', {
+            duration: 5000,
+            id: 'bill-print-bg-fail',
+          });
+        });
+        await finishAfterBill(true);
         return;
       }
 
       const res = await api.restaurant.requestBill(order.id);
-      const bill = res.data.data as { order: OrderDetail; meta: CheckMeta };
+      const bill = res.data.data as {
+        order: OrderDetail;
+        meta: CheckMeta;
+        printJobs?: ClientPrintJob[];
+      };
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
       invalidateCheck();
 
-      let printOk = true;
-      try {
-        await printRestaurantBill({
+      // Kitchen/bill SSOT is already committed — do not block floor return on paper.
+      if (bill.printJobs && bill.printJobs.length > 0) {
+        const jobs = bill.printJobs.map((j) => ({
+          ...j,
+          targetPrinter: j.targetPrinter || guestBillPrinterName,
+          payloadJson: {
+            ...j.payloadJson,
+            taxName,
+            printedAt: new Date().toLocaleString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            }),
+            currencySymbol: config.currency?.symbol,
+          },
+        }));
+        void dispatchPrintJobs(jobs, { branding: companyBranding }).then((dispatched) => {
+          if (dispatched.failures > 0) {
+            toast.error('Bill marked (print unavailable)', {
+              duration: 5000,
+              id: 'bill-print-bg-fail',
+            });
+          }
+        });
+      } else {
+        void printRestaurantBill({
           orderNumber: bill.order.orderNumber,
           tableLabel: bill.meta.tableName || bill.meta.tableCode || selectedTable?.name || 'Table',
           waiterName: bill.meta.waiterName,
@@ -2249,12 +2400,15 @@ export default function RestaurantPosPage() {
           taxAmount: Number(bill.order.taxAmount),
           taxName,
           totalAmount: Number(bill.order.totalAmount),
+        }).catch(() => {
+          toast.error('Bill marked (print unavailable)', {
+            duration: 5000,
+            id: 'bill-print-bg-fail',
+          });
         });
-      } catch {
-        printOk = false;
       }
 
-      await finishAfterBill(printOk);
+      await finishAfterBill(true);
     } catch (err) {
       toast.error(apiErr(err, 'Bill failed'));
       setBusy(false);
@@ -2632,19 +2786,30 @@ export default function RestaurantPosPage() {
     items: Array<{ productName: string; quantity: string; lineNotes: string | null }>;
   };
 
-  const printVoidTickets = async (voidKots: VoidKotPrint[], reason?: string) => {
-    for (const kot of voidKots) {
-      try {
-        await printKitchenTicket({
+  const printVoidTickets = async (
+    voidKots: VoidKotPrint[],
+    reason?: string,
+    printJobs?: ClientPrintJob[],
+  ) => {
+    // VOID paper is best-effort — never block void UX on HTML→PDF.
+    if (printJobs && printJobs.length > 0) {
+      void dispatchPrintJobs(printJobs, { branding: companyBranding });
+      return;
+    }
+    const jobs = voidKots.map((kot) =>
+      enqueueOfflinePrintJob({
+        documentType: 'VOID_KOT',
+        targetPrinter: kot.printerName ?? null,
+        stationCode: kot.station,
+        payloadJson: {
           kotNumber: kot.kotNumber,
           station: kot.station,
-          printerName: kot.printerName,
           tableLabel: kot.tableName || kot.tableCode || selectedTable?.name || 'Table',
           sentByName:
             kot.firedByName || kot.waiterName || user?.fullName || user?.email || null,
           serverName: kot.serverName || null,
           waiterName: kot.firedByName || kot.waiterName,
-          firedAt: new Date(kot.firedAt).toLocaleString(),
+          firedAt: kot.firedAt,
           ticketKind: 'VOID',
           voidReason: reason || null,
           orderChannel: meta?.orderChannel || kot.orderChannel,
@@ -2652,19 +2817,15 @@ export default function RestaurantPosPage() {
           guestPhone: meta?.guestPhone || kot.guestPhone,
           deliveryAddress: meta?.deliveryAddress || kot.deliveryAddress,
           pickupLabel: meta?.pickupLabel || kot.pickupLabel,
-          companyName: companyBranding.companyName,
-          companyAddress: companyBranding.companyAddress,
-          companyPhone: companyBranding.companyPhone,
           items: kot.items.map((it) => ({
             productName: it.productName,
             quantity: Number(it.quantity),
             lineNotes: it.lineNotes,
           })),
-        });
-      } catch {
-        // best-effort — kitchen still has VOID on KDS
-      }
-    }
+        },
+      }),
+    );
+    void dispatchPrintJobs(jobs, { branding: companyBranding });
   };
 
   const handleVoidLines = async (
@@ -2810,10 +2971,11 @@ export default function RestaurantPosPage() {
       });
       const data = res.data.data as {
         voidKots?: VoidKotPrint[];
+        printJobs?: ClientPrintJob[];
         checkCancelled?: boolean;
       };
       if (hasKot && (data.voidKots?.length || 0) > 0) {
-        await printVoidTickets(data.voidKots || [], reason);
+        await printVoidTickets(data.voidKots || [], reason, data.printJobs);
         publishLanKdsBoardChanged('KOT_VOIDED');
       }
       setLineSheet(null);
@@ -3052,15 +3214,18 @@ export default function RestaurantPosPage() {
       return;
     }
     const addQty = nextQty - group.quantity;
+    const menuProduct =
+      productsQuery.data?.find((p) => p.id === group.productId) || null;
     addItemMutation.mutate(
       {
         product: {
           id: group.productId,
           name: group.productName,
           sellingPrice: String(group.unitPrice),
-          categoryId: null,
-          categoryName: null,
-          kitchenStation: null,
+          categoryId: menuProduct?.categoryId ?? null,
+          categoryName: menuProduct?.categoryName ?? null,
+          kitchenStation: menuProduct?.kitchenStation ?? null,
+          productType: menuProduct?.productType,
         },
         quantity: addQty,
       },
@@ -3214,9 +3379,9 @@ export default function RestaurantPosPage() {
     setBusy(true);
     try {
       const res = await api.restaurant.cancelCheck(order.id, { reason });
-      const data = res.data.data as { voidKots?: VoidKotPrint[] };
+      const data = res.data.data as { voidKots?: VoidKotPrint[]; printJobs?: ClientPrintJob[] };
       if (hasKot && (data.voidKots?.length || 0) > 0) {
-        await printVoidTickets(data.voidKots || [], reason);
+        await printVoidTickets(data.voidKots || [], reason, data.printJobs);
         publishLanKdsBoardChanged('KOT_VOIDED');
       }
       settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', { reason });
@@ -3431,6 +3596,7 @@ export default function RestaurantPosPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <PrinterServiceStatusChip compact showDiagnosticsLink={canManage} />
             <span
               className={`text-xs px-2 py-1 rounded ${
                 isOnline ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'

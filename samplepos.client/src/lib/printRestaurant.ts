@@ -3,14 +3,18 @@
  * KOT must never include prices.
  * Guest BILL HTML is SSOT with RECEIPT via thermalGuestDocument.
  *
+ * Thermal KOT path: Ticket model → ESC/POS → agent RAW (no Chromium).
+ * HTML→PDF remains for bills/invoices and as KOT fallback on old agents.
+ *
  * Expert FOH rule: waiters never choose a printer. Manager maps stations /
  * guest bill once. Print is silent via local agent (:1811 + X-Printer-Name).
  * Browser print dialog is emergency-only (Stations toggle, off by default).
  */
 
-import { consolidateKotLines } from '@shared/utils/consolidateKotLines';
+import { buildKotThermalTicket, resolveKotStaffLabels } from '@shared/printing/buildKotTicket';
+import { renderThermalTicketEscPos } from '@shared/printing/escposRenderer';
+import { renderThermalTicketHtml } from '@shared/printing/htmlRenderer';
 import {
-  documentCompanyHeaderHtml,
   type DocumentCompanyBranding,
 } from './documentCompanyBranding';
 import { printHtmlDocument } from './print';
@@ -18,41 +22,163 @@ import {
   billToThermalGuestDocument,
   buildThermalGuestDocumentHtml,
   formatGuestDocMoney,
+  guestDocumentToThermalTicket,
 } from './thermalGuestDocument';
 import { buildThermalPrintCss } from './thermalPrintCss';
 import { getCachedRestaurantStations } from './restaurantOfflineCache';
-import { LOCAL_PRINT_BRIDGE_ORIGINS } from './localPrintBridge';
+import { LOCAL_PRINT_BRIDGE_ORIGINS, readCachedBridgePrinters } from './localPrintBridge';
 import {
   isRestaurantBrowserPrintFallbackEnabled,
   silentPrintFailureMessage,
 } from './restaurantPrintPolicy';
+import { getPrinterServiceHealthCache } from './printAgentHealth';
+import { startPrintPathTrace } from './printPathTiming';
 
+type BridgeResult = {
+  ok: boolean;
+  reason?: 'offline' | 'unknown_printer' | 'rejected';
+  acceptMs?: number;
+};
+
+function bridgePreflight(printerName?: string | null): BridgeResult | null {
+  const name = printerName?.trim() || null;
+  const health = getPrinterServiceHealthCache();
+  if (name) {
+    if (health.status === 'offline') return { ok: false, reason: 'offline' };
+    const cached = readCachedBridgePrinters();
+    if (cached.length > 0) {
+      const hit = cached.some((p) => p.toLowerCase() === name.toLowerCase());
+      if (!hit) return { ok: false, reason: 'unknown_printer' };
+    }
+  } else if (health.status === 'offline') {
+    return { ok: false, reason: 'offline' };
+  }
+  return null;
+}
+
+function finalizeBridgeMiss(
+  name: string | null,
+  sawUnknown: boolean,
+): BridgeResult {
+  const health = getPrinterServiceHealthCache();
+  if (sawUnknown) return { ok: false, reason: 'unknown_printer' };
+  if (health.status === 'online' || health.status === 'restarting') {
+    return { ok: false, reason: name ? 'unknown_printer' : 'rejected' };
+  }
+  return { ok: false, reason: 'offline' };
+}
+
+/** Agent returns 200 or 202 once the job is queued (paper prints async). */
 async function postToPrintBridge(
   html: string,
   printerName?: string | null,
-): Promise<boolean> {
+): Promise<BridgeResult> {
+  const trace = startPrintPathTrace('postToPrintBridge');
+  const name = printerName?.trim() || null;
+  const blocked = bridgePreflight(name);
+  if (blocked) {
+    trace.end({ reason: blocked.reason });
+    return blocked;
+  }
+  trace.mark('preflight_done');
+
   const headers: Record<string, string> = {
     'Content-Type': 'text/html; charset=utf-8',
   };
-  const name = printerName?.trim();
   if (name) headers['X-Printer-Name'] = name;
 
-  const attempts = LOCAL_PRINT_BRIDGE_ORIGINS.map(async (origin) => {
+  // CRITICAL: try origins sequentially. Parallel POST to localhost + 127.0.0.1
+  // both hit the same agent and enqueue TWO identical jobs → double paper.
+  let sawUnknown = false;
+  for (const origin of LOCAL_PRINT_BRIDGE_ORIGINS) {
     try {
       const bridgeRes = await fetch(`${origin}/print`, {
         method: 'POST',
         headers,
         body: html,
-        signal: AbortSignal.timeout(3500),
+        signal: AbortSignal.timeout(1500),
       });
-      return bridgeRes.ok;
+      if (bridgeRes.ok || bridgeRes.status === 202) {
+        trace.mark('agent_responded');
+        trace.end({ ok: true, origin, format: 'html' });
+        return { ok: true, acceptMs: trace.elapsedMs() };
+      }
+      if (bridgeRes.status >= 400 && bridgeRes.status < 500) {
+        sawUnknown = true;
+        break;
+      }
     } catch {
-      return false;
+      // try next origin
     }
-  });
+  }
+  trace.mark('agent_responded');
+  const miss = finalizeBridgeMiss(name, sawUnknown);
+  trace.end({ reason: miss.reason });
+  return miss;
+}
 
-  const results = await Promise.all(attempts);
-  return results.some(Boolean);
+/** RAW ESC/POS — no Chromium. Requires Print Agent ≥ 1.3.0. */
+async function postEscPosToPrintBridge(
+  raw: Uint8Array,
+  printerName?: string | null,
+): Promise<BridgeResult> {
+  const trace = startPrintPathTrace('postEscPosToPrintBridge');
+  const name = printerName?.trim() || null;
+  const blocked = bridgePreflight(name);
+  if (blocked) {
+    trace.end({ reason: blocked.reason });
+    return blocked;
+  }
+  trace.mark('preflight_done');
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/octet-stream',
+    'X-Print-Format': 'escpos',
+  };
+  if (name) headers['X-Printer-Name'] = name;
+
+  let sawUnknown = false;
+  for (const origin of LOCAL_PRINT_BRIDGE_ORIGINS) {
+    try {
+      const bridgeRes = await fetch(`${origin}/print`, {
+        method: 'POST',
+        headers,
+        body: raw,
+        signal: AbortSignal.timeout(1500),
+      });
+      if (bridgeRes.ok || bridgeRes.status === 202) {
+        trace.mark('agent_responded');
+        trace.end({ ok: true, origin, format: 'escpos' });
+        return { ok: true, acceptMs: trace.elapsedMs() };
+      }
+      if (bridgeRes.status >= 400 && bridgeRes.status < 500) {
+        sawUnknown = true;
+        break;
+      }
+    } catch {
+      // try next origin
+    }
+  }
+  trace.mark('agent_responded');
+  const miss = finalizeBridgeMiss(name, sawUnknown);
+  trace.end({ reason: miss.reason });
+  return miss;
+}
+
+function agentSupportsEscPos(): boolean {
+  const health = getPrinterServiceHealthCache();
+  const v = health.version;
+  if (v) {
+    const m = /^(\d+)\.(\d+)/.exec(v);
+    if (!m) return false;
+    const major = Number(m[1]);
+    const minor = Number(m[2]);
+    // Explicit old agent → HTML only (binary would be mis-handled as text).
+    if (!(major > 1 || (major === 1 && minor >= 3))) return false;
+    return true;
+  }
+  // Version not cached yet but agent is up — try ESC/POS (HTML fallback on miss).
+  return health.status === 'online' || health.status === 'restarting';
 }
 
 /**
@@ -66,7 +192,9 @@ export function resolveStationPrinterName(stationCode: string | null | undefined
   const stations = getCachedRestaurantStations().filter((s) => s.isActive);
   if (code) {
     const match = stations.find((s) => s.code.toUpperCase() === code);
-    if (match?.printerName?.trim()) return match.printerName.trim();
+    // Matched station: use ITS printer only — never steal the default station printer
+    // (that collapses BAR/PIZZA tickets onto Kitchen).
+    if (match) return match.printerName?.trim() || null;
   }
   const def = stations.find((s) => s.isDefault) || stations[0];
   return def?.printerName?.trim() || null;
@@ -83,12 +211,14 @@ async function printHtml(html: string, printerName?: string | null): Promise<voi
   const allowBrowser = isRestaurantBrowserPrintFallbackEnabled();
 
   if (name) {
-    if (await postToPrintBridge(html, name)) return;
+    const delivered = await postToPrintBridge(html, name);
+    if (delivered.ok) return;
     if (allowBrowser) return printHtmlDocument(html);
     throw new Error(silentPrintFailureMessage(name));
   }
 
-  if (await postToPrintBridge(html, null)) return;
+  const delivered = await postToPrintBridge(html, null);
+  if (delivered.ok) return;
   if (allowBrowser) return printHtmlDocument(html);
   throw new Error(silentPrintFailureMessage(null));
 }
@@ -124,91 +254,55 @@ export function resolveKotStaffPrintLabels(input: {
   serverName?: string | null;
   waiterName?: string | null;
 }): { steward: string | null; server: string | null } {
-  const steward = (input.sentByName || input.waiterName || '').trim() || null;
-  const server = (input.serverName || '').trim() || null;
-  if (server && steward && server === steward) {
-    return { steward, server: null };
-  }
-  return { steward, server };
+  return resolveKotStaffLabels(input);
 }
 
 export async function printKitchenTicket(data: KotPrintData): Promise<void> {
-  const isVoid = data.ticketKind === 'VOID';
-  const consolidated = consolidateKotLines(
-    data.items.map((it) => ({
-      productName: it.productName,
-      quantity: it.quantity,
-      lineNotes: it.lineNotes ?? null,
-    })),
-  );
-  const lines = consolidated
-    .map((it) => {
-      const note = it.lineNotes
-        ? `<div style="font-size:14px;font-weight:700;padding-left:8px">* ${escapeHtml(it.lineNotes)}</div>`
-        : '';
-      return `<div style="margin:6px 0;font-weight:900"><strong style="font-size:18px">${escapeHtml(String(it.quantity))}</strong> × <span style="font-size:16px">${escapeHtml(it.productName)}</span></div>${note}`;
-    })
-    .join('');
-
-  const channelLabel =
-    data.orderChannel === 'TAKEAWAY'
-      ? 'TAKE AWAY'
-      : data.orderChannel === 'DELIVERY'
-        ? 'DELIVERY'
-        : null;
-
-  const guestBlock = [
-    channelLabel ? `<div><strong>${escapeHtml(channelLabel)}</strong></div>` : '',
-    data.guestName ? `<div>Guest: ${escapeHtml(data.guestName)}</div>` : '',
-    data.guestPhone ? `<div>Phone: ${escapeHtml(data.guestPhone)}</div>` : '',
-    data.pickupLabel ? `<div>Pickup: ${escapeHtml(data.pickupLabel)}</div>` : '',
-    data.deliveryAddress ? `<div>Addr: ${escapeHtml(data.deliveryAddress)}</div>` : '',
-  ]
-    .filter(Boolean)
-    .join('');
-
-  const companyBlock = documentCompanyHeaderHtml(
-    {
-      companyName: data.companyName,
-      companyAddress: data.companyAddress,
-      companyPhone: data.companyPhone,
-    },
-    { mode: 'kitchen', escapeHtml },
-  );
-
-  const title = isVoid ? '*** VOID ***' : `${escapeHtml(data.station)} ORDER`;
-  const staff = resolveKotStaffPrintLabels({
+  const ticket = buildKotThermalTicket({
+    kotNumber: data.kotNumber,
+    station: data.station,
+    tableLabel: data.tableLabel,
+    waiterName: data.waiterName,
     sentByName: data.sentByName,
     serverName: data.serverName,
-    waiterName: data.waiterName,
+    firedAt: data.firedAt,
+    ticketKind: data.ticketKind,
+    voidReason: data.voidReason,
+    orderChannel: data.orderChannel,
+    guestName: data.guestName,
+    guestPhone: data.guestPhone,
+    deliveryAddress: data.deliveryAddress,
+    pickupLabel: data.pickupLabel,
+    companyName: data.companyName,
+    companyAddress: data.companyAddress,
+    companyPhone: data.companyPhone,
+    items: data.items,
   });
-  const html = `<!DOCTYPE html><html><head><title>${isVoid ? 'VOID' : 'KOT'} ${escapeHtml(data.kotNumber)} · ${escapeHtml(data.station)}</title>
-<style>
-  ${buildThermalPrintCss(80)}
-  body { font-size: 16px; font-weight: 700; color: #000; padding: 8px; }
-  h1 { font-size: 22px; font-weight: 900; margin: 0 0 8px; text-align: center; color: #000; ${isVoid ? 'border: 2px solid #000; padding: 6px;' : ''} }
-  .meta { font-size: 14px; font-weight: 700; margin-bottom: 8px; color: #000; }
-  hr { border: none; border-top: 2px dashed #000; margin: 8px 0; }
-</style></head><body>
-  ${companyBlock}
-  <h1>${title}</h1>
-  <div class="meta">
-    <div><strong>${escapeHtml(data.tableLabel)}</strong></div>
-    ${guestBlock}
-    <div>Station: ${escapeHtml(data.station)}</div>
-    <div>${isVoid ? 'VOID' : 'KOT'}: ${escapeHtml(data.kotNumber)}</div>
-    ${staff.server ? `<div>Server: ${escapeHtml(staff.server)}</div>` : ''}
-    ${staff.steward ? `<div>Steward: ${escapeHtml(staff.steward)}</div>` : ''}
-    ${isVoid && data.voidReason ? `<div>Reason: ${escapeHtml(data.voidReason)}</div>` : ''}
-    <div>Time: ${escapeHtml(data.firedAt)}</div>
-  </div>
-  <hr/>
-  ${lines}
-  <hr/>
-  <div style="text-align:center;font-size:14px;font-weight:900">${isVoid ? 'STOP / DO NOT PREPARE' : 'NO PRICES'}</div>
-</body></html>`;
 
-  await printHtml(html, data.printerName || resolveStationPrinterName(data.station));
+  const printer = data.printerName || resolveStationPrinterName(data.station);
+  const allowBrowser = isRestaurantBrowserPrintFallbackEnabled();
+
+  // Primary: ESC/POS RAW (near-instant). Fallback: HTML→PDF for agents < 1.3.0.
+  if (agentSupportsEscPos()) {
+    const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const raw = renderThermalTicketEscPos(ticket);
+    const renderMs =
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+    if (typeof console !== 'undefined' && renderMs > 20) {
+      console.info(`[kot] escpos renderMs=${renderMs.toFixed(1)} (SLO <20ms)`);
+    }
+    const delivered = await postEscPosToPrintBridge(raw, printer);
+    if (delivered.ok) return;
+  }
+
+  const html = renderThermalTicketHtml(ticket, buildThermalPrintCss(80));
+  if (printer) {
+    const delivered = await postToPrintBridge(html, printer);
+    if (delivered.ok) return;
+    if (allowBrowser) return printHtmlDocument(html);
+    throw new Error(silentPrintFailureMessage(printer));
+  }
+  await printHtml(html, printer);
 }
 
 export interface BillPrintData extends DocumentCompanyBranding {
@@ -251,13 +345,17 @@ export function buildRestaurantBillHtml(data: BillPrintData): string {
 }
 
 export async function printRestaurantBill(data: BillPrintData): Promise<void> {
-  await printHtml(buildRestaurantBillHtml(data), data.printerName);
-}
+  const doc = billToThermalGuestDocument(data);
+  const printer = data.printerName?.trim() || null;
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  // Same immediate path as KOT — ESC/POS RAW at 80mm width (no Chromium).
+  if (agentSupportsEscPos()) {
+    const ticket = guestDocumentToThermalTicket(doc);
+    if (data.currencySymbol) ticket.currencySymbol = data.currencySymbol;
+    const raw = renderThermalTicketEscPos(ticket);
+    const delivered = await postEscPosToPrintBridge(raw, printer);
+    if (delivered.ok) return;
+  }
+
+  await printHtml(buildThermalGuestDocumentHtml(doc), printer);
 }

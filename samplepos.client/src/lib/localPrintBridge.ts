@@ -1,15 +1,17 @@
 /**
- * Local ESC/POS print bridge (localhost:1811) — printer discovery for station routing.
+ * Local SMART Print Agent (localhost:1811) — printer discovery for station routing.
+ * Official component: `smart-print-agent/` (npm run print-agent).
  * Same host used by printRestaurant / printHtmlDocument for X-Printer-Name.
  *
  * Discovery is optional. Station→printer mapping is stored on the server and must
  * work when the agent is offline (type exact Windows printer names).
  */
 
-export const LOCAL_PRINT_BRIDGE_ORIGIN = 'http://localhost:1811';
+export const LOCAL_PRINT_BRIDGE_ORIGIN = 'http://127.0.0.1:1811';
+/** Prefer IPv4 loopback first — agent binds 127.0.0.1; localhost can also resolve and double-hit. */
 export const LOCAL_PRINT_BRIDGE_ORIGINS = [
-  'http://localhost:1811',
   'http://127.0.0.1:1811',
+  'http://localhost:1811',
 ] as const;
 
 const CACHE_KEY = 'pos.printBridge.printers.v1';
@@ -110,6 +112,7 @@ async function tryListAt(
 /**
  * Ask the local print agent for installed printer names.
  * Probes localhost + 127.0.0.1 in parallel; falls back to last-known cache.
+ * Online/offline for UI must use /health (printAgentHealth) — this probe can be slow.
  */
 export async function listLocalPrintBridgePrinters(
   opts?: { timeoutMs?: number; origin?: string },
@@ -136,24 +139,46 @@ export async function listLocalPrintBridgePrinters(
     return { printers: unique, bridgeOnline: true, source: 'bridge' };
   }
 
+  // Printers list timed out / failed — still check /health so we don't lie about Offline.
+  let healthOnline = false;
+  for (const origin of origins) {
+    try {
+      const res = await fetch(`${origin}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(Math.min(1200, timeoutMs)),
+      });
+      if (res.ok) {
+        const body = (await res.json()) as { status?: string };
+        if (String(body.status || '').toLowerCase() === 'online') {
+          healthOnline = true;
+          break;
+        }
+      }
+    } catch {
+      // next origin
+    }
+  }
+
   const cached = readCachedBridgePrinters();
   if (cached.length > 0) {
     return {
       printers: cached,
-      bridgeOnline: false,
+      bridgeOnline: healthOnline,
       fromCache: true,
       source: 'cache',
-      error:
-        'Print bridge offline — showing last discovered printers. Mapping still works; type a Windows name if needed.',
+      error: healthOnline
+        ? 'Printer list slow — using cached names (service is online).'
+        : 'Printer Service offline — showing last discovered printers. Mapping still works.',
     };
   }
 
   return {
     printers: [],
-    bridgeOnline: false,
-    source: 'none',
-    error:
-      'Print bridge offline — start the local agent on port 1811, or type each station’s exact Windows printer name.',
+    bridgeOnline: healthOnline,
+    source: healthOnline ? 'bridge' : 'none',
+    error: healthOnline
+      ? 'Printer Service online — printer list still loading. Type a Windows name if needed.'
+      : 'Printer Service offline — install SMART Print Service on this PC (starts with Windows).',
   };
 }
 

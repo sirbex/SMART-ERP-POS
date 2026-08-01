@@ -1,8 +1,9 @@
 /**
  * Phase 2.2 — Kitchen/bar stations + printer routing + menu station assignment.
+ * Lives under Restaurant → Stations (hidden when restaurant mode is off).
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import Layout from '../../components/Layout';
@@ -21,6 +22,13 @@ import {
   setRestaurantBrowserPrintFallbackEnabled,
 } from '../../lib/restaurantPrintPolicy';
 import { listLocalPrintBridgePrinters } from '../../lib/localPrintBridge';
+import {
+  fetchPrinterServiceHealth,
+  printerServiceStatusLabel,
+  startPrinterServiceHeartbeat,
+  subscribePrinterServiceHealth,
+  type PrinterServiceHealth,
+} from '../../lib/printAgentHealth';
 import {
   readCachedGuestBillPrinter,
   writeCachedGuestBillPrinter,
@@ -54,17 +62,24 @@ function apiErr(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export default function RestaurantStationsPage() {
+export default function RestaurantStationsPage({
+  embedded = false,
+}: {
+  /** When true, render panel only (Settings → Printing). */
+  embedded?: boolean;
+}) {
   const queryClient = useQueryClient();
   const { data: restaurantEnabled, isLoading: flagLoading } = useRestaurantEnabled();
   const canManage = useCanAccess(undefined, ['restaurant.manage']);
+  const canConfigure = canManage;
   const [autoLogoutAfterPrint, setAutoLogoutAfterPrint] = useState(() =>
     isRestaurantFohAutoLogoutEnabled(),
   );
   const [browserPrintFallback, setBrowserPrintFallback] = useState(() =>
     isRestaurantBrowserPrintFallbackEnabled(),
   );
-  const [bridgeOnline, setBridgeOnline] = useState<boolean | null>(null);
+  /** SSOT with Diagnostics / FOH chip — /health heartbeat, not one-shot /printers. */
+  const [serviceHealth, setServiceHealth] = useState<PrinterServiceHealth | null>(null);
 
   const [form, setForm] = useState({
     code: '',
@@ -76,15 +91,24 @@ export default function RestaurantStationsPage() {
   const [menuFilter, setMenuFilter] = useState('');
 
   useEffect(() => {
-    let cancelled = false;
-    void listLocalPrintBridgePrinters({ timeoutMs: 800 }).then((res) => {
-      if (!cancelled) setBridgeOnline(res.bridgeOnline);
-    });
+    const stopHb = startPrinterServiceHeartbeat();
+    const unsub = subscribePrinterServiceHealth(setServiceHealth);
+    void fetchPrinterServiceHealth();
+    // Warm printer name cache for pickers (slow PowerShell) — does not drive Online/Offline.
+    void listLocalPrintBridgePrinters({ timeoutMs: 4000 });
     return () => {
-      cancelled = true;
+      unsub();
+      stopHb();
     };
   }, []);
 
+  const bridgeOnline =
+    serviceHealth == null || serviceHealth.status === 'checking'
+      ? null
+      : serviceHealth.status === 'online' || serviceHealth.status === 'restarting';
+  const serviceStatusLabel = serviceHealth
+    ? printerServiceStatusLabel(serviceHealth.status)
+    : 'Checking Printer Service…';
   const stationsQuery = useQuery({
     queryKey: ['restaurant', 'stations', true],
     queryFn: async () => {
@@ -118,7 +142,7 @@ export default function RestaurantStationsPage() {
       writeCachedGuestBillPrinter(resolved);
       return { printerName: dedicated, resolvedPrinterName: resolved };
     },
-    enabled: !!restaurantEnabled && canManage,
+    enabled: !!restaurantEnabled && canConfigure,
     placeholderData: () => {
       const cached = readCachedGuestBillPrinter();
       return cached
@@ -153,7 +177,7 @@ export default function RestaurantStationsPage() {
       const res = await api.restaurant.menuProducts();
       return (res.data.data || []) as MenuProduct[];
     },
-    enabled: !!restaurantEnabled && canManage,
+    enabled: !!restaurantEnabled && canConfigure,
   });
 
   const createMutation = useMutation({
@@ -232,39 +256,34 @@ export default function RestaurantStationsPage() {
     );
   }, [productsQuery.data, menuFilter]);
 
+  const wrap = (node: ReactNode) => {
+    if (embedded) return <>{node}</>;
+    return <Layout>{node}</Layout>;
+  };
+
   if (flagLoading) {
-    return (
-      <Layout>
-        <div className="p-6 text-gray-600">Loading…</div>
-      </Layout>
-    );
+    return wrap(<div className="p-6 text-gray-600">Loading…</div>);
   }
 
   if (!restaurantEnabled) {
-    return (
-      <Layout>
-        <div className="p-6">Restaurant module is disabled.</div>
-      </Layout>
+    return wrap(<div className="p-6">Restaurant module is disabled.</div>);
+  }
+
+  if (!canConfigure) {
+    return wrap(
+      <div className="p-6">You need restaurant.manage to configure kitchen stations and printers.</div>,
     );
   }
 
-  if (!canManage) {
-    return (
-      <Layout>
-        <div className="p-6">You need restaurant.manage to configure stations.</div>
-      </Layout>
-    );
-  }
-
-  return (
-    <Layout>
+  return wrap(
       <div className="p-4 space-y-6 max-w-5xl">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold text-stone-900">Kitchen stations</h1>
             <p className="text-sm text-stone-600">
               One-time manager setup: map printers and menu routing here. Waiters only press Order /
-              KOT / Bill — they never pick a printer.
+              KOT / Bill — they never pick a printer. POS receipt settings stay under Settings →
+              Printing.
             </p>
           </div>
           <div className="flex gap-2 text-sm">
@@ -281,30 +300,38 @@ export default function RestaurantStationsPage() {
           <h2 className="font-semibold text-stone-900">How station printing works</h2>
           <ol className="list-decimal list-inside space-y-1 text-stone-700 text-xs sm:text-sm">
             <li>
-              <strong>Map guest bill printer</strong> — set the FOH check printer below so Bill
-              always knows where to print.
+              <strong>Install Printer Service once</strong> on this POS PC (Start Menu → SMART Print
+              Service, or admin runs the Print Service installer). It starts with Windows — cashiers
+              never open a terminal.
+            </li>
+            <li>
+              <strong>Map guest bill printer</strong> — set the FOH check printer below so Bill always
+              knows where to print.
             </li>
             <li>
               <strong>Map kitchen printers</strong> — for KITCHEN, BAR, and PIZZA pick a discovered name
-              or type the exact Windows printer name and click Save (does not require bridge online).
+              or type the exact Windows printer name and click Save.
             </li>
             <li>
               <strong>Route the menu</strong> — in “Menu → station routing” below, set drinks to BAR,
               pizza to PIZZA, food to KITCHEN (etc.).
             </li>
             <li>
-              <strong>Send Order / KOT / Bill</strong> — waiters press the button; tickets print{' '}
-              <em>silently</em> via the print agent on{' '}
-              <code className="text-xs">localhost:1811</code> (no browser dialog). Keep the agent
-              running on the FOH PC. Use KDS if paper fails.
+              <strong>Send Order / KOT / Bill</strong> — waiters press the button; tickets print
+              silently. Status shows on the POS as <em>Printer Service Online</em>. Use{' '}
+              <Link to="/restaurant/printer-diagnostics" className="underline font-medium">
+                Printer Diagnostics
+              </Link>{' '}
+              for Test Print / Restart. Use KDS if paper fails.
             </li>
           </ol>
         </section>
 
         <section className="bg-white border border-stone-200 rounded-lg p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-stone-800">Silent print (this terminal)</h2>
+          <h2 className="text-sm font-semibold text-stone-800">Printer Service (this terminal)</h2>
           <p className="text-xs text-stone-600">
-            KOT and guest bill use the local agent only — no browser preview. Bridge:{' '}
+            KOT and guest bill use the local Printer Service only — no browser preview by default.
+            Status:{' '}
             <span
               className={
                 bridgeOnline === true
@@ -313,13 +340,16 @@ export default function RestaurantStationsPage() {
                     ? 'text-amber-700 font-medium'
                     : ''
               }
+              data-printer-service-status={serviceHealth?.status || 'checking'}
             >
-              {bridgeOnline === null
-                ? 'checking…'
-                : bridgeOnline
-                  ? 'online'
-                  : 'offline — start agent on port 1811'}
+              {serviceStatusLabel}
+              {serviceHealth?.version ? ` · v${serviceHealth.version}` : ''}
+              {bridgeOnline === false ? ' — install/start Printer Service on this PC' : ''}
             </span>
+            {' · '}
+            <Link to="/restaurant/printer-diagnostics" className="underline">
+              Diagnostics
+            </Link>
           </p>
           <label className="flex items-start gap-2 text-sm text-stone-800">
             <input
@@ -583,7 +613,6 @@ export default function RestaurantStationsPage() {
             )}
           </div>
         </section>
-      </div>
-    </Layout>
+      </div>,
   );
 }

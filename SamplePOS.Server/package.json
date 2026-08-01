@@ -5,7 +5,7 @@
   "main": "dist/server.js",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch --clear-screen=false --exclude \"./scripts/**/*\" --exclude \"./src/**/*.test.ts\" --exclude \"./src/**/*.evidence.test.ts\" src/server.ts",
     "build": "tsc && (shx test -d src/public && shx cp -r src/public dist/ || exit 0)",
     "build:prod": "shx rm -rf dist && tsc --build --verbose && shx cp -r src/public dist/ || echo 'no public dir'",
     "start": "node dist/server.js",

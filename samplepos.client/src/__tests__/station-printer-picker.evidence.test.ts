@@ -104,7 +104,7 @@ describe('Station printer select (bridge discovery)', () => {
     expect(page).toContain('StationPrinterPicker');
     expect(page).toContain('knownPrinters');
     expect(page).toContain('Menu → station routing');
-    expect(page).toMatch(/mapping still|type each station|does not require bridge/i);
+    expect(page).toMatch(/exact Windows printer name|mapping still|does not require bridge/i);
     expect(picker).toContain('listLocalPrintBridgePrinters');
     expect(picker).toContain('<select');
     expect(picker).toContain('None (default bridge printer)');

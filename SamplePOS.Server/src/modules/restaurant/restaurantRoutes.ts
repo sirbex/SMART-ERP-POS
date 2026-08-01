@@ -7,12 +7,29 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 import { restaurantService } from './restaurantService.js';
 import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 import type { OwnershipActor } from '../../../../shared/utils/restaurantCheckOwnership.js';
+import { legacyRoleGrantsPermission } from '../../../../shared/authorization/legacyRoleFallback.js';
 
+/**
+ * Ownership must match route gates: RBAC perms when present, else legacy role
+ * fallback (same as GET /rbac/me/permissions). Otherwise cashiers with only
+ * users.role=CASHIER see all tables in the UI but get 403 on mutate.
+ */
 function ownershipActorFromReq(req: Request): OwnershipActor {
+  const rbac = req.authContext?.permissions;
+  const permissions = new Set<string>(rbac ? [...rbac] : []);
+  if (permissions.size === 0 && req.user?.role) {
+    for (const key of [
+      'restaurant.pay',
+      'restaurant.manage',
+      'restaurant.edit_others',
+    ] as const) {
+      if (legacyRoleGrantsPermission(req.user.role, key)) permissions.add(key);
+    }
+  }
   return {
     userId: req.user!.id,
     role: req.user!.role,
-    permissions: req.authContext?.permissions ?? [],
+    permissions,
   };
 }
 
@@ -364,13 +381,13 @@ router.post(
   requireAnyPermission(['restaurant.kitchen', 'restaurant.order']),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
-    const kots = await restaurantService.sendKot(
+    const result = await restaurantService.sendKot(
       pool,
       req.params.orderId,
       req.user!.id,
       ownershipActorFromReq(req),
     );
-    res.status(201).json({ success: true, data: kots });
+    res.status(201).json({ success: true, data: result });
   }),
 );
 

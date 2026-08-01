@@ -119,6 +119,9 @@ const OrderPaymentPage = lazyWithRetry(() => import('./pages/orders/OrderPayment
 const RestaurantPosPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantPosPage'));
 const KitchenDisplayPage = lazyWithRetry(() => import('./pages/restaurant/KitchenDisplayPage'));
 const RestaurantStationsPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantStationsPage'));
+const RestaurantPrinterDiagnosticsPage = lazyWithRetry(
+  () => import('./pages/restaurant/RestaurantPrinterDiagnosticsPage'),
+);
 const RestaurantRecipesPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantRecipesPage'));
 const RestaurantOrderTagsPage = lazyWithRetry(
   () => import('./pages/restaurant/RestaurantOrderTagsPage'),
@@ -434,6 +437,18 @@ function App() {
                         requiredFeature="pos"
                       >
                         <RestaurantStationsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/restaurant/printer-diagnostics"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={['restaurant.manage']}
+                        requiredFeature="pos"
+                      >
+                        <RestaurantPrinterDiagnosticsPage />
                       </ProtectedRoute>
                     }
                   />
@@ -1128,7 +1143,7 @@ function App() {
                     }
                   />
 
-                  {/* Settings - ADMIN only */}
+                  {/* Settings */}
                   <Route
                     path="/settings"
                     element={

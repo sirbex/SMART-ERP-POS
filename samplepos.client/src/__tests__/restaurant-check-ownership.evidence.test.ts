@@ -45,6 +45,22 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     expect(canMutateRestaurantCheck({ checkWaiterId: otherWaiterId, actor: manager })).toBe(true);
   });
 
+  it('EVIDENCE: Legacy CASHIER role edits peer checks without RBAC permission list', () => {
+    expect(
+      canEditOtherWaitersChecks({
+        userId: 'cash-legacy',
+        role: 'CASHIER',
+        permissions: [],
+      }),
+    ).toBe(true);
+    expect(
+      canMutateRestaurantCheck({
+        checkWaiterId: otherWaiterId,
+        actor: { userId: 'cash-legacy', role: 'CASHIER', permissions: [] },
+      }),
+    ).toBe(true);
+  });
+
   it('EVIDENCE: Waiter owns own check and can claim unassigned', () => {
     expect(ownsRestaurantCheck(waiter.userId, waiter.userId)).toBe(true);
     expect(ownsRestaurantCheck(null, waiter.userId)).toBe(true);

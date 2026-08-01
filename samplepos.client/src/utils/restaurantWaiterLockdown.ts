@@ -13,6 +13,7 @@ export const WAITER_HOME_PATH = '/restaurant';
 const WAITER_BLOCKED_PREFIXES = [
   '/restaurant/kitchen',
   '/restaurant/stations',
+  '/restaurant/printer-diagnostics',
   '/restaurant/recipes',
   '/restaurant/order-tags',
 ] as const;

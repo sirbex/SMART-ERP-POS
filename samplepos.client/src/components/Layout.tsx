@@ -93,6 +93,15 @@ function LayoutChrome({ children }: LayoutProps) {
       requiresRestaurant: true,
     },
     {
+      name: 'Printers',
+      path: '/restaurant/printer-diagnostics',
+      icon: '📟',
+      color: 'text-stone-600',
+      permissions: ['restaurant.manage'],
+      feature: 'pos',
+      requiresRestaurant: true,
+    },
+    {
       name: 'Recipes',
       path: '/restaurant/recipes',
       icon: '🥗',
@@ -190,6 +199,17 @@ function LayoutChrome({ children }: LayoutProps) {
   const isActive = (path: string) => {
     if (path === '/settings/invoice') {
       return location.pathname.startsWith('/settings');
+    }
+    if (path.startsWith('/settings?tab=')) {
+      const tab = new URLSearchParams(path.split('?')[1] || '').get('tab');
+      return (
+        location.pathname === '/settings' &&
+        (location.search.includes(`tab=${tab}`) ||
+          (!location.search && tab === 'invoice'))
+      );
+    }
+    if (path === '/settings') {
+      return location.pathname === '/settings';
     }
     if (path === '/restaurant') {
       return location.pathname === '/restaurant';

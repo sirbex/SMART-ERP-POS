@@ -5,6 +5,7 @@
  */
 
 import { consolidatePricedLines } from '@shared/utils/consolidatePricedLines';
+import type { ThermalTicket } from '@shared/printing/thermalTicket';
 import { formatCurrency } from '../utils/currency';
 import {
   documentCompanyHeaderHtml,
@@ -395,5 +396,40 @@ export function receiptToThermalGuestDocument(data: {
     customNote: data.customReceiptNote,
     footerLines: ['Thank you for your business!'],
     isReprint: data.isReprint,
+  };
+}
+
+/** Map guest HTML SSOT → canonical ThermalTicket for EscPosRenderer. */
+export function guestDocumentToThermalTicket(doc: ThermalGuestDocument): ThermalTicket {
+  const table =
+    doc.meta.find((m) => /^table$/i.test(m.label))?.value ||
+    doc.meta.find((m) => /table/i.test(m.label))?.value ||
+    '';
+  return {
+    kind: doc.kind === 'RECEIPT' ? 'RECEIPT' : 'GUEST_BILL',
+    title: doc.title,
+    documentNumber: doc.documentNumber,
+    tableLabel: table,
+    firedAt: doc.printedAt,
+    channelLabel: doc.channelLabel || null,
+    companyName: doc.companyName || null,
+    companyAddress: doc.companyAddress || null,
+    companyPhone: doc.companyPhone || null,
+    metaRows: doc.meta.map((m) => ({ label: m.label, value: String(m.value) })),
+    items: doc.items.map((it) => ({
+      name: it.name,
+      quantity: it.quantity,
+      unitPrice: it.unitPrice,
+      lineTotal: it.lineTotal,
+      note: it.note,
+    })),
+    subtotal: doc.subtotal ?? null,
+    discountAmount: doc.discountAmount ?? null,
+    taxAmount: doc.taxAmount ?? null,
+    taxName: doc.taxName || null,
+    totalAmount: doc.totalAmount,
+    paymentRows: doc.paymentRows?.map((r) => ({ label: r.label, value: r.value })) || null,
+    customNote: doc.customNote || null,
+    footerLines: doc.footerLines,
   };
 }

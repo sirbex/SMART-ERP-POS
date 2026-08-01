@@ -10,6 +10,7 @@ import {
   isRestaurantBrowserPrintFallbackEnabled,
   setRestaurantBrowserPrintFallbackEnabled,
   silentPrintFailureMessage,
+  kotPrintPartialSuccessMessage,
 } from '../lib/restaurantPrintPolicy';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,10 +53,14 @@ describe('Restaurant silent print SSOT', () => {
     expect(isRestaurantBrowserPrintFallbackEnabled()).toBe(false);
   });
 
-  it('failure message names the mapped printer and points to agent + KDS', () => {
+  it('failure message names the mapped printer and points to Stations + KDS', () => {
     expect(silentPrintFailureMessage('Kitchen EPSON')).toMatch(/Kitchen EPSON/);
-    expect(silentPrintFailureMessage('Kitchen EPSON')).toMatch(/1811/);
-    expect(silentPrintFailureMessage(null)).toMatch(/Map printers|map printers/i);
+    expect(silentPrintFailureMessage('Kitchen EPSON')).toMatch(/KDS|Stations|Printers/i);
+    expect(silentPrintFailureMessage(null)).toMatch(
+      /Stations|Printer Service|map printers|KDS/i,
+    );
+    expect(kotPrintPartialSuccessMessage(2, 2)).toMatch(/KOT recorded \(2\)/);
+    expect(kotPrintPartialSuccessMessage(2, 2)).not.toMatch(/:1811/);
   });
 
   it('printRestaurant uses silent bridge first; browser only via policy', () => {
@@ -69,10 +74,10 @@ describe('Restaurant silent print SSOT', () => {
 
   it('Stations exposes silent policy + emergency browser toggle', () => {
     const stations = readClient('pages/restaurant/RestaurantStationsPage.tsx');
-    expect(stations).toContain('Silent print');
+    expect(stations).toMatch(/Printer Service|Silent print/);
     expect(stations).toContain('setRestaurantBrowserPrintFallbackEnabled');
     expect(stations).toContain('listLocalPrintBridgePrinters');
-    expect(stations).toMatch(/silently/i);
+    expect(stations).toMatch(/silently|silent/i);
   });
 
   it('guest bill + schema SSOT still present', () => {

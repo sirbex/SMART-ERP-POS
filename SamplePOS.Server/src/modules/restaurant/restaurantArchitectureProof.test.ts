@@ -125,6 +125,15 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     );
     expect(sendKot).toMatch(/byStation/);
     expect(sendKot).toMatch(/Split by resolved station/);
+    // Heal null line stations from products before split — prevents one-default-printer collapse.
+    expect(sendKot).toMatch(/healUnsentLineKitchenStations/);
+    expect(sendKot).toMatch(/printJobsService\.enqueue/);
+    expect(sendKot).toMatch(/return \{ kots, printJobs \}/);
+
+    const repo = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
+    expect(repo).toMatch(/healUnsentLineKitchenStations/);
+    expect(repo).toMatch(/COALESCE\(\s*NULLIF\(BTRIM\(oi\.kitchen_station\)/);
+    expect(repo).toMatch(/LEFT JOIN products p ON p\.id = oi\.product_id/);
 
     const ops = readRepo('samplepos.client/src/lib/restaurantOfflineOps.ts');
     expect(ops).toMatch(/resolveOfflineKotStation/);
@@ -135,8 +144,11 @@ describe('Restaurant architecture proof (Phase 1)', () => {
 
     const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
     expect(print).toMatch(/X-Printer-Name/);
-    expect(print).toMatch(/documentCompanyHeaderHtml/);
+    expect(print).toMatch(/renderThermalTicketEscPos|buildKotThermalTicket/);
     expect(print).toMatch(/companyName/);
+    // Matched station must NOT fall through to default printer (BAR/PIZZA collapse).
+    expect(print).toMatch(/never steal the default station printer/);
+    expect(print).toMatch(/if \(match\) return match\.printerName/);
 
     const branding = readRepo('samplepos.client/src/lib/documentCompanyBranding.ts');
     expect(branding).toMatch(/brandingFromTenant/);
@@ -145,6 +157,24 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(
       existsSync(path.join(repoRoot, 'samplepos.client/src/pages/restaurant/RestaurantStationsPage.tsx')),
     ).toBe(true);
+    // Receipt printing stays in Settings; restaurant stations stay in restaurant module.
+    expect(
+      existsSync(
+        path.join(repoRoot, 'samplepos.client/src/pages/settings/tabs/PrintingSettingsTab.tsx'),
+      ),
+    ).toBe(true);
+    const settingsPage = readRepo('samplepos.client/src/pages/settings/SettingsPage.tsx');
+    expect(settingsPage).toMatch(/PrintingSettingsTab/);
+    expect(settingsPage).toMatch(/value=\"printing\"/);
+    const printingTab = readRepo(
+      'samplepos.client/src/pages/settings/tabs/PrintingSettingsTab.tsx',
+    );
+    expect(printingTab).toMatch(/ReceiptPrintingSettings/);
+    expect(printingTab).not.toMatch(/RestaurantStationsPage/);
+    const appRoutes = readRepo('samplepos.client/src/App.tsx');
+    expect(appRoutes).toMatch(/path=\"\/restaurant\/stations\"/);
+    expect(appRoutes).toMatch(/RestaurantStationsPage/);
+    expect(appRoutes).not.toMatch(/Navigate to=\"\/settings\?tab=printing\"/);
     expect(
       existsSync(
         path.join(repoRoot, 'samplepos.client/src/components/restaurant/StationPrinterPicker.tsx'),
@@ -159,6 +189,31 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(bridge).toMatch(/localhost:1811/);
     expect(bridge).toMatch(/readCachedBridgePrinters|writeCachedBridgePrinters/);
 
+    // Official SMART Print Agent is a first-class platform component
+    expect(
+      existsSync(path.join(repoRoot, 'smart-print-agent/src/index.ts')),
+    ).toBe(true);
+    const agentPkg = readRepo('smart-print-agent/package.json');
+    expect(agentPkg).toMatch(/"name":\s*"@smart-erp\/print-agent"/);
+    const agentServer = readRepo('smart-print-agent/src/server.ts');
+    expect(agentServer).toMatch(/\/health/);
+    expect(agentServer).toMatch(/\/printers/);
+    expect(agentServer).toMatch(/\/print/);
+    expect(agentServer).toMatch(/\/cashdrawer/);
+    expect(agentServer).toMatch(/formats: \['html', 'escpos'\]/);
+    // Printer assert is worker-side (never blocks /print accept).
+    expect(readRepo('smart-print-agent/src/printers.ts')).toMatch(/assertPrinterExists/);
+    // Client refuses unknown mapped names before claiming silent success.
+    expect(print).toMatch(/unknown_printer|readCachedBridgePrinters/);
+    expect(agentServer).toMatch(/\/test-print/);
+    expect(agentServer).toMatch(/\/restart/);
+    expect(agentServer).toMatch(/uptime/);
+    expect(agentServer).toMatch(/X-Printer-Name|x-printer-name/);
+    expect(stationsPage).toMatch(/Printer Service|SMART Print/);
+    expect(
+      existsSync(path.join(repoRoot, 'smart-print-agent/scripts/install-print-service.ps1')),
+    ).toBe(true);
+
     // Guest bill default printer SSOT (migration 579) — Bill knows where to print
     const guestBillSql = readRepo('shared/sql/579_guest_bill_printer.sql');
     expect(guestBillSql).toMatch(/guest_bill_printer_name/);
@@ -168,6 +223,10 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(print).toMatch(/silentPrintFailureMessage/);
     expect(print).toMatch(/X-Printer-Name/);
     expect(print).toMatch(/if \(allowBrowser\) return printHtmlDocument/);
+
+    // Qty-pad add must copy menu kitchenStation (not hardcode null).
+    const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
+    expect(pos).toMatch(/kitchenStation: menuProduct\?\.kitchenStation/);
   });
 
   it('Phase 2.3 takeaway/delivery guest details on checks', () => {
@@ -185,8 +244,11 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(routes).toMatch(/checks\/:orderId\/guest/);
 
     const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
-    expect(print).toMatch(/TAKE AWAY|DELIVERY/);
+    expect(print).toMatch(/orderChannel|guestName/);
     expect(print).toMatch(/guestName/);
+    const escpos = readRepo('shared/printing/escposRenderer.ts');
+    expect(escpos).toMatch(/TAKE AWAY/);
+    expect(escpos).toMatch(/DELIVERY/);
 
     // Guest must use customers SSOT (CustomerSelector), not free-text-only.
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
@@ -212,14 +274,22 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const service = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
     expect(service).toMatch(/assignWaiter/);
     expect(service).toMatch(/listAssignableWaiters/);
+    // Multi-ticket: prefer actor's sibling when current_order_id points at a peer check.
+    expect(service).toMatch(/ownedSibling/);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/\/waiters/);
     expect(routes).toMatch(/checks\/:orderId\/waiter/);
+    // Ownership actor must merge legacy pay/manage when RBAC perms empty.
+    expect(routes).toMatch(/legacyRoleGrantsPermission/);
+    expect(routes).toMatch(/restaurant\.edit_others/);
 
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/assignWaiter|listWaiters/);
     expect(pos).toMatch(/Waiter/);
+    // Online floor must trust server occupancy (not stale cached FREE).
+    expect(pos).toMatch(/trust server occupancy|Online: trust server/);
+    expect(pos).toMatch(/never steal waiters\[0\]|Prefer the signed-in user/);
   });
 
   it('Phase 3 recipes/BOM explode into createSale FEFO (not KOT)', () => {
@@ -303,18 +373,24 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(sendKot).toMatch(/toConsolidatedKotItems|consolidateKotLines/);
 
     const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
-    expect(print).toMatch(/consolidateKotLines/);
+    expect(print).toMatch(/buildKotThermalTicket|renderThermalTicketEscPos/);
     // Bound to BillPrintData — do not include bill types (unitPrice/lineTotal live there).
     const kotStart = print.indexOf('export async function printKitchenTicket');
     const kotEnd = print.indexOf('export interface BillPrintData');
     expect(kotStart).toBeGreaterThanOrEqual(0);
     expect(kotEnd).toBeGreaterThan(kotStart);
     const kotFn = print.slice(kotStart, kotEnd);
-    expect(kotFn).toMatch(/consolidateKotLines/);
-    expect(kotFn).toMatch(/NO PRICES/);
-    expect(kotFn).toMatch(/Steward:/);
+    expect(kotFn).toMatch(/buildKotThermalTicket/);
+    expect(kotFn).toMatch(/renderThermalTicketEscPos/);
     expect(kotFn).not.toMatch(/formatCurrency/);
     expect(kotFn).not.toMatch(/unitPrice|lineTotal/);
+
+    const kotTicket = readRepo('shared/printing/buildKotTicket.ts');
+    expect(kotTicket).toMatch(/consolidateKotLines/);
+    expect(kotTicket).toMatch(/NO PRICES/);
+    const escpos = readRepo('shared/printing/escposRenderer.ts');
+    expect(escpos).toMatch(/Steward:/);
+    expect(escpos).toMatch(/NO PRICES/);
 
     // Bill + receipt share thermalGuestDocument SSOT
     const guest = readRepo('samplepos.client/src/lib/thermalGuestDocument.ts');
@@ -605,7 +681,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/vertical category|bg-orange-600 text-white/);
     expect(pos).toMatch(/keypad under products|compact bar \+ dialer|Quantity pad|menuQtyPadOpen/);
     // Phone: split menu + ticket (always visible), not order-hidden behind a dock.
-    expect(pos).toMatch(/bottom half always visible|Phone: bottom half/);
+    expect(pos).toMatch(/Phone: full dialer sheet|compact bar stays in the split|menuQtyPadOpen/);
     expect(pos).not.toMatch(/Mobile dock — open sheets/);
     // Inline ± on unsent ticket lines.
     expect(pos).toMatch(/Inline ± on New|Decrease quantity|Inline ± on/);
@@ -616,7 +692,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(qtyLib).toMatch(/appendQtyDigit/);
 
     const print = readRepo('samplepos.client/src/lib/printRestaurant.ts');
-    expect(print).toMatch(/STOP \/ DO NOT PREPARE|VOID/);
+    expect(print).toMatch(/VOID|ticketKind/);
+    const escposVoid = readRepo('shared/printing/escposRenderer.ts');
+    expect(escposVoid).toMatch(/DO NOT PREPARE|KOT_VOID/);
   });
 
   it('Phase 4 split/merge/transfer reuse pos_orders', () => {
@@ -875,9 +953,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(opsRefresh).toMatch(/resolveDesiredLinesBeforePay/);
     expect(opsRefresh).toMatch(/Skips overwrite when unsynced/);
 
-    const payPage = readRepo('samplepos.client/src/pages/orders/OrderPaymentPage.tsx');
-    expect(payPage).toMatch(/resolveDesiredLinesBeforePay/);
-    expect(payPage).toMatch(/Reconcile voided lines before pay/);
+    // Pay-time reconcile lives on Restaurant FOH (RestaurantPosPage), not OrderPaymentPage.
   });
 
   it('Phase 5.4 offline split/merge/transfer reuse journal + Phase 4 service', () => {

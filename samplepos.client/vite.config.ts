@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import child_process from 'child_process';
 import { env } from 'process';
+import { resilientApiProxyPlugin } from './vite.resilientApiProxy';
 
 
 const baseFolder =
@@ -43,7 +44,7 @@ const target = env.ASPNETCORE_HTTPS_PORT ? `https://localhost:${env.ASPNETCORE_H
 
 // https://vitejs.dev/config/
 export default defineConfig({
-    plugins: [plugin()],
+    plugins: [plugin(), resilientApiProxyPlugin()],
     base: '/', // Absolute path so assets resolve from root on all routes
     resolve: {
         alias: {
@@ -114,13 +115,8 @@ export default defineConfig({
                 target,
                 secure: false
             },
-            // Route ALL API requests to Node.js backend server (port 3001)
-            // The C# accounting API (port 5062) is optional and proxied via comprehensiveAccountingRoutes
-            '^/api': {
-                target: 'http://localhost:3001',
-                changeOrigin: true,
-                secure: false
-            }
+            // /api is handled by resilientApiProxyPlugin (retries + JSON 503 while
+            // the Node server restarts). Do not add a second Vite proxy for /api.
         },
         host: '127.0.0.1',  // Use IPv4 to avoid dual-stack issues
         port: 5173,

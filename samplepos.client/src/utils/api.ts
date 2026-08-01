@@ -18,6 +18,7 @@ import {
 import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
 import { isPublicApiRoute } from '../lib/apiPublicRoutes';
+import { isBackendUnavailableError } from '../lib/isBackendUnavailableError';
 import { HandledApiError, ACCESS_DENIED_MESSAGE, friendlyHttpErrorMessage, dispatchUserFacingApiNotification, resolveUserFacingApiNotification } from './errorHandler';
 import { toast } from 'sonner';
 import type { ServerListParams } from '../lib/serverListParams';
@@ -179,7 +180,16 @@ apiClient.interceptors.response.use(
   async (error: AxiosError<ApiResponse>) => {
     // Log error (status undefined = no HTTP response: network, timeout, or aborted)
     const isNetworkFailure = !error.response;
-    if (isNetworkFailure && error.config) {
+    const backendDown = isBackendUnavailableError(error);
+    if (backendDown) {
+      // Transient (dev server restart / brief outage) — don't look like an app 500.
+      console.warn('[API Backend Unavailable]', {
+        url: error.config?.url,
+        method: error.config?.method,
+        status: error.response?.status,
+        code: (error.response?.data as { error_code?: string } | undefined)?.error_code,
+      });
+    } else if (isNetworkFailure && error.config) {
       console.warn('[API Network Error]', {
         url: error.config?.url,
         method: error.config?.method,
@@ -1469,6 +1479,19 @@ export const api = {
       lines: Array<{ componentProductId: string; quantityBase: number; sortOrder?: number }>;
     }) => apiClient.put<ApiResponse>('restaurant/recipes', data),
     deleteRecipe: (id: string) => apiClient.delete<ApiResponse>(`restaurant/recipes/${id}`),
+  },
+
+  /** Print Job SSOT — enqueue on server; device agent delivers via :1811 */
+  printJobs: {
+    listPending: (params?: { limit?: number }) =>
+      apiClient.get<ApiResponse>('print-jobs/pending', { params }),
+    getById: (id: string) => apiClient.get<ApiResponse>(`print-jobs/${id}`),
+    updateStatus: (
+      id: string,
+      data: { status: 'PENDING' | 'PRINTING' | 'PRINTED' | 'ERROR'; errorMessage?: string | null },
+      config?: AxiosRequestConfig,
+    ) => apiClient.patch<ApiResponse>(`print-jobs/${id}/status`, data, config),
+    requeue: (id: string) => apiClient.post<ApiResponse>(`print-jobs/${id}/requeue`),
   },
 
   assets: {

@@ -43,6 +43,9 @@ import {
 } from '../../../../shared/utils/restaurantCheckOwnership.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { posProductSearchService } from '../inventory/warehouse/posProductSearchService.js';
+import { printJobsService } from '../print-jobs/printJobsService.js';
+import type { PrintJobRecord } from '../print-jobs/printJobTypes.js';
+import { systemSettingsService } from '../system-settings/systemSettingsService.js';
 
 async function lookupUserDisplayName(client: PoolClient, userId: string): Promise<string | null> {
   const row = await client.query<{ full_name: string | null }>(
@@ -61,6 +64,42 @@ function applyKotActorNames(
   if (checkWaiterName && checkWaiterName !== firedByName) {
     kot.serverName = checkWaiterName;
   }
+}
+
+/** Structured print payload — client renders HTML; agent receives silent job. */
+function kotToPrintPayload(
+  kot: KotRecord,
+  meta: {
+    orderChannel?: string | null;
+    guestName?: string | null;
+    guestPhone?: string | null;
+    deliveryAddress?: string | null;
+    pickupLabel?: string | null;
+  },
+): Record<string, unknown> {
+  return {
+    kotNumber: kot.kotNumber,
+    station: kot.station,
+    tableLabel: kot.tableName || kot.tableCode || 'Table',
+    tableCode: kot.tableCode,
+    tableName: kot.tableName,
+    sentByName: kot.firedByName || kot.waiterName || null,
+    serverName: kot.serverName || null,
+    waiterName: kot.firedByName || kot.waiterName || null,
+    firedAt: kot.firedAt,
+    ticketKind: kot.ticketKind || 'FIRE',
+    voidReason: kot.voidReason || null,
+    orderChannel: meta.orderChannel ?? null,
+    guestName: meta.guestName ?? null,
+    guestPhone: meta.guestPhone ?? null,
+    deliveryAddress: meta.deliveryAddress ?? null,
+    pickupLabel: meta.pickupLabel ?? null,
+    items: (kot.items || []).map((it) => ({
+      productName: it.productName,
+      quantity: Number(it.quantity),
+      lineNotes: it.lineNotes ?? null,
+    })),
+  };
 }
 
 function requireCheckMutationAccess(
@@ -457,7 +496,16 @@ export const restaurantService = {
 
     // Toast/Aloha: waiters may only open their own checks (FREE tables are fine).
     if (actor && !canEditOtherWaitersChecks(actor) && siblings.length > 0) {
-      const ownsAny = siblings.some((s) => !s.waiterId || s.waiterId === actor.userId);
+      const ownedSibling = siblings.find((s) => !s.waiterId || s.waiterId === actor.userId);
+      // Multi-ticket: current_order_id may point at a peer check — switch to ours.
+      if (ownedSibling && orderId && orderId !== ownedSibling.id) {
+        const pointed = siblings.find((s) => s.id === orderId);
+        if (pointed?.waiterId && pointed.waiterId !== actor.userId) {
+          orderId = ownedSibling.id;
+          await restaurantRepository.setTableCurrentOrder(pool, tableId, orderId);
+        }
+      }
+      const ownsAny = !!ownedSibling;
       const target = siblings.find((s) => s.id === orderId);
       const canOpenTarget =
         !target || !target.waiterId || target.waiterId === actor.userId;
@@ -675,7 +723,14 @@ export const restaurantService = {
 
       if (!orderId) {
         const waiters = await restaurantRepository.listAssignableWaiters(pool);
-        if (waiters.length > 0 && !waiters.some((w) => w.id === effectiveWaiterId)) {
+        // Always allow the acting user to own the check they open (managers/admins
+        // may not appear in the waiter picker edge cases; never block on that).
+        const actorOk = actor?.userId && actor.userId === effectiveWaiterId;
+        if (
+          waiters.length > 0 &&
+          !waiters.some((w) => w.id === effectiveWaiterId) &&
+          !actorOk
+        ) {
           throw new ValidationError('Selected user is not an assignable waiter');
         }
 
@@ -902,9 +957,15 @@ export const restaurantService = {
   },
 
   /**
-   * Fire unsent lines to kitchen. Creates immutable KOT rows without prices.
+   * Fire unsent lines to kitchen. Creates immutable KOT rows + print_jobs (SSOT).
+   * Local agent delivers jobs; browser never selects a printer.
    */
-  async sendKot(pool: Pool, orderId: string, firedBy: string, actor?: OwnershipActor): Promise<KotRecord[]> {
+  async sendKot(
+    pool: Pool,
+    orderId: string,
+    firedBy: string,
+    actor?: OwnershipActor,
+  ): Promise<{ kots: KotRecord[]; printJobs: PrintJobRecord[] }> {
     await assertRestaurantEnabled(pool);
 
     return UnitOfWork.run(pool, async (client: PoolClient) => {
@@ -928,15 +989,23 @@ export const restaurantService = {
       // (client returns to floor). Do not error; empty array means "already fired".
       if (unsent.length === 0) {
         logger.info('Restaurant KOT no-op (no unsent items)', { orderId });
-        return [];
+        return { kots: [], printJobs: [] };
       }
+
+      // Heal lines missing kitchen_station so menu→station→printer routing works
+      // for items added before routing was configured (or offline sync gaps).
+      const healed = await restaurantRepository.healUnsentLineKitchenStations(client, orderId);
+      const unsentForKot =
+        healed > 0
+          ? await restaurantRepository.listUnsentItems(client, orderId)
+          : unsent;
 
       // Toast/Aloha: ticket shows who SENT it (login user), not only check owner.
       const firedByName = await lookupUserDisplayName(client, firedBy);
 
       // Split by resolved station (registry SSOT — unknown codes → default)
-      const byStation = new Map<string, { station: RestaurantStationRecord; items: typeof unsent }>();
-      for (const item of unsent) {
+      const byStation = new Map<string, { station: RestaurantStationRecord; items: typeof unsentForKot }>();
+      for (const item of unsentForKot) {
         const resolved = await restaurantRepository.resolveStation(client, item.kitchenStation);
         const key = resolved.code.toUpperCase();
         const bucket = byStation.get(key) || { station: resolved, items: [] };
@@ -945,6 +1014,7 @@ export const restaurantService = {
       }
 
       const kots: KotRecord[] = [];
+      const printJobs: PrintJobRecord[] = [];
       for (const { station, items } of byStation.values()) {
         const kot = await restaurantRepository.createKot(client, {
           orderId,
@@ -971,6 +1041,18 @@ export const restaurantService = {
         kot.printerName = station.printerName;
         applyKotActorNames(kot, firedByName, meta.waiterName);
         kots.push(kot);
+
+        const isVoid = kot.ticketKind === 'VOID';
+        const job = await printJobsService.enqueue(client, {
+          documentType: isVoid ? 'VOID_KOT' : 'KOT',
+          targetPrinter: station.printerName,
+          payloadJson: kotToPrintPayload(kot, meta),
+          sourceType: 'restaurant_kot',
+          sourceId: kot.id,
+          orderId,
+          stationCode: station.code,
+        });
+        if (job) printJobs.push(job);
       }
 
       await restaurantRepository.patchOrderRestaurantFields(client, orderId, {
@@ -980,10 +1062,12 @@ export const restaurantService = {
       logger.info('Restaurant KOT fired', {
         orderId,
         kotCount: kots.length,
+        printJobCount: printJobs.length,
         kotNumbers: kots.map((k) => k.kotNumber),
+        printers: printJobs.map((j) => j.targetPrinter),
       });
 
-      return kots;
+      return { kots, printJobs };
     });
   },
 
@@ -1004,6 +1088,7 @@ export const restaurantService = {
     },
   ): Promise<{
     voidKots: KotRecord[];
+    printJobs: PrintJobRecord[];
     checkCancelled: boolean;
     order: Awaited<ReturnType<typeof ordersService.getOrder>> | null;
     meta: Awaited<ReturnType<typeof restaurantRepository.getOrderRestaurantMeta>> | null;
@@ -1063,6 +1148,7 @@ export const restaurantService = {
 
       const sentSlices = slices.filter((r) => !!r.kitchenSentAt);
       const voidKots: KotRecord[] = [];
+      const printJobs: PrintJobRecord[] = [];
 
       if (sentSlices.length > 0) {
         const byStation = new Map<
@@ -1100,6 +1186,16 @@ export const restaurantService = {
           kot.printerName = station.printerName;
           applyKotActorNames(kot, voidedByName, meta.waiterName);
           voidKots.push(kot);
+          const voidJob = await printJobsService.enqueue(client, {
+            documentType: 'VOID_KOT',
+            targetPrinter: station.printerName,
+            payloadJson: kotToPrintPayload(kot, meta),
+            sourceType: 'restaurant_kot',
+            sourceId: kot.id,
+            orderId,
+            stationCode: station.code,
+          });
+          if (voidJob) printJobs.push(voidJob);
         }
       }
 
@@ -1131,7 +1227,7 @@ export const restaurantService = {
       const fresh = await ordersRepository.getById(client, orderId);
       const remainingLines = fresh?.items || [];
       if (remainingLines.length === 0) {
-        return { voidKots, checkCancelled: true as const, meta };
+        return { voidKots, printJobs, checkCancelled: true as const, meta };
       }
 
       const net = remainingLines.reduce((s, it) => {
@@ -1155,7 +1251,7 @@ export const restaurantService = {
         });
       }
 
-      return { voidKots, checkCancelled: false as const, meta };
+      return { voidKots, printJobs, checkCancelled: false as const, meta };
     });
 
     if (result.checkCancelled) {
@@ -1167,6 +1263,7 @@ export const restaurantService = {
       logger.info('Restaurant check voided completely', { orderId, reason });
       return {
         voidKots: result.voidKots,
+        printJobs: result.printJobs,
         checkCancelled: true,
         order: null,
         meta: result.meta,
@@ -1182,6 +1279,7 @@ export const restaurantService = {
 
     return {
       voidKots: result.voidKots,
+      printJobs: result.printJobs,
       checkCancelled: false,
       order: await ordersService.getOrder(pool, orderId),
       meta: await restaurantRepository.getOrderRestaurantMeta(pool, orderId),
@@ -1382,12 +1480,47 @@ export const restaurantService = {
     const table = meta.tableId
       ? await restaurantRepository.getTableById(pool, meta.tableId)
       : null;
+
+    const guestBillCfg = await systemSettingsService.getGuestBillPrintConfig(pool);
+    const printJob = await printJobsService.enqueue(pool, {
+      documentType: 'GUEST_BILL',
+      targetPrinter: guestBillCfg.printerName,
+      payloadJson: {
+        orderId,
+        orderNumber: order.orderNumber,
+        tableLabel: table?.name || meta.tableName || meta.tableCode || 'Table',
+        waiterName: meta.waiterName,
+        orderChannel: meta.orderChannel,
+        guestName: meta.guestName,
+        guestPhone: meta.guestPhone,
+        deliveryAddress: meta.deliveryAddress,
+        pickupLabel: meta.pickupLabel,
+        items: (order.items || []).map((it) => ({
+          productId: it.productId,
+          productName: it.productName,
+          quantity: Number(it.quantity),
+          unitPrice: Number(it.unitPrice),
+          lineTotal: Number(it.lineTotal ?? Number(it.quantity) * Number(it.unitPrice)),
+          lineNotes: it.lineNotes ?? null,
+        })),
+        subtotal: Number(order.subtotal),
+        discountAmount: Number(order.discountAmount || 0),
+        taxAmount: Number(order.taxAmount || 0),
+        totalAmount: Number(order.totalAmount),
+      },
+      sourceType: 'pos_orders',
+      sourceId: orderId,
+      orderId,
+    });
+
     logger.info('Restaurant bill requested', {
       orderId,
       tableId: meta.tableId,
       tableStatus: table?.status ?? null,
+      printJobId: printJob?.id ?? null,
+      printer: printJob?.targetPrinter ?? guestBillCfg.printerName,
     });
-    return { order, meta, table };
+    return { order, meta, table, printJobs: printJob ? [printJob] : [] };
   },
 
   /** @deprecated Prefer requestBill — same behavior */
@@ -1440,9 +1573,9 @@ export const restaurantService = {
     }
 
     // Notify kitchen for any already-fired lines before cancelling the check.
-    const voidKots = await UnitOfWork.run(pool, async (client: PoolClient) => {
+    const { voidKots, printJobs } = await UnitOfWork.run(pool, async (client: PoolClient) => {
       const sent = await restaurantRepository.listKitchenSentItems(client, orderId);
-      if (sent.length === 0) return [] as KotRecord[];
+      if (sent.length === 0) return { voidKots: [] as KotRecord[], printJobs: [] as PrintJobRecord[] };
 
       const byStation = new Map<
         string,
@@ -1458,6 +1591,7 @@ export const restaurantService = {
 
       const cancelledByName = await lookupUserDisplayName(client, cancelledBy);
       const kots: KotRecord[] = [];
+      const jobs: PrintJobRecord[] = [];
       for (const { station, items } of byStation.values()) {
         const kot = await restaurantRepository.createKot(client, {
           orderId,
@@ -1481,8 +1615,18 @@ export const restaurantService = {
         kot.printerName = station.printerName;
         applyKotActorNames(kot, cancelledByName, meta.waiterName);
         kots.push(kot);
+        const cancelJob = await printJobsService.enqueue(client, {
+          documentType: 'VOID_KOT',
+          targetPrinter: station.printerName,
+          payloadJson: kotToPrintPayload(kot, meta),
+          sourceType: 'restaurant_kot',
+          sourceId: kot.id,
+          orderId,
+          stationCode: station.code,
+        });
+        if (cancelJob) jobs.push(cancelJob);
       }
-      return kots;
+      return { voidKots: kots, printJobs: jobs };
     });
 
     const order = await ordersService.cancelOrder(
@@ -1495,7 +1639,7 @@ export const restaurantService = {
       bumpVoids: true,
       updatedBy: cancelledBy,
     });
-    return { order, tableId: meta.tableId, voidKots };
+    return { order, tableId: meta.tableId, voidKots, printJobs };
   },
 
   // ─── Phase 3: Recipes / BOM ───────────────────────────────────────────

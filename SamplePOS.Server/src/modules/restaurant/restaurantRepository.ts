@@ -95,6 +95,8 @@ export interface KotRecord {
   status: KotTicketStatus;
   /** FIRE = cook; VOID = stop / discard previously fired lines */
   ticketKind?: 'FIRE' | 'VOID';
+  /** Present on VOID tickets for print payload */
+  voidReason?: string | null;
   firedBy: string;
   /** Display name of who fired this ticket (looked up; not always a DB column). */
   firedByName?: string | null;
@@ -777,10 +779,21 @@ export const restaurantRepository = {
       kitchenStation: string | null;
     }>
   > {
+    // Prefer line snapshot; fall back to products.kitchen_station so menu routing
+    // still splits KOT printers when older lines were saved without a station.
     const result = await conn.query(
-      `SELECT id, product_id, product_name, quantity, line_notes, kitchen_station
-       FROM pos_order_items
-       WHERE order_id = $1 AND kitchen_sent_at IS NULL
+      `SELECT oi.id,
+              oi.product_id,
+              oi.product_name,
+              oi.quantity,
+              oi.line_notes,
+              COALESCE(
+                NULLIF(BTRIM(oi.kitchen_station), ''),
+                NULLIF(BTRIM(p.kitchen_station), '')
+              ) AS kitchen_station
+       FROM pos_order_items oi
+       LEFT JOIN products p ON p.id = oi.product_id
+       WHERE oi.order_id = $1 AND oi.kitchen_sent_at IS NULL
        ORDER BY product_name`,
       [orderId],
     );
@@ -792,6 +805,26 @@ export const restaurantRepository = {
       lineNotes: string | null;
       kitchenStation: string | null;
     });
+  },
+
+  /**
+   * Persist product kitchen_station onto unsent lines that are missing it
+   * (menu was routed after the line was added, or offline sync omitted it).
+   */
+  async healUnsentLineKitchenStations(conn: DbConn, orderId: string): Promise<number> {
+    const result = await conn.query(
+      `UPDATE pos_order_items oi
+       SET kitchen_station = UPPER(BTRIM(p.kitchen_station))
+       FROM products p
+       WHERE oi.product_id = p.id
+         AND oi.order_id = $1
+         AND oi.kitchen_sent_at IS NULL
+         AND (oi.kitchen_station IS NULL OR BTRIM(oi.kitchen_station) = '')
+         AND p.kitchen_station IS NOT NULL
+         AND BTRIM(p.kitchen_station) <> ''`,
+      [orderId],
+    );
+    return result.rowCount ?? 0;
   },
 
   async listOrderItemsForVoid(
@@ -813,11 +846,22 @@ export const restaurantRepository = {
   > {
     if (itemIds.length === 0) return [];
     const result = await conn.query(
-      `SELECT id, product_id, product_name, quantity, line_notes, kitchen_station, kitchen_sent_at,
-              unit_price, discount_amount
-       FROM pos_order_items
-       WHERE order_id = $1 AND id = ANY($2::uuid[])
-       ORDER BY product_name`,
+      `SELECT oi.id,
+              oi.product_id,
+              oi.product_name,
+              oi.quantity,
+              oi.line_notes,
+              COALESCE(
+                NULLIF(BTRIM(oi.kitchen_station), ''),
+                NULLIF(BTRIM(p.kitchen_station), '')
+              ) AS kitchen_station,
+              oi.kitchen_sent_at,
+              oi.unit_price,
+              oi.discount_amount
+       FROM pos_order_items oi
+       LEFT JOIN products p ON p.id = oi.product_id
+       WHERE oi.order_id = $1 AND oi.id = ANY($2::uuid[])
+       ORDER BY oi.product_name`,
       [orderId, itemIds],
     );
     return result.rows.map(
@@ -850,10 +894,19 @@ export const restaurantRepository = {
     }>
   > {
     const result = await conn.query(
-      `SELECT id, product_id, product_name, quantity, line_notes, kitchen_station
-       FROM pos_order_items
-       WHERE order_id = $1 AND kitchen_sent_at IS NOT NULL
-       ORDER BY product_name`,
+      `SELECT oi.id,
+              oi.product_id,
+              oi.product_name,
+              oi.quantity,
+              oi.line_notes,
+              COALESCE(
+                NULLIF(BTRIM(oi.kitchen_station), ''),
+                NULLIF(BTRIM(p.kitchen_station), '')
+              ) AS kitchen_station
+       FROM pos_order_items oi
+       LEFT JOIN products p ON p.id = oi.product_id
+       WHERE oi.order_id = $1 AND oi.kitchen_sent_at IS NOT NULL
+       ORDER BY oi.product_name`,
       [orderId],
     );
     return result.rows.map(
@@ -1071,6 +1124,7 @@ export const restaurantRepository = {
     const kot = convertKeysToCamelCase(header.rows[0]) as KotRecord;
     if (!kot.status) kot.status = 'SENT';
     if (!kot.ticketKind) kot.ticketKind = ticketKind;
+    if (ticketKind === 'VOID') kot.voidReason = reasonNote;
     const items: KotItemRecord[] = [];
 
     for (const item of data.items) {
