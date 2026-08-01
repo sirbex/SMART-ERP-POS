@@ -2,23 +2,21 @@ name: Commercial Setup.exe
 
 # Phase 3 — build SMART-ERP-POS product bundle + Inno Setup artifact on Windows.
 # Optional code signing via secrets: CODESIGN_PFX_BASE64, CODESIGN_PASSWORD
+# Runs on workflow_dispatch or setup-v* tags (not every main push).
 
 on:
   workflow_dispatch:
   push:
     tags:
       - 'setup-v*'
-    paths:
-      - 'installer/**'
-      - 'smart-print-agent/**'
-      - 'samplepos.client/**'
-      - '.github/workflows/commercial-setup.yml'
-      - 'package.json'
 
 jobs:
   build-setup:
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+      CODESIGN_PASSWORD: ${{ secrets.CODESIGN_PASSWORD }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,11 +56,8 @@ jobs:
           Get-ChildItem installer\dist\SMART-ERP-POS-Setup.exe | Format-List Name, Length, LastWriteTime
 
       - name: Optional Authenticode sign
-        if: ${{ secrets.CODESIGN_PFX_BASE64 != '' }}
+        if: env.CODESIGN_PFX_BASE64 != ''
         shell: pwsh
-        env:
-          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
-          CODESIGN_PASSWORD: ${{ secrets.CODESIGN_PASSWORD }}
         run: |
           $pfx = Join-Path $env:RUNNER_TEMP 'smart-codesign.pfx'
           [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
