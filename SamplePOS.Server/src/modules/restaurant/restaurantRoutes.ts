@@ -281,7 +281,12 @@ router.patch(
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const body = GuestDetailsSchema.parse(req.body ?? {});
-    const result = await restaurantService.updateCheckGuest(pool, req.params.orderId, body);
+    const result = await restaurantService.updateCheckGuest(
+      pool,
+      req.params.orderId,
+      body,
+      ownershipActorFromReq(req),
+    );
     res.json({ success: true, data: result });
   }),
 );
@@ -341,6 +346,7 @@ router.post(
       req.params.orderId,
       body.toTableId,
       req.user!.id,
+      ownershipActorFromReq(req),
     );
     res.json({ success: true, data: result });
   }),
@@ -357,6 +363,7 @@ router.post(
       req.params.orderId,
       body.secondaryOrderId,
       req.user!.id,
+      ownershipActorFromReq(req),
     );
     res.json({ success: true, data: result });
   }),
@@ -374,6 +381,7 @@ router.post(
       targetTableId: body.targetTableId,
       sameTable: body.sameTable,
       actorId: req.user!.id,
+      actor: ownershipActorFromReq(req),
     });
     res.status(201).json({ success: true, data: result });
   }),
@@ -635,20 +643,25 @@ router.post(
 /** Mark table BILLING + return check for print. Prefer POST (mutating). */
 const billHandler = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
-  const bill = await restaurantService.requestBill(pool, req.params.orderId);
+  const bill = await restaurantService.requestBill(
+    pool,
+    req.params.orderId,
+    ownershipActorFromReq(req),
+  );
   res.json({ success: true, data: bill });
 });
 
 router.post(
   '/checks/:orderId/bill',
-  requireAnyPermission(['restaurant.pay', 'restaurant.order', 'restaurant.read']),
+  // Mutating BILLING transition — not a read-only print peek.
+  requireAnyPermission(['restaurant.pay', 'restaurant.order']),
   billHandler,
 );
 
 /** @deprecated Prefer POST — kept for older clients */
 router.get(
   '/checks/:orderId/bill',
-  requireAnyPermission(['restaurant.pay', 'restaurant.order', 'restaurant.read']),
+  requireAnyPermission(['restaurant.pay', 'restaurant.order']),
   billHandler,
 );
 
@@ -667,6 +680,7 @@ router.post(
       req.params.orderId,
       req.user!.id,
       body.reason || 'Cancelled from restaurant POS',
+      ownershipActorFromReq(req),
     );
     res.json({
       success: true,
@@ -783,6 +797,7 @@ router.post(
       itemId: body.itemId,
       orderTags: body.orderTags,
       freeText: body.freeText,
+      actor: ownershipActorFromReq(req),
     });
     res.json({ success: true, data });
   }),

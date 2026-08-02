@@ -109,13 +109,15 @@ export function seedRestaurantCheckFromServer(input: {
   }>;
 }): boolean {
   if (!input.orderId || !input.tableId || !input.items?.length) return false;
+  // Multi-ticket: only skip when THIS orderId is already in the journal — never treat
+  // a sibling on the same table as a duplicate seed.
   const existing = deriveRestaurantCheckForTable(
     input.tableId,
     getAllEvents(),
     getAllSyncState(),
     input.orderId,
   );
-  if (existing) return true;
+  if (existing?.orderId === input.orderId) return true;
 
   const lines: EventLine[] = input.items.map((it) => {
     const qty = Number(it.quantity) || 0;
@@ -684,6 +686,7 @@ export function fireRestaurantKotOffline(order: DerivedOrder): { tickets: Offlin
       key: generateEventKey(),
       orderId: order.orderId,
       kotOfflineId,
+      tableId: order.tableId,
       tableCode: order.tableCode,
       tableName: order.tableName,
       waiterName: order.waiterName,
@@ -944,6 +947,8 @@ export function reconcileRestaurantJournalWithServerTables(
     id: string;
     status: string;
     currentOrderId?: string | null;
+    /** When known (multi-ticket), open server check ids for this table. */
+    openOrderIds?: string[] | null;
   }>,
 ): { closed: number; keptLocal: number } {
   const byId = new Map(serverTables.map((t) => [t.id, t]));
@@ -957,12 +962,17 @@ export function reconcileRestaurantJournalWithServerTables(
       continue;
     }
     const server = byId.get(check.tableId);
-    // No server row, or server FREE, or pointer is a different order → stale seed.
+    // Multi-ticket: current_order_id is only one pointer — never treat sibling mismatch as settled.
+    const openIds = (server?.openOrderIds || []).filter(Boolean);
     const stale =
       !server ||
       server.status === 'FREE' ||
       !server.currentOrderId ||
-      server.currentOrderId !== check.orderId;
+      (openIds.length > 0
+        ? !openIds.includes(check.orderId)
+        : // Occupied without an open-id list: only clear when pointer matches this check
+          // and still FREE/null would have already matched above — keep siblings.
+          false);
     if (!stale) continue;
     if (markRestaurantCheckSettledInJournal(check.orderId, 'CANCELLED', {
       reason: 'Reconciled — table free / check settled on server',

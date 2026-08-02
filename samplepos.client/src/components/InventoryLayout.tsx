@@ -14,7 +14,11 @@ import { useNavOverflow } from '../hooks/useNavOverflow';
 
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 
-import { isCashierRole, resolveCashierHomePath } from '../utils/cashierLockdown';
+import {
+  isCashierAllowedPath,
+  isCashierLockdownActive,
+  resolveCashierHomePath,
+} from '../utils/cashierLockdown';
 
 import { useRestaurantModeForRouting } from '../hooks/useRestaurantEnabled';
 import { RestaurantModeBoot } from './auth/RestaurantModeBoot';
@@ -177,11 +181,20 @@ export default function InventoryLayout({ children }: InventoryLayoutProps) {
 
 
 
-  if (isCashierRole(user?.role)) {
+  // Default cashier lockdown still uses CashierPathGuard; only bounce when path not allowed.
+  // Elevated Cashier (extra RBAC ticks) uses normal inventory layout + permission filters.
+  if (isCashierLockdownActive({ role: user?.role, permissions })) {
     if (!isReady) {
       return <RestaurantModeBoot />;
     }
-    return <Navigate to={resolveCashierHomePath(restaurantEnabled)} replace />;
+    if (
+      !isCashierAllowedPath(location.pathname, {
+        restaurantEnabled,
+        permissions,
+      })
+    ) {
+      return <Navigate to={resolveCashierHomePath(restaurantEnabled)} replace />;
+    }
   }
 
 

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { SYSTEM_CASHIER_PERMISSION_KEYS } from '../../../shared/authorization/systemRoleGrants';
 import {
   CASHIER_NAV_ITEMS,
   isCashierAllowedPath,
+  isCashierLockdownActive,
   resolveCashierHomePath,
   resolveCashierNavItems,
 } from './cashierLockdown';
@@ -25,7 +27,9 @@ describe('cashierLockdown', () => {
   it('includes orders queue and inventory in cashier navigation', () => {
     expect(CASHIER_NAV_ITEMS.some((item) => item.path === '/orders-queue')).toBe(true);
     expect(CASHIER_NAV_ITEMS.some((item) => item.path.includes('/inventory'))).toBe(true);
-    expect(resolveCashierNavItems(true).some((item) => item.path.includes('/inventory'))).toBe(true);
+    expect(resolveCashierNavItems(true).some((item) => item.path.includes('/inventory'))).toBe(
+      true,
+    );
   });
 
   it('restaurant mode: cashier uses Restaurant FOH instead of retail POS', () => {
@@ -33,5 +37,20 @@ describe('cashierLockdown', () => {
     expect(resolveCashierNavItems(true)[0]?.path).toBe('/restaurant');
     expect(isCashierAllowedPath('/pos', { restaurantEnabled: true })).toBe(false);
     expect(isCashierAllowedPath('/restaurant', { restaurantEnabled: true })).toBe(true);
+  });
+
+  it('lockdown active only for default cashier grant set', () => {
+    expect(
+      isCashierLockdownActive({
+        role: 'CASHIER',
+        permissions: SYSTEM_CASHIER_PERMISSION_KEYS,
+      }),
+    ).toBe(true);
+    expect(
+      isCashierLockdownActive({
+        role: 'CASHIER',
+        permissions: [...SYSTEM_CASHIER_PERMISSION_KEYS, 'banking.read'],
+      }),
+    ).toBe(false);
   });
 });

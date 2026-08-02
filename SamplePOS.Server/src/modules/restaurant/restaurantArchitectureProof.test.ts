@@ -275,7 +275,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(service).toMatch(/assignWaiter/);
     expect(service).toMatch(/listAssignableWaiters/);
     // Multi-ticket: prefer actor's sibling when current_order_id points at a peer check.
-    expect(service).toMatch(/ownedSibling/);
+    expect(service).toMatch(/scopedSiblings/);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/\/waiters/);

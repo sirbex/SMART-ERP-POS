@@ -1790,9 +1790,11 @@ export default function RestaurantPosPage() {
         queryKey: key,
         staleTime: 60_000,
         queryFn: async () => {
-          const res = await api.restaurant.getTableCheck(selectedTableId, {
-            orderId: serverOrderId,
-          });
+          const res = await api.restaurant.getTableCheck(
+            selectedTableId,
+            { orderId: serverOrderId },
+            { silentForbidden: true },
+          );
           const data = res.data.data as CheckUiPayload;
           return attachSiblingTabs(
             checkUiAfterServerSeed(selectedTableId, data),
@@ -2251,7 +2253,21 @@ export default function RestaurantPosPage() {
       let kotFired = 0;
       let kotPrintFailures = 0;
       if (unsentCount > 0) {
-        const kotResult = await fireUnsentKotTickets();
+        // Decide logout before fire so KOT print awaits PRINTED (same race fix as KOT-only path).
+        const willAwaitKotPrint =
+          decideRestaurantFohAutoLogout({
+            kind: 'bill',
+            role: user?.role,
+            permissions,
+          }) ||
+          decideRestaurantFohAutoLogout({
+            kind: 'kot',
+            role: user?.role,
+            permissions,
+          });
+        const kotResult = await fireUnsentKotTickets({
+          awaitPrint: willAwaitKotPrint,
+        });
         kotFired = kotResult.kotCount;
         kotPrintFailures = kotResult.printFailures;
       }
@@ -2429,6 +2445,7 @@ export default function RestaurantPosPage() {
           },
         }));
         if (willAutoLogoutBill) {
+          // Auto-logout: await PRINTED so re-login flush cannot re-paper.
           const dispatched = await dispatchPrintJobs(jobs, {
             branding: companyBranding,
             awaitStatusSync: true,
@@ -2440,6 +2457,7 @@ export default function RestaurantPosPage() {
             });
           }
         } else {
+          // Steward continues immediately — do not block floor return on paper.
           void dispatchPrintJobs(jobs, { branding: companyBranding }).then((dispatched) => {
             if (dispatched.failures > 0) {
               toast.error('Bill marked (print unavailable)', {

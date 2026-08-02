@@ -505,6 +505,31 @@ export const restaurantRepository = {
   },
 
   /**
+   * After split moves items to another check: reassign FIRE/VOID KOTs that no longer
+   * have any line still on the source order (items already re-pointed to dest).
+   */
+  async reassignOrphanedKotsAfterItemMove(
+    conn: DbConn,
+    fromOrderId: string,
+    toOrderId: string,
+  ): Promise<void> {
+    await conn.query(
+      `UPDATE restaurant_kot k
+       SET order_id = $2
+       WHERE k.order_id = $1
+         AND k.status <> 'BUMPED'
+         AND NOT EXISTS (
+           SELECT 1
+           FROM restaurant_kot_items ki
+           INNER JOIN pos_order_items oi ON oi.id = ki.order_item_id
+           WHERE ki.kot_id = k.id
+             AND oi.order_id = $1
+         )`,
+      [fromOrderId, toOrderId],
+    );
+  },
+
+  /**
    * Link products.category free-text → product_categories.id so restaurant
    * category buttons (JOIN on category_id) work for older rows.
    */
@@ -766,6 +791,18 @@ export const restaurantRepository = {
        SET subtotal = $2, discount_amount = $3, tax_amount = $4, total_amount = $5
        WHERE id = $1 AND status = 'PENDING'`,
       [orderId, totals.subtotal, totals.discountAmount, totals.taxAmount, totals.totalAmount],
+    );
+  },
+
+  /**
+   * Lock unsent lines before KOT fire so concurrent sendKot cannot double-ticket.
+   */
+  async lockUnsentItemsForUpdate(conn: DbConn, orderId: string): Promise<void> {
+    await conn.query(
+      `SELECT id FROM pos_order_items
+       WHERE order_id = $1 AND kitchen_sent_at IS NULL
+       FOR UPDATE`,
+      [orderId],
     );
   },
 

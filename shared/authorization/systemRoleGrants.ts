@@ -1,13 +1,14 @@
 /**
- * Single source of truth for system RBAC role → permission grants.
+ * Single source of truth for system RBAC role → permission grants (SEED DEFAULTS).
  *
  * Used by:
  * - SamplePOS.Server/src/rbac/seed.ts
  * - SamplePOS.Server/src/modules/platform/tenantService.ts (seedDefaultRbac)
- * - SQL migrations that re-grant Manager / Accountant (must mirror these lists)
  *
- * Manager modules intentionally match LEGACY_MANAGER_MODULES so product
- * expectations stay aligned after the permission-based auth refactor.
+ * Runtime authorization uses the role's stored rbac_role_permissions rows.
+ * Role Management may add/remove catalog keys; seed is additive (ON CONFLICT DO NOTHING)
+ * and must not strip admin customizations. Client lockdowns treat these lists as the
+ * "default profile" — any extra catalog key escapes the minimal POS/FOH lockdown.
  */
 
 import { LEGACY_MANAGER_MODULES } from './legacyRoleFallback.js';

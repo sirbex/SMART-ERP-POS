@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { useTenant } from '../contexts/TenantContext';
 import { PasswordExpiryWarning } from './auth/PasswordExpiryWarning';
 import ServerClock from './ServerClock';
-import { isCashierRole, resolveCashierNavItems } from '../utils/cashierLockdown';
+import { isCashierLockdownActive, resolveCashierNavItems } from '../utils/cashierLockdown';
 import {
   isRestaurantWaiterProfile,
   WAITER_NAV_ITEMS,
@@ -138,14 +138,21 @@ function LayoutChrome({ children }: LayoutProps) {
   const adminNavItems: NavItem[] = [
     { name: 'Import', path: '/import', icon: '📥', color: 'text-violet-600', permissions: ['admin.create'] },
     { name: 'Settings', path: '/settings', icon: '⚙️', color: 'text-gray-600', permissions: ['system.read'] },
-    { name: 'Roles', path: '/admin/roles', icon: '🔐', color: 'text-pink-600', permissions: ['admin.update'] },
+    {
+      name: 'Roles',
+      path: '/admin/roles',
+      icon: '🔐',
+      color: 'text-pink-600',
+      permissions: ['system.roles_update', 'admin.update'],
+    },
   ];
 
   const planFeatures = config.planFeatures ?? [];
 
   const allNavItems = useMemo(() => {
-    if (isCashierRole(user?.role)) {
-      return resolveCashierNavItems(restaurantEnabled).map((item) => ({
+    // Default Cashier grant set → minimal nav. Extra Role Management ticks → full permission nav.
+    if (isCashierLockdownActive({ role: user?.role, permissions })) {
+      return resolveCashierNavItems(restaurantEnabled, permissions).map((item) => ({
         name: item.name,
         path: item.path,
         icon: item.icon,

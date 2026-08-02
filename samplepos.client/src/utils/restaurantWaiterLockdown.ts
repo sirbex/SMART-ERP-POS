@@ -1,12 +1,16 @@
 /**
- * Restaurant Waiter lockdown — FOH-first access.
- * Waiters operate tables/checks only; kitchen config surfaces stay hidden.
+ * Restaurant Waiter lockdown — FOH-first defaults.
  *
- * Detection (permission profile, not just legacy role):
+ * Detection (permission profile SSOT):
  * - Has restaurant.order (floor service)
- * - Lacks restaurant.kitchen, restaurant.manage, restaurant.pay
+ * - Permissions stay within SYSTEM_WAITER_PERMISSION_KEYS (or empty during login)
  * - Not ADMIN / MANAGER / CASHIER legacy roles
+ *
+ * Tick any catalog key outside the waiter default set → lockdown OFF
+ * (Role Management grants expand access).
  */
+
+import { SYSTEM_WAITER_PERMISSION_KEYS } from '../../../shared/authorization/systemRoleGrants';
 
 export const WAITER_HOME_PATH = '/restaurant';
 
@@ -41,17 +45,17 @@ export function isRestaurantWaiterProfile(input: WaiterProfileInput): boolean {
   const perms = permissionSet(input.permissions);
   // Explicit WAITER legacy without a permission cache yet (login race)
   if (perms.size === 0) {
-    return role === 'WAITER';
+    return role === 'WAITER' || role === 'STAFF';
   }
 
   if (!perms.has('restaurant.order')) return false;
-  if (perms.has('restaurant.kitchen')) return false;
-  if (perms.has('restaurant.manage')) return false;
-  if (perms.has('restaurant.pay')) return false;
-  // Admins always have broad keys — exclude if they look like system operators
-  if (perms.has('admin.update') || perms.has('admin.delete') || perms.has('system.manage')) {
-    return false;
+
+  // Elevated RBAC ticks (kitchen, pay, manage, accounting, …) escape FOH lockdown.
+  const defaults = new Set<string>(SYSTEM_WAITER_PERMISSION_KEYS);
+  for (const key of perms) {
+    if (!defaults.has(key)) return false;
   }
+
   return true;
 }
 

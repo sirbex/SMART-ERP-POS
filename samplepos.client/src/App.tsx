@@ -1307,7 +1307,7 @@ function App() {
                   <Route
                     path="/admin/roles"
                     element={
-                      <ProtectedRoute requiredPermissions={['admin.update']}>
+                      <ProtectedRoute requiredPermissions={['system.roles_update', 'admin.update']}>
                         <RoleManagementPage />
                       </ProtectedRoute>
                     }

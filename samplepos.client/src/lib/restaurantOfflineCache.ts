@@ -156,6 +156,9 @@ export function paintRestaurantTableFreeOffline(tableId: string): void {
       orderNumber: null,
       orderTotal: null,
       guestName: null,
+      orderChannel: null,
+      waiterId: null,
+      waiterName: null,
     };
   });
   if (changed) cacheRestaurantTables(next);
@@ -234,16 +237,20 @@ export async function refreshRestaurantOfflineCache(api: {
     api.menuCategories(quiet),
     api.listWaiters(quiet),
   ]);
-  const val = <T,>(i: number): T[] => {
+  /** Only overwrite a cache slice when that endpoint succeeded — never blank warm FOH on blips. */
+  const writeIfFulfilled = <T,>(
+    i: number,
+    write: (rows: T[]) => void,
+  ): void => {
     const r = settled[i];
-    if (r.status !== 'fulfilled') return [];
-    return ((r.value.data.data as T[] | undefined) || []) as T[];
+    if (r.status !== 'fulfilled') return;
+    write(((r.value.data.data as T[] | undefined) || []) as T[]);
   };
-  cacheRestaurantTables(val<CachedRestaurantTable>(0));
-  cacheRestaurantStations(val<CachedStation>(1));
-  cacheRestaurantMenu(val<CachedMenuProduct>(2));
-  cacheRestaurantCategories(val<CachedCategory>(3));
-  cacheRestaurantWaiters(val<CachedWaiter>(4));
+  writeIfFulfilled<CachedRestaurantTable>(0, cacheRestaurantTables);
+  writeIfFulfilled<CachedStation>(1, cacheRestaurantStations);
+  writeIfFulfilled<CachedMenuProduct>(2, cacheRestaurantMenu);
+  writeIfFulfilled<CachedCategory>(3, cacheRestaurantCategories);
+  writeIfFulfilled<CachedWaiter>(4, cacheRestaurantWaiters);
 
   // Multistore: keep offline stock mirror on the shop/SELLING catalog (same as retail POS).
   try {

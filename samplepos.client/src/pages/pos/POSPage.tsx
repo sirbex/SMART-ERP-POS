@@ -92,7 +92,10 @@ import { useAuth } from '../../hooks/useAuth';
 import { useDiscountLimitPercent } from '../../authorization/useDiscountLimitPercent';
 import { useHasPermission } from '../../authorization/useAuthorization';
 import { getBusinessDate, formatTimestampDate, formatTimestampTime } from '../../utils/businessDate';
-import { isCashierRole, resolveCashierNavItems } from '../../utils/cashierLockdown';
+import {
+  isCashierLockdownActive,
+  resolveCashierNavItems,
+} from '../../utils/cashierLockdown';
 import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
 import { usePosAssignedStore } from '../../hooks/usePosAssignedStore';
 
@@ -386,13 +389,15 @@ function PosWorkspaceSurface({
 export default function POSPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, logout, permissions } = useAuth();
   const { data: restaurantEnabled = false } = useRestaurantEnabled();
   const { tier, chrome } = useLayoutTier();
   const discountLimitPercent = useDiscountLimitPercent();
   const canAccessImport = useHasPermission('admin.create');
   const canAccessSettings = useHasPermission('system.read');
-  const canAccessRoles = useHasPermission('admin.update');
+  const canAccessRolesUpdate = useHasPermission('system.roles_update');
+  const canAccessRolesAdmin = useHasPermission('admin.update');
+  const canAccessRoles = canAccessRolesUpdate || canAccessRolesAdmin;
   const { data: assignedStore } = usePosAssignedStore();
   const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [items, setItems] = useState<LineItem[]>([]);
@@ -3411,8 +3416,8 @@ export default function POSPage() {
   };
 
   const posNavItems = useMemo(() => {
-    if (isCashierRole(user?.role)) {
-      return resolveCashierNavItems(restaurantEnabled);
+    if (isCashierLockdownActive({ role: user?.role, permissions })) {
+      return resolveCashierNavItems(restaurantEnabled, permissions);
     }
     return [
       { name: 'Dashboard', path: '/dashboard', icon: '📊' },
@@ -3435,7 +3440,14 @@ export default function POSPage() {
           ]
         : []),
     ];
-  }, [canAccessImport, canAccessSettings, canAccessRoles, user?.role, restaurantEnabled]);
+  }, [
+    canAccessImport,
+    canAccessSettings,
+    canAccessRoles,
+    user?.role,
+    permissions,
+    restaurantEnabled,
+  ]);
 
   return (
     <AdaptiveAppShell className="h-screen" pathname={location.pathname}>

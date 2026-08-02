@@ -15,7 +15,7 @@ const waiterPerms = [
 ];
 
 describe('restaurantWaiterLockdown', () => {
-  it('detects waiter permission profile (order without kitchen/manage/pay)', () => {
+  it('detects waiter permission profile (order without elevated ticks)', () => {
     expect(
       isRestaurantWaiterProfile({
         role: 'STAFF',
@@ -23,6 +23,13 @@ describe('restaurantWaiterLockdown', () => {
         restaurantEnabled: true,
       }),
     ).toBe(true);
+    expect(
+      isRestaurantWaiterProfile({
+        role: 'STAFF',
+        permissions: [...waiterPerms, 'restaurant.kitchen'],
+        restaurantEnabled: true,
+      }),
+    ).toBe(false);
   });
 
   it('does not treat cashiers/managers/admins as waiters', () => {

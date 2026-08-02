@@ -339,11 +339,13 @@ export const posEventReplayer = {
             case 'RESTAURANT_CHECK_SPLIT':
                 return posEventReplayer.splitRestaurantCheck(pool, event, userId);
 
+            case 'RESTAURANT_KOT_FIRED':
+                return posEventReplayer.fireRestaurantKot(pool, event, userId);
+
             case 'PAYMENT_ADDED':
             case 'SALE_VOIDED':
-            case 'RESTAURANT_KOT_FIRED':
             case 'RESTAURANT_KOT_STATUS':
-                // KOT fire/status are local-first; server kot rows land with ORDER sync / later phases
+                // KDS status advances online; offline board is local-first until a later phase.
                 logger.debug(`[EventReplayer] ${event.eventType} acknowledged (no-op)`);
                 return { status: 'ACKNOWLEDGED', eventType: event.eventType };
 
@@ -673,8 +675,23 @@ export const posEventReplayer = {
             }
 
             if (waiterId && !checkCancelled) {
-                await restaurantRepository.patchOrderRestaurantFields(pool, orderId, { waiterId });
-                logger.info(`[EventReplayer] ORDER_UPDATED waiter → order ${orderId}`);
+                // Same ownership gate as online assignWaiter — do not let offline events steal peers.
+                try {
+                    await restaurantService.assignWaiter(pool as Pool, orderId, waiterId, {
+                        userId,
+                    });
+                    logger.info(`[EventReplayer] ORDER_UPDATED waiter → order ${orderId}`);
+                } catch (assignErr: unknown) {
+                    const msg =
+                        assignErr instanceof Error ? assignErr.message : String(assignErr);
+                    if (msg.includes('owned') || msg.includes('Forbidden') || msg.includes('403')) {
+                        logger.warn(
+                            `[EventReplayer] ORDER_UPDATED waiter rejected (ownership) order=${orderId}`,
+                        );
+                    } else {
+                        throw assignErr;
+                    }
+                }
             }
 
             if (voidedCount > 0 || waiterId) {
@@ -715,19 +732,28 @@ export const posEventReplayer = {
             }
 
             if (!orderId) {
+                // Never wipe a multi-ticket table when the cancelled check is already gone.
                 if (event.tableId) {
                     try {
                         const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
                         const { restaurantRepository } = await import('../restaurant/restaurantRepository.js');
                         if (await isRestaurantModeEnabled(pool)) {
-                            await restaurantRepository.releaseTable(pool, event.tableId);
+                            const pending = await (pool as Pool).query(
+                                `SELECT COUNT(*)::int AS n FROM pos_orders
+                                 WHERE table_id = $1 AND status = 'PENDING'
+                                   AND order_channel IS DISTINCT FROM 'RETAIL'`,
+                                [event.tableId],
+                            );
+                            if ((pending.rows[0]?.n as number) === 0) {
+                                await restaurantRepository.releaseTable(pool, event.tableId);
+                            }
                         }
                     } catch {
                         /* best-effort */
                     }
                 }
                 logger.warn(
-                    `[EventReplayer] ORDER_CANCELLED: order not found offlineId=${event.offlineId ?? 'n/a'} — ACK + table free`
+                    `[EventReplayer] ORDER_CANCELLED: order not found offlineId=${event.offlineId ?? 'n/a'} — ACK`
                 );
                 return { status: 'ACKNOWLEDGED', eventType: 'ORDER_CANCELLED' };
             }
@@ -757,24 +783,37 @@ export const posEventReplayer = {
                 };
             }
 
-            await ordersService.cancelOrder(
-                pool as Pool,
-                orderId,
-                userId,
-                event.reason?.trim() || 'Cancelled offline (restaurant)',
-            );
-
-            try {
-                const { restaurantService } = await import('../restaurant/restaurantService.js');
-                await restaurantService.releaseTableForOrder(pool, orderId, {
-                    updatedBy: userId,
-                    bumpVoids: true,
-                });
-            } catch (releaseErr) {
-                logger.error('[EventReplayer] Table release after cancel failed', {
+            // SSOT: cancelCheck emits VOID KOTs for kitchen-sent lines, then cancels + releases.
+            const { restaurantService } = await import('../restaurant/restaurantService.js');
+            const meta = await (
+                await import('../restaurant/restaurantRepository.js')
+            ).restaurantRepository.getOrderRestaurantMeta(pool, orderId);
+            if (meta && meta.orderChannel !== 'RETAIL') {
+                await restaurantService.cancelCheck(
+                    pool as Pool,
                     orderId,
-                    error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
-                });
+                    userId,
+                    event.reason?.trim() || 'Cancelled offline (restaurant)',
+                    { userId },
+                );
+            } else {
+                await ordersService.cancelOrder(
+                    pool as Pool,
+                    orderId,
+                    userId,
+                    event.reason?.trim() || 'Cancelled offline (restaurant)',
+                );
+                try {
+                    await restaurantService.releaseTableForOrder(pool, orderId, {
+                        updatedBy: userId,
+                        bumpVoids: true,
+                    });
+                } catch (releaseErr) {
+                    logger.error('[EventReplayer] Table release after cancel failed', {
+                        orderId,
+                        error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+                    });
+                }
             }
 
             logger.info(
@@ -788,6 +827,58 @@ export const posEventReplayer = {
             const errMsg = err instanceof Error ? err.message : String(err);
             logger.error(
                 `[EventReplayer] ORDER_CANCELLED failed ${event.offlineId ?? event.orderId}: ${errMsg}`
+            );
+            return { status: 'FAILED', error: errMsg };
+        }
+    },
+
+    /**
+     * Offline KOT fire → restaurantService.sendKot (idempotent when lines already sent).
+     * Creates restaurant_kot + print_jobs so kitchen/VOID routing stays SSOT after sync.
+     */
+    async fireRestaurantKot(
+        pool: Pool | PoolClient,
+        event: RestaurantKotFiredEvent,
+        userId: string,
+    ): Promise<ReplayResult> {
+        try {
+            const { isRestaurantModeEnabled } = await import('../restaurant/restaurantSettings.js');
+            if (!(await isRestaurantModeEnabled(pool))) {
+                return { status: 'ACKNOWLEDGED', eventType: 'RESTAURANT_KOT_FIRED' };
+            }
+
+            let orderId: string | null = null;
+            if (event.orderId && UUID_RE.test(event.orderId)) {
+                orderId = event.orderId;
+            } else if (typeof event.tableId === 'string' && event.tableId) {
+                orderId = await resolvePendingOrderIdForTable(pool as Pool, event.tableId);
+            }
+
+            if (!orderId) {
+                // ORDER_CREATED may not have landed yet — ACK so sync does not stick.
+                return { status: 'ACKNOWLEDGED', eventType: 'RESTAURANT_KOT_FIRED' };
+            }
+
+            const { restaurantService } = await import('../restaurant/restaurantService.js');
+            const result = await restaurantService.sendKot(pool as Pool, orderId, userId, {
+                userId,
+            });
+            logger.info(
+                `[EventReplayer] RESTAURANT_KOT_FIRED → order ${orderId} kots=${result.kots.length}`,
+            );
+            return {
+                status: result.kots.length > 0 ? 'SYNCED' : 'DUPLICATE',
+                data: {
+                    orderId,
+                    kotOfflineId: event.kotOfflineId,
+                    kotCount: result.kots.length,
+                    printJobCount: result.printJobs.length,
+                },
+            };
+        } catch (err: unknown) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            logger.error(
+                `[EventReplayer] RESTAURANT_KOT_FIRED failed key=${event.key}: ${errMsg}`,
             );
             return { status: 'FAILED', error: errMsg };
         }

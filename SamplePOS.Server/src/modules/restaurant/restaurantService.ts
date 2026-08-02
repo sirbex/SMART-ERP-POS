@@ -477,6 +477,10 @@ export const restaurantService = {
     if (!table || !table.isActive) throw new NotFoundError('Restaurant table');
 
     const siblings = await restaurantRepository.listPendingOrdersForTable(pool, tableId);
+    const scopedSiblings =
+      actor && !canEditOtherWaitersChecks(actor)
+        ? siblings.filter((s) => !s.waiterId || s.waiterId === actor.userId)
+        : siblings;
 
     // Defense: ignore client temp/journal ids (tmp_ord_*, ofl_*) — never query UUID columns with them.
     const ORDER_UUID_RE =
@@ -486,32 +490,39 @@ export const restaurantService = {
 
     let orderId = safeActive || table.currentOrderId;
     if (orderId && !siblings.some((s) => s.id === orderId) && siblings.length > 0) {
-      // Stale pointer or explicit id not pending — fall back
-      orderId = table.currentOrderId || siblings[0]?.id || null;
-    }
-    if (!orderId && siblings.length > 0) {
-      orderId = siblings[0].id;
-      await restaurantRepository.setTableCurrentOrder(pool, tableId, orderId);
+      // Stale pointer or explicit id not pending — fall back (prefer owned when scoped).
+      orderId =
+        (table.currentOrderId && siblings.some((s) => s.id === table.currentOrderId)
+          ? table.currentOrderId
+          : null) ||
+        scopedSiblings[0]?.id ||
+        siblings[0]?.id ||
+        null;
     }
 
     // Toast/Aloha: waiters may only open their own checks (FREE tables are fine).
+    // Ownership runs before any floor-pointer write so a 403 cannot re-point the table.
     if (actor && !canEditOtherWaitersChecks(actor) && siblings.length > 0) {
-      const ownedSibling = siblings.find((s) => !s.waiterId || s.waiterId === actor.userId);
-      // Multi-ticket: current_order_id may point at a peer check — switch to ours.
-      if (ownedSibling && orderId && orderId !== ownedSibling.id) {
-        const pointed = siblings.find((s) => s.id === orderId);
-        if (pointed?.waiterId && pointed.waiterId !== actor.userId) {
-          orderId = ownedSibling.id;
-          await restaurantRepository.setTableCurrentOrder(pool, tableId, orderId);
-        }
-      }
-      const ownsAny = !!ownedSibling;
-      const target = siblings.find((s) => s.id === orderId);
-      const canOpenTarget =
-        !target || !target.waiterId || target.waiterId === actor.userId;
-      if (!ownsAny || !canOpenTarget) {
+      if (scopedSiblings.length === 0) {
         throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
       }
+      const pointed = orderId ? siblings.find((s) => s.id === orderId) : null;
+      if (pointed?.waiterId && pointed.waiterId !== actor.userId) {
+        orderId = scopedSiblings[0]!.id;
+      } else if (!orderId) {
+        orderId = scopedSiblings[0]!.id;
+      }
+      const target = siblings.find((s) => s.id === orderId);
+      if (target?.waiterId && target.waiterId !== actor.userId) {
+        throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
+      }
+    } else if (!orderId && siblings.length > 0) {
+      orderId = siblings[0]!.id;
+    }
+
+    // Heal floor pointer only after the actor is allowed to open the chosen check.
+    if (orderId && table.currentOrderId !== orderId && siblings.some((s) => s.id === orderId)) {
+      await restaurantRepository.setTableCurrentOrder(pool, tableId, orderId);
     }
 
     let order = null;
@@ -536,7 +547,7 @@ export const restaurantService = {
       table: await restaurantRepository.getTableById(pool, tableId),
       order,
       meta,
-      siblingChecks: await restaurantRepository.listPendingOrdersForTable(pool, tableId),
+      siblingChecks: scopedSiblings,
     };
   },
 
@@ -984,6 +995,8 @@ export const restaurantService = {
         );
       }
 
+      // Serialize concurrent fires (READ COMMITTED): lock unsent rows before reading.
+      await restaurantRepository.lockUnsentItemsForUpdate(client, orderId);
       const unsent = await restaurantRepository.listUnsentItems(client, orderId);
       // Expert FOH: KOT with nothing new is a no-op success — waiter still leaves the ticket
       // (client returns to floor). Do not error; empty array means "already fired".
@@ -1210,11 +1223,23 @@ export const restaurantService = {
         if (remaining.lte(0)) {
           deleteIds.push(slice.id);
         } else {
+          // Same proportional discount math as split — keep line discount consistent with qty.
+          const lineDiscount = Money.toNumber(Money.parseDb(String(slice.discountAmount || 0)));
+          const remainDiscount =
+            onHand > 0
+              ? Number(
+                  new Decimal(lineDiscount)
+                    .times(remaining)
+                    .div(onHand)
+                    .toFixed(2),
+                )
+              : 0;
           const ok = await restaurantRepository.reduceOrderItemQuantity(
             client,
             orderId,
             slice.id,
             remaining.toNumber(),
+            { discountAmount: remainDiscount },
           );
           if (!ok) {
             throw new BusinessError('Failed to reduce voided line quantity', 'ERR_RESTAURANT_VOID');
@@ -1467,7 +1492,7 @@ export const restaurantService = {
    * 2) Return check payload for optional local print (best-effort)
    * Order stays PENDING until Pay. Multi-ticket tables stay on floor with siblings.
    */
-  async requestBill(pool: Pool, orderId: string) {
+  async requestBill(pool: Pool, orderId: string, actor?: OwnershipActor) {
     await assertRestaurantEnabled(pool);
     const order = await ordersService.getOrder(pool, orderId);
     if (order.status !== 'PENDING') {
@@ -1480,6 +1505,7 @@ export const restaurantService = {
     if (!meta || meta.orderChannel === 'RETAIL') {
       throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
     }
+    requireCheckMutationAccess(meta.waiterId, actor);
     await this.markBilling(pool, orderId);
     const table = meta.tableId
       ? await restaurantRepository.getTableById(pool, meta.tableId)
@@ -1528,8 +1554,8 @@ export const restaurantService = {
   },
 
   /** @deprecated Prefer requestBill — same behavior */
-  async getBill(pool: Pool, orderId: string) {
-    return this.requestBill(pool, orderId);
+  async getBill(pool: Pool, orderId: string, actor?: OwnershipActor) {
+    return this.requestBill(pool, orderId, actor);
   },
 
   /**
@@ -1539,12 +1565,14 @@ export const restaurantService = {
     pool: Pool,
     orderId: string,
     guest: RestaurantGuestDetails,
+    actor?: OwnershipActor,
   ) {
     await assertRestaurantEnabled(pool);
     const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
     if (!meta || meta.orderChannel === 'RETAIL') {
       throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
     }
+    requireCheckMutationAccess(meta.waiterId, actor);
     const order = await ordersService.getOrder(pool, orderId);
     if (order.status !== 'PENDING') {
       throw new BusinessError('Only open checks can update guest details', 'ERR_RESTAURANT_CHECK_CLOSED');
@@ -1569,12 +1597,19 @@ export const restaurantService = {
     };
   },
 
-  async cancelCheck(pool: Pool, orderId: string, cancelledBy: string, reason: string) {
+  async cancelCheck(
+    pool: Pool,
+    orderId: string,
+    cancelledBy: string,
+    reason: string,
+    actor?: OwnershipActor,
+  ) {
     await assertRestaurantEnabled(pool);
     const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
     if (!meta || meta.orderChannel === 'RETAIL') {
       throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
     }
+    requireCheckMutationAccess(meta.waiterId, actor || { userId: cancelledBy });
 
     // Notify kitchen for any already-fired lines before cancelling the check.
     const { voidKots, printJobs } = await UnitOfWork.run(pool, async (client: PoolClient) => {
@@ -1741,13 +1776,15 @@ export const restaurantService = {
     pool: Pool,
     orderId: string,
     toTableId: string,
-    _actorId: string,
+    actorId: string,
+    actor?: OwnershipActor,
   ) {
     await assertRestaurantEnabled(pool);
     const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
     if (!meta || meta.orderChannel === 'RETAIL') {
       throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
     }
+    requireCheckMutationAccess(meta.waiterId, actor || { userId: actorId });
     const order = await ordersService.getOrder(pool, orderId);
     if (order.status !== 'PENDING') {
       throw new BusinessError('Only open checks can transfer', 'ERR_RESTAURANT_CHECK_CLOSED');
@@ -1809,6 +1846,7 @@ export const restaurantService = {
     primaryOrderId: string,
     secondaryOrderId: string,
     actorId: string,
+    actor?: OwnershipActor,
   ) {
     await assertRestaurantEnabled(pool);
     if (primaryOrderId === secondaryOrderId) {
@@ -1823,6 +1861,9 @@ export const restaurantService = {
     if (!secondaryMeta || secondaryMeta.orderChannel === 'RETAIL') {
       throw new BusinessError('Secondary is not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
     }
+    const ownership = actor || { userId: actorId };
+    requireCheckMutationAccess(primaryMeta.waiterId, ownership);
+    requireCheckMutationAccess(secondaryMeta.waiterId, ownership);
 
     const primary = await ordersService.getOrder(pool, primaryOrderId);
     const secondary = await ordersService.getOrder(pool, secondaryOrderId);
@@ -1906,6 +1947,7 @@ export const restaurantService = {
       targetTableId: string;
       actorId: string;
       sameTable?: boolean;
+      actor?: OwnershipActor;
     },
   ) {
     await assertRestaurantEnabled(pool);
@@ -1935,6 +1977,10 @@ export const restaurantService = {
     if (!sourceMeta || sourceMeta.orderChannel === 'RETAIL') {
       throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
     }
+    requireCheckMutationAccess(
+      sourceMeta.waiterId,
+      input.actor || { userId: input.actorId },
+    );
     const source = await ordersService.getOrder(pool, sourceOrderId);
     if (source.status !== 'PENDING') {
       throw new BusinessError('Only open checks can split', 'ERR_RESTAURANT_CHECK_CLOSED');
@@ -2087,6 +2133,12 @@ export const restaurantService = {
           if (moved !== fullMoveIds.length) {
             throw new BusinessError('Failed to move split lines', 'ERR_RESTAURANT_SPLIT');
           }
+          // KOTs whose items all left the source follow the dest check (merge parity).
+          await restaurantRepository.reassignOrphanedKotsAfterItemMove(
+            client,
+            sourceOrderId,
+            newOrderId,
+          );
         }
 
         const sourceFresh = await ordersRepository.getById(client, sourceOrderId);
@@ -2105,6 +2157,20 @@ export const restaurantService = {
           }, new Decimal(0));
           const tax = await computeTaxAmount(client, net);
           await restaurantRepository.updateOrderTotals(client, oid, recalcFromItems(items, tax));
+        }
+
+        // Keep kitchenStatus aligned with KOTs / kitchen_sent_at on both checks.
+        for (const oid of [sourceOrderId, newOrderId]) {
+          const synced = await restaurantRepository.syncOrderKitchenStatusFromKots(client, oid);
+          if (synced === 'NONE') {
+            const fresh = await ordersRepository.getById(client, oid);
+            const stillSent = (fresh?.items || []).some((it) => !!it.kitchenSentAt);
+            if (stillSent) {
+              await restaurantRepository.patchOrderRestaurantFields(client, oid, {
+                kitchenStatus: 'SENT',
+              });
+            }
+          }
         }
 
         if (!sameTable) {
@@ -2203,6 +2269,7 @@ export const restaurantService = {
       itemId: string;
       orderTags?: RestaurantOrderTagSelection[] | null;
       freeText?: string | null;
+      actor?: OwnershipActor;
     },
   ) {
     await assertRestaurantEnabled(pool);
@@ -2210,6 +2277,8 @@ export const restaurantService = {
     if (!order || order.status !== 'PENDING') {
       throw new BusinessError('Check is not open', 'ERR_RESTAURANT_CHECK_CLOSED');
     }
+    const metaEarly = await restaurantRepository.getOrderRestaurantMeta(pool, input.orderId);
+    requireCheckMutationAccess(metaEarly?.waiterId, input.actor);
     const item = (order.items || []).find((it) => it.id === input.itemId);
     if (!item) throw new NotFoundError('Order item');
     if (item.kitchenSentAt) {

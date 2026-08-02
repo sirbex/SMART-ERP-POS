@@ -848,6 +848,90 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(deriveRestaurantKitchenBoard(getAllEvents(), getAllSyncState())).toHaveLength(0);
   });
 
+  it('EVIDENCE reconcile keeps multi-ticket sibling when pointer differs', () => {
+    const first = appendRestaurantItemOffline({
+      tableId: 't-multi-rec',
+      tableCode: 'MR',
+      tableName: 'Multi Rec',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Soup',
+      unitPrice: 5,
+      quantity: 1,
+    });
+    const withSalad = appendRestaurantItemOffline({
+      tableId: 't-multi-rec',
+      tableCode: 'MR',
+      tableName: 'Multi Rec',
+      channel: 'DINE_IN',
+      productId: 'p2',
+      productName: 'Salad',
+      unitPrice: 6,
+      quantity: 1,
+    });
+    const saladId = withSalad.lines.find((l) => l.productName === 'Salad')?.lineId;
+    expect(saladId).toBeTruthy();
+    const { source, split } = splitRestaurantCheckOffline(withSalad, {
+      lineIds: [saladId!],
+      targetTableId: 't-multi-rec',
+      targetTableCode: 'MR',
+      targetTableName: 'Multi Rec',
+      sameTable: true,
+    });
+    expect(source.orderId).toBe(first.orderId);
+    expect(split.orderId).not.toBe(source.orderId);
+
+    // Occupied with pointer on primary only — sibling must NOT be reconciled away.
+    const r = reconcileRestaurantJournalWithServerTables([
+      {
+        id: 't-multi-rec',
+        status: 'OCCUPIED',
+        currentOrderId: source.orderId,
+      },
+    ]);
+    expect(r.closed).toBe(0);
+    const openIds = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())
+      .filter((c) => c.tableId === 't-multi-rec')
+      .map((c) => c.orderId)
+      .sort();
+    expect(openIds).toEqual([source.orderId, split.orderId].sort());
+
+    // Server UUID ghost sibling: openOrderIds allows clearing without FREE table.
+    const ghostId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee9';
+    seedRestaurantCheckFromServer({
+      orderId: ghostId,
+      orderNumber: 'R-GHOST',
+      tableId: 't-multi-rec',
+      tableCode: 'MR',
+      tableName: 'Multi Rec',
+      channel: 'DINE_IN',
+      items: [
+        {
+          id: 'line-ghost',
+          productId: 'p3',
+          productName: 'Ghost',
+          quantity: 1,
+          unitPrice: 1,
+        },
+      ],
+    });
+    const cleared = reconcileRestaurantJournalWithServerTables([
+      {
+        id: 't-multi-rec',
+        status: 'OCCUPIED',
+        currentOrderId: source.orderId,
+        openOrderIds: [source.orderId, split.orderId],
+      },
+    ]);
+    expect(cleared.closed).toBe(1);
+    expect(
+      deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())
+        .filter((c) => c.tableId === 't-multi-rec')
+        .map((c) => c.orderId)
+        .sort(),
+    ).toEqual([source.orderId, split.orderId].sort());
+  });
+
   it('EVIDENCE reconcile drops journal ghosts when server table is FREE', () => {
     const open = appendRestaurantItemOffline({
       tableId: 't-ghost',

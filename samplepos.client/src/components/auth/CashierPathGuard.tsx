@@ -3,7 +3,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { useRestaurantModeForRouting } from '../../hooks/useRestaurantEnabled';
 import {
   isCashierAllowedPath,
-  isCashierRole,
+  isCashierLockdownActive,
   resolveCashierHomePath,
 } from '../../utils/cashierLockdown';
 import {
@@ -15,9 +15,8 @@ import { shouldHideRetailPos } from '../../utils/retailPosVisibility';
 import { RestaurantModeBoot } from './RestaurantModeBoot';
 
 /**
- * Blocks cashiers from non-POS routes and waiters from kitchen/config/ERP surfaces.
- * When restaurant mode is on, retail /pos is blocked (Restaurant FOH instead).
- * Wrap all authenticated tenant routes in App.tsx.
+ * Blocks default cashiers from non-POS routes and waiters from kitchen/config/ERP.
+ * Extra Role Management ticks escape lockdown — ProtectedRoute enforces catalog keys.
  */
 export function CashierPathGuard() {
   const { user, permissions } = useAuth();
@@ -33,8 +32,8 @@ export function CashierPathGuard() {
   }
 
   if (
-    isCashierRole(user?.role) &&
-    !isCashierAllowedPath(location.pathname, { restaurantEnabled })
+    isCashierLockdownActive({ role: user?.role, permissions }) &&
+    !isCashierAllowedPath(location.pathname, { restaurantEnabled, permissions })
   ) {
     return <Navigate to={resolveCashierHomePath(restaurantEnabled)} replace />;
   }
