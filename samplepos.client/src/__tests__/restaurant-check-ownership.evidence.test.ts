@@ -9,6 +9,7 @@ import {
   canEditOtherWaitersChecks,
   canMutateRestaurantCheck,
   formatOrderedByLabels,
+  isSharedRestaurantServiceCounter,
   isTableVisibleToWaiter,
   ownsRestaurantCheck,
   restaurantTicketLineMergeKey,
@@ -86,6 +87,32 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     expect(ownsRestaurantCheck(null, waiter.userId)).toBe(true);
     expect(ownsRestaurantCheck(otherWaiterId, waiter.userId)).toBe(false);
     expect(canMutateRestaurantCheck({ checkWaiterId: waiter.userId, actor: waiter })).toBe(true);
+  });
+
+  it('EVIDENCE: Quick / Takeaway / Delivery counters are shared (any waiter)', () => {
+    expect(isSharedRestaurantServiceCounter({ tableCode: 'QK', tableZone: 'SERVICE' })).toBe(
+      true,
+    );
+    expect(isSharedRestaurantServiceCounter({ tableCode: 'TA', tableZone: 'SERVICE' })).toBe(
+      true,
+    );
+    expect(isSharedRestaurantServiceCounter({ tableCode: 'T1', tableZone: 'MAIN' })).toBe(false);
+
+    expect(
+      canMutateRestaurantCheck({
+        checkWaiterId: otherWaiterId,
+        actor: waiter,
+        sharedServiceCounter: true,
+      }),
+    ).toBe(true);
+    expect(
+      isTableVisibleToWaiter({
+        tableStatus: 'OCCUPIED',
+        checkWaiterId: otherWaiterId,
+        sharedServiceCounter: true,
+        actor: waiter,
+      }),
+    ).toBe(true);
   });
 
   it('EVIDENCE: Floor — waiter sees FREE + own occupied; not peer occupied', () => {

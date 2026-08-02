@@ -27,9 +27,11 @@ describe('restaurant ownership + integrity SSOT', () => {
     expect(routes).toMatch(/setOrderItemTags\([\s\S]*actor:\s*ownershipActorFromReq\(req\)/);
 
     expect(service).toMatch(/async cancelCheck\([\s\S]*actor\?: OwnershipActor/);
-    expect(service).toMatch(/requireCheckMutationAccess\(meta\.waiterId, actor/);
-    expect(service).toMatch(/requireCheckMutationAccess\(primaryMeta\.waiterId/);
-    expect(service).toMatch(/requireCheckMutationAccess\(secondaryMeta\.waiterId/);
+    expect(service).toMatch(/requireOrderMutationAccess/);
+    expect(service).toMatch(/requireOrderMutationAccess\(pool, meta/);
+    expect(service).toMatch(/requireOrderMutationAccess\(pool, primaryMeta/);
+    expect(service).toMatch(/requireOrderMutationAccess\(pool, secondaryMeta/);
+    expect(service).toMatch(/sharedServiceCounter/);
   });
 
   it('bill route does not allow restaurant.read alone', () => {

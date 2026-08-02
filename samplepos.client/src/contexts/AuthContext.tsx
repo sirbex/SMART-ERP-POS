@@ -11,6 +11,11 @@ import {
   shouldIgnoreCrossTabSessionExpired,
   shouldPerformIdleLogout,
 } from '../lib/sessionLogoutPolicy';
+import {
+  COLD_START_QUICK_LOGIN_HREF,
+  markBrowserSessionAlive,
+  shouldEnforceColdStartPinGate,
+} from '../lib/sessionColdStartLock';
 import type { AxiosError } from 'axios';
 import type { UserRole } from '../types';
 
@@ -100,6 +105,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (token && savedUser) {
           const userData = JSON.parse(savedUser);
 
+          // ── COLD-START / REBOOT PIN GATE (shared POS) ───────────────────────
+          // localStorage survives reboot; sessionStorage does not. Without this,
+          // the last cashier/waiter is silently restored and anyone can operate.
+          if (
+            shouldEnforceColdStartPinGate({
+              role: userData.role,
+              hasStoredSession: true,
+            })
+          ) {
+            clearTokens();
+            const path = typeof window !== 'undefined' ? window.location.pathname : '';
+            const onAuthScreen =
+              path.startsWith('/quick-login') ||
+              path.startsWith('/login') ||
+              path.startsWith('/platform');
+            if (!onAuthScreen && typeof window !== 'undefined') {
+              window.location.replace(COLD_START_QUICK_LOGIN_HREF);
+            }
+            return;
+          }
+
           // ── PROACTIVE TOKEN REFRESH (Fix #1 + #4) ───────────────────────────
           // initAuth() uses raw fetch() below which bypasses the axios interceptor.
           // Refresh here first if the access token is expired or within 2 min of
@@ -158,6 +184,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
           setUser(userData);
           setIsAuthenticated(true);
+          markBrowserSessionAlive();
 
           // Restore cached permissions immediately (prevents flash)
           const cachedPerms = localStorage.getItem('rbac_permissions');
@@ -270,6 +297,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // NOW set authenticated — routes will render with permissions already loaded
     setUser(userData);
     setIsAuthenticated(true);
+    markBrowserSessionAlive();
     resetAuthState();
 
     // Notify other tabs/components

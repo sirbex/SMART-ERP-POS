@@ -515,8 +515,11 @@ export function resolveUserFacingApiNotification(error: unknown): UserFacingApiN
   }
 
   const parsed = parseApiError(error, 'Something went wrong. Please try again.');
+  // Prefer API body (ownership / business copy) via friendly mapper — not blind ACCESS_DENIED.
   let message =
-    parsed.status === 403 ? ACCESS_DENIED_MESSAGE : formatByErrorCode(parsed);
+    parsed.status === 403
+      ? friendlyHttpErrorMessage(403, parsed.message, ACCESS_DENIED_MESSAGE)
+      : formatByErrorCode(parsed);
 
   if (AXIOS_STATUS_CODE_MESSAGE.test(message)) {
     message = friendlyHttpErrorMessage(parsed.status, message);
@@ -534,13 +537,16 @@ export function resolveUserFacingApiNotification(error: unknown): UserFacingApiN
   }
 
   const status = parsed.status;
-  const toastId =
-    status === 403
+  const ownership403 =
+    status === 403 && /another waiter|belongs to another|edit others|reassign/i.test(message);
+  const toastId = ownership403
+    ? 'app-forbidden-ownership'
+    : status === 403
       ? 'app-forbidden'
       : `app-api-${status ?? 'error'}-${(parsed.errorCode || message).slice(0, 48)}`;
 
   return {
-    title: titleForHttpStatus(status),
+    title: ownership403 ? 'Table in use' : titleForHttpStatus(status),
     message,
     toastId,
     status,

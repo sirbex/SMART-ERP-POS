@@ -10,6 +10,7 @@ import { Search, X } from 'lucide-react';
 import Layout from '../../components/Layout';
 import { AdaptiveDialog } from '../../components/adaptive';
 import { api, getStructuredError } from '../../utils/api';
+import { getStructuredErrorMessage, toastApiError } from '../../utils/errorHandler';
 import { isBackendUnavailableError } from '../../lib/isBackendUnavailableError';
 import { formatCurrency } from '../../utils/currency';
 import { useRestaurantEnabled } from '../../hooks/useRestaurantEnabled';
@@ -409,12 +410,8 @@ function ticketTabAccent(index: number) {
 }
 
 function apiErr(err: unknown, fallback: string): string {
-  if (axios.isAxiosError(err)) {
-    const data = err.response?.data as { error?: string; message?: string } | undefined;
-    return data?.error || data?.message || err.message || fallback;
-  }
-  if (err instanceof Error) return err.message;
-  return fallback;
+  // Message-only — interceptor may already have toasted (HandledApiError).
+  return getStructuredErrorMessage(err, fallback);
 }
 
 /** Closed/paid check still painted on FOH — retry add without orderId. */
@@ -1266,7 +1263,7 @@ export default function RestaurantPosPage() {
       setTagPad(null);
       toast.success('Order tags applied');
     } catch (err) {
-      toast.error(apiErr(err, 'Failed to apply tags'));
+      toastApiError(err, 'Failed to apply tags');
     } finally {
       setTagPadBusy(false);
     }
@@ -1287,41 +1284,14 @@ export default function RestaurantPosPage() {
         tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
       const channel = channelHint(table);
       const isQuickLane = (table?.code || '').toUpperCase() === 'QK';
-      const opening = !order;
-      if (opening && (channel === 'TAKEAWAY' || channel === 'DELIVERY') && !isQuickLane) {
-        const hasCustomer =
-          !!selectedCustomer?.id || !!guestDraft.guestName.trim();
-        if (!hasCustomer) {
-          const phone =
-            typeof window !== 'undefined' && !window.matchMedia('(min-width: 1024px)').matches;
-          if (phone) setMobileSheet('details');
-          throw new Error(
-            channel === 'DELIVERY'
-              ? 'Select a customer for delivery'
-              : 'Select a customer for takeaway',
-          );
-        }
-        const deliveryAddress =
-          selectedCustomer?.address?.trim() || guestDraft.deliveryAddress.trim() || '';
-        if (channel === 'DELIVERY' && !deliveryAddress) {
-          if (
-            typeof window !== 'undefined' &&
-            !window.matchMedia('(min-width: 1024px)').matches
-          ) {
-            setMobileSheet('details');
-          }
-          throw new Error(
-            'Customer needs a delivery address — use + Add and include the address',
-          );
-        }
-      }
+      // Takeaway / Delivery / Quick: customer + address are optional (walk-up / unnamed).
 
       if (!table) throw new Error('Table not in offline cache — connect once to sync floor/menu');
       const waiter = waiters.find((w) => w.id === selectedWaiterId);
       const guestName =
         selectedCustomer?.name?.trim() ||
         guestDraft.guestName.trim() ||
-        (isQuickLane ? 'Walk-in' : null);
+        (isQuickLane || channel === 'TAKEAWAY' || channel === 'DELIVERY' ? 'Walk-in' : null);
       const guestPhone =
         selectedCustomer?.phone?.trim() || guestDraft.guestPhone.trim() || null;
       const deliveryAddress =
@@ -1470,7 +1440,7 @@ export default function RestaurantPosPage() {
       if (data && typeof data === 'object' && ('offline' in data || 'refreshed' in data)) return;
       invalidateCheck();
     },
-    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to add item')),
+    onError: (err: unknown) => toastApiError(err, 'Failed to add item'),
   });
 
   const openServiceLane = async (kind: ServiceLaneKind) => {
@@ -1525,7 +1495,7 @@ export default function RestaurantPosPage() {
           : `${def.name} — select customer, then add items`,
       );
     } catch (err) {
-      toast.error(apiErr(err, `Failed to open ${def.name}`));
+      toastApiError(err, `Failed to open ${def.name}`);
     }
   };
 
@@ -1569,7 +1539,7 @@ export default function RestaurantPosPage() {
       if (data && typeof data === 'object' && 'offline' in data) return;
       invalidateCheck();
     },
-    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to save customer')),
+    onError: (err: unknown) => toastApiError(err, 'Failed to save customer'),
   });
 
   /** Search/add customer → stamp name/phone/address on the check (no duplicate guest form). */
@@ -1602,7 +1572,7 @@ export default function RestaurantPosPage() {
       toast.success('Waiter assigned');
       invalidateCheck();
     },
-    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to assign waiter')),
+    onError: (err: unknown) => toastApiError(err, 'Failed to assign waiter'),
   });
 
   const createTableMutation = useMutation({
@@ -1621,7 +1591,7 @@ export default function RestaurantPosPage() {
       setNewTable({ code: '', name: '', zone: 'MAIN', seats: 4 });
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
     },
-    onError: (err: unknown) => toast.error(apiErr(err, 'Failed to create table')),
+    onError: (err: unknown) => toastApiError(err, 'Failed to create table'),
   });
 
   const order = checkQuery.data?.order ?? null;
@@ -1729,7 +1699,11 @@ export default function RestaurantPosPage() {
       return t;
     });
     if (!myTablesOnly || !user?.id) return all;
-    return all.filter((t) => t.status === 'FREE' || t.waiterId === user.id);
+    // Quick / Takeaway / Delivery counters stay visible to every FOH user.
+    return all.filter(
+      (t) =>
+        isServiceChannelTable(t) || t.status === 'FREE' || t.waiterId === user.id,
+    );
   }, [tablesQuery.data, myTablesOnly, user?.id, isOnline, floorOccupancy, journalTick]);
 
   const freeTables = useMemo(() => {
@@ -2220,7 +2194,7 @@ export default function RestaurantPosPage() {
       if (maybeAutoLogoutAfterPrint('kot')) return;
       returnToFloor();
     } catch (err) {
-      toast.error(apiErr(err, 'KOT failed'));
+      toastApiError(err, 'KOT failed');
       setBusy(false);
     }
   };
@@ -2540,7 +2514,7 @@ export default function RestaurantPosPage() {
 
       await finishAfterBill(true);
     } catch (err) {
-      toast.error(apiErr(err, 'Bill failed'));
+      toastApiError(err, 'Bill failed');
       setBusy(false);
     }
   };
@@ -2648,7 +2622,7 @@ export default function RestaurantPosPage() {
           toast.error('That check is already closed');
           return;
         }
-        toast.error(apiErr(err, 'Failed to switch check'));
+        toastApiError(err, 'Failed to switch check');
       }
     })();
   };
@@ -2695,7 +2669,7 @@ export default function RestaurantPosPage() {
       setActiveOrderId(order.id);
       invalidateCheck();
     } catch (err) {
-      toast.error(isOnline ? apiErr(err, 'Transfer failed') : err instanceof Error ? err.message : 'Transfer failed');
+      if (isOnline) toastApiError(err, 'Transfer failed'); else toast.error(err instanceof Error ? err.message : 'Transfer failed');
     } finally {
       setBusy(false);
     }
@@ -2737,7 +2711,7 @@ export default function RestaurantPosPage() {
       setOpsSecondaryOrderId('');
       invalidateCheck();
     } catch (err) {
-      toast.error(isOnline ? apiErr(err, 'Merge failed') : err instanceof Error ? err.message : 'Merge failed');
+      if (isOnline) toastApiError(err, 'Merge failed'); else toast.error(err instanceof Error ? err.message : 'Merge failed');
     } finally {
       setBusy(false);
     }
@@ -2840,7 +2814,7 @@ export default function RestaurantPosPage() {
       }
       invalidateCheck();
     } catch (err) {
-      toast.error(isOnline ? apiErr(err, 'Move failed') : err instanceof Error ? err.message : 'Move failed');
+      if (isOnline) toastApiError(err, 'Move failed'); else toast.error(err instanceof Error ? err.message : 'Move failed');
     } finally {
       setBusy(false);
     }
@@ -3192,7 +3166,7 @@ export default function RestaurantPosPage() {
         returnToFloor();
         toast.success('Check was already closed — table freed');
       } else {
-        toast.error(msg);
+        toastApiError(err, hasKot ? 'Void failed' : 'Remove failed');
       }
       invalidateCheck();
     } finally {
@@ -3340,7 +3314,7 @@ export default function RestaurantPosPage() {
       } catch {
         queryClient.setQueryData(checkKey, prevSnapshot);
       }
-      toast.error(apiErr(err, 'Failed to add'));
+      toastApiError(err, 'Failed to add');
     }
   };
 
@@ -3607,7 +3581,7 @@ export default function RestaurantPosPage() {
       setActiveOrderId(null);
       invalidateCheck();
     } catch (err) {
-      toast.error(apiErr(err, 'Cancel failed'));
+      toastApiError(err, 'Cancel failed');
     } finally {
       setBusy(false);
     }
@@ -3676,7 +3650,7 @@ export default function RestaurantPosPage() {
         }
         invalidateCheck();
       } catch (err) {
-        toast.error(apiErr(err, 'Could not sync voided lines — retry before paying'));
+        toastApiError(err, 'Could not sync voided lines — retry before paying');
         return;
       } finally {
         setBusy(false);

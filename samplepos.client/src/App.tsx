@@ -238,20 +238,21 @@ function TenantAppServices() {
 function App() {
   const { isAuthenticated, isLoading } = useAuth();
 
-  // Global 403 Forbidden listener — standard Access denied toast (no HTTP status codes)
+  // Global 403 Forbidden listener — ownership copy keeps its own title (FOH SSOT)
   useEffect(() => {
     const handler = (e: Event) => {
       const msg =
         (e as CustomEvent<string>).detail ||
         'You do not have permission to perform this action. Contact an administrator if you need access.';
+      const ownership = /another waiter|belongs to another|edit others|reassign/i.test(msg);
       toast.error(
         () => (
           <div>
-            <div style={{ fontWeight: 600 }}>Access denied</div>
+            <div style={{ fontWeight: 600 }}>{ownership ? 'Table in use' : 'Access denied'}</div>
             <div style={{ fontSize: 13, marginTop: 4, opacity: 0.9 }}>{msg}</div>
           </div>
         ),
-        { duration: 6000, icon: '🔒', id: 'app-forbidden' }
+        { duration: 6000, icon: '🔒', id: ownership ? 'app-forbidden-ownership' : 'app-forbidden' }
       );
     };
     window.addEventListener('app:forbidden', handler);

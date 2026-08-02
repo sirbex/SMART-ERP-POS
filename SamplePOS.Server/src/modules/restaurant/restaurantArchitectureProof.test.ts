@@ -250,11 +250,12 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(escpos).toMatch(/TAKE AWAY/);
     expect(escpos).toMatch(/DELIVERY/);
 
-    // Guest must use customers SSOT (CustomerSelector), not free-text-only.
+    // Guest uses customers SSOT (CustomerSelector) when provided — optional for TA/DL/Quick.
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/CustomerSelector/);
     expect(pos).toMatch(/selectedCustomer/);
-    expect(pos).toMatch(/Select a customer/);
+    expect(pos).toMatch(/Customer \(optional\)/);
+    expect(pos).toMatch(/customer \+ address are optional/);
     expect(pos).toMatch(/updateRestaurantGuestOffline/);
     expect(pos).toMatch(/compact/);
     expect(pos).toMatch(/handleSelectServiceCustomer/);
