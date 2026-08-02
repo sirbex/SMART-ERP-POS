@@ -176,6 +176,8 @@ export type PosOfflineEvent =
         key: string;
         orderId: string;
         kotOfflineId: string;
+        /** Floor table id — used by sync replayer when orderId is still ofl_ord_*. */
+        tableId?: string;
         tableCode?: string;
         tableName?: string;
         waiterName?: string;

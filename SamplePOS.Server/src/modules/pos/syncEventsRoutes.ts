@@ -135,6 +135,7 @@ const RestaurantKotFiredEventSchema = z.object({
     key: z.string().min(1),
     orderId: z.string().min(1),
     kotOfflineId: z.string().min(1),
+    tableId: z.string().optional(),
     tableCode: z.string().optional(),
     tableName: z.string().optional(),
     waiterName: z.string().optional(),
