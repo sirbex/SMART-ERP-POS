@@ -79,4 +79,17 @@ describe('buildOrderCompletionSaleTotals', () => {
     expect(totals.discountAmount).toBe(5000);
     expect(totals.totalAmount).toBe(95000);
   });
+
+  it('authoritativeTaxAmount overrides stale order.taxAmount for createSale parity', () => {
+    const order = {
+      subtotal: '100000.00',
+      discountAmount: '0.00',
+      taxAmount: '0.00',
+      items: [{ quantity: '1', unitPrice: '100000.00', discountAmount: '0' }],
+    };
+
+    const totals = buildOrderCompletionSaleTotals(order, 0, undefined, 18000);
+    expect(totals.taxAmount).toBe(18000);
+    expect(totals.totalAmount).toBe(118000);
+  });
 });

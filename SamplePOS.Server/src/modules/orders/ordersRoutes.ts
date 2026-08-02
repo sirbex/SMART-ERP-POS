@@ -10,6 +10,7 @@ import { requirePermission, requireAnyPermission } from '../../rbac/middleware.j
 import { asyncHandler, BusinessError } from '../../middleware/errorHandler.js';
 import { Money } from '../../utils/money.js';
 import logger from '../../utils/logger.js';
+import { DocumentTaxService } from '../../services/documentTaxService.js';
 import { userHasPermission } from '../../authorization/serviceAuth.js';
 import {
   findSaleByIdempotencyKey,
@@ -342,12 +343,29 @@ router.post(
       }
     }
 
+    // Authoritative tax before createSale — avoids ERR_SALE_TOTAL_MISMATCH when order
+    // header tax was a stale client preview (createSale recomputes via DocumentTaxService).
+    const pricedTax = await DocumentTaxService.priceDocumentLines(pool, {
+      customerId: effectiveCustomerId,
+      scope: 'SALE',
+      preferLineTaxOverrides: false,
+      // Match FOH restaurant DocumentTax (tenant default when unresolved)
+      applyTenantDefaultWhenUnresolved: isRestaurantCheck,
+      lines: saleItems.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discountAmount: item.discountAmount || 0,
+      })),
+    });
+
     // Combine order header discount with cashier extra discount — avoid double-counting
     // line discounts already passed on sale items (createSale nets lines then subtracts cart).
     const saleTotals = buildOrderCompletionSaleTotals(
       order,
       paymentData.extraDiscountAmount ?? 0,
       saleItems,
+      pricedTax.taxAmount,
     );
 
     const saleInput: CreateSaleInput = {

@@ -64,6 +64,7 @@ export type AuditAction =
   | 'ADJUST_INVENTORY'
   | 'PRICE_CHANGE'
   | 'PRICE_OVERRIDE'
+  | 'TAX_OVERRIDE'
   | 'REMOVE'
   | 'STATUS_CHANGE'
   | 'FINALIZE'

@@ -25,6 +25,11 @@ export interface SystemSettings {
     taxNumber?: string;
     taxInclusive: boolean;
     taxRates: TaxRate[];
+    /**
+     * When true, DocumentTaxService applies output VAT only for VAT-registered customers.
+     * Walk-in (no customer) and non-registered customers → 0 VAT. Default false (BC).
+     */
+    vatOutputRequiresRegisteredCustomer: boolean;
 
     // Printing Settings - Receipt
     receiptPrinterEnabled: boolean;
@@ -104,6 +109,7 @@ export interface SystemSettingsDbRow {
     tax_number?: string;
     tax_inclusive: boolean;
     tax_rates: TaxRate[];
+    vat_output_requires_registered_customer?: boolean;
     receipt_printer_enabled: boolean;
     receipt_printer_name?: string;
     guest_bill_printer_name?: string | null;
@@ -155,6 +161,7 @@ export interface UpdateSystemSettingsDto {
     taxNumber?: string;
     taxInclusive?: boolean;
     taxRates?: TaxRate[];
+    vatOutputRequiresRegisteredCustomer?: boolean;
     receiptPrinterEnabled?: boolean;
     receiptPrinterName?: string;
     guestBillPrinterName?: string | null;
@@ -206,6 +213,8 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
         taxNumber: dbRow.tax_number,
         taxInclusive: dbRow.tax_inclusive,
         taxRates: dbRow.tax_rates || [],
+        vatOutputRequiresRegisteredCustomer:
+            dbRow.vat_output_requires_registered_customer ?? false,
         receiptPrinterEnabled: dbRow.receipt_printer_enabled,
         receiptPrinterName: dbRow.receipt_printer_name,
         guestBillPrinterName: dbRow.guest_bill_printer_name?.trim() || undefined,

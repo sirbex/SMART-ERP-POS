@@ -38,4 +38,17 @@ describe('DatePicker responsive layout', () => {
   it('documents DatePicker as global SSOT', () => {
     expect(tsx).toContain('global SSOT for single-date selection');
   });
+
+  it('commits typed custom dates on Enter, blur, and Apply', () => {
+    expect(tsx).toContain('parseTypedDateToIso');
+    expect(tsx).toContain('commitTypedDate');
+    expect(tsx).toContain('onBlur={() => commitTypedDate(false)}');
+    expect(tsx).toContain("e.key === 'Enter'");
+    expect(tsx).toContain('Apply');
+    expect(tsx).toContain('Press Enter or Apply after typing');
+  });
+
+  it('focuses the type-in field when the popover opens', () => {
+    expect(tsx).toContain('inputRef.current?.focus()');
+  });
 });

@@ -175,6 +175,11 @@ export interface CreateSaleData {
   idempotencyKey?: string; // Offline sync idempotency key
   offlineId?: string; // Offline sale identifier
   cashRegisterSessionId?: string; // Link to cash register session for drawer tracking
+  /** Phase 5 DocumentTax override audit columns */
+  taxOverrideMode?: string | null;
+  taxOverrideRate?: number | null;
+  taxOverrideReason?: string | null;
+  taxOverrideBy?: string | null;
 }
 
 export interface CreateSaleItemData {
@@ -193,6 +198,11 @@ export interface CreateSaleItemData {
   conversionFactor?: number; // SAP UoM snapshot: conversion factor at posting time
   /** FEFO total cost at sale build — used by COGS drift guard (not persisted). */
   allocatedTotalCost?: number;
+  /** Phase 6 — DocumentTax line snapshot at posting */
+  taxAmount?: number;
+  taxRate?: number;
+  isTaxable?: boolean;
+  taxDetermination?: string | null;
 }
 
 export const salesRepository = {
@@ -259,8 +269,10 @@ export const salesRepository = {
         sale_number, customer_id, sale_date, subtotal, tax_amount, discount_amount, total_amount,
         total_cost, profit, profit_margin,
         payment_method, amount_paid, change_amount, cashier_id, quote_id,
-        idempotency_key, offline_id, cash_register_session_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        idempotency_key, offline_id, cash_register_session_id,
+        tax_override_mode, tax_override_rate, tax_override_reason, tax_override_by
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+                $19, $20, $21, $22)
       RETURNING 
         id,
         sale_number as "saleNumber",
@@ -299,6 +311,10 @@ export const salesRepository = {
               data.idempotencyKey || null,
               data.offlineId || null,
               data.cashRegisterSessionId || null, // Link to cash register session
+              data.taxOverrideMode || null,
+              data.taxOverrideRate != null ? data.taxOverrideRate : null,
+              data.taxOverrideReason || null,
+              data.taxOverrideBy || null,
             ],
           );
           await pool.query('RELEASE SAVEPOINT sp_sale_number_insert');
@@ -398,9 +414,9 @@ export const salesRepository = {
     const placeholders: string[] = [];
 
     items.forEach((item, index) => {
-      const offset = index * 16; // 16 fields (added base_qty, base_uom_id, conversion_factor)
+      const offset = index * 20; // 20 fields (Phase 6: tax_amount/rate/is_taxable/determination)
       placeholders.push(
-        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13}, $${offset + 14}, $${offset + 15}, $${offset + 16})`
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}, $${offset + 11}, $${offset + 12}, $${offset + 13}, $${offset + 14}, $${offset + 15}, $${offset + 16}, $${offset + 17}, $${offset + 18}, $${offset + 19}, $${offset + 20})`
       );
 
       // Use provided profit if available (may include discount allocation),
@@ -422,6 +438,7 @@ export const salesRepository = {
       const productInfo = productId ? productTypeMap.get(productId) : null;
       const productType = productInfo?.productType || 'inventory';
       const incomeAccountId = productInfo?.incomeAccountId || null;
+      const lineTaxAmount = new Decimal(item.taxAmount || 0);
 
       values.push(
         item.saleId,
@@ -439,13 +456,18 @@ export const salesRepository = {
         incomeAccountId,
         item.baseQty ?? null, // SAP UoM snapshot: base quantity
         item.baseUomId ?? null, // SAP UoM snapshot: base UoM at posting time
-        item.conversionFactor ?? 1 // SAP UoM snapshot: conversion factor at posting time
+        item.conversionFactor ?? 1, // SAP UoM snapshot: conversion factor at posting time
+        lineTaxAmount.toFixed(2),
+        Number(item.taxRate || 0),
+        item.isTaxable === true || lineTaxAmount.greaterThan(0),
+        item.taxDetermination || null,
       );
     });
 
     const result = await pool.query(
       `INSERT INTO sale_items (
-        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id, discount_amount, product_type, income_account_id, base_qty, base_uom_id, conversion_factor
+        sale_id, product_id, product_name, item_type, quantity, unit_price, total_price, unit_cost, profit, uom_id, discount_amount, product_type, income_account_id, base_qty, base_uom_id, conversion_factor,
+        tax_amount, tax_rate, is_taxable, tax_determination
       ) VALUES ${placeholders.join(', ')}
       RETURNING *`,
       values

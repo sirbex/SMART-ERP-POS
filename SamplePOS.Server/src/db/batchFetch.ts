@@ -106,6 +106,8 @@ export interface ProductBatchRow {
     max_discount_percentage: string | null;
     track_expiry: boolean;
     product_type: string;
+    is_taxable: boolean;
+    tax_rate: string | number;
 }
 
 export interface ProductUomRow {
@@ -138,7 +140,9 @@ export async function batchFetchProducts(
             COALESCE(pv.average_cost, '0') as average_cost,
             p.is_active, p.min_price, p.max_discount_percentage,
             COALESCE(p.track_expiry, false) as track_expiry,
-            COALESCE(p.product_type, 'inventory') as product_type
+            COALESCE(p.product_type, 'inventory') as product_type,
+            COALESCE(p.is_taxable, false) as is_taxable,
+            COALESCE(p.tax_rate, 0) as tax_rate
      FROM products p
      LEFT JOIN product_valuation pv ON pv.product_id = p.id
      WHERE p.id = ANY($1::uuid[])`,

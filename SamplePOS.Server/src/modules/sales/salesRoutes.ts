@@ -172,6 +172,8 @@ export const salesController = {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           discountAmount: item.discountAmount || 0, // Per-item discount
+          isTaxable: item.isTaxable,
+          taxRate: item.taxRate,
         })),
         subtotal: posData.subtotal,
         discountAmount: posData.discountAmount || 0,
@@ -190,6 +192,7 @@ export const salesController = {
         saleDate: posData.saleDate || undefined, // Backdated sale date if provided
         paymentLines: posData.paymentLines || undefined, // Include payment lines for split payment
         exchangeRefundId: posData.exchangeRefundId || undefined,
+        taxOverride: posData.taxOverride,
       };
     } else {
       // Log POS validation errors

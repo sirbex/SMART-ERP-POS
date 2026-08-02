@@ -60,7 +60,8 @@ describe('Bad Debt architecture proof (Gate A partial — 4A)', () => {
 
   it('CURRENT_SCHEMA_VERSION is 550+', () => {
     const schema = readRepo('SamplePOS.Server/src/constants/schemaVersion.ts');
-    expect(schema).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*(550|551)\b/);
+    const m = schema.match(/CURRENT_SCHEMA_VERSION\s*=\s*(\d+)/);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(550);
   });
 
   it('AccountCodes.BAD_DEBT_EXPENSE is 5210', () => {

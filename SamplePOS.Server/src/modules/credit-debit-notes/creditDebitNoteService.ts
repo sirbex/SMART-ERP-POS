@@ -38,6 +38,40 @@ import type {
     CreateSupplierDebitNote,
 } from '../../../../shared/zod/creditDebitNote.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import { DocumentTaxService } from '../../services/documentTaxService.js';
+
+/** Authoritative note-line tax via DocumentTaxService (line taxRate overrides). */
+async function priceNoteLines(
+  client: PoolClient,
+  opts: {
+    customerId?: string | null;
+    scope: 'SALE' | 'PURCHASE';
+    lines: Array<{
+      productId?: string;
+      quantity: number;
+      unitAmount: number;
+      taxRate?: number;
+    }>;
+  },
+) {
+  return DocumentTaxService.priceDocumentLines(client, {
+    customerId: opts.customerId ?? null,
+    scope: opts.scope,
+    preferLineTaxOverrides: true,
+    applyTenantDefaultWhenUnresolved: false,
+    lines: opts.lines.map((l) => {
+      const rate = Number(l.taxRate ?? 0);
+      return {
+        productId: l.productId || null,
+        quantity: l.quantity,
+        unitPrice: l.unitAmount,
+        discountAmount: 0,
+        isTaxable: rate > 0,
+        taxRate: rate,
+      };
+    }),
+  });
+}
 import {
     assertCreditNoteReasonNotBadDebt,
     BadDebtInvariantError,
@@ -76,20 +110,21 @@ export const creditDebitNoteService = {
             if (invoice.documentType !== 'INVOICE') throw new Error('Cannot create a note against another note');
             if (invoice.status === 'Cancelled' || invoice.status === 'CANCELLED') throw new Error('Cannot create a note against a cancelled invoice');
 
-            // 2. Calculate note totals from lines
-            let subtotal = Money.zero();
-            let taxTotal = Money.zero();
-            for (const line of input.lines) {
-                const lineAmount = Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitPrice));
-                const lineTax = Money.multiply(lineAmount, Money.divide(Money.parseDb(line.taxRate ?? 0), Money.parseDb(100)));
-                subtotal = Money.add(subtotal, lineAmount);
-                taxTotal = Money.add(taxTotal, lineTax);
-            }
-            const totalAmount = Money.add(subtotal, taxTotal);
-            const total = Money.toNumber(totalAmount);
+            // 2. Calculate note totals via DocumentTaxService
+            const priced = await priceNoteLines(client, {
+                customerId: invoice.customerId,
+                scope: 'SALE',
+                lines: input.lines.map((l) => ({
+                    productId: l.productId,
+                    quantity: l.quantity,
+                    unitAmount: l.unitPrice,
+                    taxRate: l.taxRate,
+                })),
+            });
+            const total = priced.totalAmount;
 
             // 3. Enforce noteType business rules (SAP/Odoo compliance)
-            if (input.noteType === 'FULL' && total !== invoice.totalAmount) {
+            if (input.noteType === 'FULL' && Math.abs(total - invoice.totalAmount) > 0.009) {
                 throw new Error(
                     `FULL credit note must equal invoice total (${invoice.totalAmount}), got ${total}`,
                 );
@@ -100,7 +135,7 @@ export const creditDebitNoteService = {
                 client,
                 input.invoiceId,
             );
-            const cumulativeDec = Money.add(Money.parseDb(existingPostedTotal), totalAmount);
+            const cumulativeDec = Money.add(Money.parseDb(existingPostedTotal), Money.parseDb(total));
             if (Money.toNumber(cumulativeDec) > invoice.totalAmount + 0.009) {
                 const headroom = Math.max(0, invoice.totalAmount - existingPostedTotal);
                 throw new Error(
@@ -118,8 +153,8 @@ export const creditDebitNoteService = {
                 customerId: invoice.customerId,
                 customerName: invoice.customerName,
                 issueDate: input.issueDate || getBusinessDate(),
-                subtotal: Money.toNumber(subtotal),
-                taxAmount: Money.toNumber(taxTotal),
+                subtotal: priced.subtotal,
+                taxAmount: priced.taxAmount,
                 totalAmount: total,
                 reason: input.reason,
                 notes: input.notes || null,
@@ -130,13 +165,14 @@ export const creditDebitNoteService = {
             const lineItems = await creditDebitNoteRepository.createNoteLineItems(
                 client,
                 note.id,
-                input.lines.map(l => ({
+                input.lines.map((l, idx) => ({
                     productId: l.productId || '',
                     productName: l.productName,
                     description: l.description || null,
                     quantity: l.quantity,
                     unitPrice: l.unitPrice,
-                    taxRate: l.taxRate ?? 0,
+                    taxRate: priced.lines[idx]?.taxRate ?? l.taxRate ?? 0,
+                    taxAmount: priced.lines[idx]?.taxAmount,
                 })),
             );
 
@@ -162,16 +198,16 @@ export const creditDebitNoteService = {
             if (invoice.documentType !== 'INVOICE') throw new Error('Cannot create a note against another note');
             if (invoice.status === 'Cancelled' || invoice.status === 'CANCELLED') throw new Error('Cannot create a note against a cancelled invoice');
 
-            let subtotal = Money.zero();
-            let taxTotal = Money.zero();
-            for (const line of input.lines) {
-                const lineAmount = Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitPrice));
-                const lineTax = Money.multiply(lineAmount, Money.divide(Money.parseDb(line.taxRate ?? 0), Money.parseDb(100)));
-                subtotal = Money.add(subtotal, lineAmount);
-                taxTotal = Money.add(taxTotal, lineTax);
-            }
-            const totalAmount = Money.add(subtotal, taxTotal);
-            const total = Money.toNumber(totalAmount);
+            const priced = await priceNoteLines(client, {
+                customerId: invoice.customerId,
+                scope: 'SALE',
+                lines: input.lines.map((l) => ({
+                    productId: l.productId,
+                    quantity: l.quantity,
+                    unitAmount: l.unitPrice,
+                    taxRate: l.taxRate,
+                })),
+            });
 
             // Debit notes ADD charges to a customer (undercharge correction, late fees, etc.)
             // Unlike credit notes, they are NOT capped at the original invoice total.
@@ -186,9 +222,9 @@ export const creditDebitNoteService = {
                 customerId: invoice.customerId,
                 customerName: invoice.customerName,
                 issueDate: input.issueDate || getBusinessDate(),
-                subtotal: Money.toNumber(subtotal),
-                taxAmount: Money.toNumber(taxTotal),
-                totalAmount: Money.toNumber(totalAmount),
+                subtotal: priced.subtotal,
+                taxAmount: priced.taxAmount,
+                totalAmount: priced.totalAmount,
                 reason: input.reason,
                 notes: input.notes || null,
             });
@@ -196,13 +232,14 @@ export const creditDebitNoteService = {
             const lineItems = await creditDebitNoteRepository.createNoteLineItems(
                 client,
                 note.id,
-                input.lines.map(l => ({
+                input.lines.map((l, idx) => ({
                     productId: l.productId || '',
                     productName: l.productName,
                     description: l.description || null,
                     quantity: l.quantity,
                     unitPrice: l.unitPrice,
-                    taxRate: l.taxRate ?? 0,
+                    taxRate: priced.lines[idx]?.taxRate ?? l.taxRate ?? 0,
+                    taxAmount: priced.lines[idx]?.taxAmount,
                 })),
             );
 
@@ -493,19 +530,19 @@ export const supplierCreditDebitNoteService = {
                 ? input.lines
                 : [{ productName: 'Price Correction', quantity: 1, unitCost: input.amount as number, taxRate: 0 }];
 
-            let subtotal = Money.zero();
-            let taxTotal = Money.zero();
-            for (const line of effectiveCreditLines) {
-                const lineAmount = Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitCost));
-                const lineTax = Money.multiply(lineAmount, Money.divide(Money.parseDb(line.taxRate ?? 0), Money.parseDb(100)));
-                subtotal = Money.add(subtotal, lineAmount);
-                taxTotal = Money.add(taxTotal, lineTax);
-            }
-            const totalAmount = Money.add(subtotal, taxTotal);
-            const total = Money.toNumber(totalAmount);
+            const priced = await priceNoteLines(client, {
+                scope: 'PURCHASE',
+                lines: effectiveCreditLines.map((l) => ({
+                    productId: (l as { productId?: string }).productId,
+                    quantity: l.quantity,
+                    unitAmount: l.unitCost,
+                    taxRate: l.taxRate,
+                })),
+            });
+            const total = priced.totalAmount;
 
             // Enforce FULL noteType (SAP/Odoo compliance)
-            if (input.noteType === 'FULL' && total !== invoice.totalAmount) {
+            if (input.noteType === 'FULL' && Math.abs(total - invoice.totalAmount) > 0.009) {
                 throw new Error(
                     `FULL credit note must equal invoice total (${invoice.totalAmount}), got ${total}`,
                 );
@@ -516,7 +553,7 @@ export const supplierCreditDebitNoteService = {
                 client, input.invoiceId, 'SUPPLIER_CREDIT_NOTE',
             );
             const existingTotalDec = existing.reduce((sum, n) => Money.add(sum, Money.parseDb(n.totalAmount)), Money.zero());
-            const cumulativeDec = Money.add(existingTotalDec, totalAmount);
+            const cumulativeDec = Money.add(existingTotalDec, Money.parseDb(total));
             if (Money.toNumber(cumulativeDec) > invoice.totalAmount) {
                 throw new Error(
                     `Credit note total (${total}) plus existing notes (${Money.toNumber(existingTotalDec)}) would exceed invoice total (${invoice.totalAmount})`,
@@ -546,8 +583,8 @@ export const supplierCreditDebitNoteService = {
                 referenceInvoiceId: input.invoiceId,
                 supplierId: invoice.supplierId,
                 issueDate: input.issueDate || getBusinessDate(),
-                subtotal: Money.toNumber(subtotal),
-                taxAmount: Money.toNumber(taxTotal),
+                subtotal: priced.subtotal,
+                taxAmount: priced.taxAmount,
                 totalAmount: total,
                 reason: input.reason,
                 notes: input.notes || null,
@@ -557,13 +594,14 @@ export const supplierCreditDebitNoteService = {
             const lineItems = await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(
                 client,
                 note.id,
-                effectiveCreditLines.map(l => ({
+                effectiveCreditLines.map((l, idx) => ({
                     productId: (l as { productId?: string }).productId || '',
                     productName: l.productName,
                     description: (l as { description?: string }).description || null,
                     quantity: l.quantity,
                     unitCost: l.unitCost,
-                    taxRate: l.taxRate ?? 0,
+                    taxRate: priced.lines[idx]?.taxRate ?? l.taxRate ?? 0,
+                    taxAmount: priced.lines[idx]?.taxAmount,
                 })),
             );
 
@@ -588,16 +626,15 @@ export const supplierCreditDebitNoteService = {
                 ? input.lines
                 : [{ productName: 'Additional Charge', quantity: 1, unitCost: input.amount as number, taxRate: 0 }];
 
-            let subtotal = Money.zero();
-            let taxTotal = Money.zero();
-            for (const line of effectiveDebitLines) {
-                const lineAmount = Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitCost));
-                const lineTax = Money.multiply(lineAmount, Money.divide(Money.parseDb(line.taxRate ?? 0), Money.parseDb(100)));
-                subtotal = Money.add(subtotal, lineAmount);
-                taxTotal = Money.add(taxTotal, lineTax);
-            }
-            const totalAmount = Money.add(subtotal, taxTotal);
-            const total = Money.toNumber(totalAmount);
+            const priced = await priceNoteLines(client, {
+                scope: 'PURCHASE',
+                lines: effectiveDebitLines.map((l) => ({
+                    productId: (l as { productId?: string }).productId,
+                    quantity: l.quantity,
+                    unitAmount: l.unitCost,
+                    taxRate: l.taxRate,
+                })),
+            });
 
             // Supplier debit notes ADD charges to the supplier (damaged goods, shortages, etc.)
             // Unlike credit notes, they are NOT capped at the original invoice total.
@@ -611,9 +648,9 @@ export const supplierCreditDebitNoteService = {
                 referenceInvoiceId: input.invoiceId,
                 supplierId: invoice.supplierId,
                 issueDate: input.issueDate || getBusinessDate(),
-                subtotal: Money.toNumber(subtotal),
-                taxAmount: Money.toNumber(taxTotal),
-                totalAmount: Money.toNumber(totalAmount),
+                subtotal: priced.subtotal,
+                taxAmount: priced.taxAmount,
+                totalAmount: priced.totalAmount,
                 reason: input.reason,
                 notes: input.notes || null,
             });
@@ -621,13 +658,14 @@ export const supplierCreditDebitNoteService = {
             const lineItems = await supplierCreditDebitNoteRepository.createSupplierNoteLineItems(
                 client,
                 note.id,
-                effectiveDebitLines.map(l => ({
+                effectiveDebitLines.map((l, idx) => ({
                     productId: (l as { productId?: string }).productId || '',
                     productName: l.productName,
                     description: (l as { description?: string }).description || null,
                     quantity: l.quantity,
                     unitCost: l.unitCost,
-                    taxRate: l.taxRate ?? 0,
+                    taxRate: priced.lines[idx]?.taxRate ?? l.taxRate ?? 0,
+                    taxAmount: priced.lines[idx]?.taxAmount,
                 })),
             );
 

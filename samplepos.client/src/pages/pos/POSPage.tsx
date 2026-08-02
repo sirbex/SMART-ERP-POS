@@ -11,6 +11,14 @@ import { shouldShowCoach } from '../../lib/adaptiveChrome';
 import PrintReceiptDialog from '../../components/pos/PrintReceiptDialog';
 import CustomerSelector from '../../components/pos/CustomerSelector';
 import { computeUomPrices } from '@shared/utils/uom-pricing';
+import { previewPosCartTax } from '@shared/utils/documentTaxPreview';
+import {
+  getCachedTaxSnapshot,
+  getTaxCatalogForPreview,
+  getProductTaxMappingsForPreview,
+  getCachedCustomerTaxProfile,
+  isCustomerTaxExemptCached,
+} from '../../services/offlineCatalogService';
 import { ProductCreateSchema } from '@shared/zod/product';
 import { POSSaleSchema } from '@shared/zod/pos-sale';
 import type { Customer } from '@shared/zod/customer';
@@ -67,7 +75,9 @@ import apiClient from '../../utils/api';
 import { toast } from 'react-hot-toast';
 import { pricingApi } from '../../api/pricing';
 import DiscountDialog from '../../components/pos/DiscountDialog';
+import TaxOverrideDialog from '../../components/pos/TaxOverrideDialog';
 import ManagerApprovalDialog from '../../components/pos/ManagerApprovalDialog';
+import type { DocumentTaxOverride } from '@shared/zod/taxOverride';
 import { ResumeHoldDialog } from '../../components/pos/ResumeHoldDialog';
 import { ServiceInfoBanner } from '../../components/pos/ServiceInfoBanner';
 import { ServiceBadge } from '../../components/pos/ServiceBadge';
@@ -398,6 +408,8 @@ export default function POSPage() {
   const canAccessRolesUpdate = useHasPermission('system.roles_update');
   const canAccessRolesAdmin = useHasPermission('admin.update');
   const canAccessRoles = canAccessRolesUpdate || canAccessRolesAdmin;
+  const canTaxOverride = useHasPermission('sales.tax_override');
+  const canApproveSales = useHasPermission('sales.approve');
   const { data: assignedStore } = usePosAssignedStore();
   const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [items, setItems] = useState<LineItem[]>([]);
@@ -465,6 +477,10 @@ export default function POSPage() {
   const [invoiceCreated, setInvoiceCreated] = useState(false);
   const [saleDate, setSaleDate] = useState<string>(''); // For backdated sales (empty = current date)
   const [showDatePicker, setShowDatePicker] = useState(false); // Toggle date picker visibility
+
+  // Phase 5 — privileged DocumentTax override
+  const [showTaxOverrideDialog, setShowTaxOverrideDialog] = useState(false);
+  const [taxOverride, setTaxOverride] = useState<DocumentTaxOverride | null>(null);
 
   // Discount state
   const [showDiscountDialog, setShowDiscountDialog] = useState(false);
@@ -1282,6 +1298,7 @@ export default function POSPage() {
       setItems([]);
       setSelectedCustomer(null);
       setCartDiscount(null);
+      setTaxOverride(null);
       setPaymentLines([]);
       setPaymentAmount('');
       setPaymentReference('');
@@ -1753,6 +1770,7 @@ export default function POSPage() {
         setItems([]);
         setSelectedCustomer(null);
         setCartDiscount(null);
+        setTaxOverride(null);
         setPaymentLines([]);
         setPaymentAmount('');
         setPaymentReference('');
@@ -2085,7 +2103,7 @@ export default function POSPage() {
                   .toNumber(),
           ),
           isTaxable: item.isTaxable,
-          taxRate: item.taxRate || 18,
+          taxRate: item.taxRate ?? 0,
           uom: item.uomName || 'unit',
           selectedUomId: item.uomId || undefined, // Convert null to undefined for Zod validation
           productType: productType as LineItem['productType'],
@@ -2272,17 +2290,49 @@ export default function POSPage() {
   const cartDiscountAmount = cartDiscount ? cartDiscount.amount : 0;
   const subtotalAfterDiscount = new Decimal(subtotal).minus(cartDiscountAmount).toNumber();
 
-  // Calculate tax per-item based on isTaxable flag (on discounted subtotals)
-  const tax = items.reduce((sum, item) => {
-    if (item.isTaxable && item.taxRate > 0) {
-      const itemTax = new Decimal(item.subtotal)
-        .times(item.taxRate / 100)
-        .toDecimalPlaces(2) // Use 2 decimal places for proper currency precision
-        .toNumber();
-      return new Decimal(sum).plus(itemTax).toNumber();
-    }
-    return sum;
-  }, 0);
+  // DocumentTax preview SSOT (matches server DocumentTaxService / TaxEngine.compute)
+  const taxSnapshot = getCachedTaxSnapshot();
+  const cachedProfile = getCachedCustomerTaxProfile(selectedCustomer?.id);
+  const customerProfile = {
+    vatRegistered:
+      selectedCustomer?.vatRegistered === true || cachedProfile?.vatRegistered === true,
+    taxExempt: selectedCustomer?.taxExempt === true || cachedProfile?.taxExempt === true,
+    taxProfile: selectedCustomer?.taxProfile || cachedProfile?.taxProfile,
+    defaultVatRate:
+      selectedCustomer?.defaultVatRate ?? cachedProfile?.defaultVatRate ?? null,
+    taxEffectiveFrom: selectedCustomer?.taxEffectiveFrom ?? null,
+    vatRegistrationDate: selectedCustomer?.vatRegistrationDate ?? null,
+  };
+  const customerAllowsTaxOverride =
+    !selectedCustomer?.id ||
+    selectedCustomer?.allowTaxOverride === true ||
+    cachedProfile?.allowTaxOverride === true ||
+    canApproveSales;
+  const canOfferTaxOverride = canTaxOverride && customerAllowsTaxOverride;
+
+  const taxPreviewCtx = {
+    customerExempt: isCustomerTaxExemptCached(selectedCustomer?.id) || customerProfile.taxExempt,
+    customerProfile,
+    vatOutputRequiresRegisteredCustomer:
+      taxSnapshot?.vatOutputRequiresRegisteredCustomer === true,
+    taxCatalog: getTaxCatalogForPreview(),
+    productMappings: getProductTaxMappingsForPreview(),
+    taxEnabled: taxSnapshot?.taxEnabled,
+    taxInclusive: taxSnapshot?.taxInclusive,
+    defaultTaxRate: taxSnapshot?.defaultTaxRate,
+    customerDefaultVatRate: customerProfile.defaultVatRate,
+    taxOverride: taxOverride ?? undefined,
+  };
+  const tax = previewPosCartTax(
+    items.map((item) => ({
+      productId: item.id,
+      subtotal: item.subtotal,
+      quantity: item.quantity,
+      isTaxable: item.isTaxable,
+      taxRate: item.taxRate,
+    })),
+    taxPreviewCtx,
+  );
 
   const grandTotal = new Decimal(subtotalAfterDiscount).plus(tax).toNumber();
   const avgMargin = items.length
@@ -3042,13 +3092,18 @@ export default function POSPage() {
       cashRegisterSessionId: currentSession?.id, // Link to cash register for drawer tracking
       idempotencyKey: saleIdempotencyKey,
       lineItems: items.map((item) => {
-        const itemTax =
-          item.isTaxable && item.taxRate > 0
-            ? new Decimal(item.subtotal)
-              .times(item.taxRate / 100)
-              .toDecimalPlaces(2)
-              .toNumber()
-            : 0;
+        const linePreview = previewPosCartTax(
+          [
+            {
+              productId: item.id,
+              subtotal: item.subtotal,
+              quantity: item.quantity,
+              isTaxable: item.isTaxable,
+              taxRate: item.taxRate,
+            },
+          ],
+          taxPreviewCtx,
+        );
 
         return {
           productId: item.id,
@@ -3061,8 +3116,10 @@ export default function POSPage() {
           costPrice: item.costPrice,
           subtotal: item.subtotal,
           discountAmount: item.discount?.amount || undefined, // Per-item discount
-          taxAmount: itemTax,
+          taxAmount: linePreview,
           productType: item.productType || 'inventory',
+          isTaxable: item.isTaxable,
+          taxRate: item.taxRate,
         };
       }),
       subtotal,
@@ -3071,6 +3128,7 @@ export default function POSPage() {
       totalAmount: grandTotal,
       saleDate: formattedSaleDate,
       exchangeRefundId: exchangeCredit?.refundId,
+      taxOverride: taxOverride ?? undefined,
       paymentLines: finalPaymentLines.map((line) => ({
         paymentMethod: line.paymentMethod,
         amount: line.amount,
@@ -3177,6 +3235,7 @@ export default function POSPage() {
       setItems([]);
       setSelectedCustomer(null);
       setCartDiscount(null);
+      setTaxOverride(null);
       setExchangeCredit(null);
       setShowPaymentModal(false);
       setPaymentLines([]);
@@ -3250,6 +3309,7 @@ export default function POSPage() {
         setItems([]);
         setSelectedCustomer(null);
         setCartDiscount(null);
+        setTaxOverride(null);
         setExchangeCredit(null);
         setLoadedQuoteId(null); // Clear quote reference after successful sale
 
@@ -4120,8 +4180,33 @@ export default function POSPage() {
                   <span className="font-medium">-{formatCurrency(cartDiscount.amount)}</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span>Tax:</span>
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1 flex-wrap">
+                  Tax
+                  {taxOverride ? (
+                    <span className="text-xs text-amber-700" data-tax-override-active="true">
+                      ({taxOverride.mode === 'FORCE_EXEMPT' ? 'exempt' : `${taxOverride.rate}%`})
+                      <button
+                        type="button"
+                        onClick={() => setTaxOverride(null)}
+                        className="ml-1 text-xs text-amber-700 underline"
+                      >
+                        Clear
+                      </button>
+                    </span>
+                  ) : canOfferTaxOverride ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowTaxOverrideDialog(true)}
+                      className="text-xs text-amber-700 underline"
+                      data-tax-override-open="true"
+                      title="Override tax determination"
+                    >
+                      Override
+                    </button>
+                  ) : null}
+                  :
+                </span>
                 <span className="font-medium">{formatCurrency(tax)}</span>
               </div>
               <div className="flex justify-between font-bold text-base sm:text-lg">
@@ -5058,6 +5143,14 @@ export default function POSPage() {
         }
         lineItemIndex={discountTarget?.itemIndex}
         maxDiscountPercent={discountLimitPercent}
+      />
+
+      <TaxOverrideDialog
+        isOpen={showTaxOverrideDialog}
+        onClose={() => setShowTaxOverrideDialog(false)}
+        onApply={(ov) => setTaxOverride(ov)}
+        currentTax={tax}
+        defaultRate={taxSnapshot?.defaultTaxRate || 18}
       />
 
       {/* Manager Approval Dialog */}

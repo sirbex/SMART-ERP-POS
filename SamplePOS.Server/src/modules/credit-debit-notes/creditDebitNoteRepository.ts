@@ -297,13 +297,23 @@ export const creditDebitNoteRepository = {
             quantity: number;
             unitPrice: number;
             taxRate: number;
+            /** Authoritative DocumentTax line tax — when set, do not re-derive from rate% */
+            taxAmount?: number;
         }>
     ): Promise<NoteLineItemRecord[]> {
         const items: NoteLineItemRecord[] = [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const lineTotal = Money.toNumber(Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitPrice)));
-            const taxAmount = Money.toNumber(Money.multiply(Money.parseDb(lineTotal), Money.divide(Money.parseDb(line.taxRate), Money.parseDb(100))));
+            const taxAmount =
+                line.taxAmount !== undefined && line.taxAmount !== null
+                    ? Money.toNumber(Money.parseDb(line.taxAmount))
+                    : Money.toNumber(
+                        Money.multiply(
+                          Money.parseDb(lineTotal),
+                          Money.divide(Money.parseDb(line.taxRate), Money.parseDb(100)),
+                        ),
+                      );
             const lineTotalIncTax = Money.toNumber(Money.add(Money.parseDb(lineTotal), Money.parseDb(taxAmount)));
 
             const uuidResult = await client.query('SELECT gen_random_uuid() as id');
@@ -724,13 +734,23 @@ export const supplierCreditDebitNoteRepository = {
             quantity: number;
             unitCost: number;
             taxRate: number;
+            /** Authoritative DocumentTax line tax — when set, do not re-derive from rate% */
+            taxAmount?: number;
         }>
     ) {
         const items = [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const lineTotal = Money.toNumber(Money.multiply(Money.parseDb(line.quantity), Money.parseDb(line.unitCost)));
-            const taxAmount = Money.toNumber(Money.multiply(Money.parseDb(lineTotal), Money.divide(Money.parseDb(line.taxRate), Money.parseDb(100))));
+            const taxAmount =
+                line.taxAmount !== undefined && line.taxAmount !== null
+                    ? Money.toNumber(Money.parseDb(line.taxAmount))
+                    : Money.toNumber(
+                        Money.multiply(
+                          Money.parseDb(lineTotal),
+                          Money.divide(Money.parseDb(line.taxRate), Money.parseDb(100)),
+                        ),
+                      );
             const lineTotalIncTax = Money.toNumber(Money.add(Money.parseDb(lineTotal), Money.parseDb(taxAmount)));
 
             const uuidResult = await client.query('SELECT gen_random_uuid() as id');

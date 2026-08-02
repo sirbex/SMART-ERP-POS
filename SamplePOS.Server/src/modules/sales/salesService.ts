@@ -68,6 +68,13 @@ import {
   assertSaleHeaderMatchesCalculatedTotal,
   deriveUnitPriceFromLineTotal,
 } from './saleIntegrity.js';
+import {
+  DocumentTaxService,
+  resolveAuthoritativeTaxAmount,
+} from '../../services/documentTaxService.js';
+import { loadCustomerTaxProfile } from '../../services/documentTaxRepository.js';
+import { logAction } from '../audit/auditService.js';
+import { DocumentTaxOverrideSchema, type DocumentTaxOverride } from '../../../../shared/zod/taxOverride.js';
 import { resolveSaleItemUom, type SaleItemUomSnapshot } from './saleItemBaseQuantity.js';
 import { reconcileSaleCostsToActualBatchDeduction } from '../../utils/cogsDriftGuard.js';
 import {
@@ -87,6 +94,9 @@ export interface SaleItemInput {
   quantity: number;
   unitPrice: number;
   discountAmount?: number; // Per-item discount amount
+  /** Custom/service lines — DocumentTaxService bridge when no products row */
+  isTaxable?: boolean;
+  taxRate?: number;
 }
 
 export interface PaymentLineInput {
@@ -118,6 +128,8 @@ export interface CreateSaleInput {
   auditContext?: AuditContext;
   /** P4: opt-in phase timings (also CHECKOUT_PROFILE=1 / X-Checkout-Profile). */
   profileCheckout?: boolean;
+  /** Phase 5 — privileged DocumentTax override (sales.tax_override + reason). */
+  taxOverride?: DocumentTaxOverride;
 }
 
 export interface RefundItemInput {
@@ -935,18 +947,131 @@ export const salesService = {
         });
       }
 
-      // Use provided tax if available, otherwise default to 0
-      const taxAmount = input.taxAmount ? new Decimal(input.taxAmount) : new Decimal(0);
-
       // Use provided discount if available, otherwise default to 0
       const discountAmount = input.discountAmount
         ? new Decimal(input.discountAmount)
         : new Decimal(0);
 
-      // DEBUG: Log received values
-      logger.info('💰 TAX CALCULATION DEBUG', {
+      // ========== DocumentTaxService (authoritative) ==========
+      // Client taxAmount is preview only. Server recomputes via determination → TaxEngine.compute.
+      // Tax base = line net after line discounts (cart/document discount is not in the tax base —
+      // matches current Retail POS preview).
+      let validatedTaxOverride: DocumentTaxOverride | undefined;
+      if (input.taxOverride) {
+        const parsed = DocumentTaxOverrideSchema.safeParse(input.taxOverride);
+        if (!parsed.success) {
+          throw new ValidationError(
+            `Invalid tax override: ${parsed.error.errors.map((e) => e.message).join('; ')}`,
+          );
+        }
+        validatedTaxOverride = parsed.data;
+        await assertUserPermission(pool, input.soldBy, 'sales.tax_override', {
+          errorCode: 'ERR_TAX_OVERRIDE_PERMISSION',
+          message: 'Missing permission: sales.tax_override',
+        });
+        if (input.customerId) {
+          const profile = await loadCustomerTaxProfile(client, input.customerId);
+          if (profile && !profile.allowTaxOverride) {
+            const canApprove = await userHasPermission(pool, input.soldBy, 'sales.approve');
+            if (!canApprove) {
+              throw new BusinessError(
+                'This customer does not allow tax overrides. Enable Allow tax override on the customer, or use sales.approve.',
+                'ERR_TAX_OVERRIDE_CUSTOMER',
+                { customerId: input.customerId },
+              );
+            }
+          }
+        }
+      }
+
+      let applyTenantDefaultWhenUnresolved = false;
+      if (input.fromOrderId) {
+        const { restaurantService } = await import('../restaurant/restaurantService.js');
+        applyTenantDefaultWhenUnresolved = await restaurantService.isRestaurantCheck(
+          pool,
+          input.fromOrderId,
+        );
+      }
+
+      const taxDoc = await DocumentTaxService.computeForLines(client, {
+        customerId: input.customerId ?? null,
+        documentDate: input.saleDate,
+        scope: 'SALE',
+        applyTenantDefaultWhenUnresolved,
+        taxOverride: validatedTaxOverride ?? null,
+        lines: input.items.map((item, lineIndex) => {
+          const lineNet = new Decimal(item.quantity)
+            .times(item.unitPrice)
+            .minus(item.discountAmount || 0);
+          return {
+            lineIndex,
+            productId: item.productId ?? null,
+            lineNetAmount: Money.toNumber(Money.round(lineNet, 2)),
+            quantity: item.quantity,
+            // Client tax fields are preview-only for UUID products; DocumentTax loads DB bridge.
+            // custom_* / non-UUID lines still use client isTaxable/taxRate.
+            isTaxable: item.isTaxable,
+            taxRate: item.taxRate,
+          };
+        }),
+      });
+      const taxAmount = resolveAuthoritativeTaxAmount(
+        taxDoc.documentTotals.totalTax,
+        input.taxAmount,
+        { saleHint: 'createSale' },
+      );
+
+      // Phase 6 — stamp DocumentTax lineResults onto sale item rows (same order as input.items)
+      if (itemsWithCosts.length !== taxDoc.lineResults.length) {
+        throw new BusinessError(
+          `DocumentTax lineResults length mismatch (${taxDoc.lineResults.length}) vs sale items (${itemsWithCosts.length})`,
+          'ERR_TAX_LINE_MISMATCH',
+          {
+            items: itemsWithCosts.length,
+            lineResults: taxDoc.lineResults.length,
+          },
+        );
+      }
+      let stampedLineTax = new Decimal(0);
+      for (let i = 0; i < itemsWithCosts.length; i++) {
+        const lr = taxDoc.lineResults[i];
+        if (!lr) {
+          throw new BusinessError(
+            `DocumentTax missing lineResult for sale item index ${i}`,
+            'ERR_TAX_LINE_MISMATCH',
+            { lineIndex: i },
+          );
+        }
+        const lineTax = lr.computation.totalTax;
+        const pct = lr.taxes.find((t) => t.type === 'PERCENTAGE' && Number(t.rate) > 0);
+        const lineRate = pct ? Number(pct.rate) : Number(input.items[i]?.taxRate || 0);
+        itemsWithCosts[i].taxAmount = lineTax;
+        itemsWithCosts[i].taxRate = lineTax > 0 ? lineRate : 0;
+        itemsWithCosts[i].isTaxable = lineTax > 0 || lr.taxes.length > 0;
+        itemsWithCosts[i].taxDetermination = lr.determination;
+        stampedLineTax = stampedLineTax.plus(lineTax);
+      }
+      if (stampedLineTax.minus(taxAmount).abs().greaterThan(0.02)) {
+        throw new BusinessError(
+          `DocumentTax line tax sum (${stampedLineTax.toFixed(2)}) diverges from header tax (${taxAmount.toFixed(2)})`,
+          'ERR_TAX_LINE_HEADER_MISMATCH',
+          {
+            lineTaxSum: stampedLineTax.toFixed(2),
+            headerTax: taxAmount.toFixed(2),
+          },
+        );
+      }
+      profiler.mark('document_tax');
+
+      logger.info('DocumentTaxService createSale tax', {
+        clientTax: input.taxAmount,
+        serverTax: taxAmount.toFixed(2),
+        customerExempt: taxDoc.customerExempt,
+        taxOverrideApplied: taxDoc.taxOverrideApplied,
+        applyTenantDefaultWhenUnresolved,
+        determinations: taxDoc.lineResults.map((r) => r.determination),
+        lineTaxes: itemsWithCosts.map((i) => i.taxAmount),
         'input.totalAmount': input.totalAmount,
-        'input.taxAmount': input.taxAmount,
         'input.subtotal': input.subtotal,
         'input.discountAmount': input.discountAmount,
         calculated_totalAmount_from_items: totalAmount.toFixed(2),
@@ -1208,11 +1333,48 @@ export const salesService = {
         idempotencyKey: input.idempotencyKey,
         offlineId: input.offlineId,
         cashRegisterSessionId: validatedSessionId || undefined,
+        taxOverrideMode: validatedTaxOverride?.mode ?? null,
+        taxOverrideRate:
+          validatedTaxOverride?.mode === 'FORCE_RATE'
+            ? Number(validatedTaxOverride.rate ?? 0)
+            : null,
+        taxOverrideReason: validatedTaxOverride?.reason ?? null,
+        taxOverrideBy: validatedTaxOverride ? input.soldBy : null,
       };
 
       profiler.mark('line_prep');
       const sale = await salesRepository.createSale(client, saleData);
       profiler.mark('persist_sale_header');
+
+      if (validatedTaxOverride && input.auditContext) {
+        await logAction(
+          client,
+          {
+            entityType: 'SALE',
+            entityId: sale.id,
+            entityNumber: sale.saleNumber,
+            action: 'TAX_OVERRIDE',
+            severity: 'WARNING',
+            category: 'FINANCIAL',
+            actionDetails: `Tax override ${validatedTaxOverride.mode}${
+              validatedTaxOverride.mode === 'FORCE_RATE'
+                ? ` @ ${validatedTaxOverride.rate}%`
+                : ''
+            } → tax ${Money.toNumber(taxAmount).toFixed(2)}`,
+            newValues: {
+              mode: validatedTaxOverride.mode,
+              rate: validatedTaxOverride.rate ?? null,
+              reason: validatedTaxOverride.reason,
+              taxAmount: Money.toNumber(taxAmount),
+              customerId: input.customerId ?? null,
+            },
+            notes: validatedTaxOverride.reason,
+            tags: ['tax', 'override', 'vat'],
+            referenceNumber: sale.saleNumber,
+          },
+          input.auditContext,
+        );
+      }
 
       // ============================================================
       // CRITICAL: DISCOUNT ALLOCATION TO ITEM-LEVEL PROFITS
@@ -1898,9 +2060,9 @@ export const salesService = {
               customerName: customerName,
               quoteId: input.quoteId,
               dueDate: dueDateStr,
-              subtotal: Money.toNumber(Money.parse(input.subtotal || 0)),
-              taxAmount: Money.toNumber(Money.parse(input.taxAmount || 0)),
-              totalAmount: Money.toNumber(Money.parse(input.totalAmount || 0)),
+              subtotal: Money.toNumber(subtotal),
+              taxAmount: Money.toNumber(taxAmount),
+              totalAmount: Money.toNumber(finalTotalAmount),
               createdById: input.soldBy,
             });
             invoiceId = invoiceResult?.id;
@@ -2060,8 +2222,8 @@ export const salesService = {
             customerName: customerName,
             quoteId: input.quoteId ?? null,
             dueDate: dueDateStr,
-            subtotal: Money.toNumber(Money.parse(input.subtotal || subtotal.toNumber())),
-            taxAmount: Money.toNumber(Money.parse(input.taxAmount || taxAmount.toNumber())),
+            subtotal: Money.toNumber(subtotal),
+            taxAmount: Money.toNumber(taxAmount),
             totalAmount: Money.toNumber(finalTotalAmount), // Full sale amount
             createdById: input.soldBy,
           });

@@ -16,6 +16,15 @@ import { requirePermission } from '../../rbac/middleware.js';
 import { asyncHandler } from '../../middleware/errorHandler.js';
 import { FiscalYearCloseService } from '../../services/fiscalYearCloseService.js';
 import { TaxEngine } from '../../services/taxEngine.js';
+import { DocumentTaxService } from '../../services/documentTaxService.js';
+import {
+  loadActiveTaxDefinitions,
+  loadTaxPreviewSnapshot,
+  listProductTaxMappings,
+  replaceProductTaxMappings,
+} from '../../services/documentTaxRepository.js';
+import { ValidationError } from '../../middleware/errorHandler.js';
+import { UnitOfWork } from '../../db/unitOfWork.js';
 import { GLReconciliationService } from '../../services/glReconciliationService.js';
 import { CurrencyRevaluationService } from '../../services/currencyRevaluationService.js';
 import { GLIntegrityChecker } from '../../services/glIntegrityChecker.js';
@@ -69,7 +78,7 @@ router.get('/taxes', asyncHandler(async (req, res) => {
   const taxScope = scope && validScopes.includes(scope)
     ? (scope as 'SALE' | 'PURCHASE' | 'BOTH')
     : undefined;
-  const taxes = await TaxEngine.getTaxDefinitions(taxScope, req.tenantPool);
+  const taxes = await loadActiveTaxDefinitions(req.tenantPool!, taxScope);
   res.json({ success: true, data: taxes });
 }));
 
@@ -83,13 +92,95 @@ router.post('/taxes/compute', asyncHandler(async (req, res) => {
     });
   }
 
-  const allTaxes = await TaxEngine.getTaxDefinitions(undefined, req.tenantPool);
+  const qty = Number(quantity);
+  const price = Number(unitPrice);
+  if (!Number.isFinite(price) || !Number.isFinite(qty)) {
+    return res.status(400).json({
+      success: false,
+      error: 'unitPrice and quantity must be numbers',
+    });
+  }
+
+  const allTaxes = await loadActiveTaxDefinitions(req.tenantPool!);
   const applicable = allTaxes.filter(t => taxIds.includes(t.id));
-  const result = TaxEngine.compute(unitPrice, applicable, quantity);
+  // TaxEngine amount is line net (qty × unit); quantity is for FIXED per-unit taxes
+  const lineNet = price * qty;
+  const result = TaxEngine.compute(lineNet, applicable, qty);
   res.json({ success: true, data: result });
 }));
 
-/** GET /api/enterprise-accounting/taxes/product/:productId — Get taxes for product */
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * GET /api/enterprise-accounting/taxes/product/:productId/mappings
+ * Raw product_tax_mappings (not full DocumentTax determination).
+ * Must be registered before /taxes/product/:productId.
+ */
+router.get(
+  '/taxes/product/:productId/mappings',
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.productId)) {
+      throw new ValidationError('productId must be a UUID');
+    }
+    const taxes = await listProductTaxMappings(req.tenantPool!, req.params.productId);
+    res.json({
+      success: true,
+      data: { productId: req.params.productId, taxes },
+    });
+  }),
+);
+
+/**
+ * PUT /api/enterprise-accounting/taxes/product/:productId/mappings
+ * Full replace of product_tax_mappings. Requires accounting.manage.
+ */
+router.put(
+  '/taxes/product/:productId/mappings',
+  requirePermission('accounting.manage'),
+  asyncHandler(async (req, res) => {
+    if (!UUID_RE.test(req.params.productId)) {
+      throw new ValidationError('productId must be a UUID');
+    }
+    const taxIds = req.body?.taxIds;
+    if (!Array.isArray(taxIds)) {
+      return res.status(400).json({
+        success: false,
+        error: 'taxIds[] is required (use [] to clear mappings)',
+      });
+    }
+    if (!taxIds.every((id: unknown) => typeof id === 'string' && UUID_RE.test(id))) {
+      return res.status(400).json({ success: false, error: 'taxIds must be string UUIDs' });
+    }
+
+    try {
+      const taxes = await UnitOfWork.run(req.tenantPool!, async (client) =>
+        replaceProductTaxMappings(client, req.params.productId, taxIds as string[]),
+      );
+      res.json({
+        success: true,
+        data: {
+          productId: req.params.productId,
+          taxes,
+          offlineSnapshotHint: 'refresh_tax_snapshot',
+        },
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.startsWith('Product not found') || msg.startsWith('Invalid or inactive')) {
+        throw new ValidationError(msg);
+      }
+      // PG invalid uuid / etc.
+      const code = (err as { code?: string })?.code;
+      if (code === '22P02') {
+        throw new ValidationError('Invalid UUID in productId or taxIds');
+      }
+      throw err;
+    }
+  }),
+);
+
+/** GET /api/enterprise-accounting/taxes/product/:productId — Safe determination hierarchy */
 router.get('/taxes/product/:productId', asyncHandler(async (req, res) => {
   const customerId = (req.query.customerId as string) || null;
   const scope = (req.query.scope as string) || 'SALE';
@@ -97,13 +188,28 @@ router.get('/taxes/product/:productId', asyncHandler(async (req, res) => {
   const taxScope = validScopes.includes(scope)
     ? (scope as 'SALE' | 'PURCHASE' | 'BOTH')
     : 'SALE' as const;
-  const taxes = await TaxEngine.getApplicableTaxes(
+  const taxes = await DocumentTaxService.determineApplicableTaxes(
+    req.tenantPool!,
     req.params.productId,
     customerId,
     taxScope,
-    req.tenantPool
+    { applyTenantDefaultWhenUnresolved: false },
   );
   res.json({ success: true, data: taxes });
+}));
+
+/**
+ * GET /api/enterprise-accounting/taxes/snapshot
+ * Offline / POS client preview cache: definitions, mappings, exemptions, tenant flags.
+ */
+router.get('/taxes/snapshot', asyncHandler(async (req, res) => {
+  const scope = (req.query.scope as string) || 'SALE';
+  const validScopes = ['SALE', 'PURCHASE', 'BOTH'];
+  const taxScope = validScopes.includes(scope)
+    ? (scope as 'SALE' | 'PURCHASE' | 'BOTH')
+    : 'SALE' as const;
+  const snapshot = await loadTaxPreviewSnapshot(req.tenantPool!, taxScope);
+  res.json({ success: true, data: snapshot });
 }));
 
 // =============================================================================

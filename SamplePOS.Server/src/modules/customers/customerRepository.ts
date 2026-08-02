@@ -32,6 +32,14 @@ const CUSTOMER_SELECT = `
       c.balance, c.credit_limit as "creditLimit",
       COALESCE(c.wht_liable, false) as "whtLiable",
       c.default_wht_type_id as "defaultWhtTypeId",
+      COALESCE(c.vat_registered, false) as "vatRegistered",
+      c.tin,
+      COALESCE(c.tax_profile, 'STANDARD') as "taxProfile",
+      c.default_vat_rate::float8 as "defaultVatRate",
+      c.vat_registration_date::text as "vatRegistrationDate",
+      c.tax_effective_from::text as "taxEffectiveFrom",
+      COALESCE(c.tax_exempt, false) as "taxExempt",
+      COALESCE(c.allow_tax_override, false) as "allowTaxOverride",
       c.is_active as "isActive",
       c.created_at as "createdAt",
       c.updated_at as "updatedAt",
@@ -134,14 +142,32 @@ export async function generateCustomerNumber(conn: pg.Pool | pg.PoolClient): Pro
   return `CUST-${seq.toString().padStart(6, '0')}`;
 }
 
+function resolveTaxProfileWrite(data: {
+  vatRegistered?: boolean;
+  taxExempt?: boolean;
+  taxProfile?: string | null;
+}): { vatRegistered: boolean; taxExempt: boolean; taxProfile: string } {
+  let taxProfile = data.taxProfile || 'STANDARD';
+  let vatRegistered = data.vatRegistered === true;
+  let taxExempt = data.taxExempt === true;
+  if (taxProfile === 'VAT_REGISTERED') vatRegistered = true;
+  if (taxProfile === 'EXEMPT') taxExempt = true;
+  if (taxExempt) taxProfile = 'EXEMPT';
+  else if (vatRegistered && taxProfile === 'STANDARD') taxProfile = 'VAT_REGISTERED';
+  return { vatRegistered, taxExempt, taxProfile };
+}
+
 export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg.PoolClient): Promise<Customer> {
   const pool = dbPool || globalPool;
   const customerNumber = await generateCustomerNumber(pool);
+  const tax = resolveTaxProfileWrite(data);
   const result = await pool.query(
     `INSERT INTO customers (
       customer_number, name, email, phone, address, customer_group_id, price_group_id, credit_limit,
-      wht_liable, default_wht_type_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      wht_liable, default_wht_type_id,
+      vat_registered, tin, tax_profile, default_vat_rate, vat_registration_date, tax_effective_from,
+      tax_exempt, allow_tax_override
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
     RETURNING id`,
     [
       customerNumber,
@@ -154,6 +180,14 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
       data.creditLimit || 0,
       data.whtLiable === true,
       data.whtLiable === true ? data.defaultWhtTypeId || null : null,
+      tax.vatRegistered,
+      data.tin || null,
+      tax.taxProfile,
+      data.defaultVatRate ?? null,
+      data.vatRegistrationDate || null,
+      data.taxEffectiveFrom || null,
+      tax.taxExempt,
+      data.allowTaxOverride === true,
     ]
   );
 
@@ -207,6 +241,57 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
   } else if (data.defaultWhtTypeId !== undefined) {
     fields.push(`default_wht_type_id = $${paramIndex++}`);
     values.push(data.defaultWhtTypeId);
+  }
+
+  if (data.taxProfile !== undefined) {
+    const tax = resolveTaxProfileWrite({
+      vatRegistered: data.vatRegistered,
+      taxExempt: data.taxExempt,
+      taxProfile: data.taxProfile,
+    });
+    fields.push(`vat_registered = $${paramIndex++}`);
+    values.push(tax.vatRegistered);
+    fields.push(`tax_exempt = $${paramIndex++}`);
+    values.push(tax.taxExempt);
+    fields.push(`tax_profile = $${paramIndex++}`);
+    values.push(tax.taxProfile);
+  } else {
+    if (data.vatRegistered !== undefined) {
+      fields.push(`vat_registered = $${paramIndex++}`);
+      values.push(data.vatRegistered === true);
+      if (data.vatRegistered === true) {
+        fields.push(`tax_profile = $${paramIndex++}`);
+        values.push('VAT_REGISTERED');
+      }
+    }
+    if (data.taxExempt !== undefined) {
+      fields.push(`tax_exempt = $${paramIndex++}`);
+      values.push(data.taxExempt === true);
+      if (data.taxExempt === true) {
+        fields.push(`tax_profile = $${paramIndex++}`);
+        values.push('EXEMPT');
+      }
+    }
+  }
+  if (data.tin !== undefined) {
+    fields.push(`tin = $${paramIndex++}`);
+    values.push(data.tin || null);
+  }
+  if (data.defaultVatRate !== undefined) {
+    fields.push(`default_vat_rate = $${paramIndex++}`);
+    values.push(data.defaultVatRate);
+  }
+  if (data.vatRegistrationDate !== undefined) {
+    fields.push(`vat_registration_date = $${paramIndex++}`);
+    values.push(data.vatRegistrationDate || null);
+  }
+  if (data.taxEffectiveFrom !== undefined) {
+    fields.push(`tax_effective_from = $${paramIndex++}`);
+    values.push(data.taxEffectiveFrom || null);
+  }
+  if (data.allowTaxOverride !== undefined) {
+    fields.push(`allow_tax_override = $${paramIndex++}`);
+    values.push(data.allowTaxOverride === true);
   }
 
   if (fields.length === 0) {

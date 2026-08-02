@@ -428,6 +428,9 @@ export async function getTaxReversalReport(
   // Output VAT from customer invoices/notes, Input VAT from supplier invoices/notes
   // Grouped by tax rate from line items
 
+  // Phase 7: Output VAT boxes = invoice_line_items ∪ sale_items (DocumentTax 584).
+  // sale_items included only when the sale has no non-draft AR invoice (avoids double-count).
+  // Partial returns net tax by remaining qty (quantity - refunded_qty). GL 2300 unchanged.
   const result = await pool.query(
     `WITH customer_tax AS (
        SELECT
@@ -446,6 +449,38 @@ export async function getTaxReversalReport(
          AND i.issue_date >= $1::date
          AND i.issue_date <= $2::date
        GROUP BY COALESCE(ili."TaxRate", 0)
+     ),
+     pos_sale_tax AS (
+       SELECT
+         COALESCE(si.tax_rate, 0) AS tax_rate,
+         SUM(
+           si.tax_amount
+           * (si.quantity - COALESCE(si.refunded_qty, 0))
+           / NULLIF(si.quantity, 0)
+         ) AS sales_tax
+       FROM sale_items si
+       JOIN sales s ON s.id = si.sale_id
+       WHERE si.tax_amount > 0
+         AND (si.quantity - COALESCE(si.refunded_qty, 0)) > 0
+         AND s.status IN ('COMPLETED', 'PARTIALLY_RETURNED')
+         AND s.sale_date::date >= $1::date
+         AND s.sale_date::date <= $2::date
+         AND NOT EXISTS (
+           SELECT 1
+           FROM invoices i
+           WHERE i.sale_id = s.id
+             AND COALESCE(i.document_type, 'INVOICE') = 'INVOICE'
+             AND i.status NOT IN ('CANCELLED', 'DRAFT')
+         )
+       GROUP BY COALESCE(si.tax_rate, 0)
+     ),
+     output_tax AS (
+       SELECT
+         COALESCE(ct.tax_rate, pst.tax_rate) AS tax_rate,
+         COALESCE(ct.sales_tax, 0) + COALESCE(pst.sales_tax, 0) AS sales_tax,
+         COALESCE(ct.tax_reversed_cn, 0) AS tax_reversed_cn
+       FROM customer_tax ct
+       FULL OUTER JOIN pos_sale_tax pst ON pst.tax_rate = ct.tax_rate
      ),
      supplier_tax AS (
        SELECT
@@ -467,15 +502,15 @@ export async function getTaxReversalReport(
        GROUP BY COALESCE(sili."TaxRate", 0)
      )
      SELECT
-       COALESCE(ct.tax_rate, st.tax_rate) AS tax_rate,
-       COALESCE(ct.sales_tax, 0) AS sales_tax,
-       COALESCE(ct.tax_reversed_cn, 0) AS tax_reversed_cn,
-       COALESCE(ct.sales_tax, 0) - COALESCE(ct.tax_reversed_cn, 0) AS net_sales_tax,
+       COALESCE(ot.tax_rate, st.tax_rate) AS tax_rate,
+       COALESCE(ot.sales_tax, 0) AS sales_tax,
+       COALESCE(ot.tax_reversed_cn, 0) AS tax_reversed_cn,
+       COALESCE(ot.sales_tax, 0) - COALESCE(ot.tax_reversed_cn, 0) AS net_sales_tax,
        COALESCE(st.purchase_tax, 0) AS purchase_tax,
        COALESCE(st.tax_reversed_scn, 0) AS tax_reversed_scn,
        COALESCE(st.purchase_tax, 0) - COALESCE(st.tax_reversed_scn, 0) AS net_purchase_tax
-     FROM customer_tax ct
-     FULL OUTER JOIN supplier_tax st ON st.tax_rate = ct.tax_rate
+     FROM output_tax ot
+     FULL OUTER JOIN supplier_tax st ON st.tax_rate = ot.tax_rate
      ORDER BY tax_rate`,
     [startDate, endDate],
   );

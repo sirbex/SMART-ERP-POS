@@ -64,7 +64,8 @@ describe('Loss & Quarantine Phase 2D governance', () => {
     const sql = readRepo('shared/sql/547_drop_stock_movement_gl_trigger.sql');
     expect(sql).toMatch(/DROP TRIGGER IF EXISTS trg_post_stock_movement_to_ledger/);
     const ver = readRepo('SamplePOS.Server/src/constants/schemaVersion.ts');
-    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*549/);
+    const m = ver.match(/CURRENT_SCHEMA_VERSION\s*=\s*(\d+)/);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(547);
   });
 
   it('fixInventoryGLDrift documents quarantine BS exposure', () => {

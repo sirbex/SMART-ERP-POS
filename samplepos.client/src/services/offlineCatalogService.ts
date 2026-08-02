@@ -10,12 +10,14 @@
  */
 
 import apiClient from '../utils/api';
+import type { TaxDefinitionLike } from '@shared/utils/taxCompute';
 
 // ── Storage keys ──────────────────────────────────────────────
 const CATALOG_KEY = 'pos_product_catalog';
 const STOCK_KEY = 'pos_local_stock';
 const SYNC_KEY = 'pos_catalog_last_sync';
 const CART_KEY = 'pos_persisted_cart_v2';
+const TAX_SNAPSHOT_KEY = 'pos_tax_snapshot_v1';
 
 /** SAP/Odoo POS: background catalog refresh interval (not per keystroke). */
 export const CATALOG_STALE_MS = 5 * 60 * 1000;
@@ -71,6 +73,100 @@ export interface CachedProduct {
 
 export interface LocalStockMap {
     [productId: string]: number;
+}
+
+/** Offline DocumentTax preview snapshot (mirrors GET .../taxes/snapshot). */
+export interface CachedTaxSnapshot {
+    definitions: TaxDefinitionLike[];
+    productMappings: Array<{ productId: string; taxes: TaxDefinitionLike[] }>;
+    exemptCustomerIds: string[];
+    customerProfiles: Array<{
+        customerId: string;
+        vatRegistered: boolean;
+        taxExempt: boolean;
+        taxProfile: string;
+        defaultVatRate: number | null;
+        tin: string | null;
+        allowTaxOverride?: boolean;
+    }>;
+    taxEnabled: boolean;
+    taxInclusive: boolean;
+    defaultTaxRate: number;
+    vatOutputRequiresRegisteredCustomer: boolean;
+    syncedAt: number;
+}
+
+export function getCachedTaxSnapshot(): CachedTaxSnapshot | null {
+    try {
+        const raw = localStorage.getItem(TAX_SNAPSHOT_KEY);
+        return raw ? (JSON.parse(raw) as CachedTaxSnapshot) : null;
+    } catch {
+        return null;
+    }
+}
+
+export function setCachedTaxSnapshot(snapshot: Omit<CachedTaxSnapshot, 'syncedAt'>): void {
+    const payload: CachedTaxSnapshot = { ...snapshot, syncedAt: Date.now() };
+    localStorage.setItem(TAX_SNAPSHOT_KEY, JSON.stringify(payload));
+}
+
+export function getTaxCatalogForPreview(): TaxDefinitionLike[] {
+    return getCachedTaxSnapshot()?.definitions ?? [];
+}
+
+export function getProductTaxMappingsForPreview(): Map<string, TaxDefinitionLike[]> {
+    const snap = getCachedTaxSnapshot();
+    const map = new Map<string, TaxDefinitionLike[]>();
+    if (!snap) return map;
+    for (const row of snap.productMappings) {
+        map.set(row.productId, row.taxes);
+    }
+    return map;
+}
+
+export function isCustomerTaxExemptCached(customerId?: string | null): boolean {
+    if (!customerId) return false;
+    const snap = getCachedTaxSnapshot();
+    if (!snap) return false;
+    if (snap.exemptCustomerIds.includes(customerId)) return true;
+    const profile = snap.customerProfiles?.find((p) => p.customerId === customerId);
+    return profile?.taxExempt === true || profile?.taxProfile === 'EXEMPT';
+}
+
+export function getCachedCustomerTaxProfile(customerId?: string | null) {
+    if (!customerId) return null;
+    const snap = getCachedTaxSnapshot();
+    return snap?.customerProfiles?.find((p) => p.customerId === customerId) ?? null;
+}
+
+async function syncTaxSnapshot(): Promise<void> {
+    try {
+        const res = await apiClient.get<{
+            success?: boolean;
+            data?: Omit<CachedTaxSnapshot, 'syncedAt'>;
+        }>('enterprise-accounting/taxes/snapshot', { params: { scope: 'SALE' } });
+        const data = res.data?.data;
+        if (!data?.definitions) return;
+        setCachedTaxSnapshot({
+            definitions: data.definitions ?? [],
+            productMappings: data.productMappings ?? [],
+            exemptCustomerIds: data.exemptCustomerIds ?? [],
+            customerProfiles: data.customerProfiles ?? [],
+            taxEnabled: Boolean(data.taxEnabled),
+            taxInclusive: Boolean(data.taxInclusive),
+            defaultTaxRate: Number(data.defaultTaxRate ?? 0),
+            vatOutputRequiresRegisteredCustomer: Boolean(
+                data.vatOutputRequiresRegisteredCustomer,
+            ),
+        });
+    } catch (err) {
+        console.warn('[OfflineCatalog] Tax snapshot sync failed — using prior cache if any', err);
+    }
+}
+
+/** Refresh DocumentTax offline snapshot (after product mapping admin saves). */
+export async function refreshTaxSnapshot(): Promise<void> {
+    await syncTaxSnapshot();
 }
 
 // ── Catalog: read / write ─────────────────────────────────────
@@ -265,6 +361,9 @@ async function syncProductCatalogOnce(): Promise<CachedProduct[]> {
             stock[p.id] = p.stockOnHand;
         }
         setLocalStock(stock);
+
+        // DocumentTax offline snapshot (definitions / mappings / exemptions)
+        await syncTaxSnapshot();
 
         notifyCatalogSynced();
         return products;

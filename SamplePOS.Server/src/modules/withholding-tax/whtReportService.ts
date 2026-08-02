@@ -222,7 +222,7 @@ export async function getTaxComplianceSummary(
     standards: {
       model: 'SAP_TAX_RETURN_STYLE',
       notes: [
-        'VAT boxes from document tax (invoices / CN / SCN) — same approach as SAP tax return extracts.',
+        'VAT boxes from document tax (invoices / CN / SCN + POS sale_items DocumentTax lines) — SAP tax return style.',
         'WHT payable/receivable from control accounts 2350 / 1250 (Odoo / Tally withholding ledgers).',
         'Net VAT payable = net output − net input (QuickBooks Sales Tax style).',
         'Product VAT uses tax_definitions; payment WHT uses withholding_tax_types (no dual posting).',

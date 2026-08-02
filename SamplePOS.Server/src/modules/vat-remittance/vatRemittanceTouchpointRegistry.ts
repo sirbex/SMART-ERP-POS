@@ -65,11 +65,13 @@ export const VAT_REMITTANCE_TOUCHPOINT_REGISTRY: VatRemittanceTouchpoint[] = [
   {
     id: 'VR05',
     workflow: 'Tax Engine product VAT definitions',
-    entryFile: 'taxEngine.ts / tax_definitions',
+    entryFile: 'documentTaxService.ts / taxEngine.ts / tax_definitions',
     targetGateway: 'Accrual calculator only',
     status: 'ALLOW_LISTED',
     owner: 'Tax',
     proof: 'Not a remittance writer',
+    notes:
+      'Phase 6 persists line tax on sale_items (584); Phase 7 reads into VR06 boxes — still not a remittance write gateway',
   },
   {
     id: 'VR06',
@@ -78,7 +80,9 @@ export const VAT_REMITTANCE_TOUCHPOINT_REGISTRY: VatRemittanceTouchpoint[] = [
     targetGateway: 'Report SSOT; settled ← sumPostedVatRemittances (VR-INV-10)',
     status: 'MIGRATED',
     owner: 'Tax',
-    proof: 'Phase 3D getTaxLiabilityReport + PROOF_TAX_COMPLIANCE',
+    proof: 'Phase 3D getTaxLiabilityReport + PROOF_TAX_COMPLIANCE; Phase 7 sale_items in getTaxReversalReport',
+    notes:
+      'Output boxes = invoice_line_items ∪ sale_items (NOT EXISTS guard against double-count). GL 2300 unchanged. Phase 8a copies sale_items → invoice lines on AR invoice create.',
   },
   {
     id: 'VR07',

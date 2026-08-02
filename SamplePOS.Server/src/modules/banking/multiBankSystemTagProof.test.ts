@@ -36,9 +36,10 @@ describe('Multi-bank BANK system tag — unique index proof', () => {
     expect(sql).toMatch(/schema_version \(version\) VALUES \(558\)/);
   });
 
-  it('E-02 schema version bumped to 558', () => {
+  it('E-02 schema version is 558+', () => {
     const ver = readRepo('SamplePOS.Server/src/constants/schemaVersion.ts');
-    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*558/);
+    const m = ver.match(/CURRENT_SCHEMA_VERSION\s*=\s*(\d+)/);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(558);
   });
 
   it('E-03 Create & use this GL still requests bankLiquidity BANK stamp', () => {

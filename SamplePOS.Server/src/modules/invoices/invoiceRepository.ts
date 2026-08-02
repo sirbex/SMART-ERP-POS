@@ -176,7 +176,84 @@ export const invoiceRepository = {
         now,
       ]
     );
-    return normalizeInvoiceRow(result.rows[0]);
+    const invoice = normalizeInvoiceRow(result.rows[0]);
+    if (data.saleId) {
+      await this.copySaleItemsAsInvoiceLines(pool, invoice.id, data.saleId);
+    }
+    return invoice;
+  },
+
+  /**
+   * Phase 8a — Materialize invoice_line_items from sale_items DocumentTax snapshot.
+   * Enables remittance boxes to prefer invoice lines (Phase 7 NOT EXISTS guard).
+   * Idempotent: no-op if lines already exist for this invoice.
+   */
+  async copySaleItemsAsInvoiceLines(
+    pool: Pool | PoolClient,
+    invoiceId: string,
+    saleId: string,
+  ): Promise<number> {
+    const existing = await pool.query(
+      `SELECT 1 FROM invoice_line_items WHERE "InvoiceId" = $1 LIMIT 1`,
+      [invoiceId],
+    );
+    if (existing.rows.length > 0) {
+      return 0;
+    }
+
+    const result = await pool.query(
+      `INSERT INTO invoice_line_items (
+         "Id", "InvoiceId", "LineNumber", "ProductId", "ProductName",
+         "Description", "Quantity", "UnitOfMeasure", "UnitPrice", "LineTotal",
+         "TaxRate", "TaxAmount", "LineTotalIncludingTax"
+       )
+       SELECT
+         gen_random_uuid(),
+         $1::uuid,
+         ROW_NUMBER() OVER (ORDER BY si.created_at NULLS LAST, si.id),
+         COALESCE(si.product_id::text, ''),
+         COALESCE(si.product_name, 'Item'),
+         NULL,
+         si.quantity,
+         'EA',
+         si.unit_price,
+         si.total_price,
+         COALESCE(si.tax_rate, 0),
+         COALESCE(si.tax_amount, 0),
+         COALESCE(si.total_price, 0) + COALESCE(si.tax_amount, 0)
+       FROM sale_items si
+       WHERE si.sale_id = $2::uuid
+       RETURNING "Id"`,
+      [invoiceId, saleId],
+    );
+
+    const integrity = await pool.query(
+      `SELECT
+         COALESCE(s.tax_amount, 0)::numeric AS sale_tax,
+         COALESCE(SUM(si.tax_amount), 0)::numeric AS line_tax
+       FROM sales s
+       LEFT JOIN sale_items si ON si.sale_id = s.id
+       WHERE s.id = $1::uuid
+       GROUP BY s.tax_amount`,
+      [saleId],
+    );
+    const saleTax = Number(integrity.rows[0]?.sale_tax ?? 0);
+    const lineTax = Number(integrity.rows[0]?.line_tax ?? 0);
+    if (saleTax > 0.009 && lineTax < 0.009) {
+      throw new Error(
+        `Cannot copy sale ${saleId} to invoice ${invoiceId}: sales.tax_amount=${saleTax} but sale_items tax sum is 0`,
+      );
+    }
+
+    const count = result.rowCount ?? result.rows.length;
+    if (count > 0) {
+      logger.info('Copied sale_items → invoice_line_items (DocumentTax)', {
+        invoiceId,
+        saleId,
+        lineCount: count,
+      });
+    }
+    return count;
   },
 
   /**
@@ -197,25 +274,41 @@ export const invoiceRepository = {
 
     const now = new Date();
 
+    const saleTotals = await pool.query(
+      `SELECT subtotal, tax_amount, total_amount
+       FROM sales WHERE id = $1::uuid`,
+      [data.saleId],
+    );
+    const saleRow = saleTotals.rows[0];
+    const saleSubtotal = saleRow ? Number(saleRow.subtotal ?? 0) : data.totalAmount;
+    const saleTax = saleRow ? Number(saleRow.tax_amount ?? 0) : 0;
+    const saleTotal = saleRow
+      ? Number(saleRow.total_amount ?? data.totalAmount)
+      : data.totalAmount;
+
     const result = await pool.query(
       `INSERT INTO invoices (
         id, invoice_number, customer_id, customer_name, sale_id, issue_date, due_date,
         subtotal, tax_amount, total_amount, amount_paid, amount_due, 
         notes, status, payment_terms, created_at, updated_at
       ) VALUES (gen_random_uuid(),$1,$2,$3,$4,NOW(),NOW() + INTERVAL '30 days',
-                $5, 0, $5, 0, $5, $6, 'DRAFT', 30, $7, $7)
+                $5, $6, $7, 0, $7, $8, 'DRAFT', 30, $9, $9)
       RETURNING *`,
       [
         invoiceNumber,
         data.customerId,
         data.customerName,
         data.saleId,
-        data.totalAmount,
+        saleSubtotal,
+        saleTax,
+        saleTotal,
         `Invoice for sale ${data.saleNumber}`,
         now,
       ]
     );
-    return normalizeInvoiceRow(result.rows[0]);
+    const invoice = normalizeInvoiceRow(result.rows[0]);
+    await this.copySaleItemsAsInvoiceLines(pool, invoice.id, data.saleId);
+    return invoice;
   },
 
   async getInvoiceById(pool: Pool | PoolClient, id: string): Promise<InvoiceRecord | null> {

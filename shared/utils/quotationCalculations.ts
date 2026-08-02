@@ -1,4 +1,5 @@
 import Decimal from 'decimal.js';
+import { previewDocumentTax } from './documentTaxPreview.js';
 
 export interface QuotationLineCalc {
   quantity: number;
@@ -6,40 +7,56 @@ export interface QuotationLineCalc {
   discountAmount?: number;
   isTaxable: boolean;
   taxRate: number;
+  productId?: string | null;
 }
 
 export function calculateLineTotal(item: QuotationLineCalc): number {
   const subtotal = new Decimal(item.quantity).times(item.unitPrice);
   const afterDiscount = subtotal.minus(item.discountAmount || 0);
-  if (item.isTaxable) {
-    const tax = afterDiscount.times(item.taxRate || 0).dividedBy(100);
-    return afterDiscount.plus(tax).toNumber();
-  }
-  return afterDiscount.toNumber();
+  const preview = previewDocumentTax(
+    [
+      {
+        productId: item.productId,
+        lineNetAmount: afterDiscount.toNumber(),
+        quantity: item.quantity,
+        isTaxable: item.isTaxable,
+        taxRate: item.taxRate,
+      },
+    ],
+    { preferLineTaxOverrides: true, applyTenantDefaultWhenUnresolved: false },
+  );
+  return afterDiscount.plus(preview.totalTax).toNumber();
 }
 
 export function calculateQuotationTotals(items: QuotationLineCalc[]) {
   let subtotal = new Decimal(0);
   let totalDiscount = new Decimal(0);
-  let totalTax = new Decimal(0);
 
-  items.forEach((item) => {
+  const pricedLines = items.map((item) => {
     const itemSubtotal = new Decimal(item.quantity).times(item.unitPrice);
     subtotal = subtotal.plus(itemSubtotal);
     totalDiscount = totalDiscount.plus(item.discountAmount || 0);
-
-    if (item.isTaxable) {
-      const afterDiscount = itemSubtotal.minus(item.discountAmount || 0);
-      totalTax = totalTax.plus(afterDiscount.times(item.taxRate || 0).dividedBy(100));
-    }
+    const afterDiscount = itemSubtotal.minus(item.discountAmount || 0);
+    return {
+      productId: item.productId,
+      lineNetAmount: afterDiscount.toNumber(),
+      quantity: item.quantity,
+      isTaxable: item.isTaxable,
+      taxRate: item.taxRate,
+    };
   });
 
-  const total = subtotal.minus(totalDiscount).plus(totalTax);
+  const preview = previewDocumentTax(pricedLines, {
+    preferLineTaxOverrides: true,
+    applyTenantDefaultWhenUnresolved: false,
+  });
+
+  const total = subtotal.minus(totalDiscount).plus(preview.totalTax);
 
   return {
     subtotal: subtotal.toNumber(),
     totalDiscount: totalDiscount.toNumber(),
-    totalTax: totalTax.toNumber(),
+    totalTax: preview.totalTax,
     total: total.toNumber(),
   };
 }

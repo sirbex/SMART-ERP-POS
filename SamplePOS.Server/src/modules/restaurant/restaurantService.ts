@@ -13,8 +13,8 @@ import { normalizeProductIdForDb } from '../../utils/productIdBoundary.js';
 import { resolveSaleItemUom } from '../products/uomService.js';
 import { ordersRepository, type CreateOrderItemData } from '../orders/ordersRepository.js';
 import { ordersService, type OrderItemInput } from '../orders/ordersService.js';
-import { systemSettingsRepository } from '../system-settings/systemSettingsRepository.js';
 import logger from '../../utils/logger.js';
+import { DocumentTaxService } from '../../services/documentTaxService.js';
 import { isRestaurantModeEnabled } from './restaurantSettings.js';
 import {
   restaurantRepository,
@@ -214,15 +214,37 @@ function channelForTable(table: RestaurantTableRecord): OrderChannel {
   return 'DINE_IN';
 }
 
-async function computeTaxAmount(
+/**
+ * Restaurant tax via DocumentTaxService (tenant-default fallback preserves prior flat rate).
+ * Server is authoritative — do not trust client taxAmount.
+ */
+async function computeRestaurantDocumentTax(
   conn: Pool | PoolClient,
-  subtotalNetOfDiscount: Decimal,
+  items: Array<{
+    productId?: string | null;
+    quantity: string | number;
+    unitPrice: string | number;
+    discountAmount?: string | number | null;
+  }>,
+  customerId?: string | null,
 ): Promise<Decimal> {
-  const settings = await systemSettingsRepository.getSettings(conn);
-  if (!settings?.taxEnabled) return new Decimal(0);
-  const rate = new Decimal(settings.defaultTaxRate || 0);
-  if (settings.taxInclusive) return new Decimal(0);
-  return Money.round(subtotalNetOfDiscount.times(rate).dividedBy(100), 2);
+  const result = await DocumentTaxService.computeForLines(conn, {
+    customerId: customerId ?? null,
+    scope: 'SALE',
+    applyTenantDefaultWhenUnresolved: true,
+    lines: items.map((it, lineIndex) => {
+      const lineNet = Money.parseDb(String(it.quantity))
+        .times(Money.parseDb(String(it.unitPrice)))
+        .minus(Money.parseDb(String(it.discountAmount || 0)));
+      return {
+        lineIndex,
+        productId: it.productId ?? null,
+        lineNetAmount: Money.toNumber(Money.round(lineNet, 2)),
+        quantity: Number(it.quantity) || 0,
+      };
+    }),
+  });
+  return new Decimal(result.documentTotals.totalTax);
 }
 
 function recalcFromItems(
@@ -860,11 +882,11 @@ export const restaurantService = {
             await restaurantRepository.occupyTable(client, lockedTable.id, orderId!);
 
             const order = await ordersRepository.getById(client, orderId!);
-            const net = new Decimal(order!.subtotal).minus(new Decimal(order!.discountAmount));
-            const tax =
-              input.taxAmount !== undefined
-                ? new Decimal(input.taxAmount)
-                : await computeTaxAmount(client, net);
+            const tax = await computeRestaurantDocumentTax(
+              client,
+              order!.items || [],
+              order!.customerId,
+            );
             const totals = recalcFromItems(order!.items || [], tax);
             await restaurantRepository.updateOrderTotals(client, orderId!, totals);
           });
@@ -980,15 +1002,11 @@ export const restaurantService = {
         }
 
         const refreshed = await ordersRepository.getById(client, orderId!);
-        const net = (refreshed?.items || []).reduce((sum, it) => {
-          return sum
-            .plus(Money.parseDb(it.quantity).times(Money.parseDb(it.unitPrice)))
-            .minus(Money.parseDb(it.discountAmount || '0'));
-        }, new Decimal(0));
-        const tax =
-          input.taxAmount !== undefined
-            ? new Decimal(input.taxAmount)
-            : await computeTaxAmount(client, net);
+        const tax = await computeRestaurantDocumentTax(
+          client,
+          refreshed?.items || [],
+          refreshed?.customerId,
+        );
         const totals = recalcFromItems(refreshed?.items || [], tax);
         await restaurantRepository.updateOrderTotals(client, orderId!, totals);
 
@@ -1307,14 +1325,11 @@ export const restaurantService = {
         return { voidKots, printJobs, checkCancelled: true as const, meta };
       }
 
-      const net = remainingLines.reduce((s, it) => {
-        return s.plus(
-          Money.parseDb(String(it.quantity))
-            .times(Money.parseDb(String(it.unitPrice)))
-            .minus(Money.parseDb(String(it.discountAmount || 0))),
-        );
-      }, new Decimal(0));
-      const tax = await computeTaxAmount(client, net);
+      const tax = await computeRestaurantDocumentTax(
+        client,
+        remainingLines,
+        fresh?.customerId,
+      );
       await restaurantRepository.updateOrderTotals(
         client,
         orderId,
@@ -1940,18 +1955,12 @@ export const restaurantService = {
       await restaurantRepository.reassignKotsToOrder(client, secondaryOrderId, primaryOrderId);
 
       const primaryFresh = await ordersRepository.getById(client, primaryOrderId);
-      const net = new Decimal(primaryFresh!.subtotal).minus(new Decimal(primaryFresh!.discountAmount));
       // Recalc from items after move
       const items = primaryFresh?.items || [];
-      const tax = await computeTaxAmount(
+      const tax = await computeRestaurantDocumentTax(
         client,
-        items.reduce((s, it) => {
-          return s.plus(
-            Money.parseDb(String(it.quantity))
-              .times(Money.parseDb(String(it.unitPrice)))
-              .minus(Money.parseDb(String(it.discountAmount || 0))),
-          );
-        }, new Decimal(0)),
+        items,
+        primaryFresh?.customerId,
       );
       const totals = recalcFromItems(items, tax);
       await restaurantRepository.updateOrderTotals(client, primaryOrderId, totals);
@@ -2197,14 +2206,7 @@ export const restaurantService = {
           [newOrderId, destFresh],
         ] as const) {
           const items = fresh?.items || [];
-          const net = items.reduce((s, it) => {
-            return s.plus(
-              Money.parseDb(String(it.quantity))
-                .times(Money.parseDb(String(it.unitPrice)))
-                .minus(Money.parseDb(String(it.discountAmount || 0))),
-            );
-          }, new Decimal(0));
-          const tax = await computeTaxAmount(client, net);
+          const tax = await computeRestaurantDocumentTax(client, items, fresh?.customerId);
           await restaurantRepository.updateOrderTotals(client, oid, recalcFromItems(items, tax));
         }
 
@@ -2386,12 +2388,11 @@ export const restaurantService = {
       );
 
       const refreshed = await ordersRepository.getById(client, input.orderId);
-      const net = (refreshed?.items || []).reduce((sum, it) => {
-        return sum
-          .plus(Money.parseDb(it.quantity).times(Money.parseDb(it.unitPrice)))
-          .minus(Money.parseDb(it.discountAmount || '0'));
-      }, new Decimal(0));
-      const tax = await computeTaxAmount(client, net);
+      const tax = await computeRestaurantDocumentTax(
+        client,
+        refreshed?.items || [],
+        refreshed?.customerId,
+      );
       await restaurantRepository.updateOrderTotals(
         client,
         input.orderId,

@@ -33,6 +33,8 @@ interface SystemSettings {
     taxNumber?: string;
     taxInclusive: boolean;
     taxRates: TaxRate[];
+    /** DocumentTax: output VAT only for VAT-registered customers when true */
+    vatOutputRequiresRegisteredCustomer?: boolean;
     receiptPrinterEnabled: boolean;
     receiptPrinterName?: string;
     receiptPaperWidth: number;
@@ -417,6 +419,8 @@ function TaxSettings({
         defaultTaxRate: settings.defaultTaxRate,
         taxInclusive: settings.taxInclusive,
         taxRates: settings.taxRates || [],
+        vatOutputRequiresRegisteredCustomer:
+            settings.vatOutputRequiresRegisteredCustomer ?? false,
         treasuryDocumentEnabled: settings.treasuryDocumentEnabled ?? false,
         restaurantModeEnabled: settings.restaurantModeEnabled ?? false,
     });
@@ -462,6 +466,33 @@ function TaxSettings({
                         <label htmlFor="taxEnabled" className="ml-2 block text-sm text-gray-900">
                             Enable Tax System
                         </label>
+                    </div>
+
+                    <div className="flex items-start">
+                        <input
+                            type="checkbox"
+                            id="vatOutputRequiresRegisteredCustomer"
+                            checked={formData.vatOutputRequiresRegisteredCustomer}
+                            onChange={(e) =>
+                                setFormData({
+                                    ...formData,
+                                    vatOutputRequiresRegisteredCustomer: e.target.checked,
+                                })
+                            }
+                            className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="ml-2">
+                            <label
+                                htmlFor="vatOutputRequiresRegisteredCustomer"
+                                className="block text-sm font-medium text-gray-900"
+                            >
+                                VAT only for registered customers
+                            </label>
+                            <p className="mt-0.5 text-xs text-gray-600">
+                                Walk-in and non-VAT-registered customers get 0% output VAT. VAT-registered
+                                customers use product / mapping / profile rates.
+                            </p>
+                        </div>
                     </div>
 
                     <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-3">

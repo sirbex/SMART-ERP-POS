@@ -1596,10 +1596,20 @@ export const api = {
     // Tax Engine
     listTaxes: (scope?: string) =>
       apiClient.get<ApiResponse>('enterprise-accounting/taxes', { params: scope ? { scope } : undefined }),
+    taxSnapshot: (scope?: string) =>
+      apiClient.get<ApiResponse>('enterprise-accounting/taxes/snapshot', {
+        params: { scope: scope || 'SALE' },
+      }),
     computeTaxes: (data: { unitPrice: number; quantity: number; taxIds: string[] }) =>
       apiClient.post<ApiResponse>('enterprise-accounting/taxes/compute', data),
     productTaxes: (productId: string, params?: { customerId?: string; scope?: string }) =>
       apiClient.get<ApiResponse>(`enterprise-accounting/taxes/product/${productId}`, { params }),
+    productTaxMappings: (productId: string) =>
+      apiClient.get<ApiResponse>(`enterprise-accounting/taxes/product/${productId}/mappings`),
+    setProductTaxMappings: (productId: string, taxIds: string[]) =>
+      apiClient.put<ApiResponse>(`enterprise-accounting/taxes/product/${productId}/mappings`, {
+        taxIds,
+      }),
 
     // GL Reconciliation
     unreconciledItems: (accountCode: string, params?: { startDate?: string; endDate?: string; limit?: number }) =>

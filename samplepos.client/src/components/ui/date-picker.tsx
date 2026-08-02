@@ -6,8 +6,9 @@
  * - Value is always YYYY-MM-DD (API / Zod date-only contract).
  * - "Today" / relative quick picks use business timezone via getBusinessDate().
  * - Date ranges should use DateRangeFilter (which wraps this component).
+ * - Custom typed dates commit on Enter / blur (and immediately when fully valid).
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { DayPicker } from 'react-day-picker';
 import 'react-day-picker/dist/style.css';
@@ -32,6 +33,91 @@ export interface DatePickerProps {
   'aria-label'?: string;
 }
 
+/** Strict YYYY-MM-DD (avoids date-fns accepting partial junk). */
+const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Parse user-typed dates into YYYY-MM-DD.
+ * Accepts ISO and common local forms (zero-padded or not).
+ * Ambiguous mid-typed values (e.g. "12") return null — commit on Enter/blur/Apply.
+ */
+export function parseTypedDateToIso(raw: string): string | null {
+  const val = raw.trim();
+  if (!val) return null;
+
+  const iso = val.match(ISO_DATE_RE);
+  if (iso) {
+    const y = Number(iso[1]);
+    const m = Number(iso[2]);
+    const d = Number(iso[3]);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (
+      dt.getUTCFullYear() === y &&
+      dt.getUTCMonth() === m - 1 &&
+      dt.getUTCDate() === d
+    ) {
+      return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    }
+    return null;
+  }
+
+  // Need day + month + year tokens before we accept (avoid partial keystroke commits)
+  const parts = val.split(/[/. -]/).filter(Boolean);
+  if (parts.length !== 3) return null;
+  if (parts.some((p) => !/^\d{1,4}$/.test(p))) return null;
+  const yearPart = parts.find((p) => p.length === 4) ?? parts[2];
+  if (yearPart.length !== 4) return null;
+
+  const formats = [
+    'dd/MM/yyyy',
+    'd/M/yyyy',
+    'dd-MM-yyyy',
+    'd-M-yyyy',
+    'MM/dd/yyyy',
+    'M/d/yyyy',
+    'MM-dd-yyyy',
+    'M-d-yyyy',
+    'dd.MM.yyyy',
+    'd.M.yyyy',
+    'yyyy/MM/dd',
+    'yyyy/M/d',
+  ];
+
+  for (const fmt of formats) {
+    const parsed = parse(val, fmt, new Date());
+    if (!isValid(parsed)) continue;
+    const out = format(parsed, 'yyyy-MM-dd');
+    // Round-trip calendar validity (rejects 32/01/2026 overflow)
+    const [yy, mm, dd] = out.split('-').map(Number);
+    const check = new Date(Date.UTC(yy, mm - 1, dd));
+    if (
+      check.getUTCFullYear() === yy &&
+      check.getUTCMonth() === mm - 1 &&
+      check.getUTCDate() === dd
+    ) {
+      return out;
+    }
+  }
+
+  return null;
+}
+
+function withinBounds(iso: string, minDate?: Date, maxDate?: Date): boolean {
+  const parsed = parse(iso, 'yyyy-MM-dd', new Date());
+  if (!isValid(parsed)) return false;
+  if (minDate) {
+    const min = new Date(minDate);
+    min.setHours(0, 0, 0, 0);
+    if (parsed < min) return false;
+  }
+  if (maxDate) {
+    const max = new Date(maxDate);
+    max.setHours(23, 59, 59, 999);
+    if (parsed > max) return false;
+  }
+  return true;
+}
+
 export const DatePicker: React.FC<DatePickerProps> = ({
   value,
   onChange,
@@ -46,41 +132,77 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState(value || '');
+  const [typeError, setTypeError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const manualInputId = useId();
 
   useEffect(() => {
     setInputValue(value || '');
+    setTypeError(null);
   }, [value]);
 
   const selectedDate = value ? parse(value, 'yyyy-MM-dd', new Date()) : undefined;
   const isValidDate = selectedDate && isValid(selectedDate);
 
+  const commitIso = (iso: string | null, opts?: { close?: boolean }) => {
+    if (!iso) {
+      onChange?.('');
+      setInputValue('');
+      setTypeError(null);
+      if (opts?.close) setOpen(false);
+      return;
+    }
+    if (!withinBounds(iso, minDate, maxDate)) {
+      setTypeError('Date is outside the allowed range');
+      return;
+    }
+    setInputValue(iso);
+    setTypeError(null);
+    onChange?.(iso);
+    if (opts?.close) setOpen(false);
+  };
+
   const handleDayClick = (date: Date | undefined) => {
     if (!date) return;
-
-    const formatted = format(date, 'yyyy-MM-dd');
-    setInputValue(formatted);
-    onChange?.(formatted);
-    setOpen(false);
+    commitIso(format(date, 'yyyy-MM-dd'), { close: true });
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setInputValue(val);
+    setTypeError(null);
 
-    if (val === '') {
+    if (val.trim() === '') {
       onChange?.('');
       return;
     }
 
-    const formats = ['yyyy-MM-dd', 'MM/dd/yyyy', 'dd/MM/yyyy', 'MM-dd-yyyy'];
-    for (const fmt of formats) {
-      const parsed = parse(val, fmt, new Date());
-      if (isValid(parsed)) {
-        const formatted = format(parsed, 'yyyy-MM-dd');
-        onChange?.(formatted);
-        setInputValue(formatted);
-        break;
-      }
+    // Commit immediately only when the typed value is a complete, unambiguous date
+    const iso = parseTypedDateToIso(val);
+    if (iso && withinBounds(iso, minDate, maxDate)) {
+      onChange?.(iso);
+    }
+  };
+
+  const commitTypedDate = (close = false) => {
+    const trimmed = inputValue.trim();
+    if (!trimmed) {
+      commitIso(null, { close });
+      return;
+    }
+    const iso = parseTypedDateToIso(trimmed);
+    if (!iso) {
+      setTypeError('Use YYYY-MM-DD, DD/MM/YYYY, or MM/DD/YYYY');
+      return;
+    }
+    commitIso(iso, { close });
+  };
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitTypedDate(true);
     }
   };
 
@@ -88,9 +210,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   const handleQuickSelect = (daysBack: number) => {
     const businessToday = getBusinessDate();
     const next = daysBack === 0 ? businessToday : addDaysToDateString(businessToday, -daysBack);
-    setInputValue(next);
-    onChange?.(next);
-    setOpen(false);
+    commitIso(next, { close: true });
   };
 
   return (
@@ -129,7 +249,12 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           'max-h-[min(var(--radix-popover-content-available-height),calc(100vh-1.5rem))]',
           'overflow-hidden shadow-xl border-gray-200',
         )}
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          // Focus the type-in field so custom dates work immediately
+          requestAnimationFrame(() => inputRef.current?.focus());
+        }}
+        onCloseAutoFocus={(e) => e.preventDefault()}
       >
         <div className="flex max-h-[inherit] flex-col md:flex-row md:divide-x md:divide-gray-100">
           <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5">
@@ -185,23 +310,55 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 
             <div className="space-y-2">
               <label
-                htmlFor="date-picker-manual-input"
+                htmlFor={manualInputId}
                 className="text-xs font-semibold uppercase tracking-wide text-gray-500"
               >
                 Type a date
               </label>
               <input
-                id="date-picker-manual-input"
+                ref={inputRef}
+                id={manualInputId}
                 type="text"
+                inputMode="numeric"
+                autoComplete="off"
                 value={inputValue}
                 onChange={handleInputChange}
-                placeholder="YYYY-MM-DD"
+                onBlur={() => commitTypedDate(false)}
+                onKeyDown={handleInputKeyDown}
+                placeholder="YYYY-MM-DD or DD/MM/YYYY"
                 className={cn(
                   'h-10 w-full rounded-md border px-3 text-sm',
                   'focus:outline-none focus:ring-2 focus:ring-blue-500',
                   'placeholder:text-gray-400',
+                  typeError ? 'border-red-400' : 'border-gray-300',
                 )}
               />
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9 flex-1"
+                  onClick={() => commitTypedDate(true)}
+                >
+                  Apply
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-9"
+                  onClick={() => commitIso(null)}
+                >
+                  Clear
+                </Button>
+              </div>
+              {typeError ? (
+                <p className="text-xs text-red-600">{typeError}</p>
+              ) : (
+                <p className="text-xs text-gray-500">
+                  Press Enter or Apply after typing.
+                </p>
+              )}
             </div>
 
             {isValidDate && (

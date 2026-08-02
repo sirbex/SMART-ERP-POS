@@ -19,6 +19,12 @@ export const PERMISSIONS: Record<string, Permission> = {
   SALES_EXCHANGE: p('sales.exchange', 'sales', 'exchange', 'Exchange wrong products on completed sales'),
   SALES_EXPORT: p('sales.export', 'sales', 'export', 'Export sales data'),
   SALES_APPROVE: p('sales.approve', 'sales', 'approve', 'Approve sales requiring authorization'),
+  SALES_TAX_OVERRIDE: p(
+    'sales.tax_override',
+    'sales',
+    'tax_override',
+    'Override VAT/tax determination on sales (requires reason + audit)',
+  ),
   SALES_REPRINT: p('sales.reprint', 'sales', 'reprint', 'Reprint sale receipts'),
 
   INVENTORY_READ: p('inventory.read', 'inventory', 'read', 'View inventory levels'),

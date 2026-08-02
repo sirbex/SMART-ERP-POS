@@ -38,6 +38,7 @@ import { loadMasterUoms, normalizeQuotationLineUom } from './quotationUomResolve
 import { InventoryBusinessRules, SalesBusinessRules } from '../../middleware/businessRules.js';
 import * as masterDataGuard from '../../services/masterDataGuard.js';
 import { NotFoundError, ValidationError, BusinessError, ConflictError } from '../../middleware/errorHandler.js';
+import { DocumentTaxService } from '../../services/documentTaxService.js';
 import { createLogger } from '../../utils/logger.js';
 import { assertEditableQuotation, assertStatusChangeable } from './quotationGuards.js';
 
@@ -260,23 +261,33 @@ export const quotationService = {
   ): Promise<QuotationDetail> {
       const masterUoms = await loadMasterUoms(client);
 
-      // Calculate totals
-      let subtotal = new Decimal(0);
-      let taxAmount = new Decimal(0);
+      // DocumentTaxService — authoritative; prefer-line only when quote line makes an explicit decision
+      const priced = await DocumentTaxService.priceDocumentLines(client, {
+        customerId: data.customerId,
+        scope: 'SALE',
+        preferLineTaxOverrides: true,
+        applyTenantDefaultWhenUnresolved: false,
+        lines: data.items.map((item) => ({
+          productId: item.productId || null,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          discountAmount: item.discountAmount || 0,
+          // undefined isTaxable → allow mapping/bridge; explicit false → NONE
+          isTaxable: item.isTaxable === false ? false : item.isTaxable === true ? true : undefined,
+          taxRate:
+            item.taxRate !== undefined && item.taxRate !== null
+              ? Number(item.taxRate)
+              : undefined,
+        })),
+      });
+
+      const subtotal = new Decimal(priced.subtotal);
+      const taxAmount = new Decimal(priced.taxAmount);
 
       const itemsWithTotals = data.items.map((item, idx) => {
         const qty = new Decimal(item.quantity);
-        const price = new Decimal(item.unitPrice);
         const discount = new Decimal(item.discountAmount || 0);
-        const taxRate = new Decimal(item.taxRate || 0);
-        const isTaxable = item.isTaxable !== false;
-
-        const itemSubtotal = qty.times(price).minus(discount);
-        const itemTax = isTaxable ? itemSubtotal.times(taxRate).dividedBy(100) : new Decimal(0);
-        const lineTotal = itemSubtotal.plus(itemTax);
-
-        subtotal = subtotal.plus(itemSubtotal);
-        taxAmount = taxAmount.plus(itemTax);
+        const taxLine = priced.lines[idx];
 
         const normalizedUom = normalizeQuotationLineUom(masterUoms, {
           itemType: item.itemType,
@@ -295,11 +306,11 @@ export const quotationService = {
           quantity: item.quantity,
           unitPrice: item.unitPrice,
           discountAmount: discount.toNumber(),
-          subtotal: itemSubtotal.toNumber(),
-          isTaxable,
-          taxRate: taxRate.toNumber(),
-          taxAmount: itemTax.toNumber(),
-          lineTotal: lineTotal.toNumber(),
+          subtotal: taxLine.lineNetAmount,
+          isTaxable: taxLine.isTaxable,
+          taxRate: taxLine.taxRate,
+          taxAmount: taxLine.taxAmount,
+          lineTotal: taxLine.lineTotal,
           uomId: normalizedUom.uomId,
           uomName: normalizedUom.uomName,
           unitCost: item.unitCost || null,
@@ -308,7 +319,7 @@ export const quotationService = {
         };
       });
 
-      const totalAmount = subtotal.plus(taxAmount);
+      const totalAmount = new Decimal(priced.totalAmount);
 
       // BR-QUOTE-012: Duplicate prevention via content hash (open quotes only).
       const contentHash = computeContentHash(
@@ -465,24 +476,42 @@ export const quotationService = {
         // Delete existing items
         await client.query('DELETE FROM quotation_items WHERE quotation_id = $1', [id]);
 
-        // Recalculate totals and add line numbers
-        let subtotal = new Decimal(0);
-        let taxAmount = new Decimal(0);
+        const customerId = (data as Record<string, unknown>).customerId as string | undefined || existing.rows[0].customer_id;
+        const customerName = (data as Record<string, unknown>).customerName as string | undefined || existing.rows[0].customer_name;
 
-        const itemsWithTotals = (data.items as Record<string, unknown>[]).map((raw: Record<string, unknown>, idx: number) => {
+        const rawItems = data.items as Record<string, unknown>[];
+        const priced = await DocumentTaxService.priceDocumentLines(client, {
+          customerId,
+          scope: 'SALE',
+          preferLineTaxOverrides: true,
+          applyTenantDefaultWhenUnresolved: false,
+          lines: rawItems.map((raw) => {
+            const item = raw as Record<string, string | number | boolean | null>;
+            const isTaxableRaw = item.isTaxable;
+            return {
+              productId: (item.productId as string | null) || null,
+              quantity: Number(item.quantity),
+              unitPrice: Number(item.unitPrice),
+              discountAmount: Number(item.discountAmount || 0),
+              isTaxable:
+                isTaxableRaw === false ? false : isTaxableRaw === true ? true : undefined,
+              taxRate:
+                item.taxRate !== undefined && item.taxRate !== null
+                  ? Number(item.taxRate)
+                  : undefined,
+            };
+          }),
+        });
+
+        const subtotal = new Decimal(priced.subtotal);
+        const taxAmount = new Decimal(priced.taxAmount);
+        const totalAmount = new Decimal(priced.totalAmount);
+
+        const itemsWithTotals = rawItems.map((raw: Record<string, unknown>, idx: number) => {
           const item = raw as Record<string, string | number | boolean | null>;
           const qty = new Decimal(item.quantity as number);
-          const price = new Decimal(item.unitPrice);
           const discount = new Decimal(item.discountAmount || 0);
-          const taxRate = new Decimal(item.taxRate || 0);
-          const isTaxable = item.isTaxable !== false;
-
-          const itemSubtotal = qty.times(price).minus(discount);
-          const itemTax = isTaxable ? itemSubtotal.times(taxRate).dividedBy(100) : new Decimal(0);
-          const lineTotal = itemSubtotal.plus(itemTax);
-
-          subtotal = subtotal.plus(itemSubtotal);
-          taxAmount = taxAmount.plus(itemTax);
+          const taxLine = priced.lines[idx];
 
           const normalizedUom = normalizeQuotationLineUom(masterUoms, {
             itemType: String(item.itemType || 'product'),
@@ -501,11 +530,11 @@ export const quotationService = {
             quantity: Number(item.quantity),
             unitPrice: Number(item.unitPrice),
             discountAmount: discount.toNumber(),
-            subtotal: itemSubtotal.toNumber(),
-            isTaxable,
-            taxRate: taxRate.toNumber(),
-            taxAmount: itemTax.toNumber(),
-            lineTotal: lineTotal.toNumber(),
+            subtotal: taxLine.lineNetAmount,
+            isTaxable: taxLine.isTaxable,
+            taxRate: taxLine.taxRate,
+            taxAmount: taxLine.taxAmount,
+            lineTotal: taxLine.lineTotal,
             uomId: normalizedUom.uomId,
             uomName: normalizedUom.uomName,
             unitCost: item.unitCost ? Number(item.unitCost) : null,
@@ -514,11 +543,7 @@ export const quotationService = {
           };
         });
 
-        const totalAmount = subtotal.plus(taxAmount);
-
         // Update quotation totals + recompute content hash (BR-QUOTE-012)
-        const customerId = (data as Record<string, unknown>).customerId as string | undefined || existing.rows[0].customer_id;
-        const customerName = (data as Record<string, unknown>).customerName as string | undefined || existing.rows[0].customer_name;
         const newContentHash = computeContentHash(
           customerId,
           customerName,

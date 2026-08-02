@@ -82,6 +82,10 @@ export const systemSettingsRepository = {
             setClauses.push(`tax_rates = $${paramIndex++}`);
             values.push(JSON.stringify(updates.taxRates));
         }
+        if (updates.vatOutputRequiresRegisteredCustomer !== undefined) {
+            setClauses.push(`vat_output_requires_registered_customer = $${paramIndex++}`);
+            values.push(updates.vatOutputRequiresRegisteredCustomer);
+        }
         if (updates.receiptPrinterEnabled !== undefined) {
             setClauses.push(`receipt_printer_enabled = $${paramIndex++}`);
             values.push(updates.receiptPrinterEnabled);

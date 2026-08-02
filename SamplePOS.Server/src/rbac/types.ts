@@ -50,7 +50,8 @@ export type PermissionAction =
   | 'hr_view'
   | 'period_manage'
   | 'chart_manage'
-  | 'reprint';
+  | 'reprint'
+  | 'tax_override';
 
 export interface Permission {
   key: string;

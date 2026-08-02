@@ -3,6 +3,13 @@
 
 import { z } from 'zod';
 
+export const CustomerTaxProfileSchema = z.enum([
+  'STANDARD',
+  'VAT_REGISTERED',
+  'EXEMPT',
+  'ZERO_RATED',
+]);
+
 export const CustomerSchema = z.object({
   id: z.string().uuid(),
   customerNumber: z.string().optional(), // Human-readable ID (CUST-0001)
@@ -19,6 +26,15 @@ export const CustomerSchema = z.object({
   /** When true, payments should default WHT for this customer (customer-withheld). */
   whtLiable: z.boolean().default(false).optional(),
   defaultWhtTypeId: z.string().uuid().optional().nullable(),
+  /** DocumentTaxService — customer VAT profile */
+  vatRegistered: z.boolean().default(false).optional(),
+  tin: z.string().max(50).optional().nullable(),
+  taxProfile: CustomerTaxProfileSchema.default('STANDARD').optional(),
+  defaultVatRate: z.number().nonnegative().optional().nullable(),
+  vatRegistrationDate: z.string().optional().nullable(),
+  taxEffectiveFrom: z.string().optional().nullable(),
+  taxExempt: z.boolean().default(false).optional(),
+  allowTaxOverride: z.boolean().default(false).optional(),
   isActive: z.boolean().default(true),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -35,6 +51,14 @@ export const CreateCustomerSchema = z.object({
   creditLimit: z.number().nonnegative().default(0),
   whtLiable: z.boolean().optional(),
   defaultWhtTypeId: z.string().uuid().optional().nullable(),
+  vatRegistered: z.boolean().optional(),
+  tin: z.union([z.string().max(50), z.literal('')]).optional().transform(v => v === '' ? undefined : v).nullable(),
+  taxProfile: CustomerTaxProfileSchema.optional(),
+  defaultVatRate: z.number().nonnegative().optional().nullable(),
+  vatRegistrationDate: z.string().optional().nullable(),
+  taxEffectiveFrom: z.string().optional().nullable(),
+  taxExempt: z.boolean().optional(),
+  allowTaxOverride: z.boolean().optional(),
 }).strict();
 
 export const UpdateCustomerSchema = CreateCustomerSchema.partial().extend({

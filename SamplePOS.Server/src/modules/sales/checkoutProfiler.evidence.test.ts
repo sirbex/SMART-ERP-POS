@@ -76,6 +76,7 @@ describe('checkout profile SSOT gates', () => {
       'uom_resolve',
       'recipe_explode',
       'pricing_engine',
+      'document_tax',
       'line_prep',
       'fefo_stock',
       'gl_posting',

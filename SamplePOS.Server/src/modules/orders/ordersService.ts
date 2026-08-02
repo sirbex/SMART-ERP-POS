@@ -8,6 +8,7 @@ import logger from '../../utils/logger.js';
 import { normalizeProductIdForDb } from '../../utils/productIdBoundary.js';
 import Decimal from 'decimal.js';
 import { Money } from '../../utils/money.js';
+import { DocumentTaxService } from '../../services/documentTaxService.js';
 
 // ── Input types ──────────────────────────────────────────────────────
 
@@ -47,6 +48,8 @@ export function buildOrderCompletionSaleTotals(
   order: Pick<OrderRecord, 'subtotal' | 'discountAmount' | 'taxAmount' | 'items'>,
   extraDiscountAmount = 0,
   saleItemsOverride?: Array<{ quantity: number; unitPrice: number; discountAmount?: number }>,
+  /** When set (DocumentTaxService), overrides stored order.taxAmount for createSale parity. */
+  authoritativeTaxAmount?: number,
 ): { subtotal: number; discountAmount: number; taxAmount: number; totalAmount: number } {
   const orderItems = order.items ?? [];
   const itemDiscountSum = orderItems.reduce(
@@ -54,7 +57,10 @@ export function buildOrderCompletionSaleTotals(
     new Decimal(0),
   );
   const orderDiscountAmount = Money.parseDb(order.discountAmount);
-  const orderTaxAmount = Money.parseDb(order.taxAmount);
+  const orderTaxAmount =
+    authoritativeTaxAmount !== undefined && authoritativeTaxAmount !== null
+      ? new Decimal(authoritativeTaxAmount)
+      : Money.parseDb(order.taxAmount);
   const extraDiscount = new Decimal(extraDiscountAmount);
 
   const headerSurplus = orderDiscountAmount.minus(itemDiscountSum);
@@ -129,14 +135,27 @@ export const ordersService = {
 
     const subtotal = input.subtotal !== undefined ? new Decimal(input.subtotal) : calculatedSubtotal;
     const discountAmount = input.discountAmount !== undefined ? new Decimal(input.discountAmount) : calculatedDiscount;
-    const taxAmount = input.taxAmount !== undefined ? new Decimal(input.taxAmount) : new Decimal(0);
-    const totalAmount = input.totalAmount !== undefined
-      ? new Decimal(input.totalAmount)
-      : subtotal.minus(discountAmount).plus(taxAmount);
 
     let order: OrderRecord;
     try {
       order = await UnitOfWork.run(pool, async (client: PoolClient) => {
+        // Authoritative tax (same hierarchy as createSale) — client taxAmount is preview only
+        const pricedTax = await DocumentTaxService.priceDocumentLines(client, {
+          customerId: input.customerId || null,
+          documentDate: input.orderDate,
+          scope: 'SALE',
+          preferLineTaxOverrides: false,
+          applyTenantDefaultWhenUnresolved: false,
+          lines: input.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discountAmount: item.discountAmount || 0,
+          })),
+        });
+        const taxAmount = new Decimal(pricedTax.taxAmount);
+        const totalAmount = subtotal.minus(discountAmount).plus(taxAmount);
+
         // Create order header
         const orderData: CreateOrderData = {
           customerId: input.customerId || null,
@@ -209,7 +228,10 @@ export const ordersService = {
       throw err;
     }
 
-    logger.info('POS order created', { orderNumber: order.orderNumber, totalAmount: totalAmount.toFixed(2) });
+    logger.info('POS order created', {
+      orderNumber: order.orderNumber,
+      totalAmount: order.totalAmount,
+    });
     return order;
   },
 

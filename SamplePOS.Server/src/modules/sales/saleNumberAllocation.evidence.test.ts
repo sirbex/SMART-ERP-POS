@@ -62,7 +62,7 @@ describe('document number SEQUENCE SSOT (complete-path scale)', () => {
     expect(mig).toContain('setval');
     expect(mig).toContain('581');
     const ver = readRepo('SamplePOS.Server/src/constants/schemaVersion.ts');
-    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*581/);
+    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*58\d/);
   });
 
   it('EVIDENCE gate: allocator uses nextval + self-heal — no advisory lock on sale/order/refund', () => {

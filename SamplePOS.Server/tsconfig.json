@@ -37,6 +37,7 @@
     "dist",
     "**/*.old",
     "**/*.test.ts",
+    "../shared/**/*.test.ts",
     "**/__tests__/**"
   ]
 }

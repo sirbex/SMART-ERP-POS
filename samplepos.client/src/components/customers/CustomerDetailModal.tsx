@@ -52,6 +52,14 @@ interface CustomerData {
     pricingMode?: 'STANDARD' | 'AT_COST' | null;
     whtLiable?: boolean;
     defaultWhtTypeId?: string | null;
+    vatRegistered?: boolean;
+    tin?: string | null;
+    taxProfile?: 'STANDARD' | 'VAT_REGISTERED' | 'EXEMPT' | 'ZERO_RATED';
+    defaultVatRate?: number | null;
+    vatRegistrationDate?: string | null;
+    taxEffectiveFrom?: string | null;
+    taxExempt?: boolean;
+    allowTaxOverride?: boolean;
     createdAt?: string;
 }
 
@@ -219,6 +227,13 @@ export default function CustomerDetailModal({
     const initialPriceGroupIdRef = useRef<string | null>(null);
     const [editWhtLiable, setEditWhtLiable] = useState(false);
     const [editDefaultWhtTypeId, setEditDefaultWhtTypeId] = useState('');
+    const [editVatRegistered, setEditVatRegistered] = useState(false);
+    const [editTaxExempt, setEditTaxExempt] = useState(false);
+    const [editAllowTaxOverride, setEditAllowTaxOverride] = useState(false);
+    const [editTin, setEditTin] = useState('');
+    const [editDefaultVatRate, setEditDefaultVatRate] = useState('');
+    const [editVatRegistrationDate, setEditVatRegistrationDate] = useState('');
+    const [editTaxEffectiveFrom, setEditTaxEffectiveFrom] = useState('');
     const { data: whtTypesRaw } = useWhtTypes();
     const customerWhtTypes = useMemo(() => {
         const items = (Array.isArray(whtTypesRaw) ? whtTypesRaw : []) as Array<{
@@ -251,6 +266,21 @@ export default function CustomerDetailModal({
             const c = customer as CustomerData;
             setEditWhtLiable(c.whtLiable === true);
             setEditDefaultWhtTypeId(c.defaultWhtTypeId || '');
+            setEditVatRegistered(c.vatRegistered === true || c.taxProfile === 'VAT_REGISTERED');
+            setEditTaxExempt(c.taxExempt === true || c.taxProfile === 'EXEMPT');
+            setEditAllowTaxOverride(c.allowTaxOverride === true);
+            setEditTin(c.tin || '');
+            setEditDefaultVatRate(
+                c.defaultVatRate != null && c.defaultVatRate !== undefined
+                    ? String(c.defaultVatRate)
+                    : '',
+            );
+            setEditVatRegistrationDate(
+                c.vatRegistrationDate ? String(c.vatRegistrationDate).slice(0, 10) : '',
+            );
+            setEditTaxEffectiveFrom(
+                c.taxEffectiveFrom ? String(c.taxEffectiveFrom).slice(0, 10) : '',
+            );
         }
     }, [tab, customer, priceGroupIdForEffectDeps(customer as CustomerData | undefined)]);
 
@@ -304,6 +334,18 @@ export default function CustomerDetailModal({
                 creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
                 whtLiable: editWhtLiable,
                 defaultWhtTypeId: editWhtLiable ? editDefaultWhtTypeId || null : null,
+                vatRegistered: editVatRegistered,
+                taxExempt: editTaxExempt,
+                allowTaxOverride: editAllowTaxOverride,
+                tin: editTin.trim() || null,
+                defaultVatRate: editDefaultVatRate !== '' ? Number(editDefaultVatRate) : null,
+                vatRegistrationDate: editVatRegistrationDate || null,
+                taxEffectiveFrom: editTaxEffectiveFrom || null,
+                taxProfile: editTaxExempt
+                    ? 'EXEMPT'
+                    : editVatRegistered
+                        ? 'VAT_REGISTERED'
+                        : 'STANDARD',
             },
         );
         try {
@@ -529,6 +571,18 @@ export default function CustomerDetailModal({
                                                             WHT liable
                                                         </span>
                                                     )}
+                                                    {((customer as CustomerData).vatRegistered ||
+                                                        (customer as CustomerData).taxProfile === 'VAT_REGISTERED') && (
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">
+                                                            VAT registered
+                                                        </span>
+                                                    )}
+                                                    {((customer as CustomerData).taxExempt ||
+                                                        (customer as CustomerData).taxProfile === 'EXEMPT') && (
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-amber-100 text-amber-900">
+                                                            Tax exempt
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -569,6 +623,69 @@ export default function CustomerDetailModal({
                                                     <span className="text-gray-500">Created:</span>
                                                     <span className="ml-2 text-gray-900">
                                                         {(customer as CustomerData).createdAt ? formatTimestampDate((customer as CustomerData).createdAt) : '-'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="bg-white rounded-lg border border-gray-200 p-4">
+                                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Tax details</h3>
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                                                <div>
+                                                    <span className="text-gray-500">Tax status:</span>
+                                                    <span className="ml-2 text-gray-900 font-medium">
+                                                        {((customer as CustomerData).taxExempt ||
+                                                            (customer as CustomerData).taxProfile === 'EXEMPT')
+                                                            ? 'Tax exempt'
+                                                            : ((customer as CustomerData).vatRegistered ||
+                                                                  (customer as CustomerData).taxProfile ===
+                                                                      'VAT_REGISTERED')
+                                                              ? 'VAT registered'
+                                                              : 'Standard'}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">TIN:</span>
+                                                    <span className="ml-2 text-gray-900 font-mono">
+                                                        {(customer as CustomerData).tin || '—'}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Default VAT rate:</span>
+                                                    <span className="ml-2 text-gray-900 font-medium">
+                                                        {(customer as CustomerData).defaultVatRate != null
+                                                            ? `${(customer as CustomerData).defaultVatRate}%`
+                                                            : '—'}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Allow tax override:</span>
+                                                    <span className="ml-2 text-gray-900 font-medium">
+                                                        {(customer as CustomerData).allowTaxOverride ? 'Yes' : 'No'}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">VAT registration date:</span>
+                                                    <span className="ml-2 text-gray-900">
+                                                        {(customer as CustomerData).vatRegistrationDate
+                                                            ? formatTimestampDate(
+                                                                  String(
+                                                                      (customer as CustomerData).vatRegistrationDate,
+                                                                  ).slice(0, 10),
+                                                              )
+                                                            : '—'}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-gray-500">Effective from:</span>
+                                                    <span className="ml-2 text-gray-900">
+                                                        {(customer as CustomerData).taxEffectiveFrom
+                                                            ? formatTimestampDate(
+                                                                  String(
+                                                                      (customer as CustomerData).taxEffectiveFrom,
+                                                                  ).slice(0, 10),
+                                                              )
+                                                            : '—'}
                                                     </span>
                                                 </div>
                                             </div>
@@ -1386,6 +1503,168 @@ export default function CustomerDetailModal({
                                             <p className="mt-1 text-xs text-gray-500">
                                                 Set to <strong>At Cost</strong> to always sell to this customer at inventory cost price (zero margin).
                                             </p>
+                                        </div>
+                                        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-4">
+                                            <div>
+                                                <p className="text-sm font-semibold text-gray-900">Tax details</p>
+                                                <p className="text-xs text-gray-500 mt-0.5">
+                                                    DocumentTax uses this profile for output VAT determination on sales, invoices, and credit notes.
+                                                </p>
+                                            </div>
+
+                                            <fieldset className="space-y-2">
+                                                <legend className="text-sm font-medium text-gray-700">Tax status</legend>
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                                    {(
+                                                        [
+                                                            {
+                                                                id: 'standard',
+                                                                label: 'Standard',
+                                                                hint: 'Product / mapping tax rules apply',
+                                                                active: !editVatRegistered && !editTaxExempt,
+                                                                onSelect: () => {
+                                                                    setEditVatRegistered(false);
+                                                                    setEditTaxExempt(false);
+                                                                },
+                                                            },
+                                                            {
+                                                                id: 'vat',
+                                                                label: 'VAT registered',
+                                                                hint: 'B2B VAT customer',
+                                                                active: editVatRegistered && !editTaxExempt,
+                                                                onSelect: () => {
+                                                                    setEditVatRegistered(true);
+                                                                    setEditTaxExempt(false);
+                                                                },
+                                                            },
+                                                            {
+                                                                id: 'exempt',
+                                                                label: 'Tax exempt',
+                                                                hint: 'No output VAT',
+                                                                active: editTaxExempt,
+                                                                onSelect: () => {
+                                                                    setEditTaxExempt(true);
+                                                                    setEditVatRegistered(false);
+                                                                },
+                                                            },
+                                                        ] as const
+                                                    ).map((opt) => (
+                                                        <button
+                                                            key={opt.id}
+                                                            type="button"
+                                                            onClick={opt.onSelect}
+                                                            className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                                                                opt.active
+                                                                    ? 'border-blue-600 bg-blue-50 ring-1 ring-blue-600'
+                                                                    : 'border-gray-200 bg-gray-50 hover:border-gray-300'
+                                                            }`}
+                                                            aria-pressed={opt.active}
+                                                        >
+                                                            <span className="block text-sm font-medium text-gray-900">
+                                                                {opt.label}
+                                                            </span>
+                                                            <span className="block text-xs text-gray-500 mt-0.5">
+                                                                {opt.hint}
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </fieldset>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                <div className="sm:col-span-2">
+                                                    <Label htmlFor="modal-customer-tin" className="text-sm font-medium text-gray-700">
+                                                        TIN
+                                                    </Label>
+                                                    <input
+                                                        id="modal-customer-tin"
+                                                        value={editTin}
+                                                        onChange={(e) => setEditTin(e.target.value)}
+                                                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white font-mono text-sm"
+                                                        placeholder="e.g. 100011036589475"
+                                                        autoComplete="off"
+                                                    />
+                                                </div>
+
+                                                <div>
+                                                    <Label htmlFor="modal-customer-default-vat" className="text-sm font-medium text-gray-700">
+                                                        Default VAT rate (%)
+                                                    </Label>
+                                                    <input
+                                                        id="modal-customer-default-vat"
+                                                        type="number"
+                                                        min={0}
+                                                        step={0.01}
+                                                        value={editDefaultVatRate}
+                                                        onChange={(e) => setEditDefaultVatRate(e.target.value)}
+                                                        disabled={editTaxExempt}
+                                                        className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white disabled:bg-gray-100 disabled:text-gray-500"
+                                                        placeholder="18"
+                                                    />
+                                                    <p className="mt-1 text-xs text-gray-500">
+                                                        Used when a line has no product tax mapping or bridge rate.
+                                                    </p>
+                                                </div>
+
+                                                <div>
+                                                    <Label htmlFor="modal-customer-vat-reg-date" className="text-sm font-medium text-gray-700">
+                                                        VAT registration date
+                                                    </Label>
+                                                    <div className="mt-1">
+                                                        <DatePicker
+                                                            id="modal-customer-vat-reg-date"
+                                                            value={editVatRegistrationDate}
+                                                            onChange={setEditVatRegistrationDate}
+                                                            placeholder="Select registration date"
+                                                            disabled={editTaxExempt}
+                                                            aria-label="VAT registration date"
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div className="sm:col-span-2">
+                                                    <Label htmlFor="modal-customer-tax-effective" className="text-sm font-medium text-gray-700">
+                                                        Effective from
+                                                    </Label>
+                                                    <div className="mt-1 max-w-sm">
+                                                        <DatePicker
+                                                            id="modal-customer-tax-effective"
+                                                            value={editTaxEffectiveFrom}
+                                                            onChange={setEditTaxEffectiveFrom}
+                                                            placeholder="Select effective date"
+                                                            disabled={editTaxExempt}
+                                                            aria-label="Tax profile effective from"
+                                                        />
+                                                    </div>
+                                                    <p className="mt-1 text-xs text-gray-500">
+                                                        Profile is inactive for DocumentTax before this business date (falls back to registration date if empty).
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="border-t border-gray-100 pt-3">
+                                                <div className="flex items-start gap-3">
+                                                    <Checkbox
+                                                        id="modal-customer-allow-tax-override"
+                                                        checked={editAllowTaxOverride}
+                                                        onCheckedChange={(checked) =>
+                                                            setEditAllowTaxOverride(checked === true)
+                                                        }
+                                                    />
+                                                    <div>
+                                                        <Label
+                                                            htmlFor="modal-customer-allow-tax-override"
+                                                            className="text-sm font-medium text-gray-900"
+                                                        >
+                                                            Allow tax override
+                                                        </Label>
+                                                        <p className="text-xs text-gray-600 mt-0.5">
+                                                            Lets cashiers with <span className="font-mono">sales.tax_override</span> force
+                                                            exempt or a custom rate on a document (audited).
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-4 space-y-3">
                                             <div className="flex items-start gap-3">

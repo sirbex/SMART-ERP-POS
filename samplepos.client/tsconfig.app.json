@@ -46,6 +46,7 @@
     "dist",
     "BACKEND_*.ts",
     "BACKEND_*.md",
-    "*.prisma"
+    "*.prisma",
+    "../shared/**/*.test.ts"
   ]
 }

@@ -60,7 +60,8 @@ describe('VAT Remittance architecture proof (Gate A partial — 3A)', () => {
     const sql = readRepo('shared/sql/548_vat_remittance_foundation.sql');
     expect(sql).toMatch(/vat_remittance_document_enabled/);
     const ver = readRepo('SamplePOS.Server/src/constants/schemaVersion.ts');
-    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*(549|550|551)\b/);
+    const m = ver.match(/CURRENT_SCHEMA_VERSION\s*=\s*(\d+)/);
+    expect(Number(m?.[1])).toBeGreaterThanOrEqual(549);
   });
 
   it('Phase 3B Decision B recorded + VAT recon lane', () => {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DocumentTaxOverrideSchema } from './taxOverride.js';
 
 // POS Sale Line Item Schema
 export const POSSaleLineItemSchema = z.object({
@@ -16,6 +17,9 @@ export const POSSaleLineItemSchema = z.object({
   notes: z.string().max(500).optional().or(z.null()).transform(val => val ?? undefined), // Line item notes (converts null to undefined)
   // Cart/offline stamp — service lines skip stock; restaurant-enabled tenants always send this.
   productType: z.enum(['inventory', 'consumable', 'service']).optional(),
+  /** Custom/service line tax bridge when no products row (DocumentTaxService). */
+  isTaxable: z.boolean().optional(),
+  taxRate: z.number().nonnegative().finite().optional(),
 }).strict();
 
 // Payment Line Schema (for split payments)
@@ -46,6 +50,8 @@ export const POSSaleSchema = z.object({
   idempotencyKey: z.string().min(1).max(100).optional(), // Prevents duplicate sale creation
   /** Exchange refund document (REF-* with refund_type EXCHANGE) whose store credit is applied */
   exchangeRefundId: z.string().uuid().optional(),
+  /** Phase 5 — privileged VAT override (server enforces sales.tax_override + reason). */
+  taxOverride: DocumentTaxOverrideSchema.optional(),
 }).strict().superRefine((data, ctx) => {
   // Must have either paymentMethod OR paymentLines
   if (!data.paymentMethod && (!data.paymentLines || data.paymentLines.length === 0)) {
