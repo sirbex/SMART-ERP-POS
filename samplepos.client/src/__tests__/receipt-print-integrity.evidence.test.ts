@@ -132,6 +132,7 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
       companyName: 'Cafe',
       items: [{ productName: 'Steak', quantity: 1, unitPrice: 25000, lineTotal: 25000 }],
       subtotal: 25000,
+      discountAmount: 0,
       taxAmount: 0,
       totalAmount: 25000,
     });
