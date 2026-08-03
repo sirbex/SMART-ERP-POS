@@ -1,8 +1,29 @@
 // Invoice Settings Service
 
 import { Pool } from 'pg';
+import { randomUUID } from 'node:crypto';
 import * as invoiceSettingsRepository from './invoiceSettingsRepository.js';
 import type { InvoiceSettings } from './invoiceSettingsRepository.js';
+import { normalizePaymentAccounts } from '../../../../shared/utils/paymentAccountsVisibility.js';
+
+function withNormalizedPaymentAccounts(settings: InvoiceSettings): InvoiceSettings {
+  const normalized = normalizePaymentAccounts(settings.paymentAccounts || []).map((a) => ({
+    id: a.id || randomUUID(),
+    type: (a.type === 'BANK' || a.type === 'WALLET' ? a.type : 'MOBILE_MONEY') as
+      | 'BANK'
+      | 'MOBILE_MONEY'
+      | 'WALLET',
+    provider: a.provider,
+    accountName: a.accountName,
+    accountNumber: a.accountNumber,
+    branchOrCode: a.branchOrCode,
+    isActive: a.isActive,
+    showOnReceipt: a.showOnReceipt,
+    showOnInvoice: a.showOnInvoice,
+    sortOrder: a.sortOrder,
+  }));
+  return { ...settings, paymentAccounts: normalized };
+}
 
 export async function getSettings(pool: Pool): Promise<InvoiceSettings> {
   let settings = await invoiceSettingsRepository.getInvoiceSettings(pool);
@@ -12,7 +33,7 @@ export async function getSettings(pool: Pool): Promise<InvoiceSettings> {
     settings = await invoiceSettingsRepository.initializeDefaults(pool);
   }
 
-  return settings;
+  return withNormalizedPaymentAccounts(settings);
 }
 
 export async function updateSettings(
@@ -34,6 +55,15 @@ export async function updateSettings(
     throw new Error('Secondary color must be in hex format (#RRGGBB)');
   }
 
-  const updated = await invoiceSettingsRepository.updateInvoiceSettings(pool, data);
-  return updated;
+  // Persist normalized flags so Settings UI and PDF always agree (no silent default skew).
+  const writeData = { ...data };
+  if (writeData.paymentAccounts !== undefined) {
+    writeData.paymentAccounts = withNormalizedPaymentAccounts({
+      ...(writeData as InvoiceSettings),
+      paymentAccounts: writeData.paymentAccounts,
+    } as InvoiceSettings).paymentAccounts;
+  }
+
+  const updated = await invoiceSettingsRepository.updateInvoiceSettings(pool, writeData);
+  return withNormalizedPaymentAccounts(updated);
 }

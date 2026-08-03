@@ -201,16 +201,22 @@ export function renderInvoiceBody(ctx: LayoutContext, data: InvoiceBodyData): vo
     }
 
     if (theme.flags.showPaymentInstructions) {
-        const onInvoice = theme.paymentAccounts.filter(a => a.showOnInvoice);
-        if (onInvoice.length > 0) {
+        // Missing showOnInvoice must mean ON (settings Zod default); only explicit false excludes.
+        const onInvoice = theme.paymentAccounts.filter((a) => a.showOnInvoice !== false);
+        if (onInvoice.length > 0 || theme.copy.paymentInstructions) {
             Layout.sectionTitle(ctx, 'Payment Instructions');
-            Layout.kvGrid(
-                ctx,
-                onInvoice.flatMap(a => [
-                    { label: a.provider, value: `${a.accountName} — ${a.accountNumber}${a.branchOrCode ? ` (${a.branchOrCode})` : ''}` },
-                ]),
-                { columns: 1 },
-            );
+            if (onInvoice.length > 0) {
+                // One line per account — fixed row height must fit multi-line-safe copy.
+                // columns:1 so BANK + MOBILE_MONEY both appear (never silent type drop).
+                Layout.kvGrid(
+                    ctx,
+                    onInvoice.map((a) => ({
+                        label: a.provider,
+                        value: `${a.accountName} — ${a.accountNumber}${a.branchOrCode ? ` (${a.branchOrCode})` : ''}`,
+                    })),
+                    { columns: 1, rowHeight: 22 },
+                );
+            }
             if (theme.copy.paymentInstructions) {
                 Layout.text(ctx, theme.copy.paymentInstructions);
                 doc.moveDown(0.5);

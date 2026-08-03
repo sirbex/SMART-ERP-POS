@@ -4,6 +4,7 @@ import * as Label from '@radix-ui/react-label';
 import * as Switch from '@radix-ui/react-switch';
 import * as RadioGroup from '@radix-ui/react-radio-group';
 import { api } from '../../../services/api';
+import { normalizePaymentAccounts } from '@shared/utils/paymentAccountsVisibility';
 
 type PaymentAccountType = 'BANK' | 'MOBILE_MONEY' | 'WALLET';
 
@@ -121,9 +122,21 @@ export default function InvoiceSettingsTab() {
         throw new Error(result.error || 'Failed to fetch settings');
       }
       const settings = result.data as InvoiceSettings;
-      // Sync payment accounts state from server
-      setPaymentAccounts(settings.paymentAccounts || []);
-      return settings;
+      // Coerce visibility flags so Settings checkboxes match PDF (undefined = ON).
+      const normalized = normalizePaymentAccounts(settings.paymentAccounts || []).map((a) => ({
+        id: a.id || crypto.randomUUID(),
+        type: (a.type === 'BANK' || a.type === 'WALLET' ? a.type : 'MOBILE_MONEY') as PaymentAccountType,
+        provider: a.provider,
+        accountName: a.accountName,
+        accountNumber: a.accountNumber,
+        branchOrCode: a.branchOrCode || '',
+        isActive: a.isActive,
+        showOnReceipt: a.showOnReceipt,
+        showOnInvoice: a.showOnInvoice,
+        sortOrder: a.sortOrder,
+      }));
+      setPaymentAccounts(normalized);
+      return { ...settings, paymentAccounts: normalized };
     },
     retry: 1,
     staleTime: 30000, // Consider data fresh for 30 seconds

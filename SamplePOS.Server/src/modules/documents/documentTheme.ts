@@ -11,6 +11,7 @@
 
 import type { Pool } from 'pg';
 import { getSettings } from '../settings/invoiceSettingsService.js';
+import { normalizePaymentAccounts } from '../../../../shared/utils/paymentAccountsVisibility.js';
 
 // =============================================================================
 // PAPER SIZE
@@ -226,10 +227,12 @@ export async function loadDocumentTheme(pool: Pool): Promise<DocumentTheme> {
             footerText: s.footerText?.trim() || null,
             customReceiptNote: s.customReceiptNote,
         },
-        paymentAccounts: (s.paymentAccounts || [])
-            .filter(a => a.isActive)
-            .map(a => ({
-                type: a.type,
+        // Active accounts only; surface flags (showOnInvoice / Receipt) stay explicit so
+        // each body filters with default-true semantics (never drop BANK vs MOBILE by type).
+        paymentAccounts: normalizePaymentAccounts(s.paymentAccounts || [])
+            .filter((a) => a.isActive)
+            .map((a) => ({
+                type: a.type as 'BANK' | 'MOBILE_MONEY' | 'WALLET',
                 provider: a.provider,
                 accountName: a.accountName,
                 accountNumber: a.accountNumber,

@@ -1,6 +1,7 @@
 import Decimal from 'decimal.js';
 import type { ReceiptData } from './print';
 import { api } from '../utils/api';
+import { accountsForReceipt } from '@shared/utils/paymentAccountsVisibility';
 
 /** Invoice/receipt branding fields from tenant settings */
 export interface InvoiceSettingsForReceipt {
@@ -243,17 +244,14 @@ export function invoiceSettingsToReceiptBranding(
     return {};
   }
 
-  const accounts = (invoiceSettings.paymentAccounts || [])
-    .filter((a) => a.isActive !== false && a.showOnReceipt !== false)
-    .slice()
-    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-    .map((a) => ({
-      type: a.type,
-      provider: a.provider,
-      accountName: a.accountName,
-      accountNumber: a.accountNumber,
-      branchOrCode: a.branchOrCode,
-    }));
+  // SSOT with invoice PDF — default ON, type-agnostic (BANK + MOBILE_MONEY share rules).
+  const accounts = accountsForReceipt(invoiceSettings.paymentAccounts || []).map((a) => ({
+    type: a.type,
+    provider: a.provider,
+    accountName: a.accountName,
+    accountNumber: a.accountNumber,
+    branchOrCode: a.branchOrCode,
+  }));
 
   return {
     companyName: invoiceSettings.companyName,
