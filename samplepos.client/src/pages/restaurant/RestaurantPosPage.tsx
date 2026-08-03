@@ -656,10 +656,28 @@ export default function RestaurantPosPage() {
           companyName: invoiceBranding?.companyName,
           companyAddress: invoiceBranding?.companyAddress,
           companyPhone: invoiceBranding?.companyPhone,
+          companyTin: invoiceBranding?.companyTin,
         },
         brandingFromTenant(config.branding),
       ),
     [invoiceBranding, config.branding],
+  );
+  /** Invoice footer / payment accounts / note — guest bills must match Receipt branding. */
+  const guestBillInvoiceFields = useMemo(
+    () => ({
+      companyTin: companyBranding.companyTin || invoiceBranding?.companyTin || undefined,
+      paymentAccounts: invoiceBranding?.paymentAccounts,
+      customReceiptNote: invoiceBranding?.customReceiptNote || undefined,
+      footerText: invoiceBranding?.footerText || undefined,
+    }),
+    [companyBranding.companyTin, invoiceBranding],
+  );
+  const guestBillDispatchBranding = useMemo(
+    () => ({
+      ...companyBranding,
+      ...guestBillInvoiceFields,
+    }),
+    [companyBranding, guestBillInvoiceFields],
   );
   const taxName = config.tax?.name || 'VAT';
   const { user, permissions, logout } = useAuth();
@@ -840,8 +858,8 @@ export default function RestaurantPosPage() {
   // Retry undelivered jobs once per online session (not on every branding reload —
   // that re-fired flush and could re-paper after FOH re-login).
   const printFlushOnceRef = useRef(false);
-  const companyBrandingRef = useRef(companyBranding);
-  companyBrandingRef.current = companyBranding;
+  const companyBrandingRef = useRef(guestBillDispatchBranding);
+  companyBrandingRef.current = guestBillDispatchBranding;
   useEffect(() => {
     if (!isOnline) {
       printFlushOnceRef.current = false;
@@ -2030,7 +2048,7 @@ export default function RestaurantPosPage() {
       deliverOpts?: { awaitStatusSync?: boolean },
     ): Promise<number> => {
       const dispatched = await dispatchPrintJobs(jobs, {
-        branding: companyBranding,
+        branding: guestBillDispatchBranding,
         awaitStatusSync: deliverOpts?.awaitStatusSync,
       });
       return dispatched.failures;
@@ -2366,6 +2384,7 @@ export default function RestaurantPosPage() {
         companyName: companyBranding.companyName,
         companyAddress: companyBranding.companyAddress,
         companyPhone: companyBranding.companyPhone,
+        ...guestBillInvoiceFields,
         printerName: guestBillPrinterName,
         items: billLines,
         subtotal: Number(billTotals.subtotal),
@@ -2472,7 +2491,7 @@ export default function RestaurantPosPage() {
         if (willAutoLogoutBill) {
           // Auto-logout: await PRINTED so re-login flush cannot re-paper.
           const dispatched = await dispatchPrintJobs(jobs, {
-            branding: companyBranding,
+            branding: guestBillDispatchBranding,
             awaitStatusSync: true,
           });
           if (dispatched.failures > 0) {
@@ -2483,7 +2502,7 @@ export default function RestaurantPosPage() {
           }
         } else {
           // Steward continues immediately — do not block floor return on paper.
-          void dispatchPrintJobs(jobs, { branding: companyBranding }).then((dispatched) => {
+          void dispatchPrintJobs(jobs, { branding: guestBillDispatchBranding }).then((dispatched) => {
             if (dispatched.failures > 0) {
               toast.error('Bill marked (print unavailable)', {
                 duration: 5000,
@@ -2505,6 +2524,7 @@ export default function RestaurantPosPage() {
             companyName: companyBranding.companyName,
             companyAddress: companyBranding.companyAddress,
             companyPhone: companyBranding.companyPhone,
+            ...guestBillInvoiceFields,
             items: billLines,
             subtotal: Number(billTotals.subtotal),
             discountAmount: Number(
@@ -2541,6 +2561,7 @@ export default function RestaurantPosPage() {
           companyName: companyBranding.companyName,
           companyAddress: companyBranding.companyAddress,
           companyPhone: companyBranding.companyPhone,
+          ...guestBillInvoiceFields,
           printerName: guestBillPrinterName,
           items: (bill.order.items || []).map((it) => ({
             productId: it.productId,
@@ -2959,7 +2980,7 @@ export default function RestaurantPosPage() {
                 (typeof j.payloadJson?.station === 'string' ? j.payloadJson.station : null),
             ),
         })),
-        { branding: companyBranding },
+        { branding: guestBillDispatchBranding },
       );
       return;
     }
@@ -2992,7 +3013,7 @@ export default function RestaurantPosPage() {
         },
       }),
     );
-    void dispatchPrintJobs(jobs, { branding: companyBranding });
+    void dispatchPrintJobs(jobs, { branding: guestBillDispatchBranding });
   };
 
   const handleVoidLines = async (
@@ -3112,7 +3133,7 @@ export default function RestaurantPosPage() {
               },
             }),
           );
-          void dispatchPrintJobs(jobs, { branding: companyBranding });
+          void dispatchPrintJobs(jobs, { branding: guestBillDispatchBranding });
         }
         setLineSheet(null);
         setQtyPadSheet(null);
@@ -3609,7 +3630,7 @@ export default function RestaurantPosPage() {
                 },
               }),
             );
-            void dispatchPrintJobs(jobs, { branding: companyBranding });
+            void dispatchPrintJobs(jobs, { branding: guestBillDispatchBranding });
           }
           settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', { reason });
           setSelectedTableId(null);
@@ -3761,37 +3782,40 @@ export default function RestaurantPosPage() {
           try {
             const printCfg = await fetchReceiptPrintConfig();
             if (!shouldPrintReceiptOnSettlement(printCfg)) return;
-            await printReceipt({
-              saleNumber: paid.offlineId,
-              saleDate: new Date().toLocaleString(),
-              subtotal: paid.subtotal,
-              discountAmount: paid.discountAmount,
-              taxAmount: paid.taxAmount,
-              totalAmount: paid.totalAmount,
-              paymentMethod: 'CASH',
-              amountPaid: paid.tenderedAmount,
-              changeAmount: paid.changeAmount,
-              changeGiven: paid.changeAmount,
-              payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
-              cashierName: user?.fullName || user?.email || undefined,
-              customerName:
-                tableLabel !== 'table' ? `Table ${tableLabel} · ${paidOrderNumber}` : paidOrderNumber,
-              companyName: companyBranding.companyName || invoiceBranding?.companyName || undefined,
-              companyAddress:
-                companyBranding.companyAddress || invoiceBranding?.companyAddress || undefined,
-              companyPhone: companyBranding.companyPhone || invoiceBranding?.companyPhone || undefined,
-              companyTin: invoiceBranding?.companyTin,
-              paymentAccounts: invoiceBranding?.paymentAccounts,
-              customReceiptNote: invoiceBranding?.customReceiptNote,
-              footerText: invoiceBranding?.footerText,
-              items: paid.lines.map((l) => ({
-                name: l.productName,
-                quantity: l.quantity,
-                unitPrice: l.unitPrice,
-                subtotal: l.subtotal,
-                uom: l.uom,
-              })),
-            });
+            await printReceipt(
+              {
+                saleNumber: paid.offlineId,
+                saleDate: new Date().toLocaleString(),
+                subtotal: paid.subtotal,
+                discountAmount: paid.discountAmount,
+                taxAmount: paid.taxAmount,
+                totalAmount: paid.totalAmount,
+                paymentMethod: 'CASH',
+                amountPaid: paid.tenderedAmount,
+                changeAmount: paid.changeAmount,
+                changeGiven: paid.changeAmount,
+                payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
+                cashierName: user?.fullName || user?.email || undefined,
+                customerName:
+                  tableLabel !== 'table' ? `Table ${tableLabel} · ${paidOrderNumber}` : paidOrderNumber,
+                companyName: companyBranding.companyName || invoiceBranding?.companyName || undefined,
+                companyAddress:
+                  companyBranding.companyAddress || invoiceBranding?.companyAddress || undefined,
+                companyPhone: companyBranding.companyPhone || invoiceBranding?.companyPhone || undefined,
+                companyTin: invoiceBranding?.companyTin,
+                paymentAccounts: invoiceBranding?.paymentAccounts,
+                customReceiptNote: invoiceBranding?.customReceiptNote,
+                footerText: invoiceBranding?.footerText,
+                items: paid.lines.map((l) => ({
+                  name: l.productName,
+                  quantity: l.quantity,
+                  unitPrice: l.unitPrice,
+                  subtotal: l.subtotal,
+                  uom: l.uom,
+                })),
+              },
+              { printerName: printCfg.printerName },
+            );
           } catch {
             toast.error('Receipt print failed — sale is saved locally');
           }

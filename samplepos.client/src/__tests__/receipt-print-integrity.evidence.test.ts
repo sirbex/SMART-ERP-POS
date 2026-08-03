@@ -144,6 +144,75 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
     expect(billHtml).not.toMatch(/Cash Given|CARD|MOBILE_MONEY/);
   });
 
+  it('guest BILL shows invoice footer + payment accounts when settings on (not tender)', () => {
+    const bill = billToThermalGuestDocument({
+      tableLabel: 'T2',
+      orderNumber: 'R-200',
+      companyName: 'Cafe',
+      companyTin: '123456',
+      footerText: 'Visit again soon\nOpen 7 days',
+      customReceiptNote: 'Ask for loyalty stamp',
+      paymentAccounts: [
+        {
+          provider: 'MTN MoMo',
+          accountName: 'Cafe Ltd',
+          accountNumber: '0788123456',
+          branchOrCode: '*182*1#',
+        },
+      ],
+      items: [{ productName: 'Steak', quantity: 1, unitPrice: 25000, lineTotal: 25000 }],
+      subtotal: 25000,
+      discountAmount: 0,
+      taxAmount: 0,
+      totalAmount: 25000,
+    });
+    expect(bill.paymentAccounts?.length).toBe(1);
+    expect(bill.customNote).toMatch(/loyalty/i);
+    expect(bill.footerLines).toEqual(
+      expect.arrayContaining(['Visit again soon', 'Open 7 days', 'Pay at cashier']),
+    );
+    // Still no tender lines
+    expect(bill.paymentRows == null || bill.paymentRows.length === 0).toBe(true);
+
+    const html = buildThermalGuestDocumentHtml(bill);
+    expect(html).toContain('Payment Details');
+    expect(html).toContain('MTN MoMo');
+    expect(html).toContain('0788123456');
+    expect(html).toContain('Visit again soon');
+    expect(html).toContain('Ask for loyalty stamp');
+    expect(html).toContain('Pay at cashier');
+    expect(html).toMatch(/TIN:\s*123456/);
+  });
+
+  it('STRUCT: sale receipt bridge uses configured printer name', () => {
+    const print = readClient('lib/print.ts');
+    expect(print).toMatch(/printerName/);
+    expect(print).toMatch(/X-Printer-Name/);
+    expect(print).toMatch(/LOCAL_PRINT_BRIDGE_ORIGINS/);
+
+    const dialog = readClient('components/pos/PrintReceiptDialog.tsx');
+    expect(dialog).toMatch(/printerName/);
+
+    const pos = readClient('pages/pos/POSPage.tsx');
+    expect(pos).toMatch(/printerName=\{receiptPrinterName\}/);
+
+    // Receipt gate never imported by guest bill path
+    const guest = readClient('lib/thermalGuestDocument.ts');
+    expect(guest).toMatch(/paymentAccounts/);
+    expect(guest).toMatch(/footerText/);
+  });
+
+  it('STRUCT: FOH guest bills carry invoice footer + payment accounts; never receipt enable gate', () => {
+    const foh = readClient('pages/restaurant/RestaurantPosPage.tsx');
+    expect(foh).toMatch(/guestBillInvoiceFields|guestBillDispatchBranding/);
+    expect(foh).toMatch(/paymentAccounts/);
+    expect(foh).toMatch(/footerText/);
+    expect(foh).toMatch(/printRestaurantBill/);
+    // bill path branding includes invoice fields — receipt enable stays off bill path
+    const printRestaurant = readClient('lib/printRestaurant.ts');
+    expect(printRestaurant).not.toMatch(/isReceiptPrintingEnabled|shouldAutoPrintAfterSale/);
+  });
+
   it('STRUCT: auto-print/settlement use enable gates; KOT/bill stay independent', () => {
     const cfg = readClient('lib/receiptPrintConfig.ts');
     expect(cfg).toMatch(/export function isReceiptPrintingEnabled/);

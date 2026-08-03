@@ -21,6 +21,8 @@ interface PrintReceiptDialogProps {
     onAfterPrint?: () => void;
     /** When true, print once as soon as the dialog opens with receipt data */
     autoPrint?: boolean;
+    /** Settings → receipt printer name (bridge X-Printer-Name) */
+    printerName?: string | null;
 }
 
 export default function PrintReceiptDialog({
@@ -29,6 +31,7 @@ export default function PrintReceiptDialog({
     receiptData,
     onAfterPrint,
     autoPrint = false,
+    printerName = null,
 }: PrintReceiptDialogProps) {
     const [isPrinting, setIsPrinting] = useState(false);
     const [printFormat, setPrintFormat] = useState<PrintFormat>('detailed');
@@ -65,6 +68,7 @@ export default function PrintReceiptDialog({
 
             const printOptions: PrintOptions = {
                 format: printFormat,
+                printerName,
             };
 
             await printReceipt(receiptData, printOptions);
@@ -90,7 +94,7 @@ export default function PrintReceiptDialog({
             setErrorMessage(error instanceof Error ? error.message : 'Failed to print receipt. Please try again.');
             setIsPrinting(false);
         }
-    }, [receiptData, isPrinting, rememberFormat, printFormat, onOpenChange, onAfterPrint]);
+    }, [receiptData, isPrinting, rememberFormat, printFormat, printerName, onOpenChange, onAfterPrint]);
 
     // Auto-print after payment when tenant "Auto-print receipt" is enabled
     useEffect(() => {

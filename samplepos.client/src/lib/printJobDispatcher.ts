@@ -256,15 +256,31 @@ function asKotPrintData(
   };
 }
 
-function asBillPrintData(
-  job: ClientPrintJob,
-  branding: {
-    companyName?: string | null;
-    companyAddress?: string | null;
-    companyPhone?: string | null;
-  },
-): BillPrintData {
+export type GuestBillBranding = {
+  companyName?: string | null;
+  companyAddress?: string | null;
+  companyPhone?: string | null;
+  companyTin?: string | null;
+  paymentAccounts?: BillPrintData['paymentAccounts'];
+  customReceiptNote?: string | null;
+  footerText?: string | null;
+};
+
+function asBillPrintData(job: ClientPrintJob, branding: GuestBillBranding): BillPrintData {
   const p = job.payloadJson;
+  // Prefer payload branding when present (reprints / server payload), then terminal branding.
+  const tin =
+    (typeof p.companyTin === 'string' ? p.companyTin : null) || branding.companyTin || null;
+  const footerText =
+    (typeof p.footerText === 'string' ? p.footerText : null) || branding.footerText || null;
+  const customNote =
+    (typeof p.customReceiptNote === 'string' ? p.customReceiptNote : null) ||
+    branding.customReceiptNote ||
+    null;
+  const accountsFromPayload = Array.isArray(p.paymentAccounts)
+    ? (p.paymentAccounts as BillPrintData['paymentAccounts'])
+    : null;
+
   return {
     orderNumber: String(p.orderNumber || ''),
     tableLabel: String(p.tableLabel || 'Table'),
@@ -291,6 +307,10 @@ function asBillPrintData(
     companyName: branding.companyName,
     companyAddress: branding.companyAddress,
     companyPhone: branding.companyPhone,
+    companyTin: tin,
+    paymentAccounts: accountsFromPayload || branding.paymentAccounts,
+    customReceiptNote: customNote,
+    footerText,
     items: Array.isArray(p.items) ? (p.items as BillPrintData['items']) : [],
     subtotal: Number(p.subtotal || 0),
     discountAmount: Number(p.discountAmount || 0),
@@ -309,7 +329,7 @@ function asBillPrintData(
 export async function dispatchPrintJobs(
   jobs: ClientPrintJob[],
   opts?: {
-    branding?: ReturnType<typeof brandingFromTenant> | null;
+    branding?: (ReturnType<typeof brandingFromTenant> & GuestBillBranding) | GuestBillBranding | null;
     awaitStatusSync?: boolean;
   },
 ): Promise<{ delivered: number; failures: number }> {

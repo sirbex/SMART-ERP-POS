@@ -486,6 +486,7 @@ export default function OrderPaymentPage() {
               })),
               invoiceSettings,
             }),
+            { printerName: printCfg.printerName },
           );
         }
       } catch (printErr) {

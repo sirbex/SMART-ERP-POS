@@ -319,6 +319,15 @@ export interface BillPrintData extends DocumentCompanyBranding {
   pickupLabel?: string | null;
   /** Default guest-bill printer — same bridge routing as KOT (X-Printer-Name). */
   printerName?: string | null;
+  /** Invoice payment accounts (showOnReceipt) — Payment Details block. */
+  paymentAccounts?: Array<{
+    provider: string;
+    accountName: string;
+    accountNumber: string;
+    branchOrCode?: string;
+  }>;
+  customReceiptNote?: string | null;
+  footerText?: string | null;
   items: Array<{
     productId?: string | null;
     productName: string;

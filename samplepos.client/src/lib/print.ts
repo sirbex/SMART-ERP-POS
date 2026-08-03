@@ -9,12 +9,15 @@ import {
   receiptToThermalGuestDocument,
 } from './thermalGuestDocument';
 import { ensureThermalPrintCss } from './thermalPrintCss';
+import { LOCAL_PRINT_BRIDGE_ORIGINS } from './localPrintBridge';
 
 export type PrintFormat = 'detailed' | 'compact';
 
 export interface PrintOptions {
   format?: PrintFormat;
   autoPrint?: boolean;
+  /** Windows / agent printer name (X-Printer-Name). From receipt print settings. */
+  printerName?: string | null;
 }
 
 export interface ReceiptData {
@@ -94,7 +97,7 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
     return;
   }
 
-  return printHtmlDocument(receiptHTML);
+  return printHtmlDocument(receiptHTML, options.printerName);
 }
 
 /**
@@ -103,25 +106,40 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
  *
  * Browser fallback: inject 80mm @page (height: auto) and keep the iframe alive
  * until afterprint — removing it too early cancels the spooler job on Windows.
+ *
+ * @param printerName Optional agent target (same X-Printer-Name as KOT/bill).
  */
-export async function printHtmlDocument(html: string): Promise<void> {
+export async function printHtmlDocument(
+  html: string,
+  printerName?: string | null,
+): Promise<void> {
   if (!html || !html.trim()) {
     throw new Error('Invalid print document: HTML is required');
   }
 
   const printHtml = ensureThermalPrintCss(html, 80);
+  const name = printerName?.trim() || null;
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/html; charset=utf-8',
+  };
+  if (name) headers['X-Printer-Name'] = name;
 
-  // Strategy 1: local print bridge (Sunmi ESC/POS agent, etc.)
-  try {
-    const bridgeRes = await fetch('http://127.0.0.1:1811/print', {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/html; charset=utf-8' },
-      body: printHtml,
-      signal: AbortSignal.timeout(1500),
-    });
-    if (bridgeRes.ok || bridgeRes.status === 202) return;
-  } catch {
-    // Bridge not reachable — fall through
+  // Strategy 1: local print bridge (Print Service agent). Sequential origins only —
+  // parallel POST double-queues the same job.
+  for (const origin of LOCAL_PRINT_BRIDGE_ORIGINS) {
+    try {
+      const bridgeRes = await fetch(`${origin}/print`, {
+        method: 'POST',
+        headers,
+        body: printHtml,
+        signal: AbortSignal.timeout(1500),
+      });
+      if (bridgeRes.ok || bridgeRes.status === 202) return;
+      // Named printer unknown / rejected — still try browser fallback for receipts.
+      if (bridgeRes.status >= 400 && bridgeRes.status < 500) break;
+    } catch {
+      // try next origin
+    }
   }
 
   // Strategy 2: browser window.print() via laid-out iframe

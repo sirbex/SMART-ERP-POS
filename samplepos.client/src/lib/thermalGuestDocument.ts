@@ -200,6 +200,11 @@ export function billToThermalGuestDocument(data: {
   companyName?: string | null;
   companyAddress?: string | null;
   companyPhone?: string | null;
+  companyTin?: string | null;
+  /** Invoice Settings payment accounts (showOnReceipt) — not tendered methods. */
+  paymentAccounts?: ThermalGuestDocument['paymentAccounts'];
+  customReceiptNote?: string | null;
+  footerText?: string | null;
   items: Array<{
     productId?: string | null;
     productName: string;
@@ -254,6 +259,27 @@ export function billToThermalGuestDocument(data: {
   if (data.pickupLabel) meta.push({ label: 'Pickup', value: data.pickupLabel });
   if (data.deliveryAddress) meta.push({ label: 'Address', value: data.deliveryAddress });
 
+  // Invoice footer when set; always keep pre-pay guidance for guest bills.
+  const footerFromSettings = (data.footerText || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const footerLines =
+    footerFromSettings.length > 0
+      ? footerFromSettings.some((l) => /pay at cashier/i.test(l))
+        ? footerFromSettings
+        : [...footerFromSettings, 'Pay at cashier']
+      : ['Pay at cashier', 'Thank you'];
+
+  const accounts = (data.paymentAccounts || [])
+    .map((a) => ({
+      provider: a.provider,
+      accountName: a.accountName,
+      accountNumber: a.accountNumber,
+      branchOrCode: a.branchOrCode,
+    }))
+    .filter((a) => a.provider || a.accountName || a.accountNumber);
+
   return {
     kind: 'BILL',
     title: 'GUEST BILL',
@@ -262,6 +288,7 @@ export function billToThermalGuestDocument(data: {
     companyName: data.companyName,
     companyAddress: data.companyAddress,
     companyPhone: data.companyPhone,
+    companyTin: data.companyTin,
     channelLabel,
     meta,
     items: consolidated.map((c) => ({
@@ -276,7 +303,10 @@ export function billToThermalGuestDocument(data: {
     taxAmount: data.taxAmount,
     taxName: data.taxName,
     totalAmount: data.totalAmount,
-    footerLines: ['Pay at cashier', 'Thank you'],
+    // No tendered paymentRows on pre-pay bills — payment *accounts* only.
+    paymentAccounts: accounts.length > 0 ? accounts : undefined,
+    customNote: data.customReceiptNote?.trim() || null,
+    footerLines,
   };
 }
 
@@ -414,6 +444,21 @@ export function guestDocumentToThermalTicket(doc: ThermalGuestDocument): Thermal
     doc.meta.find((m) => /^table$/i.test(m.label))?.value ||
     doc.meta.find((m) => /table/i.test(m.label))?.value ||
     '';
+
+  // ESC/POS has no dedicated payment-accounts block — fold into customNote.
+  const accountLines: string[] = [];
+  if (doc.paymentAccounts && doc.paymentAccounts.length > 0) {
+    accountLines.push('Payment Details');
+    for (const acc of doc.paymentAccounts) {
+      if (acc.provider) accountLines.push(acc.provider);
+      accountLines.push(`${acc.accountName} — ${acc.accountNumber}`);
+      if (acc.branchOrCode) accountLines.push(acc.branchOrCode);
+    }
+  }
+  const noteParts = [doc.customNote?.trim(), accountLines.length ? accountLines.join('\n') : '']
+    .filter(Boolean)
+    .join('\n\n');
+
   return {
     kind: doc.kind === 'RECEIPT' ? 'RECEIPT' : 'GUEST_BILL',
     title: doc.title,
@@ -438,7 +483,7 @@ export function guestDocumentToThermalTicket(doc: ThermalGuestDocument): Thermal
     taxName: doc.taxName || null,
     totalAmount: doc.totalAmount,
     paymentRows: doc.paymentRows?.map((r) => ({ label: r.label, value: r.value })) || null,
-    customNote: doc.customNote || null,
+    customNote: noteParts || null,
     footerLines: doc.footerLines,
   };
 }

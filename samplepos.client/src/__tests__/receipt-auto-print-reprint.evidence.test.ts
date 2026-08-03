@@ -74,13 +74,17 @@ describe('EVIDENCE — auto-print after payment + reprint', () => {
     const pos = readClient('pages/pos/POSPage.tsx');
     expect(pos).toMatch(/fetchReceiptPrintConfig/);
     expect(pos).toMatch(/shouldAutoPrintAfterSale|presentSaleReceipt/);
-    expect(pos).toMatch(/autoPrint=\{receiptAutoPrint\}/);
+    expect(pos).toMatch(/autoPrint=\{shouldAutoPrintAfterSale|autoPrint=\{receiptAutoPrint\}/);
+    expect(pos).toMatch(/printerName=\{receiptPrinterName\}/);
     expect(pos).toMatch(/presentSaleReceipt\(/);
   });
 
   it('STRUCT: Sales reprint awaits printReceipt and refetches thin detail', () => {
     const sales = readClient('pages/SalesPage.tsx');
-    expect(sales).toMatch(/await printReceipt\(receiptData\)/);
+    expect(sales).toMatch(
+      /await printReceipt\(receiptData(?:,\s*\{\s*printerName:\s*printCfg\.printerName\s*\})?\)/,
+    );
+    expect(sales).toMatch(/printerName:\s*printCfg\.printerName/);
     expect(sales).toMatch(/isReprint:\s*true/);
     expect(sales).toMatch(/api\.sales\.getById/);
     expect(sales).toMatch(/Receipt sent to printer|isReprinting/);

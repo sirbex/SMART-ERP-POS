@@ -2873,7 +2873,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                       const receiptData = buildReceiptDataFromSale(s, branding, {
                         isReprint: true,
                       });
-                      await printReceipt(receiptData);
+                      await printReceipt(receiptData, { printerName: printCfg.printerName });
                       toast.success('Receipt sent to printer');
                     } catch (err) {
                       console.error('Print failed:', err);

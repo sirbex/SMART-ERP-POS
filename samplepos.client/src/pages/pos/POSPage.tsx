@@ -506,6 +506,8 @@ export default function POSPage() {
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [receiptAutoPrint, setReceiptAutoPrint] = useState(false);
+  const [receiptPrintEnabled, setReceiptPrintEnabled] = useState(true);
+  const [receiptPrinterName, setReceiptPrinterName] = useState<string | null>(null);
   const receiptPrintConfigRef = useRef<ReceiptPrintConfig | null>(null);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [lastSale, setLastSale] = useState<SaleRecord | null>(null);
@@ -692,6 +694,8 @@ export default function POSPage() {
       const cfg = await fetchReceiptPrintConfig();
       receiptPrintConfigRef.current = cfg;
       setReceiptAutoPrint(cfg.autoPrint);
+      setReceiptPrintEnabled(cfg.enabled !== false);
+      setReceiptPrinterName(cfg.printerName ?? null);
     };
 
     fetchInvoiceSettings();
@@ -4518,7 +4522,11 @@ export default function POSPage() {
       {/* Print Receipt Dialog — autoPrint when Settings → Auto-print receipt is on */}
       <PrintReceiptDialog
         open={showPrintDialog}
-        autoPrint={receiptAutoPrint}
+        autoPrint={shouldAutoPrintAfterSale({
+          enabled: receiptPrintEnabled,
+          autoPrint: receiptAutoPrint,
+        })}
+        printerName={receiptPrinterName}
         onOpenChange={(open) => {
           setShowPrintDialog(open);
           // When print dialog closes, refocus search
