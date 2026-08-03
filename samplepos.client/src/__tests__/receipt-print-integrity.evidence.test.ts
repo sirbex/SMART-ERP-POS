@@ -218,21 +218,29 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
   it('STRUCT: restaurant sale receipt reuses guest-bill printer + browser preview fallback', () => {
     const printRest = readClient('lib/printRestaurant.ts');
     expect(printRest).toMatch(/export async function printGuestThermalDocument/);
-    expect(printRest).toMatch(/openBrowserReceiptPreview/);
+    expect(printRest).toMatch(/openInAppReceiptPreview|openBrowserReceiptPreview/);
     expect(printRest).toMatch(/openBrowserPreviewOnFailure/);
 
+    const settlement = readClient('lib/restaurantSettlementReceipt.ts');
+    expect(settlement).toMatch(/printRestaurantSettlementReceipt/);
+    expect(settlement).toMatch(/Receipt printing is off/);
+    expect(settlement).toMatch(/guestBill|Guest|guest-bill/i);
+
     const orderPay = readClient('pages/orders/OrderPaymentPage.tsx');
-    expect(orderPay).toMatch(/resolveReceiptPrinterTargets/);
-    expect(orderPay).toMatch(/readCachedGuestBillPrinter/);
-    expect(orderPay).toMatch(/openBrowserPreviewOnFailure:\s*true/);
+    expect(orderPay).toMatch(/printRestaurantSettlementReceipt/);
+    expect(orderPay).not.toMatch(/if \(!shouldPrintReceiptOnSettlement/);
 
     const foh = readClient('pages/restaurant/RestaurantPosPage.tsx');
-    expect(foh).toMatch(/resolveReceiptPrinterTargets/);
-    expect(foh).toMatch(/readCachedGuestBillPrinter/);
-    expect(foh).toMatch(/openBrowserPreviewOnFailure:\s*true/);
-
+    expect(foh).toMatch(/printRestaurantSettlementReceipt/);
     // Guest bill path still independent of receipt enable
     expect(printRest).not.toMatch(/isReceiptPrintingEnabled|shouldAutoPrintAfterSale/);
+  });
+
+  it('STRUCT: sale receipt never silent-skips restaurant pay without toast helper', () => {
+    const settlement = readClient('lib/restaurantSettlementReceipt.ts');
+    expect(settlement).toMatch(/toast\./);
+    expect(settlement).toMatch(/skippedReason:\s*'disabled'/);
+    expect(settlement).toMatch(/preferSettingsPrinter/);
   });
 
   it('STRUCT: FOH guest bills carry invoice footer + payment accounts; never receipt enable gate', () => {
@@ -258,15 +266,17 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
     expect(pos).toMatch(/fetchReceiptPrintConfig/);
 
     const orderPay = readClient('pages/orders/OrderPaymentPage.tsx');
-    expect(orderPay).toMatch(/shouldPrintReceiptOnSettlement/);
-    expect(orderPay).toMatch(/fetchReceiptPrintConfig/);
+    expect(orderPay).toMatch(/printRestaurantSettlementReceipt/);
     expect(orderPay).not.toMatch(/void printCfg/);
 
     const foh = readClient('pages/restaurant/RestaurantPosPage.tsx');
-    expect(foh).toMatch(/shouldPrintReceiptOnSettlement/);
-    expect(foh).toMatch(/fetchReceiptPrintConfig/);
-    // Offline cash receipt is gated; KOT path must remain
+    expect(foh).toMatch(/printRestaurantSettlementReceipt/);
     expect(foh).toMatch(/printKitchenTicket|fireRestaurantKot|dispatchPrintJobs|printRestaurantBill|requestBill/);
+
+    const settlement = readClient('lib/restaurantSettlementReceipt.ts');
+    expect(settlement).toMatch(/shouldPrintReceiptOnSettlement/);
+    expect(settlement).toMatch(/fetchReceiptPrintConfig/);
+    // Offline cash receipt is gated; KOT path must remain
 
     const sales = readClient('pages/SalesPage.tsx');
     expect(sales).toMatch(/isReceiptPrintingEnabled/);

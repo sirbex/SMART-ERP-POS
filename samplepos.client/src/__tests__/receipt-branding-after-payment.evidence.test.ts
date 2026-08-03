@@ -119,7 +119,7 @@ describe('EVIDENCE — receipt branding after payment', () => {
     const orderPay = readClient('pages/orders/OrderPaymentPage.tsx');
     expect(orderPay).toMatch(/fetchInvoiceSettingsForReceipt/);
     expect(orderPay).toMatch(/buildReceiptDataFromCheckout/);
-    expect(orderPay).toMatch(/printReceipt/);
+    expect(orderPay).toMatch(/printRestaurantSettlementReceipt|printReceipt/);
     expect(orderPay).toMatch(/invoiceSettings/);
 
     const rest = readClient('pages/restaurant/RestaurantPosPage.tsx');

@@ -357,10 +357,16 @@ export function buildRestaurantBillHtml(data: BillPrintData): string {
 
 export type SilentThermalPrintMethod = 'escpos' | 'html' | 'browser' | 'preview' | 'none';
 
+export type GuestThermalPrintResult = {
+  method: SilentThermalPrintMethod;
+  printerName?: string | null;
+  triedPrinters?: Array<string | null>;
+};
+
 /**
  * Shared guest thermal delivery (GUEST BILL + paid RECEIPT).
  * Prefer ESC/POS + named agent printer (same path that makes bills work).
- * Sale receipts may open a visible browser preview when silent paths miss.
+ * Sale receipts may open a visible in-app print preview when silent paths miss.
  */
 export async function printGuestThermalDocument(
   doc: ThermalGuestDocument,
@@ -371,10 +377,12 @@ export async function printGuestThermalDocument(
     currencySymbol?: string | null;
     /** Allow silent browser iframe print (often blocked after async pay). */
     allowBrowserFallback?: boolean;
-    /** Always open a visible preview tab with Print when silent fails. */
+    /** Always open a visible preview when silent fails. */
     openBrowserPreviewOnFailure?: boolean;
+    /** Prefer in-app modal (not window.open) so popup blockers cannot hide failure. */
+    preferInAppPreview?: boolean;
   },
-): Promise<{ method: SilentThermalPrintMethod }> {
+): Promise<GuestThermalPrintResult> {
   const tried = new Set<string>();
   const queue: Array<string | null> = [];
   const push = (n?: string | null) => {
@@ -390,6 +398,7 @@ export async function printGuestThermalDocument(
   push(null);
 
   let lastReason = 'offline';
+  const triedList = [...queue];
 
   if (agentSupportsEscPos()) {
     const ticket = guestDocumentToThermalTicket(doc);
@@ -397,7 +406,9 @@ export async function printGuestThermalDocument(
     const raw = renderThermalTicketEscPos(ticket);
     for (const printer of queue) {
       const delivered = await postEscPosToPrintBridge(raw, printer);
-      if (delivered.ok) return { method: 'escpos' };
+      if (delivered.ok) {
+        return { method: 'escpos', printerName: printer, triedPrinters: triedList };
+      }
       lastReason = delivered.reason || lastReason;
     }
   }
@@ -405,21 +416,31 @@ export async function printGuestThermalDocument(
   const html = buildThermalGuestDocumentHtml(doc);
   for (const printer of queue) {
     const delivered = await postToPrintBridge(html, printer);
-    if (delivered.ok) return { method: 'html' };
+    if (delivered.ok) {
+      return { method: 'html', printerName: printer, triedPrinters: triedList };
+    }
     lastReason = delivered.reason || lastReason;
   }
 
-  // Prefer visible preview over silent iframe — after async settlement browsers
-  // often block window.print() without a user gesture, so receipts "succeed" with no paper.
+  // Prefer visible in-app preview — window.open is often blocked after async pay;
+  // silent iframe "succeeds" with no paper and zero operator feedback.
   if (opts?.openBrowserPreviewOnFailure) {
-    const opened = openBrowserReceiptPreview(html);
-    if (opened) return { method: 'preview' };
+    if (opts?.preferInAppPreview !== false) {
+      const inApp = openInAppReceiptPreview(html);
+      if (inApp) {
+        return { method: 'preview', printerName: null, triedPrinters: triedList };
+      }
+    }
+    const tab = openBrowserReceiptPreview(html);
+    if (tab) {
+      return { method: 'preview', printerName: null, triedPrinters: triedList };
+    }
   }
 
   if (opts?.allowBrowserFallback) {
     try {
       await printHtmlDocument(html);
-      return { method: 'browser' };
+      return { method: 'browser', printerName: null, triedPrinters: triedList };
     } catch {
       // fall through
     }
@@ -427,9 +448,109 @@ export async function printGuestThermalDocument(
 
   throw new Error(
     lastReason === 'unknown_printer'
-      ? 'Receipt printer name not found on this PC. Set Printing → Thermal Printer Name (or Stations guest bill printer).'
+      ? `Receipt printer not found on this PC (tried: ${triedList
+          .map((p) => p || '(default)')
+          .join(', ')}). Set Stations guest-bill printer or Printing → Thermal Printer Name.`
       : silentPrintFailureMessage(opts?.printerName || null),
   );
+}
+
+/**
+ * In-app receipt preview (not a popup). Survives popup blockers and shows Print under a real click.
+ * Returns true when the overlay was mounted.
+ */
+export function openInAppReceiptPreview(html: string): boolean {
+  if (typeof document === 'undefined' || !document.body) return false;
+  const printHtml = ensureThermalPrintCss(html, 80);
+
+  // Remove any previous receipt overlay
+  document.getElementById('sp-receipt-preview-root')?.remove();
+
+  const root = document.createElement('div');
+  root.id = 'sp-receipt-preview-root';
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-label', 'Receipt print preview');
+  root.style.cssText = [
+    'position:fixed',
+    'inset:0',
+    'z-index:2147483000',
+    'background:rgba(28,25,23,0.55)',
+    'display:flex',
+    'align-items:center',
+    'justify-content:center',
+    'padding:16px',
+  ].join(';');
+
+  const panel = document.createElement('div');
+  panel.style.cssText = [
+    'background:#fff',
+    'border-radius:10px',
+    'max-width:min(420px,100%)',
+    'width:100%',
+    'max-height:min(90vh,900px)',
+    'display:flex',
+    'flex-direction:column',
+    'box-shadow:0 20px 50px rgba(0,0,0,0.35)',
+    'overflow:hidden',
+  ].join(';');
+
+  const bar = document.createElement('div');
+  bar.style.cssText =
+    'display:flex;gap:8px;align-items:center;padding:10px 12px;background:#1c1917;color:#fafaf9;flex-shrink:0';
+  const title = document.createElement('span');
+  title.style.cssText = 'margin-right:auto;font-size:13px;font-weight:600';
+  title.textContent = 'Receipt ready — printer agent did not accept (or no paper path). Print here:';
+  const btnClose = document.createElement('button');
+  btnClose.type = 'button';
+  btnClose.textContent = 'Close';
+  btnClose.style.cssText =
+    'min-height:40px;padding:0 14px;border-radius:6px;border:none;font-weight:700;cursor:pointer;background:#44403c;color:#fafaf9';
+  const btnPrint = document.createElement('button');
+  btnPrint.type = 'button';
+  btnPrint.textContent = 'Print';
+  btnPrint.style.cssText =
+    'min-height:40px;padding:0 14px;border-radius:6px;border:none;font-weight:700;cursor:pointer;background:#2563eb;color:#fff';
+  bar.appendChild(title);
+  bar.appendChild(btnClose);
+  bar.appendChild(btnPrint);
+
+  const frame = document.createElement('iframe');
+  frame.title = 'Receipt';
+  frame.style.cssText = 'border:0;width:100%;height:min(70vh,640px);background:#fff;flex:1';
+  panel.appendChild(bar);
+  panel.appendChild(frame);
+  root.appendChild(panel);
+  document.body.appendChild(root);
+
+  const doc = frame.contentDocument || frame.contentWindow?.document;
+  if (!doc) {
+    root.remove();
+    return false;
+  }
+  doc.open();
+  doc.write(printHtml);
+  doc.close();
+
+  const dismiss = () => {
+    root.remove();
+  };
+  btnClose.onclick = () => dismiss();
+  root.addEventListener('click', (e) => {
+    if (e.target === root) dismiss();
+  });
+  btnPrint.onclick = () => {
+    try {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+    } catch (e) {
+      console.error('[openInAppReceiptPreview] print failed', e);
+    }
+  };
+
+  // Focus print so operator can hit Enter after settle
+  setTimeout(() => btnPrint.focus(), 50);
+  return true;
 }
 
 /**

@@ -20,11 +20,19 @@ export interface PrintOptions {
   printerName?: string | null;
   /** Tried after primary (e.g. guest-bill printer for restaurant sale receipts). */
   fallbackPrinterNames?: Array<string | null | undefined>;
-  /** Attempt hidden iframe print after agent miss (default true). */
+  /** Attempt hidden iframe print after agent miss (default false — gesture-fragile). */
   allowBrowserFallback?: boolean;
-  /** Open visible preview tab when silent paths fail (default true for receipts). */
+  /** Visible recovery when agent fails (default true). */
   openBrowserPreviewOnFailure?: boolean;
+  /** Prefer in-app modal over window.open (survives popup blockers + navigation timing). */
+  preferInAppPreview?: boolean;
 }
+
+export type PrintReceiptResult = {
+  method: 'escpos' | 'html' | 'browser' | 'preview' | 'none';
+  /** Printer name used when agent accepted (if any). */
+  printerName?: string | null;
+};
 
 export interface ReceiptData {
   saleNumber: string;
@@ -81,31 +89,32 @@ export interface ReceiptData {
  * Print a receipt using the shared PrintService contract:
  *   0. SUNMI WebView JSON bridge (receipts only)
  *   1. ESC/POS + HTML via local agent (same as guest bill when possible)
- *   2. Browser iframe print (often blocked after async settlement)
- *   3. Visible browser preview tab with Print button (always available)
+ *   2. In-app / browser tab preview with Print (visible; not silent)
  *
- * Reports and other HTML documents should call {@link printHtmlDocument}
- * (same strategies 1–2 — no new backends).
+ * Reports and other HTML documents should call {@link printHtmlDocument}.
+ * Returns how delivery was accepted — callers must surface non-silent UX for restaurant.
  */
-export async function printReceipt(receiptData: ReceiptData, options: PrintOptions = {}): Promise<void> {
+export async function printReceipt(
+  receiptData: ReceiptData,
+  options: PrintOptions = {},
+): Promise<PrintReceiptResult> {
   if (!receiptData || !receiptData.saleNumber) {
     throw new Error('Invalid receipt data: saleNumber is required');
   }
 
   const printFormat = options.format || 'detailed';
-  // Layout SSOT is guest thermal (compact and detailed share HTML today).
   const builtHtml =
     printFormat === 'compact'
       ? generateCompactReceiptHTML(receiptData)
       : generateDetailedReceiptHTML(receiptData);
-  void builtHtml; // delivery uses ThermalGuestDocument path below
+  void builtHtml;
   const doc = receiptToThermalGuestDocument(receiptData);
 
   // Strategy 0: SUNMI Android WebView bridge (receipt payload)
   if (typeof (window as unknown as { SunmiPrinter?: unknown }).SunmiPrinter !== 'undefined') {
     (window as unknown as { SunmiPrinter: { printReceipt: (json: string) => void } })
       .SunmiPrinter.printReceipt(JSON.stringify(receiptData));
-    return;
+    return { method: 'escpos', printerName: 'SunmiPrinter' };
   }
 
   // Dynamic import avoids circular init with printRestaurant → printHtmlDocument.
@@ -113,13 +122,21 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
   const result = await printGuestThermalDocument(doc, {
     printerName: options.printerName,
     fallbackPrinterNames: options.fallbackPrinterNames,
-    // Prefer agent + visible preview. Hidden iframe print is gesture-fragile after pay.
     allowBrowserFallback: options.allowBrowserFallback === true,
     openBrowserPreviewOnFailure: options.openBrowserPreviewOnFailure !== false,
+    preferInAppPreview: options.preferInAppPreview !== false,
   });
-  if (result.method === 'preview' && typeof console !== 'undefined') {
-    console.info('[printReceipt] Silent agent miss — opened browser receipt preview');
+  if (typeof console !== 'undefined') {
+    console.info('[printReceipt]', {
+      method: result.method,
+      printerName: result.printerName ?? null,
+      tried: result.triedPrinters,
+    });
   }
+  return {
+    method: result.method,
+    printerName: result.printerName,
+  };
 }
 
 /** Prefer receipt printer; fall back to guest-bill printer (restaurant FOH where bills already work). */

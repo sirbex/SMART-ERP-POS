@@ -35,11 +35,7 @@ import {
   flushPendingPrintJobs,
   type ClientPrintJob,
 } from '../../lib/printJobDispatcher';
-import { printReceipt, resolveReceiptPrinterTargets } from '../../lib/print';
-import {
-  fetchReceiptPrintConfig,
-  shouldPrintReceiptOnSettlement,
-} from '../../lib/receiptPrintConfig';
+import { printRestaurantSettlementReceipt } from '../../lib/restaurantSettlementReceipt';
 import PrinterServiceStatusChip from '../../components/restaurant/PrinterServiceStatusChip';
 import {
   readCachedGuestBillPrinter,
@@ -3776,57 +3772,40 @@ export default function RestaurantPosPage() {
             ? `Paid ${paidOrderNumber} (${paid.offlineId}) — ${remainingTickets.length} ticket(s) still open on table`
             : `Paid ${paidOrderNumber} (${paid.offlineId}) — syncs when online`,
         );
-        // Sale receipt only when tenant receipt printing is enabled.
-        // Never gates KOT / guest bill (those use printRestaurant / print jobs).
+        // Sale receipt: never silent — toast disabled / sent / preview / error.
+        // Prefer guest-bill printer (same target as working bills).
         void (async () => {
-          try {
-            const printCfg = await fetchReceiptPrintConfig();
-            if (!shouldPrintReceiptOnSettlement(printCfg)) return;
-            const targets = resolveReceiptPrinterTargets(
-              printCfg.printerName,
-              readCachedGuestBillPrinter(),
-            );
-            await printReceipt(
-              {
-                saleNumber: paid.offlineId,
-                saleDate: new Date().toLocaleString(),
-                subtotal: paid.subtotal,
-                discountAmount: paid.discountAmount,
-                taxAmount: paid.taxAmount,
-                totalAmount: paid.totalAmount,
-                paymentMethod: 'CASH',
-                amountPaid: paid.tenderedAmount,
-                changeAmount: paid.changeAmount,
-                changeGiven: paid.changeAmount,
-                payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
-                cashierName: user?.fullName || user?.email || undefined,
-                customerName:
-                  tableLabel !== 'table' ? `Table ${tableLabel} · ${paidOrderNumber}` : paidOrderNumber,
-                companyName: companyBranding.companyName || invoiceBranding?.companyName || undefined,
-                companyAddress:
-                  companyBranding.companyAddress || invoiceBranding?.companyAddress || undefined,
-                companyPhone: companyBranding.companyPhone || invoiceBranding?.companyPhone || undefined,
-                companyTin: invoiceBranding?.companyTin,
-                paymentAccounts: invoiceBranding?.paymentAccounts,
-                customReceiptNote: invoiceBranding?.customReceiptNote,
-                footerText: invoiceBranding?.footerText,
-                items: paid.lines.map((l) => ({
-                  name: l.productName,
-                  quantity: l.quantity,
-                  unitPrice: l.unitPrice,
-                  subtotal: l.subtotal,
-                  uom: l.uom,
-                })),
-              },
-              {
-                printerName: targets.primary,
-                fallbackPrinterNames: targets.fallbacks,
-                openBrowserPreviewOnFailure: true,
-              },
-            );
-          } catch {
-            toast.error('Receipt print failed — allow popups or reprint from Sales');
-          }
+          await printRestaurantSettlementReceipt({
+            saleNumber: paid.offlineId,
+            saleDate: new Date().toLocaleString(),
+            subtotal: paid.subtotal,
+            discountAmount: paid.discountAmount,
+            taxAmount: paid.taxAmount,
+            totalAmount: paid.totalAmount,
+            paymentMethod: 'CASH',
+            amountPaid: paid.tenderedAmount,
+            changeAmount: paid.changeAmount,
+            changeGiven: paid.changeAmount,
+            payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
+            cashierName: user?.fullName || user?.email || undefined,
+            customerName:
+              tableLabel !== 'table' ? `Table ${tableLabel} · ${paidOrderNumber}` : paidOrderNumber,
+            companyName: companyBranding.companyName || invoiceBranding?.companyName || undefined,
+            companyAddress:
+              companyBranding.companyAddress || invoiceBranding?.companyAddress || undefined,
+            companyPhone: companyBranding.companyPhone || invoiceBranding?.companyPhone || undefined,
+            companyTin: invoiceBranding?.companyTin,
+            paymentAccounts: invoiceBranding?.paymentAccounts,
+            customReceiptNote: invoiceBranding?.customReceiptNote,
+            footerText: invoiceBranding?.footerText,
+            items: paid.lines.map((l) => ({
+              name: l.productName,
+              quantity: l.quantity,
+              unitPrice: l.unitPrice,
+              subtotal: l.subtotal,
+              uom: l.uom,
+            })),
+          });
         })();
 
         setActiveOrderId(null);
