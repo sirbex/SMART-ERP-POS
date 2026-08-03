@@ -68,10 +68,11 @@ Note: `printerRoles.receipt` may still be `null` on agent — app now sends `X-P
 
 | Field | Value |
 |-------|--------|
-| Repo SHA | _(filled after push)_ |
-| Deploy workflow | `Deploy to Production` |
-| Actions URL | _(filled after workflow)_ |
-| Expect SPA fingerprints | `guestBillInvoiceFields`, `X-Printer-Name`, `Payment Details` on bill path |
+| Repo SHA | `90bf135ddc5ae53b22ef8b20f33b3f85e775f4c6` |
+| Deploy workflow | **success** https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30814913847 |
+| CI workflow | **success** https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/30814913946 |
+| Deployed SPA fingerprints | `print-BXF5b9lC.js` (`GUEST BILL`, `Payment Details`, `X-Printer-Name`, `Pay at cashier`); `RestaurantPosPage-DQhRVuUO.js` (`paymentAccounts`, `footerText`) |
+| Full deploy proof | `PROOF_GUEST_BILL_RECEIPT_PRINT_DEPLOYED.md` |
 
 ## Manual smoke (after deploy)
 
@@ -79,6 +80,6 @@ Note: `printerRoles.receipt` may still be `null` on agent — app now sends `X-P
 2. Printing Settings: enable receipt + exact Windows printer name + auto-print → complete POS sale → paper on that printer.
 3. Disable receipt enable → sale does not auto-print; KOT + guest bill still print.
 
-## Verdict (local)
+## Verdict
 
-**PASS** integrity suites (58/58). Production gate completed after push/deploy row below.
+**PASS** integrity suites (58/58) + production deploy + SPA fingerprint scan.
