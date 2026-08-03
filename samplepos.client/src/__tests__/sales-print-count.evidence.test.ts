@@ -1,5 +1,5 @@
 /**
- * Evidence: sales print_count for reprint audit — schema + fail-soft route.
+ * Evidence: sales.print_count for reprint audit — schema + fail-soft route.
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, '../../../..');
+const repoRoot = resolve(here, '../../..');
 
 function read(pathFromRepo: string): string {
   return readFileSync(resolve(repoRoot, pathFromRepo), 'utf8');
