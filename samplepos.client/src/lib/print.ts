@@ -51,7 +51,8 @@ export interface ReceiptData {
   companyName?: string;
   companyAddress?: string;
   companyPhone?: string;
-  // Payment accounts from settings
+  companyTin?: string;
+  // Payment accounts from settings (active + showOnReceipt)
   paymentAccounts?: Array<{
     type: string;
     provider: string;
@@ -59,7 +60,10 @@ export interface ReceiptData {
     accountNumber: string;
     branchOrCode?: string;
   }>;
+  /** Invoice Settings → Custom Receipt Note (shown after payment block) */
   customReceiptNote?: string;
+  /** Invoice Settings → Footer Text (closing line; default Thank you…) */
+  footerText?: string;
   /** When true, a visible REPRINTED COPY banner is shown on the receipt */
   isReprint?: boolean;
 }

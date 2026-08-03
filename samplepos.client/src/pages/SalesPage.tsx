@@ -8,12 +8,14 @@ import { BUSINESS_TIMEZONE, getBusinessDate, formatTimestamp, formatTimestampDat
 import Decimal from 'decimal.js';
 import { api } from '../utils/api';
 import { DatePicker } from '../components/ui/date-picker';
+import { toast } from 'react-hot-toast';
 import { printReceipt } from '../lib/print';
 import {
   buildReceiptDataFromSale,
   mergeSaleForReceipt,
   fetchInvoiceSettingsForReceipt,
   type InvoiceSettingsForReceipt,
+  type SaleForReceipt,
 } from '../lib/receiptFromSale';
 import { DocumentFlowButton } from '../components/shared/DocumentFlowButton';
 import { VoidSaleModal } from '../components/sales/VoidSaleModal';
@@ -2193,6 +2195,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettingsForReceipt | null>(null);
+  const [isReprinting, setIsReprinting] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
 
   // Handle escape key and focus trap
@@ -2803,22 +2806,70 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
               </button>
               {canReprintReceipt && (
                 <button
+                  disabled={isReprinting || loadingDetails}
                   onClick={async () => {
-                    const s = mergeSaleForReceipt(sale, saleDetails);
-
-                    // Log reprint to audit trail and increment print count
+                    if (isReprinting) return;
+                    setIsReprinting(true);
                     try {
-                      await api.post(`/sales/${sale.id}/reprint`);
-                    } catch (err) {
-                      console.error('Failed to log receipt reprint:', err);
-                    }
+                      // Prefer fully loaded detail (items + payments); refetch if still thin
+                      let detail: SaleRow | null = saleDetails;
+                      if (!detail?.items?.length) {
+                        const response = await api.sales.getById(sale.id);
+                        if (response.data?.success && response.data.data) {
+                          const responseData = response.data.data;
+                          if (responseData && typeof responseData === 'object' && 'sale' in responseData) {
+                            const nested = responseData as {
+                              sale: Record<string, unknown>;
+                              items?: SaleItemRow[];
+                              paymentLines?: PaymentLine[];
+                            };
+                            detail = {
+                              ...nested.sale,
+                              items: nested.items || [],
+                              paymentLines: nested.paymentLines || [],
+                            } as SaleRow;
+                            setSaleDetails(detail);
+                          } else {
+                            detail = responseData as SaleRow;
+                            setSaleDetails(detail);
+                          }
+                        }
+                      }
 
-                    const receiptData = buildReceiptDataFromSale(s, invoiceSettings, {
-                      isReprint: true,
-                    });
-                    printReceipt(receiptData).catch((err) => console.error('Print failed:', err));
+                      let branding = invoiceSettings;
+                      if (!branding) {
+                        branding = await fetchInvoiceSettingsForReceipt();
+                        setInvoiceSettings(branding);
+                      }
+
+                      const s = mergeSaleForReceipt(sale as SaleForReceipt, detail as SaleForReceipt | null);
+                      if (!s.items?.length) {
+                        toast.error('Sale has no line items to print. Reload and try again.');
+                        return;
+                      }
+
+                      // Audit trail (non-blocking if already counted this session)
+                      try {
+                        await api.post(`/sales/${sale.id}/reprint`);
+                      } catch (err) {
+                        console.error('Failed to log receipt reprint:', err);
+                      }
+
+                      const receiptData = buildReceiptDataFromSale(s, branding, {
+                        isReprint: true,
+                      });
+                      await printReceipt(receiptData);
+                      toast.success('Receipt sent to printer');
+                    } catch (err) {
+                      console.error('Print failed:', err);
+                      toast.error(
+                        err instanceof Error ? err.message : 'Failed to reprint receipt',
+                      );
+                    } finally {
+                      setIsReprinting(false);
+                    }
                   }}
-                  className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2"
+                  className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                     <path
@@ -2827,7 +2878,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                       clipRule="evenodd"
                     />
                   </svg>
-                  Reprint Receipt
+                  {isReprinting ? 'Printing…' : loadingDetails ? 'Loading…' : 'Reprint Receipt'}
                 </button>
               )}
             </div>

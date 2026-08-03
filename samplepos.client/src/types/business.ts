@@ -75,6 +75,8 @@ export interface Customer {
   address?: string;
   groupId?: string;
   creditLimit: string | Decimal;
+  /** Enterprise: when true, credit/on-account sales ignore the hard ceiling */
+  unlimitedCredit?: boolean;
   currentBalance: string | Decimal;
   /** Customer deducts WHT from payments to us */
   whtLiable?: boolean;

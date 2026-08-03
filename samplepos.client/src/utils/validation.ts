@@ -7,6 +7,7 @@
 
 import Decimal from 'decimal.js';
 import { BUSINESS_RULES, VALIDATION } from './constants';
+import { evaluateCustomerCreditLimit } from '@shared/utils/customerCreditLimit';
 
 /**
  * Validation Result
@@ -60,28 +61,31 @@ export function validatePositiveQuantity(quantity: number | Decimal | string): V
 }
 
 /**
- * BR-SAL-003: Validate credit limit not exceeded
+ * BR-SAL-003: Validate credit limit not exceeded.
+ * Enterprise: pass unlimitedCredit=true to skip the hard ceiling.
  */
 export function validateCreditLimit(
   currentBalance: number | Decimal | string,
   creditLimit: number | Decimal | string,
-  newAmount: number | Decimal | string
+  newAmount: number | Decimal | string,
+  unlimitedCredit?: boolean,
 ): ValidationResult {
-  const balance = new Decimal(currentBalance || 0);
-  const limit = new Decimal(creditLimit || 0);
-  const amount = new Decimal(newAmount || 0);
-  
-  const newBalance = balance.plus(amount);
-  
-  if (newBalance.greaterThan(limit)) {
+  const evalResult = evaluateCustomerCreditLimit({
+    unlimitedCredit,
+    creditLimit,
+    currentBalance,
+    additionalCredit: newAmount,
+  });
+
+  if (!evalResult.allowed) {
     return {
       valid: false,
-      error: `Credit limit exceeded. Current: ${balance.toString()}, Limit: ${limit.toString()}, New Amount: ${amount.toString()}`,
+      error: evalResult.message,
       code: 'CREDIT_LIMIT_EXCEEDED',
-      rule: BUSINESS_RULES.SAL_003
+      rule: BUSINESS_RULES.SAL_003,
     };
   }
-  
+
   return { valid: true };
 }
 

@@ -18,6 +18,8 @@ describe('receipt reprint parity', () => {
       companyName: 'Henber Pharmacy',
       companyAddress: 'Kampala Rd',
       companyPhone: '+256700000000',
+      companyTin: '1000000000',
+      footerText: 'Come again soon',
       customReceiptNote: 'Thank you for shopping',
       paymentAccounts: [
         {
@@ -27,6 +29,7 @@ describe('receipt reprint parity', () => {
           accountNumber: '0700000000',
           isActive: true,
           showOnReceipt: true,
+          sortOrder: 1,
         },
         {
           type: 'BANK',
@@ -35,6 +38,7 @@ describe('receipt reprint parity', () => {
           accountNumber: '123',
           isActive: true,
           showOnReceipt: false,
+          sortOrder: 0,
         },
       ],
     });
@@ -42,6 +46,8 @@ describe('receipt reprint parity', () => {
     expect(branding.companyName).toBe('Henber Pharmacy');
     expect(branding.companyAddress).toBe('Kampala Rd');
     expect(branding.companyPhone).toBe('+256700000000');
+    expect(branding.companyTin).toBe('1000000000');
+    expect(branding.footerText).toBe('Come again soon');
     expect(branding.customReceiptNote).toBe('Thank you for shopping');
     expect(branding.paymentAccounts).toHaveLength(1);
     expect(branding.paymentAccounts?.[0].provider).toBe('MTN');
@@ -152,14 +158,20 @@ describe('receipt reprint parity', () => {
     expect(reprint.isReprint).toBe(true);
   });
 
-  it('print.ts renders customer name, phone, and email in shared HTML helper', () => {
+  it('receipt HTML SSOT maps customer fields through thermal guest document', () => {
     const { readFileSync } = require('node:fs');
     const { resolve } = require('node:path');
-    const src = readFileSync(resolve(__dirname, '../lib/print.ts'), 'utf8');
-    expect(src).toContain('function renderReceiptCustomerHTML');
-    expect(src).toContain('Tel: ${data.customerPhone}');
-    expect(src).toContain('data.customerEmail');
-    expect(src).toContain("renderReceiptCustomerHTML(data, 'detailed')");
-    expect(src).toContain("renderReceiptCustomerHTML(data, 'compact')");
+    const printSrc = readFileSync(resolve(__dirname, '../lib/print.ts'), 'utf8');
+    expect(printSrc).toContain('receiptToThermalGuestDocument');
+    expect(printSrc).toContain('buildThermalGuestDocumentHtml');
+    expect(printSrc).toContain('customReceiptNote');
+    expect(printSrc).toContain('footerText');
+
+    const guestSrc = readFileSync(resolve(__dirname, '../lib/thermalGuestDocument.ts'), 'utf8');
+    expect(guestSrc).toContain("label: 'Customer'");
+    expect(guestSrc).toContain("label: 'Tel'");
+    expect(guestSrc).toContain("label: 'Email'");
+    expect(guestSrc).toContain('customNote');
+    expect(guestSrc).toContain('paymentAccounts');
   });
 });

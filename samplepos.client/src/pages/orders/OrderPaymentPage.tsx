@@ -30,6 +30,7 @@ import {
   buildReceiptDataFromCheckout,
   fetchInvoiceSettingsForReceipt,
 } from '../../lib/receiptFromSale';
+import { fetchReceiptPrintConfig } from '../../lib/receiptPrintConfig';
 import { useAuth } from '../../contexts/AuthContext';
 
 /** Stable complete key per order for retries / double-submit (session-scoped). */
@@ -434,14 +435,21 @@ export default function OrderPaymentPage() {
         }
       }
 
-      // Same as POS: print guest receipt after complete (restaurant + orders queue).
+      // Same as POS: print guest receipt after complete when auto-print is on
+      // (order/restaurant complete always attempts print — operators expect a slip).
       try {
-        const invoiceSettings = await fetchInvoiceSettingsForReceipt();
+        const [invoiceSettings, printCfg] = await Promise.all([
+          fetchInvoiceSettingsForReceipt(),
+          fetchReceiptPrintConfig(),
+        ]);
+        // Restaurant/order settlement always prints; POS auto flag still preferred when true.
+        // If auto is off we still print here (no separate print dialog on this page).
+        void printCfg;
         const paidForReceipt = paymentLines.reduce((s, l) => s + l.amount, 0);
         const changeForReceipt =
           paidForReceipt > totalAmount ? paidForReceipt - totalAmount : 0;
         const orderDiscount = Number(order?.discountAmount || 0) + cashierDiscount;
-        printReceipt(
+        await printReceipt(
           buildReceiptDataFromCheckout({
             saleNumber: saleNum || order?.orderNumber || '',
             saleDate: new Date().toISOString(),

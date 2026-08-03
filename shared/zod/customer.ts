@@ -22,6 +22,11 @@ export const CustomerSchema = z.object({
   pricingMode: z.enum(['STANDARD', 'AT_COST']).optional().nullable(), // Resolved from price_groups join
   balance: z.number().default(0),
   creditLimit: z.number().nonnegative().default(0),
+  /**
+   * Enterprise: when true, on-account / credit sales ignore the hard credit_limit ceiling.
+   * credit_limit may still be kept as a soft advisory figure for display/reporting.
+   */
+  unlimitedCredit: z.boolean().default(false).optional(),
   depositBalance: z.number().default(0).optional(),
   /** When true, payments should default WHT for this customer (customer-withheld). */
   whtLiable: z.boolean().default(false).optional(),
@@ -49,6 +54,7 @@ export const CreateCustomerSchema = z.object({
   customerGroupId: z.string().uuid().optional().nullable(),
   priceGroupId: z.string().uuid().optional().nullable(),
   creditLimit: z.number().nonnegative().default(0),
+  unlimitedCredit: z.boolean().optional(),
   whtLiable: z.boolean().optional(),
   defaultWhtTypeId: z.string().uuid().optional().nullable(),
   vatRegistered: z.boolean().optional(),

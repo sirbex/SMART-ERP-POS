@@ -287,11 +287,16 @@ export async function adjustCustomerBalance(
   const amountDecimal = new Decimal(amount);
   const currentBalanceDecimal = new Decimal(customer.balance);
   const creditLimitDecimal = new Decimal(customer.creditLimit);
+  const unlimited = (customer as { unlimitedCredit?: boolean }).unlimitedCredit === true;
 
-  // BR-SAL-003: Check credit limit
+  // BR-SAL-003: Check credit limit (enterprise unlimited skips hard ceiling)
   const newBalance = currentBalanceDecimal.plus(amountDecimal);
 
-  if (newBalance.lessThan(0) && newBalance.abs().greaterThan(creditLimitDecimal)) {
+  if (
+    !unlimited &&
+    newBalance.lessThan(0) &&
+    newBalance.abs().greaterThan(creditLimitDecimal)
+  ) {
     throw new Error(
       `Transaction would exceed credit limit. Current: ${currentBalanceDecimal.toString()}, ` +
       `Adjustment: ${amountDecimal.toString()}, Limit: ${creditLimitDecimal.toString()}`
@@ -304,6 +309,7 @@ export async function adjustCustomerBalance(
     adjustment: amountDecimal.toString(),
     newBalance: newBalance.toString(),
     creditLimit: creditLimitDecimal.toString(),
+    unlimitedCredit: unlimited,
   });
 
   const updated = await customerRepository.updateCustomerBalance(

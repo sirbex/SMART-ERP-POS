@@ -39,6 +39,7 @@ interface CustomerData {
     address?: string;
     creditLimit?: number | string;
     credit_limit?: number | string;
+    unlimitedCredit?: boolean;
     currentBalance?: number | string;
     current_balance?: number | string;
     balance?: number | string;
@@ -230,6 +231,7 @@ export default function CustomerDetailModal({
     const [editVatRegistered, setEditVatRegistered] = useState(false);
     const [editTaxExempt, setEditTaxExempt] = useState(false);
     const [editAllowTaxOverride, setEditAllowTaxOverride] = useState(false);
+    const [editUnlimitedCredit, setEditUnlimitedCredit] = useState(false);
     const [editTin, setEditTin] = useState('');
     const [editDefaultVatRate, setEditDefaultVatRate] = useState('');
     const [editVatRegistrationDate, setEditVatRegistrationDate] = useState('');
@@ -269,6 +271,7 @@ export default function CustomerDetailModal({
             setEditVatRegistered(c.vatRegistered === true || c.taxProfile === 'VAT_REGISTERED');
             setEditTaxExempt(c.taxExempt === true || c.taxProfile === 'EXEMPT');
             setEditAllowTaxOverride(c.allowTaxOverride === true);
+            setEditUnlimitedCredit(c.unlimitedCredit === true);
             setEditTin(c.tin || '');
             setEditDefaultVatRate(
                 c.defaultVatRate != null && c.defaultVatRate !== undefined
@@ -332,6 +335,7 @@ export default function CustomerDetailModal({
                 phone: formData.get('phone')?.toString() || undefined,
                 address: formData.get('address')?.toString() || undefined,
                 creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
+                unlimitedCredit: editUnlimitedCredit,
                 whtLiable: editWhtLiable,
                 defaultWhtTypeId: editWhtLiable ? editDefaultWhtTypeId || null : null,
                 vatRegistered: editVatRegistered,
@@ -556,8 +560,15 @@ export default function CustomerDetailModal({
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                                 <div className="text-sm text-gray-600">Credit Limit</div>
                                                 <div className="text-xl sm:text-2xl font-bold text-gray-900">
-                                                    {formatCurrency((customer as CustomerData).creditLimit || 0)}
+                                                    {(customer as CustomerData).unlimitedCredit
+                                                        ? 'Unlimited'
+                                                        : formatCurrency((customer as CustomerData).creditLimit || 0)}
                                                 </div>
+                                                {(customer as CustomerData).unlimitedCredit ? (
+                                                    <div className="text-xs text-indigo-600 mt-1">
+                                                        On-account / credit sales are not capped
+                                                    </div>
+                                                ) : null}
                                             </div>
                                             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                                 <div className="text-sm text-gray-600">Status</div>
@@ -1482,8 +1493,26 @@ export default function CustomerDetailModal({
                                                 defaultValue={(customer as CustomerData).creditLimit || 0}
                                                 min={0}
                                                 step={1000}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                disabled={editUnlimitedCredit}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-500"
                                             />
+                                            <label className="mt-2 flex items-center gap-2 text-sm text-gray-800 cursor-pointer select-none">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editUnlimitedCredit}
+                                                    onChange={(e) => setEditUnlimitedCredit(e.target.checked)}
+                                                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                />
+                                                <span>
+                                                    <span className="font-medium">Unlimited credit</span>
+                                                    <span className="text-gray-500"> — on-account sales not capped by limit</span>
+                                                </span>
+                                            </label>
+                                            {editUnlimitedCredit ? (
+                                                <p className="mt-1 text-xs text-indigo-700">
+                                                    Hard credit ceiling is off. Optional amount above is kept only as a soft reference.
+                                                </p>
+                                            ) : null}
                                         </div>
                                         <div>
                                             <label htmlFor="customerPriceGroup" className="block text-sm font-medium text-gray-700 mb-1">Price Group</label>

@@ -326,7 +326,9 @@ export default function CustomersPage() {
                           </div>
                           <div>
                             <div className="text-gray-500">Limit</div>
-                            <div className="text-gray-600">{formatCurrency(customer.creditLimit)}</div>
+                            <div className="text-gray-600">
+                              {customer.unlimitedCredit ? 'Unlimited' : formatCurrency(customer.creditLimit)}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -378,7 +380,7 @@ export default function CustomersPage() {
                               </span>
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-600">
-                              {formatCurrency(customer.creditLimit)}
+                              {customer.unlimitedCredit ? 'Unlimited' : formatCurrency(customer.creditLimit)}
                             </td>
                             <td className="px-4 py-3">
                               <span
@@ -495,7 +497,9 @@ export default function CustomersPage() {
                           </div>
                           <div>
                             <div className="text-xs text-gray-500">Limit</div>
-                            <div className="text-sm text-gray-600">{formatCurrency(customer.creditLimit)}</div>
+                            <div className="text-sm text-gray-600">
+                              {customer.unlimitedCredit ? 'Unlimited' : formatCurrency(customer.creditLimit)}
+                            </div>
                           </div>
                         </div>
                         <div className="flex gap-2 border-t border-gray-100 pt-2">
@@ -567,7 +571,7 @@ export default function CustomersPage() {
                               </span>
                             </td>
                             <td className="px-6 py-4 text-sm text-gray-600">
-                              {formatCurrency(customer.creditLimit)}
+                              {customer.unlimitedCredit ? 'Unlimited' : formatCurrency(customer.creditLimit)}
                             </td>
                             <td className="px-6 py-4">
                               <span

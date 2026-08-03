@@ -3705,6 +3705,8 @@ export default function RestaurantPosPage() {
             : `Paid ${paidOrderNumber} (${paid.offlineId}) — syncs when online`,
         );
         // Print after UI updates — never block FOH on the printer.
+        // Use Invoice Settings branding (custom note, payment accounts, footer) — do not
+        // overwrite customReceiptNote with offline meta.
         void printReceipt({
           saleNumber: paid.offlineId,
           saleDate: new Date().toLocaleString(),
@@ -3718,9 +3720,14 @@ export default function RestaurantPosPage() {
           changeGiven: paid.changeAmount,
           payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
           cashierName: user?.fullName || user?.email || undefined,
-          companyName: companyBranding.companyName || undefined,
-          companyAddress: companyBranding.companyAddress || undefined,
-          companyPhone: companyBranding.companyPhone || undefined,
+          customerName: tableLabel !== 'table' ? `Table ${tableLabel} · ${paidOrderNumber}` : paidOrderNumber,
+          companyName: companyBranding.companyName || invoiceBranding?.companyName || undefined,
+          companyAddress: companyBranding.companyAddress || invoiceBranding?.companyAddress || undefined,
+          companyPhone: companyBranding.companyPhone || invoiceBranding?.companyPhone || undefined,
+          companyTin: invoiceBranding?.companyTin,
+          paymentAccounts: invoiceBranding?.paymentAccounts,
+          customReceiptNote: invoiceBranding?.customReceiptNote,
+          footerText: invoiceBranding?.footerText,
           items: paid.lines.map((l) => ({
             name: l.productName,
             quantity: l.quantity,
@@ -3728,7 +3735,6 @@ export default function RestaurantPosPage() {
             subtotal: l.subtotal,
             uom: l.uom,
           })),
-          customReceiptNote: `${tableLabel} · ${paidOrderNumber} (offline-first)`,
         }).catch(() => {
           toast.error('Receipt print failed — sale is saved locally');
         });

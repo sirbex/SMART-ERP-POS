@@ -107,6 +107,7 @@ interface CustomerDetailData {
   pricingMode?: 'STANDARD' | 'AT_COST' | null;
   balance: number | string;
   creditLimit: number | string;
+  unlimitedCredit?: boolean;
   isActive: boolean;
   whtLiable?: boolean;
   defaultWhtTypeId?: string | null;
@@ -366,6 +367,7 @@ export default function CustomerDetailPage() {
   const initialPriceGroupIdRef = useRef<string | null>(null);
   const [editWhtLiable, setEditWhtLiable] = useState(false);
   const [editDefaultWhtTypeId, setEditDefaultWhtTypeId] = useState('');
+  const [editUnlimitedCredit, setEditUnlimitedCredit] = useState(false);
 
   useEffect(() => {
     if (tab === 'edit' && customer) {
@@ -375,6 +377,7 @@ export default function CustomerDetailPage() {
       const c = customer as CustomerDetailData;
       setEditWhtLiable(c.whtLiable === true);
       setEditDefaultWhtTypeId(c.defaultWhtTypeId || '');
+      setEditUnlimitedCredit(c.unlimitedCredit === true);
     }
   }, [tab, customer, priceGroupIdForEffectDeps(customer as CustomerDetailData | undefined)]);
 
@@ -398,6 +401,7 @@ export default function CustomerDetailPage() {
         phone: formData.get('phone')?.toString() || undefined,
         address: formData.get('address')?.toString() || undefined,
         creditLimit: formData.get('creditLimit') ? Number(formData.get('creditLimit')) : undefined,
+        unlimitedCredit: editUnlimitedCredit,
         whtLiable: editWhtLiable,
         defaultWhtTypeId: editWhtLiable ? editDefaultWhtTypeId || null : null,
       },
@@ -698,8 +702,16 @@ export default function CustomerDetailPage() {
             </div>
             <div className="bg-white rounded-lg shadow p-5 border border-gray-200">
               <p className="text-sm text-gray-600">Credit Limit</p>
-              <p className="text-2xl font-bold text-gray-900">{formatCurrency(typeof (customer as CustomerDetailData).creditLimit === 'string' ? (customer as CustomerDetailData).creditLimit : Number((customer as CustomerDetailData).creditLimit))}</p>
-              <p className="text-xs text-gray-500 mt-1">Maximum credit allowed</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {(customer as CustomerDetailData).unlimitedCredit
+                  ? 'Unlimited'
+                  : formatCurrency(typeof (customer as CustomerDetailData).creditLimit === 'string' ? (customer as CustomerDetailData).creditLimit : Number((customer as CustomerDetailData).creditLimit))}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {(customer as CustomerDetailData).unlimitedCredit
+                  ? 'No hard AR ceiling'
+                  : 'Maximum credit allowed'}
+              </p>
             </div>
             <div className="bg-white rounded-lg shadow p-5 border border-gray-200">
               <p className="text-sm text-gray-600">Total Invoices</p>
@@ -1321,7 +1333,35 @@ export default function CustomerDetailPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="creditLimit" className="block text-sm font-medium text-gray-700">Credit Limit</label>
-                  <input id="creditLimit" name="creditLimit" type="number" step="0.01" placeholder="0.00" defaultValue={(customer as CustomerDetailData).creditLimit} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
+                  <input
+                    id="creditLimit"
+                    name="creditLimit"
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    defaultValue={(customer as CustomerDetailData).creditLimit}
+                    disabled={editUnlimitedCredit}
+                    className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  />
+                  <label className="mt-2 flex items-center gap-2 text-sm text-gray-800 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={editUnlimitedCredit}
+                      onChange={(e) => setEditUnlimitedCredit(e.target.checked)}
+                      className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span>
+                      <span className="font-medium">Unlimited credit</span>
+                      <span className="text-gray-500"> — no hard AR ceiling</span>
+                    </span>
+                  </label>
+                  {editUnlimitedCredit ? (
+                    <p className="text-xs text-indigo-700 mt-1">
+                      Credit/on-account sales will not be blocked by a numeric limit.
+                    </p>
+                  ) : (
+                    <p className="text-xs text-gray-500 mt-1">Set to 0 for cash-only (no credit headroom).</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Customer group</label>

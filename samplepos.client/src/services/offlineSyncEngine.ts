@@ -96,6 +96,7 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
             phone?: string;
             address?: string;
             creditLimit?: number;
+            unlimitedCredit?: boolean;
             whtLiable?: boolean;
             defaultWhtTypeId?: string | null;
         }> = JSON.parse(raw);
@@ -108,6 +109,7 @@ export async function syncOfflineCustomers(): Promise<Map<string, string>> {
                 const payload: Record<string, unknown> = {
                     name: cust.name,
                     creditLimit: cust.creditLimit ?? 0,
+                    unlimitedCredit: cust.unlimitedCredit === true,
                     whtLiable: cust.whtLiable === true,
                     defaultWhtTypeId: cust.whtLiable === true ? cust.defaultWhtTypeId || null : null,
                 };

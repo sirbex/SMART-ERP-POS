@@ -20,6 +20,7 @@ function offlineToCustomer(c: OfflineCustomer): Customer {
     pricingMode: c.pricingMode ?? null,
     balance: c.balance,
     creditLimit: c.creditLimit,
+    unlimitedCredit: c.unlimitedCredit === true,
     whtLiable: c.whtLiable ?? false,
     defaultWhtTypeId: c.defaultWhtTypeId ?? null,
     isActive: c.isActive,
@@ -112,10 +113,14 @@ export default function CustomerSelector({
   };
 
   const availableCredit = selectedCustomer
-    ? new Decimal(selectedCustomer.creditLimit).minus(selectedCustomer.balance).toNumber()
+    ? selectedCustomer.unlimitedCredit
+      ? Number.POSITIVE_INFINITY
+      : new Decimal(selectedCustomer.creditLimit).minus(selectedCustomer.balance).toNumber()
     : 0;
 
-  const canUseCredit = selectedCustomer && availableCredit >= saleTotal;
+  const canUseCredit =
+    selectedCustomer &&
+    (selectedCustomer.unlimitedCredit === true || availableCredit >= saleTotal);
 
   const touchSearch =
     'w-full min-h-12 px-3 py-3 text-base border border-stone-300 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 touch-manipulation';
@@ -201,7 +206,11 @@ export default function CustomerSelector({
                 <div className="mt-2 text-xs space-y-1">
                   <div className="flex justify-between gap-2">
                     <span className="font-medium">Credit Limit:</span>
-                    <span className="text-right">{formatCurrency(selectedCustomer.creditLimit)}</span>
+                    <span className="text-right">
+                      {selectedCustomer.unlimitedCredit
+                        ? 'Unlimited'
+                        : formatCurrency(selectedCustomer.creditLimit)}
+                    </span>
                   </div>
                   <div className="flex justify-between gap-2">
                     <span className="font-medium">Current Balance:</span>
@@ -210,9 +219,15 @@ export default function CustomerSelector({
                   <div className="flex justify-between gap-2">
                     <span className="font-medium">Available Credit:</span>
                     <span
-                      className={`text-right ${availableCredit < 0 ? 'text-red-600' : 'text-green-600'}`}
+                      className={`text-right ${
+                        !selectedCustomer.unlimitedCredit && availableCredit < 0
+                          ? 'text-red-600'
+                          : 'text-green-600'
+                      }`}
                     >
-                      {formatCurrency(availableCredit)}
+                      {selectedCustomer.unlimitedCredit
+                        ? 'Unlimited'
+                        : formatCurrency(availableCredit)}
                     </span>
                   </div>
                 </div>
@@ -276,8 +291,9 @@ export default function CustomerSelector({
                             <div className="text-xs text-gray-500 truncate">{customer.email}</div>
                           ) : null}
                           <div className="text-xs text-gray-600 mt-1">
-                            Credit: {formatCurrency(customer.creditLimit)} | Balance:{' '}
-                            {formatCurrency(customer.balance)}
+                            Credit:{' '}
+                            {customer.unlimitedCredit ? 'Unlimited' : formatCurrency(customer.creditLimit)}{' '}
+                            | Balance: {formatCurrency(customer.balance)}
                           </div>
                         </button>
                       ))

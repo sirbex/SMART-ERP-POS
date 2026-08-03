@@ -49,6 +49,8 @@ export interface CreateCustomerInput {
   customerGroupId?: string;
   priceGroupId?: string | null;
   creditLimit?: number | string;
+  /** Enterprise: no hard AR credit ceiling when true */
+  unlimitedCredit?: boolean;
   whtLiable?: boolean;
   defaultWhtTypeId?: string | null;
   isActive?: boolean;

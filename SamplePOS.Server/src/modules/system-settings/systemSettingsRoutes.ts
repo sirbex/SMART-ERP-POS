@@ -18,7 +18,8 @@ router.patch('/', requirePermission('admin.update'), systemSettingsController.up
 router.get('/tax', requirePermission('system.read'), systemSettingsController.getTaxConfig);
 
 // GET /api/system-settings/printing/receipt - Get receipt print config
-router.get('/printing/receipt', requirePermission('system.read'), systemSettingsController.getReceiptPrintConfig);
+// Authenticated POS/cashiers need autoPrint without system.read (same class as invoice settings GET).
+router.get('/printing/receipt', systemSettingsController.getReceiptPrintConfig);
 
 // GET /api/system-settings/printing/invoice - Get invoice print config
 router.get('/printing/invoice', requirePermission('system.read'), systemSettingsController.getInvoicePrintConfig);

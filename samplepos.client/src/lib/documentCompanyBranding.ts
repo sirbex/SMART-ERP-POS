@@ -7,6 +7,8 @@ export type DocumentCompanyBranding = {
   companyName?: string | null;
   companyAddress?: string | null;
   companyPhone?: string | null;
+  /** TIN / VAT ID — shown on guest receipts when set */
+  companyTin?: string | null;
 };
 
 export function brandingFromTenant(
@@ -15,6 +17,7 @@ export function brandingFromTenant(
         companyName?: string | null;
         companyAddress?: string | null;
         companyPhone?: string | null;
+        companyTin?: string | null;
       }
     | null
     | undefined,
@@ -24,6 +27,7 @@ export function brandingFromTenant(
     companyName: branding.companyName?.trim() || null,
     companyAddress: branding.companyAddress?.trim() || null,
     companyPhone: branding.companyPhone?.trim() || null,
+    companyTin: branding.companyTin?.trim() || null,
   };
 }
 
@@ -42,12 +46,13 @@ export function mergeDocumentCompanyBranding(
     companyName: pick(preferred?.companyName, fallback?.companyName),
     companyAddress: pick(preferred?.companyAddress, fallback?.companyAddress),
     companyPhone: pick(preferred?.companyPhone, fallback?.companyPhone),
+    companyTin: pick(preferred?.companyTin, fallback?.companyTin),
   };
 }
 
 /**
  * Thermal/HTML company block.
- * - guest: full name + address + phone (bill / receipt-style)
+ * - guest: full name + address + phone + TIN (bill / receipt-style)
  * - kitchen: company name only (KOT stays prep-focused, still identifiable)
  */
 export function documentCompanyHeaderHtml(
@@ -65,9 +70,11 @@ export function documentCompanyHeaderHtml(
   }
   const addr = branding?.companyAddress?.trim();
   const phone = branding?.companyPhone?.trim();
+  const tin = branding?.companyTin?.trim();
   return `<div style="text-align:center;margin-bottom:8px;color:#000">
     <div style="font-size:18px;font-weight:900;color:#000">${esc(name)}</div>
     ${addr ? `<div style="font-size:13px;font-weight:700;color:#000">${esc(addr)}</div>` : ''}
     ${phone ? `<div style="font-size:13px;font-weight:700;color:#000">${esc(phone)}</div>` : ''}
+    ${tin ? `<div style="font-size:13px;font-weight:700;color:#000">TIN: ${esc(tin.replace(/^TIN:\s*/i, ''))}</div>` : ''}
   </div>`;
 }

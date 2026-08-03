@@ -810,6 +810,9 @@ export default function InvoiceSettingsTab() {
             <Label.Root className="block text-sm font-medium text-gray-700 mb-2" htmlFor="footerText">
               Footer Text
             </Label.Root>
+            <p className="text-xs text-gray-500 mb-2">
+              Closing line at the bottom of paid receipts (defaults to “Thank you for your business!” if empty)
+            </p>
             <input
               type="text"
               id="footerText"
@@ -825,7 +828,8 @@ export default function InvoiceSettingsTab() {
               Custom Receipt Note
             </Label.Root>
             <p className="text-xs text-gray-500 mb-2">
-              Add any custom text to display on receipts (e.g. MoMo numbers, promo messages, opening hours)
+              Printed on <strong>paid receipts</strong> after the payment method block (and after Payment Details).
+              Use for MoMo numbers, refund policy, opening hours — not for guest bills.
             </p>
             <textarea
               id="customReceiptNote"

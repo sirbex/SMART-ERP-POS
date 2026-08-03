@@ -80,6 +80,8 @@ export interface OfflineCustomer {
   address: string;
   balance: number;
   creditLimit: number;
+  /** Enterprise: no hard AR ceiling when true */
+  unlimitedCredit?: boolean;
   customerGroupId?: string;
   priceGroupId?: string;
   pricingMode?: 'STANDARD' | 'AT_COST';

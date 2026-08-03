@@ -53,6 +53,7 @@ interface CustomerAccount {
     // Debt/Receivables Management
     outstandingBalance: number;
     creditLimit: number;
+    unlimitedCredit?: boolean;
     accountsReceivable: CustomerReceivable[];
     deposits: CustomerDeposit[];
     credits: CustomerCredit[];
@@ -96,6 +97,7 @@ interface Customer {
     phone?: string;
     balance?: number;
     creditLimit?: number;
+    unlimitedCredit?: boolean;
 }
 
 /** Raw deposit shape returned by the Node.js /deposits API */
@@ -284,6 +286,7 @@ const CustomerFinancialPage = () => {
                 customerName: customer.name,
                 outstandingBalance: customer.balance || 0,
                 creditLimit: customer.creditLimit || 0,
+                unlimitedCredit: customer.unlimitedCredit === true,
                 totalDepositBalance: deposits.reduce((sum, d) => new Decimal(sum).plus(d.amount).toNumber(), 0),
                 totalCreditBalance: credits.reduce((sum, c) => new Decimal(sum).plus(c.amount).toNumber(), 0),
                 availableDepositBalance: depositBalance,
@@ -549,11 +552,15 @@ const CustomerFinancialPage = () => {
                                                 {customer.email && <span>{customer.email}</span>}
                                                 {customer.phone && <span className="ml-2">{customer.phone}</span>}
                                                 {/* Credit limit indicator */}
-                                                {customer.creditLimit && customer.creditLimit > 0 && (
+                                                {customer.unlimitedCredit ? (
+                                                    <div className="mt-1 text-xs text-indigo-600">
+                                                        Credit Limit: Unlimited
+                                                    </div>
+                                                ) : customer.creditLimit && customer.creditLimit > 0 ? (
                                                     <div className="mt-1 text-xs text-blue-600">
                                                         Credit Limit: {formatCurrency(customer.creditLimit)}
                                                     </div>
-                                                )}
+                                                ) : null}
                                             </div>
                                         </div>
                                     ))
@@ -800,13 +807,16 @@ const CustomerFinancialPage = () => {
                                             <div className="bg-blue-50 p-4 rounded-lg">
                                                 <div className="text-sm text-blue-600 font-medium">Credit Limit</div>
                                                 <div className="text-2xl font-bold text-blue-900">
-                                                    {formatCurrency(customerAccount.creditLimit || 0)}
+                                                    {customerAccount.unlimitedCredit
+                                                        ? 'Unlimited'
+                                                        : formatCurrency(customerAccount.creditLimit || 0)}
                                                 </div>
                                                 <div className="text-sm text-blue-600">
-                                                    {customerAccount.creditLimit && customerAccount.outstandingBalance ?
-                                                        `${Math.round((customerAccount.outstandingBalance / customerAccount.creditLimit) * 100)}% used` :
-                                                        'Available credit'
-                                                    }
+                                                    {customerAccount.unlimitedCredit
+                                                        ? 'No hard AR ceiling'
+                                                        : customerAccount.creditLimit && customerAccount.outstandingBalance
+                                                        ? `${Math.round((customerAccount.outstandingBalance / customerAccount.creditLimit) * 100)}% used`
+                                                        : 'Available credit'}
                                                 </div>
                                             </div>
                                             <div className="bg-green-50 p-4 rounded-lg">

@@ -7,6 +7,9 @@ export interface InvoiceSettingsForReceipt {
   companyName?: string;
   companyAddress?: string | null;
   companyPhone?: string | null;
+  companyTin?: string | null;
+  /** Invoice Settings → Footer Text (closing line under note) */
+  footerText?: string | null;
   customReceiptNote?: string | null;
   paymentAccounts?: Array<{
     type: string;
@@ -16,6 +19,7 @@ export interface InvoiceSettingsForReceipt {
     branchOrCode?: string;
     isActive: boolean;
     showOnReceipt: boolean;
+    sortOrder?: number;
   }>;
 }
 
@@ -227,26 +231,38 @@ export function invoiceSettingsToReceiptBranding(
   invoiceSettings?: InvoiceSettingsForReceipt | null
 ): Pick<
   ReceiptData,
-  'companyName' | 'companyAddress' | 'companyPhone' | 'paymentAccounts' | 'customReceiptNote'
+  | 'companyName'
+  | 'companyAddress'
+  | 'companyPhone'
+  | 'companyTin'
+  | 'paymentAccounts'
+  | 'customReceiptNote'
+  | 'footerText'
 > {
   if (!invoiceSettings) {
     return {};
   }
 
+  const accounts = (invoiceSettings.paymentAccounts || [])
+    .filter((a) => a.isActive !== false && a.showOnReceipt !== false)
+    .slice()
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+    .map((a) => ({
+      type: a.type,
+      provider: a.provider,
+      accountName: a.accountName,
+      accountNumber: a.accountNumber,
+      branchOrCode: a.branchOrCode,
+    }));
+
   return {
     companyName: invoiceSettings.companyName,
     companyAddress: invoiceSettings.companyAddress || undefined,
     companyPhone: invoiceSettings.companyPhone || undefined,
-    paymentAccounts: invoiceSettings.paymentAccounts
-      ?.filter((a) => a.isActive && a.showOnReceipt)
-      .map((a) => ({
-        type: a.type,
-        provider: a.provider,
-        accountName: a.accountName,
-        accountNumber: a.accountNumber,
-        branchOrCode: a.branchOrCode,
-      })),
-    customReceiptNote: invoiceSettings.customReceiptNote || undefined,
+    companyTin: invoiceSettings.companyTin || undefined,
+    paymentAccounts: accounts.length > 0 ? accounts : undefined,
+    customReceiptNote: invoiceSettings.customReceiptNote?.trim() || undefined,
+    footerText: invoiceSettings.footerText?.trim() || undefined,
   };
 }
 

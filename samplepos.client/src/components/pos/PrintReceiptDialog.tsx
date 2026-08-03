@@ -4,7 +4,7 @@
  * Phase 4: AdaptiveDialog chrome — print still uses lib/print.printReceipt (SSOT).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
@@ -19,6 +19,8 @@ interface PrintReceiptDialogProps {
     onOpenChange: (open: boolean) => void;
     receiptData: ReceiptData | null;
     onAfterPrint?: () => void;
+    /** When true, print once as soon as the dialog opens with receipt data */
+    autoPrint?: boolean;
 }
 
 export default function PrintReceiptDialog({
@@ -26,12 +28,14 @@ export default function PrintReceiptDialog({
     onOpenChange,
     receiptData,
     onAfterPrint,
+    autoPrint = false,
 }: PrintReceiptDialogProps) {
     const [isPrinting, setIsPrinting] = useState(false);
     const [printFormat, setPrintFormat] = useState<PrintFormat>('detailed');
     const [rememberFormat, setRememberFormat] = useState(true);
     const [printStatus, setPrintStatus] = useState<'idle' | 'success' | 'error'>('idle');
     const [errorMessage, setErrorMessage] = useState<string>('');
+    const autoPrintFiredRef = useRef(false);
 
     useEffect(() => {
         if (open) {
@@ -41,8 +45,9 @@ export default function PrintReceiptDialog({
             }
             setPrintStatus('idle');
             setErrorMessage('');
+            autoPrintFiredRef.current = false;
         }
-    }, [open]);
+    }, [open, receiptData?.saleNumber]);
 
     const handlePrint = useCallback(async () => {
         if (!receiptData || isPrinting) {
@@ -65,6 +70,7 @@ export default function PrintReceiptDialog({
             await printReceipt(receiptData, printOptions);
 
             setPrintStatus('success');
+            setIsPrinting(false);
 
             onAfterPrint?.();
 
@@ -85,6 +91,15 @@ export default function PrintReceiptDialog({
             setIsPrinting(false);
         }
     }, [receiptData, isPrinting, rememberFormat, printFormat, onOpenChange, onAfterPrint]);
+
+    // Auto-print after payment when tenant "Auto-print receipt" is enabled
+    useEffect(() => {
+        if (!open || !autoPrint || !receiptData || autoPrintFiredRef.current || isPrinting) {
+            return;
+        }
+        autoPrintFiredRef.current = true;
+        void handlePrint();
+    }, [open, autoPrint, receiptData, handlePrint, isPrinting]);
 
     const handleClose = useCallback(() => {
         if (isPrinting) {

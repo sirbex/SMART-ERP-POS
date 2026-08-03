@@ -10,6 +10,11 @@ import { useLayoutTier } from '../../hooks/useLayoutTier';
 import { shouldShowCoach } from '../../lib/adaptiveChrome';
 import PrintReceiptDialog from '../../components/pos/PrintReceiptDialog';
 import CustomerSelector from '../../components/pos/CustomerSelector';
+import {
+  fetchReceiptPrintConfig,
+  shouldAutoPrintAfterSale,
+  type ReceiptPrintConfig,
+} from '../../lib/receiptPrintConfig';
 import { computeUomPrices } from '@shared/utils/uom-pricing';
 import { previewPosCartTax } from '@shared/utils/documentTaxPreview';
 import {
@@ -251,6 +256,8 @@ interface InvoiceSettingsData {
   companyName?: string;
   companyAddress?: string | null;
   companyPhone?: string | null;
+  companyTin?: string | null;
+  footerText?: string | null;
   customReceiptNote?: string | null;
   paymentAccounts?: Array<{
     type: string;
@@ -261,6 +268,7 @@ interface InvoiceSettingsData {
     isActive: boolean;
     showOnReceipt: boolean;
     showOnInvoice: boolean;
+    sortOrder?: number;
   }>;
 }
 
@@ -471,6 +479,8 @@ export default function POSPage() {
   const [showSyncPanel, setShowSyncPanel] = useState(false);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
+  const [receiptAutoPrint, setReceiptAutoPrint] = useState(false);
+  const receiptPrintConfigRef = useRef<ReceiptPrintConfig | null>(null);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [lastSale, setLastSale] = useState<SaleRecord | null>(null);
   const [autoCreateInvoice, setAutoCreateInvoice] = useState(true); // Toggle for auto-invoice on credit sales
@@ -519,6 +529,8 @@ export default function POSPage() {
     companyName?: string;
     companyAddress?: string | null;
     companyPhone?: string | null;
+    companyTin?: string | null;
+    footerText?: string | null;
     customReceiptNote?: string | null;
     paymentAccounts?: InvoiceSettingsData['paymentAccounts'];
   } | null>(null);
@@ -568,6 +580,20 @@ export default function POSPage() {
     [currentUser?.fullName, selectedCustomer, invoiceSettings]
   );
 
+  /** After payment: show sale complete; auto-open print dialog when auto-print is on. */
+  const presentSaleReceipt = useCallback(
+    (opts?: { preferAutoPrint?: boolean }) => {
+      const auto =
+        opts?.preferAutoPrint !== false &&
+        shouldAutoPrintAfterSale(receiptPrintConfigRef.current ?? { enabled: true, autoPrint: receiptAutoPrint });
+      setShowReceiptModal(true);
+      if (auto) {
+        setShowPrintDialog(true);
+      }
+    },
+    [receiptAutoPrint],
+  );
+
   // ── Fullscreen: enter fullscreen when not already in standalone/fullscreen mode ──
   useEffect(() => {
     const isStandalone =
@@ -611,26 +637,49 @@ export default function POSPage() {
     }
   }, [storageVersion]);
 
-  // Fetch invoice settings for receipt branding
+  // Fetch invoice settings for receipt branding (note, footer, payment accounts, company)
   useEffect(() => {
+    const applyInvoiceSettings = (settingsData: InvoiceSettingsData) => {
+      setInvoiceSettings({
+        companyName: settingsData.companyName,
+        companyAddress: settingsData.companyAddress,
+        companyPhone: settingsData.companyPhone,
+        companyTin: settingsData.companyTin,
+        footerText: settingsData.footerText,
+        customReceiptNote: settingsData.customReceiptNote,
+        paymentAccounts: settingsData.paymentAccounts,
+      });
+    };
+
     const fetchInvoiceSettings = async () => {
       try {
         const response = await api.settings.getInvoiceSettings();
         if (response.data?.success && response.data?.data) {
-          const settingsData = response.data.data as InvoiceSettingsData;
-          setInvoiceSettings({
-            companyName: settingsData.companyName,
-            companyAddress: settingsData.companyAddress,
-            companyPhone: settingsData.companyPhone,
-            customReceiptNote: settingsData.customReceiptNote,
-            paymentAccounts: settingsData.paymentAccounts,
-          });
+          applyInvoiceSettings(response.data.data as InvoiceSettingsData);
         }
       } catch (error) {
         console.error('Failed to fetch invoice settings:', error);
       }
     };
+
+    const loadPrintConfig = async () => {
+      const cfg = await fetchReceiptPrintConfig();
+      receiptPrintConfigRef.current = cfg;
+      setReceiptAutoPrint(cfg.autoPrint);
+    };
+
     fetchInvoiceSettings();
+    loadPrintConfig();
+
+    // Refresh when returning to POS so Custom Receipt Note / accounts / auto-print stay current
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        fetchInvoiceSettings();
+        loadPrintConfig();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   // Re-sync catalog when coming back online
@@ -3243,7 +3292,7 @@ export default function POSPage() {
       setPaymentReference('');
       setSaleDate('');
       setShowDatePicker(false);
-      setShowReceiptModal(true);
+      presentSaleReceipt();
       clearPersistedCart();
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
@@ -3323,9 +3372,9 @@ export default function POSPage() {
         setPaymentReference('');
         setSaleDate('');
         setShowDatePicker(false);
-        setShowReceiptModal(true);
         setLastSale(sale);
-        console.log('✅ Modals updated: payment=false, receipt=true');
+        presentSaleReceipt();
+        console.log('✅ Modals updated: payment=false, receipt presented (auto-print if enabled)');
 
         // MANDATORY: Create invoice for any credit payment (business rule)
         // Credit sales MUST have invoices to track accounts receivable
@@ -4436,9 +4485,10 @@ export default function POSPage() {
         </POSModal>
       )}
 
-      {/* Print Receipt Dialog */}
+      {/* Print Receipt Dialog — autoPrint when Settings → Auto-print receipt is on */}
       <PrintReceiptDialog
         open={showPrintDialog}
+        autoPrint={receiptAutoPrint}
         onOpenChange={(open) => {
           setShowPrintDialog(open);
           // When print dialog closes, refocus search
@@ -4448,8 +4498,8 @@ export default function POSPage() {
         }}
         receiptData={receiptData}
         onAfterPrint={() => {
-          // Log receipt print to audit trail
-          if (lastSale?.id) {
+          // Log receipt print to audit trail (permission may fail; print already succeeded)
+          if (lastSale?.id && !String(lastSale.id).startsWith('offline') && !String(lastSale.id).startsWith('ofl_')) {
             api.post(`/sales/${lastSale.id}/reprint`).catch((err: unknown) => {
               console.error('Failed to log receipt print:', err);
             });

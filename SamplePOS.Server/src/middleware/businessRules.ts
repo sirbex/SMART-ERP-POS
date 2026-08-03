@@ -10,6 +10,7 @@ import Decimal from 'decimal.js';
 import logger from '../utils/logger.js';
 import { Money } from '../utils/money.js';
 import { getBusinessDate, formatDateBusiness } from '../utils/dateRange.js';
+import { evaluateCustomerCreditLimit } from '../../../shared/utils/customerCreditLimit.js';
 
 // Configure Decimal for financial calculations
 Decimal.set({ precision: 20, rounding: Decimal.ROUND_HALF_UP });
@@ -402,7 +403,7 @@ export class SalesBusinessRules {
   }
 
   /**
-   * BR-SAL-003: Credit sales require customer with credit limit
+   * BR-SAL-003: Credit sales require customer; enforce finite credit_limit unless unlimited_credit.
    */
   static async validateCreditSale(
     pool: Pool | PoolClient,
@@ -422,7 +423,8 @@ export class SalesBusinessRules {
       const result = await pool.query(
         `SELECT 
           credit_limit, 
-          COALESCE(balance, 0) as current_balance 
+          COALESCE(balance, 0) as current_balance,
+          COALESCE(unlimited_credit, false) as unlimited_credit
          FROM customers 
          WHERE id = $1`,
         [customerId]
@@ -436,13 +438,18 @@ export class SalesBusinessRules {
         );
       }
 
-      const { credit_limit, current_balance } = result.rows[0];
-      const newBalance = new Decimal(current_balance).plus(totalAmount);
+      const { credit_limit, current_balance, unlimited_credit } = result.rows[0];
+      const evalResult = evaluateCustomerCreditLimit({
+        unlimitedCredit: Boolean(unlimited_credit),
+        creditLimit: credit_limit,
+        currentBalance: current_balance,
+        additionalCredit: totalAmount,
+      });
 
-      if (newBalance.greaterThan(credit_limit)) {
+      if (!evalResult.allowed) {
         throw new BusinessRuleViolation(
           'BR-SAL-003',
-          `Credit limit exceeded. Limit: ${credit_limit}, Current: ${current_balance}, New: ${newBalance.toFixed(2)}`,
+          evalResult.message,
           'CREDIT_LIMIT_EXCEEDED'
         );
       }

@@ -56,6 +56,7 @@ export default function QuickAddCustomerModal({
     phone: '',
     address: '',
     creditLimit: 500000, // Default: 500,000 UGX
+    unlimitedCredit: false,
     whtLiable: false,
     defaultWhtTypeId: null,
   });
@@ -106,6 +107,7 @@ export default function QuickAddCustomerModal({
       phone: '',
       address: '',
       creditLimit: 500000, // Default: 500,000 UGX
+      unlimitedCredit: false,
       whtLiable: false,
       defaultWhtTypeId: null,
     });
@@ -153,6 +155,7 @@ export default function QuickAddCustomerModal({
         phone: validation.data.phone || undefined,
         address: validation.data.address || undefined,
         creditLimit: validation.data.creditLimit ?? 0,
+        unlimitedCredit: validation.data.unlimitedCredit === true,
         whtLiable,
         defaultWhtTypeId,
         balance: 0,
@@ -168,6 +171,7 @@ export default function QuickAddCustomerModal({
         phone: validation.data.phone || '',
         address: validation.data.address || '',
         creditLimit: validation.data.creditLimit ?? 0,
+        unlimitedCredit: validation.data.unlimitedCredit === true,
         balance: 0,
         customerGroupId: validation.data.customerGroupId ?? undefined,
         priceGroupId: validation.data.priceGroupId ?? undefined,
@@ -191,6 +195,7 @@ export default function QuickAddCustomerModal({
       customerGroupId: validation.data.customerGroupId ?? undefined,
       priceGroupId: validation.data.priceGroupId ?? undefined,
       creditLimit: validation.data.creditLimit,
+      unlimitedCredit: validation.data.unlimitedCredit === true,
       whtLiable: validation.data.whtLiable,
       defaultWhtTypeId: validation.data.defaultWhtTypeId ?? undefined,
     });
@@ -300,49 +305,86 @@ export default function QuickAddCustomerModal({
               step="1000"
               value={formData.creditLimit || 0}
               onChange={(e) => handleChange('creditLimit', parseFloat(e.target.value) || 0)}
-              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${errors.creditLimit ? 'border-red-500' : 'border-gray-300'
+              disabled={formData.unlimitedCredit === true}
+              className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 ${errors.creditLimit ? 'border-red-500' : 'border-gray-300'
                 }`}
               placeholder="500000"
             />
             {errors.creditLimit && <p className="text-red-500 text-xs mt-1">{errors.creditLimit}</p>}
+            <label className="mt-2 flex items-center gap-2 text-sm text-gray-800 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={formData.unlimitedCredit === true}
+                onChange={(e) => handleChange('unlimitedCredit', e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <span>
+                <span className="font-medium">Unlimited credit</span>
+                <span className="text-gray-500"> — no hard AR ceiling</span>
+              </span>
+            </label>
             <div className="flex gap-2 mt-2">
               <button
                 type="button"
-                onClick={() => handleChange('creditLimit', 100000)}
+                onClick={() => {
+                  handleChange('unlimitedCredit', false);
+                  handleChange('creditLimit', 100000);
+                }}
                 className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
               >
                 100K
               </button>
               <button
                 type="button"
-                onClick={() => handleChange('creditLimit', 250000)}
+                onClick={() => {
+                  handleChange('unlimitedCredit', false);
+                  handleChange('creditLimit', 250000);
+                }}
                 className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
               >
                 250K
               </button>
               <button
                 type="button"
-                onClick={() => handleChange('creditLimit', 500000)}
+                onClick={() => {
+                  handleChange('unlimitedCredit', false);
+                  handleChange('creditLimit', 500000);
+                }}
                 className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
               >
                 500K
               </button>
               <button
                 type="button"
-                onClick={() => handleChange('creditLimit', 1000000)}
+                onClick={() => {
+                  handleChange('unlimitedCredit', false);
+                  handleChange('creditLimit', 1000000);
+                }}
                 className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
               >
                 1M
               </button>
               <button
                 type="button"
-                onClick={() => handleChange('creditLimit', 0)}
+                onClick={() => {
+                  handleChange('unlimitedCredit', false);
+                  handleChange('creditLimit', 0);
+                }}
                 className="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 text-red-700 rounded"
               >
                 No Credit
               </button>
+              <button
+                type="button"
+                onClick={() => handleChange('unlimitedCredit', true)}
+                className="px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-800 rounded"
+              >
+                Unlimited
+              </button>
             </div>
-            <p className="text-xs text-gray-500 mt-1">💡 Default: 500,000 UGX • Set to 0 for cash-only customers</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Finite limit is a hard cap on credit/on-account sales. Unlimited is for enterprise accounts with no ceiling.
+            </p>
           </div>
 
           {/* WHT defaults — same as customer edit */}

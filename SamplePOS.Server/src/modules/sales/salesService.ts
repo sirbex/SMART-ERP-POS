@@ -1256,7 +1256,7 @@ export const salesService = {
       // Validate customer exists in database if provided
       if (input.customerId) {
         const customerCheck = await client.query(
-          'SELECT id, name, credit_limit, balance FROM customers WHERE id = $1',
+          'SELECT id, name, credit_limit, balance, COALESCE(unlimited_credit, false) AS unlimited_credit FROM customers WHERE id = $1',
           [input.customerId]
         );
 
@@ -1267,8 +1267,8 @@ export const salesService = {
         const customer = customerCheck.rows[0];
         const outstandingAmount = actualTotalAmount.minus(actualAmountPaid);
 
-        // Check credit limit for sales with outstanding balance
-        if (hasOutstandingBalance && customer.credit_limit) {
+        // Check credit limit for sales with outstanding balance (enterprise: skip if unlimited)
+        if (hasOutstandingBalance && !customer.unlimited_credit && customer.credit_limit) {
           const newBalance = Money.add(customer.balance || 0, outstandingAmount);
           const creditLimit = Money.parse(customer.credit_limit || 0);
 
@@ -1281,13 +1281,6 @@ export const salesService = {
               creditLimit: Money.toNumber(creditLimit),
               outstandingAmount: Money.toNumber(outstandingAmount),
             });
-
-            // Option: throw error to prevent exceeding credit limit
-            // throw new Error(
-            //   `CREDIT LIMIT EXCEEDED: Customer "${customer.name}" has credit limit of ${creditLimit.toFixed(2)}. ` +
-            //   `Current balance: ${parseFloat(customer.balance || 0).toFixed(2)}, This sale: ${outstandingAmount.toFixed(2)}, ` +
-            //   `New balance would be: ${newBalance.toFixed(2)}. Cannot proceed.`
-            // );
           }
         }
 

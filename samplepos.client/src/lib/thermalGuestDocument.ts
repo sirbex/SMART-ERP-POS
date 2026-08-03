@@ -73,6 +73,7 @@ export function buildThermalGuestDocumentHtml(doc: ThermalGuestDocument): string
       companyName: doc.companyName,
       companyAddress: doc.companyAddress,
       companyPhone: doc.companyPhone,
+      companyTin: doc.companyTin,
     },
     { mode: 'guest', escapeHtml },
   );
@@ -307,8 +308,10 @@ export function receiptToThermalGuestDocument(data: {
   companyName?: string;
   companyAddress?: string;
   companyPhone?: string;
+  companyTin?: string;
   paymentAccounts?: ThermalGuestDocument['paymentAccounts'];
   customReceiptNote?: string;
+  footerText?: string;
   isReprint?: boolean;
 }): ThermalGuestDocument {
   const plain = (data.items || []).filter((i) => !i.discountAmount);
@@ -376,6 +379,11 @@ export function receiptToThermalGuestDocument(data: {
     }
   }
 
+  const footerFromSettings = (data.footerText || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
   return {
     kind: 'RECEIPT',
     title: 'RECEIPT',
@@ -384,6 +392,7 @@ export function receiptToThermalGuestDocument(data: {
     companyName: data.companyName,
     companyAddress: data.companyAddress,
     companyPhone: data.companyPhone,
+    companyTin: data.companyTin,
     meta,
     items,
     subtotal: data.subtotal,
@@ -393,8 +402,8 @@ export function receiptToThermalGuestDocument(data: {
     totalAmount: data.totalAmount,
     paymentRows,
     paymentAccounts: data.paymentAccounts,
-    customNote: data.customReceiptNote,
-    footerLines: ['Thank you for your business!'],
+    customNote: data.customReceiptNote?.trim() || null,
+    footerLines: footerFromSettings.length > 0 ? footerFromSettings : ['Thank you for your business!'],
     isReprint: data.isReprint,
   };
 }

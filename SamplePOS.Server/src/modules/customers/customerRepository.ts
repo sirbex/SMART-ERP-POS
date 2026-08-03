@@ -30,6 +30,7 @@ const CUSTOMER_SELECT = `
       c.price_group_id as "priceGroupId",
       pg.pricing_mode as "pricingMode",
       c.balance, c.credit_limit as "creditLimit",
+      COALESCE(c.unlimited_credit, false) as "unlimitedCredit",
       COALESCE(c.wht_liable, false) as "whtLiable",
       c.default_wht_type_id as "defaultWhtTypeId",
       COALESCE(c.vat_registered, false) as "vatRegistered",
@@ -164,10 +165,11 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
   const result = await pool.query(
     `INSERT INTO customers (
       customer_number, name, email, phone, address, customer_group_id, price_group_id, credit_limit,
+      unlimited_credit,
       wht_liable, default_wht_type_id,
       vat_registered, tin, tax_profile, default_vat_rate, vat_registration_date, tax_effective_from,
       tax_exempt, allow_tax_override
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
     RETURNING id`,
     [
       customerNumber,
@@ -178,6 +180,7 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool | pg
       data.customerGroupId || null,
       data.priceGroupId || null,
       data.creditLimit || 0,
+      data.unlimitedCredit === true,
       data.whtLiable === true,
       data.whtLiable === true ? data.defaultWhtTypeId || null : null,
       tax.vatRegistered,
@@ -230,6 +233,10 @@ export async function updateCustomer(id: string, data: UpdateCustomer, dbPool?: 
   if (data.creditLimit !== undefined) {
     fields.push(`credit_limit = $${paramIndex++}`);
     values.push(data.creditLimit);
+  }
+  if (data.unlimitedCredit !== undefined) {
+    fields.push(`unlimited_credit = $${paramIndex++}`);
+    values.push(data.unlimitedCredit === true);
   }
   if (data.whtLiable !== undefined) {
     fields.push(`wht_liable = $${paramIndex++}`);
@@ -776,7 +783,7 @@ export interface CustomerSummary {
   totalInvoices: number;
   outstandingBalance: number;
   creditUsed: number;
-  creditAvailable: number;
+  creditAvailable: number | null;
   lastPurchaseDate?: Date;
   pendingInvoices: number;
 }
@@ -815,9 +822,10 @@ export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool | 
   // Positive → customer owes money, Negative → customer overpaid (credit balance)
   const balance = typeof customer.balance === 'string' ? parseFloat(customer.balance) : (customer.balance || 0);
   const creditLimit = typeof customer.creditLimit === 'string' ? parseFloat(String(customer.creditLimit)) : (customer.creditLimit || 0);
+  const unlimitedCredit = Boolean((customer as { unlimitedCredit?: boolean }).unlimitedCredit);
   const outstandingBalance = balance > 0 ? balance : 0;
   const creditUsed = outstandingBalance;
-  const creditAvailable = Math.max(0, creditLimit - creditUsed);
+  const creditAvailable = unlimitedCredit ? null : Math.max(0, creditLimit - creditUsed);
 
   return {
     totalSales: parseInt(summary.totalInvoices, 10),
@@ -825,7 +833,9 @@ export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool | 
     totalInvoices: parseInt(summary.totalInvoices, 10),
     outstandingBalance,
     creditUsed,
+    /** null = unlimited (enterprise) */
     creditAvailable,
+    unlimitedCredit,
     lastPurchaseDate: summary.lastPurchaseDate || undefined,
     pendingInvoices,
   };
