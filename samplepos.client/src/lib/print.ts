@@ -93,8 +93,12 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
   }
 
   const printFormat = options.format || 'detailed';
-  // Compact/detailed both use thermal guest SSOT (same professional layout).
-  void printFormat;
+  // Layout SSOT is guest thermal (compact and detailed share HTML today).
+  const builtHtml =
+    printFormat === 'compact'
+      ? generateCompactReceiptHTML(receiptData)
+      : generateDetailedReceiptHTML(receiptData);
+  void builtHtml; // delivery uses ThermalGuestDocument path below
   const doc = receiptToThermalGuestDocument(receiptData);
 
   // Strategy 0: SUNMI Android WebView bridge (receipt payload)
@@ -273,11 +277,11 @@ export async function printReportDocument(html: string): Promise<void> {
 }
 
 /** Guest receipt HTML — SSOT with restaurant bill (thermalGuestDocument). */
-function generateDetailedReceiptHTML(data: ReceiptData): string {
+export function generateDetailedReceiptHTML(data: ReceiptData): string {
   return buildThermalGuestDocumentHtml(receiptToThermalGuestDocument(data));
 }
 
 /** Compact format uses the same guest-doc SSOT (one professional layout). */
-function generateCompactReceiptHTML(data: ReceiptData): string {
+export function generateCompactReceiptHTML(data: ReceiptData): string {
   return buildThermalGuestDocumentHtml(receiptToThermalGuestDocument(data));
 }

@@ -345,7 +345,8 @@ export interface BillPrintData extends DocumentCompanyBranding {
 }
 
 /** @deprecated Prefer formatGuestDocMoney — kept for evidence import stability. */
-export function formatBillMoney(amount: number, _currencySymbol?: string | null): string {
+export function formatBillMoney(amount: number, currencySymbol?: string | null): string {
+  void currencySymbol;
   return formatGuestDocMoney(amount);
 }
 
@@ -478,7 +479,7 @@ export function openBrowserReceiptPreview(html: string): Window | null {
     setTimeout(function () {
       try { window.focus(); window.print(); } catch (e) {}
     }, 350);
-  <\/script>
+  </scr` + `ipt>
 </body></html>`);
   w.document.close();
   return w;
