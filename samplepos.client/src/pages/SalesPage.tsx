@@ -2852,11 +2852,15 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                         return;
                       }
 
-                      // Audit trail (non-blocking if already counted this session)
+                      // Audit trail (non-blocking) — never toast if sale missing
                       try {
-                        await api.post(`/sales/${sale.id}/reprint`);
+                        await api.post(`/sales/${sale.id}/reprint`, undefined, {
+                          silentErrorToast: true,
+                        });
                       } catch (err) {
-                        console.error('Failed to log receipt reprint:', err);
+                        if (import.meta.env.DEV) {
+                          console.warn('[Sales] Receipt reprint audit failed', err);
+                        }
                       }
 
                       const printCfg = await fetchReceiptPrintConfig();

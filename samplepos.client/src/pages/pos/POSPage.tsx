@@ -167,6 +167,32 @@ interface SaleRecord {
   created_at?: string;
   totalAmount?: number;
   total_amount?: number;
+  /**
+   * Only true for completed `sales` rows — never for hold-orders / offline journal ids.
+   * Gates POST /sales/:id/reprint audit (orders are not sales → 404 without this).
+   */
+  isPersistedSale?: boolean;
+}
+
+/** UUID v1–v5 shape — avoids posting offline tokens or sale numbers as path ids. */
+function isSaleIdUuid(id: string | null | undefined): boolean {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(id).trim(),
+  );
+}
+
+/** Best-effort audit only — never toast on 404/network (print already succeeded). */
+function logSaleReceiptPrintAudit(saleId: string | null | undefined, isPersistedSale?: boolean): void {
+  if (!isPersistedSale || !isSaleIdUuid(saleId)) return;
+  void api
+    .post(`/sales/${saleId}/reprint`, undefined, { silentErrorToast: true })
+    .catch((err: unknown) => {
+      // Dev visibility only — production should not surface failed audit after a good print
+      if (import.meta.env.DEV) {
+        console.warn('[POS] Receipt print audit skipped/failed', err);
+      }
+    });
 }
 
 /** Format a Date into a receipt-friendly date+time string: DD/MM/YYYY h:mm AM/PM
@@ -2725,6 +2751,7 @@ export default function POSPage() {
           saleNumber: offlineId,
           saleDate: getBusinessDate(),
           totalAmount: grandTotal,
+          isPersistedSale: false,
         });
 
         // Clear cart
@@ -2798,6 +2825,7 @@ export default function POSPage() {
           saleNumber: orderNum,
           saleDate: getBusinessDate(),
           totalAmount: grandTotal,
+          isPersistedSale: false,
         });
 
         // Clear cart
@@ -2851,6 +2879,7 @@ export default function POSPage() {
           saleNumber: offlineId,
           saleDate: getBusinessDate(),
           totalAmount: grandTotal,
+          isPersistedSale: false,
         });
         setItems([]);
         setSelectedCustomer(null);
@@ -3270,6 +3299,7 @@ export default function POSPage() {
           saleNumber: offlineId,
           saleDate: offlineSaleDate,
           totalAmount: grandTotal,
+          isPersistedSale: false,
         });
       } catch (stockErr: unknown) {
         toast.error(
@@ -3372,7 +3402,7 @@ export default function POSPage() {
         setPaymentReference('');
         setSaleDate('');
         setShowDatePicker(false);
-        setLastSale(sale);
+        setLastSale({ ...sale, isPersistedSale: true });
         presentSaleReceipt();
         console.log('✅ Modals updated: payment=false, receipt presented (auto-print if enabled)');
 
@@ -4498,12 +4528,8 @@ export default function POSPage() {
         }}
         receiptData={receiptData}
         onAfterPrint={() => {
-          // Log receipt print to audit trail (permission may fail; print already succeeded)
-          if (lastSale?.id && !String(lastSale.id).startsWith('offline') && !String(lastSale.id).startsWith('ofl_')) {
-            api.post(`/sales/${lastSale.id}/reprint`).catch((err: unknown) => {
-              console.error('Failed to log receipt print:', err);
-            });
-          }
+          // Audit only real sales rows — hold-order UUIDs must not hit /sales/:id/reprint (404 toast).
+          logSaleReceiptPrintAudit(lastSale?.id, lastSale?.isPersistedSale);
           // Close the receipt modal after printing
           setShowReceiptModal(false);
           // Refocus search after printing completes
