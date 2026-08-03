@@ -153,11 +153,19 @@ describe('printReceipt — SUNMI bridge routing', () => {
                 style: { position: '', width: '', height: '', border: '' },
                 contentWindow: null,
             }),
-            body: { appendChild: vi.fn(), removeChild: vi.fn(), contains: vi.fn().mockReturnValue(false) },
+            body: {
+                appendChild: vi.fn(),
+                removeChild: vi.fn(),
+                contains: vi.fn().mockReturnValue(false),
+            },
+            getElementById: vi.fn().mockReturnValue(null),
         });
 
-        // Preview or browser fallback may still resolve/reject — we only assert bridge contact.
-        await printReceipt(RECEIPT, { openBrowserPreviewOnFailure: true }).catch(() => {});
+        // Named printer required — sale receipts never POST to agent with OS default only.
+        await printReceipt(RECEIPT, {
+            printerName: 'EPSON TM-T88III Receipt',
+            openBrowserPreviewOnFailure: true,
+        }).catch(() => {});
 
         expect(mockFetch).toHaveBeenCalled();
         const urls = mockFetch.mock.calls.map((c) => String(c[0]));
@@ -165,6 +173,43 @@ describe('printReceipt — SUNMI bridge routing', () => {
         expect(
             mockFetch.mock.calls.some((c) => c[1] && (c[1] as { method?: string }).method === 'POST'),
         ).toBe(true);
+    });
+
+    it('STRATEGY: no named printer skips agent (no silent OS-default 202) and opens preview', async () => {
+        const mockFetch = vi.fn();
+        vi.stubGlobal('fetch', mockFetch);
+        const open = vi.fn(() => null);
+        vi.stubGlobal('window', { open });
+        let created = 0;
+        vi.stubGlobal('document', {
+            createElement: vi.fn(() => {
+                created += 1;
+                return {
+                    style: {},
+                    setAttribute: vi.fn(),
+                    appendChild: vi.fn(),
+                    addEventListener: vi.fn(),
+                    contentDocument: {
+                        open: vi.fn(),
+                        write: vi.fn(),
+                        close: vi.fn(),
+                    },
+                    contentWindow: { focus: vi.fn(), print: vi.fn() },
+                };
+            }),
+            body: { appendChild: vi.fn(), removeChild: vi.fn() },
+            getElementById: vi.fn().mockReturnValue(null),
+        });
+
+        const result = await printReceipt(RECEIPT, {
+            openBrowserPreviewOnFailure: true,
+            preferInAppPreview: true,
+        });
+
+        // Must not call agent without a mapped thermal name (would 202→PDF after local-network grant)
+        expect(mockFetch).not.toHaveBeenCalled();
+        expect(result.method).toBe('preview');
+        expect(created).toBeGreaterThan(0);
     });
 
     // ── Validation ───────────────────────────────────────────────────────────

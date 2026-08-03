@@ -236,11 +236,17 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
     expect(printRest).not.toMatch(/isReceiptPrintingEnabled|shouldAutoPrintAfterSale/);
   });
 
-  it('STRUCT: sale receipt never silent-skips restaurant pay without toast helper', () => {
-    const settlement = readClient('lib/restaurantSettlementReceipt.ts');
-    expect(settlement).toMatch(/toast\./);
-    expect(settlement).toMatch(/skippedReason:\s*'disabled'/);
-    expect(settlement).toMatch(/preferSettingsPrinter/);
+  it('STRUCT: sale receipts never silent-accept unnamed Windows default after local-network grant', () => {
+    const print = readClient('lib/print.ts');
+    expect(print).toMatch(/allowUnnamedAgentDefault:\s*false/);
+    expect(print).toMatch(/resolveAgentPrinterRole/);
+
+    const thermal = readClient('lib/printRestaurant.ts');
+    expect(thermal).toMatch(/allowUnnamedAgentDefault/);
+    expect(thermal).toMatch(/namedOnly|No receipt printer named|false success|OS default|unnamed/i);
+
+    const health = readClient('lib/printAgentHealth.ts');
+    expect(health).toMatch(/export function resolveAgentPrinterRole/);
   });
 
   it('STRUCT: FOH guest bills carry invoice footer + payment accounts; never receipt enable gate', () => {

@@ -88,11 +88,14 @@ export interface ReceiptData {
 /**
  * Print a receipt using the shared PrintService contract:
  *   0. SUNMI WebView JSON bridge (receipts only)
- *   1. ESC/POS + HTML via local agent (same as guest bill when possible)
- *   2. In-app / browser tab preview with Print (visible; not silent)
+ *   1. ESC/POS + HTML via local agent **only with a named Windows printer**
+ *   2. In-app / browser preview with Print (when agent offline or no name mapped)
+ *
+ * Why named-only for silent agent: after Chrome grants "local network devices",
+ * :1811 becomes reachable and often 202s the OS default printer (PDF) → fake success.
+ * Before that grant, agent failed closed and browser print worked.
  *
  * Reports and other HTML documents should call {@link printHtmlDocument}.
- * Returns how delivery was accepted — callers must surface non-silent UX for restaurant.
  */
 export async function printReceipt(
   receiptData: ReceiptData,
@@ -119,18 +122,30 @@ export async function printReceipt(
 
   // Dynamic import avoids circular init with printRestaurant → printHtmlDocument.
   const { printGuestThermalDocument } = await import('./printRestaurant');
+  const { resolveAgentPrinterRole } = await import('./printAgentHealth');
+
+  const agentRole = resolveAgentPrinterRole('receipt');
+  const fallbacks = [
+    ...(options.fallbackPrinterNames || []),
+    // Agent setup wizard "receipt" role when Settings printer name is blank
+    agentRole,
+  ];
+
   const result = await printGuestThermalDocument(doc, {
     printerName: options.printerName,
-    fallbackPrinterNames: options.fallbackPrinterNames,
+    fallbackPrinterNames: fallbacks,
     allowBrowserFallback: options.allowBrowserFallback === true,
     openBrowserPreviewOnFailure: options.openBrowserPreviewOnFailure !== false,
     preferInAppPreview: options.preferInAppPreview !== false,
+    // Never silent-accept OS default (PDF / dead queue after local-network permission)
+    allowUnnamedAgentDefault: false,
   });
   if (typeof console !== 'undefined') {
     console.info('[printReceipt]', {
       method: result.method,
       printerName: result.printerName ?? null,
       tried: result.triedPrinters,
+      agentRole,
     });
   }
   return {

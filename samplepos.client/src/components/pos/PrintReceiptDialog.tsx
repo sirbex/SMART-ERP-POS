@@ -71,10 +71,20 @@ export default function PrintReceiptDialog({
                 printerName,
             };
 
-            await printReceipt(receiptData, printOptions);
+            const result = await printReceipt(receiptData, printOptions);
 
             setPrintStatus('success');
             setIsPrinting(false);
+
+            // Agent "accept" to unnamed default used to fake success after local-network
+            // permission — method "preview" means user must click Print on the overlay.
+            if (result.method === 'preview') {
+                setErrorMessage(
+                    'No named receipt printer mapped. Use Print on the preview, or set Settings → Printing → Thermal Printer Name (exact Windows name).',
+                );
+                // Keep dialog open so operator sees the hint
+                return;
+            }
 
             onAfterPrint?.();
 

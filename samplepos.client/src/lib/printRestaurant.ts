@@ -366,7 +366,11 @@ export type GuestThermalPrintResult = {
 /**
  * Shared guest thermal delivery (GUEST BILL + paid RECEIPT).
  * Prefer ESC/POS + named agent printer (same path that makes bills work).
- * Sale receipts may open a visible in-app print preview when silent paths miss.
+ *
+ * IMPORTANT (sale receipts): after the browser grants "use local network devices",
+ * POST :1811 often returns 202 for Windows **default** printer (PDF / ghost).
+ * That looks like success but produces no thermal paper. Sale receipts must use
+ * named printers only (`allowUnnamedAgentDefault: false`).
  */
 export async function printGuestThermalDocument(
   doc: ThermalGuestDocument,
@@ -381,6 +385,11 @@ export async function printGuestThermalDocument(
     openBrowserPreviewOnFailure?: boolean;
     /** Prefer in-app modal (not window.open) so popup blockers cannot hide failure. */
     preferInAppPreview?: boolean;
+    /**
+     * When true (KOT/bill default), last try uses agent Windows default (no name header).
+     * When false (sale receipts), never silent-accept unnamed default — use preview instead.
+     */
+    allowUnnamedAgentDefault?: boolean;
   },
 ): Promise<GuestThermalPrintResult> {
   const tried = new Set<string>();
@@ -394,11 +403,43 @@ export async function printGuestThermalDocument(
   };
   push(opts?.printerName);
   for (const f of opts?.fallbackPrinterNames || []) push(f);
-  // Final: agent default (no name) — same recovery as unmapped KOT default.
-  push(null);
+  // Unnamed Windows default — NOT for sale receipts (false 202 → PDF / no paper).
+  // Default false for safety after Chrome "local network" grant; bills/KOT pass true.
+  if (opts?.allowUnnamedAgentDefault === true) {
+    push(null);
+  }
 
   let lastReason = 'offline';
   const triedList = [...queue];
+  const namedOnly = queue.filter((p): p is string => !!p);
+
+  // No named destination: sale receipts → visible print; KOT/bill may still use OS default.
+  if (namedOnly.length === 0) {
+    if (opts?.allowUnnamedAgentDefault === true) {
+      // continue below to agent with null (legacy KOT/bill default path)
+    } else {
+      const htmlEmpty = buildThermalGuestDocumentHtml(doc);
+      if (opts?.openBrowserPreviewOnFailure !== false) {
+        if (opts?.preferInAppPreview !== false) {
+          const inApp = openInAppReceiptPreview(htmlEmpty);
+          if (inApp) {
+            return { method: 'preview', printerName: null, triedPrinters: triedList };
+          }
+        }
+        const tab = openBrowserReceiptPreview(htmlEmpty);
+        if (tab) {
+          return { method: 'preview', printerName: null, triedPrinters: triedList };
+        }
+      }
+      if (opts?.allowBrowserFallback) {
+        await printHtmlDocument(htmlEmpty);
+        return { method: 'browser', printerName: null, triedPrinters: triedList };
+      }
+      throw new Error(
+        'No receipt printer named in Settings → Printing or Print Agent roles. Set Thermal Printer Name to the exact Windows printer name.',
+      );
+    }
+  }
 
   if (agentSupportsEscPos()) {
     const ticket = guestDocumentToThermalTicket(doc);
@@ -620,5 +661,7 @@ export async function printRestaurantBill(data: BillPrintData): Promise<void> {
     // Bills stay silent — emergency browser only via stations policy when named miss.
     allowBrowserFallback: isRestaurantBrowserPrintFallbackEnabled(),
     openBrowserPreviewOnFailure: false,
+    // Named guest-bill preferred; still allow Windows default when unmapped (legacy).
+    allowUnnamedAgentDefault: true,
   });
 }

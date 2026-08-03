@@ -187,6 +187,12 @@ export function createAgentApp(): Express {
           ? req.headers['x-printer-name']
           : '') || null;
       const trimmed = printerName?.trim() || null;
+      // Prefer wizard roles when client omits name — never silent-null to wrong default without roles.
+      const roles = readPrinterRoles();
+      const resolvedPrinter =
+        trimmed ||
+        (roles.receipt?.trim() || null) ||
+        null;
       const id = `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
       if (isEscPosRequest(req)) {
@@ -201,17 +207,18 @@ export function createAgentApp(): Express {
           id,
           format: 'escpos',
           payload: buf.toString('base64'),
-          printerName: trimmed,
+          printerName: resolvedPrinter,
         });
         const acceptMs = Date.now() - t0;
         appendAgentLog(
-          `[print] accepted id=${id} format=escpos bytes=${buf.length} printer=${trimmed || '(default)'} acceptMs=${acceptMs}`,
+          `[print] accepted id=${id} format=escpos bytes=${buf.length} printer=${resolvedPrinter || '(windows-default)'} acceptMs=${acceptMs}`,
         );
         res.status(202).json({
           success: true,
           id,
           accepted: true,
           format: 'escpos',
+          printerName: resolvedPrinter,
           queueDepth: getQueueDepth(),
           acceptMs,
         });
@@ -223,16 +230,17 @@ export function createAgentApp(): Express {
         res.status(400).json({ success: false, error: 'Empty print body' });
         return;
       }
-      enqueuePrintJob({ id, format: 'html', payload: html, printerName: trimmed });
+      enqueuePrintJob({ id, format: 'html', payload: html, printerName: resolvedPrinter });
       const acceptMs = Date.now() - t0;
       appendAgentLog(
-        `[print] accepted id=${id} format=html printer=${trimmed || '(default)'} acceptMs=${acceptMs}`,
+        `[print] accepted id=${id} format=html printer=${resolvedPrinter || '(windows-default)'} acceptMs=${acceptMs}`,
       );
       res.status(202).json({
         success: true,
         id,
         accepted: true,
         format: 'html',
+        printerName: resolvedPrinter,
         queueDepth: getQueueDepth(),
         acceptMs,
       });

@@ -320,3 +320,16 @@ export function printerServiceStatusLabel(status: PrinterServiceStatus): string 
       return 'Printer Service Offline';
   }
 }
+
+/**
+ * Named Windows printer from local agent Setup Wizard roles
+ * (health /printers + printer-roles.json via /health).
+ */
+export function resolveAgentPrinterRole(
+  role: 'receipt' | 'kitchen' | 'bar',
+): string | null {
+  const roles = getPrinterServiceHealthCache().printerRoles;
+  if (!roles) return null;
+  const name = roles[role];
+  return typeof name === 'string' && name.trim() ? name.trim() : null;
+}
