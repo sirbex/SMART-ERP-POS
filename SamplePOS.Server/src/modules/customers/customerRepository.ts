@@ -784,6 +784,8 @@ export interface CustomerSummary {
   outstandingBalance: number;
   creditUsed: number;
   creditAvailable: number | null;
+  /** Enterprise: true when customer has no hard AR ceiling */
+  unlimitedCredit?: boolean;
   lastPurchaseDate?: Date;
   pendingInvoices: number;
 }
