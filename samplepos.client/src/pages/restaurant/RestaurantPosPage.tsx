@@ -36,6 +36,10 @@ import {
   type ClientPrintJob,
 } from '../../lib/printJobDispatcher';
 import { printReceipt } from '../../lib/print';
+import {
+  fetchReceiptPrintConfig,
+  shouldPrintReceiptOnSettlement,
+} from '../../lib/receiptPrintConfig';
 import PrinterServiceStatusChip from '../../components/restaurant/PrinterServiceStatusChip';
 import {
   readCachedGuestBillPrinter,
@@ -3751,40 +3755,47 @@ export default function RestaurantPosPage() {
             ? `Paid ${paidOrderNumber} (${paid.offlineId}) — ${remainingTickets.length} ticket(s) still open on table`
             : `Paid ${paidOrderNumber} (${paid.offlineId}) — syncs when online`,
         );
-        // Print after UI updates — never block FOH on the printer.
-        // Use Invoice Settings branding (custom note, payment accounts, footer) — do not
-        // overwrite customReceiptNote with offline meta.
-        void printReceipt({
-          saleNumber: paid.offlineId,
-          saleDate: new Date().toLocaleString(),
-          subtotal: paid.subtotal,
-          discountAmount: paid.discountAmount,
-          taxAmount: paid.taxAmount,
-          totalAmount: paid.totalAmount,
-          paymentMethod: 'CASH',
-          amountPaid: paid.tenderedAmount,
-          changeAmount: paid.changeAmount,
-          changeGiven: paid.changeAmount,
-          payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
-          cashierName: user?.fullName || user?.email || undefined,
-          customerName: tableLabel !== 'table' ? `Table ${tableLabel} · ${paidOrderNumber}` : paidOrderNumber,
-          companyName: companyBranding.companyName || invoiceBranding?.companyName || undefined,
-          companyAddress: companyBranding.companyAddress || invoiceBranding?.companyAddress || undefined,
-          companyPhone: companyBranding.companyPhone || invoiceBranding?.companyPhone || undefined,
-          companyTin: invoiceBranding?.companyTin,
-          paymentAccounts: invoiceBranding?.paymentAccounts,
-          customReceiptNote: invoiceBranding?.customReceiptNote,
-          footerText: invoiceBranding?.footerText,
-          items: paid.lines.map((l) => ({
-            name: l.productName,
-            quantity: l.quantity,
-            unitPrice: l.unitPrice,
-            subtotal: l.subtotal,
-            uom: l.uom,
-          })),
-        }).catch(() => {
-          toast.error('Receipt print failed — sale is saved locally');
-        });
+        // Sale receipt only when tenant receipt printing is enabled.
+        // Never gates KOT / guest bill (those use printRestaurant / print jobs).
+        void (async () => {
+          try {
+            const printCfg = await fetchReceiptPrintConfig();
+            if (!shouldPrintReceiptOnSettlement(printCfg)) return;
+            await printReceipt({
+              saleNumber: paid.offlineId,
+              saleDate: new Date().toLocaleString(),
+              subtotal: paid.subtotal,
+              discountAmount: paid.discountAmount,
+              taxAmount: paid.taxAmount,
+              totalAmount: paid.totalAmount,
+              paymentMethod: 'CASH',
+              amountPaid: paid.tenderedAmount,
+              changeAmount: paid.changeAmount,
+              changeGiven: paid.changeAmount,
+              payments: paid.payments.map((p) => ({ method: p.paymentMethod, amount: p.amount })),
+              cashierName: user?.fullName || user?.email || undefined,
+              customerName:
+                tableLabel !== 'table' ? `Table ${tableLabel} · ${paidOrderNumber}` : paidOrderNumber,
+              companyName: companyBranding.companyName || invoiceBranding?.companyName || undefined,
+              companyAddress:
+                companyBranding.companyAddress || invoiceBranding?.companyAddress || undefined,
+              companyPhone: companyBranding.companyPhone || invoiceBranding?.companyPhone || undefined,
+              companyTin: invoiceBranding?.companyTin,
+              paymentAccounts: invoiceBranding?.paymentAccounts,
+              customReceiptNote: invoiceBranding?.customReceiptNote,
+              footerText: invoiceBranding?.footerText,
+              items: paid.lines.map((l) => ({
+                name: l.productName,
+                quantity: l.quantity,
+                unitPrice: l.unitPrice,
+                subtotal: l.subtotal,
+                uom: l.uom,
+              })),
+            });
+          } catch {
+            toast.error('Receipt print failed — sale is saved locally');
+          }
+        })();
 
         setActiveOrderId(null);
         returnToFloor();

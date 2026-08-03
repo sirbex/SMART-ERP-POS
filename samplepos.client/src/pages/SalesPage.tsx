@@ -11,6 +11,10 @@ import { DatePicker } from '../components/ui/date-picker';
 import { toast } from 'react-hot-toast';
 import { printReceipt } from '../lib/print';
 import {
+  fetchReceiptPrintConfig,
+  isReceiptPrintingEnabled,
+} from '../lib/receiptPrintConfig';
+import {
   buildReceiptDataFromSale,
   mergeSaleForReceipt,
   fetchInvoiceSettingsForReceipt,
@@ -2855,6 +2859,13 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                         console.error('Failed to log receipt reprint:', err);
                       }
 
+                      const printCfg = await fetchReceiptPrintConfig();
+                      if (!isReceiptPrintingEnabled(printCfg)) {
+                        toast.error(
+                          'Receipt printing is disabled in Settings → Printing. KOT and guest bills still print.',
+                        );
+                        return;
+                      }
                       const receiptData = buildReceiptDataFromSale(s, branding, {
                         isReprint: true,
                       });

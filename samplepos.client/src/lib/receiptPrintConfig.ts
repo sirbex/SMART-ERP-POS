@@ -1,6 +1,11 @@
 /**
  * Receipt auto-print config (tenant system_settings).
  * Cashiers need this without system.read — server GET is authenticated-only.
+ *
+ * Integrity (must never break KOT / guest bill):
+ * - Master switch `enabled` only gates **sale receipts** (POS / order pay / FOH cash).
+ * - Restaurant KOT + guest bill print paths must never call these helpers.
+ * - Guest bills stay pre-pay (no tender methods); paid receipts show payment lines.
  */
 import { apiClient } from '../utils/api';
 
@@ -47,11 +52,33 @@ export async function fetchReceiptPrintConfig(): Promise<ReceiptPrintConfig> {
 }
 
 /**
- * True when settings intend auto-print after payment.
- * Uses autoPrint flag only (printer name may be blank / browser bridge).
+ * Master switch for sale-receipt paper.
+ * Default true when config missing so legacy tenants keep prior behavior.
+ */
+export function isReceiptPrintingEnabled(
+  config: ReceiptPrintConfig | null | undefined,
+): boolean {
+  if (config == null) return true;
+  return config.enabled !== false;
+}
+
+/**
+ * True when settings intend auto-print after payment (dialog or forced path).
+ * Requires **both** master enable and autoPrint.
  */
 export function shouldAutoPrintAfterSale(
   config: ReceiptPrintConfig | null | undefined,
 ): boolean {
-  return config?.autoPrint === true;
+  return isReceiptPrintingEnabled(config) && config?.autoPrint === true;
+}
+
+/**
+ * Settlement without print dialog (order pay, restaurant offline cash).
+ * Prints when master enable is on — independent of auto-print checkbox.
+ * Auto-print still drives POS dialog auto-open via shouldAutoPrintAfterSale.
+ */
+export function shouldPrintReceiptOnSettlement(
+  config: ReceiptPrintConfig | null | undefined,
+): boolean {
+  return isReceiptPrintingEnabled(config);
 }

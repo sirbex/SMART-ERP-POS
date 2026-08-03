@@ -30,7 +30,10 @@ import {
   buildReceiptDataFromCheckout,
   fetchInvoiceSettingsForReceipt,
 } from '../../lib/receiptFromSale';
-import { fetchReceiptPrintConfig } from '../../lib/receiptPrintConfig';
+import {
+  fetchReceiptPrintConfig,
+  shouldPrintReceiptOnSettlement,
+} from '../../lib/receiptPrintConfig';
 import { useAuth } from '../../contexts/AuthContext';
 
 /** Stable complete key per order for retries / double-submit (session-scoped). */
@@ -435,56 +438,56 @@ export default function OrderPaymentPage() {
         }
       }
 
-      // Same as POS: print guest receipt after complete when auto-print is on
-      // (order/restaurant complete always attempts print — operators expect a slip).
+      // Sale receipt only when tenant receipt printing is enabled (never gates KOT/bill).
       try {
         const [invoiceSettings, printCfg] = await Promise.all([
           fetchInvoiceSettingsForReceipt(),
           fetchReceiptPrintConfig(),
         ]);
-        // Restaurant/order settlement always prints; POS auto flag still preferred when true.
-        // If auto is off we still print here (no separate print dialog on this page).
-        void printCfg;
-        const paidForReceipt = paymentLines.reduce((s, l) => s + l.amount, 0);
-        const changeForReceipt =
-          paidForReceipt > totalAmount ? paidForReceipt - totalAmount : 0;
-        const orderDiscount = Number(order?.discountAmount || 0) + cashierDiscount;
-        await printReceipt(
-          buildReceiptDataFromCheckout({
-            saleNumber: saleNum || order?.orderNumber || '',
-            saleDate: new Date().toISOString(),
-            subtotal: Number(order?.subtotal || totalAmount),
-            discountAmount: orderDiscount > 0 ? orderDiscount : undefined,
-            taxAmount: Number(order?.taxAmount || 0),
-            totalAmount,
-            cashierName: user?.fullName || user?.email || undefined,
-            customer: selectedCustomer
-              ? {
-                  name: selectedCustomer.name,
-                  phone: selectedCustomer.phone,
-                  email: selectedCustomer.email,
-                }
-              : order?.customerName
-                ? { name: order.customerName }
-                : undefined,
-            paymentMethod: paymentLines[0]?.paymentMethod || paymentMethod,
-            amountPaid: paidForReceipt > 0 ? paidForReceipt : totalAmount,
-            changeGiven: changeForReceipt > 0 ? changeForReceipt : undefined,
-            items: (order?.items || []).map((it) => ({
-              name: it.productName,
-              quantity: Number(it.quantity),
-              unitPrice: Number(it.unitPrice),
-              subtotal: Number(it.lineTotal),
-              discountAmount: Number(it.discountAmount || 0) || undefined,
-            })),
-            payments: paymentLines.map((l) => ({
-              method: l.paymentMethod,
-              amount: l.amount,
-              reference: l.reference,
-            })),
-            invoiceSettings,
-          }),
-        );
+        if (!shouldPrintReceiptOnSettlement(printCfg)) {
+          // Master off — KOT/guest bill paths are untouched.
+        } else {
+          const paidForReceipt = paymentLines.reduce((s, l) => s + l.amount, 0);
+          const changeForReceipt =
+            paidForReceipt > totalAmount ? paidForReceipt - totalAmount : 0;
+          const orderDiscount = Number(order?.discountAmount || 0) + cashierDiscount;
+          await printReceipt(
+            buildReceiptDataFromCheckout({
+              saleNumber: saleNum || order?.orderNumber || '',
+              saleDate: new Date().toISOString(),
+              subtotal: Number(order?.subtotal || totalAmount),
+              discountAmount: orderDiscount > 0 ? orderDiscount : undefined,
+              taxAmount: Number(order?.taxAmount || 0),
+              totalAmount,
+              cashierName: user?.fullName || user?.email || undefined,
+              customer: selectedCustomer
+                ? {
+                    name: selectedCustomer.name,
+                    phone: selectedCustomer.phone,
+                    email: selectedCustomer.email,
+                  }
+                : order?.customerName
+                  ? { name: order.customerName }
+                  : undefined,
+              paymentMethod: paymentLines[0]?.paymentMethod || paymentMethod,
+              amountPaid: paidForReceipt > 0 ? paidForReceipt : totalAmount,
+              changeGiven: changeForReceipt > 0 ? changeForReceipt : undefined,
+              items: (order?.items || []).map((it) => ({
+                name: it.productName,
+                quantity: Number(it.quantity),
+                unitPrice: Number(it.unitPrice),
+                subtotal: Number(it.lineTotal),
+                discountAmount: Number(it.discountAmount || 0) || undefined,
+              })),
+              payments: paymentLines.map((l) => ({
+                method: l.paymentMethod,
+                amount: l.amount,
+                reference: l.reference,
+              })),
+              invoiceSettings,
+            }),
+          );
+        }
       } catch (printErr) {
         console.error('Receipt print after order complete failed:', printErr);
         toast.error('Sale completed — receipt print failed. Reprint from Sales if needed.');

@@ -1,5 +1,6 @@
 /**
  * Evidence: auto-print after payment + reprint path.
+ * Master enable is enforced via shouldAutoPrintAfterSale (see receipt-print-integrity suite).
  */
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -22,9 +23,9 @@ function readServer(rel: string): string {
 }
 
 describe('EVIDENCE — auto-print after payment + reprint', () => {
-  it('shouldAutoPrintAfterSale only when autoPrint=true', () => {
+  it('shouldAutoPrintAfterSale only when enabled AND autoPrint=true', () => {
     expect(shouldAutoPrintAfterSale({ enabled: true, autoPrint: true })).toBe(true);
-    expect(shouldAutoPrintAfterSale({ enabled: false, autoPrint: true })).toBe(true);
+    expect(shouldAutoPrintAfterSale({ enabled: false, autoPrint: true })).toBe(false);
     expect(shouldAutoPrintAfterSale({ enabled: true, autoPrint: false })).toBe(false);
     expect(shouldAutoPrintAfterSale(DEFAULT_RECEIPT_PRINT_CONFIG)).toBe(false);
     expect(shouldAutoPrintAfterSale(null)).toBe(false);
@@ -83,6 +84,7 @@ describe('EVIDENCE — auto-print after payment + reprint', () => {
     expect(sales).toMatch(/isReprint:\s*true/);
     expect(sales).toMatch(/api\.sales\.getById/);
     expect(sales).toMatch(/Receipt sent to printer|isReprinting/);
+    expect(sales).toMatch(/isReceiptPrintingEnabled/);
   });
 
   it('STRUCT: receipt print config GET allows authenticated cashiers (no system.read only)', () => {
