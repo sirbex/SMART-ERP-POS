@@ -635,6 +635,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(service).toMatch(/ticketKind: 'VOID'/);
     expect(service).toMatch(/reduceOrderItemQuantity/);
     expect(service).toMatch(/resolveStationForVoidItem/);
+    // Partial voids ignore stale itemIds (already gone / wrong tab).
+    expect(service).toMatch(/ignoring stale item ids not on check/);
+    expect(service).toMatch(/Those lines are no longer on this check/);
     expect(service).toMatch(/cancelCheck[\s\S]*ticketKind: 'VOID'/s);
 
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');

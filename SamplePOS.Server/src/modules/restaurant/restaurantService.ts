@@ -1207,8 +1207,33 @@ export const restaurantService = {
       );
 
       const rows = await restaurantRepository.listOrderItemsForVoid(client, orderId, uniqueIds);
-      if (rows.length !== uniqueIds.length) {
-        throw new ValidationError('One or more lines are missing from this check');
+      const foundIds = new Set(rows.map((r) => r.id));
+      const missingIds = uniqueIds.filter((id) => !foundIds.has(id));
+      // Stale FOH itemIds (already voided, swapped check, optimism) — drop ghosts, void what remains.
+      // All missing → hard fail with guidance (not a silent no-op).
+      if (rows.length === 0) {
+        let elsewhere = 0;
+        try {
+          const hit = await client.query(
+            `SELECT COUNT(*)::int AS n FROM pos_order_items WHERE id = ANY($1::uuid[])`,
+            [uniqueIds],
+          );
+          elsewhere = Number(hit.rows[0]?.n || 0);
+        } catch {
+          elsewhere = 0;
+        }
+        throw new ValidationError(
+          elsewhere > 0
+            ? 'Those lines are on a different check — switch the ticket tab and try again'
+            : 'Those lines are no longer on this check — refresh the table and try again',
+        );
+      }
+      if (missingIds.length > 0) {
+        logger.warn('voidCheckItems: ignoring stale item ids not on check', {
+          orderId,
+          missingCount: missingIds.length,
+          foundCount: rows.length,
+        });
       }
 
       type VoidSlice = (typeof rows)[number] & { voidQuantity: number };
@@ -1365,6 +1390,7 @@ export const restaurantService = {
     logger.info('Restaurant lines voided', {
       orderId,
       itemCount: input.items.length,
+      voidedLineCount: result.voidKots.reduce((n, k) => n + (k.items?.length || 0), 0),
       voidKotCount: result.voidKots.length,
       reason,
     });

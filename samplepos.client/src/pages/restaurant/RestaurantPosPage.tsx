@@ -3105,11 +3105,21 @@ export default function RestaurantPosPage() {
       return;
     }
 
-    // Server void requires real pos_order_items UUIDs (not ofl_line_*).
-    if (voidItems.some((v) => !isServerOrderItemId(v.itemId))) {
-      toast.error('Check is out of sync — refreshing…');
+    // Server void requires real pos_order_items UUIDs still on this painted check.
+    // Stale selection (double-void / tab race) is dropped client-side; server also ignores ghosts.
+    const liveVoidItems = voidItems.filter(
+      (v) =>
+        isServerOrderItemId(v.itemId) &&
+        targetLines.some((l) => l.id === v.itemId),
+    );
+    if (liveVoidItems.length === 0) {
+      toast.error('Ticket lines out of date — refreshing…');
+      setSelectedLineIds([]);
       invalidateCheck();
       return;
+    }
+    if (liveVoidItems.length !== voidItems.length) {
+      // keep going with survivors only
     }
 
     const reason =
@@ -3119,7 +3129,7 @@ export default function RestaurantPosPage() {
     setBusy(true);
     try {
       const res = await api.restaurant.voidItems(order.id, {
-        items: voidItems,
+        items: liveVoidItems,
         reason,
       });
       const data = res.data.data as {
@@ -3158,6 +3168,8 @@ export default function RestaurantPosPage() {
           (err.response?.data as { error_code?: string } | undefined)?.error_code ===
             'ERR_RESTAURANT_VOID' &&
           /Open restaurant check/i.test(msg));
+      const linesMissing =
+        /no longer on this check|different check|lines are missing from this check/i.test(msg);
       if (alreadyClosed && order) {
         settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', {
           reason: reason || 'Check already closed',
@@ -3165,10 +3177,17 @@ export default function RestaurantPosPage() {
         setActiveOrderId(null);
         returnToFloor();
         toast.success('Check was already closed — table freed');
+      } else if (linesMissing) {
+        toast.error(msg.includes('different check')
+          ? 'Those lines belong to another open ticket — switch tabs and try again'
+          : 'Ticket was out of date — refreshed. Try void again.');
+        setSelectedLineIds([]);
+        setLineSheet(null);
+        invalidateCheck();
       } else {
         toastApiError(err, hasKot ? 'Void failed' : 'Remove failed');
       }
-      invalidateCheck();
+      if (!linesMissing) invalidateCheck();
     } finally {
       setBusy(false);
     }
