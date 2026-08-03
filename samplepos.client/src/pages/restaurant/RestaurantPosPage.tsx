@@ -35,7 +35,7 @@ import {
   flushPendingPrintJobs,
   type ClientPrintJob,
 } from '../../lib/printJobDispatcher';
-import { printReceipt } from '../../lib/print';
+import { printReceipt, resolveReceiptPrinterTargets } from '../../lib/print';
 import {
   fetchReceiptPrintConfig,
   shouldPrintReceiptOnSettlement,
@@ -3782,6 +3782,10 @@ export default function RestaurantPosPage() {
           try {
             const printCfg = await fetchReceiptPrintConfig();
             if (!shouldPrintReceiptOnSettlement(printCfg)) return;
+            const targets = resolveReceiptPrinterTargets(
+              printCfg.printerName,
+              readCachedGuestBillPrinter(),
+            );
             await printReceipt(
               {
                 saleNumber: paid.offlineId,
@@ -3814,10 +3818,14 @@ export default function RestaurantPosPage() {
                   uom: l.uom,
                 })),
               },
-              { printerName: printCfg.printerName },
+              {
+                printerName: targets.primary,
+                fallbackPrinterNames: targets.fallbacks,
+                openBrowserPreviewOnFailure: true,
+              },
             );
           } catch {
-            toast.error('Receipt print failed — sale is saved locally');
+            toast.error('Receipt print failed — allow popups or reprint from Sales');
           }
         })();
 

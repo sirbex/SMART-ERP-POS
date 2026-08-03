@@ -25,7 +25,7 @@ import {
 import { publishLanKdsBoardChanged } from '../../lib/restaurantLanKds';
 import { getAllEvents, getAllSyncState } from '../../lib/offlineEventJournal';
 import { deriveRestaurantOpenChecks } from '../../lib/offlineEventSelectors';
-import { printReceipt } from '../../lib/print';
+import { printReceipt, resolveReceiptPrinterTargets } from '../../lib/print';
 import {
   buildReceiptDataFromCheckout,
   fetchInvoiceSettingsForReceipt,
@@ -34,6 +34,7 @@ import {
   fetchReceiptPrintConfig,
   shouldPrintReceiptOnSettlement,
 } from '../../lib/receiptPrintConfig';
+import { readCachedGuestBillPrinter } from '../../lib/guestBillPrinter';
 import { useAuth } from '../../contexts/AuthContext';
 
 /** Stable complete key per order for retries / double-submit (session-scoped). */
@@ -451,43 +452,60 @@ export default function OrderPaymentPage() {
           const changeForReceipt =
             paidForReceipt > totalAmount ? paidForReceipt - totalAmount : 0;
           const orderDiscount = Number(order?.discountAmount || 0) + cashierDiscount;
-          await printReceipt(
-            buildReceiptDataFromCheckout({
-              saleNumber: saleNum || order?.orderNumber || '',
-              saleDate: new Date().toISOString(),
-              subtotal: Number(order?.subtotal || totalAmount),
-              discountAmount: orderDiscount > 0 ? orderDiscount : undefined,
-              taxAmount: Number(order?.taxAmount || 0),
-              totalAmount,
-              cashierName: user?.fullName || user?.email || undefined,
-              customer: selectedCustomer
-                ? {
-                    name: selectedCustomer.name,
-                    phone: selectedCustomer.phone,
-                    email: selectedCustomer.email,
-                  }
-                : order?.customerName
-                  ? { name: order.customerName }
-                  : undefined,
-              paymentMethod: paymentLines[0]?.paymentMethod || paymentMethod,
-              amountPaid: paidForReceipt > 0 ? paidForReceipt : totalAmount,
-              changeGiven: changeForReceipt > 0 ? changeForReceipt : undefined,
-              items: (order?.items || []).map((it) => ({
-                name: it.productName,
-                quantity: Number(it.quantity),
-                unitPrice: Number(it.unitPrice),
-                subtotal: Number(it.lineTotal),
-                discountAmount: Number(it.discountAmount || 0) || undefined,
-              })),
-              payments: paymentLines.map((l) => ({
-                method: l.paymentMethod,
-                amount: l.amount,
-                reference: l.reference,
-              })),
-              invoiceSettings,
-            }),
-            { printerName: printCfg.printerName },
+          // Restaurant bills already print — reuse guest-bill printer when receipt name empty/wrong.
+          const targets = resolveReceiptPrinterTargets(
+            printCfg.printerName,
+            readCachedGuestBillPrinter(),
           );
+          const resultNote: string[] = [];
+          try {
+            await printReceipt(
+              buildReceiptDataFromCheckout({
+                saleNumber: saleNum || order?.orderNumber || '',
+                saleDate: new Date().toISOString(),
+                subtotal: Number(order?.subtotal || totalAmount),
+                discountAmount: orderDiscount > 0 ? orderDiscount : undefined,
+                taxAmount: Number(order?.taxAmount || 0),
+                totalAmount,
+                cashierName: user?.fullName || user?.email || undefined,
+                customer: selectedCustomer
+                  ? {
+                      name: selectedCustomer.name,
+                      phone: selectedCustomer.phone,
+                      email: selectedCustomer.email,
+                    }
+                  : order?.customerName
+                    ? { name: order.customerName }
+                    : undefined,
+                paymentMethod: paymentLines[0]?.paymentMethod || paymentMethod,
+                amountPaid: paidForReceipt > 0 ? paidForReceipt : totalAmount,
+                changeGiven: changeForReceipt > 0 ? changeForReceipt : undefined,
+                items: (order?.items || []).map((it) => ({
+                  name: it.productName,
+                  quantity: Number(it.quantity),
+                  unitPrice: Number(it.unitPrice),
+                  subtotal: Number(it.lineTotal),
+                  discountAmount: Number(it.discountAmount || 0) || undefined,
+                })),
+                payments: paymentLines.map((l) => ({
+                  method: l.paymentMethod,
+                  amount: l.amount,
+                  reference: l.reference,
+                })),
+                invoiceSettings,
+              }),
+              {
+                printerName: targets.primary,
+                fallbackPrinterNames: targets.fallbacks,
+                openBrowserPreviewOnFailure: true,
+              },
+            );
+          } catch (printErr) {
+            console.error('Receipt print after order complete failed:', printErr);
+            toast.error('Sale completed — open browser Print if receipt tab blocked.');
+            resultNote.push('print-failed');
+          }
+          void resultNote;
         }
       } catch (printErr) {
         console.error('Receipt print after order complete failed:', printErr);

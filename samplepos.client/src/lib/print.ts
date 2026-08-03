@@ -18,6 +18,12 @@ export interface PrintOptions {
   autoPrint?: boolean;
   /** Windows / agent printer name (X-Printer-Name). From receipt print settings. */
   printerName?: string | null;
+  /** Tried after primary (e.g. guest-bill printer for restaurant sale receipts). */
+  fallbackPrinterNames?: Array<string | null | undefined>;
+  /** Attempt hidden iframe print after agent miss (default true). */
+  allowBrowserFallback?: boolean;
+  /** Open visible preview tab when silent paths fail (default true for receipts). */
+  openBrowserPreviewOnFailure?: boolean;
 }
 
 export interface ReceiptData {
@@ -74,8 +80,9 @@ export interface ReceiptData {
 /**
  * Print a receipt using the shared PrintService contract:
  *   0. SUNMI WebView JSON bridge (receipts only)
- *   1. Local ESC/POS HTML bridge at localhost:1811
- *   2. Browser window.print() via hidden iframe
+ *   1. ESC/POS + HTML via local agent (same as guest bill when possible)
+ *   2. Browser iframe print (often blocked after async settlement)
+ *   3. Visible browser preview tab with Print button (always available)
  *
  * Reports and other HTML documents should call {@link printHtmlDocument}
  * (same strategies 1–2 — no new backends).
@@ -86,9 +93,9 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
   }
 
   const printFormat = options.format || 'detailed';
-  const receiptHTML = printFormat === 'compact'
-    ? generateCompactReceiptHTML(receiptData)
-    : generateDetailedReceiptHTML(receiptData);
+  // Compact/detailed both use thermal guest SSOT (same professional layout).
+  void printFormat;
+  const doc = receiptToThermalGuestDocument(receiptData);
 
   // Strategy 0: SUNMI Android WebView bridge (receipt payload)
   if (typeof (window as unknown as { SunmiPrinter?: unknown }).SunmiPrinter !== 'undefined') {
@@ -97,7 +104,32 @@ export async function printReceipt(receiptData: ReceiptData, options: PrintOptio
     return;
   }
 
-  return printHtmlDocument(receiptHTML, options.printerName);
+  // Dynamic import avoids circular init with printRestaurant → printHtmlDocument.
+  const { printGuestThermalDocument } = await import('./printRestaurant');
+  const result = await printGuestThermalDocument(doc, {
+    printerName: options.printerName,
+    fallbackPrinterNames: options.fallbackPrinterNames,
+    // Prefer agent + visible preview. Hidden iframe print is gesture-fragile after pay.
+    allowBrowserFallback: options.allowBrowserFallback === true,
+    openBrowserPreviewOnFailure: options.openBrowserPreviewOnFailure !== false,
+  });
+  if (result.method === 'preview' && typeof console !== 'undefined') {
+    console.info('[printReceipt] Silent agent miss — opened browser receipt preview');
+  }
+}
+
+/** Prefer receipt printer; fall back to guest-bill printer (restaurant FOH where bills already work). */
+export function resolveReceiptPrinterTargets(
+  receiptPrinterName?: string | null,
+  guestBillPrinterName?: string | null,
+): { primary: string | null; fallbacks: string[] } {
+  const primary = receiptPrinterName?.trim() || null;
+  const bill = guestBillPrinterName?.trim() || null;
+  const fallbacks: string[] = [];
+  if (bill && bill.toLowerCase() !== (primary || '').toLowerCase()) {
+    fallbacks.push(bill);
+  }
+  return { primary, fallbacks };
 }
 
 /**

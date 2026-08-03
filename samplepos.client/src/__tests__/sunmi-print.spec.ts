@@ -136,6 +136,14 @@ describe('printReceipt — SUNMI bridge routing', () => {
         // window from beforeEach: {} — no SunmiPrinter
         const mockFetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
         vi.stubGlobal('fetch', mockFetch);
+        vi.stubGlobal('window', {
+            open: vi.fn(() => ({
+                document: { open: vi.fn(), write: vi.fn(), close: vi.fn() },
+                focus: vi.fn(),
+                print: vi.fn(),
+                close: vi.fn(),
+            })),
+        });
 
         // Make Strategy 2 reject immediately (contentWindow = null) so the Promise
         // does not hang on onload / fallback-setTimeout.  We only care that fetch
@@ -148,13 +156,15 @@ describe('printReceipt — SUNMI bridge routing', () => {
             body: { appendChild: vi.fn(), removeChild: vi.fn(), contains: vi.fn().mockReturnValue(false) },
         });
 
-        // Rejection from "Unable to create print window" is expected — swallow it
-        await printReceipt(RECEIPT).catch(() => { });
+        // Preview or browser fallback may still resolve/reject — we only assert bridge contact.
+        await printReceipt(RECEIPT, { openBrowserPreviewOnFailure: true }).catch(() => {});
 
-        expect(mockFetch).toHaveBeenCalledWith(
-            'http://localhost:1811/print',
-            expect.objectContaining({ method: 'POST' }),
-        );
+        expect(mockFetch).toHaveBeenCalled();
+        const urls = mockFetch.mock.calls.map((c) => String(c[0]));
+        expect(urls.some((u) => /127\.0\.0\.1:1811|localhost:1811/.test(u))).toBe(true);
+        expect(
+            mockFetch.mock.calls.some((c) => c[1] && (c[1] as { method?: string }).method === 'POST'),
+        ).toBe(true);
     });
 
     // ── Validation ───────────────────────────────────────────────────────────

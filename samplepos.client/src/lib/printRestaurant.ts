@@ -18,13 +18,14 @@ import {
   type DocumentCompanyBranding,
 } from './documentCompanyBranding';
 import { printHtmlDocument } from './print';
+import type { ThermalGuestDocument } from './thermalGuestDocument';
 import {
   billToThermalGuestDocument,
   buildThermalGuestDocumentHtml,
   formatGuestDocMoney,
   guestDocumentToThermalTicket,
 } from './thermalGuestDocument';
-import { buildThermalPrintCss } from './thermalPrintCss';
+import { buildThermalPrintCss, ensureThermalPrintCss } from './thermalPrintCss';
 import { getCachedRestaurantStations } from './restaurantOfflineCache';
 import { LOCAL_PRINT_BRIDGE_ORIGINS, readCachedBridgePrinters } from './localPrintBridge';
 import {
@@ -353,18 +354,149 @@ export function buildRestaurantBillHtml(data: BillPrintData): string {
   return buildThermalGuestDocumentHtml(billToThermalGuestDocument(data));
 }
 
-export async function printRestaurantBill(data: BillPrintData): Promise<void> {
-  const doc = billToThermalGuestDocument(data);
-  const printer = data.printerName?.trim() || null;
+export type SilentThermalPrintMethod = 'escpos' | 'html' | 'browser' | 'preview' | 'none';
 
-  // Same immediate path as KOT — ESC/POS RAW at 80mm width (no Chromium).
+/**
+ * Shared guest thermal delivery (GUEST BILL + paid RECEIPT).
+ * Prefer ESC/POS + named agent printer (same path that makes bills work).
+ * Sale receipts may open a visible browser preview when silent paths miss.
+ */
+export async function printGuestThermalDocument(
+  doc: ThermalGuestDocument,
+  opts?: {
+    printerName?: string | null;
+    /** Extra targets tried after primary (e.g. guest bill printer for restaurant sale receipts). */
+    fallbackPrinterNames?: Array<string | null | undefined>;
+    currencySymbol?: string | null;
+    /** Allow silent browser iframe print (often blocked after async pay). */
+    allowBrowserFallback?: boolean;
+    /** Always open a visible preview tab with Print when silent fails. */
+    openBrowserPreviewOnFailure?: boolean;
+  },
+): Promise<{ method: SilentThermalPrintMethod }> {
+  const tried = new Set<string>();
+  const queue: Array<string | null> = [];
+  const push = (n?: string | null) => {
+    const t = n?.trim() || null;
+    const key = t?.toLowerCase() || '';
+    if (tried.has(key)) return;
+    tried.add(key);
+    queue.push(t);
+  };
+  push(opts?.printerName);
+  for (const f of opts?.fallbackPrinterNames || []) push(f);
+  // Final: agent default (no name) — same recovery as unmapped KOT default.
+  push(null);
+
+  let lastReason = 'offline';
+
   if (agentSupportsEscPos()) {
     const ticket = guestDocumentToThermalTicket(doc);
-    if (data.currencySymbol) ticket.currencySymbol = data.currencySymbol;
+    if (opts?.currencySymbol) ticket.currencySymbol = opts.currencySymbol;
     const raw = renderThermalTicketEscPos(ticket);
-    const delivered = await postEscPosToPrintBridge(raw, printer);
-    if (delivered.ok) return;
+    for (const printer of queue) {
+      const delivered = await postEscPosToPrintBridge(raw, printer);
+      if (delivered.ok) return { method: 'escpos' };
+      lastReason = delivered.reason || lastReason;
+    }
   }
 
-  await printHtml(buildThermalGuestDocumentHtml(doc), printer);
+  const html = buildThermalGuestDocumentHtml(doc);
+  for (const printer of queue) {
+    const delivered = await postToPrintBridge(html, printer);
+    if (delivered.ok) return { method: 'html' };
+    lastReason = delivered.reason || lastReason;
+  }
+
+  // Prefer visible preview over silent iframe — after async settlement browsers
+  // often block window.print() without a user gesture, so receipts "succeed" with no paper.
+  if (opts?.openBrowserPreviewOnFailure) {
+    const opened = openBrowserReceiptPreview(html);
+    if (opened) return { method: 'preview' };
+  }
+
+  if (opts?.allowBrowserFallback) {
+    try {
+      await printHtmlDocument(html);
+      return { method: 'browser' };
+    } catch {
+      // fall through
+    }
+  }
+
+  throw new Error(
+    lastReason === 'unknown_printer'
+      ? 'Receipt printer name not found on this PC. Set Printing → Thermal Printer Name (or Stations guest bill printer).'
+      : silentPrintFailureMessage(opts?.printerName || null),
+  );
+}
+
+/**
+ * Visible browser print fallback — survives lost user-gesture after async pay.
+ * Opens a tab with the receipt HTML and an explicit Print button.
+ */
+export function openBrowserReceiptPreview(html: string): Window | null {
+  if (typeof window === 'undefined') return null;
+  const printHtml = ensureThermalPrintCss(html, 80);
+  const w = window.open('', '_blank');
+  if (!w) return null;
+  w.document.open();
+  w.document.write(`<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><title>Receipt print preview</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; background: #f5f5f4; }
+  .bar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+    padding: 10px 12px; background: #1c1917; color: #fafaf9;
+  }
+  .bar button {
+    min-height: 40px; padding: 0 14px; border-radius: 6px; border: none;
+    font-weight: 700; cursor: pointer;
+  }
+  .bar .print { background: #2563eb; color: #fff; }
+  .bar .close { background: #44403c; color: #fafaf9; }
+  .sheet { max-width: 80mm; margin: 12px auto; background: #fff; box-shadow: 0 1px 8px rgba(0,0,0,.15); }
+  @media print {
+    .bar { display: none !important; }
+    body { background: #fff; }
+    .sheet { box-shadow: none; margin: 0; max-width: none; }
+  }
+</style></head><body>
+  <div class="bar">
+    <span style="margin-right:auto;font-size:13px">Receipt ready — confirm print</span>
+    <button type="button" class="close" onclick="window.close()">Close</button>
+    <button type="button" class="print" id="btn-print">Print</button>
+  </div>
+  <div class="sheet" id="sheet">${extractBodyInner(printHtml)}</div>
+  <script>
+    document.getElementById('btn-print').onclick = function () {
+      window.focus();
+      window.print();
+    };
+    // Soft auto-prompt once the tab opens; user can still use the button.
+    setTimeout(function () {
+      try { window.focus(); window.print(); } catch (e) {}
+    }, 350);
+  <\/script>
+</body></html>`);
+  w.document.close();
+  return w;
+}
+
+function extractBodyInner(fullHtml: string): string {
+  const m = fullHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  if (m) return m[1];
+  return fullHtml;
+}
+
+export async function printRestaurantBill(data: BillPrintData): Promise<void> {
+  const doc = billToThermalGuestDocument(data);
+  await printGuestThermalDocument(doc, {
+    printerName: data.printerName,
+    currencySymbol: data.currencySymbol,
+    // Bills stay silent — emergency browser only via stations policy when named miss.
+    allowBrowserFallback: isRestaurantBrowserPrintFallbackEnabled(),
+    openBrowserPreviewOnFailure: false,
+  });
 }

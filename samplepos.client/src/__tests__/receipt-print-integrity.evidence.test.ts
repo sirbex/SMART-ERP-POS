@@ -17,6 +17,7 @@ import {
   shouldAutoPrintAfterSale,
   shouldPrintReceiptOnSettlement,
 } from '../lib/receiptPrintConfig';
+import { resolveReceiptPrinterTargets } from '../lib/print';
 import {
   billToThermalGuestDocument,
   buildThermalGuestDocumentHtml,
@@ -52,6 +53,17 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
     expect(shouldPrintReceiptOnSettlement({ enabled: true, autoPrint: false })).toBe(true);
     expect(shouldPrintReceiptOnSettlement({ enabled: false, autoPrint: true })).toBe(false);
     expect(shouldPrintReceiptOnSettlement(null)).toBe(true);
+
+    // Restaurant: when receipt printer blank, guest-bill printer is the fallback target
+    expect(resolveReceiptPrinterTargets(null, 'EPSON Guest Bill')).toEqual({
+      primary: null,
+      fallbacks: ['EPSON Guest Bill'],
+    });
+    expect(resolveReceiptPrinterTargets('EPSON Receipt', 'EPSON Guest Bill')).toEqual({
+      primary: 'EPSON Receipt',
+      fallbacks: ['EPSON Guest Bill'],
+    });
+    expect(resolveReceiptPrinterTargets('EPSON Guest Bill', 'EPSON Guest Bill').fallbacks).toEqual([]);
   });
 
   it('paid RECEIPT always carries tendered payment method lines when ticked path has data', () => {
@@ -187,8 +199,9 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
   it('STRUCT: sale receipt bridge uses configured printer name', () => {
     const print = readClient('lib/print.ts');
     expect(print).toMatch(/printerName/);
-    expect(print).toMatch(/X-Printer-Name/);
-    expect(print).toMatch(/LOCAL_PRINT_BRIDGE_ORIGINS/);
+    expect(print).toMatch(/printGuestThermalDocument|fallbackPrinterNames/);
+    expect(print).toMatch(/resolveReceiptPrinterTargets/);
+    expect(print).toMatch(/openBrowserPreviewOnFailure/);
 
     const dialog = readClient('components/pos/PrintReceiptDialog.tsx');
     expect(dialog).toMatch(/printerName/);
@@ -200,6 +213,26 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
     const guest = readClient('lib/thermalGuestDocument.ts');
     expect(guest).toMatch(/paymentAccounts/);
     expect(guest).toMatch(/footerText/);
+  });
+
+  it('STRUCT: restaurant sale receipt reuses guest-bill printer + browser preview fallback', () => {
+    const printRest = readClient('lib/printRestaurant.ts');
+    expect(printRest).toMatch(/export async function printGuestThermalDocument/);
+    expect(printRest).toMatch(/openBrowserReceiptPreview/);
+    expect(printRest).toMatch(/openBrowserPreviewOnFailure/);
+
+    const orderPay = readClient('pages/orders/OrderPaymentPage.tsx');
+    expect(orderPay).toMatch(/resolveReceiptPrinterTargets/);
+    expect(orderPay).toMatch(/readCachedGuestBillPrinter/);
+    expect(orderPay).toMatch(/openBrowserPreviewOnFailure:\s*true/);
+
+    const foh = readClient('pages/restaurant/RestaurantPosPage.tsx');
+    expect(foh).toMatch(/resolveReceiptPrinterTargets/);
+    expect(foh).toMatch(/readCachedGuestBillPrinter/);
+    expect(foh).toMatch(/openBrowserPreviewOnFailure:\s*true/);
+
+    // Guest bill path still independent of receipt enable
+    expect(printRest).not.toMatch(/isReceiptPrintingEnabled|shouldAutoPrintAfterSale/);
   });
 
   it('STRUCT: FOH guest bills carry invoice footer + payment accounts; never receipt enable gate', () => {
