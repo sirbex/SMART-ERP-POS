@@ -3,6 +3,8 @@
  * Transaction truth stays in pos_offline_events — never store open checks here.
  */
 
+import { shouldPersistRestaurantTablesCache } from './restaurantFloorSession';
+
 const TABLES_KEY = 'restaurant_offline_tables';
 const STATIONS_KEY = 'restaurant_offline_stations';
 const MENU_KEY = 'restaurant_offline_menu';
@@ -94,7 +96,13 @@ function writeJson(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+/**
+ * Persist offline tables projection.
+ * Never replace a non-empty warm floor with successful [] (session isolation SSOT).
+ */
 export function cacheRestaurantTables(tables: CachedRestaurantTable[]): void {
+  const previous = readJson<CachedRestaurantTable[]>(TABLES_KEY, []);
+  if (!shouldPersistRestaurantTablesCache(previous, tables)) return;
   writeJson(TABLES_KEY, tables);
   touchMeta();
 }
@@ -237,7 +245,10 @@ export async function refreshRestaurantOfflineCache(api: {
     api.menuCategories(quiet),
     api.listWaiters(quiet),
   ]);
-  /** Only overwrite a cache slice when that endpoint succeeded — never blank warm FOH on blips. */
+  /**
+   * Only overwrite a cache slice when that endpoint succeeded — never blank warm FOH on blips.
+   * Tables also refuse empty overwrite of non-empty warm (cacheRestaurantTables guard).
+   */
   const writeIfFulfilled = <T,>(
     i: number,
     write: (rows: T[]) => void,

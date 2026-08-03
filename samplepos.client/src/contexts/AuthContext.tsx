@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessTokenDeduped, resetAuthState } from '../hooks/useTokenRefresh';
 import { apiClient } from '../utils/api';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
@@ -16,6 +17,7 @@ import {
   markBrowserSessionAlive,
   shouldEnforceColdStartPinGate,
 } from '../lib/sessionColdStartLock';
+import { refreshRestaurantFloorSession } from '../lib/restaurantFloorSession';
 import type { AxiosError } from 'axios';
 import type { UserRole } from '../types';
 
@@ -76,6 +78,7 @@ async function fetchPermissionKeys(): Promise<string[]> {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -300,6 +303,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     markBrowserSessionAlive();
     resetAuthState();
 
+    // FOH session isolation: drop prior actor floor RQ so User B never paints User A.
+    refreshRestaurantFloorSession(queryClient);
+
     // Notify other tabs/components
     window.dispatchEvent(new Event('auth-changed'));
   };
@@ -340,12 +346,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsAuthenticated(false);
       setPermissionKeys([]);
 
+      // Drop floor cache so next login cannot reuse this session's RQ entries.
+      refreshRestaurantFloorSession(queryClient);
+
       // Notify other tabs/components about auth change
       window.dispatchEvent(new Event('auth-changed'));
     } catch (error) {
       console.error('Error during logout:', error);
     }
-  }, []);
+  }, [queryClient]);
 
   // ── Auto-logout on idle (60 minutes without deliberate interaction) ────────
   const idleLogout = useCallback(() => {

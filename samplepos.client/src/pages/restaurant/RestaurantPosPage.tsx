@@ -136,6 +136,12 @@ import {
   isRestaurantOrderBillRequestedOffline,
   paintRestaurantTableFreeOffline,
 } from '../../lib/restaurantOfflineCache';
+import {
+  resolveDiningFloorEmptyState,
+  restaurantTablesQueryKey,
+  restaurantWaitersQueryKey,
+  shouldPaintJournalOccupancyOnServerFree,
+} from '../../lib/restaurantFloorSession';
 import OfflineSyncStatusPanel from '../../components/offline/OfflineSyncStatusPanel';
 import axios from 'axios';
 
@@ -873,7 +879,7 @@ export default function RestaurantPosPage() {
   }, [restaurantEnabled]);
 
   const tablesQuery = useQuery({
-    queryKey: ['restaurant', 'tables', isOnline],
+    queryKey: restaurantTablesQueryKey(user?.id, isOnline),
     queryFn: async () => {
       if (!isOnline) {
         return getCachedRestaurantTables() as RestaurantTable[];
@@ -881,7 +887,7 @@ export default function RestaurantPosPage() {
       try {
         const res = await api.restaurant.listTables();
         const tables = (res.data.data || []) as RestaurantTable[];
-        // keep cache warm
+        // keep cache warm (never blank non-empty warm with [])
         const { cacheRestaurantTables } = await import('../../lib/restaurantOfflineCache');
         cacheRestaurantTables(tables);
         return tables;
@@ -894,7 +900,9 @@ export default function RestaurantPosPage() {
         throw err;
       }
     },
-    enabled: !!restaurantEnabled,
+    enabled: !!restaurantEnabled && !!user?.id,
+    staleTime: 0,
+    refetchOnMount: 'always',
     refetchInterval: isOnline ? 15_000 : false,
     retry: (failureCount, error) => {
       if (isBackendUnavailableError(error)) return failureCount < 6;
@@ -920,7 +928,7 @@ export default function RestaurantPosPage() {
   }, [restaurantEnabled, isOnline, tablesQuery.data, queryClient]);
 
   const waitersQuery = useQuery({
-    queryKey: ['restaurant', 'waiters', isOnline],
+    queryKey: restaurantWaitersQueryKey(user?.id, isOnline),
     queryFn: async () => {
       if (!isOnline) return getCachedRestaurantWaiters() as RestaurantWaiter[];
       const res = await api.restaurant.listWaiters();
@@ -929,7 +937,9 @@ export default function RestaurantPosPage() {
       cacheRestaurantWaiters(waiters);
       return waiters;
     },
-    enabled: !!restaurantEnabled,
+    enabled: !!restaurantEnabled && !!user?.id,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const checkQuery = useQuery({
@@ -1638,8 +1648,16 @@ export default function RestaurantPosPage() {
       const check = floorOccupancy.get(t.id);
       if (check) {
         const localOnly = isJournalLocalOrderId(check.orderId);
-        // Online + server FREE: never paint busy from a stale journal seed.
-        if (isOnline && !localOnly && t.status === 'FREE') {
+        const paintJournal = shouldPaintJournalOccupancyOnServerFree({
+          isOnline,
+          serverStatus: t.status,
+          journalOrderId: check.orderId,
+          isJournalLocalOrderId: localOnly,
+          journalWaiterId: check.waiterId,
+          actorUserId: user?.id,
+        });
+        // Online + server FREE: never paint busy from a stale peer journal seed.
+        if (!paintJournal) {
           return {
             ...t,
             status: 'FREE' as const,
@@ -1647,6 +1665,8 @@ export default function RestaurantPosPage() {
             orderNumber: null,
             orderTotal: null,
             guestName: null,
+            waiterId: null,
+            waiterName: null,
           };
         }
         const totals = totalsFromLines(check.lines);
@@ -1705,6 +1725,33 @@ export default function RestaurantPosPage() {
         isServiceChannelTable(t) || t.status === 'FREE' || t.waiterId === user.id,
     );
   }, [tablesQuery.data, myTablesOnly, user?.id, isOnline, floorOccupancy, journalTick]);
+
+  const diningFloorTables = useMemo(
+    () => floorTables.filter((t) => !isServiceChannelTable(t)),
+    [floorTables],
+  );
+
+  const diningFloorEmpty = useMemo(
+    () =>
+      resolveDiningFloorEmptyState({
+        isLoading: tablesQuery.isLoading,
+        isError: tablesQuery.isError,
+        isOnline,
+        serverTableCount: (tablesQuery.data || []).length,
+        diningVisibleCount: diningFloorTables.length,
+        myTablesOnly,
+        canEditOthers,
+      }),
+    [
+      tablesQuery.isLoading,
+      tablesQuery.isError,
+      tablesQuery.data,
+      isOnline,
+      diningFloorTables.length,
+      myTablesOnly,
+      canEditOthers,
+    ],
+  );
 
   const freeTables = useMemo(() => {
     return (tablesQuery.data || []).filter((t) => {
@@ -1935,7 +1982,7 @@ export default function RestaurantPosPage() {
       if (!stillOpen) {
         paintRestaurantTableFreeOffline(tableId);
         queryClient.setQueryData(
-          ['restaurant', 'tables', isOnline],
+          restaurantTablesQueryKey(user?.id, isOnline),
           (prev: RestaurantTable[] | undefined) =>
             (prev || []).map((t) =>
               t.id === tableId
@@ -3945,10 +3992,11 @@ export default function RestaurantPosPage() {
             <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide pt-2">
               Dining tables
             </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3 pb-[env(safe-area-inset-bottom)]">
-              {floorTables
-                .filter((t) => !isServiceChannelTable(t))
-                .map((table) => {
+            <div
+              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3 pb-[env(safe-area-inset-bottom)]"
+              data-dining-floor-empty={diningFloorEmpty.isEmpty ? diningFloorEmpty.reason : 'none'}
+            >
+              {diningFloorTables.map((table) => {
                 const occupied = table.status !== 'FREE';
                 const billing = table.status === 'BILLING';
                 return (
@@ -4007,10 +4055,21 @@ export default function RestaurantPosPage() {
                 );
               })}
             </div>
-            {tablesQuery.isLoading && <p className="text-stone-500 mt-4">Loading tables…</p>}
-            {tablesQuery.isError && (
-              <p className="text-red-600 text-sm">
-                {apiErr(tablesQuery.error, 'Failed to load tables. Apply migration 560 and enable the module.')}
+            {diningFloorEmpty.isEmpty && diningFloorEmpty.message && (
+              <p
+                className={
+                  diningFloorEmpty.reason === 'error'
+                    ? 'text-red-600 text-sm mt-4'
+                    : 'text-stone-600 text-sm mt-4'
+                }
+                data-dining-floor-empty-message={diningFloorEmpty.reason}
+              >
+                {diningFloorEmpty.reason === 'error'
+                  ? apiErr(
+                      tablesQuery.error,
+                      diningFloorEmpty.message,
+                    )
+                  : diningFloorEmpty.message}
               </p>
             )}
           </div>
