@@ -396,7 +396,8 @@ export async function printGuestThermalDocument(
   const queue: Array<string | null> = [];
   const push = (n?: string | null) => {
     const t = n?.trim() || null;
-    const key = t?.toLowerCase() || '';
+    if (!t) return; // never enqueue empty as "named" target
+    const key = t.toLowerCase();
     if (tried.has(key)) return;
     tried.add(key);
     queue.push(t);
@@ -406,7 +407,11 @@ export async function printGuestThermalDocument(
   // Unnamed Windows default — NOT for sale receipts (false 202 → PDF / no paper).
   // Default false for safety after Chrome "local network" grant; bills/KOT pass true.
   if (opts?.allowUnnamedAgentDefault === true) {
-    push(null);
+    const key = '';
+    if (!tried.has(key)) {
+      tried.add(key);
+      queue.push(null);
+    }
   }
 
   let lastReason = 'offline';
