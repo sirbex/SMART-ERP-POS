@@ -18,8 +18,12 @@ import { assertPositiveFinite } from '../../utils/safeParse.js';
 import * as auditRepository from '../audit/auditRepository.js';
 import { CustomerStatementSchema } from '../../../../shared/zod/customerStatement.js';
 import type { Customer, CreateCustomer, UpdateCustomer } from '../../../../shared/zod/customer.js';
+import {
+  mergeCustomerTaxForAssert,
+  vatRegistrationTinError,
+} from '../../../../shared/utils/customerTaxProfileIntegrity.js';
 import { SalesBusinessRules } from '../../middleware/businessRules.js';
-import { ConflictError, BusinessError } from '../../middleware/errorHandler.js';
+import { ConflictError, BusinessError, ValidationError } from '../../middleware/errorHandler.js';
 import logger from '../../utils/logger.js';
 import { BUSINESS_TIMEZONE, getBusinessDate, formatDateBusiness } from '../../utils/dateRange.js';
 
@@ -155,6 +159,16 @@ export async function createCustomer(data: CreateCustomer, dbPool?: pg.Pool): Pr
   const { assertPartnerDefaultWhtType } = await import('../withholding-tax/whtService.js');
   await assertPartnerDefaultWhtType('CUSTOMER', data, dbPool);
 
+  const tinErr = vatRegistrationTinError({
+    vatRegistered: data.vatRegistered,
+    taxExempt: data.taxExempt,
+    taxProfile: data.taxProfile,
+    tin: data.tin,
+  });
+  if (tinErr) {
+    throw new ValidationError(tinErr);
+  }
+
   // Use Decimal for bank-grade precision
   const customerData = {
     ...data,
@@ -214,6 +228,27 @@ export async function updateCustomer(
 
   const { assertPartnerDefaultWhtType } = await import('../withholding-tax/whtService.js');
   await assertPartnerDefaultWhtType('CUSTOMER', data, dbPool);
+
+  // Only when tax fields are in the payload — legacy incomplete rows can still
+  // update name/contact until an operator edits tax status or TIN.
+  const taxPatch =
+    data.vatRegistered !== undefined ||
+    data.taxExempt !== undefined ||
+    data.taxProfile !== undefined ||
+    data.tin !== undefined;
+  if (taxPatch) {
+    const tinErr = vatRegistrationTinError(
+      mergeCustomerTaxForAssert(existing, {
+        vatRegistered: data.vatRegistered,
+        taxExempt: data.taxExempt,
+        taxProfile: data.taxProfile,
+        tin: data.tin,
+      }),
+    );
+    if (tinErr) {
+      throw new ValidationError(tinErr);
+    }
+  }
 
   // Use Decimal for bank-grade precision
   const updateData = {

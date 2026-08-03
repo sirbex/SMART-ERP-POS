@@ -30,6 +30,11 @@ import {
     isListableCustomerInvoice,
     type CustomerInvoiceListRow,
 } from '../../utils/customerInvoiceListFilters';
+import {
+    describeCustomerTaxStatus,
+    isIncompleteVatRegistration,
+    vatRegistrationTinError,
+} from '@shared/utils/customerTaxProfileIntegrity';
 
 interface CustomerData {
     id: string;
@@ -326,6 +331,21 @@ export default function CustomerDetailModal({
         if (!customer || !customerId) return;
         const form = e.currentTarget;
         const formData = new FormData(form);
+        const taxProfile = editTaxExempt
+            ? 'EXEMPT'
+            : editVatRegistered
+                ? 'VAT_REGISTERED'
+                : 'STANDARD';
+        const tinCheck = vatRegistrationTinError({
+            vatRegistered: editVatRegistered,
+            taxExempt: editTaxExempt,
+            taxProfile,
+            tin: editTin,
+        });
+        if (tinCheck) {
+            alert(`❌ ${tinCheck}`);
+            return;
+        }
         const payload = buildCustomerUpdatePayload(
             initialPriceGroupIdRef.current,
             editPriceGroupId,
@@ -345,11 +365,7 @@ export default function CustomerDetailModal({
                 defaultVatRate: editDefaultVatRate !== '' ? Number(editDefaultVatRate) : null,
                 vatRegistrationDate: editVatRegistrationDate || null,
                 taxEffectiveFrom: editTaxEffectiveFrom || null,
-                taxProfile: editTaxExempt
-                    ? 'EXEMPT'
-                    : editVatRegistered
-                        ? 'VAT_REGISTERED'
-                        : 'STANDARD',
+                taxProfile,
             },
         );
         try {
@@ -577,23 +593,36 @@ export default function CustomerDetailModal({
                                                         }`}>
                                                         {(customer as CustomerData).isActive ? '✓ Active' : '✗ Inactive'}
                                                     </span>
-                                                    {(customer as CustomerData).whtLiable && (
+                                                    {((customer as CustomerData).whtLiable) && (
                                                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-sky-100 text-sky-800">
                                                             WHT liable
                                                         </span>
                                                     )}
-                                                    {((customer as CustomerData).vatRegistered ||
-                                                        (customer as CustomerData).taxProfile === 'VAT_REGISTERED') && (
-                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">
-                                                            VAT registered
-                                                        </span>
-                                                    )}
-                                                    {((customer as CustomerData).taxExempt ||
-                                                        (customer as CustomerData).taxProfile === 'EXEMPT') && (
-                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-amber-100 text-amber-900">
-                                                            Tax exempt
-                                                        </span>
-                                                    )}
+                                                    {(() => {
+                                                        const taxUi = describeCustomerTaxStatus(customer as CustomerData);
+                                                        if (taxUi.status === 'VAT_INCOMPLETE') {
+                                                            return (
+                                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-amber-100 text-amber-950">
+                                                                    VAT incomplete
+                                                                </span>
+                                                            );
+                                                        }
+                                                        if (taxUi.status === 'VAT_REGISTERED') {
+                                                            return (
+                                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-emerald-100 text-emerald-800">
+                                                                    VAT registered
+                                                                </span>
+                                                            );
+                                                        }
+                                                        if (taxUi.status === 'EXEMPT') {
+                                                            return (
+                                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-amber-100 text-amber-900">
+                                                                    Tax exempt
+                                                                </span>
+                                                            );
+                                                        }
+                                                        return null;
+                                                    })()}
                                                 </div>
                                             </div>
                                         </div>
@@ -641,18 +670,22 @@ export default function CustomerDetailModal({
 
                                         <div className="bg-white rounded-lg border border-gray-200 p-4">
                                             <h3 className="text-lg font-semibold text-gray-900 mb-4">Tax details</h3>
+                                            {isIncompleteVatRegistration(customer as CustomerData) && (
+                                                <div
+                                                    className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950"
+                                                    role="status"
+                                                >
+                                                    This customer is marked VAT registered but has no TIN. Document tax may
+                                                    still follow product VAT rules for registered customers; fix by adding a
+                                                    TIN (Edit) or switching tax status to Standard if they are not VAT
+                                                    registered.
+                                                </div>
+                                            )}
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                                                 <div>
                                                     <span className="text-gray-500">Tax status:</span>
                                                     <span className="ml-2 text-gray-900 font-medium">
-                                                        {((customer as CustomerData).taxExempt ||
-                                                            (customer as CustomerData).taxProfile === 'EXEMPT')
-                                                            ? 'Tax exempt'
-                                                            : ((customer as CustomerData).vatRegistered ||
-                                                                  (customer as CustomerData).taxProfile ===
-                                                                      'VAT_REGISTERED')
-                                                              ? 'VAT registered'
-                                                              : 'Standard'}
+                                                        {describeCustomerTaxStatus(customer as CustomerData).label}
                                                     </span>
                                                 </div>
                                                 <div>
@@ -1600,10 +1633,19 @@ export default function CustomerDetailModal({
                                                 </div>
                                             </fieldset>
 
+                                            {(editVatRegistered && !editTaxExempt) && (
+                                                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                                                    TIN is required for VAT-registered customers (e.g. Uganda TIN). Leave empty only if you set status to Standard.
+                                                </div>
+                                            )}
+
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                                 <div className="sm:col-span-2">
                                                     <Label htmlFor="modal-customer-tin" className="text-sm font-medium text-gray-700">
                                                         TIN
+                                                        {editVatRegistered && !editTaxExempt ? (
+                                                            <span className="text-red-600"> *</span>
+                                                        ) : null}
                                                     </Label>
                                                     <input
                                                         id="modal-customer-tin"
@@ -1612,6 +1654,7 @@ export default function CustomerDetailModal({
                                                         className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white font-mono text-sm"
                                                         placeholder="e.g. 100011036589475"
                                                         autoComplete="off"
+                                                        required={editVatRegistered && !editTaxExempt}
                                                     />
                                                 </div>
 
