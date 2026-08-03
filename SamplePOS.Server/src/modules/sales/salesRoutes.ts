@@ -790,12 +790,33 @@ salesRoutes.post(
 
     const saleNumber = saleData.sale.saleNumber || (saleData.sale as unknown as Record<string, unknown>).sale_number as string;
 
-    // Increment print_count
-    const result = await pool.query(
-      'UPDATE sales SET print_count = COALESCE(print_count, 0) + 1 WHERE id = $1 RETURNING print_count',
-      [id]
-    );
-    const printCount = result.rows[0].print_count;
+    // Increment print_count (self-heal if schema drift left the column off)
+    let printCount = 1;
+    try {
+      const result = await pool.query(
+        'UPDATE sales SET print_count = COALESCE(print_count, 0) + 1 WHERE id = $1 RETURNING print_count',
+        [id],
+      );
+      printCount = Number(result.rows[0]?.print_count ?? 1);
+    } catch (err: unknown) {
+      const pgCode =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code?: string }).code)
+          : '';
+      // 42703 = undefined_column
+      if (pgCode === '42703') {
+        await pool.query(
+          `ALTER TABLE sales ADD COLUMN IF NOT EXISTS print_count INTEGER NOT NULL DEFAULT 0`,
+        );
+        const result = await pool.query(
+          'UPDATE sales SET print_count = COALESCE(print_count, 0) + 1 WHERE id = $1 RETURNING print_count',
+          [id],
+        );
+        printCount = Number(result.rows[0]?.print_count ?? 1);
+      } else {
+        throw err;
+      }
+    }
 
     // Log to audit trail
     try {
