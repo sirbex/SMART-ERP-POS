@@ -24,6 +24,9 @@ import {
   handleApiError,
   parseApiError,
   toastApiError,
+  markApiErrorNotified,
+  shouldSuppressApiErrorToast,
+  resetApiErrorToastDedupeForTests,
 } from '../utils/errorHandler';
 import { getErrorMessage } from '../utils/api';
 
@@ -101,6 +104,19 @@ describe('PROOF — Access denied notification (no HTTP status codes)', () => {
     // Must not throw; interceptor already notified
     expect(() => toastApiError(handled)).not.toThrow();
     expect(handleApiError(handled)).toBe(ACCESS_DENIED_MESSAGE);
+  });
+
+  it('E-06b global dedupe marks interceptor messages for toast.error suppress', () => {
+    resetApiErrorToastDedupeForTests();
+    const msg =
+      'No active recipe for this product. Add ingredient lines manually or define a restaurant recipe first.';
+    markApiErrorNotified(msg, 'Invalid request');
+    expect(shouldSuppressApiErrorToast(msg)).toBe(true);
+    expect(shouldSuppressApiErrorToast('Invalid request')).toBe(true);
+    // Wrapper install is covered in errorHandler.spec.ts (toast.error re-fire no-ops)
+    expect(readSrc('utils/errorHandler.ts')).toMatch(/installGlobalApiToastDedupe/);
+    expect(readSrc('utils/api.ts')).toMatch(/markApiErrorNotified/);
+    expect(readSrc('main.tsx')).toMatch(/installGlobalApiToastDedupe/);
   });
 
   it('E-07 accounting mutation hooks use toastApiError (skips handled 403)', () => {

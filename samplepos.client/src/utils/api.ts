@@ -19,7 +19,10 @@ import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
 import { isPublicApiRoute } from '../lib/apiPublicRoutes';
 import { isBackendUnavailableError } from '../lib/isBackendUnavailableError';
-import { HandledApiError, ACCESS_DENIED_MESSAGE, friendlyHttpErrorMessage, dispatchUserFacingApiNotification, resolveUserFacingApiNotification } from './errorHandler';
+import { HandledApiError, ACCESS_DENIED_MESSAGE, friendlyHttpErrorMessage, dispatchUserFacingApiNotification, resolveUserFacingApiNotification, markApiErrorNotified, installGlobalApiToastDedupe } from './errorHandler';
+
+// Global: interceptor-notified API errors suppress page-level re-toasts
+installGlobalApiToastDedupe();
 import { toast } from 'sonner';
 import type { ServerListParams } from '../lib/serverListParams';
 import { toServerListQuery } from '../lib/serverListParams';
@@ -254,6 +257,8 @@ apiClient.interceptors.response.use(
         duration: 8000,
         id: brvCode ?? 'BUSINESS_RULE_VIOLATION', // deduplicate: same rule won't stack multiple toasts
       });
+      // After first toast: suppress catch-block re-toasts of the same message
+      markApiErrorNotified(reason, 'Action Not Allowed', brvCode);
       return Promise.reject(new HandledApiError(reason));
     }
 
@@ -269,6 +274,7 @@ apiClient.interceptors.response.use(
         Boolean(error.config?.silentForbidden) || Boolean(error.config?.silentErrorToast);
       if (!silent) {
         console.error('Access denied:', error.response.data?.error || msg);
+        markApiErrorNotified(msg, ACCESS_DENIED_MESSAGE, 'app-forbidden');
         window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
       }
       return Promise.reject(new HandledApiError(msg));
@@ -296,6 +302,7 @@ apiClient.interceptors.response.use(
         ? 'Could not reach the server. Please try again.'
         : 'You appear to be offline. Check your connection and try again.';
       if (!error.config?.silentErrorToast) {
+        markApiErrorNotified(msg, 'Connection problem', 'app-network');
         window.dispatchEvent(
           new CustomEvent('app:api-error', {
             detail: {
@@ -1497,9 +1504,241 @@ export const api = {
       name: string;
       isActive?: boolean;
       notes?: string | null;
+      usageMode?: 'AT_SALE' | 'AT_PRODUCTION';
       lines: Array<{ componentProductId: string; quantityBase: number; sortOrder?: number }>;
     }) => apiClient.put<ApiResponse>('restaurant/recipes', data),
     deleteRecipe: (id: string) => apiClient.delete<ApiResponse>(`restaurant/recipes/${id}`),
+  },
+
+  /** Kitchen Production (ADR-005) — cook-to-stock batches; posts to inventory engine */
+  kitchenProduction: {
+    enabled: () => apiClient.get<ApiResponse<{ enabled: boolean }>>('kitchen-production/enabled'),
+    listProducibleProducts: (params?: {
+      preparedOnly?: boolean;
+      search?: string;
+      limit?: number;
+    }) =>
+      apiClient.get<ApiResponse>('kitchen-production/producible-products', { params }),
+    listBatches: (params?: { status?: string; limit?: number }) =>
+      apiClient.get<ApiResponse>('kitchen-production/batches', { params }),
+    getBatch: (id: string) => apiClient.get<ApiResponse>(`kitchen-production/batches/${id}`),
+    planFromRecipe: (data: { outputProductId: string; outputQtyBase: number }) =>
+      apiClient.post<ApiResponse>('kitchen-production/plan-from-recipe', data),
+    createBatch: (data: {
+      productionDate?: string;
+      storeLocationId?: string | null;
+      outputProductId: string;
+      outputQtyBase: number;
+      outputLotNumber?: string | null;
+      notes?: string | null;
+      lines: Array<{
+        productId: string;
+        plannedQtyBase?: number;
+        actualQtyBase: number;
+        sortOrder?: number;
+      }>;
+    }) => apiClient.post<ApiResponse>('kitchen-production/batches', data),
+    updateBatch: (
+      id: string,
+      data: {
+        productionDate?: string;
+        storeLocationId?: string | null;
+        outputProductId?: string;
+        outputQtyBase?: number;
+        outputLotNumber?: string | null;
+        notes?: string | null;
+        lines?: Array<{
+          productId: string;
+          plannedQtyBase?: number;
+          actualQtyBase: number;
+          sortOrder?: number;
+        }>;
+      },
+    ) => apiClient.patch<ApiResponse>(`kitchen-production/batches/${id}`, data),
+    postBatch: (id: string) => apiClient.post<ApiResponse>(`kitchen-production/batches/${id}/post`),
+    cancelBatch: (id: string) =>
+      apiClient.post<ApiResponse>(`kitchen-production/batches/${id}/cancel`),
+
+    // Phase 6 — kitchen ops hub (one-shot actions, no multi-round drafts)
+    opsBoard: (params?: { serviceDate?: string }) =>
+      apiClient.get<ApiResponse>('kitchen-production/ops/board', { params }),
+    quickProduce: (data: {
+      outputProductId: string;
+      outputQtyBase: number;
+      storeLocationId?: string | null;
+      notes?: string | null;
+      productionDate?: string;
+      lines?: Array<{
+        productId: string;
+        plannedQtyBase?: number;
+        actualQtyBase: number;
+        sortOrder?: number;
+      }>;
+    }) => apiClient.post<ApiResponse>('kitchen-production/ops/quick-produce', data),
+    startService: (data: {
+      name: string;
+      serviceDate?: string;
+      coverProductId: string;
+      expectedCovers: number;
+      allowOverbook?: boolean;
+      storeLocationId?: string | null;
+      notes?: string | null;
+      lines?: Array<{
+        preparedProductId: string;
+        plannedQtyBase: number;
+        unitLabel?: string | null;
+        sortOrder?: number;
+        notes?: string | null;
+      }>;
+    }) => apiClient.post<ApiResponse>('kitchen-production/ops/start-service', data),
+    quickWaste: (data: {
+      documentType?: 'WASTE_YIELD' | 'CLOSING';
+      wasteDate?: string;
+      reason?: string;
+      storeLocationId?: string | null;
+      buffetSessionId?: string | null;
+      productionDocumentId?: string | null;
+      notes?: string | null;
+      lines: Array<{
+        productId: string;
+        plannedQtyBase?: number;
+        qtyBase: number;
+        sortOrder?: number;
+        notes?: string | null;
+      }>;
+    }) => apiClient.post<ApiResponse>('kitchen-production/ops/quick-waste', data),
+    endService: (data: {
+      sessionId: string;
+      leftoverLines?: Array<{
+        productId: string;
+        plannedQtyBase?: number;
+        qtyBase: number;
+        notes?: string | null;
+      }>;
+      reason?: string;
+      storeLocationId?: string | null;
+      notes?: string | null;
+    }) => apiClient.post<ApiResponse>('kitchen-production/ops/end-service', data),
+
+    // Phase 3 — buffet sessions (capacity, not BOM)
+    listBuffetSessions: (params?: { status?: string; serviceDate?: string; limit?: number }) =>
+      apiClient.get<ApiResponse>('kitchen-production/buffet-sessions', { params }),
+    getBuffetSession: (id: string) =>
+      apiClient.get<ApiResponse>(`kitchen-production/buffet-sessions/${id}`),
+    createBuffetSession: (data: {
+      name: string;
+      serviceDate?: string;
+      coverProductId: string;
+      expectedCovers: number;
+      allowOverbook?: boolean;
+      storeLocationId?: string | null;
+      notes?: string | null;
+      lines?: Array<{
+        preparedProductId: string;
+        plannedQtyBase: number;
+        unitLabel?: string | null;
+        sortOrder?: number;
+        notes?: string | null;
+      }>;
+    }) => apiClient.post<ApiResponse>('kitchen-production/buffet-sessions', data),
+    updateBuffetSession: (
+      id: string,
+      data: {
+        name?: string;
+        serviceDate?: string;
+        coverProductId?: string;
+        expectedCovers?: number;
+        allowOverbook?: boolean;
+        storeLocationId?: string | null;
+        notes?: string | null;
+        lines?: Array<{
+          preparedProductId: string;
+          plannedQtyBase: number;
+          unitLabel?: string | null;
+          sortOrder?: number;
+          notes?: string | null;
+        }>;
+      },
+    ) => apiClient.patch<ApiResponse>(`kitchen-production/buffet-sessions/${id}`, data),
+    openBuffetSession: (id: string) =>
+      apiClient.post<ApiResponse>(`kitchen-production/buffet-sessions/${id}/open`),
+    closeBuffetSession: (id: string) =>
+      apiClient.post<ApiResponse>(`kitchen-production/buffet-sessions/${id}/close`),
+    cancelBuffetSession: (id: string) =>
+      apiClient.post<ApiResponse>(`kitchen-production/buffet-sessions/${id}/cancel`),
+    closeBuffetWithLeftovers: (
+      id: string,
+      data?: {
+        leftoverLines?: Array<{
+          productId: string;
+          plannedQtyBase?: number;
+          qtyBase: number;
+          notes?: string | null;
+        }>;
+        reason?: string;
+        storeLocationId?: string | null;
+        notes?: string | null;
+      },
+    ) =>
+      apiClient.post<ApiResponse>(
+        `kitchen-production/buffet-sessions/${id}/close-with-leftovers`,
+        data ?? {},
+      ),
+
+    // Phase 4 — waste / yield
+    listWaste: (params?: { status?: string; buffetSessionId?: string; limit?: number }) =>
+      apiClient.get<ApiResponse>('kitchen-production/waste', { params }),
+    getWaste: (id: string) => apiClient.get<ApiResponse>(`kitchen-production/waste/${id}`),
+    createWaste: (data: {
+      documentType?: 'WASTE_YIELD' | 'CLOSING';
+      wasteDate?: string;
+      reason?: string;
+      storeLocationId?: string | null;
+      buffetSessionId?: string | null;
+      productionDocumentId?: string | null;
+      notes?: string | null;
+      lines: Array<{
+        productId: string;
+        plannedQtyBase?: number;
+        qtyBase: number;
+        sortOrder?: number;
+        notes?: string | null;
+      }>;
+    }) => apiClient.post<ApiResponse>('kitchen-production/waste', data),
+    updateWaste: (
+      id: string,
+      data: {
+        documentType?: 'WASTE_YIELD' | 'CLOSING';
+        wasteDate?: string;
+        reason?: string;
+        storeLocationId?: string | null;
+        buffetSessionId?: string | null;
+        productionDocumentId?: string | null;
+        notes?: string | null;
+        lines?: Array<{
+          productId: string;
+          plannedQtyBase?: number;
+          qtyBase: number;
+          sortOrder?: number;
+          notes?: string | null;
+        }>;
+      },
+    ) => apiClient.patch<ApiResponse>(`kitchen-production/waste/${id}`, data),
+    postWaste: (id: string) => apiClient.post<ApiResponse>(`kitchen-production/waste/${id}/post`),
+    cancelWaste: (id: string) =>
+      apiClient.post<ApiResponse>(`kitchen-production/waste/${id}/cancel`),
+
+    // Phase 5 — food-cost analytics
+    analyticsSummary: (params?: { from?: string; to?: string }) =>
+      apiClient.get<ApiResponse>('kitchen-production/analytics/summary', { params }),
+    analyticsProductionVariance: (params?: { from?: string; to?: string }) =>
+      apiClient.get<ApiResponse>('kitchen-production/analytics/production-variance', {
+        params,
+      }),
+    analyticsWaste: (params?: { from?: string; to?: string }) =>
+      apiClient.get<ApiResponse>('kitchen-production/analytics/waste', { params }),
+    analyticsBuffet: (params?: { from?: string; to?: string }) =>
+      apiClient.get<ApiResponse>('kitchen-production/analytics/buffet', { params }),
   },
 
   /** Print Job SSOT — enqueue on server; device agent delivers via :1811 */

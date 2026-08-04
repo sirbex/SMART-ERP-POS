@@ -24,6 +24,8 @@ export interface RecipeRecord {
   name: string;
   isActive: boolean;
   notes: string | null;
+  /** AT_SALE | AT_PRODUCTION (default AT_SALE) */
+  usageMode: 'AT_SALE' | 'AT_PRODUCTION';
   createdAt: string;
   updatedAt: string;
   lines: RecipeLineRecord[];
@@ -43,6 +45,7 @@ export const recipeRepository = {
     const headers = await conn.query(
       `SELECT
          r.id, r.parent_product_id, r.name, r.is_active, r.notes, r.created_at, r.updated_at,
+         COALESCE(r.usage_mode, 'AT_SALE') AS usage_mode,
          p.name AS parent_product_name
        FROM product_recipes r
        JOIN products p ON p.id = r.parent_product_id
@@ -62,6 +65,7 @@ export const recipeRepository = {
     const result = await conn.query(
       `SELECT
          r.id, r.parent_product_id, r.name, r.is_active, r.notes, r.created_at, r.updated_at,
+         COALESCE(r.usage_mode, 'AT_SALE') AS usage_mode,
          p.name AS parent_product_name
        FROM product_recipes r
        JOIN products p ON p.id = r.parent_product_id
@@ -79,6 +83,7 @@ export const recipeRepository = {
     const result = await conn.query(
       `SELECT
          r.id, r.parent_product_id, r.name, r.is_active, r.notes, r.created_at, r.updated_at,
+         COALESCE(r.usage_mode, 'AT_SALE') AS usage_mode,
          p.name AS parent_product_name
        FROM product_recipes r
        JOIN products p ON p.id = r.parent_product_id
@@ -112,11 +117,13 @@ export const recipeRepository = {
       name: string;
       isActive?: boolean;
       notes?: string | null;
+      usageMode?: 'AT_SALE' | 'AT_PRODUCTION';
       lines: Array<{ componentProductId: string; quantityBase: number; sortOrder?: number }>;
     },
   ): Promise<RecipeRecord> {
     const existing = await this.getByParentProductId(conn, data.parentProductId);
     let recipeId: string;
+    const usageMode = data.usageMode === 'AT_PRODUCTION' ? 'AT_PRODUCTION' : 'AT_SALE';
 
     if (existing) {
       await conn.query(
@@ -124,18 +131,31 @@ export const recipeRepository = {
          SET name = $2,
              is_active = COALESCE($3, is_active),
              notes = $4,
+             usage_mode = $5,
              updated_at = NOW()
          WHERE id = $1`,
-        [existing.id, data.name.trim(), data.isActive ?? existing.isActive, data.notes ?? null],
+        [
+          existing.id,
+          data.name.trim(),
+          data.isActive ?? existing.isActive,
+          data.notes ?? null,
+          usageMode,
+        ],
       );
       recipeId = existing.id;
       await conn.query(`DELETE FROM product_recipe_lines WHERE recipe_id = $1`, [recipeId]);
     } else {
       const inserted = await conn.query(
-        `INSERT INTO product_recipes (parent_product_id, name, is_active, notes)
-         VALUES ($1, $2, COALESCE($3, TRUE), $4)
+        `INSERT INTO product_recipes (parent_product_id, name, is_active, notes, usage_mode)
+         VALUES ($1, $2, COALESCE($3, TRUE), $4, $5)
          RETURNING id`,
-        [data.parentProductId, data.name.trim(), data.isActive ?? true, data.notes ?? null],
+        [
+          data.parentProductId,
+          data.name.trim(),
+          data.isActive ?? true,
+          data.notes ?? null,
+          usageMode,
+        ],
       );
       recipeId = inserted.rows[0].id;
     }

@@ -129,7 +129,7 @@ export default function KitchenDisplayPage() {
         const pendingLocal = local.filter((t) => !remoteKeys.has(t.kotNumber));
         return [...remote, ...pendingLocal];
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : apiErr(err, 'Kitchen board API failed');
+        const msg = err instanceof Error ? err.message : apiErr(err, 'Kitchen Display API failed');
         console.error('[KitchenDisplay] API board failed — using local journal', msg);
         toast.error(`Kitchen API unavailable — showing local tickets (${msg})`, {
           id: 'kds-api-fallback',

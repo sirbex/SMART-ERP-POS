@@ -5,10 +5,25 @@
 
 export type CatalogProductType = 'inventory' | 'consumable' | 'service';
 
+/**
+ * When a parent recipe’s ingredients are reserved for inventory:
+ * - AT_SALE — kit / cook-to-order (explode on payment)
+ * - AT_PRODUCTION — manufacture / cook-to-stock (explode only on production batch; sale deducts parent)
+ */
+export type RecipeUsageMode = 'AT_SALE' | 'AT_PRODUCTION';
+
 export function isServiceProductType(
   productType: string | null | undefined,
 ): boolean {
   return String(productType || '').toLowerCase() === 'service';
+}
+
+export function normalizeRecipeUsageMode(
+  mode: string | null | undefined,
+): RecipeUsageMode {
+  return String(mode || 'AT_SALE').toUpperCase() === 'AT_PRODUCTION'
+    ? 'AT_PRODUCTION'
+    : 'AT_SALE';
 }
 
 /** How createSale should handle inventory for one sale line. */
@@ -19,19 +34,21 @@ export type SaleStockDeductionPlan =
 
 /**
  * Parent × recipe matrix at payment (not KOT):
- * | Parent type           | Active recipe? | Stock at pay                     |
- * | inventory / consumable| no             | deduct parent                    |
- * | inventory / consumable| yes            | deduct ingredient lines (FEFO)   |
- * | service               | no             | skip stock                       |
- * | service               | yes            | deduct ingredient lines (FEFO)   |
+ * | Parent type           | Recipe at sale? | Stock at pay                     |
+ * | inventory / consumable| no (or production-only BOM) | deduct parent             |
+ * | inventory / consumable| yes AT_SALE     | deduct ingredient lines (FEFO)   |
+ * | service               | no              | skip stock                       |
+ * | service               | yes AT_SALE     | deduct ingredient lines (FEFO)   |
+ *
+ * @param recipeExplodesAtSale — true only when active recipe has usage_mode AT_SALE with lines
  */
 export function planSaleStockDeduction(
   parentProductType: string,
-  hasRecipeLines: boolean,
+  recipeExplodesAtSale: boolean,
 ): SaleStockDeductionPlan {
   const type = (parentProductType || 'inventory').toLowerCase();
-  if (type === 'service' && !hasRecipeLines) return { kind: 'skip' };
-  if (hasRecipeLines) return { kind: 'ingredients' };
+  if (type === 'service' && !recipeExplodesAtSale) return { kind: 'skip' };
+  if (recipeExplodesAtSale) return { kind: 'ingredients' };
   return { kind: 'parent' };
 }
 
@@ -82,12 +99,15 @@ export type ProductSaveShape = {
   costingMethod?: string;
   costPrice?: number;
   sellingPrice?: number;
+  isPreparedFood?: boolean;
+  isBuffetCover?: boolean;
 };
 
 /**
  * Normalize create/update payload when type is service:
  * clears supplier, expiry, reorder; forces STANDARD costing.
  * Does not invent a selling price — caller must set menu price.
+ * Prepared food flag is cleared for service parents (cannot be stocked FG).
  */
 export function normalizeProductSaveForType<T extends ProductSaveShape>(data: T): T {
   if (!isServiceProductType(data.productType)) return data;
@@ -95,11 +115,28 @@ export function normalizeProductSaveForType<T extends ProductSaveShape>(data: T)
   return {
     ...data,
     productType: 'service',
+    isPreparedFood: false,
     ...clears,
   };
 }
 
-/** Which Product form sections are active for a given type. */
+/**
+ * Defaults when marking a product as kitchen prepared food (Phase 2).
+ * Does not force selling price or name.
+ */
+export function prepareFoodCatalogDefaults(): {
+  productType: 'inventory';
+  isPreparedFood: true;
+  recommendedRecipeUsageMode: RecipeUsageMode;
+} {
+  return {
+    productType: 'inventory',
+    isPreparedFood: true,
+    recommendedRecipeUsageMode: 'AT_PRODUCTION',
+  };
+}
+
+/** Which ProductForm sections are active for a given type. */
 export function productFormSectionVisibility(productType: string | null | undefined) {
   const service = isServiceProductType(productType);
   return {
@@ -110,5 +147,6 @@ export function productFormSectionVisibility(productType: string | null | undefi
     showCostingMethod: !service,
     showExpiry: !service,
     showActiveOnlyAvailability: service,
+    showPreparedFood: !service,
   };
 }

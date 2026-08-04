@@ -18,6 +18,8 @@ export const MovementTypeSchema = z.enum([
   'DAMAGE',
   'EXPIRY',
   'OPENING_BALANCE',
+  'PRODUCTION_ISSUE',
+  'PRODUCTION_RECEIPT',
 ]);
 
 export type MovementType = z.infer<typeof MovementTypeSchema>;

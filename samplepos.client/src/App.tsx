@@ -123,6 +123,13 @@ const RestaurantPrinterDiagnosticsPage = lazyWithRetry(
   () => import('./pages/restaurant/RestaurantPrinterDiagnosticsPage'),
 );
 const RestaurantRecipesPage = lazyWithRetry(() => import('./pages/restaurant/RestaurantRecipesPage'));
+const KitchenHubPage = lazyWithRetry(() => import('./pages/kitchen/KitchenHubPage'));
+const KitchenProductionPage = lazyWithRetry(() => import('./pages/kitchen/KitchenProductionPage'));
+const KitchenBuffetSessionsPage = lazyWithRetry(
+  () => import('./pages/kitchen/KitchenBuffetSessionsPage'),
+);
+const KitchenWastePage = lazyWithRetry(() => import('./pages/kitchen/KitchenWastePage'));
+const KitchenAnalyticsPage = lazyWithRetry(() => import('./pages/kitchen/KitchenAnalyticsPage'));
 const RestaurantOrderTagsPage = lazyWithRetry(
   () => import('./pages/restaurant/RestaurantOrderTagsPage'),
 );
@@ -474,6 +481,82 @@ function App() {
                         requiredFeature="pos"
                       >
                         <RestaurantRecipesPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/kitchen"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={[
+                          'kitchen.production.read',
+                          'kitchen.production.create',
+                          'kitchen.production.post',
+                        ]}
+                        requiredFeature="pos"
+                      >
+                        <KitchenHubPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/kitchen/production"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={[
+                          'kitchen.production.read',
+                          'kitchen.production.create',
+                          'kitchen.production.post',
+                        ]}
+                        requiredFeature="pos"
+                      >
+                        <KitchenProductionPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/kitchen/buffet-sessions"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={[
+                          'kitchen.production.read',
+                          'kitchen.production.create',
+                          'kitchen.production.post',
+                        ]}
+                        requiredFeature="pos"
+                      >
+                        <KitchenBuffetSessionsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/kitchen/waste"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={[
+                          'kitchen.production.read',
+                          'kitchen.production.create',
+                          'kitchen.production.post',
+                        ]}
+                        requiredFeature="pos"
+                      >
+                        <KitchenWastePage />
+                      </ProtectedRoute>
+                    }
+                  />
+
+                  <Route
+                    path="/kitchen/analytics"
+                    element={
+                      <ProtectedRoute
+                        requiredPermissions={['kitchen.production.read']}
+                        requiredFeature="pos"
+                      >
+                        <KitchenAnalyticsPage />
                       </ProtectedRoute>
                     }
                   />

@@ -15,15 +15,17 @@
  */
 import axios, { type AxiosError } from 'axios';
 import toast from 'react-hot-toast';
+import { toast as sonnerToast } from 'sonner';
 import { formatCurrency } from './currency';
 
 // ── Types ──────────────────────────────────────────────────────────
 
 /**
  * Thrown (and re-rejected) by the API interceptor after it has already
- * shown a toast for a GOV_RULE_* / ACC_RULE_* / INV_RULE_* error.
- * Catch handlers that call handleApiError will see this and skip a
- * duplicate toast.
+ * shown a toast for a GOV_RULE_* / ACC_RULE_* / INV_RULE_* / HTTP error.
+ * Catch handlers that call handleApiError / toastApiError skip a
+ * duplicate toast. A global toast.error / sonner wrapper also suppresses
+ * re-toasts of the same message when pages still call toast.error(msg).
  */
 export class HandledApiError extends Error {
   readonly isHandled = true as const;
@@ -31,6 +33,140 @@ export class HandledApiError extends Error {
     super(message);
     this.name = 'HandledApiError';
   }
+}
+
+// ── Global anti-double-toast (SSOT) ──────────────────────────────────
+// Interceptor toasts first, then rejects HandledApiError. Many screens still
+// call toast.error(...) in catch / onError — suppress those for a short window.
+
+const API_TOAST_DEDUPE_MS = 6000;
+const recentApiErrorNotices = new Map<string, number>();
+let rhtToastErrorPatched = false;
+let sonnerToastErrorPatched = false;
+
+function normalizeToastText(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** Record messages already shown for an API failure (call once per interceptor notify). */
+export function markApiErrorNotified(...messages: Array<string | null | undefined>): void {
+  const now = Date.now();
+  for (const raw of messages) {
+    if (typeof raw !== 'string') continue;
+    const n = normalizeToastText(raw);
+    if (n.length < 2) continue;
+    recentApiErrorNotices.set(n, now);
+  }
+  for (const [k, t] of recentApiErrorNotices) {
+    if (now - t > API_TOAST_DEDUPE_MS * 2) recentApiErrorNotices.delete(k);
+  }
+}
+
+/** True when a redundant toast for this API message would be a double-notify. */
+export function shouldSuppressApiErrorToast(
+  ...messages: Array<string | null | undefined>
+): boolean {
+  const now = Date.now();
+  for (const raw of messages) {
+    if (typeof raw !== 'string') continue;
+    const n = normalizeToastText(raw);
+    if (!n) continue;
+    const t = recentApiErrorNotices.get(n);
+    if (t != null && now - t < API_TOAST_DEDUPE_MS) return true;
+  }
+  return false;
+}
+
+function collectToastMessageTexts(message: unknown, options?: unknown): string[] {
+  const out: string[] = [];
+  if (typeof message === 'string') out.push(message);
+  if (options && typeof options === 'object') {
+    const o = options as { description?: unknown; id?: unknown };
+    if (typeof o.description === 'string') out.push(o.description);
+    if (typeof o.id === 'string') out.push(o.id);
+  }
+  return out;
+}
+
+/**
+ * Wrap a toast.error implementation so previously notified API messages are no-ops.
+ * Used by production install and by proof/evidence tests (pure — no spy side effects).
+ */
+export function wrapToastErrorWithApiDedupe(
+  original: (message: unknown, options?: unknown) => unknown,
+): (message: unknown, options?: unknown) => unknown {
+  return (message: unknown, options?: unknown) => {
+    const texts = collectToastMessageTexts(message, options);
+    if (texts.length > 0 && shouldSuppressApiErrorToast(...texts)) {
+      return typeof options === 'object' &&
+        options &&
+        'id' in options &&
+        typeof (options as { id?: unknown }).id === 'string'
+        ? (options as { id: string }).id
+        : 'suppressed-api-error';
+    }
+    return original(message, options);
+  };
+}
+
+function installToastErrorDedupe(
+  host: { error: (...args: unknown[]) => unknown },
+  flag: { get: () => boolean; set: () => void },
+): void {
+  if (flag.get()) return;
+  flag.set();
+
+  const unwrapped = host.error as ((...args: unknown[]) => unknown) & {
+    mockImplementation?: (fn: (...args: unknown[]) => unknown) => unknown;
+    getMockImplementation?: () => ((...args: unknown[]) => unknown) | undefined;
+    __apiToastDedupe?: boolean;
+  };
+
+  // Vitest/Jest: keep the spy identity (so expect(toast.error).not.toHaveBeenCalled works
+  // for code paths that never invoke toast). Additionally wire dedupe for production realism.
+  if (typeof unwrapped.mockImplementation === 'function') {
+    if (unwrapped.__apiToastDedupe) return;
+    const prior =
+      (typeof unwrapped.getMockImplementation === 'function'
+        ? unwrapped.getMockImplementation()
+        : undefined) || (() => undefined);
+    unwrapped.__apiToastDedupe = true;
+    unwrapped.mockImplementation(wrapToastErrorWithApiDedupe(prior));
+    return;
+  }
+
+  // Production (real toast APIs): replace host.error so the underlying toast never fires twice
+  const original = host.error.bind(host) as (message: unknown, options?: unknown) => unknown;
+  host.error = wrapToastErrorWithApiDedupe(original) as typeof host.error;
+}
+
+/**
+ * Patch toast libraries so page-level re-toasts of interceptor failures are no-ops.
+ * Safe to call multiple times. Invoked on module load and from App bootstrap.
+ */
+export function installGlobalApiToastDedupe(): void {
+  installToastErrorDedupe(toast as { error: (...args: unknown[]) => unknown }, {
+    get: () => rhtToastErrorPatched,
+    set: () => {
+      rhtToastErrorPatched = true;
+    },
+  });
+
+  try {
+    installToastErrorDedupe(sonnerToast as { error: (...args: unknown[]) => unknown }, {
+      get: () => sonnerToastErrorPatched,
+      set: () => {
+        sonnerToastErrorPatched = true;
+      },
+    });
+  } catch {
+    // sonner may be absent in some test shims
+  }
+}
+
+/** Test-only: clear dedupe window between suites. */
+export function resetApiErrorToastDedupeForTests(): void {
+  recentApiErrorNotices.clear();
 }
 
 /** User-facing copy for HTTP 403 / RBAC denials — never show status codes. */
@@ -563,5 +699,11 @@ export function dispatchUserFacingApiNotification(error: unknown): HandledApiErr
       window.dispatchEvent(new CustomEvent('app:api-error', { detail: notification }));
     }
   }
+  // App listener may toast a React node (not a string). Register body/title so
+  // catch-block toast.error(message) does not double-fire.
+  markApiErrorNotified(notification.message, notification.title, notification.toastId);
   return new HandledApiError(notification.message);
 }
+
+// Install once on import (api.ts / App both pull this module).
+installGlobalApiToastDedupe();

@@ -44,6 +44,10 @@ export const ProductCoreObject = z.object({
     .transform((v) => (v === "" ? undefined : v)),
   productType: ProductTypeEnum.default("inventory"),
   availableInRestaurant: z.boolean().default(true),
+  /** Kitchen prepared / finished food (cook-to-stock FG). Ignored for service. */
+  isPreparedFood: z.boolean().default(false),
+  /** Buffet plate/cover capacity product (Phase 3). Usually a service. */
+  isBuffetCover: z.boolean().default(false),
   genericName: z
     .string()
     .trim()

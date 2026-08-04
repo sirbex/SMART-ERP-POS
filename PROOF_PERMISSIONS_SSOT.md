@@ -1,6 +1,6 @@
 # PROOF: Permissions SSOT
 
-- Date: 2026-07-31T08:46:29.956Z
+- Date: 2026-08-01T23:03:31.611Z
 - Runner: `npx vitest run src/__tests__/permissions-ssot.proof.test.ts`
 
 ## Results
@@ -8,7 +8,6 @@
 - PASS inventory adjust wiring
 - PASS waiter grant matrix
 - PASS waiter takeaway ensureServiceLanes
-- PASS migration 578 heal
 
 ## Verdict
-**PASS** — inventory adjust/approve SSOT + waiter takeaway service lanes.
+**FAIL** — incomplete.

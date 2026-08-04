@@ -16,6 +16,8 @@ const PRODUCT_SELECT_COLUMNS = `
       p.category_id as "categoryId",
       COALESCE(p.product_type, 'inventory') as "productType",
       COALESCE(p.available_in_restaurant, false) as "availableInRestaurant",
+      COALESCE(p.is_prepared_food, false) as "isPreparedFood",
+      COALESCE(p.is_buffet_cover, false) as "isBuffetCover",
       p.generic_name as "genericName",
       p.conversion_factor as "conversionFactor",
       pv.cost_price as "costPrice",
@@ -64,7 +66,7 @@ const PRODUCT_UOM_AGG = `
       ) as "productUoms"`;
 
 const PRODUCT_GROUP_BY = `p.id, p.product_number, p.sku, p.barcode, p.name, p.description, p.category,
-             p.category_id, p.product_type, p.available_in_restaurant, p.generic_name, p.conversion_factor, pv.cost_price, pv.selling_price,
+             p.category_id, p.product_type, p.available_in_restaurant, p.is_prepared_food, p.is_buffet_cover, p.generic_name, p.conversion_factor, pv.cost_price, pv.selling_price,
              p.is_taxable, p.tax_rate, pv.costing_method, pv.average_cost, pv.last_cost,
              pv.pricing_formula, pv.auto_update_price, pi.quantity_on_hand,
              pi.reorder_level, pi.reorder_quantity, p.track_expiry, p.min_days_before_expiry_sale, p.is_active,
@@ -252,6 +254,9 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   const categoryId = await resolveCategoryId(pool, data.category);
   const productType = data.productType || 'inventory';
   const availableInRestaurant = data.availableInRestaurant ?? true;
+  const isPreparedFood =
+    productType === 'service' ? false : Boolean(data.isPreparedFood);
+  const isBuffetCover = Boolean(data.isBuffetCover);
 
   const params = [
     productNumber,
@@ -263,6 +268,8 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
     categoryId,
     productType,
     availableInRestaurant,
+    isPreparedFood,
+    isBuffetCover,
     data.genericName || null,
     data.conversionFactor || 1.0,
     data.costPrice || 0,
@@ -280,12 +287,12 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   ];
 
   const sql = `INSERT INTO products (
-      product_number, sku, barcode, name, description, category, category_id, product_type, available_in_restaurant, generic_name,
+      product_number, sku, barcode, name, description, category, category_id, product_type, available_in_restaurant, is_prepared_food, is_buffet_cover, generic_name,
       conversion_factor,
       cost_price, selling_price, is_taxable, tax_rate,
       reorder_level, track_expiry, min_days_before_expiry_sale, is_active,
       preferred_supplier_id, supplier_product_code, purchase_uom_id, lead_time_days
-  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
     RETURNING id`;
 
   const result = await pool.query(sql, params);
@@ -343,6 +350,12 @@ export function planProductUpdateAssignments(
   if (data.productType !== undefined) set(master, 'product_type', data.productType);
   if (data.availableInRestaurant !== undefined) {
     set(master, 'available_in_restaurant', data.availableInRestaurant);
+  }
+  if (data.isPreparedFood !== undefined) {
+    set(master, 'is_prepared_food', data.isPreparedFood);
+  }
+  if (data.isBuffetCover !== undefined) {
+    set(master, 'is_buffet_cover', data.isBuffetCover);
   }
   if (data.genericName !== undefined) set(master, 'generic_name', data.genericName || null);
   if (data.isTaxable !== undefined) set(master, 'is_taxable', data.isTaxable);

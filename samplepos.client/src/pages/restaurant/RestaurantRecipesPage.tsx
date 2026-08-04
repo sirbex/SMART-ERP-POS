@@ -1,6 +1,6 @@
 /**
- * Phase 3 — Recipe / BOM editor.
- * Menu item → ingredients (qty in base UoM). Consumption happens on pay via createSale.
+ * Phase 3 — Recipe / BOM editor (+ Kitchen Phase 2 usage mode).
+ * AT_SALE: ingredients on payment. AT_PRODUCTION: BOM for kitchen production; sale deducts parent stock.
  */
 
 import { useMemo, useState } from 'react';
@@ -28,6 +28,7 @@ interface Recipe {
   name: string;
   isActive: boolean;
   notes: string | null;
+  usageMode?: 'AT_SALE' | 'AT_PRODUCTION';
   lines: RecipeLine[];
 }
 
@@ -56,6 +57,7 @@ export default function RestaurantRecipesPage() {
   const [parentProductId, setParentProductId] = useState('');
   const [recipeName, setRecipeName] = useState('');
   const [notes, setNotes] = useState('');
+  const [usageMode, setUsageMode] = useState<'AT_SALE' | 'AT_PRODUCTION'>('AT_SALE');
   const [lines, setLines] = useState<Array<{ componentProductId: string; quantityBase: string }>>([
     { componentProductId: '', quantityBase: '1' },
   ]);
@@ -108,6 +110,7 @@ export default function RestaurantRecipesPage() {
         name: recipeName.trim(),
         notes: notes.trim() || null,
         isActive: true,
+        usageMode,
         lines: cleaned,
       });
       return res.data.data;
@@ -117,6 +120,7 @@ export default function RestaurantRecipesPage() {
       setParentProductId('');
       setRecipeName('');
       setNotes('');
+      setUsageMode('AT_SALE');
       setLines([{ componentProductId: '', quantityBase: '1' }]);
       void queryClient.invalidateQueries({ queryKey: ['restaurant', 'recipes'] });
     },
@@ -138,6 +142,7 @@ export default function RestaurantRecipesPage() {
     setParentProductId(recipe.parentProductId);
     setRecipeName(recipe.name);
     setNotes(recipe.notes || '');
+    setUsageMode(recipe.usageMode === 'AT_PRODUCTION' ? 'AT_PRODUCTION' : 'AT_SALE');
     setLines(
       recipe.lines.map((l) => ({
         componentProductId: l.componentProductId,
@@ -182,12 +187,18 @@ export default function RestaurantRecipesPage() {
           <div>
             <h1 className="text-xl font-semibold text-stone-900">Recipes / BOM</h1>
             <p className="text-sm text-stone-600 mt-1">
-              Link menu items to ingredients. Stock is consumed on payment (not on KOT).
+              Cook-to-order: consume on payment. Cook-to-stock: set usage to &quot;On production&quot;
+              and produce via Kitchen Production before selling the finished product.
             </p>
           </div>
-          <Link to="/restaurant" className="text-sm text-amber-800 underline">
-            Back to Restaurant POS
-          </Link>
+          <div className="flex gap-3 text-sm">
+            <Link to="/kitchen" className="text-amber-900 underline">
+              Kitchen Production
+            </Link>
+            <Link to="/restaurant" className="text-amber-800 underline">
+              Back to Restaurant POS
+            </Link>
+          </div>
         </div>
 
         <div className="rounded-lg border border-stone-200 bg-white p-4 space-y-3">
@@ -226,6 +237,22 @@ export default function RestaurantRecipesPage() {
                 placeholder="e.g. Chicken Pilau"
               />
             </div>
+          </div>
+          <div>
+            <label className="text-xs text-stone-600">When are ingredients consumed?</label>
+            <select
+              className="w-full border border-stone-300 rounded px-2 py-2 text-sm mt-1"
+              value={usageMode}
+              onChange={(e) => setUsageMode(e.target.value as 'AT_SALE' | 'AT_PRODUCTION')}
+            >
+              <option value="AT_SALE">On payment (cook-to-order / kit)</option>
+              <option value="AT_PRODUCTION">On kitchen production (cook-to-stock)</option>
+            </select>
+            <p className="text-xs text-stone-500 mt-1">
+              {usageMode === 'AT_PRODUCTION'
+                ? 'Sale deducts finished goods only. Produce via Kitchen Production first.'
+                : 'Sale explodes ingredients (FEFO). No pre-production required.'}
+            </p>
           </div>
           <div>
             <label className="text-xs text-stone-600">Notes</label>
@@ -325,6 +352,8 @@ export default function RestaurantRecipesPage() {
                   <div className="font-medium text-stone-900">{recipe.name}</div>
                   <div className="text-xs text-stone-500">
                     {recipe.parentProductName || recipe.parentProductId}
+                    {' · '}
+                    {recipe.usageMode === 'AT_PRODUCTION' ? 'On production' : 'On payment'}
                     {!recipe.isActive ? ' · inactive' : ''}
                   </div>
                   <ul className="mt-1 text-sm text-stone-700">

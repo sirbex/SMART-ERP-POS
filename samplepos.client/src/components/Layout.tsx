@@ -75,7 +75,7 @@ function LayoutChrome({ children }: LayoutProps) {
       requiresRestaurant: true,
     },
     {
-      name: 'Kitchen',
+      name: 'Kitchen Display',
       path: '/restaurant/kitchen',
       icon: '👨‍🍳',
       color: 'text-orange-700',
@@ -109,6 +109,18 @@ function LayoutChrome({ children }: LayoutProps) {
       permissions: ['restaurant.manage'],
       feature: 'pos',
       requiresRestaurant: true,
+    },
+    {
+      name: 'Kitchen Production',
+      path: '/kitchen',
+      icon: '🍲',
+      color: 'text-orange-800',
+      permissions: [
+        'kitchen.production.read',
+        'kitchen.production.create',
+        'kitchen.production.post',
+      ],
+      feature: 'pos',
     },
     {
       name: 'Order tags',
@@ -167,7 +179,7 @@ function LayoutChrome({ children }: LayoutProps) {
         restaurantEnabled,
       })
     ) {
-      // Waiters: Restaurant FOH only — never Kitchen / Stations / Recipes / Order tags.
+      // Waiters: Restaurant FOH only — never Kitchen Display / Stations / Recipes / Order tags.
       const authz = createClientAuthorization(user, permissions);
       return WAITER_NAV_ITEMS.filter((item) => {
         if (item.path === '/customers') {

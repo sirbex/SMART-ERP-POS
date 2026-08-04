@@ -72,20 +72,42 @@ export default function PrintReceiptDialog({
             };
 
             const result = await printReceipt(receiptData, printOptions);
-
-            setPrintStatus('success');
             setIsPrinting(false);
 
-            // Agent "accept" to unnamed default used to fake success after local-network
-            // permission — method "preview" means user must click Print on the overlay.
+            // In-app preview = agent / named printer did NOT print. Never show "printed successfully".
+            // Close this dialog so Radix releases modal/inert trap; otherwise the preview overlay freezes.
             if (result.method === 'preview') {
-                setErrorMessage(
-                    'No named receipt printer mapped. Use Print on the preview, or set Settings → Printing → Thermal Printer Name (exact Windows name).',
-                );
-                // Keep dialog open so operator sees the hint
+                setPrintStatus('idle');
+                setErrorMessage('');
+                onAfterPrint?.();
+                onOpenChange(false);
+                // Preview may already be mounted under an open dialog; clear any leftover traps.
+                requestAnimationFrame(() => {
+                    try {
+                        document.body.style.pointerEvents = '';
+                        document.body.style.overflow = '';
+                        const root = document.getElementById('sp-receipt-preview-root');
+                        if (root) {
+                            root.style.pointerEvents = 'auto';
+                            const printBtn = root.querySelector('button:last-of-type') as HTMLButtonElement | null;
+                            printBtn?.focus();
+                        }
+                    } catch {
+                        /* ignore */
+                    }
+                });
                 return;
             }
 
+            if (result.method === 'none') {
+                setPrintStatus('error');
+                setErrorMessage(
+                    'Receipt print produced no output. Check Printer Service and Settings → Printing.',
+                );
+                return;
+            }
+
+            setPrintStatus('success');
             onAfterPrint?.();
 
             setTimeout(() => {

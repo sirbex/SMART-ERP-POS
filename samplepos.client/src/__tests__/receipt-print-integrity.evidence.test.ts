@@ -205,6 +205,21 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
 
     const dialog = readClient('components/pos/PrintReceiptDialog.tsx');
     expect(dialog).toMatch(/printerName/);
+    // Preview path must never claim success (contradicts agent-miss overlay) and must release modal trap
+    expect(dialog).toMatch(/result\.method === 'preview'/);
+    expect(dialog).toMatch(/Never show "printed successfully"|did NOT print/i);
+    expect(dialog).toMatch(/onOpenChange\(false\)/);
+    // success banner only on real success branch (not before method check)
+    const successIdx = dialog.indexOf("setPrintStatus('success')");
+    const previewIdx = dialog.indexOf("result.method === 'preview'");
+    expect(successIdx).toBeGreaterThan(-1);
+    expect(previewIdx).toBeGreaterThan(-1);
+    expect(previewIdx).toBeLessThan(successIdx);
+
+    const printRest = readClient('lib/printRestaurant.ts');
+    expect(printRest).toMatch(/openInAppReceiptPreview/);
+    expect(printRest).toMatch(/pointer-events:\s*auto|pointerEvents/);
+    expect(printRest).toMatch(/Escape/);
 
     const pos = readClient('pages/pos/POSPage.tsx');
     expect(pos).toMatch(/printerName=\{receiptPrinterName\}/);

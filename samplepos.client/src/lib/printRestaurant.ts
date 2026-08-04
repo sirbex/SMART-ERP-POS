@@ -512,6 +512,24 @@ export function openInAppReceiptPreview(html: string): boolean {
   // Remove any previous receipt overlay
   document.getElementById('sp-receipt-preview-root')?.remove();
 
+  // Radix Dialog (or other modals) can leave the body inert / pointer-events blocked.
+  // Clear traps so this fallback is always usable (otherwise POS looks "frozen").
+  try {
+    document.body.style.pointerEvents = '';
+    document.body.style.overflow = '';
+    document.querySelectorAll('[aria-hidden="true"]').forEach((el) => {
+      // Don't strip on our own root after mount — only pre-existing tree
+      if (el.id !== 'sp-receipt-preview-root') {
+        el.removeAttribute('aria-hidden');
+      }
+    });
+    document.querySelectorAll('[inert]').forEach((el) => {
+      el.removeAttribute('inert');
+    });
+  } catch {
+    // ignore DOM errors
+  }
+
   const root = document.createElement('div');
   root.id = 'sp-receipt-preview-root';
   root.setAttribute('role', 'dialog');
@@ -526,6 +544,7 @@ export function openInAppReceiptPreview(html: string): boolean {
     'align-items:center',
     'justify-content:center',
     'padding:16px',
+    'pointer-events:auto',
   ].join(';');
 
   const panel = document.createElement('div');
@@ -539,24 +558,26 @@ export function openInAppReceiptPreview(html: string): boolean {
     'flex-direction:column',
     'box-shadow:0 20px 50px rgba(0,0,0,0.35)',
     'overflow:hidden',
+    'pointer-events:auto',
   ].join(';');
 
   const bar = document.createElement('div');
   bar.style.cssText =
     'display:flex;gap:8px;align-items:center;padding:10px 12px;background:#1c1917;color:#fafaf9;flex-shrink:0';
   const title = document.createElement('span');
-  title.style.cssText = 'margin-right:auto;font-size:13px;font-weight:600';
-  title.textContent = 'Receipt ready — printer agent did not accept (or no paper path). Print here:';
+  title.style.cssText = 'margin-right:auto;font-size:13px;font-weight:600;line-height:1.3';
+  title.textContent =
+    'Printer not confirmed — review receipt, then Print. (Map Settings → Printing → Thermal Printer Name to silence this.)';
   const btnClose = document.createElement('button');
   btnClose.type = 'button';
   btnClose.textContent = 'Close';
   btnClose.style.cssText =
-    'min-height:40px;padding:0 14px;border-radius:6px;border:none;font-weight:700;cursor:pointer;background:#44403c;color:#fafaf9';
+    'min-height:40px;padding:0 14px;border-radius:6px;border:none;font-weight:700;cursor:pointer;background:#44403c;color:#fafaf9;pointer-events:auto';
   const btnPrint = document.createElement('button');
   btnPrint.type = 'button';
   btnPrint.textContent = 'Print';
   btnPrint.style.cssText =
-    'min-height:40px;padding:0 14px;border-radius:6px;border:none;font-weight:700;cursor:pointer;background:#2563eb;color:#fff';
+    'min-height:40px;padding:0 14px;border-radius:6px;border:none;font-weight:700;cursor:pointer;background:#2563eb;color:#fff;pointer-events:auto';
   bar.appendChild(title);
   bar.appendChild(btnClose);
   bar.appendChild(btnPrint);
@@ -579,8 +600,21 @@ export function openInAppReceiptPreview(html: string): boolean {
   doc.close();
 
   const dismiss = () => {
+    try {
+      window.removeEventListener('keydown', onKey);
+    } catch {
+      /* ignore */
+    }
     root.remove();
   };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      dismiss();
+    }
+  };
+  window.addEventListener('keydown', onKey);
+
   btnClose.onclick = () => dismiss();
   root.addEventListener('click', (e) => {
     if (e.target === root) dismiss();

@@ -212,7 +212,7 @@ export function resolveCashierNavItems(
 
   const extras: CashierNavItem[] = [];
   if (perms.has('restaurant.kitchen')) {
-    extras.push({ name: 'Kitchen', path: '/restaurant/kitchen', icon: '👨‍🍳' });
+    extras.push({ name: 'Kitchen Display', path: '/restaurant/kitchen', icon: '👨‍🍳' });
   }
   if (perms.has('expenses.read') || perms.has('expenses.create')) {
     extras.push({ name: 'Expenses', path: '/expenses', icon: '💵' });

@@ -73,6 +73,9 @@ export interface SystemSettings {
     /** Restaurant module FOH/KOT (default false — retail unchanged) */
     restaurantModeEnabled: boolean;
 
+    /** ADR-005 Kitchen Production Batch cook-to-stock (default false) */
+    kitchenProductionEnabled: boolean;
+
     /** ADR-004 Phase 2A — Loss & Quarantine disposal documents (default false) */
     lossQuarantineDocumentEnabled: boolean;
 
@@ -135,6 +138,7 @@ export interface SystemSettingsDbRow {
     is_multistore_enabled: boolean;
     treasury_document_enabled?: boolean;
     restaurant_mode_enabled?: boolean;
+    kitchen_production_enabled?: boolean;
     loss_quarantine_document_enabled?: boolean;
     transfer_policy_require_approval_all: boolean;
     transfer_policy_allow_direct: boolean;
@@ -187,6 +191,7 @@ export interface UpdateSystemSettingsDto {
     isMultistoreEnabled?: boolean;
     treasuryDocumentEnabled?: boolean;
     restaurantModeEnabled?: boolean;
+    kitchenProductionEnabled?: boolean;
     lossQuarantineDocumentEnabled?: boolean;
     transferPolicyRequireApprovalAll?: boolean;
     transferPolicyAllowDirect?: boolean;
@@ -240,6 +245,7 @@ export function normalizeSystemSettings(dbRow: SystemSettingsDbRow): SystemSetti
         isMultistoreEnabled: dbRow.is_multistore_enabled ?? false,
         treasuryDocumentEnabled: dbRow.treasury_document_enabled ?? false,
         restaurantModeEnabled: dbRow.restaurant_mode_enabled ?? false,
+        kitchenProductionEnabled: dbRow.kitchen_production_enabled ?? false,
         lossQuarantineDocumentEnabled: dbRow.loss_quarantine_document_enabled ?? false,
         transferPolicyRequireApprovalAll: dbRow.transfer_policy_require_approval_all ?? true,
         transferPolicyAllowDirect: dbRow.transfer_policy_allow_direct ?? true,

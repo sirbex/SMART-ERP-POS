@@ -19,7 +19,8 @@ export type PermissionModule =
   | 'expenses'
   | 'quotations'
   | 'distribution'
-  | 'corrections';
+  | 'corrections'
+  | 'kitchen';
 
 export type PermissionAction =
   | 'read'

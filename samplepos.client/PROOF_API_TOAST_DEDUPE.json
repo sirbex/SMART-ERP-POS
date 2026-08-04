@@ -1,0 +1,43 @@
+{
+  "proof": "API_TOAST_DEDUPE",
+  "objective": "One user-visible API failure notification globally — interceptors notify once; page re-toasts suppressed",
+  "runAt": "2026-08-04T03:36:01.388Z",
+  "result": "PASS",
+  "summary": {
+    "pass": 5,
+    "fail": 0,
+    "total": 5
+  },
+  "gates": [
+    {
+      "id": "R6-local-allowed",
+      "pass": true,
+      "detail": "calls=1"
+    },
+    {
+      "id": "R7-toastApiError-skip",
+      "pass": true,
+      "detail": "calls=0"
+    },
+    {
+      "id": "W1-json",
+      "pass": true
+    },
+    {
+      "id": "W2-md",
+      "pass": true
+    },
+    {
+      "id": "W3-all-passed",
+      "pass": true,
+      "detail": "0 failed of prior gates"
+    }
+  ],
+  "bug": "Invalid request + No active recipe… plus second toast with the same body from page onError",
+  "fix": [
+    "markApiErrorNotified after interceptor / dispatch notify",
+    "installGlobalApiToastDedupe patches react-hot-toast + sonner",
+    "toastApiError / handleApiError skip HandledApiError"
+  ],
+  "command": "npx vitest run src/__tests__/api-toast-dedupe.proof.test.ts src/__tests__/errorHandler.spec.ts src/__tests__/access-denied-notification-proof.test.ts"
+}

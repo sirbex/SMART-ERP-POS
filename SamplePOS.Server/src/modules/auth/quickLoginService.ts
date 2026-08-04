@@ -173,6 +173,10 @@ export async function authenticateWithPin(
 /**
  * Authenticate by PIN alone (no userId required).
  * Since PINs are unique, the system identifies the user by matching against all PIN hashes.
+ *
+ * Performance: parallel bcrypt.compare across candidates (wall-time ≈ one bcrypt),
+ * and a single lockout query — sequential N×bcrypt + N×SQL made shared POS feel frozen
+ * after idle auto-logout when many waiters have PINs.
  */
 export async function authenticateWithPinOnly(
     pool: Pool,
@@ -188,29 +192,35 @@ export async function authenticateWithPinOnly(
         throw new QuickLoginError('This device is not registered as a trusted POS terminal', 'UNTRUSTED_DEVICE');
     }
 
-    // 2. Get all users with PINs configured
-    const usersWithPin = await quickLoginRepo.findAllUsersWithPin(pool);
+    // 2. Get all users with PINs + active lockouts in two queries (not N+1)
+    const [usersWithPin, lockedIds] = await Promise.all([
+        quickLoginRepo.findAllUsersWithPin(pool),
+        quickLoginRepo.getActivePinLockoutUserIds(pool),
+    ]);
     if (usersWithPin.length === 0) {
         throw new QuickLoginError('No users have configured quick login PINs', 'NO_USERS');
     }
 
-    // 3. Find matching user by comparing PIN against each hash
-    let matchedUser: typeof usersWithPin[0] | null = null;
-    for (const user of usersWithPin) {
-        if (!user.pinHash) continue;
+    const candidates = usersWithPin.filter((u) => u.pinHash && !lockedIds.has(u.id));
+    if (candidates.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        throw new QuickLoginError('Invalid PIN. Please try again.', 'INVALID_PIN');
+    }
 
-        // Check lockout for this user before comparing
-        const attempts = await quickLoginRepo.getPinAttempts(pool, user.id);
-        if (attempts?.lockedUntil) {
-            const lockedUntil = new Date(attempts.lockedUntil);
-            if (lockedUntil > new Date()) continue; // Skip locked users
-        }
-
-        const isMatch = await bcrypt.compare(pin, user.pinHash);
-        if (isMatch) {
-            matchedUser = user;
-            break;
-        }
+    // 3. Parallel PIN verify — first match wins (bcrypt is CPU-bound but concurrent)
+    let matchedUser: (typeof usersWithPin)[0] | null = null;
+    try {
+        matchedUser = await Promise.any(
+            candidates.map(async (user) => {
+                const ok = await bcrypt.compare(pin, user.pinHash!);
+                if (!ok) {
+                    throw new Error('PIN_MISMATCH');
+                }
+                return user;
+            }),
+        );
+    } catch {
+        matchedUser = null;
     }
 
     if (!matchedUser) {

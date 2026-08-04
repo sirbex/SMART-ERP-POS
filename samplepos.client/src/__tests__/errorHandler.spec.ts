@@ -11,13 +11,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { AxiosError } from 'axios';
 
-// ── Mock react-hot-toast before importing errorHandler ───────────────────────
+// ── Mock react-hot-toast / sonner before importing errorHandler ─────────────
 // vi.hoisted ensures the spy is available when the mock factory is hoisted to
 // the top of the file by vitest's transform.
 const toastErrorSpy = vi.hoisted(() => vi.fn());
+const sonnerErrorSpy = vi.hoisted(() => vi.fn());
 vi.mock('react-hot-toast', () => ({
     default: {
         error: toastErrorSpy,
+        success: vi.fn(),
+    },
+}));
+vi.mock('sonner', () => ({
+    toast: {
+        error: sonnerErrorSpy,
         success: vi.fn(),
     },
 }));
@@ -27,7 +34,13 @@ import {
     handleApiError,
     getStructuredErrorMessage,
     parseApiError,
+    markApiErrorNotified,
+    shouldSuppressApiErrorToast,
+    installGlobalApiToastDedupe,
+    resetApiErrorToastDedupeForTests,
+    wrapToastErrorWithApiDedupe,
 } from '../utils/errorHandler';
+import toast from 'react-hot-toast';
 
 // ── Helper: build a minimal AxiosError-shaped object ─────────────────────────
 function makeAxiosError(
@@ -81,7 +94,10 @@ describe('HandledApiError', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('handleApiError — HandledApiError suppresses duplicate toast', () => {
-    beforeEach(() => toastErrorSpy.mockClear());
+    beforeEach(() => {
+        toastErrorSpy.mockClear();
+        resetApiErrorToastDedupeForTests();
+    });
 
     it('should return the error message without calling toast', () => {
         const err = new HandledApiError('Cash account may not be credited.');
@@ -95,6 +111,44 @@ describe('handleApiError — HandledApiError suppresses duplicate toast', () => 
         const err = new HandledApiError('Rule fired');
         handleApiError(err, { silent: true });
         expect(toastErrorSpy).not.toHaveBeenCalled();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Global toast.error dedupe — page re-toasts after interceptor are no-ops
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('global API toast dedupe', () => {
+    beforeEach(() => {
+        toastErrorSpy.mockClear();
+        resetApiErrorToastDedupeForTests();
+        installGlobalApiToastDedupe();
+    });
+
+    it('suppresses underlying display after markApiErrorNotified (pure wrap)', () => {
+        const msg =
+            'No active recipe for this product. Add ingredient lines manually or define a restaurant recipe first.';
+        markApiErrorNotified(msg, 'Invalid request');
+        expect(shouldSuppressApiErrorToast(msg)).toBe(true);
+
+        // Spy.calls still increment if we call toast.error — measure *surface/display* via pure wrap
+        const displayed: string[] = [];
+        const display = wrapToastErrorWithApiDedupe((m) => {
+            displayed.push(String(m));
+        });
+        display(msg);
+        display(msg);
+        expect(displayed).toEqual([]);
+    });
+
+    it('still allows toast.error for a different (unmarked) message via pure wrap', () => {
+        markApiErrorNotified('Other failure');
+        const displayed: string[] = [];
+        const display = wrapToastErrorWithApiDedupe((m) => {
+            displayed.push(String(m));
+        });
+        display('Select a finished product');
+        expect(displayed).toEqual(['Select a finished product']);
     });
 });
 

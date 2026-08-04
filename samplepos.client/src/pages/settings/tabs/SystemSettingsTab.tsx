@@ -68,6 +68,8 @@ interface SystemSettings {
     treasuryDocumentEnabled?: boolean;
     /** Restaurant FOH module (tables, KOT, SambaPOS-style ordering) */
     restaurantModeEnabled?: boolean;
+    /** ADR-005 Kitchen Production cook-to-stock batches */
+    kitchenProductionEnabled?: boolean;
 }
 
 async function fetchSettings(): Promise<SystemSettings> {
@@ -134,6 +136,9 @@ export default function SystemSettingsTab() {
             }
             if (variables.restaurantModeEnabled !== undefined) {
                 void queryClient.invalidateQueries({ queryKey: ['restaurant', 'enabled'] });
+            }
+            if (variables.kitchenProductionEnabled !== undefined) {
+                void queryClient.invalidateQueries({ queryKey: ['kitchen-production', 'enabled'] });
             }
             // Immediately write transaction mode to localStorage so that:
             // 1. Same-tab POS page picks it up on next render (via cache read)
@@ -423,6 +428,7 @@ function TaxSettings({
             settings.vatOutputRequiresRegisteredCustomer ?? false,
         treasuryDocumentEnabled: settings.treasuryDocumentEnabled ?? false,
         restaurantModeEnabled: settings.restaurantModeEnabled ?? false,
+        kitchenProductionEnabled: settings.kitchenProductionEnabled ?? false,
     });
 
     const [newRate, setNewRate] = useState({ name: '', rate: 0, description: '' });
@@ -549,6 +555,36 @@ function TaxSettings({
                                 <p className="mt-0.5 text-xs text-gray-600">
                                     Tables, kitchen tickets (KOT), and SambaPOS-style restaurant POS.
                                     Retail and wholesale POS stay unchanged when this is off.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-3">
+                        <div className="flex items-start">
+                            <input
+                                type="checkbox"
+                                id="kitchenProductionEnabled"
+                                checked={formData.kitchenProductionEnabled}
+                                onChange={(e) =>
+                                    setFormData({
+                                        ...formData,
+                                        kitchenProductionEnabled: e.target.checked,
+                                    })
+                                }
+                                className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                            />
+                            <div className="ml-2">
+                                <label
+                                    htmlFor="kitchenProductionEnabled"
+                                    className="block text-sm font-medium text-gray-900"
+                                >
+                                    Enable Kitchen Production
+                                </label>
+                                <p className="mt-0.5 text-xs text-gray-600">
+                                    Cook-to-stock production batches (issue ingredients, receive finished
+                                    food). Optional; does not replace restaurant cook-to-order recipe
+                                    explosion at payment.
                                 </p>
                             </div>
                         </div>

@@ -101,6 +101,10 @@ export function classifyTaskFamily(pathname: string): WorkspaceTaskFamily {
   if (path.startsWith('/restaurant') || path.startsWith('/orders-queue')) {
     return 'restaurant';
   }
+  // ADR-005 kitchen production (cook-to-stock hub, batches, buffet, waste) — inventory engine path
+  if (path === '/kitchen' || path.startsWith('/kitchen/')) {
+    return 'inventory';
+  }
   if (path.startsWith('/accounting') || path.startsWith('/treasury') || path.startsWith('/banking')) {
     return 'accounting';
   }

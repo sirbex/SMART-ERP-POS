@@ -1799,6 +1799,7 @@ export const restaurantService = {
       name: string;
       isActive?: boolean;
       notes?: string | null;
+      usageMode?: 'AT_SALE' | 'AT_PRODUCTION';
       lines: Array<{ componentProductId: string; quantityBase: number; sortOrder?: number }>;
     },
   ) {
@@ -1813,11 +1814,20 @@ export const restaurantService = {
     if (!data.name?.trim()) throw new ValidationError('Recipe name is required');
     if (!data.lines?.length) throw new ValidationError('At least one ingredient is required');
 
+    const usageMode = data.usageMode === 'AT_PRODUCTION' ? 'AT_PRODUCTION' : 'AT_SALE';
+
     const parent = await pool.query(
       `SELECT id, name, product_type FROM products WHERE id = $1 AND COALESCE(is_active, TRUE) = TRUE`,
       [data.parentProductId],
     );
     if (!parent.rows[0]) throw new NotFoundError('Parent product');
+
+    // Manufacture BOM: parent should be stockable (inventory/consumable)
+    if (usageMode === 'AT_PRODUCTION' && parent.rows[0].product_type === 'service') {
+      throw new ValidationError(
+        'AT_PRODUCTION recipes require an inventory/consumable parent (prepared food). Use AT_SALE for service menu kits.',
+      );
+    }
 
     const seen = new Set<string>();
     for (const line of data.lines) {
@@ -1849,7 +1859,7 @@ export const restaurantService = {
       }
     }
 
-    return recipeRepository.upsertRecipe(pool, data);
+    return recipeRepository.upsertRecipe(pool, { ...data, usageMode });
   },
 
   async deleteRecipe(pool: Pool, id: string) {

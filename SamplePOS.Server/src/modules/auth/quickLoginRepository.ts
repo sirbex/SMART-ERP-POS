@@ -301,6 +301,16 @@ export async function getPinAttempts(conn: DbConnection, userId: string): Promis
     return result.rows[0] || null;
 }
 
+/** Active pin lockouts only — one query for PIN-only login (avoids N×getPinAttempts). */
+export async function getActivePinLockoutUserIds(conn: DbConnection): Promise<Set<string>> {
+    const result = await conn.query(
+        `SELECT user_id::text AS id
+         FROM pin_attempts
+         WHERE locked_until IS NOT NULL AND locked_until > CURRENT_TIMESTAMP`,
+    );
+    return new Set(result.rows.map((r: { id: string }) => r.id));
+}
+
 export async function recordPinFailure(conn: DbConnection, userId: string, maxAttempts: number, lockoutMinutes: number): Promise<PinAttemptStatus> {
     const result = await conn.query(
         `INSERT INTO pin_attempts (user_id, failed_attempts, last_attempt_at, locked_until)

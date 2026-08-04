@@ -163,12 +163,24 @@ export default function QuickLoginScreen() {
 
     const handlePinComplete = useCallback(async (pin: string) => {
         try {
+            // FOH hard-logout already stashed /restaurant — skip extra restaurant enabled RTT.
+            let stashedReturn: string | null = null;
+            try {
+                stashedReturn = sessionStorage.getItem('restaurant_post_quick_login_path');
+            } catch {
+                stashedReturn = null;
+            }
+
             const result = await loginWithPinOnly(pin);
             toast.success(`Welcome, ${result.user.fullName}!`);
-            const enabled = await queryClient.fetchQuery({
-                queryKey: restaurantEnabledQueryKey,
-                queryFn: fetchRestaurantEnabled,
-            });
+
+            let enabled = stashedReturn === '/restaurant' || !!stashedReturn?.startsWith('/restaurant');
+            if (!enabled) {
+                enabled = await queryClient.fetchQuery({
+                    queryKey: restaurantEnabledQueryKey,
+                    queryFn: fetchRestaurantEnabled,
+                });
+            }
             const intended = takeRestaurantPostQuickLoginPath(
               enabled ? '/restaurant' : '/pos',
             );
@@ -239,6 +251,11 @@ export default function QuickLoginScreen() {
                         isLoading={isLoading}
                         label="Enter your personal PIN"
                     />
+                    {isLoading ? (
+                        <p className="mt-3 text-sm font-medium text-blue-600 dark:text-blue-400 animate-pulse">
+                            Signing in…
+                        </p>
+                    ) : null}
 
                     <div className="flex gap-2 mt-6">
                         {[4, 5, 6].map((len) => (

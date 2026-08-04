@@ -57,6 +57,7 @@ import {
   planSaleStockDeduction,
   type RecipeExplosionLine,
 } from './saleRecipeExplosion.js';
+import { buffetSessionService } from '../kitchen-production/buffetSessionService.js';
 import { lotService } from '../inventory-lot/lotService.js';
 import { loadGlobalSelectableLots } from '../inventory-lot/postgresLotSelector.js';
 import { selectLots } from '@shared/inventory-lot/index.js';
@@ -1827,6 +1828,27 @@ export const salesService = {
         throw glError;
       }
       profiler.mark('gl_posting');
+
+      // Kitchen Production Phase 3: buffet cover capacity (no ingredient re-explosion)
+      try {
+        await buffetSessionService.tryConsumeCoversForSale(client, {
+          saleId: sale.id,
+          saleDate: String(sale.saleDate || getBusinessDate()).slice(0, 10),
+          userId: input.soldBy ?? null,
+          lines: input.items
+            .filter((it) => it.productId && !it.productId.startsWith('custom_'))
+            .map((it) => ({
+              productId: it.productId,
+              quantity: it.quantity,
+            })),
+        });
+      } catch (buffetErr) {
+        logger.error('Buffet cover allocation failed — transaction will rollback', {
+          saleId: sale.id,
+          error: buffetErr instanceof Error ? buffetErr.message : String(buffetErr),
+        });
+        throw buffetErr;
+      }
 
       if (input.exchangeRefundId && saleDiscountDec.greaterThan(0)) {
         const creditApplied = Money.toNumber(saleDiscountDec);

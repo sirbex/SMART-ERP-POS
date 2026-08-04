@@ -531,6 +531,7 @@ const RecipeUpsertSchema = z.object({
   name: z.string().min(1).max(120),
   isActive: z.boolean().optional(),
   notes: z.string().max(2000).nullable().optional(),
+  usageMode: z.enum(['AT_SALE', 'AT_PRODUCTION']).optional(),
   lines: z
     .array(
       z.object({

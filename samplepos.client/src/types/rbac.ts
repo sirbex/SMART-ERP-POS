@@ -25,7 +25,8 @@ export type PermissionModule =
   | 'expenses'
   | 'quotations'
   | 'distribution'
-  | 'corrections';
+  | 'corrections'
+  | 'kitchen';
 
 // Permission Action Types
 export type PermissionAction =

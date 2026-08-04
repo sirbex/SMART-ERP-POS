@@ -186,6 +186,10 @@ export const systemSettingsRepository = {
             setClauses.push(`restaurant_mode_enabled = $${paramIndex++}`);
             values.push(updates.restaurantModeEnabled);
         }
+        if (updates.kitchenProductionEnabled !== undefined) {
+            setClauses.push(`kitchen_production_enabled = $${paramIndex++}`);
+            values.push(updates.kitchenProductionEnabled);
+        }
         if (updates.lossQuarantineDocumentEnabled !== undefined) {
             setClauses.push(`loss_quarantine_document_enabled = $${paramIndex++}`);
             values.push(updates.lossQuarantineDocumentEnabled);

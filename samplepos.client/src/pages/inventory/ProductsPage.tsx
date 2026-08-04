@@ -117,6 +117,8 @@ interface ProductFormData {
   taxRate: string;
   isActive: boolean;
   availableInRestaurant: boolean;
+  isPreparedFood: boolean;
+  isBuffetCover: boolean;
   trackExpiry: boolean;
   minDaysBeforeExpirySale: string;
   // Procurement fields
@@ -167,6 +169,8 @@ const initialFormData: ProductFormData = {
   taxRate: '18',
   isActive: true,
   availableInRestaurant: true,
+  isPreparedFood: false,
+  isBuffetCover: false,
   trackExpiry: false,
   minDaysBeforeExpirySale: '0',
   preferredSupplierId: '',
@@ -619,6 +623,8 @@ export default function ProductsPage() {
       leadTimeDays: formData.leadTimeDays,
       reorderQuantity: formData.reorderQuantity,
       availableInRestaurant: formData.availableInRestaurant,
+      isPreparedFood: formData.isPreparedFood,
+      isBuffetCover: formData.isBuffetCover,
     }, modalMode === 'edit' ? 'update' : 'create');
 
     const errors: Record<string, string> = { ...(z.valid ? {} : z.errors) };
@@ -683,6 +689,8 @@ export default function ProductsPage() {
       taxRate: String(product.taxRate ?? initialFormData.taxRate),
       isActive: product.isActive ?? true,
       availableInRestaurant: product.availableInRestaurant !== false,
+      isPreparedFood: Boolean((product as { isPreparedFood?: boolean }).isPreparedFood),
+      isBuffetCover: Boolean((product as { isBuffetCover?: boolean }).isBuffetCover),
       trackExpiry: product.trackExpiry ?? false,
       minDaysBeforeExpirySale: String(product.minDaysBeforeExpirySale ?? '0'),
       preferredSupplierId: String(product.preferredSupplierId ?? ''),
@@ -724,6 +732,8 @@ export default function ProductsPage() {
         category: formData.category || undefined,
         productType: formData.productType || 'inventory',
         availableInRestaurant: formData.availableInRestaurant !== false,
+        isPreparedFood: isService ? false : !!formData.isPreparedFood,
+        isBuffetCover: !!formData.isBuffetCover,
         conversionFactor: parseFloat(formData.conversionFactor) || 1.0,
         costPrice: parseFloat(formData.costPrice) || 0,
         sellingPrice: parseFloat(formData.sellingPrice) || 0,
@@ -1551,6 +1561,8 @@ export default function ProductsPage() {
                   trackExpiry: formData.trackExpiry,
                   isActive: formData.isActive,
                   availableInRestaurant: formData.availableInRestaurant,
+                  isPreparedFood: formData.isPreparedFood,
+                  isBuffetCover: formData.isBuffetCover,
                   genericName: formData.genericName,
                   minDaysBeforeExpirySale: formData.minDaysBeforeExpirySale,
                   preferredSupplierId: formData.preferredSupplierId,

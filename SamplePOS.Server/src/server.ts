@@ -75,6 +75,7 @@ import { vatRemittanceRoutes } from './modules/vat-remittance/vatRemittanceRoute
 import { badDebtRoutes } from './modules/bad-debt/badDebtRoutes.js';
 import { treasuryRoutes } from './modules/treasury/treasuryRoutes.js';
 import restaurantRoutes from './modules/restaurant/restaurantRoutes.js';
+import kitchenProductionRoutes from './modules/kitchen-production/kitchenProductionRoutes.js';
 import printJobsRoutes from './modules/print-jobs/printJobsRoutes.js';
 import { assetRoutes } from './modules/asset-accounting/assetRoutes.js';
 import { jeApprovalRoutes } from './modules/je-approval/jeApprovalRoutes.js';
@@ -437,6 +438,7 @@ app.use('/api/vat-remittance', requireFeature('accounting'), vatRemittanceRoutes
 app.use('/api/bad-debt', requireFeature('accounting'), badDebtRoutes);
 app.use('/api/treasury', requireFeature('accounting'), treasuryRoutes);
 app.use('/api/restaurant', requireFeature('pos'), restaurantRoutes);
+app.use('/api/kitchen-production', requireFeature('pos'), kitchenProductionRoutes);
 app.use('/api/print-jobs', requireFeature('pos'), printJobsRoutes);
 app.use('/api/assets', requireFeature('accounting'), assetRoutes);
 app.use('/api/je-approval', requireFeature('accounting'), jeApprovalRoutes);

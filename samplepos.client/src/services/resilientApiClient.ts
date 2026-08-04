@@ -1,7 +1,7 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig } from 'axios';
 import { attachAuthInterceptors } from '../hooks/useTokenRefresh';
 import logger from '../utils/logger';
-import { HandledApiError, ACCESS_DENIED_MESSAGE, dispatchUserFacingApiNotification } from '../utils/errorHandler';
+import { HandledApiError, ACCESS_DENIED_MESSAGE, dispatchUserFacingApiNotification, markApiErrorNotified } from '../utils/errorHandler';
 import { toast } from 'sonner';
 
 /**
@@ -77,10 +77,12 @@ class ResilientApiClient {
                         duration: 8000,
                         id: brvCode ?? 'BUSINESS_RULE_VIOLATION',
                     });
+                    markApiErrorNotified(reason, 'Action Not Allowed', brvCode);
                     return Promise.reject(new HandledApiError(reason));
                 }
 
                 if (error.response?.status === 403) {
+                    markApiErrorNotified(ACCESS_DENIED_MESSAGE, 'app-forbidden');
                     window.dispatchEvent(
                         new CustomEvent('app:forbidden', { detail: ACCESS_DENIED_MESSAGE })
                     );

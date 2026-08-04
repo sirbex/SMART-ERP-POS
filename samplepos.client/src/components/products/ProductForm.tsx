@@ -49,6 +49,10 @@ export interface ProductFormValues {
   isActive: boolean;
   /** When restaurant module is on: show this product on Restaurant POS */
   availableInRestaurant: boolean;
+  /** Kitchen finished / semi-finished food (cook-to-stock) */
+  isPreparedFood: boolean;
+  /** Buffet cover / plate capacity menu product */
+  isBuffetCover: boolean;
   // Procurement fields (Part 9)
   preferredSupplierId: string;
   supplierProductCode: string;
@@ -121,6 +125,7 @@ export default function ProductForm({
       onChange('purchaseUomId', clears.purchaseUomId);
       onChange('leadTimeDays', clears.leadTimeDays);
       onChange('autoUpdatePrice', clears.autoUpdatePrice);
+      onChange('isPreparedFood', false);
     }
   };
 
@@ -460,6 +465,24 @@ export default function ProductForm({
                 </div>
               </div>
             )}
+            <div className="flex items-start gap-2">
+              <input
+                id="is-buffet-cover-svc"
+                type="checkbox"
+                checked={Boolean(values.isBuffetCover)}
+                onChange={(e) => onChange('isBuffetCover', e.target.checked)}
+                disabled={disabled}
+                className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <div>
+                <label htmlFor="is-buffet-cover-svc" className="text-sm font-medium text-gray-700">
+                  Buffet cover / plate (capacity sale)
+                </label>
+                <p className="text-xs text-gray-500">
+                  Sold as covers against an OPEN Buffet Session — ingredients are not exploded at payment.
+                </p>
+              </div>
+            </div>
           </div>
         ) : (
         <>
@@ -537,6 +560,47 @@ export default function ProductForm({
             </div>
           </div>
         )}
+
+        {sections.showPreparedFood && (
+          <div className="mt-3 flex items-start gap-2">
+            <input
+              id="is-prepared-food"
+              type="checkbox"
+              checked={Boolean(values.isPreparedFood)}
+              onChange={(e) => onChange('isPreparedFood', e.target.checked)}
+              disabled={disabled}
+              className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <div>
+              <label htmlFor="is-prepared-food" className="text-sm font-medium text-gray-700">
+                Prepared food (kitchen finished goods)
+              </label>
+              <p className="text-xs text-gray-500">
+                Produced with Kitchen Production batches. Pair with a recipe usage &quot;On production&quot;
+                so sale deducts this product, not raw ingredients again.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-3 flex items-start gap-2">
+          <input
+            id="is-buffet-cover-inv"
+            type="checkbox"
+            checked={Boolean(values.isBuffetCover)}
+            onChange={(e) => onChange('isBuffetCover', e.target.checked)}
+            disabled={disabled}
+            className="mt-1 w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+          />
+          <div>
+            <label htmlFor="is-buffet-cover-inv" className="text-sm font-medium text-gray-700">
+              Buffet cover / plate (capacity sale)
+            </label>
+            <p className="text-xs text-gray-500">
+              Usually a service SKU. Sale requires an OPEN Buffet Session and does not explode ingredients.
+            </p>
+          </div>
+        </div>
 
         {/* Expiry Enforcement (shown when Track Expiry is enabled) */}
         {values.trackExpiry && (

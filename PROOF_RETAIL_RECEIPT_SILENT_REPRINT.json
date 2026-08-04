@@ -1,0 +1,174 @@
+{
+  "started": "2026-08-04T05:51:24.939Z",
+  "mode": "live-print",
+  "preferredPrinter": "EPSON TM-T88III Receipt",
+  "agent": {
+    "origin": "http://127.0.0.1:1811",
+    "health": {
+      "status": "online",
+      "version": "1.3.1",
+      "name": "SMART Print Agent",
+      "uptime": 17283,
+      "printers": 12,
+      "queueDepth": 0,
+      "printing": false,
+      "queue": [],
+      "formats": [
+        "html",
+        "escpos"
+      ],
+      "channel": "commercial",
+      "bundledRuntime": true,
+      "autoStart": true,
+      "windowsService": "installed",
+      "setupComplete": true,
+      "printerRoles": {
+        "receipt": null,
+        "kitchen": null,
+        "bar": null,
+        "updatedAt": "2026-08-01T10:29:46.876Z"
+      },
+      "heartbeatAt": "2026-08-04T05:51:25.039Z"
+    },
+    "afterHealth": {
+      "status": "online",
+      "version": "1.3.1",
+      "name": "SMART Print Agent",
+      "uptime": 17287,
+      "printers": 12,
+      "queueDepth": 1,
+      "printing": false,
+      "queue": [
+        {
+          "id": "local_mse8px1l_diw2vx",
+          "format": "html",
+          "printerName": null,
+          "attempts": 1,
+          "enqueuedAt": "2026-08-04T05:51:28.137Z",
+          "lastError": "Edge/Chrome HTML→PDF failed under the Print Service account. Profile: C:\\ProgramData\\SMART-ERP-POS\\print-service\\browser-profile. exit=1002 --headless Kitchen ESC/POS still works; for HTML bills set the service Log On to the POS Windows user, or keep using Test Print (spooler fallback)."
+        }
+      ],
+      "formats": [
+        "html",
+        "escpos"
+      ],
+      "channel": "commercial",
+      "bundledRuntime": true,
+      "autoStart": true,
+      "windowsService": "installed",
+      "setupComplete": true,
+      "printerRoles": {
+        "receipt": null,
+        "kitchen": null,
+        "bar": null,
+        "updatedAt": "2026-08-01T10:29:46.876Z"
+      },
+      "heartbeatAt": "2026-08-04T05:51:28.961Z"
+    }
+  },
+  "printer": {
+    "selected": "EPSON TM-T88III Receipt",
+    "preferred": "EPSON TM-T88III Receipt",
+    "matchedPreferred": true,
+    "details": {
+      "name": "EPSON TM-T88III Receipt",
+      "isDefault": false,
+      "status": "4096"
+    }
+  },
+  "jobs": [
+    {
+      "role": "original_sale",
+      "format": "escpos",
+      "saleNumber": "PROOF-RTL-MSE8PWPH",
+      "isReprint": false,
+      "printerName": "EPSON TM-T88III Receipt",
+      "status": 202,
+      "ok": true,
+      "text": "{\"success\":true,\"id\":\"local_mse8pwpr_0cwis4\",\"accepted\":true,\"format\":\"escpos\",\"queueDepth\":0,\"acceptMs\":0}",
+      "json": {
+        "success": true,
+        "id": "local_mse8pwpr_0cwis4",
+        "accepted": true,
+        "format": "escpos",
+        "queueDepth": 0,
+        "acceptMs": 0
+      },
+      "printerHeader": "EPSON TM-T88III Receipt"
+    },
+    {
+      "role": "reprint",
+      "format": "escpos",
+      "saleNumber": "PROOF-RTL-MSE8PWPH",
+      "isReprint": true,
+      "printerName": "EPSON TM-T88III Receipt",
+      "status": 202,
+      "ok": true,
+      "text": "{\"success\":true,\"id\":\"local_mse8px1d_j9meun\",\"accepted\":true,\"format\":\"escpos\",\"queueDepth\":0,\"acceptMs\":0}",
+      "json": {
+        "success": true,
+        "id": "local_mse8px1d_j9meun",
+        "accepted": true,
+        "format": "escpos",
+        "queueDepth": 0,
+        "acceptMs": 0
+      },
+      "printerHeader": "EPSON TM-T88III Receipt"
+    },
+    {
+      "role": "unnamed_control",
+      "format": "html",
+      "ok": true,
+      "status": 202
+    }
+  ],
+  "results": [
+    {
+      "ok": true,
+      "name": "Print Agent online",
+      "detail": "v1.3.1 channel=commercial formats=html,escpos"
+    },
+    {
+      "ok": true,
+      "name": "Agent supports escpos",
+      "detail": "silent path prefers X-Print-Format: escpos"
+    },
+    {
+      "ok": true,
+      "name": "Windows printers discovered",
+      "detail": "12 printers"
+    },
+    {
+      "ok": true,
+      "name": "Receipt printer selected",
+      "detail": "EPSON TM-T88III Receipt"
+    },
+    {
+      "ok": true,
+      "name": "Silent ORIGINAL sale receipt accepted by agent",
+      "detail": "HTTP 202 X-Printer-Name=\"EPSON TM-T88III Receipt\""
+    },
+    {
+      "ok": true,
+      "name": "Silent REPRINT receipt accepted by agent",
+      "detail": "HTTP 202 X-Printer-Name=\"EPSON TM-T88III Receipt\" same as original"
+    },
+    {
+      "ok": true,
+      "name": "Same receipt printer for original + reprint",
+      "detail": "single X-Printer-Name=\"EPSON TM-T88III Receipt\""
+    },
+    {
+      "ok": true,
+      "name": "Control: agent response without X-Printer-Name recorded",
+      "detail": "HTTP 202 (app must still require named printer for retail success)"
+    },
+    {
+      "ok": true,
+      "name": "Agent still healthy after dual silent jobs",
+      "detail": "queueDepth=1 printing=false"
+    }
+  ],
+  "overall": "PASS",
+  "finished": "2026-08-04T05:51:28.964Z"
+}

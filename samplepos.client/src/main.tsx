@@ -8,7 +8,11 @@ import { TenantProvider } from './contexts/TenantContext';
 import { TransactionGuardProvider } from './contexts/TransactionGuardContext';
 import App from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import { installGlobalApiToastDedupe } from './utils/errorHandler';
 import './index.css';
+
+// SSOT: one API error toast — interceptor notifies; page catch toast.error(msg) is suppressed
+installGlobalApiToastDedupe();
 
 // Comprehensive browser extension error suppression
 const suppressExtensionErrors = (event: ErrorEvent | PromiseRejectionEvent) => {

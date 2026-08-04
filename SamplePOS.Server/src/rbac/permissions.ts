@@ -182,6 +182,26 @@ export const PERMISSIONS: Record<string, Permission> = {
     'Manage physical stock counts'
   ),
   INVENTORY_ADJUST: p('inventory.adjust', 'inventory', 'adjust', 'Perform stock adjustments (add, remove, transfer)'),
+
+  // Kitchen Production (ADR-005) — posts into inventory engine; optional feature
+  KITCHEN_PRODUCTION_READ: p(
+    'kitchen.production.read',
+    'kitchen',
+    'read',
+    'View kitchen production batches',
+  ),
+  KITCHEN_PRODUCTION_CREATE: p(
+    'kitchen.production.create',
+    'kitchen',
+    'create',
+    'Create and edit draft production batches',
+  ),
+  KITCHEN_PRODUCTION_POST: p(
+    'kitchen.production.post',
+    'kitchen',
+    'post',
+    'Post production batches (issue ingredients + receive finished food)',
+  ),
   INVENTORY_TRANSFER_REQUEST: p(
     'inventory.transfer.request',
     'inventory',

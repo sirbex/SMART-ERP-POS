@@ -24,8 +24,13 @@ describe('planSaleStockDeduction — inventory × service matrix', () => {
     expect(planSaleStockDeduction('inventory', false)).toEqual({ kind: 'parent' });
   });
 
-  it('inventory parent with recipe → deduct ingredients', () => {
+  it('inventory parent with AT_SALE recipe → deduct ingredients', () => {
     expect(planSaleStockDeduction('inventory', true)).toEqual({ kind: 'ingredients' });
+  });
+
+  it('inventory prepared food with production-only BOM (no at-sale explode) → parent', () => {
+    // usage_mode AT_PRODUCTION → explodeActiveRecipe returns null → plan gets false
+    expect(planSaleStockDeduction('inventory', false)).toEqual({ kind: 'parent' });
   });
 
   it('consumable parent without recipe → deduct parent', () => {
@@ -50,6 +55,17 @@ describe('planSaleStockDeduction — inventory × service matrix', () => {
   });
 });
 
+describe('prepareFoodCatalogDefaults', () => {
+  it('recommends inventory prepared food + production recipe mode', async () => {
+    const { prepareFoodCatalogDefaults } = await import('../../../../shared/utils/productTypeRules.js');
+    expect(prepareFoodCatalogDefaults()).toEqual({
+      productType: 'inventory',
+      isPreparedFood: true,
+      recommendedRecipeUsageMode: 'AT_PRODUCTION',
+    });
+  });
+});
+
 describe('explodeActiveRecipe', () => {
   beforeEach(() => {
     resetProductRecipesTableCache();
@@ -69,6 +85,7 @@ describe('explodeActiveRecipe', () => {
       query: jest
         .fn<() => Promise<{ rows: unknown[] }>>()
         .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+        .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
         .mockResolvedValueOnce({ rows: [] }),
     };
     const result = await explodeActiveRecipe(conn as any, 'parent-1', new Decimal(3));
@@ -79,7 +96,8 @@ describe('explodeActiveRecipe', () => {
     const conn = {
       query: jest
         .fn<() => Promise<{ rows: unknown[] }>>()
-        .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+        .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] }) // table exists
+        .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] }) // usage_mode column
         .mockResolvedValueOnce({
           rows: [
             {
@@ -103,6 +121,18 @@ describe('explodeActiveRecipe', () => {
     expect(result![0].baseQty.toFixed(6)).toBe('1.000000'); // 4 × 0.25
     expect(result![1].componentProductId).toBe('oil-id');
     expect(result![1].baseQty.toFixed(6)).toBe('0.080000'); // 4 × 0.02
+  });
+
+  it('returns null for production-only recipes (no AT_SALE lines)', async () => {
+    const conn = {
+      query: jest
+        .fn<() => Promise<{ rows: unknown[] }>>()
+        .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+        .mockResolvedValueOnce({ rows: [{ '?column?': 1 }] })
+        .mockResolvedValueOnce({ rows: [] }), // filtered by usage_mode
+    };
+    const result = await explodeActiveRecipe(conn as any, 'curry-id', new Decimal(5));
+    expect(result).toBeNull();
   });
 });
 
