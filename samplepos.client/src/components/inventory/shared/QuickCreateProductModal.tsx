@@ -46,6 +46,8 @@ const initialValues: ProductFormValues = {
     purchaseUomId: '',
     leadTimeDays: '0',
     reorderQuantity: '0',
+    isPreparedFood: false,
+    isBuffetCover: false,
 };
 
 interface QuickCreateProductModalProps {

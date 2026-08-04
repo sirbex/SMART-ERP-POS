@@ -18,6 +18,7 @@ const masterUoms = [
 ];
 
 function dishForm(overrides: Partial<ProductFormValues> = {}): ProductFormValues {
+  const { isPreparedFood, isBuffetCover, ...rest } = overrides;
   return {
     name: 'matooke with beans',
     sku: 'PRD-MENU-MATOOKE',
@@ -43,7 +44,9 @@ function dishForm(overrides: Partial<ProductFormValues> = {}): ProductFormValues
     purchaseUomId: '11111111-1111-4111-8111-111111111111',
     leadTimeDays: '7',
     reorderQuantity: '50',
-    ...overrides,
+    isPreparedFood: isPreparedFood ?? false,
+    isBuffetCover: isBuffetCover ?? false,
+    ...rest,
   };
 }
 

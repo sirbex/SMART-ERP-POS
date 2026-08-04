@@ -33,7 +33,6 @@ import {
   dispatchUserFacingApiNotification,
   handleApiError,
   installGlobalApiToastDedupe,
-  markApiErrorNotified,
   resetApiErrorToastDedupeForTests,
   shouldSuppressApiErrorToast,
   toastApiError,

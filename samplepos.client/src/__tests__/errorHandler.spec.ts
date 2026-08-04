@@ -40,7 +40,6 @@ import {
     resetApiErrorToastDedupeForTests,
     wrapToastErrorWithApiDedupe,
 } from '../utils/errorHandler';
-import toast from 'react-hot-toast';
 
 // ── Helper: build a minimal AxiosError-shaped object ─────────────────────────
 function makeAxiosError(
