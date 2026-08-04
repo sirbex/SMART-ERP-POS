@@ -14,7 +14,10 @@ import apiClient from '../../utils/api';
 import { formatTimestampTime } from '../../utils/businessDate';
 
 interface OfflineSyncStatusPanelProps {
-  /** Compact mode hides the cache detail section */
+  /**
+   * Compact: hide cache footer; toolbar-style strip (no full card).
+   * For restaurant floor chrome so dining tables reclaim the vertical gap.
+   */
   compact?: boolean;
 }
 
@@ -96,29 +99,45 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
         : 'Live'
       : `Last online ${formatRelativeTime(lastOnlineAt)}`;
 
+  const shellClass = compact
+    ? 'min-w-0 divide-y divide-stone-200/80'
+    : 'bg-white rounded-lg shadow divide-y divide-gray-200';
+  const stripPad = compact ? 'px-0 py-0' : 'px-3 py-2.5 sm:px-4';
+  const detailsPad = compact ? 'pt-2 pb-1 px-0' : 'px-3 py-3 sm:px-4';
+  // Compact toolbar: hide Refresh when healthy so the strip stays one line in the header.
+  const showRefresh = isOnline && (!compact || totalQueueItems > 0 || catalogStale || isCacheWarming);
+
   return (
-    <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
+    <div className={shellClass} data-offline-strip={compact ? 'compact' : 'panel'}>
       {/* Smart status strip — connectivity · queue · cache on one line */}
-      <div className="px-3 py-2.5 sm:px-4">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      <div className={stripPad}>
+        <div className="flex flex-wrap items-center gap-x-1.5 sm:gap-x-2 gap-y-1 min-w-0">
           <span
             className={`inline-flex h-2.5 w-2.5 shrink-0 rounded-full ${
               isOnline ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'
             }`}
             aria-hidden
           />
-          <span className={`text-sm font-medium ${isOnline ? 'text-emerald-800' : 'text-red-800'}`}>
+          <span
+            className={`text-xs sm:text-sm font-medium shrink-0 ${
+              isOnline ? 'text-emerald-800' : 'text-red-800'
+            }`}
+          >
             {isOnline ? 'Online' : 'Offline'}
           </span>
-          <span className="text-gray-300 select-none" aria-hidden>
-            ·
-          </span>
-          <span className="text-xs text-gray-500">{linkMeta}</span>
+          {!compact && (
+            <>
+              <span className="text-gray-300 select-none" aria-hidden>
+                ·
+              </span>
+              <span className="text-xs text-gray-500">{linkMeta}</span>
+            </>
+          )}
           <span className="text-gray-300 select-none" aria-hidden>
             ·
           </span>
           <span
-            className={`text-xs ${
+            className={`text-xs truncate ${
               totalQueueItems === 0
                 ? 'text-gray-500'
                 : failedCount > 0 || reviewCount > 0
@@ -139,7 +158,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
             </>
           )}
 
-          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <div className="ml-auto flex flex-wrap items-center gap-1 sm:gap-1.5 shrink-0">
             {totalQueueItems > 0 && (
               <button
                 type="button"
@@ -171,7 +190,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
                 Retry {failedCount + reviewCount}
               </button>
             )}
-            {isOnline && (
+            {showRefresh && (
               <button
                 type="button"
                 onClick={() => prewarmCache()}
@@ -185,7 +204,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
         </div>
 
         {!isOnline && pendingCount > 0 && (
-          <p className="mt-1.5 text-xs text-amber-700">
+          <p className="mt-1 text-xs text-amber-700">
             {pendingCount} sale(s) will auto-sync when back online
           </p>
         )}
@@ -193,7 +212,7 @@ export default function OfflineSyncStatusPanel({ compact = false }: OfflineSyncS
 
       {/* Queue details — only when expanded and there is work */}
       {showQueue && totalQueueItems > 0 && (
-        <div className="px-3 py-3 sm:px-4">
+        <div className={detailsPad}>
           <div className="grid grid-cols-3 gap-2 mb-3">
             <div className="text-center p-2 bg-yellow-50 rounded-lg">
               <p className="text-lg font-bold text-yellow-700">{pendingCount}</p>

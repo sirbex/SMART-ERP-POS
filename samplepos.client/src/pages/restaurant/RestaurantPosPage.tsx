@@ -3887,15 +3887,8 @@ export default function RestaurantPosPage() {
               {isCheckBilled ? ' · Bill printed' : ''}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <PrinterServiceStatusChip compact showDiagnosticsLink={canManage} />
-            <span
-              className={`text-xs px-2 py-1 rounded ${
-                isOnline ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
-              }`}
-            >
-              {isOnline ? 'Online · syncing' : 'Offline · local journal'}
-            </span>
             {!selectedTableId && canManage && (
               <button
                 type="button"
@@ -3906,21 +3899,39 @@ export default function RestaurantPosPage() {
               </button>
             )}
             {selectedTableId && (
-              <button
-                type="button"
-                onClick={() => returnToFloor()}
-                className={touchBtnGhost}
-                aria-label="Back to tables"
-              >
-                ← Tables
-              </button>
+              <>
+                <span
+                  className={`text-xs px-2 py-1 rounded shrink-0 ${
+                    isOnline ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
+                  }`}
+                >
+                  {isOnline ? 'Online' : 'Offline'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => returnToFloor()}
+                  className={touchBtnGhost}
+                  aria-label="Back to tables"
+                >
+                  ← Tables
+                </button>
+              </>
             )}
           </div>
         </div>
 
-        {!selectedTableId ? (
-          <div className="flex-1 overflow-auto p-4 space-y-4">
+        {/* Floor chrome: slim strip (not a card) so dining grid starts immediately below. */}
+        {!selectedTableId && (
+          <div
+            className="px-3 sm:px-4 py-1.5 bg-white border-b border-stone-200 shrink-0"
+            data-floor-offline-chrome="true"
+          >
             <OfflineSyncStatusPanel compact />
+          </div>
+        )}
+
+        {!selectedTableId ? (
+          <div className="flex-1 overflow-auto p-3 sm:p-4 space-y-3">
             {showAddTable && canManage && (
               <div className="bg-white border border-stone-200 rounded-lg p-4 max-w-xl space-y-3">
                 <h2 className="text-sm font-semibold text-stone-800">New table</h2>
@@ -4026,23 +4037,25 @@ export default function RestaurantPosPage() {
             </div>
               </>
             )}
-            {!canAccessServiceLanes && (
-            <div className="flex items-center justify-end gap-3 flex-wrap">
-              <label className={`${TOUCH} min-h-11 px-3 inline-flex items-center gap-3 text-sm text-stone-700 rounded-xl active:bg-stone-200/60`}>
-                <input
-                  type="checkbox"
-                  checked={myTablesOnly}
-                  onChange={(e) => setMyTablesOnly(e.target.checked)}
-                  disabled={!canEditOthers}
-                  className="h-5 w-5 rounded border-stone-300"
-                />
-                {canEditOthers ? 'My tables only' : 'My tables'}
-              </label>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide">
+                Dining tables
+              </h2>
+              {!canAccessServiceLanes && (
+                <label
+                  className={`${TOUCH} min-h-11 px-3 inline-flex items-center gap-3 text-sm text-stone-700 rounded-xl active:bg-stone-200/60`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={myTablesOnly}
+                    onChange={(e) => setMyTablesOnly(e.target.checked)}
+                    disabled={!canEditOthers}
+                    className="h-5 w-5 rounded border-stone-300"
+                  />
+                  {canEditOthers ? 'My tables only' : 'My tables'}
+                </label>
+              )}
             </div>
-            )}
-            <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide pt-2">
-              Dining tables
-            </h2>
             <div
               className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3 pb-[env(safe-area-inset-bottom)]"
               data-dining-floor-empty={diningFloorEmpty.isEmpty ? diningFloorEmpty.reason : 'none'}
