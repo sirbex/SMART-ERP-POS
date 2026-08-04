@@ -541,6 +541,10 @@ function TaxSettings({
                                     setFormData({
                                         ...formData,
                                         restaurantModeEnabled: e.target.checked,
+                                        // Kitchen is restaurant-domain — auto-off when restaurant is off
+                                        kitchenProductionEnabled: e.target.checked
+                                            ? formData.kitchenProductionEnabled
+                                            : false,
                                     })
                                 }
                                 className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
@@ -553,8 +557,9 @@ function TaxSettings({
                                     Enable Restaurant Module
                                 </label>
                                 <p className="mt-0.5 text-xs text-gray-600">
-                                    Tables, kitchen tickets (KOT), and SambaPOS-style restaurant POS.
-                                    Retail and wholesale POS stay unchanged when this is off.
+                                    Tables, kitchen tickets (KOT), Kitchen Display, Kitchen Production,
+                                    and SambaPOS-style restaurant POS. Pure retail tenants leave this
+                                    off — no restaurant UI or kitchen modules.
                                 </p>
                             </div>
                         </div>
@@ -565,26 +570,34 @@ function TaxSettings({
                             <input
                                 type="checkbox"
                                 id="kitchenProductionEnabled"
-                                checked={formData.kitchenProductionEnabled}
+                                checked={
+                                    Boolean(formData.restaurantModeEnabled) &&
+                                    Boolean(formData.kitchenProductionEnabled)
+                                }
+                                disabled={!formData.restaurantModeEnabled}
                                 onChange={(e) =>
                                     setFormData({
                                         ...formData,
                                         kitchenProductionEnabled: e.target.checked,
                                     })
                                 }
-                                className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 disabled:opacity-50"
                             />
                             <div className="ml-2">
                                 <label
                                     htmlFor="kitchenProductionEnabled"
-                                    className="block text-sm font-medium text-gray-900"
+                                    className={`block text-sm font-medium ${
+                                        formData.restaurantModeEnabled
+                                            ? 'text-gray-900'
+                                            : 'text-gray-400'
+                                    }`}
                                 >
                                     Enable Kitchen Production
                                 </label>
                                 <p className="mt-0.5 text-xs text-gray-600">
-                                    Cook-to-stock production batches (issue ingredients, receive finished
-                                    food). Optional; does not replace restaurant cook-to-order recipe
-                                    explosion at payment.
+                                    Cook-to-stock prep batches under Restaurant mode (issue ingredients,
+                                    receive finished food). Requires Restaurant Module above. Does not
+                                    replace cook-to-order recipe explosion at payment.
                                 </p>
                             </div>
                         </div>

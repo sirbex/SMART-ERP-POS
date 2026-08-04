@@ -93,6 +93,16 @@ describe('PROOF — kitchen nav integrity & label consistency', () => {
       new Set(nav.map((n) => n.name)).size === nav.length,
       JSON.stringify(nav.map((n) => n.name)),
     );
+    const prodSlice = layout.slice(
+      layout.indexOf("name: 'Kitchen Production'"),
+      layout.indexOf("name: 'Kitchen Production'") + 450,
+    );
+    const kdsSlice = layout.slice(
+      layout.indexOf("name: 'Kitchen Display'"),
+      layout.indexOf("name: 'Kitchen Display'") + 350,
+    );
+    gate('A9-prod-requires-restaurant', prodSlice.includes('requiresRestaurant: true'), prodSlice.slice(0, 120));
+    gate('A10-kds-requires-restaurant', kdsSlice.includes('requiresRestaurant: true'), kdsSlice.slice(0, 120));
   });
 
   it('B — App routes wired for both families', () => {
@@ -126,8 +136,27 @@ describe('PROOF — kitchen nav integrity & label consistency', () => {
     gate('D2-cashier-no-bare', !/name: 'Kitchen',\s*path: '\/restaurant\/kitchen'/.test(cashier));
     gate('D3-workspace-class', workspaces.includes("path === '/kitchen'") || workspaces.includes("'/kitchen/'"));
     gate('D4-runtime-kds-family', classifyTaskFamily('/restaurant/kitchen') === 'restaurant');
-    gate('D5-runtime-hub-family', classifyTaskFamily('/kitchen') === 'inventory');
-    gate('D6-runtime-batch-family', classifyTaskFamily('/kitchen/waste') === 'inventory');
+    gate('D5-runtime-hub-family', classifyTaskFamily('/kitchen') === 'restaurant');
+    gate('D6-runtime-batch-family', classifyTaskFamily('/kitchen/waste') === 'restaurant');
+    gate(
+      'D7-layout-prod-requires-restaurant',
+      layout.includes("name: 'Kitchen Production'") && layout.includes('requiresRestaurant: true'),
+    );
+    gate(
+      'D8-settings-kitchen-tied-to-restaurant',
+      /kitchenProductionEnabled[\s\S]*disabled=\{!formData\.restaurantModeEnabled\}|disabled=\{\!formData\.restaurantModeEnabled\}/.test(
+        readRepo('samplepos.client/src/pages/settings/tabs/SystemSettingsTab.tsx'),
+      ) ||
+        readRepo('samplepos.client/src/pages/settings/tabs/SystemSettingsTab.tsx').includes(
+          'disabled={!formData.restaurantModeEnabled}',
+        ),
+    );
+    gate(
+      'D9-server-requires-restaurant-mode',
+      readRepo(
+        'SamplePOS.Server/src/modules/kitchen-production/kitchenProductionSettings.ts',
+      ).includes('isRestaurantModeEnabled'),
+    );
   });
 
   it('E — integrity: production hub is single primary SSOT entry', () => {

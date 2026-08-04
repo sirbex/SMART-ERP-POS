@@ -32,7 +32,7 @@ type Db = Pool | PoolClient;
 async function assertEnabled(conn: Db): Promise<void> {
   if (!(await isKitchenProductionEnabled(conn))) {
     throw new ForbiddenError(
-      'Kitchen Production is disabled. Enable kitchen_production_enabled in system settings.',
+      'Kitchen Production is disabled. Turn on Restaurant mode and Enable Kitchen Production in system settings.',
     );
   }
 }

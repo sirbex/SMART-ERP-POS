@@ -90,6 +90,23 @@ describe('Kitchen Production architecture proof (Phase 1)', () => {
     expect(server).toMatch(/kitchenProductionRoutes/);
   });
 
+  it('kitchen production requires restaurant mode (tenant SSOT)', () => {
+    const settings = readRepo(
+      'SamplePOS.Server/src/modules/kitchen-production/kitchenProductionSettings.ts',
+    );
+    expect(settings).toMatch(/isRestaurantModeEnabled/);
+    expect(settings).toMatch(/restaurant_mode|Restaurant mode/i);
+    // Fail-closed when restaurant is off
+    expect(settings).toMatch(/if \(!\(await isRestaurantModeEnabled/);
+
+    const layout = readRepo('samplepos.client/src/components/Layout.tsx');
+    const prodBlock = layout.slice(
+      layout.indexOf("name: 'Kitchen Production'"),
+      layout.indexOf("name: 'Kitchen Production'") + 500,
+    );
+    expect(prodBlock).toMatch(/requiresRestaurant:\s*true/);
+  });
+
   it('cook-to-order path remains on salesService recipe explosion', () => {
     const explosion = readRepo('SamplePOS.Server/src/modules/sales/saleRecipeExplosion.ts');
     expect(explosion).toMatch(/never KOT/i);

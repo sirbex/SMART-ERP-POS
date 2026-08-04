@@ -100,8 +100,8 @@ describe('workspace task family classification (PWA Phase 1)', () => {
     expect(classifyTaskFamily('/pos/held')).toBe('pos');
     expect(classifyTaskFamily('/restaurant')).toBe('restaurant');
     expect(classifyTaskFamily('/restaurant/kitchen')).toBe('restaurant');
-    expect(classifyTaskFamily('/kitchen')).toBe('inventory');
-    expect(classifyTaskFamily('/kitchen/production')).toBe('inventory');
+    expect(classifyTaskFamily('/kitchen')).toBe('restaurant');
+    expect(classifyTaskFamily('/kitchen/production')).toBe('restaurant');
     expect(classifyTaskFamily('/orders-queue')).toBe('restaurant');
     expect(classifyTaskFamily('/accounting/journal')).toBe('accounting');
     expect(classifyTaskFamily('/reports/pnl')).toBe('reports');

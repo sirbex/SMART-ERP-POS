@@ -98,12 +98,14 @@ export function classifyTaskFamily(pathname: string): WorkspaceTaskFamily {
   const path = (pathname || '/').split('?')[0].toLowerCase();
 
   if (path === '/pos' || path.startsWith('/pos/')) return 'pos';
-  if (path.startsWith('/restaurant') || path.startsWith('/orders-queue')) {
+  if (
+    path.startsWith('/restaurant') ||
+    path.startsWith('/orders-queue') ||
+    // Kitchen production is restaurant-domain UI (posts into inventory engine, not inventory workspace)
+    path === '/kitchen' ||
+    path.startsWith('/kitchen/')
+  ) {
     return 'restaurant';
-  }
-  // ADR-005 kitchen production (cook-to-stock hub, batches, buffet, waste) — inventory engine path
-  if (path === '/kitchen' || path.startsWith('/kitchen/')) {
-    return 'inventory';
   }
   if (path.startsWith('/accounting') || path.startsWith('/treasury') || path.startsWith('/banking')) {
     return 'accounting';

@@ -1,12 +1,12 @@
 {
   "proof": "KITCHEN_NAV_INTEGRITY",
   "objective": "Distinct Kitchen Display (KDS) vs Kitchen Production (ops hub) labels, routes, titles, and workspace class — no dual Kitchen menu",
-  "runAt": "2026-08-04T05:51:35.846Z",
+  "runAt": "2026-08-04T07:03:25.598Z",
   "result": "PASS",
   "summary": {
-    "pass": 38,
+    "pass": 43,
     "fail": 0,
-    "total": 38
+    "total": 43
   },
   "navSsot": [
     {
@@ -67,6 +67,16 @@
       "id": "A8-no-duplicate-names",
       "pass": true,
       "detail": "[\"Dashboard\",\"Point of Sale\",\"Restaurant\",\"Kitchen Display\",\"Stations\",\"Printers\",\"Recipes\",\"Kitchen Production\",\"Order tags\",\"Orders Queue\",\"Inventory\",\"Customers\",\"Suppliers\",\"Sales\",\"Quotations\",\"CRM\",\"HR & Payroll\",\"Sales Orders\",\"Dispatch\",\"Pricing\",\"Accounting\",\"Reports\",\"Category Reports\"]"
+    },
+    {
+      "id": "A9-prod-requires-restaurant",
+      "pass": true,
+      "detail": "name: 'Kitchen Production',\n      path: '/kitchen',\n      icon: '🍲',\n      color: 'text-orange-800',\n      permissions:"
+    },
+    {
+      "id": "A10-kds-requires-restaurant",
+      "pass": true,
+      "detail": "name: 'Kitchen Display',\n      path: '/restaurant/kitchen',\n      icon: '👨‍🍳',\n      color: 'text-orange-700',\n      p"
     },
     {
       "id": "B1-route-kds",
@@ -158,6 +168,18 @@
     },
     {
       "id": "D6-runtime-batch-family",
+      "pass": true
+    },
+    {
+      "id": "D7-layout-prod-requires-restaurant",
+      "pass": true
+    },
+    {
+      "id": "D8-settings-kitchen-tied-to-restaurant",
+      "pass": true
+    },
+    {
+      "id": "D9-server-requires-restaurant-mode",
       "pass": true
     },
     {

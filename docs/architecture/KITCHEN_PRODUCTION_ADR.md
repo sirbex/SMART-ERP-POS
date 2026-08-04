@@ -9,7 +9,9 @@
 
 ## 0. Objective (freeze statement)
 
-**Kitchen Production is a business document family that posts into the existing Inventory Engine.**
+**Kitchen Production is a restaurant-domain business document family that posts into the existing Inventory Engine.**
+
+It is **only functional when restaurant mode is ON** for the tenant (same rule as FOH / KDS / KOT). Pure retail tenants never see or call it.
 
 It does **not** own stock balances, lots, UoM, cost layers, or GL. It decides what happened operationally (prepared, held, issued, produced) and translates that into standard inventory movements and governed journals.
 

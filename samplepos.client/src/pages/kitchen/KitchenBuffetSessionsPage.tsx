@@ -233,8 +233,8 @@ export default function KitchenBuffetSessionsPage() {
         <div className="mx-auto max-w-2xl p-6">
           <h1 className="text-xl font-semibold text-stone-900">Buffet Sessions</h1>
           <p className="mt-3 text-stone-600">
-            Disabled. Enable <code className="rounded bg-stone-100 px-1">kitchen_production_enabled</code>{' '}
-            and apply migration 589. Cover products sell as capacity against OPEN sessions.
+            Disabled. Turn on <strong>Restaurant Module</strong>, then Enable Kitchen Production, in
+            system settings (migration 589). Cover products sell as capacity against OPEN sessions.
           </p>
           <Link to="/kitchen/production" className="mt-4 inline-block text-amber-800 underline">
             Kitchen Production batches

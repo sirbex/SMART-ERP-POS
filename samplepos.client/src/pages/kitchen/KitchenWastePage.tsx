@@ -220,7 +220,8 @@ export default function KitchenWastePage() {
         <div className="mx-auto max-w-2xl p-6">
           <h1 className="text-xl font-semibold text-stone-900">Kitchen Waste & Yield</h1>
           <p className="mt-3 text-stone-600">
-            Disabled. Enable kitchen production and apply migration 590.
+            Disabled. Turn on <strong>Restaurant Module</strong>, then Enable Kitchen Production, in
+            system settings (migration 590).
           </p>
         </div>
       </Layout>

@@ -1,8 +1,8 @@
 # PROOF: Kitchen nav integrity & label consistency
 
-- Run: 2026-08-04T05:51:35.846Z
+- Run: 2026-08-04T07:03:25.598Z
 - Command: `npx vitest run src/__tests__/kitchen-nav-integrity.proof.test.ts src/__tests__/adaptive-pwa-phase1-workspace.evidence.test.ts`
-- Result: **PASS** — 38 pass / 0 fail / 38 total
+- Result: **PASS** — 43 pass / 0 fail / 43 total
 
 ## Objective
 
@@ -28,6 +28,16 @@ Distinct Kitchen Display (KDS) vs Kitchen Production (ops hub) labels, routes, t
 - **PASS** A6-labels-differ
 - **PASS** A7-no-duplicate-paths — count=23 unique=23
 - **PASS** A8-no-duplicate-names — ["Dashboard","Point of Sale","Restaurant","Kitchen Display","Stations","Printers","Recipes","Kitchen Production","Order tags","Orders Queue","Inventory","Customers","Suppliers","Sales","Quotations","CRM","HR & Payroll","Sales Orders","Dispatch","Pricing","Accounting","Reports","Category Reports"]
+- **PASS** A9-prod-requires-restaurant — name: 'Kitchen Production',
+      path: '/kitchen',
+      icon: '🍲',
+      color: 'text-orange-800',
+      permissions:
+- **PASS** A10-kds-requires-restaurant — name: 'Kitchen Display',
+      path: '/restaurant/kitchen',
+      icon: '👨‍🍳',
+      color: 'text-orange-700',
+      p
 - **PASS** B1-route-kds
 - **PASS** B2-route-hub
 - **PASS** B3-route-batches
@@ -51,6 +61,9 @@ Distinct Kitchen Display (KDS) vs Kitchen Production (ops hub) labels, routes, t
 - **PASS** D4-runtime-kds-family
 - **PASS** D5-runtime-hub-family
 - **PASS** D6-runtime-batch-family
+- **PASS** D7-layout-prod-requires-restaurant
+- **PASS** D8-settings-kitchen-tied-to-restaurant
+- **PASS** D9-server-requires-restaurant-mode
 - **PASS** E1-hub-ops-copy
 - **PASS** E2-hub-not-kds
 - **PASS** E3-layout-primary-path-is-hub

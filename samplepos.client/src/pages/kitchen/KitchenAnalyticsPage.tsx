@@ -161,7 +161,8 @@ export default function KitchenAnalyticsPage() {
         <div className="mx-auto max-w-2xl p-6">
           <h1 className="text-xl font-semibold text-stone-900">Kitchen Food Cost</h1>
           <p className="mt-3 text-stone-600">
-            Disabled. Enable kitchen production to view food-cost analytics.
+            Disabled. Turn on <strong>Restaurant Module</strong>, then Enable Kitchen Production, to
+            view food-cost analytics.
           </p>
         </div>
       </Layout>

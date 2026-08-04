@@ -44,9 +44,15 @@ export const systemSettingsService = {
         };
 
         return UnitOfWork.run(pool, async (client) => {
+            // Restaurant-domain SSOT: kitchen production cannot stay on when restaurant is off
+            const gateUpdates =
+                updates.restaurantModeEnabled === false
+                    ? { ...updatesWithUser, kitchenProductionEnabled: false }
+                    : updatesWithUser;
+
             const updated = await systemSettingsRepository.updateSettings(
                 client,
-                updatesWithUser
+                gateUpdates
             );
 
             let multistoreBootstrap: MultistoreToggleResult['multistoreBootstrap'];

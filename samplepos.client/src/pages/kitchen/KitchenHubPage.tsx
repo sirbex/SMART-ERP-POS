@@ -272,8 +272,9 @@ export default function KitchenHubPage() {
         <div className="mx-auto max-w-2xl p-6">
           <h1 className="text-xl font-semibold text-stone-900">Kitchen Production</h1>
           <p className="mt-3 text-stone-600">
-            Disabled. Enable <code className="rounded bg-stone-100 px-1">kitchen_production_enabled</code>{' '}
-            in system settings. Restaurant cook-to-order is unaffected.
+            Disabled. Turn on <strong>Restaurant Module</strong>, then{' '}
+            <strong>Enable Kitchen Production</strong> in system settings. Pure retail tenants leave
+            restaurant mode off — this module will not appear or run.
           </p>
         </div>
       </Layout>

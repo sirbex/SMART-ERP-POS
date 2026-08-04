@@ -121,6 +121,8 @@ function LayoutChrome({ children }: LayoutProps) {
         'kitchen.production.post',
       ],
       feature: 'pos',
+      // Restaurant-domain capability — must not appear on pure retail tenants
+      requiresRestaurant: true,
     },
     {
       name: 'Order tags',
