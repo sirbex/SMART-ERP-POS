@@ -152,10 +152,10 @@ router.post(
   }),
 );
 
-/** Waiters may ensure TA/DL/QK lanes exist (not full table management). */
+/** Cashiers / managers may ensure TA/DL/QK lanes (not floor waiters). */
 router.post(
   '/service-lanes/ensure',
-  requirePermission('restaurant.order'),
+  requireAnyPermission(['restaurant.manage', 'restaurant.pay']),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const tables = await restaurantService.ensureServiceLanes(pool);

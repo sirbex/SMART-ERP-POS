@@ -685,6 +685,11 @@ export default function RestaurantPosPage() {
   const canOrder = useCanAccess(undefined, ['restaurant.order']);
   /** Pay is cashier / accountant / admin only — waiters and managers order but do not settle. */
   const canRestaurantPay = useCanAccess(undefined, ['restaurant.pay']);
+  /**
+   * Service lanes (Takeaway / Delivery / Quick) — counter & manager only.
+   * Floor waiters work dining tables and do not start TA/DL/QK orders.
+   */
+  const canAccessServiceLanes = canManage || canRestaurantPay;
   /** Toast: Edit other employees' orders — managers/cashiers see every table. */
   const canEditOthers = canEditOtherWaitersChecks({
     userId: user?.id || '',
@@ -1472,6 +1477,12 @@ export default function RestaurantPosPage() {
   });
 
   const openServiceLane = async (kind: ServiceLaneKind) => {
+    if (!canAccessServiceLanes) {
+      toast.error(
+        'Takeaway, Delivery, and Quick orders are for cashiers and managers only. Waiters use dining tables.',
+      );
+      return;
+    }
     const def = SERVICE_LANE_DEFS[kind];
     // Phone: TA/DL open customer sheet first; Quick goes straight to menu (add items).
     // Never open Order sheet on lane select — it covers the menu and blocks adds.
@@ -1490,7 +1501,6 @@ export default function RestaurantPosPage() {
       );
       return;
     }
-    // Waiters have restaurant.order (not manage) — ensure TA/DL/QK via dedicated endpoint.
     if (!canOrder) {
       toast.error('You need restaurant.order permission for takeaway / delivery');
       return;
@@ -1737,10 +1747,11 @@ export default function RestaurantPosPage() {
       return t;
     });
     if (!myTablesOnly || !user?.id) return all;
-    // Quick / Takeaway / Delivery counters stay visible to every FOH user.
+    // Dining only for "my tables" filter — service counters are not waiter tables.
     return all.filter(
       (t) =>
-        isServiceChannelTable(t) || t.status === 'FREE' || t.waiterId === user.id,
+        !isServiceChannelTable(t) &&
+        (t.status === 'FREE' || t.waiterId === user.id),
     );
   }, [tablesQuery.data, myTablesOnly, user?.id, isOnline, floorOccupancy, journalTick]);
 
@@ -3954,6 +3965,8 @@ export default function RestaurantPosPage() {
               </div>
             )}
 
+            {canAccessServiceLanes && (
+              <>
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide">
                 Service
@@ -4011,6 +4024,22 @@ export default function RestaurantPosPage() {
                 );
               })}
             </div>
+              </>
+            )}
+            {!canAccessServiceLanes && (
+            <div className="flex items-center justify-end gap-3 flex-wrap">
+              <label className={`${TOUCH} min-h-11 px-3 inline-flex items-center gap-3 text-sm text-stone-700 rounded-xl active:bg-stone-200/60`}>
+                <input
+                  type="checkbox"
+                  checked={myTablesOnly}
+                  onChange={(e) => setMyTablesOnly(e.target.checked)}
+                  disabled={!canEditOthers}
+                  className="h-5 w-5 rounded border-stone-300"
+                />
+                {canEditOthers ? 'My tables only' : 'My tables'}
+              </label>
+            </div>
+            )}
             <h2 className="text-sm font-medium text-stone-700 uppercase tracking-wide pt-2">
               Dining tables
             </h2>

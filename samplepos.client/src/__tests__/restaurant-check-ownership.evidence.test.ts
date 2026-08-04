@@ -89,7 +89,7 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     expect(canMutateRestaurantCheck({ checkWaiterId: waiter.userId, actor: waiter })).toBe(true);
   });
 
-  it('EVIDENCE: Quick / Takeaway / Delivery counters are shared (any waiter)', () => {
+  it('EVIDENCE: Quick / Takeaway / Delivery are counter-only (not floor waiters)', () => {
     expect(isSharedRestaurantServiceCounter({ tableCode: 'QK', tableZone: 'SERVICE' })).toBe(
       true,
     );
@@ -98,10 +98,35 @@ describe('restaurant check ownership (behavioral evidence)', () => {
     );
     expect(isSharedRestaurantServiceCounter({ tableCode: 'T1', tableZone: 'MAIN' })).toBe(false);
 
+    // Pure waiters cannot open or mutate service counters
     expect(
       canMutateRestaurantCheck({
         checkWaiterId: otherWaiterId,
         actor: waiter,
+        sharedServiceCounter: true,
+      }),
+    ).toBe(false);
+    expect(
+      isTableVisibleToWaiter({
+        tableStatus: 'OCCUPIED',
+        checkWaiterId: otherWaiterId,
+        sharedServiceCounter: true,
+        actor: waiter,
+      }),
+    ).toBe(false);
+
+    // Managers and cashiers can
+    expect(
+      canMutateRestaurantCheck({
+        checkWaiterId: otherWaiterId,
+        actor: manager,
+        sharedServiceCounter: true,
+      }),
+    ).toBe(true);
+    expect(
+      canMutateRestaurantCheck({
+        checkWaiterId: otherWaiterId,
+        actor: cashier,
         sharedServiceCounter: true,
       }),
     ).toBe(true);
@@ -110,7 +135,7 @@ describe('restaurant check ownership (behavioral evidence)', () => {
         tableStatus: 'OCCUPIED',
         checkWaiterId: otherWaiterId,
         sharedServiceCounter: true,
-        actor: waiter,
+        actor: cashier,
       }),
     ).toBe(true);
   });

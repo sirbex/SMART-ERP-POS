@@ -35,11 +35,13 @@ import {
 } from '../../../../shared/utils/restaurantOrderTags.js';
 import { consolidateKotLines } from '../../../../shared/utils/consolidateKotLines.js';
 import {
+  canAccessRestaurantServiceLane,
   canEditOtherWaitersChecks,
   canMutateRestaurantCheck,
   isSharedRestaurantServiceCounter,
   isTableVisibleToWaiter,
   RESTAURANT_CHECK_OWNED_MESSAGE,
+  RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE,
   type OwnershipActor,
 } from '../../../../shared/utils/restaurantCheckOwnership.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
@@ -109,6 +111,9 @@ function requireCheckMutationAccess(
   opts?: { sharedServiceCounter?: boolean },
 ): void {
   if (!actor) return;
+  if (opts?.sharedServiceCounter && !canAccessRestaurantServiceLane(actor)) {
+    throw new ForbiddenError(RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE);
+  }
   if (
     canMutateRestaurantCheck({
       checkWaiterId,
@@ -118,7 +123,11 @@ function requireCheckMutationAccess(
   ) {
     return;
   }
-  throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
+  throw new ForbiddenError(
+    opts?.sharedServiceCounter
+      ? RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE
+      : RESTAURANT_CHECK_OWNED_MESSAGE,
+  );
 }
 
 function tableIsSharedServiceCounter(table: {
@@ -431,7 +440,7 @@ export const restaurantService = {
 
   /**
    * Ensure Takeaway / Delivery / Quick service lanes exist.
-   * Waiters with restaurant.order may call this — not full restaurant.manage.
+   * Cashiers (restaurant.pay) and managers (restaurant.manage) only — not floor waiters.
    * Idempotent: returns existing rows when already present.
    */
   async ensureServiceLanes(pool: Pool): Promise<RestaurantTableRecord[]> {
@@ -528,7 +537,11 @@ export const restaurantService = {
 
     const siblings = await restaurantRepository.listPendingOrdersForTable(pool, tableId);
     const sharedCounter = tableIsSharedServiceCounter(table);
-    // Quick / Takeaway / Delivery: any FOH user may open any ticket (unlike dining tables).
+    // TA / DL / QK — cashiers & managers only (not floor waiters).
+    if (sharedCounter && actor && !canAccessRestaurantServiceLane(actor)) {
+      throw new ForbiddenError(RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE);
+    }
+    // Shared counters: multi-ticket open to counter staff; ownership not waiter-scoped.
     const scopedSiblings =
       !sharedCounter && actor && !canEditOtherWaitersChecks(actor)
         ? siblings.filter((s) => !s.waiterId || s.waiterId === actor.userId)
@@ -670,6 +683,14 @@ export const restaurantService = {
 
     const table = await restaurantRepository.getTableById(pool, input.tableId);
     if (!table || !table.isActive) throw new NotFoundError('Restaurant table');
+
+    if (
+      tableIsSharedServiceCounter(table) &&
+      input.actor &&
+      !canAccessRestaurantServiceLane(input.actor)
+    ) {
+      throw new ForbiddenError(RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE);
+    }
 
     // Waiters always own what they open; managers may assign another waiter on open.
     const actor = input.actor;

@@ -5,6 +5,7 @@
  * - Waiters without edit-others only see FREE tables + their own occupied checks
  * - Managers / cashiers with pay / explicit restaurant.edit_others can open any check
  * - Line attribution (added_by) is separate from ownership — who rang the item
+ * - Service counters (Takeaway / Delivery / Quick): counter staff only — NOT floor waiters
  */
 
 export const RESTAURANT_EDIT_OTHERS_PERMISSION = 'restaurant.edit_others';
@@ -45,6 +46,27 @@ export function canEditOtherWaitersChecks(actor: OwnershipActor): boolean {
   return false;
 }
 
+/**
+ * Takeaway / Delivery / Quick service lanes — counter & management, not floor waiters.
+ * Waiters work dining tables only (they do not take TA/DL/QK orders).
+ */
+export function canAccessRestaurantServiceLane(actor: OwnershipActor): boolean {
+  const role = (actor.role || '').toUpperCase();
+  if (role === 'ADMIN' || role === 'MANAGER' || role === 'CASHIER') return true;
+
+  const perms = permissionSet(actor.permissions);
+  if (perms.has('*')) return true;
+  for (const key of perms) {
+    if (key.startsWith('admin.')) return true;
+  }
+  if (perms.has('restaurant.manage')) return true;
+  if (perms.has('restaurant.pay')) return true;
+  return false;
+}
+
+export const RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE =
+  'Takeaway, Delivery, and Quick orders are for cashiers and managers only. Waiters use dining tables.';
+
 /** True when the open check is owned by this user (or has no owner yet). */
 export function ownsRestaurantCheck(
   checkWaiterId: string | null | undefined,
@@ -55,7 +77,7 @@ export function ownsRestaurantCheck(
 }
 
 /**
- * Takeaway / Delivery / Quick counters — shared by all FOH staff (unlike dining tables).
+ * Takeaway / Delivery / Quick counters — not dining tables.
  * Codes TA/DL/QK or zone SERVICE.
  */
 export function isSharedRestaurantServiceCounter(input: {
@@ -74,18 +96,20 @@ export function isSharedRestaurantServiceCounter(input: {
 
 /**
  * Floor visibility: FREE always; occupied only if owned or actor can edit others.
- * Shared service counters (Quick / Takeaway / Delivery) are always visible.
+ * Service counters visible only to cashiers/managers (not pure waiters).
  */
 export function isTableVisibleToWaiter(input: {
   tableStatus: string;
   checkWaiterId?: string | null;
   /** True when any pending check on the table belongs to the actor (multi-ticket). */
   actorOwnsAnyCheckOnTable?: boolean;
-  /** Service lane — not a dining table; any waiter may open. */
+  /** Service lane — counter staff only (not dining-floor waiters). */
   sharedServiceCounter?: boolean;
   actor: OwnershipActor;
 }): boolean {
-  if (input.sharedServiceCounter) return true;
+  if (input.sharedServiceCounter) {
+    return canAccessRestaurantServiceLane(input.actor);
+  }
   if (canEditOtherWaitersChecks(input.actor)) return true;
   if (input.tableStatus === 'FREE') return true;
   if (input.actorOwnsAnyCheckOnTable) return true;
@@ -94,14 +118,16 @@ export function isTableVisibleToWaiter(input: {
 
 /**
  * Mutate (add/void/KOT/bill/assign) — owner or edit-others.
- * Shared service counters: any restaurant.order actor may mutate.
+ * Shared service counters: cashiers/managers only (not floor waiters).
  */
 export function canMutateRestaurantCheck(input: {
   checkWaiterId?: string | null;
   actor: OwnershipActor;
   sharedServiceCounter?: boolean;
 }): boolean {
-  if (input.sharedServiceCounter) return true;
+  if (input.sharedServiceCounter) {
+    return canAccessRestaurantServiceLane(input.actor);
+  }
   if (canEditOtherWaitersChecks(input.actor)) return true;
   return ownsRestaurantCheck(input.checkWaiterId, input.actor.userId);
 }

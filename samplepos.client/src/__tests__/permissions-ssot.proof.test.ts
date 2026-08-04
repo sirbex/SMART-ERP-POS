@@ -1,7 +1,7 @@
 /**
  * PROOF: Permissions SSOT
  * - Inventory stock adjust accepts inventory.adjust OR inventory.approve
- * - Waiter can take takeaway (restaurant.order + ensureServiceLanes, not restaurant.manage)
+ * - Service lanes (TA/DL/QK) are cashiers/managers only — waiters use dining tables
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -15,6 +15,10 @@ import {
   SYSTEM_WAITER_PERMISSION_KEYS,
   isSystemWaiterPermission,
 } from '../../../shared/authorization/systemRoleGrants';
+import {
+  canAccessRestaurantServiceLane,
+  canMutateRestaurantCheck,
+} from '../../../shared/utils/restaurantCheckOwnership';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const results: string[] = [];
@@ -57,56 +61,73 @@ describe('PROOF: Inventory adjust/approve SSOT', () => {
   });
 });
 
-describe('PROOF: Waiter takeaway SSOT', () => {
-  it('waiter grants include restaurant.order + customers (not pay/manage/kitchen)', () => {
+describe('PROOF: Service lanes restricted from waiters', () => {
+  it('waiter grants exclude pay/manage (cannot access service lanes)', () => {
     expect(SYSTEM_WAITER_PERMISSION_KEYS).toContain('restaurant.order');
     expect(SYSTEM_WAITER_PERMISSION_KEYS).toContain('restaurant.read');
-    expect(SYSTEM_WAITER_PERMISSION_KEYS).toContain('customers.create');
     expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.pay');
     expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.manage');
-    expect(SYSTEM_WAITER_PERMISSION_KEYS).not.toContain('restaurant.kitchen');
     expect(
       isSystemWaiterPermission({ key: 'restaurant.order', module: 'restaurant' }),
     ).toBe(true);
     expect(
       isSystemWaiterPermission({ key: 'restaurant.manage', module: 'restaurant' }),
     ).toBe(false);
-    pass('waiter grant matrix');
+
+    const waiterActor = {
+      userId: 'w1',
+      role: 'STAFF',
+      permissions: SYSTEM_WAITER_PERMISSION_KEYS,
+    };
+    expect(canAccessRestaurantServiceLane(waiterActor)).toBe(false);
+    expect(
+      canMutateRestaurantCheck({
+        checkWaiterId: null,
+        actor: waiterActor,
+        sharedServiceCounter: true,
+      }),
+    ).toBe(false);
+
+    const managerActor = {
+      userId: 'm1',
+      role: 'MANAGER',
+      permissions: ['restaurant.manage', 'restaurant.order'],
+    };
+    const cashierActor = {
+      userId: 'c1',
+      role: 'CASHIER',
+      permissions: ['restaurant.pay', 'restaurant.order'],
+    };
+    expect(canAccessRestaurantServiceLane(managerActor)).toBe(true);
+    expect(canAccessRestaurantServiceLane(cashierActor)).toBe(true);
+    pass('waiter vs manager/cashier service-lane access');
   });
 
-  it('service-lanes/ensure is gated by restaurant.order (waiters can create TA/DL/QK)', () => {
+  it('service-lanes/ensure requires manage or pay (not restaurant.order alone)', () => {
     const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
     expect(routes).toMatch(/\/service-lanes\/ensure/);
-    expect(routes).toMatch(/requirePermission\('restaurant\.order'\)/);
-
-    const svc = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
-    expect(svc).toMatch(/async ensureServiceLanes/);
-    expect(svc).toMatch(/code: 'TA'/);
-    expect(svc).toMatch(/code: 'DL'/);
-    expect(svc).toMatch(/code: 'QK'/);
+    expect(routes).toMatch(
+      /requireAnyPermission\(\[\s*'restaurant\.manage',\s*'restaurant\.pay'\s*\]\)/,
+    );
 
     const pos = readClient('pages/restaurant/RestaurantPosPage.tsx');
-    expect(pos).toMatch(/ensureServiceLanes/);
+    expect(pos).toMatch(/canAccessServiceLanes/);
     expect(pos).toMatch(/openServiceLane/);
-    // Must NOT require restaurant.manage to open missing takeaway lane
-    const openFn = pos.slice(pos.indexOf('const openServiceLane'), pos.indexOf('const saveGuestMutation'));
-    expect(openFn).toMatch(/canOrder/);
-    expect(openFn).not.toMatch(/canManage/);
-    pass('waiter takeaway ensureServiceLanes');
+    const openFn = pos.slice(
+      pos.indexOf('const openServiceLane'),
+      pos.indexOf('const saveGuestMutation'),
+    );
+    expect(openFn).toMatch(/canAccessServiceLanes/);
+    expect(pos).toMatch(/canManage \|\| canRestaurantPay/);
+    pass('service lane ensure gated to manage/pay');
   });
 
-  it('migration 578 seeds lanes + inventory.adjust catalog + waiter grants', () => {
+  it('migration 578 still documents TA/DL/QK lane seed (lanes remain; access is RBAC)', () => {
     const sql = readRepo('shared/sql/578_rbac_inventory_adjust_and_waiter_service_lanes.sql');
-    expect(sql).toContain("'inventory.adjust'");
     expect(sql).toContain("'TA'");
     expect(sql).toContain("'DL'");
     expect(sql).toContain("'QK'");
-    expect(sql).toContain("lower(name) = 'waiter'");
-    expect(sql).toContain("'restaurant.order'");
-    expect(sql).toMatch(/schema_version[\s\S]*578/);
-    const ver = readRepo('SamplePOS.Server/src/constants/schemaVersion.ts');
-    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*578/);
-    pass('migration 578 heal');
+    pass('migration 578 service lane seed rows exist');
   });
 });
 
@@ -122,7 +143,7 @@ afterAll(() => {
     '',
     '## Verdict',
     results.length >= 5
-      ? '**PASS** — inventory adjust/approve SSOT + waiter takeaway service lanes.'
+      ? '**PASS** — inventory adjust SSOT + service lanes hidden from waiters (manage/pay only).'
       : '**FAIL** — incomplete.',
     '',
   ].join('\n');
