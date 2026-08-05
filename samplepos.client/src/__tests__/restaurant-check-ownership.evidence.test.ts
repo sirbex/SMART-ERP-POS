@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  canCancelRestaurantCheck,
   canEditOtherWaitersChecks,
   canMutateRestaurantCheck,
   formatOrderedByLabels,
@@ -37,6 +38,19 @@ const cashier = {
 };
 
 describe('restaurant check ownership (behavioral evidence)', () => {
+  it('EVIDENCE: Cancel check is managers only (not waiters or cashiers)', () => {
+    expect(canCancelRestaurantCheck(waiter)).toBe(false);
+    expect(canCancelRestaurantCheck(cashier)).toBe(false);
+    expect(canCancelRestaurantCheck(manager)).toBe(true);
+    expect(
+      canCancelRestaurantCheck({
+        userId: 'c-legacy',
+        role: 'CASHIER',
+        permissions: [],
+      }),
+    ).toBe(false);
+  });
+
   it('EVIDENCE: Waiter cannot edit another waiter’s check; Manager/Cashier can', () => {
     expect(canEditOtherWaitersChecks(waiter)).toBe(false);
     expect(canEditOtherWaitersChecks(manager)).toBe(true);

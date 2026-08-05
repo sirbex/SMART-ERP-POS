@@ -672,7 +672,8 @@ const CancelCheckSchema = z.object({
 
 router.post(
   '/checks/:orderId/cancel',
-  requirePermission('restaurant.order'),
+  // Managers only — waiters/cashiers cannot cancel entire checks (UI + API).
+  requirePermission('restaurant.manage'),
   asyncHandler(async (req: Request, res: Response) => {
     const pool = req.tenantPool || globalPool;
     const body = CancelCheckSchema.parse(req.body ?? {});

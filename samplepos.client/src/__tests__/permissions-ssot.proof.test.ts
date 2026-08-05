@@ -2,6 +2,7 @@
  * PROOF: Permissions SSOT
  * - Inventory stock adjust accepts inventory.adjust OR inventory.approve
  * - Service lanes (TA/DL/QK) are cashiers/managers only — waiters use dining tables
+ * - Cancel check is managers only — hidden from waiters and cashiers
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -17,6 +18,7 @@ import {
 } from '../../../shared/authorization/systemRoleGrants';
 import {
   canAccessRestaurantServiceLane,
+  canCancelRestaurantCheck,
   canMutateRestaurantCheck,
 } from '../../../shared/utils/restaurantCheckOwnership';
 
@@ -131,6 +133,56 @@ describe('PROOF: Service lanes restricted from waiters', () => {
   });
 });
 
+describe('PROOF: Cancel check is managers only', () => {
+  it('waiters and cashiers cannot cancel; managers can', () => {
+    expect(
+      canCancelRestaurantCheck({
+        userId: 'w1',
+        role: 'STAFF',
+        permissions: SYSTEM_WAITER_PERMISSION_KEYS,
+      }),
+    ).toBe(false);
+    expect(
+      canCancelRestaurantCheck({
+        userId: 'c1',
+        role: 'CASHIER',
+        permissions: ['restaurant.pay', 'restaurant.order'],
+      }),
+    ).toBe(false);
+    expect(
+      canCancelRestaurantCheck({
+        userId: 'm1',
+        role: 'MANAGER',
+        permissions: ['restaurant.manage', 'restaurant.order'],
+      }),
+    ).toBe(true);
+    expect(
+      canCancelRestaurantCheck({
+        userId: 'staff-mgr',
+        role: 'STAFF',
+        permissions: ['restaurant.manage'],
+      }),
+    ).toBe(true);
+    pass('cancel-check actor policy');
+  });
+
+  it('API + FOH gate cancel to restaurant.manage', () => {
+    const routes = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
+    expect(routes).toMatch(
+      /\/checks\/:orderId\/cancel'[\s\S]{0,200}requirePermission\('restaurant\.manage'\)/,
+    );
+    expect(routes).not.toMatch(
+      /\/checks\/:orderId\/cancel'[\s\S]{0,120}requirePermission\('restaurant\.order'\)/,
+    );
+
+    const pos = readClient('pages/restaurant/RestaurantPosPage.tsx');
+    expect(pos).toMatch(/canCancelCheck/);
+    expect(pos).toMatch(/canCancelRestaurantCheck/);
+    expect(pos).toMatch(/chrome\.secondaryActions === 'inline' && canCancelCheck/);
+    pass('cancel-check UI + route wiring');
+  });
+});
+
 afterAll(() => {
   const body = [
     '# PROOF: Permissions SSOT',
@@ -142,8 +194,8 @@ afterAll(() => {
     ...results,
     '',
     '## Verdict',
-    results.length >= 5
-      ? '**PASS** — inventory adjust SSOT + service lanes hidden from waiters (manage/pay only).'
+    results.length >= 7
+      ? '**PASS** — inventory adjust SSOT; service lanes for manage/pay; cancel check managers only.'
       : '**FAIL** — incomplete.',
     '',
   ].join('\n');

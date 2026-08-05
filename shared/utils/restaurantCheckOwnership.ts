@@ -67,6 +67,26 @@ export function canAccessRestaurantServiceLane(actor: OwnershipActor): boolean {
 export const RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE =
   'Takeaway, Delivery, and Quick orders are for cashiers and managers only. Waiters use dining tables.';
 
+/**
+ * Cancel entire check (void fired kitchen) — managers only.
+ * Waiters and cashiers must not cancel checks (pay/settle only for cashiers).
+ */
+export function canCancelRestaurantCheck(actor: OwnershipActor): boolean {
+  const role = (actor.role || '').toUpperCase();
+  if (role === 'ADMIN' || role === 'MANAGER') return true;
+
+  const perms = permissionSet(actor.permissions);
+  if (perms.has('*')) return true;
+  for (const key of perms) {
+    if (key.startsWith('admin.')) return true;
+  }
+  if (perms.has('restaurant.manage')) return true;
+  return false;
+}
+
+export const RESTAURANT_CANCEL_CHECK_RESTRICTED_MESSAGE =
+  'Only managers can cancel a check. Waiters and cashiers cannot void an entire check.';
+
 /** True when the open check is owned by this user (or has no owner yet). */
 export function ownsRestaurantCheck(
   checkWaiterId: string | null | undefined,

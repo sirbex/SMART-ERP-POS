@@ -44,6 +44,16 @@ describe('restaurant ownership + integrity SSOT', () => {
     );
   });
 
+  it('cancel check requires restaurant.manage (not order alone)', () => {
+    const routes = read('SamplePOS.Server/src/modules/restaurant/restaurantRoutes.ts');
+    const ownership = read('shared/utils/restaurantCheckOwnership.ts');
+    expect(routes).toMatch(
+      /\/checks\/:orderId\/cancel'[\s\S]{0,200}requirePermission\('restaurant\.manage'\)/,
+    );
+    expect(ownership).toMatch(/export function canCancelRestaurantCheck/);
+    expect(ownership).toMatch(/perms\.has\('restaurant\.manage'\)/);
+  });
+
   it('getTableCheck filters siblings and heals pointer only after ownership', () => {
     const service = read('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
     expect(service).toMatch(/scopedSiblings/);

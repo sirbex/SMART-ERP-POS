@@ -57,10 +57,12 @@ import {
 } from '../../utils/restaurantFohAutoLogout';
 import { isRestaurantWaiterProfile } from '../../utils/restaurantWaiterLockdown';
 import {
+  canCancelRestaurantCheck,
   canEditOtherWaitersChecks,
   formatCheckOpenDuration,
   formatLineAddedClock,
   formatOrderedByLabels,
+  RESTAURANT_CANCEL_CHECK_RESTRICTED_MESSAGE,
   restaurantTicketLineMergeKey,
   shortWaiterLabel,
 } from '@shared/utils/restaurantCheckOwnership';
@@ -690,6 +692,12 @@ export default function RestaurantPosPage() {
    * Floor waiters work dining tables and do not start TA/DL/QK orders.
    */
   const canAccessServiceLanes = canManage || canRestaurantPay;
+  /** Cancel entire check — managers only (hidden from waiters and cashiers). */
+  const canCancelCheck = canCancelRestaurantCheck({
+    userId: user?.id || '',
+    role: user?.role,
+    permissions,
+  });
   /** Toast: Edit other employees' orders — managers/cashiers see every table. */
   const canEditOthers = canEditOtherWaitersChecks({
     userId: user?.id || '',
@@ -3563,8 +3571,8 @@ export default function RestaurantPosPage() {
 
   const handleCancelCheck = async () => {
     if (!order) return;
-    if (!canOrder) {
-      toast.error('You need restaurant.order permission to cancel a check');
+    if (!canCancelCheck) {
+      toast.error(RESTAURANT_CANCEL_CHECK_RESTRICTED_MESSAGE);
       return;
     }
     // New/unsent checks: cancel with confirm only (no reason, no VOID print).
@@ -5213,7 +5221,7 @@ export default function RestaurantPosPage() {
                       ) : null}
                     </button>
                   ) : null}
-                  {chrome.secondaryActions === 'inline' ? (
+                  {chrome.secondaryActions === 'inline' && canCancelCheck ? (
                   <button
                     type="button"
                     disabled={!order || busy}
@@ -5379,17 +5387,20 @@ export default function RestaurantPosPage() {
           >
             Merge
           </button>
-          <button
-            type="button"
-            disabled={!order || busy}
-            onClick={() => {
-              setMobileSheet(null);
-              void handleCancelCheck();
-            }}
-            className={`${touchBtnDanger} w-full`}
-          >
-            Cancel check
-          </button>
+          {canCancelCheck ? (
+            <button
+              type="button"
+              disabled={!order || busy}
+              onClick={() => {
+                setMobileSheet(null);
+                void handleCancelCheck();
+              }}
+              className={`${touchBtnDanger} w-full`}
+              data-secondary-ops-surface="cancel"
+            >
+              Cancel check
+            </button>
+          ) : null}
         </div>
       </AdaptiveDialog>
 
