@@ -26,6 +26,12 @@ export const PERMISSIONS: Record<string, Permission> = {
     'Override VAT/tax determination on sales (requires reason + audit)',
   ),
   SALES_REPRINT: p('sales.reprint', 'sales', 'reprint', 'Reprint sale receipts'),
+  SALES_REASSIGN_CUSTOMER: p(
+    'sales.reassign_customer',
+    'sales',
+    'update',
+    'Reassign sale to another customer (wrong customer correction; manager/admin only)',
+  ),
 
   INVENTORY_READ: p('inventory.read', 'inventory', 'read', 'View inventory levels'),
   INVENTORY_CREATE: p('inventory.create', 'inventory', 'create', 'Create inventory items'),

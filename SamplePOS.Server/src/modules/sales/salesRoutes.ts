@@ -724,6 +724,57 @@ salesRoutes.post(
   asyncHandler(salesController.rebuildSummary)
 );
 
+// Wrong-customer correction (manager/admin) — must be before /:id
+salesRoutes.post(
+  '/customer-reassignment/preview',
+  authenticate,
+  requirePermission('sales.reassign_customer'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (
+      await import('../../../../shared/zod/saleCustomerReassignment.js')
+    ).SaleCustomerReassignmentBodySchema.safeParse(req.body);
+    if (!body.success) {
+      const { ValidationError } = await import('../../middleware/errorHandler.js');
+      throw new ValidationError(
+        body.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; '),
+      );
+    }
+    const { saleCustomerReassignmentService } = await import(
+      '../corrections/saleCustomerReassignmentService.js'
+    );
+    const pool = req.tenantPool || globalPool;
+    const data = await saleCustomerReassignmentService.preview(pool, body.data);
+    res.json({ success: true, data });
+  }),
+);
+
+salesRoutes.post(
+  '/customer-reassignment/execute',
+  authenticate,
+  requirePermission('sales.reassign_customer'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (
+      await import('../../../../shared/zod/saleCustomerReassignment.js')
+    ).SaleCustomerReassignmentExecuteSchema.safeParse(req.body);
+    if (!body.success) {
+      const { ValidationError } = await import('../../middleware/errorHandler.js');
+      throw new ValidationError(
+        body.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; '),
+      );
+    }
+    if (!req.user?.id) {
+      const { ValidationError } = await import('../../middleware/errorHandler.js');
+      throw new ValidationError('User identity required');
+    }
+    const { saleCustomerReassignmentService } = await import(
+      '../corrections/saleCustomerReassignmentService.js'
+    );
+    const pool = req.tenantPool || globalPool;
+    const data = await saleCustomerReassignmentService.execute(pool, body.data, req.user.id);
+    res.status(201).json({ success: true, data });
+  }),
+);
+
 salesRoutes.get('/:id', authenticate, asyncHandler(salesController.getSaleById));
 
 // Sales reports - all authenticated users

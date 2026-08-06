@@ -33,6 +33,7 @@
     "proof:kitchen-production-foundation": "node scripts/proof-kitchen-production-foundation.mjs",
     "proof:kitchen-production-certification": "node scripts/proof-kitchen-production-foundation.mjs --strict",
     "proof:kitchen-production-live": "tsx scripts/proof-kitchen-production-live.ts",
+    "proof:sale-customer-reassignment": "node scripts/proof-sale-customer-reassignment-integrity.mjs",
     "proof:order-complete-soak": "node scripts/proof-order-complete-soak.mjs",
     "proof:order-complete-soak:live": "node scripts/proof-order-complete-soak.mjs --live",
     "proof:inventory-supplier-inconsistencies": "node scripts/proof-inventory-supplier-inconsistencies.mjs",

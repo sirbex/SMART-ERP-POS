@@ -13,6 +13,7 @@ import { printReceipt } from '../lib/print';
 import {
   fetchReceiptPrintConfig,
   isReceiptPrintingEnabled,
+  applyReceiptPrintPresentation,
 } from '../lib/receiptPrintConfig';
 import {
   buildReceiptDataFromSale,
@@ -24,6 +25,7 @@ import {
 import { DocumentFlowButton } from '../components/shared/DocumentFlowButton';
 import { VoidSaleModal } from '../components/sales/VoidSaleModal';
 import { RefundSaleModal } from '../components/sales/RefundSaleModal';
+import { SaleCustomerReassignmentModal } from '../components/sales/SaleCustomerReassignmentModal';
 import {
   AdaptivePage,
   AdaptiveSearch,
@@ -2192,12 +2194,14 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
   const canRefundSale = useBackendPermission('sales.refund');
   const canExchangeSale = useBackendPermission('sales.exchange') || canRefundSale;
   const canReprintReceipt = useBackendPermission('sales.reprint');
+  const canReassignCustomer = useBackendPermission('sales.reassign_customer');
   const [saleDetails, setSaleDetails] = useState<SaleRow | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showVoidModal, setShowVoidModal] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
+  const [showReassignCustomerModal, setShowReassignCustomerModal] = useState(false);
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettingsForReceipt | null>(null);
   const [isReprinting, setIsReprinting] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -2661,7 +2665,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                     </>
                   );
                 })()}
-                {(sale.taxAmount || sale.tax_amount) && (
+                {Number(sale.taxAmount || sale.tax_amount || 0) > 0 && (
                   <div className="flex justify-between text-gray-600">
                     <span>Tax:</span>
                     <span className="font-medium">
@@ -2740,6 +2744,18 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
           <div className="border-t border-gray-200 px-6 py-4 bg-gray-50 flex flex-col-reverse sm:flex-row justify-between gap-3 flex-shrink-0">
             {/* Left side: Void & Refund actions */}
             <div className="flex flex-col sm:flex-row gap-2">
+              {['COMPLETED', 'PARTIALLY_RETURNED'].includes(
+                (saleDetails?.status || sale.status) as string
+              ) &&
+                canReassignCustomer && (
+                  <button
+                    onClick={() => setShowReassignCustomerModal(true)}
+                    title="Correct sale billed to the wrong customer (managers/admins only)."
+                    className="w-full sm:w-auto px-4 py-2 border border-violet-300 text-violet-800 rounded-lg hover:bg-violet-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                  >
+                    Reassign customer
+                  </button>
+                )}
               {/* Void is FORBIDDEN for completed POS sales (ERP discipline: SAP/Odoo-style).
                   Stock, invoice, and payment are already posted. Use Return instead.
                   Only shown for non-posted statuses — none exist in current enum by design. */}
@@ -2870,9 +2886,12 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                         );
                         return;
                       }
-                      const receiptData = buildReceiptDataFromSale(s, branding, {
-                        isReprint: true,
-                      });
+                      const receiptData = applyReceiptPrintPresentation(
+                        buildReceiptDataFromSale(s, branding, {
+                          isReprint: true,
+                        }),
+                        printCfg,
+                      );
                       await printReceipt(receiptData, { printerName: printCfg.printerName });
                       toast.success('Receipt sent to printer');
                     } catch (err) {
@@ -2928,6 +2947,39 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
             setShowRefundModal(false);
             onSaleUpdated?.();
             onClose();
+          }}
+        />
+      )}
+
+      {/* Wrong-customer reassignment (manager/admin) */}
+      {showReassignCustomerModal && (
+        <SaleCustomerReassignmentModal
+          saleId={sale.id}
+          saleNumber={saleDetails?.saleNumber || sale.saleNumber || `Sale #${sale.id.slice(0, 8)}`}
+          fromCustomerId={saleDetails?.customerId || sale.customerId || null}
+          fromCustomerName={saleDetails?.customerName || sale.customerName || null}
+          onClose={() => setShowReassignCustomerModal(false)}
+          onSuccess={() => {
+            setShowReassignCustomerModal(false);
+            toast.success('Sale reassigned to the correct customer');
+            onSaleUpdated?.();
+            // Refresh detail while keeping modal pattern of parent
+            void api.sales.getById(sale.id).then((response) => {
+              if (response.data.success) {
+                const responseData = response.data.data as {
+                  sale?: SaleRow;
+                  items?: SaleRow['items'];
+                  paymentLines?: SaleRow['paymentLines'];
+                };
+                if (responseData.sale) {
+                  setSaleDetails({
+                    ...responseData.sale,
+                    items: responseData.items,
+                    paymentLines: responseData.paymentLines,
+                  });
+                }
+              }
+            });
           }}
         />
       )}

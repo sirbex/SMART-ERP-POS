@@ -83,6 +83,50 @@ export interface SupplierReassignmentResult {
     warnings: string[];
 }
 
+export interface SaleCustomerReassignmentPreview {
+  saleId: string;
+  saleNumber: string;
+  fromCustomerId: string | null;
+  fromCustomerName: string | null;
+  toCustomerId: string;
+  toCustomerName: string | null;
+  reason: string;
+  saleTotal: number;
+  openArAmount: number;
+  invoiceOutstandingAmount?: number;
+  accountScope: 'AR' | 'NONE';
+  invoicesToMove: Array<{
+    invoiceId: string;
+    invoiceNumber: string;
+    outstandingBalance: number;
+    totalAmount: number;
+    amountPaid: number;
+  }>;
+  journalLines: Array<{ accountCode: string; debit: number; credit: number; entityId: string }>;
+  wizardSteps: Array<{
+    order: number;
+    code: string;
+    title: string;
+    description: string;
+  }>;
+  blockers: string[];
+  warnings: string[];
+  documentTaxImmutable?: boolean;
+}
+
+export interface SaleCustomerReassignmentResult {
+  eventId: string;
+  glTransactionId: string;
+  saleId: string;
+  saleNumber: string;
+  fromCustomerId: string | null;
+  toCustomerId: string;
+  toCustomerName: string | null;
+  invoicesMoved: number;
+  openArReclassed: number;
+  warnings: string[];
+}
+
 export const correctionApi = {
     getEligibility(documentType: string, documentId: string) {
         const params = new URLSearchParams({ documentType, documentId });
@@ -112,6 +156,30 @@ export const correctionApi = {
     }) {
         return api.post<{ success: boolean; data: SupplierReassignmentResult }>(
             '/corrections/supplier-reassignment/execute',
+            body,
+        );
+    },
+
+    previewSaleCustomerReassignment(body: {
+        saleId: string;
+        fromCustomerId?: string | null;
+        toCustomerId: string;
+        reason: string;
+    }) {
+        return api.post<{ success: boolean; data: SaleCustomerReassignmentPreview }>(
+            '/sales/customer-reassignment/preview',
+            body,
+        );
+    },
+
+    executeSaleCustomerReassignment(body: {
+        saleId: string;
+        fromCustomerId?: string | null;
+        toCustomerId: string;
+        reason: string;
+    }) {
+        return api.post<{ success: boolean; data: SaleCustomerReassignmentResult }>(
+            '/sales/customer-reassignment/execute',
             body,
         );
     },
