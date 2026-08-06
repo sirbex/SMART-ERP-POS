@@ -441,6 +441,17 @@ export const api = {
       replaceReason: string;
       confirmImpact?: boolean;
     }) => apiClient.post<ApiResponse>('customers/opening-balance/replace', data),
+    increaseOpeningBalance: (data: {
+      customerId: string;
+      increaseBy: number;
+      asOfDate: string;
+      dueDate?: string;
+      notes?: string;
+      reason: string;
+      confirmImpact?: boolean;
+    }) => apiClient.post<ApiResponse>('customers/opening-balance/increase', data),
+    getOpeningBalanceSummary: (customerId: string) =>
+      apiClient.get<ApiResponse>(`customers/opening-balance/summary`, { params: { customerId } }),
     cancelOpeningBalance: (data: { invoiceId: string; reason: string }) =>
       apiClient.post<ApiResponse>('customers/opening-balance/cancel', data),
   },
@@ -1907,6 +1918,18 @@ export const api = {
       notes?: string;
       replaceReason: string;
     }) => apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance/replace', data),
+    increaseOpeningBalance: (data: {
+      supplierId: string;
+      increaseBy: number;
+      asOfDate: string;
+      dueDate?: string;
+      notes?: string;
+      reason: string;
+    }) => apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance/increase', data),
+    getOpeningBalanceSummary: (supplierId: string) =>
+      apiClient.get<ApiResponse>('supplier-payments/invoices/opening-balance/summary', {
+        params: { supplierId },
+      }),
     cancelOpeningBalance: (data: { invoiceId: string; reason: string }) =>
       apiClient.post<ApiResponse>('supplier-payments/invoices/opening-balance/cancel', data),
   },

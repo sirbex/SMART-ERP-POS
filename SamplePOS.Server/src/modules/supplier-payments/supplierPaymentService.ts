@@ -2217,7 +2217,7 @@ export async function cancelSupplierInvoiceForCorrection(
 export async function replaceSupplierOpeningBalance(
     pool: Pool,
     data: ImportSupplierOpeningBalanceInput & { replaceReason: string },
-): Promise<{ invoiceNumber: string; amount: number; replaced: boolean }> {
+): Promise<{ invoiceId: string; invoiceNumber: string; amount: number; replaced: boolean }> {
     const existing = await pool.query<{ Id: string }>(
         `SELECT "Id" FROM supplier_invoices
          WHERE "SupplierId" = $1
@@ -2277,4 +2277,161 @@ export async function replaceSupplierOpeningBalance(
     }
 
     return { ...created, replaced };
+}
+
+/**
+ * Smart cutover increase for suppliers: enter delta to add, not screen outstanding.
+ */
+export async function increaseSupplierOpeningBalance(
+    pool: Pool,
+    data: ImportSupplierOpeningBalanceInput & {
+        increaseBy: number;
+        reason: string;
+    },
+): Promise<{
+    invoiceId?: string;
+    invoiceNumber: string;
+    amount: number;
+    replaced: boolean;
+    previousCutoverTotal: number;
+    increaseBy: number;
+}> {
+    const { BusinessError } = await import('../../middleware/errorHandler.js');
+    const increaseBy = assertPositiveFinite(data.increaseBy, 'Increase amount');
+
+    const active = await pool.query<{ Id: string; TotalAmount: string | number }>(
+        `SELECT "Id", "TotalAmount" FROM supplier_invoices
+         WHERE "SupplierId" = $1
+           AND document_type = 'OPENING_BALANCE'
+           AND deleted_at IS NULL
+           AND UPPER("Status") NOT IN ('CANCELLED', 'VOIDED', 'DELETED')
+         LIMIT 1`,
+        [data.supplierId],
+    );
+    if (!active.rows[0]) {
+        throw new BusinessError(
+            'No active cutover opening balance for this supplier. Use Post go-live cutover first.',
+            'OB_INCREASE_NO_ACTIVE_CUTOVER',
+        );
+    }
+
+    const previousCutoverTotal = Number(active.rows[0].TotalAmount || 0);
+    const newTotal = previousCutoverTotal + increaseBy;
+
+    const result = await replaceSupplierOpeningBalance(pool, {
+        ...data,
+        amount: newTotal,
+        replaceReason: `[INCREASE +${increaseBy}] ${data.reason}`,
+        postReason: data.reason,
+    });
+
+    try {
+        const supRes = await pool.query<{ CompanyName: string }>(
+            'SELECT "CompanyName" FROM suppliers WHERE "Id" = $1',
+            [data.supplierId],
+        );
+        await UnitOfWork.run(pool, async (client) => {
+            await logOpeningBalanceAudit(client, {
+                party: 'supplier',
+                partyId: data.supplierId,
+                partyName: supRes.rows[0]?.CompanyName ?? 'Supplier',
+                action: 'INCREASE',
+                invoiceId: result.invoiceId ?? active.rows[0].Id,
+                invoiceNumber: result.invoiceNumber,
+                amount: result.amount,
+                previousAmount: previousCutoverTotal,
+                increaseBy,
+                reason: data.reason,
+                userId: data.userId,
+                userName: data.userName,
+                userRole: data.userRole,
+            });
+        });
+    } catch {
+        /* secondary audit only */
+    }
+
+    return {
+        ...result,
+        previousCutoverTotal,
+        increaseBy,
+    };
+}
+
+export async function getSupplierCutoverSummary(pool: Pool, supplierId: string) {
+    const sup = await pool.query<{ CompanyName: string; OutstandingBalance: string | number }>(
+        `SELECT "CompanyName", COALESCE("OutstandingBalance", 0) AS "OutstandingBalance"
+         FROM suppliers WHERE "Id" = $1`,
+        [supplierId],
+    );
+    if (!sup.rows[0]) throw new Error(`Supplier ${supplierId} not found`);
+
+    const ob = await pool.query<{
+        Id: string;
+        SupplierInvoiceNumber: string;
+        TotalAmount: string | number;
+        AmountPaid: string | number;
+        OutstandingBalance: string | number;
+        InvoiceDate: Date | string;
+        Status: string;
+    }>(
+        `SELECT "Id", "SupplierInvoiceNumber", "TotalAmount", COALESCE("AmountPaid",0) AS "AmountPaid",
+                COALESCE("OutstandingBalance",0) AS "OutstandingBalance", "InvoiceDate", "Status"
+         FROM supplier_invoices
+         WHERE "SupplierId" = $1
+           AND document_type = 'OPENING_BALANCE'
+           AND deleted_at IS NULL
+           AND UPPER("Status") NOT IN ('CANCELLED', 'VOIDED', 'DELETED')
+         ORDER BY "CreatedAt" DESC NULLS LAST
+         LIMIT 1`,
+        [supplierId],
+    );
+
+    const other = await pool.query<{ due: string | number; cnt: string | number }>(
+        `SELECT COALESCE(SUM(COALESCE("OutstandingBalance",0)),0) AS due, COUNT(*)::int AS cnt
+         FROM supplier_invoices
+         WHERE "SupplierId" = $1
+           AND COALESCE(document_type, 'INVOICE') <> 'OPENING_BALANCE'
+           AND deleted_at IS NULL
+           AND UPPER("Status") NOT IN ('CANCELLED', 'VOIDED', 'DELETED', 'PAID')
+           AND COALESCE("OutstandingBalance",0) > 0.009`,
+        [supplierId],
+    );
+
+    const currentOutstanding = Number(sup.rows[0].OutstandingBalance || 0);
+    const cutover = ob.rows[0]
+        ? {
+              invoiceId: ob.rows[0].Id,
+              invoiceNumber: ob.rows[0].SupplierInvoiceNumber,
+              documentTotal: Number(ob.rows[0].TotalAmount || 0),
+              amountPaid: Number(ob.rows[0].AmountPaid || 0),
+              amountDue: Number(ob.rows[0].OutstandingBalance || 0),
+              issueDate: String(ob.rows[0].InvoiceDate).slice(0, 10),
+              status: ob.rows[0].Status,
+          }
+        : null;
+
+    const guidance: string[] = [];
+    if (!cutover) {
+        guidance.push(
+            'No go-live cutover yet. Post total still owed to this supplier from the old system as of cutover — not today’s AP alone.',
+        );
+    } else {
+        guidance.push(
+            `Cutover ${cutover.invoiceNumber} document total is ${cutover.documentTotal}. Current AP outstanding ${currentOutstanding} is calculated and may differ.`,
+        );
+        guidance.push('To bring more legacy AP, use Increase cutover by the extra amount.');
+    }
+
+    return {
+        supplierId,
+        supplierName: sup.rows[0].CompanyName,
+        currentOutstanding,
+        hasActiveCutover: Boolean(cutover),
+        cutover,
+        otherOpenInvoicesDue: Number(other.rows[0]?.due || 0),
+        otherOpenInvoiceCount: Number(other.rows[0]?.cnt || 0),
+        unallocatedCash: 0,
+        guidance,
+    };
 }

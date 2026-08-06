@@ -1,0 +1,31 @@
+{
+  "proof": "smart-cutover",
+  "runAt": "2026-08-06T15:44:46.036Z",
+  "result": "PASS",
+  "api": "http://localhost:3001",
+  "cases": {
+    "summaryBefore": true,
+    "postCutover": true,
+    "documentTotalDistinctFromTypingScreenBalance": true,
+    "duplicatePostRejected": true,
+    "increaseByDelta": true,
+    "newTotalEqualsPreviousPlusDelta": true,
+    "outstandingRoseByIncrease": true
+  },
+  "samples": {
+    "obAmount": 200000,
+    "increaseBy": 50000,
+    "afterTotal": 250000,
+    "customerId": "80bb57a7-7eff-4940-b02f-1020819837c3",
+    "firstOb": "OB-000004",
+    "afterOb": "OB-000005"
+  },
+  "evidence": {
+    "vitest": "smart-cutover-opening-balance.evidence.test.ts 7/7",
+    "jestImpact": "customerObReplaceImpact.test.ts 6/6",
+    "jestSchemas": "openingBalanceSchemas.test.ts (increase schema included)",
+    "liveLocal": "proof-smart-cutover-local.mjs 22/22",
+    "legacyOb": "proof-customer-opening-balance-local.mjs 13/13",
+    "bugFixedDuringProof": "audit_log INCREASE mapped to stored action UPDATE with CUTOVER_INCREASE tag"
+  }
+}

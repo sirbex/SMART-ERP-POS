@@ -1,11 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   CustomerOpeningBalanceCancelSchema,
+  CustomerOpeningBalanceIncreaseSchema,
   CustomerOpeningBalanceReplaceSchema,
   CustomerOpeningBalanceSchema,
 } from '@shared/zod/customerOpeningBalance';
 import {
   SupplierOpeningBalanceCancelSchema,
+  SupplierOpeningBalanceIncreaseSchema,
   SupplierOpeningBalanceReplaceSchema,
   SupplierOpeningBalanceSchema,
 } from '@shared/zod/supplierOpeningBalance';
@@ -96,6 +98,27 @@ describe('Customer opening balance Zod schemas', () => {
     });
     expect(ok.invoiceId).toBe('33333333-3333-3333-3333-333333333333');
   });
+
+  it('increase requires positive increaseBy and reason (delta, not full balance)', () => {
+    expect(() =>
+      CustomerOpeningBalanceIncreaseSchema.parse({
+        customerId: validCustomerOb.customerId,
+        increaseBy: 0,
+        asOfDate: '2026-01-15',
+        reason: 'Add more legacy AR',
+      }),
+    ).toThrow();
+
+    const ok = CustomerOpeningBalanceIncreaseSchema.parse({
+      customerId: validCustomerOb.customerId,
+      increaseBy: 50_000,
+      asOfDate: '2026-01-15',
+      reason: 'Bring additional legacy AR from old system',
+      confirmImpact: true,
+    });
+    expect(ok.increaseBy).toBe(50_000);
+    expect(ok.confirmImpact).toBe(true);
+  });
 });
 
 describe('Supplier opening balance Zod schemas', () => {
@@ -140,5 +163,15 @@ describe('Supplier opening balance Zod schemas', () => {
       reason: 'Void wrong OB',
     });
     expect(ok.reason).toBe('Void wrong OB');
+  });
+
+  it('increase requires increaseBy delta', () => {
+    const ok = SupplierOpeningBalanceIncreaseSchema.parse({
+      supplierId: validSupplierOb.supplierId,
+      increaseBy: 12_500,
+      asOfDate: '2026-01-15',
+      reason: 'Additional legacy AP lines',
+    });
+    expect(ok.increaseBy).toBe(12_500);
   });
 });

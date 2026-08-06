@@ -13,6 +13,7 @@ import { getBusinessDate } from '../../utils/dateRange.js';
 import {
   CustomerOpeningBalanceSchema,
   CustomerOpeningBalanceReplaceSchema,
+  CustomerOpeningBalanceIncreaseSchema,
   CustomerOpeningBalanceCancelSchema,
 } from '../../../../shared/zod/customerOpeningBalance.js';
 import { assertPositiveFinite } from '../../utils/safeParse.js';
@@ -76,6 +77,31 @@ export const replaceCustomerOpeningBalance = asyncHandler(async (req: Request, r
     confirmImpact: validated.confirmImpact,
   });
   res.status(201).json({ success: true, data: result });
+});
+
+export const increaseCustomerOpeningBalance = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const validated = CustomerOpeningBalanceIncreaseSchema.parse(req.body);
+  const result = await customerService.increaseCustomerOpeningBalance(pool, {
+    customerId: validated.customerId,
+    increaseBy: assertPositiveFinite(validated.increaseBy, 'Increase amount'),
+    asOfDate: validated.asOfDate,
+    dueDate: validated.dueDate,
+    notes: validated.notes,
+    reason: validated.reason,
+    userId: req.user!.id,
+    userName: req.user!.fullName,
+    userRole: req.user!.role,
+    confirmImpact: validated.confirmImpact,
+  });
+  res.status(201).json({ success: true, data: result });
+});
+
+export const getCustomerCutoverSummary = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const customerId = z.string().uuid().parse(req.query.customerId);
+  const result = await customerService.getCustomerCutoverSummary(pool, customerId);
+  res.json({ success: true, data: result });
 });
 
 export const cancelCustomerOpeningBalance = asyncHandler(async (req: Request, res: Response) => {

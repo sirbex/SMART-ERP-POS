@@ -14,6 +14,7 @@ import { asyncHandler } from '../../middleware/errorHandler.js';
 import {
     SupplierOpeningBalanceSchema,
     SupplierOpeningBalanceReplaceSchema,
+    SupplierOpeningBalanceIncreaseSchema,
     SupplierOpeningBalanceCancelSchema,
 } from '../../../../shared/zod/supplierOpeningBalance.js';
 import { assertPositiveFinite } from '../../utils/safeParse.js';
@@ -457,6 +458,16 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
         }),
     );
 
+    router.get(
+        '/invoices/opening-balance/summary',
+        requirePermission('accounting.opening_balance'),
+        asyncHandler(async (req, res) => {
+            const supplierId = z.string().uuid().parse(req.query.supplierId);
+            const result = await supplierPaymentService.getSupplierCutoverSummary(p(req), supplierId);
+            res.json({ success: true, data: result });
+        }),
+    );
+
     router.post(
         '/invoices/opening-balance',
         requirePermission('accounting.opening_balance'),
@@ -493,6 +504,28 @@ export function createSupplierPaymentRoutes(pool: Pool): Router {
                 userName: req.user!.fullName,
                 userRole: req.user!.role,
                 replaceReason: validated.replaceReason,
+            });
+            res.status(201).json({ success: true, data: result });
+        }),
+    );
+
+    router.post(
+        '/invoices/opening-balance/increase',
+        requirePermission('accounting.opening_balance'),
+        asyncHandler(async (req, res) => {
+            const validated = SupplierOpeningBalanceIncreaseSchema.parse(req.body);
+            const result = await supplierPaymentService.increaseSupplierOpeningBalance(p(req), {
+                supplierId: validated.supplierId,
+                increaseBy: assertPositiveFinite(validated.increaseBy, 'Increase amount'),
+                amount: assertPositiveFinite(validated.increaseBy, 'Increase amount'), // placeholder overwritten
+                asOfDate: validated.asOfDate,
+                dueDate: validated.dueDate,
+                notes: validated.notes,
+                postReason: validated.reason,
+                reason: validated.reason,
+                userId: req.user!.id,
+                userName: req.user!.fullName,
+                userRole: req.user!.role,
             });
             res.status(201).json({ success: true, data: result });
         }),

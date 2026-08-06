@@ -1,0 +1,28 @@
+{
+  "proof": "smart-cutover-aggressive",
+  "runAt": "2026-08-06T15:53:01.339Z",
+  "result": "PASS",
+  "api": "http://localhost:3001",
+  "counts": {
+    "aggressiveLive": "105/105",
+    "smartCutoverLocal": "22/22",
+    "customerObLocal": "13/13",
+    "vitestEvidence": "7/7",
+    "jestImpactAndSchemas": "20/20"
+  },
+  "scenarios": {
+    "A_happyPostDoubleReject": true,
+    "B_stackIncreases_100k_plus_10_25_5_to_140k": true,
+    "C_increaseWithoutCutover_OB_INCREASE_NO_ACTIVE_CUTOVER": true,
+    "D_rewriteDownUpIdentity": true,
+    "E_increaseAfterRewrite_documentBase": true,
+    "F_invalidZeroNegativeShortReason": true,
+    "G_independentCustomers": true,
+    "H_rapid10xIncreases": true,
+    "I_summaryContract": true,
+    "J_classic200_plus_50_and_mercyRewriteRecover": true,
+    "ssot_summaryMatchesCustomerBalance": true
+  },
+  "inconsistenciesFound": [],
+  "command": "npm run proof:smart-cutover:aggressive"
+}

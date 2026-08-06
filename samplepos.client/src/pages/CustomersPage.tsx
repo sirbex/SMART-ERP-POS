@@ -264,9 +264,10 @@ export default function CustomersPage() {
 
             {canManageOpeningBalance && (
               <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 sm:p-6 mb-6">
-                <h2 className="text-lg font-semibold text-indigo-900 mb-1">Customer opening balance</h2>
+                <h2 className="text-lg font-semibold text-indigo-900 mb-1">Go-live cutover (legacy AR)</h2>
                 <p className="text-sm text-indigo-800 mb-3">
-                  Cutover AR is posted from Customer Payments (audited, permission-controlled). Use Record Payment → Opening balance.
+                  Post or increase cutover debt from the old system. Today’s balance is calculated — do not
+                  type it as cutover. Use Customer Payments → Go-live cutover.
                 </p>
                 <Link
                   to="/accounting/customer-payments"

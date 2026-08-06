@@ -996,7 +996,8 @@ export async function cancelCustomerOpeningBalance(
 
 /**
  * Replace customer opening balance: cancel existing active OB (if any) then post new amount.
- * Use when the cutover figure was entered incorrectly.
+ * Use when the cutover figure was entered incorrectly (migration rewrite).
+ * Prefer increaseCustomerOpeningBalance when the user only needs +delta legacy AR.
  *
  * Governance: if replace would unallocate receipts and/or leave surplus on-account
  * (customer can go into GL credit), requires confirmImpact=true after UI warning.
@@ -1006,6 +1007,9 @@ export async function replaceCustomerOpeningBalance(
   data: ImportCustomerOpeningBalanceInput & {
     replaceReason: string;
     confirmImpact?: boolean;
+    /** INCREASE = smart "add to cutover"; UPDATE = rewrite full total. */
+    auditAction?: 'UPDATE' | 'INCREASE';
+    increaseBy?: number;
   },
 ): Promise<{ invoiceId: string; invoiceNumber: string; amount: number; replaced: boolean }> {
   const existing = await pool.query<{ id: string }>(
@@ -1092,11 +1096,12 @@ export async function replaceCustomerOpeningBalance(
         party: 'customer',
         partyId: data.customerId,
         partyName: custRes.rows[0]?.name ?? 'Customer',
-        action: 'UPDATE',
+        action: data.auditAction === 'INCREASE' ? 'INCREASE' : 'UPDATE',
         invoiceId: created.invoiceId,
         invoiceNumber: created.invoiceNumber,
         amount: created.amount,
         previousAmount,
+        increaseBy: data.increaseBy,
         reason: data.replaceReason,
         userId: data.userId,
         userName: data.userName,
@@ -1108,6 +1113,209 @@ export async function replaceCustomerOpeningBalance(
   return { ...created, replaced };
 }
 
+/**
+ * Smart cutover increase: user types "bring in 50,000 more from old system".
+ * Derives new cutover document total = current cutover document total + increaseBy.
+ * Does NOT treat customers.balance as the base (avoids Mercy-class mistakes).
+ */
+export async function increaseCustomerOpeningBalance(
+  pool: Pool,
+  data: {
+    customerId: string;
+    increaseBy: number;
+    asOfDate: string;
+    dueDate?: string;
+    notes?: string;
+    reason: string;
+    userId: string;
+    userName?: string | null;
+    userRole?: string | null;
+    confirmImpact?: boolean;
+  },
+): Promise<{
+  invoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+  replaced: boolean;
+  previousCutoverTotal: number;
+  increaseBy: number;
+}> {
+  const increaseBy = assertPositiveFinite(data.increaseBy, 'Increase amount');
+  const active = await pool.query<{
+    id: string;
+    total_amount: string | number;
+    issue_date: Date | string;
+  }>(
+    `SELECT id, total_amount, issue_date
+     FROM invoices
+     WHERE customer_id = $1
+       AND document_type = 'OPENING_BALANCE'
+       AND status NOT IN ('CANCELLED', 'VOIDED')
+     LIMIT 1`,
+    [data.customerId],
+  );
+  if (!active.rows[0]) {
+    throw new BusinessError(
+      'No active cutover opening balance for this customer. Use Post go-live cutover first.',
+      'OB_INCREASE_NO_ACTIVE_CUTOVER',
+    );
+  }
+
+  const previousCutoverTotal = new Decimal(active.rows[0].total_amount || 0).toNumber();
+  const newTotal = new Decimal(previousCutoverTotal).plus(increaseBy).toDecimalPlaces(2).toNumber();
+  const issueFallback = String(active.rows[0].issue_date).slice(0, 10);
+
+  const result = await replaceCustomerOpeningBalance(pool, {
+    customerId: data.customerId,
+    amount: newTotal,
+    asOfDate: data.asOfDate || issueFallback,
+    dueDate: data.dueDate,
+    notes:
+      data.notes ||
+      `Cutover increase +${increaseBy} (prior cutover total ${previousCutoverTotal})`,
+    postReason: data.reason,
+    userId: data.userId,
+    userName: data.userName,
+    userRole: data.userRole,
+    replaceReason: `[INCREASE +${increaseBy}] ${data.reason}`,
+    confirmImpact: data.confirmImpact,
+    auditAction: 'INCREASE',
+    increaseBy,
+  });
+
+  return {
+    ...result,
+    previousCutoverTotal,
+    increaseBy,
+  };
+}
+
+/** Snapshot for UI: cutover document vs calculated outstanding (SAP/Odoo style). */
+export interface CustomerCutoverSummary {
+  customerId: string;
+  customerName: string;
+  /** Read-only net AR (customers.balance) — never type this into cutover. */
+  currentOutstanding: number;
+  hasActiveCutover: boolean;
+  cutover: null | {
+    invoiceId: string;
+    invoiceNumber: string;
+    documentTotal: number;
+    amountPaid: number;
+    amountDue: number;
+    issueDate: string;
+    status: string;
+  };
+  otherOpenInvoicesDue: number;
+  otherOpenInvoiceCount: number;
+  unallocatedCash: number;
+  guidance: string[];
+}
+
+export async function getCustomerCutoverSummary(
+  pool: Pool,
+  customerId: string,
+): Promise<CustomerCutoverSummary> {
+  const cust = await pool.query<{ name: string; balance: string | number }>(
+    `SELECT name, balance FROM customers WHERE id = $1`,
+    [customerId],
+  );
+  if (!cust.rows[0]) {
+    throw new Error(`Customer ${customerId} not found`);
+  }
+
+  const ob = await pool.query<{
+    id: string;
+    invoice_number: string;
+    total_amount: string | number;
+    amount_paid: string | number;
+    amount_due: string | number;
+    issue_date: Date | string;
+    status: string;
+  }>(
+    `SELECT id, invoice_number, total_amount, amount_paid, amount_due, issue_date, status
+     FROM invoices
+     WHERE customer_id = $1
+       AND document_type = 'OPENING_BALANCE'
+       AND status NOT IN ('CANCELLED', 'VOIDED')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [customerId],
+  );
+
+  const other = await pool.query<{ due: string | number; cnt: string | number }>(
+    `SELECT COALESCE(SUM(amount_due), 0) AS due, COUNT(*)::int AS cnt
+     FROM invoices
+     WHERE customer_id = $1
+       AND COALESCE(document_type, 'INVOICE') <> 'OPENING_BALANCE'
+       AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT', 'PAID')
+       AND amount_due > 0.009`,
+    [customerId],
+  );
+
+  const unalloc = await pool.query<{ total: string | number }>(
+    `SELECT COALESCE(SUM(unallocated_amount), 0) AS total
+     FROM ar_customer_payments
+     WHERE customer_id = $1
+       AND status NOT IN ('REVERSED', 'CANCELLED', 'DRAFT')
+       AND unallocated_amount > 0.009`,
+    [customerId],
+  );
+
+  const currentOutstanding = Moneyish(new Decimal(cust.rows[0].balance || 0));
+  const otherOpenInvoicesDue = Moneyish(new Decimal(other.rows[0]?.due || 0));
+  const otherOpenInvoiceCount = Number(other.rows[0]?.cnt || 0);
+  const unallocatedCash = Moneyish(new Decimal(unalloc.rows[0]?.total || 0));
+
+  const cutover = ob.rows[0]
+    ? {
+        invoiceId: ob.rows[0].id,
+        invoiceNumber: ob.rows[0].invoice_number,
+        documentTotal: Moneyish(new Decimal(ob.rows[0].total_amount || 0)),
+        amountPaid: Moneyish(new Decimal(ob.rows[0].amount_paid || 0)),
+        amountDue: Moneyish(new Decimal(ob.rows[0].amount_due || 0)),
+        issueDate: String(ob.rows[0].issue_date).slice(0, 10),
+        status: ob.rows[0].status,
+      }
+    : null;
+
+  const guidance: string[] = [];
+  if (!cutover) {
+    guidance.push(
+      'No go-live cutover yet. Post the total this customer still owed from the old system as of cutover date — not cash received, and not today’s invoice list alone.',
+    );
+  } else {
+    guidance.push(
+      `Cutover document ${cutover.invoiceNumber} total is ${formatMoney(new Decimal(cutover.documentTotal))} (what Replace rewrites). Today’s outstanding ${formatMoney(new Decimal(currentOutstanding))} is calculated and is usually different.`,
+    );
+    guidance.push(
+      'To bring more legacy debt (+50,000), use Increase cutover by 50,000 — do not type today’s outstanding into Replace.',
+    );
+  }
+  if (otherOpenInvoiceCount > 0) {
+    guidance.push(
+      `${otherOpenInvoiceCount} open sales invoice(s) contribute ${formatMoney(new Decimal(otherOpenInvoicesDue))} — cutover adjustments do not replace those invoices.`,
+    );
+  }
+  if (unallocatedCash > 0.009) {
+    guidance.push(
+      `${formatMoney(new Decimal(unallocatedCash))} unallocated receipt cash sits on-account and reduces net outstanding without paying specific invoices.`,
+    );
+  }
+
+  return {
+    customerId,
+    customerName: cust.rows[0].name,
+    currentOutstanding,
+    hasActiveCutover: Boolean(cutover),
+    cutover,
+    otherOpenInvoicesDue,
+    otherOpenInvoiceCount,
+    unallocatedCash,
+    guidance,
+  };
+}
+
 export interface CustomerObReplaceImpact {
   currentObAmount: number;
   newObAmount: number;
@@ -1115,6 +1323,15 @@ export interface CustomerObReplaceImpact {
   existingUnallocatedReceipts: number;
   /** Receipts freed from OB + already-unallocated − new OB (floored at 0). */
   projectedSurplusOnAccount: number;
+  /** Open INV/CN due excluding the active cutover OB. */
+  otherOpenInvoicesDue: number;
+  /** customers.balance before change (read-only context). */
+  currentOutstanding: number;
+  /**
+   * Open-item estimate after replace + reapply cash to new OB:
+   * max(0, otherOpenDue + newObAmount − freedCash).
+   */
+  projectedOutstanding: number;
   willUnallocateReceipts: boolean;
   mayLeaveCustomerInCredit: boolean;
   requiresConfirmation: boolean;
@@ -1160,9 +1377,32 @@ export async function assessCustomerObReplaceImpact(
   );
   const existingUnallocatedReceipts = new Decimal(unalloc.rows[0]?.total || 0);
 
+  const other = await pool.query<{ due: string | number }>(
+    `SELECT COALESCE(SUM(amount_due), 0) AS due
+     FROM invoices
+     WHERE customer_id = $1
+       AND id <> $2
+       AND COALESCE(document_type, 'INVOICE') <> 'OPENING_BALANCE'
+       AND status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
+       AND amount_due > 0.009`,
+    [customerId, currentObInvoiceId],
+  );
+  const otherOpenInvoicesDue = new Decimal(other.rows[0]?.due || 0);
+
+  const bal = await pool.query<{ balance: string | number }>(
+    `SELECT balance FROM customers WHERE id = $1`,
+    [customerId],
+  );
+  const currentOutstanding = new Decimal(bal.rows[0]?.balance || 0);
+
   const freedPlusExisting = allocatedOnOb.plus(existingUnallocatedReceipts);
   const surplusRaw = freedPlusExisting.minus(newObAmount);
   const projectedSurplusOnAccount = surplusRaw.lt(0) ? new Decimal(0) : surplusRaw;
+  // After reapply to new OB only: balance ≈ max(0, otherDue + newOb − cash available)
+  const projectedOutstandingRaw = otherOpenInvoicesDue.plus(newObAmount).minus(freedPlusExisting);
+  const projectedOutstanding = projectedOutstandingRaw.lt(0)
+    ? new Decimal(0)
+    : projectedOutstandingRaw;
 
   const willUnallocateReceipts = allocatedOnOb.greaterThan(0.009);
   const mayLeaveCustomerInCredit = projectedSurplusOnAccount.greaterThan(0.009);
@@ -1171,19 +1411,27 @@ export async function assessCustomerObReplaceImpact(
   const warnings: string[] = [];
   if (willUnallocateReceipts) {
     warnings.push(
-      `${formatMoney(allocatedOnOb)} of receipts currently applied to this opening balance will be unallocated.`,
+      `${formatMoney(allocatedOnOb)} of receipts currently applied to this cutover document will be temporarily unallocated, then reapplied to the new cutover total where possible.`,
     );
   }
   if (amountReduced) {
     warnings.push(
-      `New amount (${formatMoney(newObAmount)}) is lower than the current opening balance (${formatMoney(currentObAmount)}).`,
+      `New cutover total (${formatMoney(newObAmount)}) is lower than the cutover document total (${formatMoney(currentObAmount)}) — not “today’s outstanding” (${formatMoney(currentOutstanding)}).`,
     );
   }
   if (mayLeaveCustomerInCredit) {
     warnings.push(
-      `About ${formatMoney(projectedSurplusOnAccount)} may remain as unallocated customer credit (AR can show a credit / negative opening on the statement).`,
+      `About ${formatMoney(projectedSurplusOnAccount)} may remain as unallocated on-account cash after the new cutover is posted.`,
     );
   }
+  if (otherOpenInvoicesDue.greaterThan(0.009)) {
+    warnings.push(
+      `Open sales invoices of ${formatMoney(otherOpenInvoicesDue)} stay open; cutover does not replace them.`,
+    );
+  }
+  warnings.push(
+    `Estimated outstanding after change: ${formatMoney(projectedOutstanding)} (was ${formatMoney(currentOutstanding)}).`,
+  );
 
   return {
     currentObAmount: Moneyish(currentObAmount),
@@ -1191,6 +1439,9 @@ export async function assessCustomerObReplaceImpact(
     allocatedOnOb: Moneyish(allocatedOnOb),
     existingUnallocatedReceipts: Moneyish(existingUnallocatedReceipts),
     projectedSurplusOnAccount: Moneyish(projectedSurplusOnAccount),
+    otherOpenInvoicesDue: Moneyish(otherOpenInvoicesDue),
+    currentOutstanding: Moneyish(currentOutstanding),
+    projectedOutstanding: Moneyish(projectedOutstanding),
     willUnallocateReceipts,
     mayLeaveCustomerInCredit,
     requiresConfirmation: willUnallocateReceipts || mayLeaveCustomerInCredit || amountReduced,

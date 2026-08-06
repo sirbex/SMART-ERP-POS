@@ -33,6 +33,11 @@ router.get(
   requirePermission('accounting.opening_balance'),
   customerController.getCustomerOpeningBalanceHistory,
 );
+router.get(
+  '/opening-balance/summary',
+  requirePermission('accounting.opening_balance'),
+  customerController.getCustomerCutoverSummary,
+);
 router.post(
   '/opening-balance',
   requirePermission('accounting.opening_balance'),
@@ -42,6 +47,11 @@ router.post(
   '/opening-balance/replace',
   requirePermission('accounting.opening_balance'),
   customerController.replaceCustomerOpeningBalance
+);
+router.post(
+  '/opening-balance/increase',
+  requirePermission('accounting.opening_balance'),
+  customerController.increaseCustomerOpeningBalance
 );
 router.post(
   '/opening-balance/cancel',
