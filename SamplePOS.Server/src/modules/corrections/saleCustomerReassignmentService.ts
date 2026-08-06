@@ -367,6 +367,11 @@ export const saleCustomerReassignmentService = {
         preview.openArAmount > 0.01 && fromCustomerId ? preview.openArAmount : 0;
 
       if (reclassAmount > 0.01) {
+        if (!fromCustomerId) {
+          throw new ValidationError(
+            'Cannot reclass open AR without a source customer entity.',
+          );
+        }
         const journal = await AccountingCore.createJournalEntry(
           {
             entryDate,
