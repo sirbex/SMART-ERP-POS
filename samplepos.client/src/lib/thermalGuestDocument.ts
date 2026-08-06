@@ -36,6 +36,8 @@ export type ThermalGuestDocument = DocumentCompanyBranding & {
   discountAmount?: number;
   taxAmount?: number;
   taxName?: string;
+  /** When set, these rows replace the single tax line */
+  taxRows?: Array<{ label: string; amount: number }>;
   totalAmount: number;
   /** Extra settlement rows (payment method, change, etc.) */
   paymentRows?: ThermalGuestMetaRow[];
@@ -48,6 +50,10 @@ export type ThermalGuestDocument = DocumentCompanyBranding & {
   customNote?: string | null;
   footerLines: string[];
   isReprint?: boolean;
+  /** Verification QR (PNG data URL) */
+  qrDataUrl?: string | null;
+  /** Raw payload for ESC/POS QR modules */
+  verificationPayload?: string | null;
 };
 
 function escapeHtml(s: string): string {
@@ -136,6 +142,25 @@ export function buildThermalGuestDocumentHtml(doc: ThermalGuestDocument): string
     .map((l) => `<div class="footer">${escapeHtml(l)}</div>`)
     .join('');
 
+  const taxBlock =
+    doc.taxRows && doc.taxRows.length > 0
+      ? doc.taxRows
+          .map(
+            (r) =>
+              `<div class="tot-row"><span>${escapeHtml(r.label)}</span><span>${fmt(r.amount)}</span></div>`,
+          )
+          .join('')
+      : doc.taxAmount && doc.taxAmount > 0
+        ? `<div class="tot-row"><span>${escapeHtml(doc.taxName || 'Tax')}</span><span>${fmt(doc.taxAmount)}</span></div>`
+        : '';
+
+  const qrBlock =
+    doc.qrDataUrl && doc.qrDataUrl.startsWith('data:image')
+      ? `<div class="qr"><img src="${doc.qrDataUrl}" alt="Receipt verification"/><div class="qr-caption">Scan to verify</div></div>`
+      : doc.verificationPayload
+        ? `<div class="qr-text"><div class="qr-caption">Verify</div><div class="footer">${escapeHtml(doc.verificationPayload)}</div></div>`
+        : '';
+
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>${escapeHtml(doc.title)} ${escapeHtml(doc.documentNumber)}</title>
 <style>
   ${buildThermalPrintCss(80)}
@@ -160,11 +185,15 @@ export function buildThermalGuestDocumentHtml(doc: ThermalGuestDocument): string
   .amt { white-space: nowrap; font-weight: 900; }
   .tot-row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; font-size: 15px; font-weight: 700; }
   .tot-row.grand { font-weight: 900; font-size: 18px; margin-top: 6px; }
-  .footer { text-align: center; font-size: 13px; font-weight: 700; margin-top: 4px; }
+  .footer { text-align: center; font-size: 13px; font-weight: 700; margin-top: 4px; word-break: break-all; }
   .accounts { text-align: left; font-size: 13px; font-weight: 700; margin-top: 8px; border-top: 2px dashed #000; padding-top: 8px; }
   .accounts-title { font-weight: 900; margin-bottom: 4px; }
   .account { margin-bottom: 4px; }
   .custom-note { text-align: left; font-size: 13px; font-weight: 700; white-space: pre-line; margin-top: 8px; border-top: 2px dashed #000; padding-top: 8px; }
+  .qr { text-align: center; margin: 10px 0 4px; }
+  .qr img { width: 120px; height: 120px; image-rendering: pixelated; }
+  .qr-caption { font-size: 12px; font-weight: 700; margin-top: 4px; }
+  .qr-text { text-align: center; margin-top: 8px; word-break: break-all; }
 </style></head><body>
   ${doc.isReprint ? `<div class="reprint">*** REPRINTED COPY ***</div>` : ''}
   ${companyBlock}
@@ -176,11 +205,12 @@ export function buildThermalGuestDocumentHtml(doc: ThermalGuestDocument): string
   <hr/>
   ${doc.subtotal !== undefined ? `<div class="tot-row"><span>Subtotal</span><span>${fmt(doc.subtotal)}</span></div>` : ''}
   ${doc.discountAmount && doc.discountAmount > 0 ? `<div class="tot-row"><span>Discount</span><span>-${fmt(doc.discountAmount)}</span></div>` : ''}
-  ${doc.taxAmount && doc.taxAmount > 0 ? `<div class="tot-row"><span>${escapeHtml(doc.taxName || 'Tax')}</span><span>${fmt(doc.taxAmount)}</span></div>` : ''}
+  ${taxBlock}
   <div class="tot-row grand"><span>TOTAL</span><span>${fmt(doc.totalAmount)}</span></div>
   ${paymentBlock}
   ${accountsBlock}
   ${customNote}
+  ${qrBlock}
   <hr/>
   ${footer}
 </body></html>`;
@@ -318,6 +348,10 @@ export function receiptToThermalGuestDocument(data: {
   subtotal?: number;
   discountAmount?: number;
   taxAmount?: number;
+  taxName?: string;
+  taxRows?: Array<{ label: string; amount: number }>;
+  verificationPayload?: string;
+  qrDataUrl?: string | null;
   cashierName?: string;
   items?: Array<{
     name: string;
@@ -414,6 +448,13 @@ export function receiptToThermalGuestDocument(data: {
     .map((l) => l.trim())
     .filter(Boolean);
 
+  const taxRows =
+    data.taxRows && data.taxRows.length > 0
+      ? data.taxRows
+      : data.taxAmount && data.taxAmount > 0
+        ? [{ label: data.taxName || 'Tax', amount: data.taxAmount }]
+        : [];
+
   return {
     kind: 'RECEIPT',
     title: 'RECEIPT',
@@ -428,13 +469,16 @@ export function receiptToThermalGuestDocument(data: {
     subtotal: data.subtotal,
     discountAmount: data.discountAmount,
     taxAmount: data.taxAmount,
-    taxName: 'Tax',
+    taxName: data.taxName || 'Tax',
+    taxRows,
     totalAmount: data.totalAmount,
     paymentRows,
     paymentAccounts: data.paymentAccounts,
     customNote: data.customReceiptNote?.trim() || null,
     footerLines: footerFromSettings.length > 0 ? footerFromSettings : ['Thank you for your business!'],
     isReprint: data.isReprint,
+    qrDataUrl: data.qrDataUrl || null,
+    verificationPayload: data.verificationPayload || null,
   };
 }
 
@@ -481,9 +525,11 @@ export function guestDocumentToThermalTicket(doc: ThermalGuestDocument): Thermal
     discountAmount: doc.discountAmount ?? null,
     taxAmount: doc.taxAmount ?? null,
     taxName: doc.taxName || null,
+    taxRows: doc.taxRows?.map((r) => ({ label: r.label, amount: r.amount })) || null,
     totalAmount: doc.totalAmount,
     paymentRows: doc.paymentRows?.map((r) => ({ label: r.label, value: r.value })) || null,
     customNote: noteParts || null,
     footerLines: doc.footerLines,
+    qrPayload: doc.verificationPayload || null,
   };
 }

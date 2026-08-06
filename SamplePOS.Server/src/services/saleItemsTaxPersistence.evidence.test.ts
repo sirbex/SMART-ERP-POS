@@ -21,7 +21,8 @@ describe('EVIDENCE — Phase 6 sale_items tax persistence', () => {
     expect(mig).toMatch(/tax_determination/);
     expect(mig).toMatch(/OVERRIDE/);
     expect(mig).toMatch(/VALUES \(584\)/);
-    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*584/);
+    // Later phases bump version; migration 584 remains the tax line persistence SSOT.
+    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*58[4-9]/);
   });
 
   it('createSale stamps lineResults onto itemsWithCosts before persist', () => {

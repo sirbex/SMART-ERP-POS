@@ -7,14 +7,17 @@
  *
  * Hierarchy (per line) — keep in sync with shared/utils/documentTaxPreview.ts:
  *   0. Document OVERRIDE (FORCE_EXEMPT / FORCE_RATE)
- *   1. taxInclusive (always) / taxEnabled=false when applyTenantDefault (restaurant)
+ *   1. taxEnabled=false when applyTenantDefault (restaurant)
  *   2. Customer exemption / ZERO_RATED / vatOutputRequiresRegisteredCustomer
  *   3. preferLineTaxOverrides when it resolves
- *   4. product_tax_mappings
- *   5. Product bridge (DB SSOT for UUID products) / line fields
- *   6. Customer defaultVatRate (never after explicit non-taxable)
- *   7. Tenant defaultTaxRate (optional)
- *   8. No tax
+ *   4. Product is_taxable === false → NONE always (retail + restaurant; no tenant default)
+ *   5. product_tax_mappings
+ *   6. Product bridge (DB SSOT for UUID products) / line fields
+ *   7. Customer defaultVatRate (never after explicit non-taxable)
+ *   8. Tenant defaultTaxRate (restaurant unresolved only — not is_taxable=false)
+ *   9. No tax
+ *
+ * taxInclusive: prices include tax — TaxEngine extracts VAT (does not add exclusive tax).
  */
 
 import type pg from 'pg';
@@ -40,6 +43,7 @@ import {
   bridgeTaxDefinition,
   resolveCustomerTaxGate,
   resolvePreviewLineTaxes,
+  taxesForPriceMode,
   type TaxDetermination,
 } from '@shared/utils/documentTaxPreview.js';
 import logger from '../utils/logger.js';
@@ -184,8 +188,8 @@ export const DocumentTaxService = {
     const preferLineTaxOverrides = input.preferLineTaxOverrides === true;
 
     const settings = await systemSettingsRepository.getSettings(conn);
-    // Restaurant path matches computeTaxAmount: taxEnabled false / taxInclusive → no added tax.
-    // Retail POS path does NOT gate on taxEnabled (defaults false in system_settings; POS uses product bridge).
+    // Restaurant tax master: taxEnabled false → no tax (DISABLED). Retail ignores taxEnabled and uses product/mapping.
+    // taxInclusive extracts VAT from shelf price (does not add exclusive tax on top).
     const taxEnabled = Boolean(settings?.taxEnabled);
     const taxInclusive = Boolean(settings?.taxInclusive);
     const defaultTaxRate = Number(settings?.defaultTaxRate ?? 0);
@@ -206,10 +210,11 @@ export const DocumentTaxService = {
           };
         }
         const rate = Number(ov.rate ?? 0);
-        const taxes =
+        const rawTaxes =
           rate > 0
             ? ([bridgeTaxDefinition(rate, catalog)] as TaxDefinition[])
             : ([] as TaxDefinition[]);
+        const taxes = taxesForPriceMode(rawTaxes, taxInclusive) as TaxDefinition[];
         const computation = TaxEngine.compute(
           line.lineNetAmount,
           taxes,
@@ -233,9 +238,8 @@ export const DocumentTaxService = {
       };
     }
 
-    // Inclusive prices: never add exclusive DocumentTax (retail + restaurant).
-    // taxEnabled=false only gates restaurant (applyTenantDefault) — retail uses product bridge.
-    if (taxInclusive || (applyTenantDefault && !taxEnabled)) {
+    // Restaurant tax master off only — tax_inclusive no longer zeroes product VAT.
+    if (applyTenantDefault && !taxEnabled) {
       const lineResults: DocumentTaxLineResult[] = input.lines.map((line) => ({
         lineIndex: line.lineIndex,
         taxes: [],
@@ -337,6 +341,7 @@ export const DocumentTaxService = {
         preferLineTaxOverrides,
         customerProfile,
         documentDate: asOf,
+        taxInclusive,
       });
       const computation = TaxEngine.compute(
         line.lineNetAmount,
@@ -416,10 +421,14 @@ export const DocumentTaxService = {
       const effectiveRate = effectiveTaxRate(lr, input.lines[idx]?.taxRate);
       const isTaxable = taxAmount > 0 || (input.lines[idx]?.isTaxable === true && effectiveRate > 0);
       subtotal = Money.add(subtotal, p.lineNetAmount);
+      // Inclusive: line total stays net (tax extracted, not added).
+      const lineTotal = raw.taxInclusive
+        ? p.lineNetAmount
+        : Money.toNumber(Money.round(new Decimal(p.lineNetAmount).plus(taxAmount), 2));
       return {
         lineNetAmount: p.lineNetAmount,
         taxAmount,
-        lineTotal: Money.toNumber(Money.round(new Decimal(p.lineNetAmount).plus(taxAmount), 2)),
+        lineTotal,
         isTaxable,
         taxRate: effectiveRate,
         determination: lr?.determination ?? 'NONE',
@@ -427,12 +436,13 @@ export const DocumentTaxService = {
     });
 
     const taxAmount = raw.documentTotals.totalTax;
+    const subtotalNum = Money.toNumber(Money.round(subtotal, 2));
     return {
-      subtotal: Money.toNumber(Money.round(subtotal, 2)),
+      subtotal: subtotalNum,
       taxAmount,
-      totalAmount: Money.toNumber(
-        Money.round(new Decimal(Money.toNumber(subtotal)).plus(taxAmount), 2),
-      ),
+      totalAmount: raw.taxInclusive
+        ? subtotalNum
+        : Money.toNumber(Money.round(new Decimal(subtotalNum).plus(taxAmount), 2)),
       lines,
       raw,
     };
@@ -451,6 +461,7 @@ function resolveLineTaxes(
     preferLineTaxOverrides: boolean;
     customerProfile: CustomerTaxProfileRow | null;
     documentDate: string;
+    taxInclusive?: boolean;
   },
 ): { taxes: TaxDefinition[]; determination: TaxDetermination } {
   const pid = line.productId;
@@ -464,6 +475,11 @@ function resolveLineTaxes(
       isTaxable = bridge.isTaxable;
       taxRate = bridge.taxRate;
     }
+  }
+
+  // Product-master SSOT: is_taxable=false never maps tax (retail, restaurant, any path).
+  if (isTaxable === false) {
+    return { taxes: [], determination: 'NONE' };
   }
 
   const resolved = resolvePreviewLineTaxes(
@@ -481,7 +497,8 @@ function resolveLineTaxes(
       preferLineTaxOverrides: ctx.preferLineTaxOverrides,
       // Restaurant DISABLED gate already applied; allow tenant-default branch here.
       taxEnabled: true,
-      taxInclusive: false,
+      // Inclusive extract is applied via taxesForPriceMode in resolvePreviewLineTaxes.
+      taxInclusive: ctx.taxInclusive === true,
       defaultTaxRate: ctx.defaultTaxRate,
       documentDate: ctx.documentDate,
       customerProfile: ctx.customerProfile

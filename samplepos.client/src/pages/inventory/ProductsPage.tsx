@@ -250,6 +250,12 @@ export default function ProductsPage() {
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [formData, setFormData] = useState<ProductFormData>(initialFormData);
+  const [productTaxMappings, setProductTaxMappings] = useState<
+    Array<{ code?: string | null; name?: string | null; rate?: number | null }>
+  >([]);
+  const [productTaxMappingsLoading, setProductTaxMappingsLoading] = useState(false);
+  /** Settings.tax_inclusive — price-mode SSOT for product tax status copy. */
+  const [taxInclusivePricing, setTaxInclusivePricing] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [productToDelete, setProductToDelete] = useState<string | null>(null);
@@ -274,6 +280,43 @@ export default function ProductsPage() {
     isDefault: false,
   });
   const [uomAutoApplied, setUomAutoApplied] = useState(false);
+
+  // Load enterprise tax mappings when editing a product (explains "unticked but taxed" cases)
+  useEffect(() => {
+    if (!showModal || modalMode !== 'edit' || !formData.id || !isOnline) {
+      setProductTaxMappings([]);
+      setProductTaxMappingsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setProductTaxMappingsLoading(true);
+    void api.enterprise
+      .productTaxMappings(formData.id)
+      .then((res) => {
+        if (cancelled) return;
+        const rows = (res.data?.data || []) as Array<{
+          code?: string;
+          name?: string;
+          rate?: number;
+        }>;
+        setProductTaxMappings(
+          rows.map((r) => ({
+            code: r.code,
+            name: r.name,
+            rate: r.rate != null ? Number(r.rate) : null,
+          })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setProductTaxMappings([]);
+      })
+      .finally(() => {
+        if (!cancelled) setProductTaxMappingsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showModal, modalMode, formData.id, isOnline]);
 
   // Map master UoMs by id for quick lookups and inline validation
   const masterUomById = useMemo(() => {
@@ -448,6 +491,20 @@ export default function ProductsPage() {
         });
     }
   }, [showModal, masterUoms.length]);
+
+  // Price-mode SSOT for product tax status panel
+  useEffect(() => {
+    if (!showModal) return;
+    api
+      .get<{ success?: boolean; data?: { taxInclusive?: boolean } }>('/system-settings')
+      .then((response) => {
+        const row = response.data?.data;
+        if (row && typeof row.taxInclusive === 'boolean') {
+          setTaxInclusivePricing(row.taxInclusive);
+        }
+      })
+      .catch(() => undefined);
+  }, [showModal]);
 
   // Load product UoMs when editing a product
   useEffect(() => {
@@ -738,7 +795,8 @@ export default function ProductsPage() {
         costPrice: parseFloat(formData.costPrice) || 0,
         sellingPrice: parseFloat(formData.sellingPrice) || 0,
         isTaxable: !!formData.isTaxable,
-        taxRate: parseFloat(formData.taxRate) || 0,
+        // When VAT is unticked, clear bridge rate so saved master matches SSOT
+        taxRate: formData.isTaxable ? parseFloat(formData.taxRate) || 0 : 0,
         costingMethod: formData.costingMethod as 'FIFO' | 'AVCO' | 'STANDARD',
         averageCost: parseFloat(formData.averageCost) || 0,
         lastCost: parseFloat(formData.lastCost) || 0,
@@ -1584,6 +1642,9 @@ export default function ProductsPage() {
                   }))}
                 restrictPurchaseUomToConfigured={modalMode === 'edit' || productUoms.some((u) => u.uomId)}
                 lastPurchasePrice={formData.lastCost !== '0' ? formData.lastCost : undefined}
+                taxMappings={modalMode === 'edit' ? productTaxMappings : []}
+                taxMappingsLoading={modalMode === 'edit' && productTaxMappingsLoading}
+                taxInclusivePricing={taxInclusivePricing}
               />
 
               {modalMode === 'edit' && formData.id && (

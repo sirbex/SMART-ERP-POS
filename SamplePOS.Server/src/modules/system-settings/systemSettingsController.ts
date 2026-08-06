@@ -60,6 +60,27 @@ export const systemSettingsController = {
     }),
 
     /**
+     * POST /api/system-settings/printing/receipt-qr
+     * Authenticated cashiers/FOH — PNG data URL for thermal HTML QR.
+     */
+    generateReceiptQr: asyncHandler(async (req, res) => {
+        const text = String(req.body?.text || '').trim();
+        if (!text || text.length > 1024) {
+            res.status(400).json({ success: false, error: { message: 'Invalid QR payload' } });
+            return;
+        }
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const QRCode = await import('qrcode');
+        const dataUrl = await QRCode.toDataURL(text, {
+            errorCorrectionLevel: 'M',
+            margin: 1,
+            width: 160,
+            color: { dark: '#000000', light: '#ffffff' },
+        });
+        res.json({ success: true, data: { dataUrl } });
+    }),
+
+    /**
      * GET /api/system-settings/printing/invoice
      * Get invoice printing configuration
      */

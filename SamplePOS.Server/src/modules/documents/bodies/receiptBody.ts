@@ -21,6 +21,7 @@ export interface ReceiptBodyData {
         status: string;
         subtotal: number;
         taxAmount: number;
+        taxName?: string | null;
         discountAmount: number;
         totalAmount: number;
         amountPaid: number;
@@ -31,12 +32,19 @@ export interface ReceiptBodyData {
         quantity: number;
         unitPrice: number;
         lineTotal: number;
+        taxAmount?: number;
+        taxRate?: number;
+        isTaxable?: boolean;
     }>;
     paymentLines: Array<{
         paymentMethod: string;
         amount: number;
         reference?: string | null;
     }>;
+    /** Prefer system receipt flag; falls back to invoice theme flag when omitted */
+    showTaxBreakdown?: boolean;
+    taxRows?: Array<{ label: string; amount: number }>;
+    verificationPayload?: string | null;
 }
 
 function customerMetaRows(sale: ReceiptBodyData['sale']): Array<[string, string]> {
@@ -85,7 +93,10 @@ export function renderReceiptBody(ctx: LayoutContext, data: ReceiptBodyData): vo
         });
 
         Layout.hr(ctx);
-        Layout.totalsBlock(ctx, buildTotalsRows(data, theme.flags.showTaxBreakdown));
+        Layout.totalsBlock(
+            ctx,
+            buildTotalsRows(data, data.showTaxBreakdown ?? theme.flags.showTaxBreakdown),
+        );
     } else {
         // A4/A5/Letter — full-width layout
         Layout.kvGrid(ctx, [
@@ -107,7 +118,10 @@ export function renderReceiptBody(ctx: LayoutContext, data: ReceiptBodyData): vo
             ],
         );
 
-        Layout.totalsBlock(ctx, buildTotalsRows(data, theme.flags.showTaxBreakdown));
+        Layout.totalsBlock(
+            ctx,
+            buildTotalsRows(data, data.showTaxBreakdown ?? theme.flags.showTaxBreakdown),
+        );
 
         if (data.paymentLines.length > 1) {
             Layout.sectionTitle(ctx, 'Payment Breakdown');
@@ -140,14 +154,19 @@ function buildTotalsRows(
     showTax: boolean,
 ): Array<{ label: string; value: string; emphasize?: boolean }> {
     const fmt = (n: number) => Money.formatCurrency(n);
+    const taxName = data.sale.taxName || 'Tax';
+    const taxRows =
+        showTax && data.sale.taxAmount > 0
+            ? data.taxRows && data.taxRows.length > 0
+                ? data.taxRows.map((r) => ({ label: r.label, value: fmt(r.amount) }))
+                : [{ label: taxName, value: fmt(data.sale.taxAmount) }]
+            : [];
     return [
         { label: 'Subtotal', value: fmt(data.sale.subtotal) },
         ...(data.sale.discountAmount > 0
             ? [{ label: 'Discount', value: `-${fmt(data.sale.discountAmount)}` }]
             : []),
-        ...(showTax && data.sale.taxAmount > 0
-            ? [{ label: 'Tax', value: fmt(data.sale.taxAmount) }]
-            : []),
+        ...taxRows,
         { label: 'Total', value: fmt(data.sale.totalAmount), emphasize: true },
         { label: 'Paid', value: fmt(data.sale.amountPaid) },
         ...(data.sale.changeAmount > 0

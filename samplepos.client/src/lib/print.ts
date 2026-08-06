@@ -41,6 +41,19 @@ export interface ReceiptData {
   subtotal?: number;
   discountAmount?: number;
   taxAmount?: number;
+  taxName?: string;
+  /** Settings: detailed tax vs single line (from receipt print config) */
+  showTaxBreakdown?: boolean;
+  /** Settings: show verification QR */
+  showQrCode?: boolean;
+  /** Aggregated tax by rate (line stamps) */
+  taxLines?: Array<{ label: string; amount: number; rate?: number | null }>;
+  /** Precomputed tax rows for thermal / HTML (preferred at render) */
+  taxRows?: Array<{ label: string; amount: number }>;
+  /** Offline-scannable verification string (QR content) */
+  verificationPayload?: string;
+  /** data:image PNG from server when showQrCode */
+  qrDataUrl?: string | null;
   cashierName?: string;
   items?: Array<{
     name: string;
@@ -49,6 +62,10 @@ export interface ReceiptData {
     subtotal: number;
     uom?: string;
     discountAmount?: number;
+    taxAmount?: number;
+    taxRate?: number;
+    taxName?: string;
+    isTaxable?: boolean;
   }>;
   // Single payment fields (backward compatible)
   paymentMethod?: string;
@@ -105,18 +122,30 @@ export async function printReceipt(
     throw new Error('Invalid receipt data: saleNumber is required');
   }
 
+  // Ensure tax rows / verification payload when config was applied
+  let data: ReceiptData = receiptData;
+  if (data.showQrCode && data.verificationPayload && !data.qrDataUrl) {
+    try {
+      const { fetchReceiptQrDataUrl } = await import('./receiptPrintConfig');
+      const qrDataUrl = await fetchReceiptQrDataUrl(data.verificationPayload);
+      data = { ...data, qrDataUrl };
+    } catch {
+      /* preview still prints without image; ESC/POS uses payload text */
+    }
+  }
+
   const printFormat = options.format || 'detailed';
   const builtHtml =
     printFormat === 'compact'
-      ? generateCompactReceiptHTML(receiptData)
-      : generateDetailedReceiptHTML(receiptData);
+      ? generateCompactReceiptHTML(data)
+      : generateDetailedReceiptHTML(data);
   void builtHtml;
-  const doc = receiptToThermalGuestDocument(receiptData);
+  const doc = receiptToThermalGuestDocument(data);
 
   // Strategy 0: SUNMI Android WebView bridge (receipt payload)
   if (typeof (window as unknown as { SunmiPrinter?: unknown }).SunmiPrinter !== 'undefined') {
     (window as unknown as { SunmiPrinter: { printReceipt: (json: string) => void } })
-      .SunmiPrinter.printReceipt(JSON.stringify(receiptData));
+      .SunmiPrinter.printReceipt(JSON.stringify(data));
     return { method: 'escpos', printerName: 'SunmiPrinter' };
   }
 

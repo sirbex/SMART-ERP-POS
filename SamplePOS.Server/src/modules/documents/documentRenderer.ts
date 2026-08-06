@@ -30,6 +30,12 @@ import {
 } from '../credit-debit-notes/creditDebitNoteService.js';
 import { renderInvoiceBody, type InvoiceBodyData } from './bodies/invoiceBody.js';
 import { renderReceiptBody, type ReceiptBodyData } from './bodies/receiptBody.js';
+import { systemSettingsService } from '../system-settings/systemSettingsService.js';
+import {
+    aggregateReceiptTaxLines,
+    buildReceiptTaxRows,
+    buildReceiptVerificationPayload,
+} from '@shared/utils/receiptPrintDisplay.js';
 import { renderQuotationBody, type QuotationBodyData } from './bodies/quotationBody.js';
 import { hasTaxableQuotationLines, hasQuotationLineDiscounts } from '@shared/utils/quotationCalculations.js';
 import {
@@ -373,6 +379,45 @@ async function renderReceipt(
         paperSize: req.paperSize ?? 'RECEIPT_80MM',
     });
 
+    const receiptPrint = await systemSettingsService.getReceiptPrintConfig(pool);
+    const taxName =
+        (await systemSettingsService.getTaxConfig(pool).catch(() => null))?.taxName || 'Tax';
+    const lineItems = items.map(it => ({
+        productName: (it.product_name as string) ?? '—',
+        quantity: num(it.quantity),
+        unitPrice: num(it.unit_price),
+        lineTotal: num(it.total_price ?? it.line_total),
+        taxAmount: num(it.tax_amount),
+        taxRate: num(it.tax_rate),
+        isTaxable: it.is_taxable === true || num(it.tax_amount) > 0,
+    }));
+    const taxLines = aggregateReceiptTaxLines(
+        lineItems.map((it) => ({
+            taxAmount: it.taxAmount,
+            taxRate: it.taxRate,
+            taxName,
+            isTaxable: it.isTaxable,
+        })),
+        taxName,
+    );
+    const taxAmount = num(s.tax_amount);
+    const taxRows = buildReceiptTaxRows({
+        showTaxBreakdown: receiptPrint.showTaxBreakdown !== false,
+        taxAmount,
+        taxName,
+        taxLines,
+    });
+    const verificationPayload =
+        receiptPrint.showQrCode === true
+            ? buildReceiptVerificationPayload({
+                  saleNumber,
+                  totalAmount: num(s.total_amount),
+                  taxAmount,
+                  saleDate: isoDate(s.sale_date) ?? isoDate(s.created_at) ?? '',
+                  companyTin: theme.company.tin || null,
+              })
+            : null;
+
     const body: ReceiptBodyData = {
         sale: {
             saleNumber,
@@ -384,23 +429,22 @@ async function renderReceipt(
             paymentMethod: (s.payment_method as string) ?? '—',
             status,
             subtotal: num(s.subtotal),
-            taxAmount: num(s.tax_amount),
+            taxAmount,
+            taxName,
             discountAmount: num(s.discount_amount),
             totalAmount: num(s.total_amount),
             amountPaid: num(s.amount_paid ?? s.payment_received),
             changeAmount: num(s.change_amount),
         },
-        items: items.map(it => ({
-            productName: (it.product_name as string) ?? '—',
-            quantity: num(it.quantity),
-            unitPrice: num(it.unit_price),
-            lineTotal: num(it.total_price ?? it.line_total),
-        })),
+        items: lineItems,
         paymentLines: paymentLines.map(p => ({
             paymentMethod: (p.payment_method as string) ?? '—',
             amount: num(p.amount),
             reference: (p.reference as string) ?? null,
         })),
+        showTaxBreakdown: receiptPrint.showTaxBreakdown !== false,
+        taxRows,
+        verificationPayload,
     };
 
     renderReceiptBody(ctx, body);

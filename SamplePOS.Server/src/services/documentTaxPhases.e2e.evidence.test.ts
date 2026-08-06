@@ -279,11 +279,11 @@ describe('EVIDENCE E2E — retail POS sale pipeline (phases 1–8a)', () => {
     expect(net).toBe(6_000);
   });
 
-  it('client bridge understatement cannot win: server uses mapped rate (Phase 1 authority)', () => {
-    // Client sent rate 0 / non-taxable preview — mapping still applies in shared SSOT
-    // (server resolveLineTaxes overwrites bridge from DB; mapping wins before bridge)
+  it('client bridge understatement cannot win when DB product is liable (Phase 1 authority)', () => {
+    // Client sent rate 0 / non-taxable preview; server resolveLineTaxes overwrites from DB
+    // bridge is_taxable=true then mapping/bridge applies.
     const r = resolvePreviewLineTaxes(
-      { productId: PID_A, lineNetAmount: 100_000, isTaxable: false, taxRate: 0 },
+      { productId: PID_A, lineNetAmount: 100_000, isTaxable: true, taxRate: 0 },
       {
         productMappings: new Map([[PID_A, [VAT18]]]),
         taxCatalog: [VAT18],
@@ -293,12 +293,27 @@ describe('EVIDENCE E2E — retail POS sale pipeline (phases 1–8a)', () => {
     expect(r.determination).toBe('MAPPING');
     expect(computeTaxes(100_000, r.taxes, 1, true).totalTax).toBe(18_000);
   });
+
+  it('operator unticked product VAT → no tax even if Tax Engine mapping remains', () => {
+    const r = resolvePreviewLineTaxes(
+      { productId: PID_A, lineNetAmount: 100_000, isTaxable: false, taxRate: 0 },
+      {
+        productMappings: new Map([[PID_A, [VAT18]]]),
+        taxCatalog: [VAT18],
+        preferLineTaxOverrides: false,
+        applyTenantDefaultWhenUnresolved: false,
+      },
+    );
+    expect(r.determination).toBe('NONE');
+    expect(r.taxes).toHaveLength(0);
+  });
 });
 
 describe('EVIDENCE E2E — restaurant settle parity (phases 1 + integrity)', () => {
-  it('unresolved product + taxEnabled → TENANT_DEFAULT (FOH = settle)', () => {
+  it('unresolved product (liability not explicit false) + taxEnabled → TENANT_DEFAULT (FOH)', () => {
+    // FOH tenant default only when line is not explicitly non-taxable (product not unticked).
     const r = previewDocumentTax(
-      [{ productId: PID_C, lineNetAmount: 20_000, quantity: 1, isTaxable: false, taxRate: 0 }],
+      [{ productId: PID_C, lineNetAmount: 20_000, quantity: 1, taxRate: 0 }],
       {
         applyTenantDefaultWhenUnresolved: true,
         taxEnabled: true,
@@ -309,6 +324,21 @@ describe('EVIDENCE E2E — restaurant settle parity (phases 1 + integrity)', () 
     );
     expect(r.lineResults[0].determination).toBe('TENANT_DEFAULT');
     expect(r.totalTax).toBe(3_600);
+  });
+
+  it('explicit product VAT untick blocks tenant default even on restaurant settle', () => {
+    const r = previewDocumentTax(
+      [{ productId: PID_C, lineNetAmount: 6_000, quantity: 1, isTaxable: false, taxRate: 0 }],
+      {
+        applyTenantDefaultWhenUnresolved: true,
+        taxEnabled: true,
+        taxInclusive: false,
+        defaultTaxRate: 18,
+        taxCatalog: [VAT18],
+      },
+    );
+    expect(r.lineResults[0].determination).toBe('NONE');
+    expect(r.totalTax).toBe(0);
   });
 
   it('taxEnabled false → DISABLED (no silent bridge)', () => {
@@ -430,13 +460,27 @@ describe('EVIDENCE E2E — customer profile + override (phases 4–5)', () => {
 });
 
 describe('EVIDENCE E2E — inclusive + FIXED edge cases (integrity)', () => {
-  it('taxInclusive disables exclusive add-on tax (retail + restaurant)', () => {
+  it('Abchlor proof: 4200 shelf @18% inclusive → tax 640.68, charge 4200 (not 4840.68)', () => {
+    const shelf = 4_200;
+    const r = previewDocumentTax(
+      [{ lineNetAmount: shelf, isTaxable: true, taxRate: 18 }],
+      { taxInclusive: true, applyTenantDefaultWhenUnresolved: false },
+    );
+    expect(r.totalTax).toBe(640.68);
+    // Server createSale charge under tax_inclusive
+    expect(r.totalAmount).toBe(4_200);
+    // Client payload trap fixed by saleChargeTotal + POSSaleSchema inclusive accept
+  });
+
+  it('taxInclusive extracts VAT from shelf price (no exclusive add-on)', () => {
     const r = previewDocumentTax(
       [{ lineNetAmount: 118_000, isTaxable: true, taxRate: 18 }],
       { taxInclusive: true, applyTenantDefaultWhenUnresolved: false },
     );
-    expect(r.totalTax).toBe(0);
-    expect(r.lineResults[0].determination).toBe('DISABLED');
+    // 118000 is exactly 100000 + 18% → extracted VAT = 18000; total stays 118000
+    expect(r.totalTax).toBe(18_000);
+    expect(r.totalAmount).toBe(118_000);
+    expect(r.lineResults[0].determination).toBe('BRIDGE');
   });
 
   it('FIXED tax still applies when line net is 0', () => {

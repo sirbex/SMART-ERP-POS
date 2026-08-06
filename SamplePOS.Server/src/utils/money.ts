@@ -49,17 +49,19 @@ export interface CurrencyConfig {
 }
 
 // Default currency configuration (UGX)
+// UI + DocumentTax SSOT use 2dp monetary storage/display; do not force 0dp
+// here or Money.round silently corrupts VAT extract (e.g. 3050.85 → 3051).
 const DEFAULT_CURRENCY: CurrencyConfig = {
     code: 'UGX',
     symbol: 'UGX',
-    decimalPlaces: 0,  // UGX doesn't use decimal places
+    decimalPlaces: 2,
     thousandsSeparator: ',',
     decimalSeparator: '.',
 };
 
 // Supported currencies
 export const CURRENCIES: Record<string, CurrencyConfig> = {
-    UGX: { code: 'UGX', symbol: 'UGX', decimalPlaces: 0, thousandsSeparator: ',', decimalSeparator: '.' },
+    UGX: { code: 'UGX', symbol: 'UGX', decimalPlaces: 2, thousandsSeparator: ',', decimalSeparator: '.' },
     USD: { code: 'USD', symbol: '$', decimalPlaces: 2, thousandsSeparator: ',', decimalSeparator: '.' },
     EUR: { code: 'EUR', symbol: '€', decimalPlaces: 2, thousandsSeparator: '.', decimalSeparator: ',' },
     GBP: { code: 'GBP', symbol: '£', decimalPlaces: 2, thousandsSeparator: ',', decimalSeparator: '.' },
@@ -404,11 +406,12 @@ export class Money {
     }
 
     /**
-     * Convert to number for external APIs or legacy code
-     * WARNING: Use sparingly - loses precision for very large/precise values
+     * Convert to JavaScript number for APIs / persistence mapping.
+     * Does **not** apply currency rounding — call Money.round first when needed.
+     * (Re-rounding here destroyed explicit Money.round(x, 2) tax amounts on UGX.)
      */
     static toNumber(value: string | number | Decimal | null | undefined): number {
-        return Money.round(value).toNumber();
+        return Money.parse(value).toNumber();
     }
 
     /**

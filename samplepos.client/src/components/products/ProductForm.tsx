@@ -6,6 +6,7 @@ import {
   productFormSectionVisibility,
   serviceInventoryClearsForm,
 } from '@shared/utils/productTypeRules';
+import { describeProductTaxLiability } from '@shared/utils/receiptPrintDisplay';
 import { useRestaurantEnabled } from '@/hooks/useRestaurantEnabled';
 
 /**
@@ -78,6 +79,14 @@ export interface ProductFormProps {
   restrictPurchaseUomToConfigured?: boolean;
   /** Last purchase price (read-only, populated from DB) */
   lastPurchasePrice?: string;
+  /**
+   * Enterprise tax mappings for this product (Tax Engine).
+   * Mapping wins over the Taxable checkbox at sale time.
+   */
+  taxMappings?: Array<{ code?: string | null; name?: string | null; rate?: number | null }> | null;
+  /** Loading mappings indicator */
+  taxMappingsLoading?: boolean;
+  taxInclusivePricing?: boolean;
 }
 
 export default function ProductForm({
@@ -90,6 +99,9 @@ export default function ProductForm({
   configuredProductUoms,
   restrictPurchaseUomToConfigured = false,
   lastPurchasePrice,
+  taxMappings = null,
+  taxMappingsLoading = false,
+  taxInclusivePricing = false,
 }: ProductFormProps) {
   const { data: restaurantEnabled = false } = useRestaurantEnabled();
   const isService = values.productType === 'service';
@@ -328,6 +340,35 @@ export default function ProductForm({
 
         {/* Tax Section */}
         <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          {(() => {
+            const liability = describeProductTaxLiability({
+              isTaxable: values.isTaxable,
+              taxRate: parseFloat(values.taxRate) || 0,
+              mappings: taxMappings,
+              taxInclusive: taxInclusivePricing,
+            });
+            const statusColor =
+              liability.status === 'MAPPED'
+                ? 'bg-violet-100 text-violet-900 border-violet-200'
+                : liability.status === 'BRIDGE'
+                  ? 'bg-emerald-100 text-emerald-900 border-emerald-200'
+                  : liability.status === 'GATED'
+                    ? 'bg-amber-100 text-amber-900 border-amber-200'
+                    : 'bg-stone-100 text-stone-700 border-stone-200';
+            return (
+              <div className={`mb-3 rounded-md border px-3 py-2 ${statusColor}`}>
+                <p className="text-sm font-semibold">
+                  {taxMappingsLoading ? 'Checking tax mappings…' : liability.headline}
+                </p>
+                <p className="text-xs mt-1 opacity-90">{liability.detail}</p>
+                {liability.status === 'MAPPED' && (
+                  <p className="text-xs mt-1.5 font-medium">
+                    Manage in Accounting → Tax Engine → Product mappings
+                  </p>
+                )}
+              </div>
+            );
+          })()}
           <div className="flex items-start gap-3 mb-3">
             <input
               id="is-taxable"
@@ -339,10 +380,12 @@ export default function ProductForm({
             />
             <div className="flex-1">
               <label htmlFor="is-taxable" className="text-sm font-medium text-gray-700 block">
-                Taxable Product
+                VAT liable (taxable product)
               </label>
               <p className="text-xs text-gray-500 mt-0.5">
-                When checked, tax will be calculated and applied to this product at the point of sale
+                You set liability per product. How it posts is automatic: Settings “tax inclusive with
+                price” — off = add VAT on top; on = VAT already in selling price. Tax Engine mappings
+                override this rate when present.
               </p>
             </div>
           </div>
@@ -369,7 +412,8 @@ export default function ProductForm({
                 <p className="text-sm text-red-600 mt-1">{validationErrors.taxRate}</p>
               )}
               <p className="text-xs text-gray-500 mt-1">
-                This tax rate will be applied to the selling price during sales
+                Used when no Tax Engine product mapping exists. Exclusive vs inclusive is not set
+                here — that is Settings only.
               </p>
             </div>
           )}

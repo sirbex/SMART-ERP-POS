@@ -94,7 +94,7 @@ describe('EVIDENCE — Phase 5 wiring', () => {
     expect(mig).toMatch(/tax_override_mode/);
     expect(mig).toMatch(/VALUES \(583\)/);
     // Phase 6 bumped schema to 584; Phase 5 migration remains 583.
-    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*58[34]/);
+    expect(ver).toMatch(/CURRENT_SCHEMA_VERSION\s*=\s*58[3-9]/);
   });
 
   it('permissions catalog includes sales.tax_override', () => {

@@ -13,16 +13,18 @@ import CustomerSelector from '../../components/pos/CustomerSelector';
 import {
   fetchReceiptPrintConfig,
   shouldAutoPrintAfterSale,
+  applyReceiptPrintPresentation,
   type ReceiptPrintConfig,
 } from '../../lib/receiptPrintConfig';
 import { computeUomPrices } from '@shared/utils/uom-pricing';
-import { previewPosCartTax } from '@shared/utils/documentTaxPreview';
+import { previewPosCartTax, saleChargeTotal, previewDocumentTax } from '@shared/utils/documentTaxPreview';
 import {
   getCachedTaxSnapshot,
   getTaxCatalogForPreview,
   getProductTaxMappingsForPreview,
   getCachedCustomerTaxProfile,
   isCustomerTaxExemptCached,
+  refreshTaxSnapshot,
 } from '../../services/offlineCatalogService';
 import { ProductCreateSchema } from '@shared/zod/product';
 import { POSSaleSchema } from '@shared/zod/pos-sale';
@@ -486,6 +488,10 @@ export default function POSPage() {
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [isProcessingSale, setIsProcessingSale] = useState(false);
+  /** Tenant tax_inclusive from /system-settings (SSOT beyond offline snapshot). */
+  const [tenantTaxInclusive, setTenantTaxInclusive] = useState<boolean | null>(null);
+  /** Bumps after tax snapshot sync so taxInclusive charge re-renders. */
+  const [taxSnapshotRev, setTaxSnapshotRev] = useState(0);
   const [focusedCartIndex, setFocusedCartIndex] = useState<number>(-1);
   const [showUomModal, setShowUomModal] = useState(false);
   const [uomModalItemIndex, setUomModalItemIndex] = useState<number>(-1);
@@ -592,9 +598,25 @@ export default function POSPage() {
   }, []);
 
   const makePosReceiptData = useCallback(
-    (input: Omit<CheckoutReceiptInput, 'cashierName' | 'customer' | 'invoiceSettings'>) =>
-      buildReceiptDataFromCheckout({
+    (input: Omit<CheckoutReceiptInput, 'cashierName' | 'customer' | 'invoiceSettings'>) => {
+      const itemsWithTax = (input.items || []).map((item) => {
+        const rate = Number(item.taxRate || 0);
+        const estimated =
+          item.taxAmount != null
+            ? Number(item.taxAmount)
+            : item.isTaxable && rate > 0
+              ? new Decimal(item.subtotal || 0).mul(rate).div(100).toNumber()
+              : undefined;
+        return {
+          ...item,
+          taxRate: rate > 0 ? rate : item.taxRate,
+          taxAmount: estimated,
+          isTaxable: item.isTaxable === true || (rate > 0 && Number(estimated || 0) > 0),
+        };
+      });
+      const base = buildReceiptDataFromCheckout({
         ...input,
+        items: itemsWithTax,
         cashierName: currentUser?.fullName,
         customer: selectedCustomer
           ? {
@@ -604,7 +626,11 @@ export default function POSPage() {
             }
           : undefined,
         invoiceSettings,
-      }),
+      });
+      return applyReceiptPrintPresentation(base, receiptPrintConfigRef.current, {
+        taxName: undefined,
+      });
+    },
     [currentUser?.fullName, selectedCustomer, invoiceSettings]
   );
 
@@ -700,12 +726,39 @@ export default function POSPage() {
 
     fetchInvoiceSettings();
     loadPrintConfig();
+    void refreshTaxSnapshot()
+      .then(() => setTaxSnapshotRev((n) => n + 1))
+      .catch((err) => {
+        console.warn('[POSPage] Tax snapshot refresh failed', err);
+      });
+
+    void apiClient
+      .get<{ success?: boolean; data?: { taxInclusive?: boolean } }>('system-settings')
+      .then((res) => {
+        const row = res.data?.data;
+        if (row && typeof row.taxInclusive === 'boolean') {
+          setTenantTaxInclusive(row.taxInclusive);
+        }
+      })
+      .catch((err) => {
+        console.warn('[POSPage] system-settings taxInclusive load failed', err);
+      });
 
     // Refresh when returning to POS so Custom Receipt Note / accounts / auto-print stay current
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         fetchInvoiceSettings();
         loadPrintConfig();
+        void refreshTaxSnapshot().then(() => setTaxSnapshotRev((n) => n + 1));
+        void apiClient
+          .get<{ success?: boolean; data?: { taxInclusive?: boolean } }>('system-settings')
+          .then((res) => {
+            const row = res.data?.data;
+            if (row && typeof row.taxInclusive === 'boolean') {
+              setTenantTaxInclusive(row.taxInclusive);
+            }
+          })
+          .catch(() => undefined);
       }
     };
     document.addEventListener('visibilitychange', onVisible);
@@ -2370,7 +2423,7 @@ export default function POSPage() {
   const subtotalAfterDiscount = new Decimal(subtotal).minus(cartDiscountAmount).toNumber();
 
   // DocumentTax preview SSOT (matches server DocumentTaxService / TaxEngine.compute)
-  const taxSnapshot = getCachedTaxSnapshot();
+  const taxSnapshot = useMemo(() => getCachedTaxSnapshot(), [taxSnapshotRev]);
   const cachedProfile = getCachedCustomerTaxProfile(selectedCustomer?.id);
   const customerProfile = {
     vatRegistered:
@@ -2397,23 +2450,33 @@ export default function POSPage() {
     taxCatalog: getTaxCatalogForPreview(),
     productMappings: getProductTaxMappingsForPreview(),
     taxEnabled: taxSnapshot?.taxEnabled,
-    taxInclusive: taxSnapshot?.taxInclusive,
+    // Live system-settings wins over stale POS tax snapshot cache.
+    taxInclusive:
+      tenantTaxInclusive !== null
+        ? tenantTaxInclusive
+        : taxSnapshot?.taxInclusive === true,
     defaultTaxRate: taxSnapshot?.defaultTaxRate,
     customerDefaultVatRate: customerProfile.defaultVatRate,
     taxOverride: taxOverride ?? undefined,
   };
-  const tax = previewPosCartTax(
+  const taxPreviewDoc = previewDocumentTax(
     items.map((item) => ({
       productId: item.id,
-      subtotal: item.subtotal,
+      lineNetAmount: item.subtotal,
       quantity: item.quantity,
       isTaxable: item.isTaxable,
       taxRate: item.taxRate,
     })),
-    taxPreviewCtx,
+    {
+      ...taxPreviewCtx,
+      preferLineTaxOverrides: false,
+      applyTenantDefaultWhenUnresolved: false,
+    },
   );
-
-  const grandTotal = new Decimal(subtotalAfterDiscount).plus(tax).toNumber();
+  const tax = taxPreviewDoc.totalTax;
+  // Price-mode SSOT = system_settings.tax_inclusive only (never infer from tax defs).
+  const taxInclusivePricing = taxPreviewCtx.taxInclusive === true;
+  const grandTotal = saleChargeTotal(subtotalAfterDiscount, tax, taxInclusivePricing);
   const avgMargin = items.length
     ? items.reduce((sum, i) => new Decimal(sum).plus(i.marginPct).toNumber(), 0) / items.length
     : 0;
@@ -2747,6 +2810,8 @@ export default function POSPage() {
               subtotal: item.subtotal,
               uom: item.uom,
               discountAmount: item.discount?.amount,
+              taxRate: item.taxRate,
+              isTaxable: item.isTaxable,
             })),
           })
         );
@@ -2821,6 +2886,8 @@ export default function POSPage() {
               subtotal: item.subtotal,
               uom: item.uom,
               discountAmount: item.discount?.amount,
+              taxRate: item.taxRate,
+              isTaxable: item.isTaxable,
             })),
           })
         );
@@ -2875,6 +2942,8 @@ export default function POSPage() {
               subtotal: item.subtotal,
               uom: item.uom,
               discountAmount: item.discount?.amount,
+              taxRate: item.taxRate,
+              isTaxable: item.isTaxable,
             })),
           })
         );
@@ -3135,7 +3204,11 @@ export default function POSPage() {
 
     // Cart/pricing integrity — block header vs line drift (e.g. at-cost subtotal with retail unit price).
     const lineSum = items.reduce((sum, i) => new Decimal(sum).plus(i.subtotal).toNumber(), 0);
-    const expectedGrand = new Decimal(lineSum).minus(cartDiscountAmount).plus(tax).toNumber();
+    const expectedGrand = saleChargeTotal(
+      new Decimal(lineSum).minus(cartDiscountAmount).toNumber(),
+      tax,
+      taxInclusivePricing,
+    );
     if (Math.abs(expectedGrand - grandTotal) > 0.02) {
       isSubmittingRef.current = false;
       setIsProcessingSale(false);
@@ -3168,6 +3241,34 @@ export default function POSPage() {
     // This key is unique per sale attempt — used by both online and offline paths
     const saleIdempotencyKey = `pos_${Date.now()}_${Math.random().toString(36).substr(2, 12)}`;
 
+    // Charge SSOT = saleChargeTotal(settings.tax_inclusive). Product only decides liability.
+    const afterDisc = new Decimal(subtotal).minus(cartDiscountAmount).toNumber();
+    const chargedTotal = saleChargeTotal(afterDisc, tax, taxInclusivePricing);
+    const exclusiveCharge = saleChargeTotal(afterDisc, tax, false);
+    // If cart payment still holds exclusive total while mode is inclusive, clamp to shelf.
+    let submitPaymentLines = finalPaymentLines;
+    if (taxInclusivePricing && tax > 0.01) {
+      const paySum = finalPaymentLines.reduce(
+        (s, l) => new Decimal(s).plus(l.amount).toNumber(),
+        0,
+      );
+      if (Math.abs(paySum - exclusiveCharge) < 0.02) {
+        if (finalPaymentLines.length === 1) {
+          submitPaymentLines = [{ ...finalPaymentLines[0], amount: chargedTotal }];
+        } else {
+          const cashIdx = finalPaymentLines.findIndex((l) => l.paymentMethod === 'CASH');
+          if (cashIdx >= 0) {
+            const delta = new Decimal(paySum).minus(chargedTotal).toNumber();
+            submitPaymentLines = finalPaymentLines.map((l, i) =>
+              i === cashIdx
+                ? { ...l, amount: Math.max(0, new Decimal(l.amount).minus(delta).toNumber()) }
+                : l,
+            );
+          }
+        }
+      }
+    }
+
     const saleData = {
       customerId: resolvedCustomerId,
       quoteId: loadedQuoteId || undefined, // Pass quote ID for auto-conversion
@@ -3184,7 +3285,10 @@ export default function POSPage() {
               taxRate: item.taxRate,
             },
           ],
-          taxPreviewCtx,
+          {
+            ...taxPreviewCtx,
+            taxInclusive: taxInclusivePricing,
+          },
         );
 
         return {
@@ -3207,11 +3311,11 @@ export default function POSPage() {
       subtotal,
       discountAmount: cartDiscountAmount,
       taxAmount: tax,
-      totalAmount: grandTotal,
+      totalAmount: chargedTotal,
       saleDate: formattedSaleDate,
       exchangeRefundId: exchangeCredit?.refundId,
       taxOverride: taxOverride ?? undefined,
-      paymentLines: finalPaymentLines.map((line) => ({
+      paymentLines: submitPaymentLines.map((line) => ({
         paymentMethod: line.paymentMethod,
         amount: line.amount,
         reference: line.reference,
@@ -3289,6 +3393,8 @@ export default function POSPage() {
               subtotal: item.subtotal,
               uom: item.uom,
               discountAmount: item.discount?.amount,
+              taxRate: item.taxRate,
+              isTaxable: item.isTaxable,
             })),
             payments: finalPaymentLines.map((line) => ({
               method: line.paymentMethod,
@@ -3377,6 +3483,8 @@ export default function POSPage() {
               subtotal: item.subtotal,
               uom: item.uom,
               discountAmount: item.discount?.amount,
+              taxRate: item.taxRate,
+              isTaxable: item.isTaxable,
             })),
             payments: finalPaymentLines.map((line) => ({
               method: line.paymentMethod,
@@ -4266,6 +4374,9 @@ export default function POSPage() {
               <div className="flex justify-between items-center">
                 <span className="flex items-center gap-1 flex-wrap">
                   Tax
+                  {taxInclusivePricing ? (
+                    <span className="text-xs text-gray-500">(included)</span>
+                  ) : null}
                   {taxOverride ? (
                     <span className="text-xs text-amber-700" data-tax-override-active="true">
                       ({taxOverride.mode === 'FORCE_EXEMPT' ? 'exempt' : `${taxOverride.rate}%`})

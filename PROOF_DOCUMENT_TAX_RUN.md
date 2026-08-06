@@ -1,6 +1,6 @@
 # DocumentTax — Production Certification Proof Run
 
-Run: 2026-08-02T20:30:54.634Z
+Run: 2026-08-06T21:36:09.810Z
 
 Mode: foundation
 
@@ -11,6 +11,8 @@ Charter: [PROOF_DOCUMENT_TAX_CHARTER.md](./PROOF_DOCUMENT_TAX_CHARTER.md)
 
 - **PASS** A-document-tax-evidence-matrix — 101 tests class
 - **PASS** A-phases-e2e-evidence — 24 executable pipeline cases
+- **PASS** A-PM-price-mode-integrity — exclusive/inclusive contract + SALE-2026-0179 seal
+- **PASS** A-PV-product-vat-untick-integrity — is_taxable=false beats mapping on retail computeForLines
 
 ## Gates B–C — Live PostgreSQL mutations
 
@@ -20,33 +22,27 @@ Charter: [PROOF_DOCUMENT_TAX_CHARTER.md](./PROOF_DOCUMENT_TAX_CHARTER.md)
 ### Live lane stdout (tail)
 
 ```
- C-invoice-lines-copied
-- **PASS** C-invoice-line-tax — 7200
-  PASS  C-invoice-line-tax — 7200
-- **PASS** C-remittance-no-double-count — reportRows=2
-  PASS  C-remittance-no-double-count — reportRows=2
-
-## Gate C — Partial return remittance netting
-
-2026-08-02 23:31:19 [[32minfo[39m]: [32mRefund document created[39m
-2026-08-02 23:31:19 [[32minfo[39m]: [32mJournal entry created[39m
-2026-08-02 23:31:19 [[32minfo[39m]: [32mRecorded sale refund to GL[39m
-2026-08-02 23:31:19 [[32minfo[39m]: [32mSale partially returned — status changed to PARTIALLY_RETURNED[39m
-2026-08-02 23:31:19 [[32minfo[39m]: [32mSale return completed successfully[39m
-2026-08-02 23:31:19 [[32minfo[39m]: [32mCash movement recorded[39m
-2026-08-02 23:31:19 [[32minfo[39m]: [32mCash register refund movement recorded[39m
-- **PASS** C-partial-refund
-  PASS  C-partial-refund
-- **PASS** C-partial-return-tax-net — net=3600 expected~3600
-  PASS  C-partial-return-tax-net — net=3600 expected~3600
-
-## Gate C — Credit note DocumentTax line tax
-
-2026-08-02 23:31:19 [[32minfo[39m]: [32mCredit note draft created[39m
-- **PASS** C-credit-note-line-tax — got 3600 expected 3600
-  PASS  C-credit-note-line-tax — got 3600 expected 3600
-- **PASS** C-credit-note-created — dfd6682f-4059-4c22-aef5-9c5c08af849a
-  PASS  C-credit-note-created — dfd6682f-4059-4c22-aef5-9c5c08af849a
+thout customer_id — AT_COST and credit invoicing will not apply[39m
+2026-08-07 00:36:39 [[32minfo[39m]: [32mUoM conversion resolved (canonical SSOT)[39m
+2026-08-07 00:36:39 [[33mwarn[39m]: [33mDocumentTaxService: client tax preview overridden by server[39m
+2026-08-07 00:36:39 [[32minfo[39m]: [32mDocumentTaxService createSale tax[39m
+2026-08-07 00:36:39 [[32minfo[39m]: [32m💰 FINAL TOTAL AMOUNT[39m
+2026-08-07 00:36:39 [[32minfo[39m]: [32mPayment breakdown calculated[39m
+2026-08-07 00:36:39 [[32minfo[39m]: [32mSkipping inventory deduction for service item[39m
+2026-08-07 00:36:39 [[32minfo[39m]: [32mSale revenue breakdown[39m
+2026-08-07 00:36:39 [[32minfo[39m]: [32mJournal entry created[39m
+2026-08-07 00:36:39 [[32minfo[39m]: [32mRecorded sale to GL[39m
+2026-08-07 00:36:39 [[33mwarn[39m]: [33mCash sale without register session - drawer tracking will be incomplete[39m
+- **PASS** B-U-createSale — saleId=1599b313-01a6-4037-a488-ce367fc38d42
+  PASS  B-U-createSale — saleId=1599b313-01a6-4037-a488-ce367fc38d42
+- **PASS** B-U-sale-header-tax-zero — 0
+  PASS  B-U-sale-header-tax-zero — 0
+- **PASS** B-U-sale-total-shell — 20000
+  PASS  B-U-sale-total-shell — 20000
+- **PASS** B-U-line-tax-zero — 0
+  PASS  B-U-line-tax-zero — 0
+- **PASS** B-U-line-determination-NONE — NONE
+  PASS  B-U-line-determination-NONE — NONE
 
 ## Deferred / out of scope this run
 
@@ -65,13 +61,13 @@ Charter: [PROOF_DOCUMENT_TAX_CHARTER.md](./PROOF_DOCUMENT_TAX_CHARTER.md)
 
 ## Summary
 
-PASS: 24  FAIL: 0  SKIP: 5
+PASS: 41  FAIL: 0  SKIP: 5
 
 **Verdict:** CERTIFIED (live mutation lane)
 
 ════════════════════════════════════════════════════════════
  wrote C:\Users\Chase\source\repos\SamplePOS\PROOF_DOCUMENT_TAX_LIVE_LANE.md
- PASS=24 FAIL=0 SKIP=5
+ PASS=41 FAIL=0 SKIP=5
 ════════════════════════════════════════════════════════════
 
 ```
@@ -87,7 +83,7 @@ PASS: 24  FAIL: 0  SKIP: 5
 
 ## Gate E — Governance
 
-- **PASS** E-schema-version-584
+- **PASS** E-schema-version-584plus
 - **PASS** E-migration-584-file
 
 ## Gate verdicts
@@ -98,7 +94,7 @@ PASS: 24  FAIL: 0  SKIP: 5
 - Gate D: **SKIP**
 - Gate E: **PASS**
 
-PASS: 6  FAIL: 0  SKIP: 5
+PASS: 8  FAIL: 0  SKIP: 5
 
 
 **Verdict:** CERTIFIED (foundation + live)

@@ -89,6 +89,27 @@ function rule(): Uint8Array {
   return line('-'.repeat(ESC_POS_COLS_80MM));
 }
 
+/**
+ * ESC/POS QR Code (standard GS ( k model 2).
+ * Payload should already be ASCII/verification text.
+ */
+function qrCode(payload: string): Uint8Array {
+  const data = encodePrintable(payload).slice(0, 7089);
+  if (data.length === 0) return new Uint8Array(0);
+  const storeLen = data.length + 3;
+  const pL = storeLen & 0xff;
+  const pH = (storeLen >> 8) & 0xff;
+  // Model 2, size 5, error correction L, store, then print
+  return bytes(
+    new Uint8Array([GS, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]),
+    new Uint8Array([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, 0x05]),
+    new Uint8Array([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x30]),
+    new Uint8Array([GS, 0x28, 0x6b, pL, pH, 0x31, 0x50, 0x30]),
+    data,
+    new Uint8Array([GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30]),
+  );
+}
+
 function money(amount: number | null | undefined, symbol?: string | null): string {
   const n = Number(amount);
   const v = Number.isFinite(n) ? n.toFixed(2) : '0.00';
@@ -213,7 +234,13 @@ export function renderThermalTicketEscPos(ticket: ThermalTicket): Uint8Array {
         pairLine('Discount', `-${money(ticket.discountAmount, ticket.currencySymbol)}`),
       );
     }
-    if (ticket.taxAmount != null && Number(ticket.taxAmount) > 0) {
+    if (ticket.taxRows && ticket.taxRows.length > 0) {
+      for (const row of ticket.taxRows) {
+        if (Number(row.amount) > 0) {
+          parts.push(pairLine(row.label, money(row.amount, ticket.currencySymbol)));
+        }
+      }
+    } else if (ticket.taxAmount != null && Number(ticket.taxAmount) > 0) {
       parts.push(
         pairLine(ticket.taxName || 'Tax', money(ticket.taxAmount, ticket.currencySymbol)),
       );
@@ -231,6 +258,13 @@ export function renderThermalTicketEscPos(ticket: ThermalTicket): Uint8Array {
     if (ticket.customNote) {
       parts.push(rule());
       for (const w of wrapLines(ticket.customNote)) parts.push(line(w));
+    }
+    if (ticket.qrPayload && String(ticket.qrPayload).trim()) {
+      parts.push(rule());
+      parts.push(center(true));
+      parts.push(qrCode(String(ticket.qrPayload).trim()));
+      parts.push(line('Scan to verify'));
+      parts.push(leftAlign());
     }
     parts.push(rule());
   }

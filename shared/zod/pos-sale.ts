@@ -126,14 +126,24 @@ export const POSSaleSchema = z.object({
     });
   }
 
-  // Validate total = subtotal - discount + tax
+  // Price-mode charge integrity:
+  //   exclusive → total = subtotal - discount + tax
+  //   inclusive → total = subtotal - discount  (tax extracted for display/GL, not added)
   const discountAmount = data.discountAmount || 0;
-  const calculatedTotal = data.subtotal - discountAmount + data.taxAmount;
-  if (Math.abs(calculatedTotal - data.totalAmount) > 0.01) {
+  const afterDiscount = data.subtotal - discountAmount;
+  const exclusiveTotal = afterDiscount + data.taxAmount;
+  const inclusiveTotal = afterDiscount;
+  const matchesExclusive = Math.abs(exclusiveTotal - data.totalAmount) <= 0.01;
+  const matchesInclusive = Math.abs(inclusiveTotal - data.totalAmount) <= 0.01;
+  if (!matchesExclusive && !matchesInclusive) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['totalAmount'],
-      message: `Total amount does not match subtotal - discount + tax (expected ${calculatedTotal.toFixed(2)}, got ${data.totalAmount.toFixed(2)})`,
+      message:
+        `Total amount does not match priced charge. ` +
+        `Exclusive expected ${exclusiveTotal.toFixed(2)} (sub−disc+tax); ` +
+        `inclusive expected ${inclusiveTotal.toFixed(2)} (sub−disc, tax ${data.taxAmount.toFixed(2)} included). ` +
+        `Got ${data.totalAmount.toFixed(2)}.`,
     });
   }
 

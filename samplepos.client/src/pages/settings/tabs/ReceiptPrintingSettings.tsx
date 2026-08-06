@@ -165,7 +165,7 @@ export default function ReceiptPrintingSettings({
                 </p>
               </div>
 
-              <div className="flex items-center">
+              <div className="flex items-start">
                 <input
                   type="checkbox"
                   id="receiptShowTaxBreakdown"
@@ -173,14 +173,20 @@ export default function ReceiptPrintingSettings({
                   onChange={(e) =>
                     setFormData({ ...formData, receiptShowTaxBreakdown: e.target.checked })
                   }
-                  className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  className="h-4 w-4 mt-0.5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                 />
-                <label htmlFor="receiptShowTaxBreakdown" className="ml-2 block text-sm text-gray-900">
-                  Show detailed tax breakdown on receipt
-                </label>
+                <div className="ml-2">
+                  <label htmlFor="receiptShowTaxBreakdown" className="block text-sm text-gray-900">
+                    Show detailed tax breakdown on receipt
+                  </label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    When on: show VAT by rate when line tax is available. When off: one Tax total
+                    line. Either way requires sale tax &gt; 0 (taxed lines / mappings).
+                  </p>
+                </div>
               </div>
 
-              <div className="flex items-center">
+              <div className="flex items-start">
                 <input
                   type="checkbox"
                   id="receiptShowQrCode"
@@ -188,11 +194,17 @@ export default function ReceiptPrintingSettings({
                   onChange={(e) =>
                     setFormData({ ...formData, receiptShowQrCode: e.target.checked })
                   }
-                  className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                  className="h-4 w-4 mt-0.5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                 />
-                <label htmlFor="receiptShowQrCode" className="ml-2 block text-sm text-gray-900">
-                  Show QR code on receipt (for digital verification)
-                </label>
+                <div className="ml-2">
+                  <label htmlFor="receiptShowQrCode" className="block text-sm text-gray-900">
+                    Show QR code on receipt (for digital verification)
+                  </label>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Prints a scannable QR with sale number, total, and tax (offline verification
+                    payload). Requires receipt printing enabled.
+                  </p>
+                </div>
               </div>
             </>
           )}

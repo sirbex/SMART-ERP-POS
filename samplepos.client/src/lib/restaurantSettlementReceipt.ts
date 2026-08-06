@@ -14,6 +14,7 @@ import {
 import {
   fetchReceiptPrintConfig,
   shouldPrintReceiptOnSettlement,
+  applyReceiptPrintPresentation,
 } from './receiptPrintConfig';
 import { readCachedGuestBillPrinter } from './guestBillPrinter';
 
@@ -65,8 +66,10 @@ export async function printRestaurantSettlementReceipt(
     preferInAppPreview: true,
   };
 
+  const presented = applyReceiptPrintPresentation(receiptData, printCfg);
+
   try {
-    const result = await printReceipt(receiptData, options);
+    const result = await printReceipt(presented, options);
     if (result.method === 'escpos' || result.method === 'html') {
       toast.success(
         result.printerName

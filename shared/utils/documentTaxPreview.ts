@@ -4,15 +4,19 @@
  *
  * Hierarchy (per line):
  *   0. Document OVERRIDE (FORCE_EXEMPT / FORCE_RATE) — handled in previewDocumentTax
- *   1. Restaurant gates (taxEnabled / taxInclusive) when tenant-default mode;
- *      taxInclusive always disables added exclusive tax
+ *   1. Restaurant taxEnabled=false when tenant-default mode → DISABLED
  *   2. Customer exemption / ZERO_RATED / vatOutputRequiresRegisteredCustomer
  *   3. preferLineTaxOverrides (when it resolves: explicit false, or true+rate>0)
- *   4. product_tax_mappings
- *   5. Product bridge (is_taxable + tax_rate) / line fields
- *   6. Customer defaultVatRate (VAT-registered only; never after explicit non-taxable)
- *   7. Tenant defaultTaxRate (optional)
- *   8. No tax
+ *   4. Product master is_taxable === false → NONE (operator removed liability;
+ *      mappings / customer rate do not resurrect tax)
+ *   5. product_tax_mappings (only when product is tax-liable / isTaxable !== false)
+ *   6. Product bridge (is_taxable + tax_rate) / line fields
+ *   7. Customer defaultVatRate (VAT-registered only; never after explicit non-taxable)
+ *   8. Tenant defaultTaxRate (restaurant applyTenantDefault only — fills unresolved FOH lines)
+ *   9. No tax
+ *
+ * taxInclusive pricing: still determines product/mapping tax, but TaxEngine
+ * **extracts** VAT from the price (does not add exclusive tax on top).
  */
 import Decimal from 'decimal.js';
 import {
@@ -210,6 +214,22 @@ function resolvePreferLineTaxes(
   return null;
 }
 
+/**
+ * When tenant prices include tax, convert exclusive tax definitions so TaxEngine
+ * extracts VAT from the line (total stays equal to the price charged).
+ */
+export function taxesForPriceMode(
+  taxes: TaxDefinitionLike[],
+  taxInclusive: boolean,
+): TaxDefinitionLike[] {
+  if (!taxInclusive || taxes.length === 0) return taxes;
+  return taxes.map((t) =>
+    t.type === 'PERCENTAGE' && !t.isInclusive
+      ? { ...t, isInclusive: true }
+      : t,
+  );
+}
+
 export function resolvePreviewLineTaxes(
   line: DocumentTaxPreviewLineInput,
   ctx: DocumentTaxPreviewContext,
@@ -219,11 +239,7 @@ export function resolvePreviewLineTaxes(
   const applyTenantDefault = ctx.applyTenantDefaultWhenUnresolved === true;
   const preferLine = ctx.preferLineTaxOverrides === true;
 
-  // Inclusive prices: never add exclusive DocumentTax on top (retail + restaurant).
-  if (ctx.taxInclusive === true) {
-    return { taxes: [], determination: 'DISABLED' };
-  }
-
+  // Restaurant master switch only — never block retail product bridge/mapping.
   if (applyTenantDefault && ctx.taxEnabled === false) {
     return { taxes: [], determination: 'DISABLED' };
   }
@@ -240,30 +256,48 @@ export function resolvePreviewLineTaxes(
   // CN/DN / quote line rates must beat product mappings when preferLine resolves.
   if (preferLine) {
     const preferred = resolvePreferLineTaxes(line, catalog);
-    if (preferred) return preferred;
+    if (preferred) {
+      return {
+        taxes: taxesForPriceMode(preferred.taxes, ctx.taxInclusive === true),
+        determination: preferred.determination,
+      };
+    }
+  }
+
+  // Operator unticked VAT on the product master (DB/bridge is_taxable = false).
+  // Mappings, customer rates, and restaurant tenant-default must NOT re-apply tax.
+  // Restaurant FOH fills unresolved lines only when liability is not explicitly off.
+  const explicitlyNonTaxable = line.isTaxable === false;
+  if (explicitlyNonTaxable) {
+    return { taxes: [], determination: 'NONE' };
   }
 
   const pid = line.productId ?? null;
 
+  // Mappings only when product is tax-liable (or liability unset — server sets from DB).
   if (isUuidProductId(pid)) {
     const mapped = mappings.get(pid);
     if (mapped && mapped.length > 0) {
-      return { taxes: mapped, determination: 'MAPPING' };
+      return {
+        taxes: taxesForPriceMode(mapped, ctx.taxInclusive === true),
+        determination: 'MAPPING',
+      };
     }
   }
 
   // Product bridge from line fields (server fills from DB for UUID products)
   if (line.isTaxable === true && Number(line.taxRate) > 0) {
     return {
-      taxes: [bridgeTaxDefinition(Number(line.taxRate), catalog)],
+      taxes: taxesForPriceMode(
+        [bridgeTaxDefinition(Number(line.taxRate), catalog)],
+        ctx.taxInclusive === true,
+      ),
       determination: 'BRIDGE',
     };
   }
 
   // Explicit non-taxable: never apply customer defaultVatRate.
   // Restaurant (applyTenantDefault) may still fall through to tenant default.
-  const explicitlyNonTaxable = line.isTaxable === false;
-
   // Customer default VAT rate (VAT-registered) before tenant default
   if (!explicitlyNonTaxable) {
     const customerRate =
@@ -273,7 +307,10 @@ export function resolvePreviewLineTaxes(
       profileIsVatRegisteredActive(ctx.customerProfile, ctx.documentDate)
     ) {
       return {
-        taxes: [bridgeTaxDefinition(Number(customerRate), catalog)],
+        taxes: taxesForPriceMode(
+          [bridgeTaxDefinition(Number(customerRate), catalog)],
+          ctx.taxInclusive === true,
+        ),
         determination: 'BRIDGE',
       };
     }
@@ -281,7 +318,10 @@ export function resolvePreviewLineTaxes(
 
   if (applyTenantDefault && Number(ctx.defaultTaxRate) > 0) {
     return {
-      taxes: [bridgeTaxDefinition(Number(ctx.defaultTaxRate), catalog)],
+      taxes: taxesForPriceMode(
+        [bridgeTaxDefinition(Number(ctx.defaultTaxRate), catalog)],
+        ctx.taxInclusive === true,
+      ),
       determination: 'TENANT_DEFAULT',
     };
   }
@@ -306,7 +346,10 @@ function applyDocumentTaxOverride(
       };
     }
     const rate = Number(override.rate ?? 0);
-    const taxes = rate > 0 ? [bridgeTaxDefinition(rate, catalog)] : [];
+    const taxes = taxesForPriceMode(
+      rate > 0 ? [bridgeTaxDefinition(rate, catalog)] : [],
+      ctx.taxInclusive === true,
+    );
     return {
       lineIndex,
       determination: 'OVERRIDE' as const,
@@ -327,8 +370,8 @@ export function previewDocumentTax(
 
   const applyTenantDefault = ctx.applyTenantDefaultWhenUnresolved === true;
 
-  // Inclusive always disables added exclusive tax; taxEnabled=false only in restaurant mode.
-  if (ctx.taxInclusive === true || (applyTenantDefault && ctx.taxEnabled === false)) {
+  // Restaurant master switch only (tax_inclusive no longer zeroes output VAT).
+  if (applyTenantDefault && ctx.taxEnabled === false) {
     const lineResults = lines.map((line, lineIndex) => ({
       lineIndex,
       determination: 'DISABLED' as const,
@@ -422,4 +465,51 @@ export function previewPosCartTax(
     },
   );
   return result.totalTax;
+}
+
+/**
+ * Customer charge for a POS/sale header after line nets − cart discount.
+ * - Inclusive: shelf already includes VAT — do not add extracted tax again.
+ * - Exclusive: charge = afterDiscount + tax.
+ */
+export function saleChargeTotal(
+  subtotalAfterDiscount: number,
+  totalTax: number,
+  taxInclusive: boolean,
+): number {
+  const after = new Decimal(subtotalAfterDiscount || 0);
+  if (taxInclusive === true) {
+    return after.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+  }
+  return after
+    .plus(totalTax || 0)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+    .toNumber();
+}
+
+/** Header total is valid if it matches exclusive or inclusive price-mode math. */
+export function isSaleHeaderTotalConsistent(input: {
+  subtotal: number;
+  discountAmount?: number;
+  taxAmount: number;
+  totalAmount: number;
+  tolerance?: number;
+}): { ok: boolean; exclusiveTotal: number; inclusiveTotal: number; mode: 'exclusive' | 'inclusive' | 'ambiguous' | 'mismatch' } {
+  const tol = input.tolerance ?? 0.02;
+  const after = new Decimal(input.subtotal || 0).minus(input.discountAmount || 0);
+  const exclusiveTotal = after.plus(input.taxAmount || 0).toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+  const inclusiveTotal = after.toDecimalPlaces(2, Decimal.ROUND_HALF_UP).toNumber();
+  const total = new Decimal(input.totalAmount || 0);
+  const matchExclusive = total.minus(exclusiveTotal).abs().lessThanOrEqualTo(tol);
+  const matchInclusive = total.minus(inclusiveTotal).abs().lessThanOrEqualTo(tol);
+  if (matchExclusive && matchInclusive) {
+    return { ok: true, exclusiveTotal, inclusiveTotal, mode: 'ambiguous' };
+  }
+  if (matchInclusive) {
+    return { ok: true, exclusiveTotal, inclusiveTotal, mode: 'inclusive' };
+  }
+  if (matchExclusive) {
+    return { ok: true, exclusiveTotal, inclusiveTotal, mode: 'exclusive' };
+  }
+  return { ok: false, exclusiveTotal, inclusiveTotal, mode: 'mismatch' };
 }

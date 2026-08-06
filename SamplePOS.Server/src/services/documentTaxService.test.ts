@@ -96,6 +96,45 @@ describe('DocumentTaxService determination hierarchy', () => {
     expect(result.lineResults[0].determination).toBe('EXEMPT');
   });
 
+  it('RETAIL: product VAT unticked (is_taxable false) → tax 0 even with mapping + client tax stamp', async () => {
+    const pid = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    // Enterprise mapping still present; DB product liability off
+    mockLoadMappings.mockResolvedValue(new Map([[pid, [VAT18]]]));
+    mockLoadBridge.mockResolvedValue(
+      new Map([[pid, { id: pid, isTaxable: false, taxRate: 18 }]]),
+    );
+    const result = await DocumentTaxService.computeForLines(fakeConn, {
+      applyTenantDefaultWhenUnresolved: false, // createSale / retail POS
+      lines: [
+        {
+          lineIndex: 0,
+          productId: pid,
+          lineNetAmount: 4_200,
+          quantity: 1,
+          // Client cart may still send stale preview stamps
+          isTaxable: true,
+          taxRate: 18,
+        },
+      ],
+    });
+    expect(result.lineResults[0].determination).toBe('NONE');
+    expect(result.documentTotals.totalTax).toBe(0);
+    expect(result.lineResults[0].taxes).toHaveLength(0);
+  });
+
+  it('RETAIL: product VAT ticked + rate → BRIDGE tax', async () => {
+    const pid = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    mockLoadBridge.mockResolvedValue(
+      new Map([[pid, { id: pid, isTaxable: true, taxRate: 18 }]]),
+    );
+    const result = await DocumentTaxService.computeForLines(fakeConn, {
+      applyTenantDefaultWhenUnresolved: false,
+      lines: [{ lineIndex: 0, productId: pid, lineNetAmount: 4_200, quantity: 1 }],
+    });
+    expect(result.lineResults[0].determination).toBe('BRIDGE');
+    expect(result.documentTotals.totalTax).toBe(756);
+  });
+
   it('MAPPING wins over product bridge', async () => {
     const pid = '11111111-1111-1111-1111-111111111111';
     mockLoadMappings.mockResolvedValue(new Map([[pid, [VAT18]]]));
@@ -141,17 +180,36 @@ describe('DocumentTaxService determination hierarchy', () => {
     expect(result.documentTotals.totalTax).toBe(0);
   });
 
-  it('Restaurant tenant default when unresolved and taxEnabled', async () => {
+  it('Restaurant tenant default when liability unresolved (not is_taxable=false)', async () => {
     const pid = '11111111-1111-1111-1111-111111111111';
-    mockLoadBridge.mockResolvedValue(
-      new Map([[pid, { id: pid, isTaxable: false, taxRate: 0 }]]),
-    );
+    // No product bridge (or product missing) → isTaxable unset → tenant default for FOH
+    mockLoadBridge.mockResolvedValue(new Map());
     const result = await DocumentTaxService.computeForLines(fakeConn, {
       applyTenantDefaultWhenUnresolved: true,
       lines: [{ lineIndex: 0, productId: pid, lineNetAmount: 100_000, quantity: 1 }],
     });
     expect(result.lineResults[0].determination).toBe('TENANT_DEFAULT');
     expect(result.documentTotals.totalTax).toBe(18_000);
+  });
+
+  it('Restaurant settle: product is_taxable=false → tax 0 (not tenant default)', async () => {
+    const pid = '6fec0d12-4349-4a43-a5c0-48e449d36356';
+    mockLoadBridge.mockResolvedValue(
+      new Map([[pid, { id: pid, isTaxable: false, taxRate: 0 }]]),
+    );
+    const result = await DocumentTaxService.computeForLines(fakeConn, {
+      applyTenantDefaultWhenUnresolved: true,
+      lines: [
+        {
+          lineIndex: 0,
+          productId: pid,
+          lineNetAmount: 6_000,
+          quantity: 1,
+        },
+      ],
+    });
+    expect(result.lineResults[0].determination).toBe('NONE');
+    expect(result.documentTotals.totalTax).toBe(0);
   });
 
   it('Restaurant DISABLED when taxEnabled false', async () => {

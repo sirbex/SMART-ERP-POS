@@ -152,8 +152,8 @@ describe('Money Utility', () => {
     // ROUNDING
     // -----------------------------------------------------------------------
     describe('round', () => {
-        it('should round to currency decimal places (UGX = 0)', () => {
-            expect(Money.round(1234.56).toNumber()).toBe(1235);
+        it('should round to currency decimal places (UGX = 2)', () => {
+            expect(Money.round(1234.567).toNumber()).toBe(1234.57);
         });
 
         it('should round with custom decimal places', () => {
@@ -226,8 +226,9 @@ describe('Money Utility', () => {
 
     describe('equals', () => {
         it('should compare values with currency precision', () => {
-            // UGX has 0 decimal places, so 1234.4 rounds to 1234
-            expect(Money.equals(1234.4, 1234.3)).toBe(true); // both round to 1234
+            // UGX SSOT is 2dp (display/storage); 1234.401 and 1234.404 both round to 1234.40
+            expect(Money.equals(1234.401, 1234.404)).toBe(true);
+            expect(Money.equals(1234.40, 1234.41)).toBe(false);
         });
 
         it('should detect inequality', () => {
@@ -261,8 +262,8 @@ describe('Money Utility', () => {
     // FORMATTING
     // -----------------------------------------------------------------------
     describe('format', () => {
-        it('should format with thousands separators (UGX, 0 decimals)', () => {
-            expect(Money.format(1234567)).toBe('1,234,567');
+        it('should format with thousands separators (UGX, 2 decimals)', () => {
+            expect(Money.format(1234567)).toBe('1,234,567.00');
         });
 
         it('should format with custom decimal places', () => {
@@ -270,17 +271,17 @@ describe('Money Utility', () => {
         });
 
         it('should format zero', () => {
-            expect(Money.format(0)).toBe('0');
+            expect(Money.format(0)).toBe('0.00');
         });
 
         it('should format negative numbers', () => {
-            expect(Money.format(-1000)).toBe('-1,000');
+            expect(Money.format(-1000)).toBe('-1,000.00');
         });
     });
 
     describe('formatCurrency', () => {
         it('should format with UGX symbol by default', () => {
-            expect(Money.formatCurrency(1500)).toBe('UGX 1,500');
+            expect(Money.formatCurrency(1500)).toBe('UGX 1,500.00');
         });
 
         it('should format with specified currency', () => {
@@ -289,8 +290,14 @@ describe('Money Utility', () => {
     });
 
     describe('toNumber', () => {
-        it('should return rounded number', () => {
-            expect(Money.toNumber('1234.5678')).toBe(1235); // UGX rounds to 0 places
+        it('preserves digits without re-applying currency rounding', () => {
+            // Callers round explicitly; silent UGX re-round broke VAT extract (640.68 → 641).
+            expect(Money.toNumber('1234.5678')).toBe(1234.5678);
+            expect(Money.toNumber(Money.round(640.68, 2))).toBe(640.68);
+        });
+
+        it('currency rounding remains via Money.round (UGX default 2 places)', () => {
+            expect(Money.round(1234.5678).toNumber()).toBe(1234.57);
         });
     });
 
@@ -309,7 +316,7 @@ describe('Money Utility', () => {
         });
 
         it('should round to currency precision', () => {
-            expect(Money.lineTotal(3, 1234.56).toNumber()).toBe(3704); // 3703.68 → 3704 for UGX
+            expect(Money.lineTotal(3, 1234.56).toNumber()).toBe(3703.68);
         });
     });
 

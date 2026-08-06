@@ -123,6 +123,43 @@ assert(
   'A-phases-e2e-evidence',
   e2e.code === 0 ? '24 executable pipeline cases' : e2e.out.slice(-400),
 );
+
+const priceMode = run(
+  'node',
+  [
+    '--experimental-vm-modules',
+    './node_modules/jest/bin/jest.js',
+    'src/services/documentTaxPriceModeIntegrity.evidence.test.ts',
+    '--no-coverage',
+  ],
+  serverRoot,
+);
+assert(
+  priceMode.code === 0,
+  'A-PM-price-mode-integrity',
+  priceMode.code === 0
+    ? 'exclusive/inclusive contract + SALE-2026-0179 seal'
+    : priceMode.out.slice(-600),
+);
+
+const productVat = run(
+  'node',
+  [
+    '--experimental-vm-modules',
+    './node_modules/jest/bin/jest.js',
+    'src/services/documentTaxProductVatUntick.evidence.test.ts',
+    'src/services/documentTaxService.test.ts',
+    '--no-coverage',
+  ],
+  serverRoot,
+);
+assert(
+  productVat.code === 0,
+  'A-PV-product-vat-untick-integrity',
+  productVat.code === 0
+    ? 'is_taxable=false beats mapping on retail computeForLines'
+    : productVat.out.slice(-600),
+);
 gateVerdict.A = fail === 0 ? 'PASS' : 'FAIL';
 const failAfterA = fail;
 
@@ -186,25 +223,13 @@ gateVerdict.D = 'SKIP';
 // ── Gate E governance ─────────────────────────────────────────
 lines.push('\n## Gate E — Governance\n');
 const ver = readFileSync(resolve(serverRoot, 'src/constants/schemaVersion.ts'), 'utf8');
-assert(/CURRENT_SCHEMA_VERSION\s*=\s*584/.test(ver), 'E-schema-version-584');
+assert(/CURRENT_SCHEMA_VERSION\s*=\s*58[4-9]/.test(ver), 'E-schema-version-584plus');
 assert(
   existsSync(resolve(repoRoot, 'shared/sql/584_sale_items_tax_persistence.sql')),
   'E-migration-584-file',
 );
-gateVerdict.E = fail === failAfterA || fail === 0 || gateVerdict.A === 'PASS'
-  ? fail > failAfterA && !CERT_STRICT
-    ? gateVerdict.B
-    : fail === failAfterA || (gateVerdict.B !== 'FAIL' && gateVerdict.A === 'PASS')
-      ? pass > 0 && fail === 0
-        ? 'PASS'
-        : fail === 0
-          ? 'PASS'
-          : 'FAIL'
-      : 'FAIL'
-  : 'FAIL';
-// Simplify E: pass if schema asserts ok (don't double-count live fails into E wording)
 gateVerdict.E =
-  /CURRENT_SCHEMA_VERSION\s*=\s*584/.test(ver) &&
+  /CURRENT_SCHEMA_VERSION\s*=\s*58[4-9]/.test(ver) &&
   existsSync(resolve(repoRoot, 'shared/sql/584_sale_items_tax_persistence.sql'))
     ? 'PASS'
     : 'FAIL';

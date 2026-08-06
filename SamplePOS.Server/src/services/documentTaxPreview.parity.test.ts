@@ -101,12 +101,13 @@ describe('shared ↔ server tax compute parity', () => {
     expect(r.totalTax).toBe(0);
   });
 
-  it('taxInclusive disables added exclusive tax on retail path', () => {
+  it('taxInclusive extracts VAT and keeps total at shelf price', () => {
     const r = previewDocumentTax(
       [{ lineNetAmount: 100_000, isTaxable: true, taxRate: 18 }],
       { taxInclusive: true, applyTenantDefaultWhenUnresolved: false },
     );
-    expect(r.totalTax).toBe(0);
+    expect(r.totalTax).toBeGreaterThan(0);
+    expect(r.totalAmount).toBe(100_000);
   });
 });
 

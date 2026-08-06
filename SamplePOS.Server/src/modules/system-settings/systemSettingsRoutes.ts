@@ -21,6 +21,9 @@ router.get('/tax', requirePermission('system.read'), systemSettingsController.ge
 // Authenticated POS/cashiers need autoPrint without system.read (same class as invoice settings GET).
 router.get('/printing/receipt', systemSettingsController.getReceiptPrintConfig);
 
+// POST /api/system-settings/printing/receipt-qr — verification QR image for thermal HTML
+router.post('/printing/receipt-qr', systemSettingsController.generateReceiptQr);
+
 // GET /api/system-settings/printing/invoice - Get invoice print config
 router.get('/printing/invoice', requirePermission('system.read'), systemSettingsController.getInvoicePrintConfig);
 

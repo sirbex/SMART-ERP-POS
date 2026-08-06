@@ -1,7 +1,7 @@
 # DocumentTax — Production Certification (LIVE PostgreSQL)
 
-Run: 2026-08-02T20:31:07.276Z
-Database: postgresql://postgres:***@localhost:5432/pos_system
+Run: 2026-08-06T21:36:34.296Z
+Database: postgresql://postgres:***@localhost:5432/pos_system?schema=public
 
 
 ## Gate B — Live schema & fixtures
@@ -19,7 +19,7 @@ Database: postgresql://postgres:***@localhost:5432/pos_system
 
 ## Gate B — createSale persist + GL
 
-- **PASS** B-createSale — saleId=d8b33dfb-d6eb-4081-b30f-d1749efb0285 number=SALE-2026-0165
+- **PASS** B-createSale — saleId=4b9be91a-31a2-4979-9148-7641be8e4a53 number=SALE-2026-0201
 - **PASS** B-sale-header-tax — 7200
 - **PASS** B-sale-items-count — 1
 - **PASS** B-sale-item-tax-amount — 7200
@@ -30,7 +30,7 @@ Database: postgresql://postgres:***@localhost:5432/pos_system
 
 ## Gate C — Invoice copy + remittance
 
-- **PASS** C-createInvoice — 221b0ed9-228c-404e-a681-c39311b864e8
+- **PASS** C-createInvoice — 28dd78c5-35a6-46bd-99d9-38ed35857eb7
 - **PASS** C-invoice-lines-copied
 - **PASS** C-invoice-line-tax — 7200
 - **PASS** C-remittance-no-double-count — reportRows=2
@@ -43,7 +43,30 @@ Database: postgresql://postgres:***@localhost:5432/pos_system
 ## Gate C — Credit note DocumentTax line tax
 
 - **PASS** C-credit-note-line-tax — got 3600 expected 3600
-- **PASS** C-credit-note-created — dfd6682f-4059-4c22-aef5-9c5c08af849a
+- **PASS** C-credit-note-created — 57e68e05-8661-487c-8207-04fdf2a0c78c
+
+## Gate B-I — Inclusive price mode (extract VAT, charge = shelf)
+
+- **PASS** B-I-settings-inclusive — true
+- **PASS** B-I-not-DISABLED — BRIDGE
+- **PASS** B-I-extracted-tax — got 3050.85 expected ~3050.85
+- **PASS** B-I-charge-equals-shelf — got 20000 shelf 20000
+- **PASS** B-I-createSale — saleId=a0198477-1717-4ba4-a9d6-e774ca408e55 number=SALE-2026-0202
+- **PASS** B-I-sale-header-tax — 3050.85
+- **PASS** B-I-sale-total-equals-shelf — 20000
+- **PASS** B-I-line-not-DISABLED — BRIDGE
+- **PASS** B-I-line-tax-amount — 3050.85
+- **PASS** B-I-gl-cr-2300 — 3050.85
+
+## Gate B-U — Product VAT untick (is_taxable=false → tax 0 on retail)
+
+- **PASS** B-U-determination-NONE — NONE
+- **PASS** B-U-tax-zero — 0
+- **PASS** B-U-createSale — saleId=1599b313-01a6-4037-a488-ce367fc38d42
+- **PASS** B-U-sale-header-tax-zero — 0
+- **PASS** B-U-sale-total-shell — 20000
+- **PASS** B-U-line-tax-zero — 0
+- **PASS** B-U-line-determination-NONE — NONE
 
 ## Deferred / out of scope this run
 
@@ -56,7 +79,7 @@ Database: postgresql://postgres:***@localhost:5432/pos_system
 
 ## Summary
 
-PASS: 24  FAIL: 0  SKIP: 5
+PASS: 41  FAIL: 0  SKIP: 5
 
 **Verdict:** CERTIFIED (live mutation lane)
 

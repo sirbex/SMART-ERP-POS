@@ -42,9 +42,13 @@ export type ThermalTicket = {
   discountAmount?: number | null;
   taxAmount?: number | null;
   taxName?: string | null;
+  /** Detailed tax rows (rate breakdown); when set, preferred over single taxAmount line */
+  taxRows?: Array<{ label: string; amount: number }> | null;
   totalAmount?: number | null;
   currencySymbol?: string | null;
   paymentRows?: Array<{ label: string; value: string }> | null;
   customNote?: string | null;
   footerLines?: string[];
+  /** ESC/POS model QR content (SPOS verification payload) */
+  qrPayload?: string | null;
 };

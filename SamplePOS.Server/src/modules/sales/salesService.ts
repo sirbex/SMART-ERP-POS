@@ -66,7 +66,7 @@ import { warehouseSaleVoidRestoreService } from '../inventory/warehouse/warehous
 import { allocateNextMovementNumber } from '../../utils/documentNumberAllocation.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 import {
-  assertSaleHeaderMatchesCalculatedTotal,
+  resolveSaleHeaderTotal,
   deriveUnitPriceFromLineTotal,
 } from './saleIntegrity.js';
 import {
@@ -1067,6 +1067,7 @@ export const salesService = {
       logger.info('DocumentTaxService createSale tax', {
         clientTax: input.taxAmount,
         serverTax: taxAmount.toFixed(2),
+        taxInclusive: taxDoc.taxInclusive,
         customerExempt: taxDoc.customerExempt,
         taxOverrideApplied: taxDoc.taxOverrideApplied,
         applyTenantDefaultWhenUnresolved,
@@ -1078,9 +1079,58 @@ export const salesService = {
         calculated_totalAmount_from_items: totalAmount.toFixed(2),
       });
 
-      const calculatedTotal = totalAmount.minus(discountAmount).plus(taxAmount);
-      assertSaleHeaderMatchesCalculatedTotal(input.totalAmount, calculatedTotal);
-      const finalTotalAmount = calculatedTotal;
+      // Inclusive: charge = priced lines − cart discount (VAT already in shelf).
+      // Exclusive: charge = lines − discount + tax.
+      // Client exclusive-add trap (4200 + 640.68 → 4840.68) is coerced under inclusive.
+      const pricedAfterDiscount = totalAmount.minus(discountAmount);
+      const headerRes = resolveSaleHeaderTotal({
+        providedTotal: input.totalAmount,
+        pricedLinesAfterDiscount: pricedAfterDiscount,
+        taxAmount,
+        taxInclusive: taxDoc.taxInclusive === true,
+      });
+      if (
+        headerRes.coercedFromExclusiveTrap ||
+        (taxDoc.taxInclusive === true &&
+          headerRes.clientTotal != null &&
+          new Decimal(headerRes.clientTotal).minus(headerRes.finalTotal).abs().greaterThan(0.02))
+      ) {
+        logger.warn('DocumentTax: coerced client total under tax_inclusive', {
+          clientTotal: headerRes.clientTotal,
+          serverCharge: headerRes.finalTotal.toFixed(2),
+          taxAmount: taxAmount.toFixed(2),
+          exclusiveAddTrap: headerRes.coercedFromExclusiveTrap,
+        });
+      }
+      const finalTotalAmount = headerRes.finalTotal;
+
+      // If client paid exclusive trap (sub+tax) under inclusive, clamp cash lines to shelf
+      // so cash.received / change is not inflated by extracted VAT.
+      if (
+        taxDoc.taxInclusive === true &&
+        input.paymentLines &&
+        input.paymentLines.length > 0
+      ) {
+        const exclusiveTrapAmt = Money.toNumber(pricedAfterDiscount.plus(taxAmount));
+        const shelfAmt = Money.toNumber(finalTotalAmount);
+        const paySum = input.paymentLines.reduce(
+          (s, l) => s.plus(new Decimal(l.amount)),
+          new Decimal(0),
+        );
+        if (
+          paySum.minus(exclusiveTrapAmt).abs().lessThanOrEqualTo(0.02) &&
+          new Decimal(shelfAmt).minus(exclusiveTrapAmt).abs().greaterThan(0.02)
+        ) {
+          const cashLine = input.paymentLines.find((l) => l.paymentMethod === 'CASH');
+          if (cashLine && input.paymentLines.length === 1) {
+            cashLine.amount = shelfAmt;
+            logger.warn('DocumentTax: clamped cash payment from exclusive trap to shelf', {
+              was: exclusiveTrapAmt,
+              now: shelfAmt,
+            });
+          }
+        }
+      }
 
       if (input.exchangeRefundId) {
         if (discountAmount.lessThanOrEqualTo(0)) {

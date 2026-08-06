@@ -469,6 +469,231 @@ async function main() {
     skipped('C-credit-note', 'no invoice');
   }
 
+  // ── Inclusive price-mode lane (SALE-2026-0179 class regression) ──────────
+  log('\n## Gate B-I — Inclusive price mode (extract VAT, charge = shelf)\n');
+  await pool.query(
+    `UPDATE system_settings
+     SET tax_enabled = true, tax_inclusive = true, default_tax_rate = 18`,
+  );
+  // product already taxable@18 from exclusive lane setup
+  const inclQty = 1;
+  const inclShelf = Number(new Decimal(unitPrice).times(inclQty).toFixed(2));
+  const inclBase = Number(new Decimal(inclShelf).div(1.18).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
+  const inclTax = Number(new Decimal(inclShelf).minus(inclBase).toFixed(2));
+
+  const taxDocIncl = await DocumentTaxService.computeForLines(pool, {
+    scope: 'SALE',
+    applyTenantDefaultWhenUnresolved: false,
+    lines: [
+      {
+        lineIndex: 0,
+        productId: productSnap.id,
+        lineNetAmount: inclShelf,
+        quantity: inclQty,
+        isTaxable: false,
+        taxRate: 0,
+      },
+    ],
+  });
+  assert(
+    taxDocIncl.taxInclusive === true,
+    'B-I-settings-inclusive',
+    String(taxDocIncl.taxInclusive),
+  );
+  assert(
+    taxDocIncl.lineResults[0]?.determination !== 'DISABLED',
+    'B-I-not-DISABLED',
+    String(taxDocIncl.lineResults[0]?.determination),
+  );
+  assert(
+    Math.abs(taxDocIncl.documentTotals.totalTax - inclTax) < 0.02,
+    'B-I-extracted-tax',
+    `got ${taxDocIncl.documentTotals.totalTax} expected ~${inclTax}`,
+  );
+  assert(
+    Math.abs(taxDocIncl.documentTotals.totalAmount - inclShelf) < 0.02,
+    'B-I-charge-equals-shelf',
+    `got ${taxDocIncl.documentTotals.totalAmount} shelf ${inclShelf}`,
+  );
+
+  let inclSaleId: string | null = null;
+  try {
+    const createdIncl = await salesService.createSale(pool, {
+      items: [
+        {
+          productId: productSnap.id,
+          productName: productSnap.name,
+          quantity: inclQty,
+          unitPrice,
+          discountAmount: 0,
+          isTaxable: false,
+          taxRate: 0,
+        },
+      ],
+      subtotal: inclShelf,
+      discountAmount: 0,
+      taxAmount: 0,
+      totalAmount: inclShelf, // inclusive: client must not inflate total
+      paymentMethod: 'CASH',
+      paymentReceived: inclShelf,
+      soldBy: soldBy!,
+      idempotencyKey: `doc-tax-cert-incl-${Date.now()}`,
+    });
+    inclSaleId = createdIncl.sale.id;
+    ok('B-I-createSale', `saleId=${inclSaleId} number=${createdIncl.sale.saleNumber}`);
+  } catch (e) {
+    bad('B-I-createSale', e instanceof Error ? e.message : String(e));
+  }
+
+  if (inclSaleId) {
+    const inclRow = await pool.query(
+      `SELECT tax_amount::float8 AS tax_amount, total_amount::float8 AS total_amount
+       FROM sales WHERE id = $1::uuid`,
+      [inclSaleId],
+    );
+    const ir = inclRow.rows[0];
+    assert(
+      Math.abs(Number(ir.tax_amount) - inclTax) < 0.02,
+      'B-I-sale-header-tax',
+      String(ir.tax_amount),
+    );
+    assert(
+      Math.abs(Number(ir.total_amount) - inclShelf) < 0.02,
+      'B-I-sale-total-equals-shelf',
+      String(ir.total_amount),
+    );
+    const inclItems = await pool.query(
+      `SELECT tax_amount::float8 AS tax_amount, tax_determination
+       FROM sale_items WHERE sale_id = $1::uuid`,
+      [inclSaleId],
+    );
+    const ili = inclItems.rows[0];
+    assert(
+      ili?.tax_determination !== 'DISABLED',
+      'B-I-line-not-DISABLED',
+      String(ili?.tax_determination),
+    );
+    assert(
+      Math.abs(Number(ili?.tax_amount) - inclTax) < 0.02,
+      'B-I-line-tax-amount',
+      String(ili?.tax_amount),
+    );
+
+    const glIncl = await pool.query(
+      `SELECT COALESCE(SUM(le."CreditAmount"),0)::float8 AS credit
+       FROM ledger_transactions lt
+       JOIN ledger_entries le ON le."TransactionId" = lt."Id"
+       JOIN accounts a ON a."Id" = le."AccountId"
+       WHERE lt."ReferenceType" = 'SALE'
+         AND lt."ReferenceId"::text = $1
+         AND a."AccountCode" = '2300'`,
+      [inclSaleId],
+    );
+    assert(
+      Math.abs(Number(glIncl.rows[0].credit) - inclTax) < 0.02,
+      'B-I-gl-cr-2300',
+      String(glIncl.rows[0].credit),
+    );
+  }
+
+  // ── Product VAT untick (operator liability SSOT) ─────────────────────────
+  log('\n## Gate B-U — Product VAT untick (is_taxable=false → tax 0 on retail)\n');
+  await pool.query(
+    `UPDATE system_settings
+     SET tax_enabled = true, tax_inclusive = false, default_tax_rate = 18`,
+  );
+  await pool.query(
+    `UPDATE products SET is_taxable = false, tax_rate = 18 WHERE id = $1::uuid`,
+    [productSnap.id],
+  );
+  // Leave any enterprise mappings in place — they must NOT resurrect tax.
+  const untickTax = await DocumentTaxService.computeForLines(pool, {
+    scope: 'SALE',
+    applyTenantDefaultWhenUnresolved: false,
+    lines: [
+      {
+        lineIndex: 0,
+        productId: productSnap.id,
+        lineNetAmount: unitPrice,
+        quantity: 1,
+        isTaxable: true, // client cart still claims liable
+        taxRate: 18,
+      },
+    ],
+  });
+  assert(
+    untickTax.lineResults[0]?.determination === 'NONE',
+    'B-U-determination-NONE',
+    String(untickTax.lineResults[0]?.determination),
+  );
+  assert(
+    Number(untickTax.documentTotals.totalTax) === 0,
+    'B-U-tax-zero',
+    String(untickTax.documentTotals.totalTax),
+  );
+
+  let untickSaleId: string | null = null;
+  try {
+    const createdUntick = await salesService.createSale(pool, {
+      items: [
+        {
+          productId: productSnap.id,
+          productName: productSnap.name,
+          quantity: 1,
+          unitPrice,
+          discountAmount: 0,
+          isTaxable: true,
+          taxRate: 18,
+        },
+      ],
+      subtotal: unitPrice,
+      discountAmount: 0,
+      taxAmount: 756, // wrong client exclusive preview — server must zero
+      totalAmount: unitPrice,
+      paymentMethod: 'CASH',
+      paymentReceived: unitPrice,
+      soldBy: soldBy!,
+      idempotencyKey: `doc-tax-cert-untick-${Date.now()}`,
+    });
+    untickSaleId = createdUntick.sale.id;
+    ok('B-U-createSale', `saleId=${untickSaleId}`);
+  } catch (e) {
+    bad('B-U-createSale', e instanceof Error ? e.message : String(e));
+  }
+
+  if (untickSaleId) {
+    const uRow = await pool.query(
+      `SELECT tax_amount::float8 AS tax_amount, total_amount::float8 AS total_amount
+       FROM sales WHERE id = $1::uuid`,
+      [untickSaleId],
+    );
+    assert(
+      Number(uRow.rows[0].tax_amount) === 0,
+      'B-U-sale-header-tax-zero',
+      String(uRow.rows[0].tax_amount),
+    );
+    assert(
+      Math.abs(Number(uRow.rows[0].total_amount) - unitPrice) < 0.02,
+      'B-U-sale-total-shell',
+      String(uRow.rows[0].total_amount),
+    );
+    const uItems = await pool.query(
+      `SELECT tax_amount::float8 AS tax_amount, tax_determination, is_taxable
+       FROM sale_items WHERE sale_id = $1::uuid`,
+      [untickSaleId],
+    );
+    assert(
+      Number(uItems.rows[0]?.tax_amount) === 0,
+      'B-U-line-tax-zero',
+      String(uItems.rows[0]?.tax_amount),
+    );
+    assert(
+      uItems.rows[0]?.tax_determination === 'NONE',
+      'B-U-line-determination-NONE',
+      String(uItems.rows[0]?.tax_determination),
+    );
+  }
+
   log('\n## Deferred / out of scope this run\n');
   skipped('D-restaurant-order', 'HTTP FOH settle lane — use proof:order-complete-soak:live');
   skipped('D-quotation-convert', 'use proof:quotation-invoice-pdf:live');

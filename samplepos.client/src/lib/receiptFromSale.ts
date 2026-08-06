@@ -41,6 +41,14 @@ export interface SaleItemForReceipt {
   discountAmount?: number | string;
   discount_amount?: number | string;
   uom?: string;
+  taxAmount?: number | string;
+  tax_amount?: number | string;
+  taxRate?: number | string;
+  tax_rate?: number | string;
+  isTaxable?: boolean;
+  is_taxable?: boolean;
+  taxName?: string;
+  tax_name?: string;
 }
 
 export interface PaymentLineForReceipt {
@@ -102,6 +110,10 @@ export interface CheckoutReceiptInput {
     subtotal: number;
     uom?: string;
     discountAmount?: number;
+    taxAmount?: number;
+    taxRate?: number;
+    isTaxable?: boolean;
+    taxName?: string;
   }>;
   payments?: ReceiptData['payments'];
   paymentMethod?: string;
@@ -340,6 +352,10 @@ export function buildReceiptDataFromSale(
       uom: item.uom,
       discountAmount:
         parseFloat(String(item.discountAmount || item.discount_amount || 0)) || undefined,
+      taxAmount: pickNumber(item.taxAmount, item.tax_amount),
+      taxRate: pickNumber(item.taxRate, item.tax_rate),
+      isTaxable: item.isTaxable === true || item.is_taxable === true,
+      taxName: pickString(item.taxName, item.tax_name),
     })),
     payments: sale.paymentLines?.map((pl) => ({
       method: pl.paymentMethod || pl.payment_method || 'CASH',
@@ -374,6 +390,10 @@ export function buildReceiptDataFromCheckout(input: CheckoutReceiptInput): Recei
         totalPrice: item.subtotal,
         uom: item.uom,
         discountAmount: item.discountAmount,
+        taxAmount: item.taxAmount,
+        taxRate: item.taxRate,
+        isTaxable: item.isTaxable,
+        taxName: item.taxName,
       })),
       paymentLines: input.payments?.map((p) => ({
         paymentMethod: p.method,

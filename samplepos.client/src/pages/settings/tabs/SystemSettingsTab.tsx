@@ -648,21 +648,38 @@ function TaxSettings({
                                     required
                                 />
                             </div>
-
-                            <div className="flex items-center">
-                                <input
-                                    type="checkbox"
-                                    id="taxInclusive"
-                                    checked={formData.taxInclusive}
-                                    onChange={(e) => setFormData({ ...formData, taxInclusive: e.target.checked })}
-                                    className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                />
-                                <label htmlFor="taxInclusive" className="ml-2 block text-sm text-gray-900">
-                                    Tax Inclusive Pricing (prices displayed include tax)
-                                </label>
-                            </div>
                         </>
                     )}
+
+                    {/* Price-mode SSOT — independent of restaurant tax master; retail product VAT uses it too. */}
+                    <div className="flex items-start rounded-md border border-gray-200 bg-gray-50 px-3 py-3">
+                        <input
+                            type="checkbox"
+                            id="taxInclusive"
+                            checked={formData.taxInclusive}
+                            onChange={(e) => setFormData({ ...formData, taxInclusive: e.target.checked })}
+                            className="mt-0.5 h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                        />
+                        <div className="ml-2">
+                            <label htmlFor="taxInclusive" className="block text-sm font-medium text-gray-900">
+                                Tax inclusive with price
+                            </label>
+                            <p className="mt-0.5 text-xs text-gray-600">
+                                Tenant price-mode SSOT. Mark each product VAT liable (or map in Tax Engine);
+                                POS posts tax from that + this flag only.
+                            </p>
+                            <ul className="mt-1.5 text-xs text-gray-600 list-disc list-inside space-y-0.5">
+                                <li>
+                                    <strong>Unticked (exclusive):</strong> selling price is net — add output
+                                    VAT on top when the product is liable.
+                                </li>
+                                <li>
+                                    <strong>Ticked (inclusive):</strong> selling price already includes VAT —
+                                    extract for receipt/GL; charge stays the shelf total.
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
                 </div>
             </div>
 
