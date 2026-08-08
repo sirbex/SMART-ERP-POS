@@ -1,11 +1,11 @@
 /**
- * Tax Compliance Reports — SAP / Odoo / QB / Tally style period packages.
+ * Tax Compliance Reports — period VAT + WHT package for operators.
  *
  * HTTP surface: GET /api/reports/tax-compliance/{summary|register|liability}
  * (Reports module). This file is the accounting SSOT for calculations.
  *
  * Tabs:
- *   Summary   — VAT boxes (output/input) + WHT payable/receivable closing
+ *   Summary   — VAT output/input + WHT payable/receivable closing
  *   Register  — WHT certificate register (payment withholding)
  *   Liability — Opening / accrued / settled / closing for 2350, 1250, 2300
  */
@@ -56,7 +56,8 @@ export interface TaxComplianceSummary {
     recoveredInPeriod: number;
   };
   standards: {
-    model: 'SAP_TAX_RETURN_STYLE';
+    /** Stable API label for client; not shown as vendor branding. */
+    model: 'DOCUMENT_TAX_SSOT';
     notes: string[];
   };
 }
@@ -220,12 +221,12 @@ export async function getTaxComplianceSummary(
       recoveredInPeriod: receivablePeriod.settled,
     },
     standards: {
-      model: 'SAP_TAX_RETURN_STYLE',
+      model: 'DOCUMENT_TAX_SSOT',
       notes: [
-        'VAT boxes from document tax (invoices / CN / SCN + POS sale_items DocumentTax lines) — SAP tax return style.',
-        'WHT payable/receivable from control accounts 2350 / 1250 (Odoo / Tally withholding ledgers).',
-        'Net VAT payable = net output − net input (QuickBooks Sales Tax style).',
-        'Product VAT uses tax_definitions; payment WHT uses withholding_tax_types (no dual posting).',
+        'VAT comes from tax already recorded on documents (invoices, credit notes, supplier credits, and POS sales) — not from a separate tax spreadsheet.',
+        'Withholding to pay or recover is the balance on the WHT control accounts (payable 2350, recoverable 1250).',
+        'Net VAT due for the period is tax on sales minus tax on purchases (after credit notes / reverse charges).',
+        'Product VAT and payment withholding are separate catalogs and postings, so the same amount is never taxed twice.',
       ],
     },
   };

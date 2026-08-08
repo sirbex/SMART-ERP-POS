@@ -295,7 +295,7 @@ export default function TaxComplianceReportsPage() {
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700 space-y-1">
               <div className="flex items-center gap-2 font-medium text-slate-900">
                 <ShieldCheck className="h-4 w-4 text-emerald-600" />
-                Standards alignment
+                How this report is calculated
               </div>
               {summary.standards.notes.map((n) => (
                 <p key={n}>• {n}</p>
