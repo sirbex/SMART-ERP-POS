@@ -19,6 +19,7 @@ const mockUpdate = jest.fn<MockFn>();
 const mockHasActivePurchaseOrders = jest.fn<MockFn>();
 const mockSoftDeleteSupplier = jest.fn<MockFn>();
 const mockGetTotalOutstanding = jest.fn<MockFn>();
+const mockGetUnpaidOpenInvoiceSummary = jest.fn<MockFn>();
 
 jest.unstable_mockModule('./supplierRepository.js', () => ({
     findAll: mockFindAll,
@@ -31,12 +32,17 @@ jest.unstable_mockModule('./supplierRepository.js', () => ({
     hasActivePurchaseOrders: mockHasActivePurchaseOrders,
     softDeleteSupplier: mockSoftDeleteSupplier,
     getTotalOutstanding: mockGetTotalOutstanding,
+    getUnpaidOpenInvoiceSummary: mockGetUnpaidOpenInvoiceSummary,
 }));
 
 jest.unstable_mockModule('../../db/unitOfWork.js', () => ({
     UnitOfWork: {
         run: jest.fn(async (_pool: unknown, fn: (client: unknown) => Promise<unknown>) => fn({})),
     },
+}));
+
+jest.unstable_mockModule('../withholding-tax/whtService.js', () => ({
+    assertPartnerDefaultWhtType: jest.fn(async () => undefined),
 }));
 
 // Mock errorHandler so ForbiddenError is available
@@ -51,7 +57,17 @@ jest.unstable_mockModule('../../middleware/errorHandler.js', () => {
             super(403, message);
         }
     }
-    return { AppError, ForbiddenError };
+    class ValidationError extends AppError {
+        constructor(message: string) {
+            super(400, message);
+        }
+    }
+    class NotFoundError extends AppError {
+        constructor(resource: string) {
+            super(404, `${resource} not found`);
+        }
+    }
+    return { AppError, ForbiddenError, ValidationError, NotFoundError };
 });
 
 const supplierService = await import('./supplierService.js');
@@ -143,12 +159,14 @@ describe('supplierService', () => {
     });
 
     describe('deleteSupplier', () => {
-        it('should delete supplier when no active POs', async () => {
+        it('should deactivate supplier when no active POs and no unpaid invoices', async () => {
             mockFindById.mockResolvedValue({ id: 's1', name: 'Acme' });
+            mockGetUnpaidOpenInvoiceSummary.mockResolvedValue({ count: 0, outstandingTotal: 0 });
             mockHasActivePurchaseOrders.mockResolvedValue(false);
-            mockSoftDeleteSupplier.mockResolvedValue(undefined);
+            mockSoftDeleteSupplier.mockResolvedValue(true);
 
             await expect(supplierService.deleteSupplier(mockPool, 's1')).resolves.not.toThrow();
+            expect(mockSoftDeleteSupplier).toHaveBeenCalled();
         });
     });
 
@@ -222,10 +240,21 @@ describe('supplierService', () => {
             expect(mockSoftDeleteSupplier).not.toHaveBeenCalled();
         });
 
-        it('should allow deleting a normal supplier', async () => {
-            mockFindById.mockResolvedValue({ id: 's1', SupplierCode: 'SUP-2025-0001' });
+        it('should block deactivation when unpaid invoices remain', async () => {
+            mockFindById.mockResolvedValue({ id: 's1', name: 'Kikuubo', SupplierCode: 'SUP-1' });
+            mockGetUnpaidOpenInvoiceSummary.mockResolvedValue({ count: 1, outstandingTotal: 480000 });
+
+            await expect(supplierService.deleteSupplier(mockPool, 's1')).rejects.toThrow(
+                /unpaid invoices/,
+            );
+            expect(mockSoftDeleteSupplier).not.toHaveBeenCalled();
+        });
+
+        it('should allow deactivating a normal supplier with no unpaid invoices', async () => {
+            mockFindById.mockResolvedValue({ id: 's1', name: 'Acme', SupplierCode: 'SUP-2025-0001' });
+            mockGetUnpaidOpenInvoiceSummary.mockResolvedValue({ count: 0, outstandingTotal: 0 });
             mockHasActivePurchaseOrders.mockResolvedValue(false);
-            mockSoftDeleteSupplier.mockResolvedValue(undefined);
+            mockSoftDeleteSupplier.mockResolvedValue(true);
 
             await expect(supplierService.deleteSupplier(mockPool, 's1')).resolves.not.toThrow();
             expect(mockSoftDeleteSupplier).toHaveBeenCalled();

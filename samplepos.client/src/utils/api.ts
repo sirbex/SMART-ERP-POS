@@ -465,6 +465,7 @@ export const api = {
     update: (id: string, data: UpdateSupplierInput) =>
       apiClient.put<ApiResponse>(`suppliers/${id}`, data),
     delete: (id: string) => apiClient.delete<ApiResponse>(`suppliers/${id}`),
+    reactivate: (id: string) => apiClient.post<ApiResponse>(`suppliers/${id}/reactivate`),
     getPerformance: (id: string) => apiClient.get<ApiResponse>(`suppliers/${id}/performance`),
     getOrders: (id: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`suppliers/${id}/orders`, { params }),

@@ -8,6 +8,7 @@ import {
   useCreateSupplier,
   useUpdateSupplier,
   useDeleteSupplier,
+  useReactivateSupplier,
 } from '../hooks/useSuppliers';
 import { supplierInvoiceService } from '../services/comprehensive-accounting';
 import { formatCurrency } from '../utils/currency';
@@ -282,6 +283,8 @@ export default function SuppliersPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('table');
   const [filterPaymentTerms, setFilterPaymentTerms] = useState<string>('');
+  /** active (default) | inactive | all */
+  const [filterStatus, setFilterStatus] = useState<'active' | 'inactive' | 'all'>('active');
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [page, setPage] = useState(1);
   const limit = 20;
@@ -321,11 +324,13 @@ export default function SuppliersPage() {
     limit,
     search: debouncedSearch || undefined,
     paymentTerms: filterPaymentTerms || undefined,
+    status: filterStatus,
     ...serverListParams,
   });
   const createMutation = useCreateSupplier();
   const updateMutation = useUpdateSupplier();
   const deleteMutation = useDeleteSupplier();
+  const reactivateMutation = useReactivateSupplier();
 
   const suppliers = useMemo(() => {
     if (!suppliersData) return [];
@@ -341,10 +346,10 @@ export default function SuppliersPage() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Reset to page 1 whenever debounced search changes so results are always from page 1
+  // Reset to page 1 whenever debounced search / status filter changes
   useEffect(() => {
     setPage(1);
-  }, [debouncedSearch]);
+  }, [debouncedSearch, filterStatus, filterPaymentTerms]);
 
   // Fetch invoice summary on mount
   useEffect(() => {
@@ -359,8 +364,8 @@ export default function SuppliersPage() {
   // Calculate statistics — use API-level aggregates to avoid pagination skewing totals
   const stats = useMemo(() => {
     const total = listPagination?.total ?? suppliers.length;
-    const active = listPagination?.total ?? suppliers.filter((s: Supplier) => s.isActive).length;
-    return { total, active };
+    const activeOnPage = suppliers.filter((s: Supplier) => s.isActive !== false).length;
+    return { total, active: activeOnPage };
   }, [suppliers, listPagination]);
 
   // Currency formatter for summary cards — uses shared formatCurrency
@@ -429,14 +434,33 @@ export default function SuppliersPage() {
     }
   };
 
-  // Handle delete supplier
-  const handleDelete = async (id: string, name: string) => {
-    if (!confirm(`Delete supplier "${name}"? This action cannot be undone.`)) return;
+  // Deactivate (soft delete) — blocked by server if unpaid invoices
+  const handleDeactivate = async (id: string, name: string) => {
+    if (
+      !confirm(
+        `Deactivate supplier "${name}"?\n\nThey will be hidden from the default list. ` +
+          `If there are unpaid invoices, deactivation will be blocked.`,
+      )
+    ) {
+      return;
+    }
     try {
       await deleteMutation.mutateAsync(id);
-      alert('Supplier deleted successfully!');
+      alert('Supplier deactivated.');
     } catch (error) {
-      handleApiError(error, { fallback: 'Failed to delete supplier' });
+      handleApiError(error, {
+        fallback: 'Cannot deactivate supplier. Settle unpaid invoices first.',
+      });
+    }
+  };
+
+  const handleActivate = async (id: string, name: string) => {
+    if (!confirm(`Activate supplier "${name}" again?`)) return;
+    try {
+      await reactivateMutation.mutateAsync(id);
+      alert('Supplier activated.');
+    } catch (error) {
+      handleApiError(error, { fallback: 'Failed to activate supplier' });
     }
   };
 
@@ -578,7 +602,7 @@ export default function SuppliersPage() {
         <div className="bg-white rounded-lg border border-gray-200 p-4 mb-6" data-supplier-filters="true">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             {/* Payment Terms Filter */}
-            <div className="lg:col-span-3">
+            <div className="lg:col-span-2">
               <label htmlFor="filter-payment-terms" className="sr-only">
                 Filter by Payment Terms
               </label>
@@ -594,6 +618,25 @@ export default function SuppliersPage() {
                     {term.label}
                   </option>
                 ))}
+              </select>
+            </div>
+
+            {/* Active / Inactive */}
+            <div className="lg:col-span-2">
+              <label htmlFor="filter-status" className="sr-only">
+                Filter by status
+              </label>
+              <select
+                id="filter-status"
+                value={filterStatus}
+                onChange={(e) =>
+                  setFilterStatus(e.target.value as 'active' | 'inactive' | 'all')
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+                <option value="all">All (active + inactive)</option>
               </select>
             </div>
 
@@ -618,7 +661,7 @@ export default function SuppliersPage() {
             </div>
 
             {/* Actions */}
-            <div className="lg:col-span-3 flex gap-2">
+            <div className="lg:col-span-2 flex gap-2">
               <button
                 onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
                 className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
@@ -630,6 +673,7 @@ export default function SuppliersPage() {
                 onClick={() => {
                   setSearchQuery('');
                   setFilterPaymentTerms('');
+                  setFilterStatus('active');
                   clearColumnFilter();
                   setPage(1);
                 }}
@@ -715,8 +759,23 @@ export default function SuppliersPage() {
                       {canUpdateSupplier && (
                         <button onClick={() => setEditingSupplier(supplier)} className="flex-1 text-xs text-blue-600 hover:text-blue-900 font-medium py-1">✏️ Edit</button>
                       )}
-                      {canDeleteSupplier && (
-                        <button onClick={() => handleDelete(supplier.id, supplier.name)} className="flex-1 text-xs text-red-600 hover:text-red-900 font-medium py-1">🗑️ Delete</button>
+                      {supplier.isActive === false && canUpdateSupplier && (
+                        <button
+                          type="button"
+                          onClick={() => handleActivate(supplier.id, supplier.name)}
+                          className="flex-1 text-xs text-emerald-700 hover:text-emerald-900 font-medium py-1"
+                        >
+                          Activate
+                        </button>
+                      )}
+                      {supplier.isActive !== false && canDeleteSupplier && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeactivate(supplier.id, supplier.name)}
+                          className="flex-1 text-xs text-red-600 hover:text-red-900 font-medium py-1"
+                        >
+                          Deactivate
+                        </button>
                       )}
                     </div>
                   </div>
@@ -863,13 +922,24 @@ export default function SuppliersPage() {
                                 ✏️
                               </button>
                             )}
-                            {canDeleteSupplier && (
+                            {supplier.isActive === false && canUpdateSupplier && (
                               <button
-                                onClick={() => handleDelete(supplier.id, supplier.name)}
-                                className="text-red-600 hover:text-red-900"
-                                title="Delete Supplier"
+                                type="button"
+                                onClick={() => handleActivate(supplier.id, supplier.name)}
+                                className="text-emerald-600 hover:text-emerald-800 text-xs font-medium"
+                                title="Activate supplier"
                               >
-                                🗑️
+                                Activate
+                              </button>
+                            )}
+                            {supplier.isActive !== false && canDeleteSupplier && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeactivate(supplier.id, supplier.name)}
+                                className="text-red-600 hover:text-red-900 text-xs font-medium"
+                                title="Deactivate supplier (hidden from default list)"
+                              >
+                                Deactivate
                               </button>
                             )}
                           </div>
@@ -886,7 +956,7 @@ export default function SuppliersPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {suppliers.length === 0 ? (
               <div className="col-span-full bg-white rounded-lg shadow p-8 text-center text-gray-500">
-                {searchQuery || filterPaymentTerms
+                {searchQuery || filterPaymentTerms || filterStatus !== 'active'
                   ? 'No suppliers match your filters'
                   : 'No suppliers yet. Add your first supplier to get started!'}
               </div>
@@ -894,7 +964,9 @@ export default function SuppliersPage() {
               suppliers.map((supplier: Supplier) => (
                 <div
                   key={supplier.id}
-                  className="bg-white rounded-lg shadow hover:shadow-lg transition-shadow p-5"
+                  className={`bg-white rounded-lg shadow hover:shadow-lg transition-shadow p-5 ${
+                    supplier.isActive === false ? 'opacity-90 border border-dashed border-gray-300' : ''
+                  }`}
                 >
                   {/* Card Header */}
                   <div className="flex justify-between items-start mb-3">
@@ -979,12 +1051,23 @@ export default function SuppliersPage() {
                         ✏️ Edit
                       </button>
                     )}
-                    {canDeleteSupplier && (
+                    {supplier.isActive === false && canUpdateSupplier && (
                       <button
-                        onClick={() => handleDelete(supplier.id, supplier.name)}
-                        className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                        type="button"
+                        onClick={() => handleActivate(supplier.id, supplier.name)}
+                        className="px-3 py-2 text-sm bg-emerald-100 text-emerald-800 rounded-lg hover:bg-emerald-200"
                       >
-                        🗑️
+                        Activate
+                      </button>
+                    )}
+                    {supplier.isActive !== false && canDeleteSupplier && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeactivate(supplier.id, supplier.name)}
+                        className="px-3 py-2 text-sm bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+                        title="Deactivate"
+                      >
+                        Deactivate
                       </button>
                     )}
                   </div>

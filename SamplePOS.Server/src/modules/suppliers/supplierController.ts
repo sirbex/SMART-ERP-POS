@@ -41,7 +41,17 @@ const LedgerQuerySchema = z.object({
 export const getSuppliers = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const parsed = PaginationQuerySchema.parse(req.query);
-  const { page, limit, search, sortBy, sortOrder, outstandingOnly, balanceGt, paymentTerms } = parsed;
+  const {
+    page,
+    limit,
+    search,
+    sortBy,
+    sortOrder,
+    outstandingOnly,
+    balanceGt,
+    paymentTerms,
+    status,
+  } = parsed;
 
   const result = await supplierService.getAllSuppliers(pool, page, limit, {
     search,
@@ -50,6 +60,7 @@ export const getSuppliers = asyncHandler(async (req: Request, res: Response) => 
     outstandingOnly,
     balanceGt,
     paymentTerms,
+    status,
   });
 
   res.json({
@@ -127,8 +138,9 @@ export const updateSupplier = asyncHandler(async (req: Request, res: Response) =
 });
 
 /**
- * Delete supplier (soft delete)
+ * Deactivate supplier (soft delete)
  * DELETE /api/suppliers/:id
+ * Blocked when unpaid invoices remain.
  */
 export const deleteSupplier = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
@@ -137,7 +149,23 @@ export const deleteSupplier = asyncHandler(async (req: Request, res: Response) =
 
   res.json({
     success: true,
-    message: 'Supplier deleted successfully',
+    message: 'Supplier deactivated successfully',
+  });
+});
+
+/**
+ * Re-activate an inactive supplier
+ * POST /api/suppliers/:id/reactivate
+ */
+export const reactivateSupplier = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const { id } = UuidParamSchema.parse(req.params);
+  const supplier = await supplierService.reactivateSupplier(pool, id);
+
+  res.json({
+    success: true,
+    data: supplier,
+    message: 'Supplier activated successfully',
   });
 });
 

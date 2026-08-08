@@ -26,8 +26,16 @@ const SUPPLIER_SORT_COLUMNS: Record<string, string> = {
 
 function buildSupplierListClauses(query: SupplierListQuery = {}) {
   const params: unknown[] = [];
-  const conditions: string[] = ['"IsActive" = true'];
+  const conditions: string[] = [];
   let paramIndex = 1;
+
+  const status = query.status ?? 'active';
+  if (status === 'active') {
+    conditions.push('"IsActive" = true');
+  } else if (status === 'inactive') {
+    conditions.push('"IsActive" = false');
+  }
+  // status === 'all' → no IsActive filter
 
   if (query.search?.trim()) {
     params.push(`%${query.search.trim()}%`);
@@ -56,7 +64,7 @@ function buildSupplierListClauses(query: SupplierListQuery = {}) {
   }
 
   return {
-    whereClause: conditions.join(' AND '),
+    whereClause: conditions.length > 0 ? conditions.join(' AND ') : 'TRUE',
     params,
     orderBy,
     nextParamIndex: paramIndex,
@@ -402,7 +410,7 @@ export async function update(
 }
 
 /**
- * Soft delete supplier by setting IsActive to false
+ * Soft delete / deactivate supplier by setting IsActive to false
  */
 export async function softDeleteSupplier(client: PoolClient, id: string): Promise<boolean> {
   const result = await client.query(
@@ -410,6 +418,35 @@ export async function softDeleteSupplier(client: PoolClient, id: string): Promis
     [id]
   );
   return result.rows.length > 0;
+}
+
+/**
+ * Unpaid / open supplier invoices (bills) that still have a balance.
+ * Used to block deactivation while AP remains on books.
+ */
+export async function getUnpaidOpenInvoiceSummary(
+  conn: Pool | PoolClient,
+  supplierId: string,
+): Promise<{ count: number; outstandingTotal: number }> {
+  const result = await conn.query(
+    `SELECT
+       COUNT(*)::int AS count,
+       COALESCE(SUM(COALESCE(si."OutstandingBalance", 0)), 0)::numeric AS outstanding_total
+     FROM supplier_invoices si
+     WHERE si."SupplierId" = $1
+       AND si.deleted_at IS NULL
+       AND COALESCE(si.document_type, 'SUPPLIER_INVOICE') IN (
+         'SUPPLIER_INVOICE', 'INVOICE', 'OPENING_BALANCE', 'BILL'
+       )
+       AND UPPER(si."Status") NOT IN ('PAID', 'CANCELLED', 'DELETED', 'DRAFT', 'VOIDED')
+       AND COALESCE(si."OutstandingBalance", 0) > 0.009`,
+    [supplierId],
+  );
+  const row = result.rows[0];
+  return {
+    count: parseInt(String(row?.count ?? 0), 10),
+    outstandingTotal: parseFloat(String(row?.outstanding_total ?? 0)),
+  };
 }
 
 /**
@@ -434,47 +471,23 @@ export async function recalculateOutstandingBalance(
 }
 
 /**
- * Count all active suppliers
+ * Count suppliers matching the same filters as findAll
  */
 export async function countAll(
   pool: Pool,
   query: SupplierListQuery = {},
-  includeInactive: boolean = false,
 ): Promise<number> {
-  const params: unknown[] = [];
-  const conditions: string[] = [];
-
-  if (!includeInactive) {
-    conditions.push('"IsActive" = true');
-  }
-
-  if (query.search?.trim()) {
-    params.push(`%${query.search.trim()}%`);
-    conditions.push(
-      `("CompanyName" ILIKE $${params.length} OR "ContactName" ILIKE $${params.length} OR "Phone" ILIKE $${params.length} OR "Email" ILIKE $${params.length} OR "SupplierCode" ILIKE $${params.length} OR "TaxId" ILIKE $${params.length})`,
-    );
-  }
-
-  if (query.paymentTerms) {
-    params.push(paymentTermsStringToDays(query.paymentTerms));
-    conditions.push(`"DefaultPaymentTerms" = $${params.length}`);
-  }
-
-  if (query.outstandingOnly || (query.balanceGt != null && query.balanceGt > 0)) {
-    conditions.push(`(${SUPPLIER_OPEN_ITEM_BALANCE_SQL}) > 0.009`);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const { whereClause, params } = buildSupplierListClauses(query);
   const result = await pool.query(
-    `SELECT COUNT(*) as count FROM suppliers ${whereClause}`,
+    `SELECT COUNT(*) as count FROM suppliers WHERE ${whereClause}`,
     params,
   );
   return parseInt(result.rows[0].count, 10);
 }
 
 /**
- * Sum OutstandingBalance across ALL active suppliers (ignores search/pagination).
- * Used for the "Total Outstanding" summary card on SuppliersPage.
+ * Sum open-item AP across all suppliers (active + inactive).
+ * Includes inactive masters so AP cards match books (e.g. soft-deleted with open bills).
  */
 export async function getTotalOutstanding(pool: Pool): Promise<number> {
   const result = await pool.query(
@@ -503,8 +516,7 @@ export async function getTotalOutstanding(pool: Pool): Promise<number> {
          AND sp.deleted_at IS NULL
          AND sp."Status" = 'COMPLETED'
          AND COALESCE(sp."UnallocatedAmount", sp."Amount" - COALESCE(sp."AllocatedAmount", 0)) > 0.009
-     ) pay ON TRUE
-     WHERE s."IsActive" = true`,
+     ) pay ON TRUE`,
   );
   return parseFloat(result.rows[0].total);
 }

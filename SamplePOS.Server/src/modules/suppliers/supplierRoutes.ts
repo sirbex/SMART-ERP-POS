@@ -12,6 +12,7 @@ import {
   createSupplier,
   updateSupplier,
   deleteSupplier,
+  reactivateSupplier,
   getSupplierPerformance,
   getSupplierOrders,
   getSupplierProducts,
@@ -35,6 +36,7 @@ router.get('/:id/smart-statement', authenticate, requirePermission('suppliers.re
 // Modify routes - requires supplier permissions
 router.post('/', authenticate, requirePermission('suppliers.create'), createSupplier);
 router.put('/:id', authenticate, requirePermission('suppliers.update'), updateSupplier);
+router.post('/:id/reactivate', authenticate, requirePermission('suppliers.update'), reactivateSupplier);
 router.delete('/:id', authenticate, requirePermission('suppliers.delete'), deleteSupplier);
 
 export const supplierRoutes = router;

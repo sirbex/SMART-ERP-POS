@@ -20,6 +20,15 @@ export const EnterpriseListQueryFields = {
     .optional()
     .transform((v) => v === true || v === 'true' || v === '1'),
   paymentTerms: z.string().optional(),
+  /** active (default) | inactive | all — master data list visibility */
+  status: z
+    .string()
+    .optional()
+    .transform((v) => {
+      const s = String(v || '').toLowerCase();
+      if (s === 'inactive' || s === 'all' || s === 'active') return s as 'active' | 'inactive' | 'all';
+      return undefined;
+    }),
 };
 
 export type EnterpriseListQueryInput = {
@@ -29,4 +38,5 @@ export type EnterpriseListQueryInput = {
   balanceGt?: number;
   stockGt?: boolean;
   paymentTerms?: string;
+  status?: 'active' | 'inactive' | 'all';
 };

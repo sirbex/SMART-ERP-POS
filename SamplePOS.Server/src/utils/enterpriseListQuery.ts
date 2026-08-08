@@ -5,6 +5,8 @@
 
 export type SortOrder = 'asc' | 'desc';
 
+export type ActiveStatusFilter = 'active' | 'inactive' | 'all';
+
 export interface EnterpriseListQuery {
   sortBy?: string;
   sortOrder?: SortOrder;
@@ -13,6 +15,8 @@ export interface EnterpriseListQuery {
   stockGt?: boolean;
   paymentTerms?: string;
   search?: string;
+  /** Supplier (and similar master) list: active (default) | inactive | all */
+  status?: ActiveStatusFilter;
 }
 
 export function parseSortOrder(raw?: string): SortOrder {

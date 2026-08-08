@@ -87,7 +87,7 @@ export function useUpdateSupplier() {
 }
 
 /**
- * Delete supplier
+ * Delete / deactivate supplier (soft)
  */
 export function useDeleteSupplier() {
   const queryClient = useQueryClient();
@@ -99,6 +99,24 @@ export function useDeleteSupplier() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: supplierKeys.lists() });
+    },
+  });
+}
+
+/**
+ * Re-activate inactive supplier
+ */
+export function useReactivateSupplier() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const response = await api.suppliers.reactivate(id);
+      return response.data;
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: supplierKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: supplierKeys.detail(id) });
     },
   });
 }

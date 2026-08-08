@@ -6,7 +6,7 @@ import * as supplierRepository from './supplierRepository.js';
 import type { SupplierListQuery } from './supplierRepository.js';
 import logger from '../../utils/logger.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
-import { ForbiddenError } from '../../middleware/errorHandler.js';
+import { ForbiddenError, ValidationError } from '../../middleware/errorHandler.js';
 
 /** Well-known UUID for the SYSTEM supplier (created by migration 045). */
 export const SYSTEM_SUPPLIER_ID = 'a0000000-0000-0000-0000-000000000001';
@@ -23,19 +23,30 @@ function assertNotSystemSupplier(supplier: { id?: string; SupplierCode?: string 
 }
 
 /**
- * Get all suppliers with pagination
+ * Block soft-delete / deactivate when unpaid supplier invoices remain.
  */
+export async function assertSupplierCanDeactivate(
+  pool: Pool,
+  supplierId: string,
+  supplierName?: string,
+): Promise<void> {
+  const unpaid = await supplierRepository.getUnpaidOpenInvoiceSummary(pool, supplierId);
+  if (unpaid.count > 0 || unpaid.outstandingTotal > 0.009) {
+    const label = supplierName?.trim() ? `"${supplierName.trim()}"` : 'this supplier';
+    const amount = unpaid.outstandingTotal.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    throw new ValidationError(
+      `Cannot deactivate ${label} while unpaid invoices remain ` +
+        `(${unpaid.count} open · ${amount} outstanding). ` +
+        `Pay or settle the bills first, then deactivate — or keep the supplier active.`,
+    );
+  }
+}
+
 /**
- * Get all suppliers with pagination
- * @param pool - Database connection pool
- * @param page - Page number (1-indexed, default: 1)
- * @param limit - Results per page (default: 50, max: 100)
- * @returns Paginated supplier list with metadata
- * 
- * Features:
- * - Pagination support for large datasets
- * - Includes active and inactive suppliers
- * - Returns total count for pagination UI
+ * Get all suppliers with pagination (status: active | inactive | all).
  */
 export async function getAllSuppliers(
   pool: Pool,
@@ -200,6 +211,11 @@ export async function updateSupplier(
       throw new Error('Supplier name must be at least 2 characters');
     }
 
+    // Cannot hide/inactivate masters that still owe / are owed on open bills
+    if (data.isActive === false && existing.isActive !== false) {
+      await assertSupplierCanDeactivate(pool, id, existing.name);
+    }
+
     const { assertPartnerDefaultWhtType } = await import('../withholding-tax/whtService.js');
     await assertPartnerDefaultWhtType('SUPPLIER', data, pool);
 
@@ -210,28 +226,36 @@ export async function updateSupplier(
 }
 
 /**
- * Delete supplier (soft delete)
- * @throws Error if supplier not found or has active purchase orders
+ * Deactivate supplier (soft delete).
+ * Blocked while unpaid invoices or active purchase orders remain.
  */
 export async function deleteSupplier(pool: Pool, id: string) {
   return UnitOfWork.run(pool, async (client) => {
-    // Check if supplier exists
     const existing = await supplierRepository.findById(pool, id);
     if (!existing) {
       throw new Error(`Supplier with ID ${id} not found`);
     }
 
-    // Protect SYSTEM suppliers from deletion
     assertNotSystemSupplier(existing);
 
-    // Check if supplier has active purchase orders
+    await assertSupplierCanDeactivate(pool, id, existing.name);
+
     const hasActivePOs = await supplierRepository.hasActivePurchaseOrders(client, id);
     if (hasActivePOs) {
-      throw new Error('Cannot delete supplier with active purchase orders');
+      throw new ValidationError(
+        `Cannot deactivate supplier "${existing.name}" while active purchase orders remain.`,
+      );
     }
 
     const success = await supplierRepository.softDeleteSupplier(client, id);
-    logger.info('Supplier deleted successfully', { supplierId: id });
+    logger.info('Supplier deactivated (soft delete)', { supplierId: id });
     return success;
   });
+}
+
+/**
+ * Re-activate a soft-deleted / inactive supplier.
+ */
+export async function reactivateSupplier(pool: Pool, id: string) {
+  return updateSupplier(pool, id, { isActive: true });
 }
