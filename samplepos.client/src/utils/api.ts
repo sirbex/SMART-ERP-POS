@@ -1354,8 +1354,27 @@ export const api = {
         params,
         ...config,
       }),
-    activateCheck: (tableId: string, data: { orderId: string }) =>
-      apiClient.post<ApiResponse>(`restaurant/tables/${tableId}/activate-check`, data),
+    activateCheck: (
+      tableId: string,
+      data: { orderId: string },
+      config?: AxiosRequestConfig,
+    ) =>
+      apiClient.post<ApiResponse>(
+        `restaurant/tables/${tableId}/activate-check`,
+        data,
+        config,
+      ),
+    /** Samba multi-ticket: open empty check on table (siblings stay open). */
+    openCheck: (
+      tableId: string,
+      data?: {
+        waiterId?: string;
+        guestName?: string | null;
+        guestPhone?: string | null;
+        deliveryAddress?: string | null;
+        pickupLabel?: string | null;
+      },
+    ) => apiClient.post<ApiResponse>(`restaurant/tables/${tableId}/open-check`, data || {}),
     menuCategories: (config?: AxiosRequestConfig) =>
       apiClient.get<ApiResponse>('restaurant/menu/categories', config),
     menuProducts: (params?: { categoryId?: string }, config?: AxiosRequestConfig) =>
@@ -1407,6 +1426,11 @@ export const api = {
       tableId: string;
       /** Multi-ticket: append to this open check (not only table.current_order_id). */
       orderId?: string;
+      /**
+       * Party-list menu add: open a brand-new check with these items
+       * (siblings stay open).
+       */
+      forceNewCheck?: boolean;
       customerId?: string | null;
       taxAmount?: number;
       waiterId?: string;
@@ -1439,6 +1463,9 @@ export const api = {
         pickupLabel?: string | null;
       },
     ) => apiClient.patch<ApiResponse>(`restaurant/checks/${orderId}/guest`, data),
+    /** Per-ticket FOA note (pos_orders.notes). */
+    updateCheckNotes: (orderId: string, data: { notes: string | null }) =>
+      apiClient.patch<ApiResponse>(`restaurant/checks/${orderId}/notes`, data),
     listWaiters: (config?: AxiosRequestConfig) =>
       apiClient.get<ApiResponse>('restaurant/waiters', config),
     assignWaiter: (orderId: string, data: { waiterId: string }) =>

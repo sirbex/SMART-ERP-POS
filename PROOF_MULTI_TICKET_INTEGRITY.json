@@ -1,0 +1,114 @@
+{
+  "proof": "MULTI_TICKET_INTEGRITY",
+  "objective": "Consistency, integrity, and monetary accuracy for Samba multi-ticket FOH (party list force-new, preferred isolation, bill/pay/KOT per order number, adaptive menu sheet)",
+  "runAt": "2026-08-08T06:40:05.521Z",
+  "result": "PASS",
+  "summary": {
+    "client": {
+      "fail": 0,
+      "pass": 58,
+      "total": 58
+    },
+    "server": {
+      "fail": 0,
+      "pass": 7,
+      "total": 38,
+      "skipped": 31
+    },
+    "pass": 65,
+    "fail": 0,
+    "total": 65
+  },
+  "gates": [
+    {
+      "id": "C01-forceNew-distinct-orderIds-money",
+      "layer": "behavioral",
+      "claim": "Party-list forceNew yields distinct orderIds with exact 2dp money",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "C02-forceNew-ignores-orderId",
+      "layer": "behavioral",
+      "claim": "forceNewTicket never appends to caller-supplied sibling orderId",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "C03-detail-append-sticky",
+      "layer": "behavioral",
+      "claim": "orderId append stays on selected ticket after newer sibling updates",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "C04-preferred-missing-null",
+      "layer": "behavioral",
+      "claim": "Unknown preferred orderId returns null (no silent sibling substitute)",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "I01-bill-isolation",
+      "layer": "behavioral",
+      "claim": "Bill flags only selected order number",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "I02-pay-isolation",
+      "layer": "behavioral",
+      "claim": "Pay settles one ticket; remaining sibling open; paid preferred → null",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "I03-kot-isolation",
+      "layer": "behavioral",
+      "claim": "KOT sets kitchenSentAt only on fired ticket",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "I04-split-money-accuracy",
+      "layer": "behavioral",
+      "claim": "Partial qty move: remainder + destination totals exact",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "I05-floor-open-count",
+      "layer": "behavioral",
+      "claim": "Open floor lists exactly N distinct open tickets",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "S01-foh-forceNew-wiring",
+      "layer": "structural",
+      "claim": "FOH forceNewTicket = showSambaTicketList; no samba-open-ticket-first toast",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts",
+      "pass": true
+    },
+    {
+      "id": "S04-server-forceNew-short-circuit-order",
+      "layer": "structural",
+      "claim": "Server forceNew nulls target before orderId/currentOrderId resolve",
+      "source": "restaurantMultiTicketIntegrity.proof.test.ts + restaurantMultiTicketEmpty.evidence",
+      "pass": true
+    },
+    {
+      "id": "S03-adaptive-sheet-column",
+      "layer": "structural",
+      "claim": "fohTicketPane sheet on dense/ultra; column on comfortable",
+      "source": "adaptive-chrome.ssot.evidence + integrity S03",
+      "pass": true
+    }
+  ],
+  "commands": {
+    "client": "cd samplepos.client && npx vitest run src/lib/restaurantMultiTicketIntegrity.proof.test.ts src/lib/restaurantOfflineOps.proof.test.ts src/lib/restaurantOfflineSelectors.test.ts src/__tests__/adaptive-chrome.ssot.evidence.test.ts",
+    "server": "cd SamplePOS.Server && node --experimental-vm-modules ./node_modules/jest/bin/jest.js src/modules/restaurant/restaurantMultiTicketEmpty.evidence.test.ts src/modules/restaurant/restaurantArchitectureProof.test.ts -t \"empty open|party-list menu|Phase 4 split\" --no-coverage"
+  },
+  "clientExit": 0,
+  "serverExit": 0
+}

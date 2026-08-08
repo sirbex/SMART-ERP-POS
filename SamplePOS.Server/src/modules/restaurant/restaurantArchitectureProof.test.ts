@@ -745,6 +745,23 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     // Client recovers from closed check on add (retry once without orderId).
     expect(pos).toMatch(/isRestaurantCheckClosedError/);
     expect(pos).toMatch(/openOrderIds/);
+    // Party list menu ring → auto new order number (never block/toast only).
+    expect(pos).toMatch(/forceNewTicket|forceNewCheck/);
+    expect(pos).not.toMatch(/samba-open-ticket-first/);
+    expect(service).toMatch(/forceNewCheck/);
+    expect(routes).toMatch(/forceNewCheck/);
+    // Samba empty multi-ticket open (party tabs) — does not cancel/merge siblings.
+    expect(service).toMatch(/async openEmptyCheck/);
+    expect(service).toMatch(/ERR_RESTAURANT_TOO_MANY_CHECKS/);
+    expect(service).toMatch(/MAX_OPEN_CHECKS_PER_TABLE/);
+    expect(routes).toMatch(/tables\/:id\/open-check/);
+    expect(pos).toMatch(/openNewTicketOnTable|openCheck/);
+    expect(pos).toMatch(/\+ Ticket/);
+    // Floor multi-ticket session signal (not only current_order_id pointer).
+    expect(repo).toMatch(/open_check_count/);
+    expect(repo).toMatch(/open_checks_total/);
+    // release still re-points siblings when one tab closes.
+    expect(repo).toMatch(/releaseTableByOrderId/);
   });
 
   it('Phase 5.1 restaurant offline uses existing event journal', () => {

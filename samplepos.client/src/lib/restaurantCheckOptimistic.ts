@@ -9,6 +9,8 @@ export type OptimisticTicketTab = {
   id: string;
   orderNumber: string;
   totalAmount: string;
+  /** User FOA note (optional; shown on party list). */
+  note?: string | null;
 };
 
 export type OptimisticOrderItem = {
@@ -64,6 +66,7 @@ export type OptimisticCheckPayload = {
     orderNumber: string;
     totalAmount: string;
     createdAt: string;
+    notes?: string | null;
   }>;
 };
 
@@ -161,6 +164,7 @@ export function mergeRestaurantSiblingTabs(
       orderNumber: t.orderNumber,
       totalAmount: t.totalAmount,
       createdAt: new Date().toISOString(),
+      notes: t.note ?? null,
     });
   }
 

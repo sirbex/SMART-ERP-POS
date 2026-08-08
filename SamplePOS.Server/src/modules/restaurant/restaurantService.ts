@@ -552,17 +552,37 @@ export const restaurantService = {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const safeActive =
       activeOrderId && ORDER_UUID_RE.test(activeOrderId) ? activeOrderId : null;
+    const sameUuid = (a: string | null | undefined, b: string | null | undefined) =>
+      !!a && !!b && a.toLowerCase() === b.toLowerCase();
+    const isPendingOnThisTable = (id: string | null | undefined) =>
+      !!id && siblings.some((s) => sameUuid(s.id, id));
 
-    let orderId = safeActive || table.currentOrderId;
-    if (orderId && !siblings.some((s) => s.id === orderId) && siblings.length > 0) {
-      // Stale pointer or explicit id not pending — fall back (prefer owned when scoped).
-      orderId =
-        (table.currentOrderId && siblings.some((s) => s.id === table.currentOrderId)
-          ? table.currentOrderId
-          : null) ||
-        scopedSiblings[0]?.id ||
-        siblings[0]?.id ||
-        null;
+    let orderId: string | null = safeActive || table.currentOrderId || null;
+
+    // Never load a PENDING check from another table (or closed id). That used to seed the
+    // FOH journal under the wrong tableId → multi-ticket strip ghosts → activate-check 400.
+    if (orderId && !isPendingOnThisTable(orderId)) {
+      if (safeActive && sameUuid(safeActive, orderId)) {
+        // Explicit wrong id — drop to an open sibling (if any), do not fetch foreign order.
+        orderId =
+          (table.currentOrderId && isPendingOnThisTable(table.currentOrderId)
+            ? table.currentOrderId
+            : null) ||
+          scopedSiblings[0]?.id ||
+          siblings[0]?.id ||
+          null;
+      } else if (siblings.length > 0) {
+        // Stale floor pointer — prefer owned when scoped.
+        orderId =
+          (table.currentOrderId && isPendingOnThisTable(table.currentOrderId)
+            ? table.currentOrderId
+            : null) ||
+          scopedSiblings[0]?.id ||
+          siblings[0]?.id ||
+          null;
+      } else {
+        orderId = null;
+      }
     }
 
     // Toast/Aloha: waiters may only open their own dining checks (FREE tables are fine).
@@ -576,13 +596,13 @@ export const restaurantService = {
       if (scopedSiblings.length === 0) {
         throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
       }
-      const pointed = orderId ? siblings.find((s) => s.id === orderId) : null;
+      const pointed = orderId ? siblings.find((s) => sameUuid(s.id, orderId)) : null;
       if (pointed?.waiterId && pointed.waiterId !== actor.userId) {
         orderId = scopedSiblings[0]!.id;
       } else if (!orderId) {
         orderId = scopedSiblings[0]!.id;
       }
-      const target = siblings.find((s) => s.id === orderId);
+      const target = siblings.find((s) => sameUuid(s.id, orderId));
       if (target?.waiterId && target.waiterId !== actor.userId) {
         throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
       }
@@ -591,7 +611,7 @@ export const restaurantService = {
     }
 
     // Heal floor pointer only after the actor is allowed to open the chosen check.
-    if (orderId && table.currentOrderId !== orderId && siblings.some((s) => s.id === orderId)) {
+    if (orderId && !sameUuid(table.currentOrderId, orderId) && isPendingOnThisTable(orderId)) {
       await restaurantRepository.setTableCurrentOrder(pool, tableId, orderId);
     }
 
@@ -643,15 +663,184 @@ export const restaurantService = {
       }
       throw new BusinessError('Only open checks can be activated', 'ERR_RESTAURANT_CHECK_CLOSED');
     }
-    const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
-    if (!meta || meta.tableId !== tableId) {
-      throw new ValidationError('Check does not belong to this table');
+    let meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
+    const sameUuid = (a: string | null | undefined, b: string | null | undefined) =>
+      !!a && !!b && String(a).toLowerCase() === String(b).toLowerCase();
+
+    // Heal orphan header: PENDING restaurant check with null table_id while open on floor,
+    // or already listed under this table but meta.tableId drifted (legacy rows).
+    const pending = await restaurantRepository.listPendingOrdersForTable(pool, tableId);
+    const onTable = pending.some((s) => sameUuid(s.id, orderId));
+
+    if (meta && !meta.tableId && (sameUuid(table.currentOrderId, orderId) || onTable)) {
+      await restaurantRepository.patchOrderRestaurantFields(pool, orderId, {
+        tableId,
+        orderChannel:
+          (meta.orderChannel as 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | null) ||
+          channelForTable(table),
+      });
+      meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
     }
-    requireCheckMutationAccess(meta.waiterId, actor, {
+
+    // Soft heal: PENDING, correct table_id on meta, missing only from list due to RETAIL filter
+    // — no; if still not on table, refuse.
+    if (!meta || !sameUuid(meta.tableId, tableId)) {
+      // One more list after heal
+      const pending2 = await restaurantRepository.listPendingOrdersForTable(pool, tableId);
+      if (pending2.some((s) => sameUuid(s.id, orderId))) {
+        // Meta lag: trust pending membership
+      } else {
+        throw new BusinessError(
+          'Check does not belong to this table',
+          'ERR_RESTAURANT_CHECK_WRONG_TABLE',
+          {
+            orderId,
+            tableId,
+            orderTableId: meta?.tableId ?? null,
+          },
+        );
+      }
+    } else if (!onTable) {
+      // Meta says table but not in PENDING list (closed race) — treat as closed.
+      throw new BusinessError('Only open checks can be activated', 'ERR_RESTAURANT_CHECK_CLOSED');
+    }
+    requireCheckMutationAccess(meta!.waiterId, actor, {
       sharedServiceCounter: tableIsSharedServiceCounter(table),
     });
     await restaurantRepository.setTableCurrentOrder(pool, tableId, orderId);
     return this.getTableCheck(pool, tableId, orderId, actor);
+  },
+
+  /**
+   * Samba-style: open an empty pending check on a table (party tab) without moving items.
+   * Does not merge, cancel, or touch sibling lines / KOT / payments.
+   * Sets current_order_id to the new check only; other PENDING checks remain open.
+   */
+  async openEmptyCheck(
+    pool: Pool,
+    input: {
+      tableId: string;
+      waiterId: string;
+      actor?: OwnershipActor;
+      guestName?: string | null;
+      guestPhone?: string | null;
+      deliveryAddress?: string | null;
+      pickupLabel?: string | null;
+    },
+  ) {
+    await assertRestaurantEnabled(pool);
+    const table = await restaurantRepository.getTableById(pool, input.tableId);
+    if (!table || !table.isActive) throw new NotFoundError('Restaurant table');
+
+    if (
+      tableIsSharedServiceCounter(table) &&
+      input.actor &&
+      !canAccessRestaurantServiceLane(input.actor)
+    ) {
+      throw new ForbiddenError(RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE);
+    }
+
+    const actor = input.actor;
+    const effectiveWaiterId =
+      actor && !canEditOtherWaitersChecks(actor) ? actor.userId : input.waiterId;
+
+    const lockKey = `restaurant_table_${input.tableId}`;
+    await pool.query(`SELECT pg_advisory_lock(hashtext($1))`, [lockKey]);
+    try {
+      const locked = await restaurantRepository.getTableById(pool, input.tableId);
+      if (!locked) throw new NotFoundError('Restaurant table');
+
+      const pending = await restaurantRepository.listPendingOrdersForTable(
+        pool,
+        input.tableId,
+      );
+      // Cap empty/party tabs — integrity guard against runaway open headers.
+      const MAX_OPEN_CHECKS_PER_TABLE = 20;
+      if (pending.length >= MAX_OPEN_CHECKS_PER_TABLE) {
+        throw new BusinessError(
+          `This table already has ${pending.length} open tickets (max ${MAX_OPEN_CHECKS_PER_TABLE})`,
+          'ERR_RESTAURANT_TOO_MANY_CHECKS',
+          { tableId: input.tableId, openCount: pending.length },
+        );
+      }
+
+      // Ownership: waiters may open a new tab only if the table is free for them,
+      // or they already own a check here, or they can edit others (manager/cashier).
+      if (actor && !canEditOtherWaitersChecks(actor) && !tableIsSharedServiceCounter(locked)) {
+        if (pending.length > 0) {
+          const ownsAny = pending.some((s) => !s.waiterId || s.waiterId === actor.userId);
+          if (!ownsAny) {
+            throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
+          }
+        }
+      }
+
+      const channel = channelForTable(locked);
+      const guestPayload: RestaurantGuestDetails = {
+        guestName: input.guestName,
+        guestPhone: input.guestPhone,
+        deliveryAddress: input.deliveryAddress,
+        pickupLabel: input.pickupLabel,
+      };
+      // First open on service lanes still needs guest identity; sibling tabs inherit context optionally.
+      if (pending.length === 0 && (channel === 'TAKEAWAY' || channel === 'DELIVERY')) {
+        assertChannelGuest(channel, guestPayload);
+      }
+
+      const waiters = await restaurantRepository.listAssignableWaiters(pool);
+      const actorOk = actor?.userId && actor.userId === effectiveWaiterId;
+      if (
+        waiters.length > 0 &&
+        !waiters.some((w) => w.id === effectiveWaiterId) &&
+        !actorOk
+      ) {
+        throw new ValidationError('Selected user is not an assignable waiter');
+      }
+
+      let orderId: string;
+      try {
+        orderId = await UnitOfWork.run(pool, async (client: PoolClient) => {
+          // Header-only — same path as split destination; no retail createOrder item rule.
+          const header = await ordersRepository.createOrder(client, {
+            customerId: null,
+            subtotal: 0,
+            discountAmount: 0,
+            taxAmount: 0,
+            totalAmount: 0,
+            createdBy: effectiveWaiterId,
+            notes: `Restaurant ${locked.code} · ticket`,
+          });
+
+          await restaurantRepository.patchOrderRestaurantFields(client, header.id, {
+            tableId: locked.id,
+            orderChannel: channel,
+            waiterId: effectiveWaiterId,
+            kitchenStatus: 'NONE',
+            guestName: input.guestName ?? null,
+            guestPhone: input.guestPhone ?? null,
+            deliveryAddress: input.deliveryAddress ?? null,
+            pickupLabel: input.pickupLabel ?? null,
+          });
+
+          // Point floor at new tab; siblings stay PENDING and unaltered.
+          await restaurantRepository.occupyTable(client, locked.id, header.id);
+          return header.id;
+        });
+      } catch (err) {
+        logger.error('openEmptyCheck failed', { tableId: input.tableId, err });
+        throw err;
+      }
+
+      logger.info('Restaurant empty check opened (multi-ticket)', {
+        tableCode: locked.code,
+        orderId,
+        priorOpenCount: pending.length,
+      });
+
+      return this.getTableCheck(pool, input.tableId, orderId, actor);
+    } finally {
+      await pool.query(`SELECT pg_advisory_unlock(hashtext($1))`, [lockKey]);
+    }
   },
 
   /**
@@ -663,6 +852,11 @@ export const restaurantService = {
       tableId: string;
       /** Multi-ticket: target open check (avoids racing activateCheck). */
       orderId?: string;
+      /**
+       * Always open a new check with these items (party-list menu tap).
+       * Does not append to current_order_id or passed orderId; siblings stay open.
+       */
+      forceNewCheck?: boolean;
       items: RestaurantOrderItemInput[];
       waiterId: string;
       customerId?: string | null;
@@ -753,8 +947,12 @@ export const restaurantService = {
     await pool.query(`SELECT pg_advisory_lock(hashtext($1))`, [lockKey]);
     try {
       let orderId: string | null = null;
+      const forceNew = !!input.forceNewCheck;
 
-      if (input.orderId) {
+      if (forceNew) {
+        // Party list / new guest seat: never append to floor pointer or a sibling.
+        orderId = null;
+      } else if (input.orderId) {
         const meta = await restaurantRepository.getOrderRestaurantMeta(pool, input.orderId);
         if (!meta || meta.tableId !== input.tableId) {
           throw new ValidationError('Order does not belong to this table');
@@ -805,7 +1003,7 @@ export const restaurantService = {
 
       const lockedTable = await restaurantRepository.getTableById(pool, input.tableId);
       if (!lockedTable) throw new NotFoundError('Restaurant table');
-      if (!input.orderId && lockedTable.currentOrderId) {
+      if (!forceNew && !input.orderId && lockedTable.currentOrderId) {
         orderId = lockedTable.currentOrderId;
         const existing = await ordersRepository.getById(pool, orderId);
         if (!existing || existing.status !== 'PENDING') {
@@ -819,6 +1017,30 @@ export const restaurantService = {
       }
 
       if (!orderId) {
+        // Cap party tabs (same guard as openEmptyCheck).
+        const pendingForNew = await restaurantRepository.listPendingOrdersForTable(
+          pool,
+          input.tableId,
+        );
+        const MAX_OPEN_CHECKS_PER_TABLE = 20;
+        if (pendingForNew.length >= MAX_OPEN_CHECKS_PER_TABLE) {
+          throw new BusinessError(
+            `This table already has ${pendingForNew.length} open tickets (max ${MAX_OPEN_CHECKS_PER_TABLE})`,
+            'ERR_RESTAURANT_TOO_MANY_CHECKS',
+            { tableId: input.tableId, openCount: pendingForNew.length },
+          );
+        }
+        if (actor && !canEditOtherWaitersChecks(actor) && !tableIsSharedServiceCounter(lockedTable)) {
+          if (pendingForNew.length > 0) {
+            const ownsAny = pendingForNew.some(
+              (s) => !s.waiterId || s.waiterId === actor.userId,
+            );
+            if (!ownsAny) {
+              throw new ForbiddenError(RESTAURANT_CHECK_OWNED_MESSAGE);
+            }
+          }
+        }
+
         const waiters = await restaurantRepository.listAssignableWaiters(pool);
         // Always allow the acting user to own the check they open (managers/admins
         // may not appear in the waiter picker edge cases; never block on that).
@@ -1700,6 +1922,36 @@ export const restaurantService = {
       deliveryAddress: guest.deliveryAddress,
       pickupLabel: guest.pickupLabel,
     });
+
+    return {
+      order: await ordersService.getOrder(pool, orderId),
+      meta: await restaurantRepository.getOrderRestaurantMeta(pool, orderId),
+    };
+  },
+
+  /**
+   * Per-ticket FOA note (pos_orders.notes SSOT).
+   * Does not alter lines, totals, KOT, or sibling checks.
+   */
+  async updateCheckNotes(
+    pool: Pool,
+    orderId: string,
+    notes: string | null,
+    actor?: OwnershipActor,
+  ) {
+    await assertRestaurantEnabled(pool);
+    const meta = await restaurantRepository.getOrderRestaurantMeta(pool, orderId);
+    if (!meta || meta.orderChannel === 'RETAIL') {
+      throw new BusinessError('Not a restaurant check', 'ERR_RESTAURANT_CHANNEL');
+    }
+    await requireOrderMutationAccess(pool, meta, actor);
+    const order = await ordersService.getOrder(pool, orderId);
+    if (order.status !== 'PENDING') {
+      throw new BusinessError('Only open checks can update notes', 'ERR_RESTAURANT_CHECK_CLOSED');
+    }
+
+    const cleaned = notes == null ? null : String(notes).trim().slice(0, 2000) || null;
+    await restaurantRepository.updateOrderNotes(pool, orderId, cleaned);
 
     return {
       order: await ordersService.getOrder(pool, orderId),

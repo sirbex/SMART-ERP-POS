@@ -777,18 +777,22 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(openAfter[0]?.orderId).toBe(split.orderId);
     expect(openAfter.some((c) => c.orderId === source.orderId)).toBe(false);
 
-    // Paid order is closed; table helper falls back to the remaining open sibling (FOH stay-on-table).
+    // Paid ticket preferred → null (no silent sibling swap; FOH must activate remaining ticket).
     const afterPayView = deriveRestaurantCheckForTable(
       't-multi-pay',
       getAllEvents(),
       getAllSyncState(),
       source.orderId,
     );
-    expect(afterPayView?.orderId).toBe(split.orderId);
+    expect(afterPayView).toBeNull();
     expect(
       deriveRestaurantCheckForTable('t-multi-pay', getAllEvents(), getAllSyncState(), split.orderId)
         ?.lines,
     ).toHaveLength(1);
+    // No preferred: remaining open check on table.
+    expect(deriveRestaurantCheckForTable('t-multi-pay', getAllEvents(), getAllSyncState())?.orderId).toBe(
+      split.orderId,
+    );
 
     expect(deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()).has('t-multi-pay')).toBe(
       true,
@@ -1139,5 +1143,79 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(source.lines.every((l) => !!l.kitchenSentAt)).toBe(true);
     expect(totalsFromLines(source.lines).subtotal).toBe(60);
     expect(totalsFromLines(split.lines).subtotal).toBe(30);
+  });
+
+  /**
+   * EVIDENCE (party-list menu ring): with two open tickets, forceNewTicket opens a third
+   * order number — does not append to either sibling.
+   */
+  it('EVIDENCE forceNewTicket opens a third order when table already has two tickets', () => {
+    const first = appendRestaurantItemOffline({
+      tableId: 't-party-new',
+      tableCode: 'PN',
+      tableName: 'Party New',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Soup',
+      unitPrice: 5,
+      quantity: 1,
+      productType: 'service',
+    });
+    const second = appendRestaurantItemOffline({
+      tableId: 't-party-new',
+      tableCode: 'PN',
+      tableName: 'Party New',
+      channel: 'DINE_IN',
+      productId: 'p2',
+      productName: 'Bread',
+      unitPrice: 2,
+      quantity: 1,
+      productType: 'service',
+      forceNewTicket: true,
+    });
+    expect(second.orderId).not.toBe(first.orderId);
+    expect(second.lines).toHaveLength(1);
+    expect(second.lines[0].productName).toBe('Bread');
+
+    const third = appendRestaurantItemOffline({
+      tableId: 't-party-new',
+      tableCode: 'PN',
+      tableName: 'Party New',
+      channel: 'DINE_IN',
+      productId: 'p3',
+      productName: 'Fish',
+      unitPrice: 18,
+      quantity: 1,
+      productType: 'service',
+      forceNewTicket: true,
+    });
+    expect(third.orderId).not.toBe(first.orderId);
+    expect(third.orderId).not.toBe(second.orderId);
+    expect(third.lines).toHaveLength(1);
+
+    // Without forceNew, append still targets preferred/latest by orderId when set.
+    const appendFirst = appendRestaurantItemOffline({
+      tableId: 't-party-new',
+      tableCode: 'PN',
+      tableName: 'Party New',
+      channel: 'DINE_IN',
+      orderId: first.orderId,
+      productId: 'p4',
+      productName: 'Water',
+      unitPrice: 1,
+      quantity: 1,
+      productType: 'service',
+    });
+    expect(appendFirst.orderId).toBe(first.orderId);
+    expect(appendFirst.lines.some((l) => l.productName === 'Water')).toBe(true);
+
+    const siblings = deriveRestaurantSiblingChecks(
+      't-party-new',
+      getAllEvents(),
+      getAllSyncState(),
+      first.orderId,
+    );
+    const ids = new Set([first.orderId, second.orderId, third.orderId, ...siblings.map((s) => s.orderId)]);
+    expect(ids.size).toBeGreaterThanOrEqual(3);
   });
 });

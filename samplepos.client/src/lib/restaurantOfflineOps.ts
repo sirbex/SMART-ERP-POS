@@ -469,6 +469,11 @@ export interface OpenOrAddRestaurantItemInput {
   channel: RestaurantOrderChannel;
   /** Multi-ticket: append to this check (not whichever derive picks by table). */
   orderId?: string | null;
+  /**
+   * Always open a new local ticket (party-list menu add).
+   * Ignores orderId and any existing open check on the table.
+   */
+  forceNewTicket?: boolean;
   customerId?: string | null;
   waiterId?: string;
   waiterName?: string;
@@ -494,12 +499,14 @@ export interface OpenOrAddRestaurantItemInput {
 export function appendRestaurantItemOffline(input: OpenOrAddRestaurantItemInput): DerivedOrder {
   const events = getAllEvents();
   const syncState = getAllSyncState();
-  const existing = deriveRestaurantCheckForTable(
-    input.tableId,
-    events,
-    syncState,
-    input.orderId || undefined,
-  );
+  const existing = input.forceNewTicket
+    ? null
+    : deriveRestaurantCheckForTable(
+        input.tableId,
+        events,
+        syncState,
+        input.orderId || undefined,
+      );
   const qty = input.quantity ?? 1;
   const line = toEventLine({
     lineId: newOfflineLineId(),

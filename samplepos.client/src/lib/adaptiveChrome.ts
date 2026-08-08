@@ -9,6 +9,7 @@
  * - Coach copy, field helpers, and secondary ops defer on small/touch tiers
  * - Pads and dense editors open on demand (icon → sheet), dock when space allows
  * - Tiers are capability-based (viewport/pointer), never device brand
+ * - Density adapts to short/narrow handhelds (Sunmi, phones) via height + touch
  */
 
 import type { LayoutTier } from './layoutTiers';
@@ -30,6 +31,25 @@ export type AdaptiveActionLabelDensity = 'short' | 'verbose';
 
 /** List / ticket / grid row height — dense on small screens so more lines fit. */
 export type AdaptiveListRowDensity = 'dense' | 'comfortable';
+
+/**
+ * Overall surface packing — used by FOH ticket lists / footers / headers.
+ * ultra = short Sunmi / phone landscape; dense = phone/tablet; comfortable = desk.
+ */
+export type AdaptiveSurfaceDensity = 'ultra' | 'dense' | 'comfortable';
+
+/**
+ * Restaurant FOH ticket placement:
+ * - sheet = menu owns the viewport; ticket opens on demand (dock / full sheet)
+ * - column = side-by-side menu + ticket (desktop / comfortable packing)
+ */
+export type AdaptiveFohTicketPane = 'sheet' | 'column';
+
+export type AdaptiveChromeOptions = {
+  width?: number;
+  height?: number;
+  touchFirst?: boolean;
+};
 
 /**
  * Global chrome tokens — SSOT for progressive disclosure.
@@ -56,9 +76,88 @@ export type AdaptiveChrome = {
    * Comfortable = inline ± and richer chrome.
    */
   listRow: AdaptiveListRowDensity;
+  /**
+   * Surface packing for headers/footers/party strip — derived from tier +
+   * short viewport height + touch (handheld POS).
+   */
+  density: AdaptiveSurfaceDensity;
+  /**
+   * Where the open-ticket board lives relative to the product menu.
+   * Dense FOH must use sheet so products stay tappable; never stack-split
+   * menu + ticket on short handhelds.
+   */
+  fohTicketPane: AdaptiveFohTicketPane;
+  /** Primary CTA min height (px) for touch FOH */
+  primaryCtaMinHeightPx: number;
 };
 
-export function resolveAdaptiveChrome(tier: LayoutTier): AdaptiveChrome {
+/** Short physical height or phone landscape — reclaim space for lists. */
+export function isShortViewport(heightPx: number | undefined): boolean {
+  return Number.isFinite(heightPx) && (heightPx as number) > 0 && (heightPx as number) < 720;
+}
+
+/** Very narrow handset / order-pad column. */
+export function isNarrowViewport(widthPx: number | undefined): boolean {
+  return Number.isFinite(widthPx) && (widthPx as number) > 0 && (widthPx as number) < 480;
+}
+
+/**
+ * Pack FOH chrome from tier + viewport geometry + touch (never brand names).
+ * Sunmi portrait tablets are often compact+tall; landscape phones are short → ultra.
+ */
+export function resolveAdaptiveDensity(
+  tier: LayoutTier,
+  opts?: AdaptiveChromeOptions,
+): AdaptiveSurfaceDensity {
+  const h = opts?.height ?? 0;
+  const w = opts?.width ?? 0;
+  const short = isShortViewport(h);
+  const narrow = isNarrowViewport(w);
+  const touch = !!opts?.touchFirst;
+
+  if (tier === 'mobile' || narrow) {
+    return short ? 'ultra' : 'dense';
+  }
+  if (tier === 'compact') {
+    // Handheld FOH (touch POS): dense; short landscape → ultra.
+    if (short) return 'ultra';
+    if (touch) return 'dense';
+    return 'dense';
+  }
+  if (short && touch) return 'dense';
+  return 'comfortable';
+}
+
+function ctaMinHeightForDensity(density: AdaptiveSurfaceDensity): number {
+  switch (density) {
+    case 'ultra':
+      return 44;
+    case 'dense':
+      return 48;
+    case 'comfortable':
+    default:
+      return 56;
+  }
+}
+
+/**
+ * Ticket pane placement from density SSOT.
+ * Comfortable = side column; dense/ultra (phones, Sunmi, short pads) = sheet.
+ */
+export function resolveFohTicketPane(
+  density: AdaptiveSurfaceDensity,
+): AdaptiveFohTicketPane {
+  return density === 'comfortable' ? 'column' : 'sheet';
+}
+
+export function resolveAdaptiveChrome(
+  tier: LayoutTier,
+  opts?: AdaptiveChromeOptions,
+): AdaptiveChrome {
+  const density = resolveAdaptiveDensity(tier, opts);
+  const primaryCtaMinHeightPx = ctaMinHeightForDensity(density);
+  const fohTicketPane = resolveFohTicketPane(density);
+
   switch (tier) {
     case 'mobile':
       return {
@@ -70,17 +169,23 @@ export function resolveAdaptiveChrome(tier: LayoutTier): AdaptiveChrome {
         secondaryActions: 'sheet',
         actionLabels: 'short',
         listRow: 'dense',
+        density,
+        fohTicketPane,
+        primaryCtaMinHeightPx,
       };
     case 'compact':
       return {
         coach: 'hidden',
-        fieldHelpers: 'compact',
+        fieldHelpers: density === 'ultra' ? 'hidden' : 'compact',
         selectHints: false,
         numericPad: 'icon-sheet',
         categoryNav: 'chips',
         secondaryActions: 'sheet',
         actionLabels: 'short',
         listRow: 'dense',
+        density,
+        fohTicketPane,
+        primaryCtaMinHeightPx,
       };
     case 'desktop':
       return {
@@ -92,6 +197,9 @@ export function resolveAdaptiveChrome(tier: LayoutTier): AdaptiveChrome {
         secondaryActions: 'inline',
         actionLabels: 'verbose',
         listRow: 'comfortable',
+        density,
+        fohTicketPane,
+        primaryCtaMinHeightPx,
       };
     case 'wide':
       return {
@@ -103,8 +211,33 @@ export function resolveAdaptiveChrome(tier: LayoutTier): AdaptiveChrome {
         secondaryActions: 'inline',
         actionLabels: 'verbose',
         listRow: 'comfortable',
+        density,
+        fohTicketPane,
+        primaryCtaMinHeightPx,
       };
   }
+}
+
+/** Touch-packed FOH (phone / compact tablet / short height) — prefer list area over chrome. */
+export function isAdaptiveDenseSurface(
+  chromeOrTier: AdaptiveChrome | LayoutTier,
+): boolean {
+  const chrome =
+    typeof chromeOrTier === 'string'
+      ? resolveAdaptiveChrome(chromeOrTier)
+      : chromeOrTier;
+  return chrome.density === 'dense' || chrome.density === 'ultra';
+}
+
+/** Ultra packing only (short handheld) — lowest chrome budget. */
+export function isAdaptiveUltraSurface(
+  chromeOrTier: AdaptiveChrome | LayoutTier,
+): boolean {
+  const chrome =
+    typeof chromeOrTier === 'string'
+      ? resolveAdaptiveChrome(chromeOrTier)
+      : chromeOrTier;
+  return chrome.density === 'ultra';
 }
 
 /** Inline ± always available on the row; density only changes placement (same-line vs stacked). */
@@ -138,6 +271,8 @@ export const ADAPTIVE_ON_DEMAND_SURFACES = [
   'coach-copy',
   'advanced-filters',
   'line-actions',
+  /** Restaurant FOH ticket board when chrome.fohTicketPane === 'sheet' */
+  'foh-ticket-pane',
 ] as const;
 
 export type AdaptiveOnDemandSurface = (typeof ADAPTIVE_ON_DEMAND_SURFACES)[number];

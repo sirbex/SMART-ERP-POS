@@ -150,8 +150,12 @@ export type LayoutCapabilities = LayoutCapabilitiesInput & {
 export function buildLayoutCapabilities(input: LayoutCapabilitiesInput): LayoutCapabilities {
   const tier = resolveLayoutTier(input.width);
   const tokens = resolveLayoutShellTokens(tier);
-  const chrome = resolveAdaptiveChrome(tier);
   const touchFirst = input.isTouch || input.pointerCoarse;
+  const chrome = resolveAdaptiveChrome(tier, {
+    width: input.width,
+    height: input.height,
+    touchFirst,
+  });
   return {
     ...input,
     tier,

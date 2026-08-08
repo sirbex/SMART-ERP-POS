@@ -452,8 +452,9 @@ export function deriveRestaurantCheckForTable(
         .filter((o) => o.tableId === tableId)
         .sort((a, b) => b.updatedTs - a.updatedTs);
     if (preferredOrderId) {
-        const pref = matches.find((o) => o.orderId === preferredOrderId);
-        if (pref) return pref;
+        // Multi-ticket integrity: never fall back to a sibling's lines when a specific
+        // ticket was requested. Empty preferred means no snapshot for that ticket yet.
+        return matches.find((o) => o.orderId === preferredOrderId) ?? null;
     }
     return matches[0] ?? null;
 }

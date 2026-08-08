@@ -156,6 +156,7 @@ export function AdaptiveAppShell({ children, className, pathname }: AdaptiveAppS
             data-adaptive-secondary={layout.chrome.secondaryActions}
             data-adaptive-labels={layout.chrome.actionLabels}
             data-adaptive-list-row={layout.chrome.listRow}
+            data-adaptive-foh-ticket={layout.chrome.fohTicketPane}
             data-printer-capability={capabilities.printer}
             data-device-offline={capabilities.isOffline ? 'true' : 'false'}
             data-workspace={workspace ? workspaceDatasetValue(workspace) : undefined}

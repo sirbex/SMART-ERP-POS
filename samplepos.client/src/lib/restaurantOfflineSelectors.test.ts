@@ -388,4 +388,62 @@ describe('deriveRestaurantOpenChecks (Phase 5.1 / 5.2)', () => {
     expect(board[0].status).toBe('PREPARING');
     expect(board[0].items[0].productName).toBe('Fries');
   });
+
+  it('EVIDENCE multi-ticket preferred orderId never falls back to sibling lines', () => {
+    const makeLine = (lineId: string, productName: string, unitPrice: number) => ({
+      lineId,
+      productId: `p-${lineId}`,
+      productName,
+      sku: '',
+      uom: 'PIECE' as const,
+      quantity: 1,
+      unitPrice,
+      costPrice: 0,
+      subtotal: unitPrice,
+      taxAmount: 0,
+    });
+    const events: PosOfflineEvent[] = [
+      {
+        eventType: 'ORDER_CREATED',
+        key: 'mt1',
+        orderId: 'ord-ticket-1',
+        offlineId: 'ORD-1',
+        lines: [makeLine('l1', 'Soup', 5)],
+        ts: 1,
+        channel: 'DINE_IN',
+        tableId: 't-mt',
+        tableCode: 'D01',
+      },
+      {
+        eventType: 'ORDER_CREATED',
+        key: 'mt2',
+        orderId: 'ord-ticket-2',
+        offlineId: 'ORD-2',
+        lines: [makeLine('l2', 'Steak', 20)],
+        ts: 2,
+        channel: 'DINE_IN',
+        tableId: 't-mt',
+        tableCode: 'D01',
+      },
+      {
+        eventType: 'ORDER_CREATED',
+        key: 'mt3',
+        orderId: 'ord-ticket-3',
+        offlineId: 'ORD-3',
+        lines: [makeLine('l3', 'Wine', 12)],
+        ts: 3,
+        channel: 'DINE_IN',
+        tableId: 't-mt',
+        tableCode: 'D01',
+      },
+    ];
+    // Default (no preferred): latest ticket on table
+    expect(deriveRestaurantCheckForTable('t-mt', events, sync)?.orderId).toBe('ord-ticket-3');
+    // Selected ticket 2: only steak
+    const t2 = deriveRestaurantCheckForTable('t-mt', events, sync, 'ord-ticket-2');
+    expect(t2?.orderId).toBe('ord-ticket-2');
+    expect(t2?.lines.map((l) => l.productName)).toEqual(['Steak']);
+    // Unknown preferred: null — never silent substitute another ticket's lines
+    expect(deriveRestaurantCheckForTable('t-mt', events, sync, 'ord-missing')).toBeNull();
+  });
 });

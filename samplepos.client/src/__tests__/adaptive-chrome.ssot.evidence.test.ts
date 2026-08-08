@@ -8,6 +8,7 @@ import {
   isAdaptivePrimarySurface,
   resolveActionLabel,
   resolveAdaptiveChrome,
+  resolveFohTicketPane,
   resolvePayButtonLabel,
   shouldShowCoach,
   showInlineRowEditors,
@@ -18,20 +19,77 @@ import { buildLayoutCapabilities, resolveLayoutTier } from '../lib/layoutTiers';
 const here = dirname(fileURLToPath(import.meta.url));
 
 describe('adaptive chrome SSOT (global progressive disclosure)', () => {
-  it('is the single matrix — capabilities.chrome === resolveAdaptiveChrome(tier)', () => {
+  it('is the single matrix — capabilities.chrome === resolveAdaptiveChrome(tier, geometry)', () => {
     for (const width of [375, 800, 1280, 1800]) {
       const tier = resolveLayoutTier(width);
+      const height = width < 1024 ? 640 : 800;
+      const touch = width < 1024;
       const caps = buildLayoutCapabilities({
         width,
-        height: 800,
-        isTouch: width < 1024,
-        pointerCoarse: width < 1024,
-        orientation: 'landscape',
+        height,
+        isTouch: touch,
+        pointerCoarse: touch,
+        orientation: height >= width ? 'portrait' : 'landscape',
         devicePixelRatio: 1,
       });
-      expect(caps.chrome).toEqual(resolveAdaptiveChrome(tier));
+      expect(caps.chrome).toEqual(
+        resolveAdaptiveChrome(tier, {
+          width,
+          height,
+          touchFirst: touch,
+        }),
+      );
       expect(caps.tier).toBe(tier);
+      expect(['ultra', 'dense', 'comfortable']).toContain(caps.chrome.density);
+      expect(caps.chrome.primaryCtaMinHeightPx).toBeGreaterThanOrEqual(44);
+      expect(['sheet', 'column']).toContain(caps.chrome.fohTicketPane);
+      expect(caps.chrome.fohTicketPane).toBe(resolveFohTicketPane(caps.chrome.density));
     }
+  });
+
+  it('packs ultra density on short handheld viewports (Sunmi landscape / short pad)', () => {
+    const shortPhone = buildLayoutCapabilities({
+      width: 800,
+      height: 480,
+      isTouch: true,
+      pointerCoarse: true,
+      orientation: 'landscape',
+      devicePixelRatio: 2,
+    });
+    expect(shortPhone.tier).toBe('compact');
+    expect(shortPhone.chrome.density).toBe('ultra');
+    expect(shortPhone.chrome.primaryCtaMinHeightPx).toBe(44);
+    expect(shortPhone.chrome.coach).toBe('hidden');
+    expect(shortPhone.chrome.fohTicketPane).toBe('sheet');
+
+    const tallTablet = buildLayoutCapabilities({
+      width: 800,
+      height: 1280,
+      isTouch: true,
+      pointerCoarse: true,
+      orientation: 'portrait',
+      devicePixelRatio: 2,
+    });
+    expect(tallTablet.chrome.density).toBe('dense');
+    expect(tallTablet.chrome.fohTicketPane).toBe('sheet');
+  });
+
+  it('FOH ticket pane: sheet on dense/ultra (menu owns viewport); column on comfortable desk', () => {
+    expect(resolveFohTicketPane('ultra')).toBe('sheet');
+    expect(resolveFohTicketPane('dense')).toBe('sheet');
+    expect(resolveFohTicketPane('comfortable')).toBe('column');
+
+    const phone = resolveAdaptiveChrome('mobile', { width: 390, height: 844, touchFirst: true });
+    expect(phone.fohTicketPane).toBe('sheet');
+    expect(phone.density === 'dense' || phone.density === 'ultra').toBe(true);
+
+    const desk = resolveAdaptiveChrome('desktop', {
+      width: 1280,
+      height: 900,
+      touchFirst: false,
+    });
+    expect(desk.density).toBe('comfortable');
+    expect(desk.fohTicketPane).toBe('column');
   });
 
   it('hides coach + secondary chrome on mobile/compact; docks pads on desktop/wide', () => {
@@ -44,6 +102,8 @@ describe('adaptive chrome SSOT (global progressive disclosure)', () => {
       expect(chrome.secondaryActions).toBe('sheet');
       expect(chrome.actionLabels).toBe('short');
       expect(chrome.listRow).toBe('dense');
+      expect(chrome.density === 'dense' || chrome.density === 'ultra').toBe(true);
+      expect(chrome.fohTicketPane).toBe('sheet');
       expect(showInlineRowEditors(chrome)).toBe(true);
       expect(inlineRowEditorsOnSameLine(chrome)).toBe(true);
       expect(shouldShowCoach(chrome, 'coach')).toBe(false);
@@ -57,6 +117,8 @@ describe('adaptive chrome SSOT (global progressive disclosure)', () => {
     expect(desktop.coach).toBe('compact');
     expect(desktop.actionLabels).toBe('verbose');
     expect(desktop.listRow).toBe('comfortable');
+    expect(desktop.density).toBe('comfortable');
+    expect(desktop.fohTicketPane).toBe('column');
     expect(showInlineRowEditors(desktop)).toBe(true);
     expect(inlineRowEditorsOnSameLine(desktop)).toBe(false);
 
@@ -64,6 +126,7 @@ describe('adaptive chrome SSOT (global progressive disclosure)', () => {
     expect(wide.coach).toBe('full');
     expect(wide.fieldHelpers).toBe('full');
     expect(wide.listRow).toBe('comfortable');
+    expect(wide.fohTicketPane).toBe('column');
     expect(shouldShowCoach(wide, 'coach')).toBe(true);
   });
 
@@ -78,6 +141,7 @@ describe('adaptive chrome SSOT (global progressive disclosure)', () => {
     expect(ADAPTIVE_ON_DEMAND_SURFACES).toContain('secondary-actions');
     expect(ADAPTIVE_ON_DEMAND_SURFACES).toContain('field-helpers');
     expect(ADAPTIVE_ON_DEMAND_SURFACES).toContain('line-actions');
+    expect(ADAPTIVE_ON_DEMAND_SURFACES).toContain('foh-ticket-pane');
   });
 
   it('action labels resolve from SSOT density — modules only supply strings', () => {
@@ -104,6 +168,16 @@ describe('global consumers share adaptiveChrome SSOT (no module fork)', () => {
     expect(restaurant).toContain('chrome.numericPad');
     expect(restaurant).toContain('chrome.secondaryActions');
     expect(restaurant).toContain('chrome.listRow');
+    expect(restaurant).toContain('chrome.fohTicketPane');
+    expect(restaurant).toContain('isAdaptiveDenseSurface');
+    expect(restaurant).toContain('data-pos-density={chrome.density}');
+    expect(restaurant).toContain('data-foh-ticket-pane={chrome.fohTicketPane}');
+    expect(restaurant).toContain('data-foh-menu-surface="true"');
+    expect(restaurant).toContain('data-foh-order-dock="true"');
+    expect(restaurant).toContain('data-foh-menu-return="true"');
+    expect(restaurant).toContain("useSheetTicket ? 'max-h-none'");
+    expect(restaurant).not.toContain('max-h-[32%]');
+    expect(restaurant).not.toContain('max-h-[38%]');
     expect(restaurant).toContain('showInlineRowEditors(chrome)');
     expect(restaurant).toContain('inlineRowEditorsOnSameLine(chrome)');
     expect(restaurant).toContain('data-list-row={chrome.listRow}');
@@ -139,11 +213,13 @@ describe('global consumers share adaptiveChrome SSOT (no module fork)', () => {
     expect(shell).toContain('data-adaptive-pad={layout.chrome.numericPad}');
     expect(shell).toContain('data-adaptive-secondary={layout.chrome.secondaryActions}');
     expect(shell).toContain('data-adaptive-list-row={layout.chrome.listRow}');
+    expect(shell).toContain('data-adaptive-foh-ticket={layout.chrome.fohTicketPane}');
 
     expect(form).toContain('chrome.fieldHelpers');
     expect(form).toContain('data-adaptive-helper');
 
     expect(index).toContain('resolveAdaptiveChrome');
+    expect(index).toContain('resolveFohTicketPane');
     expect(index).toContain('showInlineRowEditors');
     expect(index).toContain('inlineRowEditorsOnSameLine');
     expect(index).toContain("from '../../lib/adaptiveChrome'");

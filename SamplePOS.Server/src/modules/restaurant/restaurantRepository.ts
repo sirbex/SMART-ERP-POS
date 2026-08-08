@@ -45,6 +45,13 @@ export interface RestaurantTableRecord {
   waiterName?: string | null;
   /** When the current open check was created (table timer). */
   checkOpenedAt?: string | null;
+  /**
+   * Samba multi-ticket: open PENDING restaurant checks on this table
+   * (not only the current_order_id pointer). Integrity signal for floor tiles.
+   */
+  openCheckCount?: number;
+  /** Sum of open check totals (session view; does not replace per-check billing). */
+  openChecksTotal?: string | null;
 }
 
 export interface RestaurantWaiterRecord {
@@ -176,6 +183,22 @@ export const restaurantRepository = {
     const guestSelect = hasGuest
       ? `, o.guest_name, o.order_channel`
       : `, NULL::text AS guest_name, o.order_channel`;
+    // Party session: count/sum ALL open checks (not only current_order_id).
+    const multiTicketSelect = `,
+         (
+           SELECT COUNT(*)::int
+           FROM pos_orders oc
+           WHERE oc.table_id = t.id
+             AND oc.status = 'PENDING'
+             AND oc.order_channel IS DISTINCT FROM 'RETAIL'
+         ) AS open_check_count,
+         (
+           SELECT COALESCE(SUM(oc.total_amount), 0)::text
+           FROM pos_orders oc
+           WHERE oc.table_id = t.id
+             AND oc.status = 'PENDING'
+             AND oc.order_channel IS DISTINCT FROM 'RETAIL'
+         ) AS open_checks_total`;
 
     const result = await conn.query(
       `SELECT
@@ -186,6 +209,7 @@ export const restaurantRepository = {
          uw.full_name AS waiter_name,
          o.created_at AS check_opened_at
          ${guestSelect}
+         ${multiTicketSelect}
        FROM restaurant_tables t
        LEFT JOIN pos_orders o ON o.id = t.current_order_id AND o.status = 'PENDING'
        LEFT JOIN users uw ON uw.id = o.waiter_id
@@ -201,6 +225,21 @@ export const restaurantRepository = {
     const guestSelect = hasGuest
       ? `, o.guest_name, o.order_channel`
       : `, NULL::text AS guest_name, o.order_channel`;
+    const multiTicketSelect = `,
+         (
+           SELECT COUNT(*)::int
+           FROM pos_orders oc
+           WHERE oc.table_id = t.id
+             AND oc.status = 'PENDING'
+             AND oc.order_channel IS DISTINCT FROM 'RETAIL'
+         ) AS open_check_count,
+         (
+           SELECT COALESCE(SUM(oc.total_amount), 0)::text
+           FROM pos_orders oc
+           WHERE oc.table_id = t.id
+             AND oc.status = 'PENDING'
+             AND oc.order_channel IS DISTINCT FROM 'RETAIL'
+         ) AS open_checks_total`;
 
     const result = await conn.query(
       `SELECT
@@ -211,6 +250,7 @@ export const restaurantRepository = {
          uw.full_name AS waiter_name,
          o.created_at AS check_opened_at
          ${guestSelect}
+         ${multiTicketSelect}
        FROM restaurant_tables t
        LEFT JOIN pos_orders o ON o.id = t.current_order_id AND o.status = 'PENDING'
        LEFT JOIN users uw ON uw.id = o.waiter_id
@@ -442,11 +482,14 @@ export const restaurantRepository = {
       createdAt: string;
       waiterId: string | null;
       waiterName: string | null;
+      /** FOA ticket note (user-facing; system shell notes filtered on FOH). */
+      notes: string | null;
     }>
   > {
     const result = await conn.query(
       `SELECT o.id, o.order_number, o.total_amount, o.created_at,
-              o.waiter_id, uw.full_name AS waiter_name
+              o.waiter_id, uw.full_name AS waiter_name,
+              o.notes
        FROM pos_orders o
        LEFT JOIN users uw ON uw.id = o.waiter_id
        WHERE o.table_id = $1
@@ -462,6 +505,7 @@ export const restaurantRepository = {
       createdAt: string;
       waiterId: string | null;
       waiterName: string | null;
+      notes: string | null;
     });
   },
 
@@ -779,6 +823,20 @@ export const restaurantRepository = {
 
     values.push(orderId);
     await conn.query(`UPDATE pos_orders SET ${sets.join(', ')} WHERE id = $${i}`, values);
+  },
+
+  /** FOA ticket note — header only; no line/total side effects. */
+  async updateOrderNotes(
+    conn: DbConn,
+    orderId: string,
+    notes: string | null,
+  ): Promise<void> {
+    await conn.query(
+      `UPDATE pos_orders
+       SET notes = $2
+       WHERE id = $1 AND status = 'PENDING'`,
+      [orderId, notes],
+    );
   },
 
   async updateOrderTotals(

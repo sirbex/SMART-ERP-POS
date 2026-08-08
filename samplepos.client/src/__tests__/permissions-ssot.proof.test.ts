@@ -178,7 +178,9 @@ describe('PROOF: Cancel check is managers only', () => {
     const pos = readClient('pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/canCancelCheck/);
     expect(pos).toMatch(/canCancelRestaurantCheck/);
-    expect(pos).toMatch(/chrome\.secondaryActions === 'inline' && canCancelCheck/);
+    // Cancel is always behind ⋯ sheet (Toast-style) so multi-ticket lines stay visible.
+    expect(pos).toMatch(/data-secondary-ops-surface="cancel"/);
+    expect(pos).toMatch(/canCancelCheck \? \(/);
     pass('cancel-check UI + route wiring');
   });
 });

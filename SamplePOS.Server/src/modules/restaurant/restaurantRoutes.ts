@@ -55,6 +55,11 @@ const AddItemsSchema = z.object({
   tableId: z.string().uuid(),
   /** Multi-ticket: append to this open check (not only table.current_order_id). */
   orderId: z.string().uuid().optional(),
+  /**
+   * Party-list menu add: always open a new PENDING check with these items.
+   * Ignores orderId and table.current_order_id (siblings stay open).
+   */
+  forceNewCheck: z.boolean().optional(),
   customerId: z.string().uuid().nullable().optional(),
   taxAmount: z.number().nonnegative().optional(),
   waiterId: z.string().uuid().optional(),
@@ -225,6 +230,40 @@ router.post(
   }),
 );
 
+/**
+ * POST /api/restaurant/tables/:id/open-check
+ * Samba multi-ticket: open empty PENDING check on table without moving lines.
+ * Preserves all sibling checks (no merge/cancel/release).
+ */
+router.post(
+  '/tables/:id/open-check',
+  requirePermission('restaurant.order'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const body = z
+      .object({
+        waiterId: z.string().uuid().optional(),
+        guestName: z.string().max(200).nullable().optional(),
+        guestPhone: z.string().max(50).nullable().optional(),
+        deliveryAddress: z.string().max(1000).nullable().optional(),
+        pickupLabel: z.string().max(120).nullable().optional(),
+      })
+      .parse(req.body ?? {});
+    const actor = ownershipActorFromReq(req);
+    const waiterId = body.waiterId || req.user!.id;
+    const check = await restaurantService.openEmptyCheck(pool, {
+      tableId: req.params.id,
+      waiterId,
+      actor,
+      guestName: body.guestName,
+      guestPhone: body.guestPhone,
+      deliveryAddress: body.deliveryAddress,
+      pickupLabel: body.pickupLabel,
+    });
+    res.status(201).json({ success: true, data: check });
+  }),
+);
+
 router.get(
   '/menu/categories',
   requireAnyPermission(['restaurant.read', 'restaurant.order']),
@@ -285,6 +324,24 @@ router.patch(
       pool,
       req.params.orderId,
       body,
+      ownershipActorFromReq(req),
+    );
+    res.json({ success: true, data: result });
+  }),
+);
+
+router.patch(
+  '/checks/:orderId/notes',
+  requirePermission('restaurant.order'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const pool = req.tenantPool || globalPool;
+    const body = z
+      .object({ notes: z.string().max(2000).nullable() })
+      .parse(req.body ?? {});
+    const result = await restaurantService.updateCheckNotes(
+      pool,
+      req.params.orderId,
+      body.notes,
       ownershipActorFromReq(req),
     );
     res.json({ success: true, data: result });
