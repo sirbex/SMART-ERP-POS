@@ -77,36 +77,57 @@ export function isNoteDraftStatus(status: string | null | undefined): boolean {
 }
 
 /** Build AR amount charge line (unitPrice). */
-export function buildCustomerAmountChargeLine(amount: number, reason?: string) {
+export function buildCustomerAmountChargeLine(amount: number, reason?: string): {
+    productName: string;
+    description: string | undefined;
+    quantity: number;
+    unitPrice: number;
+    taxRate: number;
+    productId?: string;
+} {
     return {
         productName: AMOUNT_CHARGE_LINE_NAME,
         description: reason?.trim() || undefined,
         quantity: 1,
         unitPrice: amount,
         taxRate: 0,
-    } as const;
+    };
 }
 
 /** Build AP amount charge line (unitCost). */
-export function buildSupplierAmountChargeLine(amount: number, reason?: string) {
+export function buildSupplierAmountChargeLine(amount: number, reason?: string): {
+    productName: string;
+    description: string | undefined;
+    quantity: number;
+    unitCost: number;
+    taxRate: number;
+    productId?: string;
+} {
     return {
         productName: AMOUNT_CHARGE_LINE_NAME,
         description: reason?.trim() || undefined,
         quantity: 1,
         unitCost: amount,
         taxRate: 0,
-    } as const;
+    };
 }
 
 /** Build AP price-correction / allowance line (unitCost). */
-export function buildSupplierAmountCreditLine(amount: number, reason?: string) {
+export function buildSupplierAmountCreditLine(amount: number, reason?: string): {
+    productName: string;
+    description: string | undefined;
+    quantity: number;
+    unitCost: number;
+    taxRate: number;
+    productId?: string;
+} {
     return {
         productName: AMOUNT_CREDIT_LINE_NAME,
         description: reason?.trim() || undefined,
         quantity: 1,
         unitCost: amount,
         taxRate: 0,
-    } as const;
+    };
 }
 
 export function supplierNoteStatusLabel(input: {
