@@ -42,6 +42,7 @@ export const SYSTEM_ACCOUNTANT_EXTRA_KEYS = [
   'sales.refund',
   'sales.approve',
   'sales.tax_override',
+  'sales.tax_restatement',
   'sales.export',
   'purchasing.read',
   'purchasing.create',

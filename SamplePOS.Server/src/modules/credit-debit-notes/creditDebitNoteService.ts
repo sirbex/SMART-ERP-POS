@@ -37,6 +37,11 @@ import type {
     CreateSupplierCreditNote,
     CreateSupplierDebitNote,
 } from '../../../../shared/zod/creditDebitNote.js';
+import {
+    buildCustomerAmountChargeLine,
+    buildSupplierAmountChargeLine,
+    buildSupplierAmountCreditLine,
+} from '../../../../shared/utils/creditDebitNoteSsot.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
 import { DocumentTaxService } from '../../services/documentTaxService.js';
 
@@ -198,10 +203,15 @@ export const creditDebitNoteService = {
             if (invoice.documentType !== 'INVOICE') throw new Error('Cannot create a note against another note');
             if (invoice.status === 'Cancelled' || invoice.status === 'CANCELLED') throw new Error('Cannot create a note against a cancelled invoice');
 
+            // Amount-only path (UI default): SSOT synthetic charge line — not a product SKU.
+            const effectiveLines = (input.lines && input.lines.length > 0)
+                ? input.lines
+                : [buildCustomerAmountChargeLine(input.amount as number, input.reason)];
+
             const priced = await priceNoteLines(client, {
                 customerId: invoice.customerId,
                 scope: 'SALE',
-                lines: input.lines.map((l) => ({
+                lines: effectiveLines.map((l) => ({
                     productId: l.productId,
                     quantity: l.quantity,
                     unitAmount: l.unitPrice,
@@ -232,7 +242,7 @@ export const creditDebitNoteService = {
             const lineItems = await creditDebitNoteRepository.createNoteLineItems(
                 client,
                 note.id,
-                input.lines.map((l, idx) => ({
+                effectiveLines.map((l, idx) => ({
                     productId: l.productId || '',
                     productName: l.productName,
                     description: l.description || null,
@@ -525,10 +535,10 @@ export const supplierCreditDebitNoteService = {
             if (invoice.documentType !== 'SUPPLIER_INVOICE') throw new Error('Cannot create a note against another note');
             if (invoice.status === 'CANCELLED' || invoice.status === 'Cancelled') throw new Error('Cannot create a note against a cancelled invoice');
 
-            // Synthesize a single line for PRICE_CORRECTION when no line items are provided (amount-only path)
+            // Synthesize amount line for PRICE_CORRECTION (SSOT — not free-form product entry)
             const effectiveCreditLines = (input.lines && input.lines.length > 0)
                 ? input.lines
-                : [{ productName: 'Price Correction', quantity: 1, unitCost: input.amount as number, taxRate: 0 }];
+                : [buildSupplierAmountCreditLine(input.amount as number, input.reason)];
 
             const priced = await priceNoteLines(client, {
                 scope: 'PURCHASE',
@@ -621,10 +631,10 @@ export const supplierCreditDebitNoteService = {
             if (invoice.documentType !== 'SUPPLIER_INVOICE') throw new Error('Cannot create a note against another note');
             if (invoice.status === 'CANCELLED' || invoice.status === 'Cancelled') throw new Error('Cannot create a note against a cancelled invoice');
 
-            // Synthesize a single line when no line items are provided (amount-only path)
+            // Synthesize a single line when no line items are provided (amount-only path — SSOT)
             const effectiveDebitLines = (input.lines && input.lines.length > 0)
                 ? input.lines
-                : [{ productName: 'Additional Charge', quantity: 1, unitCost: input.amount as number, taxRate: 0 }];
+                : [buildSupplierAmountChargeLine(input.amount as number, input.reason)];
 
             const priced = await priceNoteLines(client, {
                 scope: 'PURCHASE',

@@ -364,15 +364,20 @@ export class InventoryBusinessRules {
 export class SalesBusinessRules {
   /**
    * BR-SAL-001: Payment received must be >= total amount (no underpayment)
-   * CASH sales MUST have payment amount provided
+   * CASH sales MUST have payment amount when there is an amount due.
+   * Zero-total sales (e.g. fully covered by exchange store credit) may receive 0 cash.
    */
   static validatePaymentAmount(
     totalAmount: number,
     paymentReceived: number,
     paymentMethod: string
   ): void {
-    // CRITICAL: CASH sales must have payment amount
-    if (paymentMethod === 'CASH' && (!paymentReceived || paymentReceived <= 0)) {
+    const total = Number(totalAmount) || 0;
+    const received = Number(paymentReceived) || 0;
+
+    // CRITICAL: CASH sales with a balance due must receive cash
+    // Zero-total (exchange credit covers full replacement, free gifts, 100% discount) may be 0.
+    if (paymentMethod === 'CASH' && total > 0.009 && received <= 0) {
       throw new BusinessRuleViolation(
         'BR-SAL-001',
         'CASH sales require payment amount. Cannot record cash sale without cash received.',
@@ -380,10 +385,10 @@ export class SalesBusinessRules {
       );
     }
 
-    if (paymentMethod !== 'CREDIT' && paymentReceived < totalAmount) {
+    if (paymentMethod !== 'CREDIT' && received + 0.01 < total) {
       throw new BusinessRuleViolation(
         'BR-SAL-001',
-        `Payment received (${paymentReceived}) is less than total amount (${totalAmount})`,
+        `Payment received (${received}) is less than total amount (${total})`,
         'INSUFFICIENT_PAYMENT'
       );
     }

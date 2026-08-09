@@ -297,6 +297,23 @@ export function useCustomerSummary(customerId: string) {
   );
 }
 
+export function useCustomerCenterStats(enabled = true) {
+  return useQuery({
+    queryKey: ['customers', 'center-stats'],
+    queryFn: () => api.customers.getCenterStats(),
+    select: (resp) =>
+      (resp.data?.data ?? resp.data) as {
+        totalCustomers: number;
+        activeCustomers: number;
+        totalArBalance: number;
+        customersWithDebt: number;
+        recentActivityCount: number;
+      },
+    enabled,
+    staleTime: 30000,
+  });
+}
+
 export function useCustomerStatement(customerId: string, options?: { start?: string; end?: string; page?: number; limit?: number }) {
   const { start, end, page = 1, limit = 100 } = options || {};
   return useApiQuery(

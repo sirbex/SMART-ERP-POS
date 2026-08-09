@@ -1062,7 +1062,7 @@ describe('supplierCreditDebitNoteService — Supplier Credit Note', () => {
             // createSupplierNoteLineItems must receive the synthesized "Price Correction" line
             const lineArgs = mockSupplierRepo.createSupplierNoteLineItems.mock.calls[0][2] as Array<Record<string, unknown>>;
             expect(lineArgs).toHaveLength(1);
-            expect(lineArgs[0].productName).toBe('Price Correction');
+            expect(lineArgs[0].productName).toBe('Price correction');
             expect(lineArgs[0].quantity).toBe(1);
             expect(lineArgs[0].unitCost).toBe(5000);
             expect(lineArgs[0].taxRate).toBe(0);
@@ -1159,7 +1159,7 @@ describe('supplierCreditDebitNoteService — Supplier Debit Note', () => {
             // Synthesized "Additional Charge" line
             const lineArgs = mockSupplierRepo.createSupplierNoteLineItems.mock.calls[0][2] as Array<Record<string, unknown>>;
             expect(lineArgs).toHaveLength(1);
-            expect(lineArgs[0].productName).toBe('Additional Charge');
+            expect(lineArgs[0].productName).toBe('Additional charge');
             expect(lineArgs[0].quantity).toBe(1);
             expect(lineArgs[0].unitCost).toBe(3000);
             expect(lineArgs[0].taxRate).toBe(0);

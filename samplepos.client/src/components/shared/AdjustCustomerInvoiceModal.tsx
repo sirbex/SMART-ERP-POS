@@ -39,7 +39,7 @@ interface ReturnLineState {
     quantity: string;
 }
 
-function AdjustmentGuide({
+function AdjustmentCapacityHint({
     step,
     intent,
     existingCreditNoteTotal = 0,
@@ -50,84 +50,13 @@ function AdjustmentGuide({
     existingCreditNoteTotal?: number;
     maxAdditionalCredit?: number;
 }) {
-    if (step === 1) {
+    // Only surface operational limits — not training copy.
+    if (step === 2 && intent === 'PRICE_CORRECTION' && existingCreditNoteTotal > 0) {
         return (
-            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 space-y-2">
-                <p className="font-semibold">What you are doing</p>
-                <p>
-                    You are correcting an invoice that was charged incorrectly. The system will create and
-                    <strong> post a credit note</strong> linked to this invoice.
-                </p>
-                <ul className="list-disc pl-5 space-y-1 text-blue-800">
-                    <li>
-                        <strong>Price correction</strong> — Customer was overcharged (e.g. retail instead of at-cost).
-                        No stock changes. Use when prices on the invoice are wrong but goods stay with the customer.
-                    </li>
-                    <li>
-                        <strong>Return goods</strong> — Customer sends product back. Stock is increased and COGS is reversed.
-                        Use only when physical goods are returned.
-                    </li>
-                </ul>
-                <p className="text-xs text-blue-700">
-                    After posting, the credit note appears on the customer <strong>Transactions</strong> tab.
-                    This invoice&apos;s <strong>Paid</strong> and <strong>Outstanding</strong> amounts update automatically.
-                </p>
-            </div>
-        );
-    }
-    if (step === 2 && intent === 'PRICE_CORRECTION') {
-        return (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
-                <p className="font-semibold">Price correction — your steps</p>
-                {existingCreditNoteTotal > 0 && (
-                    <p className="text-xs font-medium text-amber-800">
-                        Prior posted credit notes on this invoice: {formatCurrency(existingCreditNoteTotal)}.
-                        Maximum additional correction: {formatCurrency(maxAdditionalCredit)}.
-                    </p>
-                )}
-                <ol className="list-decimal pl-5 space-y-1">
-                    <li>Tick each line where the <strong>charged</strong> price is higher than the <strong>correct</strong> price (system-calculated).</li>
-                    <li>Check the <strong>Selected credit</strong> total matches what you expect to refund on this invoice.</li>
-                    <li>Enter a clear <strong>reason</strong> (required for audit), e.g. &quot;AT_COST customer — billed retail on invoice&quot;.</li>
-                    <li>Click <strong>Next</strong>, review, then <strong>Post credit note</strong>.</li>
-                </ol>
-                <p className="text-xs">
-                    The credit note reduces what the customer owes on this invoice. It is <strong>not</strong> a new bill to collect.
-                </p>
-            </div>
-        );
-    }
-    if (step === 2 && intent === 'RETURN_GOODS') {
-        return (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 space-y-2">
-                <p className="font-semibold">Return goods — your steps</p>
-                <ol className="list-decimal pl-5 space-y-1">
-                    <li>Select lines and quantities actually returned to the warehouse.</li>
-                    <li>Enter reason (required).</li>
-                    <li>Posting creates a credit note and puts stock back into inventory.</li>
-                </ol>
-            </div>
-        );
-    }
-    if (step === 3) {
-        return (
-            <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900 space-y-2">
-                <p className="font-semibold">Before you post</p>
-                <p>
-                    Confirm the credit amount and lines. When you click <strong>Post credit note</strong>:
-                </p>
-                <ul className="list-disc pl-5 space-y-1">
-                    <li>A credit note is created and posted immediately (cannot be undone from this screen).</li>
-                    <li>This invoice&apos;s outstanding balance goes down by the credit total.</li>
-                    <li>Customer balance and GL entries update automatically.</li>
-                    <li>View the credit note on the customer <strong>Transactions</strong> tab.</li>
-                </ul>
-                {intent === 'PRICE_CORRECTION' && (
-                    <p className="text-xs">
-                        Price correction does <strong>not</strong> change inventory quantities.
-                    </p>
-                )}
-            </div>
+            <p className="mb-3 text-xs text-amber-800">
+                Prior credit notes on this invoice: {formatCurrency(existingCreditNoteTotal)}.
+                Remaining capacity: {formatCurrency(maxAdditionalCredit)}.
+            </p>
         );
     }
     return null;
@@ -452,7 +381,7 @@ export function AdjustCustomerInvoiceModal({
 
                 {!loading && !contextError && context && (
                     <>
-                        <AdjustmentGuide
+                        <AdjustmentCapacityHint
                             step={step}
                             intent={intent}
                             existingCreditNoteTotal={context?.existingCreditNoteTotal ?? 0}

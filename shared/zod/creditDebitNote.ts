@@ -35,9 +35,15 @@ export const CreateCustomerDebitNoteSchema = z.object({
     invoiceId: z.string().uuid('Invoice ID must be a valid UUID'),
     reason: z.string().min(1, 'Reason is required').max(500),
     issueDate: z.string().optional(),
-    lines: z.array(NoteLineItemSchema).min(1, 'At least one line item is required'),
+    // Additional AR charge on a linked invoice — usually a single amount (freight, underbill fix, late fee).
+    // Line items remain optional for API clients that need breakout detail.
+    lines: z.array(NoteLineItemSchema).min(1).optional(),
+    amount: z.number().positive('Amount must be positive').optional(),
     notes: z.string().max(1000).optional(),
-}).strict();
+}).strict().refine(
+    (data) => (data.lines != null && data.lines.length > 0) || (data.amount != null && data.amount > 0),
+    { message: 'Either an amount or line items is required for a debit note' },
+);
 
 // ============================================================
 // SUPPLIER SIDE: Credit Notes & Debit Notes

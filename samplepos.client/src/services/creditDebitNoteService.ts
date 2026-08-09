@@ -1,14 +1,20 @@
 /**
- * Credit/Debit Note API Service
- * 
- * Frontend API client for credit notes and debit notes.
- * Covers both customer (AR) and supplier (AP) sides.
+ * Credit/Debit Note API client.
+ * Create payload shapes are SSOT from @shared/zod/creditDebitNote.
  */
 
 import { api } from './api';
+import type {
+    CreateCustomerCreditNote,
+    CreateCustomerDebitNote,
+    CreateSupplierCreditNote,
+    CreateSupplierDebitNote,
+    NoteLineItem as ZodNoteLineItem,
+    SupplierNoteLineItem,
+} from '@shared/zod/creditDebitNote';
 
 // ============================================================
-// Types
+// List / detail types (API responses)
 // ============================================================
 
 export interface CreditDebitNote {
@@ -66,64 +72,14 @@ export interface NoteLineItem {
     lineTotalIncludingTax: number;
 }
 
-export interface CreateNoteLineInput {
-    productId?: string;
-    productName: string;
-    description?: string;
-    quantity: number;
-    unitPrice: number;
-    taxRate: number;
-}
-
-export interface CreateSupplierNoteLineInput {
-    productId?: string;
-    productName: string;
-    description?: string;
-    quantity: number;
-    unitCost: number;
-    taxRate: number;
-}
-
-export interface CreateCreditNoteRequest {
-    invoiceId: string;
-    reason: string;
-    noteType: 'FULL' | 'PARTIAL' | 'PRICE_CORRECTION';
-    returnsGoods?: boolean;
-    issueDate?: string;
-    lines: CreateNoteLineInput[];
-    notes?: string;
-}
-
-export interface CreateDebitNoteRequest {
-    invoiceId: string;
-    reason: string;
-    issueDate?: string;
-    lines: CreateNoteLineInput[];
-    notes?: string;
-}
-
-export interface CreateSupplierCreditNoteRequest {
-    invoiceId: string;
-    reason: string;
-    noteType: 'FULL' | 'PARTIAL' | 'PRICE_CORRECTION';
-    issueDate?: string;
-    lines?: CreateSupplierNoteLineInput[];
-    amount?: number;
-    notes?: string;
-}
-
-export interface CreateSupplierDebitNoteRequest {
-    invoiceId: string;
-    reason: string;
-    issueDate?: string;
-    lines?: CreateSupplierNoteLineInput[];
-    amount?: number;
-    notes?: string;
-}
-
-// ============================================================
-// Customer Credit/Debit Note Service
-// ============================================================
+/** @deprecated Use Zod types from @shared/zod/creditDebitNote */
+export type CreateNoteLineInput = ZodNoteLineItem;
+/** @deprecated Use SupplierNoteLineItem from @shared/zod/creditDebitNote */
+export type CreateSupplierNoteLineInput = SupplierNoteLineItem;
+export type CreateCreditNoteRequest = CreateCustomerCreditNote;
+export type CreateDebitNoteRequest = CreateCustomerDebitNote;
+export type CreateSupplierCreditNoteRequest = CreateSupplierCreditNote;
+export type CreateSupplierDebitNoteRequest = CreateSupplierDebitNote;
 
 export const creditDebitNoteService = {
     async listCustomerNotes(params?: {
@@ -148,12 +104,12 @@ export const creditDebitNoteService = {
         return response.data;
     },
 
-    async createCustomerCreditNote(data: CreateCreditNoteRequest) {
+    async createCustomerCreditNote(data: CreateCustomerCreditNote) {
         const response = await api.post('/credit-debit-notes/customer/credit-note', data);
         return response.data;
     },
 
-    async createCustomerDebitNote(data: CreateDebitNoteRequest) {
+    async createCustomerDebitNote(data: CreateCustomerDebitNote) {
         const response = await api.post('/credit-debit-notes/customer/debit-note', data);
         return response.data;
     },
@@ -167,10 +123,6 @@ export const creditDebitNoteService = {
         const response = await api.post(`/credit-debit-notes/customer/${id}/cancel`, { reason });
         return response.data;
     },
-
-    // ============================================================
-    // Supplier Credit/Debit Notes
-    // ============================================================
 
     async listSupplierNotes(params?: {
         page?: number;
@@ -194,12 +146,12 @@ export const creditDebitNoteService = {
         return response.data;
     },
 
-    async createSupplierCreditNote(data: CreateSupplierCreditNoteRequest) {
+    async createSupplierCreditNote(data: CreateSupplierCreditNote) {
         const response = await api.post('/credit-debit-notes/supplier/credit-note', data);
         return response.data;
     },
 
-    async createSupplierDebitNote(data: CreateSupplierDebitNoteRequest) {
+    async createSupplierDebitNote(data: CreateSupplierDebitNote) {
         const response = await api.post('/credit-debit-notes/supplier/debit-note', data);
         return response.data;
     },
@@ -214,13 +166,6 @@ export const creditDebitNoteService = {
         return response.data;
     },
 
-    /**
-     * Apply a posted standalone Supplier Credit Note to that supplier's open
-     * bills using FIFO (oldest InvoiceDate first). Used by the
-     * "Apply to Open Bills" button on standalone (non-RGRN) credit notes.
-     * RGRN-derived credit notes are auto-applied at post-time and never need
-     * this endpoint.
-     */
     async applySupplierCreditNoteFIFO(id: string): Promise<{
         success: boolean;
         data: {

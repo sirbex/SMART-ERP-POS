@@ -50,6 +50,11 @@ export const POSSaleSchema = z.object({
   idempotencyKey: z.string().min(1).max(100).optional(), // Prevents duplicate sale creation
   /** Exchange refund document (REF-* with refund_type EXCHANGE) whose store credit is applied */
   exchangeRefundId: z.string().uuid().optional(),
+  /**
+   * Residual after applying exchange credit to this sale:
+   * REFUND_ORIGINAL_TENDER pays change difference; KEEP_VOUCHER leaves numbered credit open.
+   */
+  exchangeResidualAction: z.enum(['REFUND_ORIGINAL_TENDER', 'KEEP_VOUCHER']).optional(),
   /** Phase 5 — privileged VAT override (server enforces sales.tax_override + reason). */
   taxOverride: DocumentTaxOverrideSchema.optional(),
 }).strict().superRefine((data, ctx) => {

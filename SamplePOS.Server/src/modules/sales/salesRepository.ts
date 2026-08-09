@@ -1693,21 +1693,43 @@ export const salesRepository = {
     refundNumber: string;
     totalAmount: number;
     exchangeAppliedAmount: number;
+    exchangeResidualPayoutAmount: number;
+    remainingAmount: number;
     refundType: string;
     status: string;
   } | null> {
     const result = await pool.query(
-      `SELECT id, refund_number, total_amount, exchange_applied_amount, refund_type, status
+      `SELECT id, refund_number, total_amount, exchange_applied_amount,
+              COALESCE(exchange_residual_payout_amount, 0) AS exchange_residual_payout_amount,
+              refund_type, status
        FROM sale_refunds WHERE id = $1`,
       [refundId],
     );
     const row = result.rows[0];
     if (!row) return null;
+    const totalAmount = Money.toNumber(Money.parseDb(row.total_amount));
+    const exchangeAppliedAmount = Money.toNumber(Money.parseDb(row.exchange_applied_amount ?? 0));
+    const exchangeResidualPayoutAmount = Money.toNumber(
+      Money.parseDb(row.exchange_residual_payout_amount ?? 0),
+    );
     return {
       id: row.id,
       refundNumber: row.refund_number,
-      totalAmount: Money.toNumber(Money.parseDb(row.total_amount)),
-      exchangeAppliedAmount: Money.toNumber(Money.parseDb(row.exchange_applied_amount ?? 0)),
+      totalAmount,
+      exchangeAppliedAmount,
+      exchangeResidualPayoutAmount,
+      remainingAmount: Math.max(
+        0,
+        Money.toNumber(
+          Money.round(
+            Money.subtract(
+              Money.subtract(Money.parseDb(totalAmount), Money.parseDb(exchangeAppliedAmount)),
+              Money.parseDb(exchangeResidualPayoutAmount),
+            ),
+            2,
+          ),
+        ),
+      ),
       refundType: row.refund_type ?? 'REFUND',
       status: row.status,
     };
@@ -1730,7 +1752,8 @@ export const salesRepository = {
        WHERE id = $3
          AND refund_type = 'EXCHANGE'
          AND status = 'COMPLETED'
-         AND exchange_applied_amount + $1 <= total_amount + 0.01
+         AND exchange_applied_amount + COALESCE(exchange_residual_payout_amount, 0) + $1
+             <= total_amount + 0.01
        RETURNING id`,
       [appliedAmount, saleId, refundId],
     );
@@ -1741,6 +1764,97 @@ export const salesRepository = {
         { refundId, saleId, appliedAmount },
       );
     }
+  },
+
+  /**
+   * Record residual cash/card payout of unused exchange store credit.
+   */
+  async applyExchangeResidualPayout(
+    pool: Pool | PoolClient,
+    refundId: string,
+    payoutAmount: number,
+  ): Promise<void> {
+    const result = await pool.query(
+      `UPDATE sale_refunds
+       SET exchange_residual_payout_amount = COALESCE(exchange_residual_payout_amount, 0) + $1,
+           updated_at = NOW()
+       WHERE id = $2
+         AND refund_type = 'EXCHANGE'
+         AND status = 'COMPLETED'
+         AND exchange_applied_amount + COALESCE(exchange_residual_payout_amount, 0) + $1
+             <= total_amount + 0.01
+       RETURNING id`,
+      [payoutAmount, refundId],
+    );
+    if (result.rows.length === 0) {
+      throw new BusinessError(
+        'Exchange residual payout could not be recorded — invalid or exhausted credit',
+        'ERR_EXCHANGE_RESIDUAL_001',
+        { refundId, payoutAmount },
+      );
+    }
+  },
+
+  /**
+   * List open (unapplied / unpayout) EXCHANGE store credits for control/reporting.
+   */
+  async listOpenExchangeCredits(
+    pool: Pool | PoolClient,
+    limit = 50,
+  ): Promise<
+    Array<{
+      id: string;
+      refundNumber: string;
+      saleId: string;
+      saleNumber: string | null;
+      totalAmount: number;
+      remainingAmount: number;
+      reason: string | null;
+      createdAt: string;
+      customerId: string | null;
+      customerName: string | null;
+    }>
+  > {
+    const result = await pool.query(
+      `SELECT
+         r.id,
+         r.refund_number AS "refundNumber",
+         r.sale_id AS "saleId",
+         s.sale_number AS "saleNumber",
+         r.total_amount AS "totalAmount",
+         r.exchange_applied_amount AS "applied",
+         COALESCE(r.exchange_residual_payout_amount, 0) AS "payout",
+         r.reason,
+         r.created_at AS "createdAt",
+         s.customer_id AS "customerId",
+         c.name AS "customerName"
+       FROM sale_refunds r
+       JOIN sales s ON s.id = r.sale_id
+       LEFT JOIN customers c ON c.id = s.customer_id
+       WHERE r.refund_type = 'EXCHANGE'
+         AND r.status = 'COMPLETED'
+         AND (r.total_amount - r.exchange_applied_amount - COALESCE(r.exchange_residual_payout_amount, 0)) > 0.01
+       ORDER BY r.created_at DESC
+       LIMIT $1`,
+      [limit],
+    );
+    return result.rows.map((row) => {
+      const total = Money.toNumber(Money.parseDb(row.totalAmount));
+      const applied = Money.toNumber(Money.parseDb(row.applied));
+      const payout = Money.toNumber(Money.parseDb(row.payout));
+      return {
+        id: row.id,
+        refundNumber: row.refundNumber,
+        saleId: row.saleId,
+        saleNumber: row.saleNumber,
+        totalAmount: total,
+        remainingAmount: Math.max(0, Money.toNumber(Money.round(Money.parseDb(total - applied - payout), 2))),
+        reason: row.reason,
+        createdAt: row.createdAt,
+        customerId: row.customerId,
+        customerName: row.customerName,
+      };
+    });
   },
 
   /**

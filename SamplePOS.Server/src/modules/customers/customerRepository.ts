@@ -15,6 +15,27 @@ import {
 
 export type CustomerListQuery = EnterpriseListQuery;
 
+/**
+ * Open-item AR for list/center UI — same formula as syncCustomerBalanceFromOpenItems:
+ * GREATEST(0, open invoice amount_due − unallocated posted receipts).
+ * Computes live so overview/list is accurate even when customers.balance is stale.
+ */
+export const CUSTOMER_OPEN_AR_SQL = `GREATEST(0,
+      COALESCE((
+        SELECT SUM(i.amount_due)
+        FROM invoices i
+        WHERE i.customer_id = c.id
+          AND COALESCE(i.document_type, 'INVOICE') IN ('INVOICE', 'OPENING_BALANCE')
+          AND i.status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
+      ), 0)
+      - COALESCE((
+        SELECT SUM(p.unallocated_amount)
+        FROM ar_customer_payments p
+        WHERE p.customer_id = c.id
+          AND p.status IN ('POSTED', 'PARTIALLY_ALLOCATED', 'FULLY_ALLOCATED')
+      ), 0)
+    )`;
+
 const CUSTOMER_FROM_JOIN = `
     FROM customers c
     LEFT JOIN price_groups pg ON pg.id = c.price_group_id
@@ -29,7 +50,8 @@ const CUSTOMER_SELECT = `
       c.customer_group_id as "customerGroupId",
       c.price_group_id as "priceGroupId",
       pg.pricing_mode as "pricingMode",
-      c.balance, c.credit_limit as "creditLimit",
+      ${CUSTOMER_OPEN_AR_SQL}::float8 as "balance",
+      c.credit_limit as "creditLimit",
       COALESCE(c.unlimited_credit, false) as "unlimitedCredit",
       COALESCE(c.wht_liable, false) as "whtLiable",
       c.default_wht_type_id as "defaultWhtTypeId",
@@ -50,7 +72,7 @@ const CUSTOMER_SELECT = `
 const CUSTOMER_SORT_COLUMNS: Record<string, string> = {
   name: 'c.name',
   contact: "LOWER(COALESCE(c.email, '') || ' ' || COALESCE(c.phone, ''))",
-  balance: 'c.balance',
+  balance: CUSTOMER_OPEN_AR_SQL,
   deposits: 'COALESCE(dep.available_balance, 0)',
   creditLimit: 'c.credit_limit',
   status: 'c.is_active',
@@ -71,12 +93,12 @@ function buildCustomerListClauses(query: CustomerListQuery = {}) {
   }
 
   if (query.outstandingOnly || (query.balanceGt != null && query.balanceGt > 0)) {
-    conditions.push('c.balance > 0.009');
+    conditions.push(`(${CUSTOMER_OPEN_AR_SQL}) > 0.009`);
   }
 
   let orderBy: string;
   if (query.sortBy === 'balance') {
-    orderBy = `c.balance ${sqlSortOrder(query.sortOrder ?? 'desc')}, c.name ASC`;
+    orderBy = `(${CUSTOMER_OPEN_AR_SQL}) ${sqlSortOrder(query.sortOrder ?? 'desc')}, c.name ASC`;
   } else {
     const col = pickSortColumn(query.sortBy, CUSTOMER_SORT_COLUMNS, 'name');
     orderBy = `${col} ${sqlSortOrder(query.sortOrder ?? 'asc')}, c.name ASC`;
@@ -790,6 +812,45 @@ export interface CustomerSummary {
   pendingInvoices: number;
 }
 
+/**
+ * Customer Center dashboard KPIs — entire active portfolio (not one page).
+ * AR totals use open-item SSOT (same as list balance column).
+ */
+export interface CustomerCenterStats {
+  totalCustomers: number;
+  activeCustomers: number;
+  totalArBalance: number;
+  customersWithDebt: number;
+  recentActivityCount: number;
+}
+
+export async function getCustomerCenterStats(dbPool?: pg.Pool): Promise<CustomerCenterStats> {
+  const pool = dbPool || globalPool;
+  const result = await pool.query(
+    `SELECT
+       COUNT(*) FILTER (WHERE c.is_active)::int AS "totalCustomers",
+       COUNT(*) FILTER (WHERE c.is_active)::int AS "activeCustomers",
+       COALESCE(SUM(CASE WHEN c.is_active THEN (${CUSTOMER_OPEN_AR_SQL}) ELSE 0 END), 0)::float8 AS "totalArBalance",
+       COUNT(*) FILTER (WHERE c.is_active AND (${CUSTOMER_OPEN_AR_SQL}) > 0.009)::int AS "customersWithDebt",
+       (
+         SELECT COUNT(*)::int
+         FROM invoices i
+         WHERE i.created_at >= (NOW() - INTERVAL '7 days')
+           AND COALESCE(i.document_type, 'INVOICE') IN ('INVOICE', 'OPENING_BALANCE', 'CREDIT_NOTE', 'DEBIT_NOTE')
+           AND i.status NOT IN ('CANCELLED', 'VOIDED', 'DRAFT')
+       ) AS "recentActivityCount"
+     FROM customers c`,
+  );
+  const row = result.rows[0] || {};
+  return {
+    totalCustomers: parseInt(String(row.totalCustomers ?? 0), 10),
+    activeCustomers: parseInt(String(row.activeCustomers ?? 0), 10),
+    totalArBalance: parseFloat(String(row.totalArBalance ?? 0)),
+    customersWithDebt: parseInt(String(row.customersWithDebt ?? 0), 10),
+    recentActivityCount: parseInt(String(row.recentActivityCount ?? 0), 10),
+  };
+}
+
 export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool | pg.PoolClient): Promise<CustomerSummary> {
   const pool = dbPool || globalPool;
   const customer = await findCustomerById(customerId, pool);
@@ -820,8 +881,7 @@ export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool | 
 
   const summary = invoiceResult.rows[0];
   const pendingInvoices = parseInt(pendingResult.rows[0]?.pendingCount || '0', 10);
-  // customer.balance = SUM(invoiced) - SUM(paid) from AR trigger
-  // Positive → customer owes money, Negative → customer overpaid (credit balance)
+  // Open-item AR SSOT (live) — not stale customers.balance column
   const balance = typeof customer.balance === 'string' ? parseFloat(customer.balance) : (customer.balance || 0);
   const creditLimit = typeof customer.creditLimit === 'string' ? parseFloat(String(customer.creditLimit)) : (customer.creditLimit || 0);
   const unlimitedCredit = Boolean((customer as { unlimitedCredit?: boolean }).unlimitedCredit);

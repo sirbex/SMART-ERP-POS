@@ -547,6 +547,10 @@ export default function POSPage() {
     customerId?: string | null;
     customerName?: string | null;
   } | null>(null);
+  /** Leftover after cheaper replacement: pay out vs keep voucher */
+  const [exchangeResidualAction, setExchangeResidualAction] = useState<
+    'REFUND_ORIGINAL_TENDER' | 'KEEP_VOUCHER'
+  >('REFUND_ORIGINAL_TENDER');
   const [showManagerApprovalDialog, setShowManagerApprovalDialog] = useState(false);
   const [pendingDiscount, setPendingDiscount] = useState<PendingDiscount | null>(null);
 
@@ -3314,6 +3318,7 @@ export default function POSPage() {
       totalAmount: chargedTotal,
       saleDate: formattedSaleDate,
       exchangeRefundId: exchangeCredit?.refundId,
+      exchangeResidualAction: exchangeCredit ? exchangeResidualAction : undefined,
       taxOverride: taxOverride ?? undefined,
       paymentLines: submitPaymentLines.map((line) => ({
         paymentMethod: line.paymentMethod,
@@ -3968,6 +3973,58 @@ export default function POSPage() {
 
         {/* Center: Line items - Scrollable cart */}
         <section className="flex-1 p-2 sm:p-4 overflow-y-auto">
+          {exchangeCredit && (
+            <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-950">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold">Exchange store credit active</p>
+                  <p className="text-xs mt-0.5">
+                    {formatCurrency(exchangeCredit.amount)} from {exchangeCredit.refundNumber}
+                    {exchangeCredit.saleNumber ? ` (${exchangeCredit.saleNumber})` : ''}.
+                    Applied as cart discount when you add replacement items.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="text-xs underline text-blue-800"
+                  onClick={() => {
+                    setExchangeCredit(null);
+                    setCartDiscount(null);
+                  }}
+                >
+                  Clear credit
+                </button>
+              </div>
+              <div className="mt-2 grid sm:grid-cols-2 gap-2 text-xs">
+                <label className="flex gap-2 items-start border border-blue-100 bg-white rounded p-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="pos-exchange-residual"
+                    checked={exchangeResidualAction === 'REFUND_ORIGINAL_TENDER'}
+                    onChange={() => setExchangeResidualAction('REFUND_ORIGINAL_TENDER')}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium">Pay leftover cash now</span>
+                    <span className="block text-blue-700/80">If replacement is cheaper</span>
+                  </span>
+                </label>
+                <label className="flex gap-2 items-start border border-blue-100 bg-white rounded p-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="pos-exchange-residual"
+                    checked={exchangeResidualAction === 'KEEP_VOUCHER'}
+                    onChange={() => setExchangeResidualAction('KEEP_VOUCHER')}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="font-medium">Keep voucher {exchangeCredit.refundNumber}</span>
+                    <span className="block text-blue-700/80">Leftover stays as numbered store credit</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
           {/* Mobile card layout */}
           <div className="md:hidden">
             {items.length === 0 ? (

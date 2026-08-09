@@ -289,10 +289,10 @@ export async function createProduct(data: CreateProduct, dbPool?: pg.Pool): Prom
   const sql = `INSERT INTO products (
       product_number, sku, barcode, name, description, category, category_id, product_type, available_in_restaurant, is_prepared_food, is_buffet_cover, generic_name,
       conversion_factor,
-      cost_price, selling_price, is_taxable, tax_rate,
+      cost_price, selling_price, is_taxable, has_tax, tax_rate,
       reorder_level, track_expiry, min_days_before_expiry_sale, is_active,
       preferred_supplier_id, supplier_product_code, purchase_uom_id, lead_time_days
-  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
     RETURNING id`;
 
   const result = await pool.query(sql, params);
@@ -358,7 +358,11 @@ export function planProductUpdateAssignments(
     set(master, 'is_buffet_cover', data.isBuffetCover);
   }
   if (data.genericName !== undefined) set(master, 'generic_name', data.genericName || null);
-  if (data.isTaxable !== undefined) set(master, 'is_taxable', data.isTaxable);
+  if (data.isTaxable !== undefined) {
+    set(master, 'is_taxable', data.isTaxable);
+    // has_tax is legacy UI/list flag — keep SSOT with is_taxable
+    set(master, 'has_tax', data.isTaxable);
+  }
   if (data.taxRate !== undefined) set(master, 'tax_rate', data.taxRate);
   if (data.trackExpiry !== undefined) set(master, 'track_expiry', data.trackExpiry);
   if (data.minDaysBeforeExpirySale !== undefined) {
@@ -619,6 +623,7 @@ export async function bulkUpsertForImport(
       cost_price = EXCLUDED.cost_price,
       selling_price = EXCLUDED.selling_price,
       is_taxable = EXCLUDED.is_taxable,
+      has_tax = EXCLUDED.is_taxable,
       tax_rate = EXCLUDED.tax_rate,
       reorder_level = EXCLUDED.reorder_level,
       track_expiry = EXCLUDED.track_expiry,

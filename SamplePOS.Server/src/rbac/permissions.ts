@@ -32,6 +32,12 @@ export const PERMISSIONS: Record<string, Permission> = {
     'update',
     'Reassign sale to another customer (wrong customer correction; manager/admin only)',
   ),
+  SALES_TAX_RESTATEMENT: p(
+    'sales.tax_restatement',
+    'sales',
+    'update',
+    'Restate tax on posted sales/invoices from DocumentTax (omitted VAT correction; manager/admin)',
+  ),
 
   INVENTORY_READ: p('inventory.read', 'inventory', 'read', 'View inventory levels'),
   INVENTORY_CREATE: p('inventory.create', 'inventory', 'create', 'Create inventory items'),

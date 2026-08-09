@@ -54,6 +54,8 @@ export const AccountCodes = {
   // Liabilities
   ACCOUNTS_PAYABLE: '2100',
   CUSTOMER_DEPOSITS: '2200',
+  /** Return/exchange store-credit liability (not cash advances — those stay on 2200) */
+  STORE_CREDIT: '2210',
   TAX_PAYABLE: '2300',
 
   // Equity
@@ -414,13 +416,16 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
           break;
       }
 
-      // Debit payment account (Cash/Card/Mobile Money)
-      ledgerLines.push({
-        accountCode: debitAccountCode,
-        description: `${paymentDescription} for ${sale.saleNumber}`,
-        debitAmount: sale.totalAmount,
-        creditAmount: 0
-      });
+      // Debit payment account only when tender moves (skip zero-total sales
+      // fully covered by exchange store credit / 100% discount).
+      if (sale.totalAmount > 0.009) {
+        ledgerLines.push({
+          accountCode: debitAccountCode,
+          description: `${paymentDescription} for ${sale.saleNumber}`,
+          debitAmount: sale.totalAmount,
+          creditAmount: 0
+        });
+      }
 
       // Credit Revenue - split by product type
       if (invRevenueNum > 0) {
@@ -510,17 +515,31 @@ export async function recordSaleToGL(sale: SaleData, pool?: pg.Pool, txClient?: 
     // rolls back, the next retry reclaims the same slot number. This means a phantom
     // GL (if one somehow commits) will collide on the idempotency key on retry,
     // causing AccountingCore to return the existing entry instead of creating a new one.
-    await AccountingCore.createJournalEntry({
-      entryDate: sale.saleDate,
-      description: `Sale: ${sale.saleNumber}`,
-      referenceType: 'SALE',
-      referenceId: sale.saleId,
-      referenceNumber: sale.saleNumber,
-      lines: ledgerLines,
-      userId: SYSTEM_USER_ID,
-      idempotencyKey: `SALE-${sale.saleNumber}`,  // saleNumber-based: stable across retries
-      source: 'SALES_INVOICE' as const,
-    }, pool, txClient);
+    //
+    // Zero-total sales fully paid by exchange store credit: net revenue journal is empty
+    // (revenue recognized on EXCHANGE_CREDIT apply). Still post COGS/Inventory if stock moved.
+    const hasRevenueJournalLines = ledgerLines.some(
+      (l) => (l.debitAmount ?? 0) > 0.009 || (l.creditAmount ?? 0) > 0.009,
+    );
+    if (hasRevenueJournalLines) {
+      await AccountingCore.createJournalEntry({
+        entryDate: sale.saleDate,
+        description: `Sale: ${sale.saleNumber}`,
+        referenceType: 'SALE',
+        referenceId: sale.saleId,
+        referenceNumber: sale.saleNumber,
+        lines: ledgerLines,
+        userId: SYSTEM_USER_ID,
+        idempotencyKey: `SALE-${sale.saleNumber}`,  // saleNumber-based: stable across retries
+        source: 'SALES_INVOICE' as const,
+      }, pool, txClient);
+    } else {
+      logger.info('Skipping empty SALE revenue journal (zero-total / full exchange credit)', {
+        saleNumber: sale.saleNumber,
+        saleId: sale.saleId,
+        totalAmount: sale.totalAmount,
+      });
+    }
 
     // Post the separate INVENTORY_MOVE journal for the goods-issue leg.
     // NOTE: referenceType is 'SALE_COGS' (not 'SALE') to allow both journals
@@ -1866,13 +1885,19 @@ function buildRefundRevenueCreditLines(data: SaleRefundData): JournalLine[] {
   const isExchange = data.refundType === 'EXCHANGE';
 
   if (isExchange && data.paymentMethod !== 'CREDIT') {
+    // Store credit / exchange hold (2210) — not customer cash advances (2200).
+    // Tag customer when known; otherwise tag the exchange refund so walk-in liability is traceable.
+    const entity =
+      data.customerId
+        ? { entityType: 'customer' as const, entityId: data.customerId }
+        : { entityType: 'exchange_refund' as const, entityId: data.refundId };
     return [
       {
-        accountCode: AccountCodes.CUSTOMER_DEPOSITS,
+        accountCode: AccountCodes.STORE_CREDIT,
         debitAmount: 0,
         creditAmount: total,
         description: `Exchange ${data.refundNumber}: store credit for ${data.saleNumber}`,
-        ...(data.customerId ? { entityType: 'customer' as const, entityId: data.customerId } : {}),
+        ...entity,
       },
     ];
   }
@@ -1974,6 +1999,20 @@ export async function recordSaleRefundToGL(
 ): Promise<string | undefined> {
   try {
     const queryTarget = txClient || pool || globalPool;
+
+    if (data.refundType === 'EXCHANGE') {
+      const { ensureStoreCreditAccount } = await import('../modules/sales/ensureStoreCreditAccount.js');
+      if (txClient) {
+        await ensureStoreCreditAccount(txClient);
+      } else {
+        const client = await (pool || globalPool).connect();
+        try {
+          await ensureStoreCreditAccount(client);
+        } finally {
+          client.release();
+        }
+      }
+    }
 
     // Find ALL non-reversed SALE transactions for this sale
     const existing = await queryTarget.query(
@@ -2103,13 +2142,14 @@ export interface ExchangeCreditApplicationData {
   saleNumber: string;
   applicationDate: string;
   amount: number;
+  customerId?: string;
 }
 
 /**
- * Clear store-credit liability (2200) when exchange credit is applied on a replacement POS sale.
- * Pairs with the EXCHANGE refund journal that credited 2200.
+ * Clear store-credit liability (2210) when exchange credit is applied on a replacement POS sale.
+ * Pairs with the EXCHANGE refund journal that credited 2210.
  *
- * DR  Customer Deposits (2200)
+ * DR  Store Credit (2210)
  * CR  Sales Revenue (4000)
  */
 export async function recordExchangeCreditApplicationToGL(
@@ -2119,6 +2159,23 @@ export async function recordExchangeCreditApplicationToGL(
 ): Promise<void> {
   if (data.amount <= 0) return;
 
+  const { ensureStoreCreditAccount } = await import('../modules/sales/ensureStoreCreditAccount.js');
+  if (txClient) {
+    await ensureStoreCreditAccount(txClient);
+  } else if (pool) {
+    const client = await pool.connect();
+    try {
+      await ensureStoreCreditAccount(client);
+    } finally {
+      client.release();
+    }
+  }
+
+  const entity =
+    data.customerId
+      ? { entityType: 'customer' as const, entityId: data.customerId }
+      : { entityType: 'exchange_refund' as const, entityId: data.refundId };
+
   await AccountingCore.createJournalEntry({
     entryDate: data.applicationDate,
     description: `Exchange credit applied: ${data.refundNumber} → sale ${data.saleNumber}`,
@@ -2127,10 +2184,11 @@ export async function recordExchangeCreditApplicationToGL(
     referenceNumber: data.saleNumber,
     lines: [
       {
-        accountCode: AccountCodes.CUSTOMER_DEPOSITS,
+        accountCode: AccountCodes.STORE_CREDIT,
         debitAmount: data.amount,
         creditAmount: 0,
         description: `Clear store credit from exchange ${data.refundNumber}`,
+        ...entity,
       },
       {
         accountCode: AccountCodes.SALES_REVENUE,
@@ -2141,6 +2199,90 @@ export async function recordExchangeCreditApplicationToGL(
     ],
     userId: SYSTEM_USER_ID,
     idempotencyKey: `EXCHANGE_CREDIT-${data.refundId}-${data.saleId}`,
+    source: 'SALES_REFUND' as const,
+  }, pool, txClient);
+}
+
+export interface ExchangeResidualPayoutData {
+  refundId: string;
+  refundNumber: string;
+  payoutDate: string;
+  amount: number;
+  /** Original sale tender — where residual cash leaves the books */
+  paymentMethod: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY' | 'CREDIT' | 'DEPOSIT';
+  customerId?: string;
+}
+
+/**
+ * Pay out unused exchange store credit (cheaper replacement or abandoned swap).
+ *
+ * DR  Store Credit (2210)     amount
+ * CR  Cash / Card / Mobile    amount  (same economic tender family as original sale)
+ */
+export async function recordExchangeResidualPayoutToGL(
+  data: ExchangeResidualPayoutData,
+  pool?: pg.Pool,
+  txClient?: pg.PoolClient,
+): Promise<void> {
+  if (data.amount <= 0.009) return;
+
+  const { ensureStoreCreditAccount } = await import('../modules/sales/ensureStoreCreditAccount.js');
+  if (txClient) {
+    await ensureStoreCreditAccount(txClient);
+  } else if (pool) {
+    const client = await pool.connect();
+    try {
+      await ensureStoreCreditAccount(client);
+    } finally {
+      client.release();
+    }
+  }
+
+  let creditAccountCode: string;
+  switch (data.paymentMethod) {
+    case 'CARD':
+      creditAccountCode = AccountCodes.CREDIT_CARD_RECEIPTS;
+      break;
+    case 'MOBILE_MONEY':
+    case 'AIRTEL_MONEY':
+      creditAccountCode = AccountCodes.MOBILE_MONEY;
+      break;
+    case 'CREDIT':
+    case 'DEPOSIT':
+    case 'CASH':
+    default:
+      creditAccountCode = AccountCodes.CASH;
+      break;
+  }
+
+  const entity =
+    data.customerId
+      ? { entityType: 'customer' as const, entityId: data.customerId }
+      : { entityType: 'exchange_refund' as const, entityId: data.refundId };
+
+  await AccountingCore.createJournalEntry({
+    entryDate: data.payoutDate,
+    description: `Exchange residual payout: ${data.refundNumber}`,
+    referenceType: 'EXCHANGE_RESIDUAL',
+    referenceId: data.refundId,
+    referenceNumber: data.refundNumber,
+    lines: [
+      {
+        accountCode: AccountCodes.STORE_CREDIT,
+        debitAmount: data.amount,
+        creditAmount: 0,
+        description: `Clear unused store credit ${data.refundNumber}`,
+        ...entity,
+      },
+      {
+        accountCode: creditAccountCode,
+        debitAmount: 0,
+        creditAmount: data.amount,
+        description: `Payout residual for ${data.refundNumber} via ${data.paymentMethod}`,
+      },
+    ],
+    userId: SYSTEM_USER_ID,
+    idempotencyKey: `EXCHANGE_RESIDUAL-${data.refundId}`,
     source: 'SALES_REFUND' as const,
   }, pool, txClient);
 }
@@ -3010,6 +3152,9 @@ export async function recordCustomerDebitNoteToGL(
       lines,
       userId: SYSTEM_USER_ID,
       idempotencyKey: `DEBIT_NOTE-${data.noteId}`,
+      // Mirror invoice charging path: DR AR / CR revenue may post to 1200 under SALES_INVOICE.
+      // (Credit notes use SALES_REFUND for the reverse AR credit.)
+      source: 'SALES_INVOICE' as const,
     }, pool, txClient);
 
     logger.info('Recorded customer debit note to GL', {

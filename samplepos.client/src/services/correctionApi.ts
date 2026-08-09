@@ -127,6 +127,60 @@ export interface SaleCustomerReassignmentResult {
   warnings: string[];
 }
 
+export interface SaleTaxRestatementLinePreview {
+  saleItemId: string;
+  productId: string | null;
+  productName: string | null;
+  postedTax: number;
+  newTax: number;
+  taxRate: number;
+  determination: string;
+  isTaxable: boolean;
+}
+
+export interface SaleTaxRestatementPreview {
+  saleId: string;
+  saleNumber: string;
+  customerId: string | null;
+  customerName: string | null;
+  reason: string;
+  taxInclusive: boolean;
+  customerExempt: boolean;
+  postedTax: number;
+  newTax: number;
+  taxDelta: number;
+  postedTotal: number;
+  newTotal: number;
+  totalDelta: number;
+  lines: SaleTaxRestatementLinePreview[];
+  invoices: Array<{
+    invoiceId: string;
+    invoiceNumber: string;
+    postedTax: number;
+    newTax: number;
+    postedTotal: number;
+    newTotal: number;
+    newAmountDue: number;
+  }>;
+  journalLines: Array<{ accountCode: string; debit: number; credit: number; entityId?: string }>;
+  wizardSteps: Array<{ order: number; code: string; title: string; description: string }>;
+  blockers: string[];
+  warnings: string[];
+}
+
+export interface SaleTaxRestatementResult {
+  eventId: string;
+  glTransactionId: string;
+  saleId: string;
+  saleNumber: string;
+  postedTax: number;
+  newTax: number;
+  taxDelta: number;
+  totalDelta: number;
+  invoicesUpdated: number;
+  warnings: string[];
+}
+
 export const correctionApi = {
     getEligibility(documentType: string, documentId: string) {
         const params = new URLSearchParams({ documentType, documentId });
@@ -180,6 +234,20 @@ export const correctionApi = {
     }) {
         return api.post<{ success: boolean; data: SaleCustomerReassignmentResult }>(
             '/sales/customer-reassignment/execute',
+            body,
+        );
+    },
+
+    previewSaleTaxRestatement(body: { saleId: string; reason: string }) {
+        return api.post<{ success: boolean; data: SaleTaxRestatementPreview }>(
+            '/sales/tax-restatement/preview',
+            body,
+        );
+    },
+
+    executeSaleTaxRestatement(body: { saleId: string; reason: string }) {
+        return api.post<{ success: boolean; data: SaleTaxRestatementResult }>(
+            '/sales/tax-restatement/execute',
             body,
         );
     },

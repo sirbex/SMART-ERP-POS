@@ -12,28 +12,14 @@ import type {
   CreditDebitNote,
   SupplierCreditDebitNote,
 } from '../../services/creditDebitNoteService';
-
-function isNoteDraft(status: string): boolean {
-  return status === 'DRAFT' || status === 'Draft';
-}
+import {
+  isNoteDraftStatus,
+  isReturnGrnCreditNote,
+  supplierNoteStatusLabel,
+} from '@shared/utils/creditDebitNoteSsot';
 
 function isSupplierPosted(status: string): boolean {
   return status === 'POSTED' || status === 'APPLIED';
-}
-
-function supplierNoteStatusLabel(note: SupplierCreditDebitNote): string {
-  if (note.status === 'APPLIED' && note.referenceInvoiceNumber) {
-    return `Allocated → ${note.referenceInvoiceNumber}`;
-  }
-  if (note.status === 'APPLIED') return 'Fully allocated';
-  return note.status;
-}
-
-function isReturnGrnCreditNote(note: SupplierCreditDebitNote): boolean {
-  return (
-    note.documentType === 'SUPPLIER_CREDIT_NOTE'
-    && (note.reason?.includes('RGRN-') === true || note.notes?.toLowerCase().includes('return grn') === true)
-  );
 }
 
 type CustomerNotesAdaptiveGridProps = {
@@ -211,7 +197,10 @@ export function SupplierNotesAdaptiveGrid({
               note.status === 'APPLIED' || isSupplierPosted(note.status) ? 'default' : 'secondary'
             }
           >
-            {supplierNoteStatusLabel(note)}
+            {supplierNoteStatusLabel({
+              status: note.status,
+              referenceInvoiceNumber: note.referenceInvoiceNumber,
+            })}
           </Badge>
           {note.documentType === 'SUPPLIER_CREDIT_NOTE'
             && note.status === 'POSTED'
@@ -221,7 +210,7 @@ export function SupplierNotesAdaptiveGrid({
                 Apply to bill required
               </Badge>
             )}
-          {isNoteDraft(note.status) && (
+          {isNoteDraftStatus(note.status) && (
             <Badge variant="outline" className="border-amber-400 bg-amber-50 text-amber-800">
               Needs posting
             </Badge>
@@ -302,7 +291,7 @@ export function SupplierNotesAdaptiveGrid({
             <Eye className="h-4 w-4 shrink-0" />
             <span className="ml-2 sm:hidden">View</span>
           </Button>
-          {isNoteDraft(note.status) && (
+          {isNoteDraftStatus(note.status) && (
             <Button
               size="sm"
               onClick={() => onPost(note)}

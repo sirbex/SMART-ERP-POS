@@ -25,7 +25,9 @@ import {
 import { DocumentFlowButton } from '../components/shared/DocumentFlowButton';
 import { VoidSaleModal } from '../components/sales/VoidSaleModal';
 import { RefundSaleModal } from '../components/sales/RefundSaleModal';
+import { ProductExchangeModal } from '../components/sales/ProductExchangeModal';
 import { SaleCustomerReassignmentModal } from '../components/sales/SaleCustomerReassignmentModal';
+import { SaleTaxRestatementModal } from '../components/sales/SaleTaxRestatementModal';
 import {
   AdaptivePage,
   AdaptiveSearch,
@@ -2195,6 +2197,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
   const canExchangeSale = useBackendPermission('sales.exchange') || canRefundSale;
   const canReprintReceipt = useBackendPermission('sales.reprint');
   const canReassignCustomer = useBackendPermission('sales.reassign_customer');
+  const canRestateTax = useBackendPermission('sales.tax_restatement');
   const [saleDetails, setSaleDetails] = useState<SaleRow | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2202,6 +2205,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
   const [showReassignCustomerModal, setShowReassignCustomerModal] = useState(false);
+  const [showTaxRestatementModal, setShowTaxRestatementModal] = useState(false);
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettingsForReceipt | null>(null);
   const [isReprinting, setIsReprinting] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -2756,6 +2760,18 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                     Reassign customer
                   </button>
                 )}
+              {['COMPLETED', 'PARTIALLY_RETURNED'].includes(
+                (saleDetails?.status || sale.status) as string
+              ) &&
+                canRestateTax && (
+                  <button
+                    onClick={() => setShowTaxRestatementModal(true)}
+                    title="Recompute VAT from product + customer rules and apply omitted tax to this sale/invoice without voiding."
+                    className="w-full sm:w-auto px-4 py-2 border border-emerald-300 text-emerald-900 rounded-lg hover:bg-emerald-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
+                  >
+                    Apply omitted VAT
+                  </button>
+                )}
               {/* Void is FORBIDDEN for completed POS sales (ERP discipline: SAP/Odoo-style).
                   Stock, invoice, and payment are already posted. Use Return instead.
                   Only shown for non-posted statuses — none exist in current enum by design. */}
@@ -2783,7 +2799,7 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
                   {canExchangeSale && (
                   <button
                     onClick={() => setShowExchangeModal(true)}
-                    title="Return wrong item(s) and sell the replacement at POS with store credit (partial only)."
+                    title="Return wrong item(s) and sell the correct product with store credit (full ticket OK for single-item sales)."
                     className="w-full sm:w-auto px-4 py-2 border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 transition-colors font-medium text-sm flex items-center justify-center gap-2"
                   >
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2984,13 +3000,43 @@ function SaleDetailModal({ sale, onClose, onSaleUpdated }: SaleDetailModalProps)
         />
       )}
 
-      {/* Product exchange (partial return → POS replacement) */}
+      {/* Omitted VAT restatement (manager/admin) */}
+      {showTaxRestatementModal && (
+        <SaleTaxRestatementModal
+          saleId={sale.id}
+          saleNumber={saleDetails?.saleNumber || sale.saleNumber || `Sale #${sale.id.slice(0, 8)}`}
+          onClose={() => setShowTaxRestatementModal(false)}
+          onSuccess={() => {
+            setShowTaxRestatementModal(false);
+            toast.success('Omitted VAT applied to sale and linked invoices');
+            onSaleUpdated?.();
+            void api.sales.getById(sale.id).then((response) => {
+              if (response.data.success) {
+                const responseData = response.data.data as {
+                  sale?: SaleRow;
+                  items?: SaleRow['items'];
+                  paymentLines?: SaleRow['paymentLines'];
+                };
+                if (responseData.sale) {
+                  setSaleDetails({
+                    ...responseData.sale,
+                    items: responseData.items,
+                    paymentLines: responseData.paymentLines,
+                  });
+                }
+              }
+            });
+          }}
+        />
+      )}
+
+      {/* Product exchange — guided return → replace → settle */}
       {showExchangeModal && saleDetails && (
-        <RefundSaleModal
-          mode="exchange"
+        <ProductExchangeModal
           saleId={sale.id}
           saleNumber={sale.saleNumber || `Sale #${sale.id.slice(0, 8)}`}
           totalAmount={sale.totalAmount}
+          paymentMethod={sale.paymentMethod || saleDetails.paymentMethod}
           customerId={saleDetails.customerId || sale.customerId}
           customerName={saleDetails.customerName || sale.customerName}
           items={saleDetails.items || []}

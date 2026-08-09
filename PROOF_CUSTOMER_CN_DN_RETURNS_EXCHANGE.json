@@ -1,0 +1,296 @@
+{
+  "runAt": "2026-08-09T09:30:18.752Z",
+  "checks": [
+    {
+      "name": "schema-coa-ready",
+      "ok": true,
+      "detail": "2210 + residual column + zero-total sales allowed"
+    },
+    {
+      "name": "fixture-user",
+      "ok": true,
+      "detail": "61bd9504-c86a-499d-9efd-db219dbdb51f"
+    },
+    {
+      "name": "fixture-product",
+      "ok": true,
+      "detail": "Zyncet tabs"
+    },
+    {
+      "name": "fixture-customer",
+      "ok": true,
+      "detail": "PROOF_CN_DN_AR Customer"
+    },
+    {
+      "name": "A-credit-sale",
+      "ok": true,
+      "detail": "SALE-2026-10906 total=1000"
+    },
+    {
+      "name": "A-invoice-from-credit-sale",
+      "ok": true,
+      "detail": "INV-2026-0181"
+    },
+    {
+      "name": "A-invoice-due-open",
+      "ok": true,
+      "detail": "due=1000"
+    },
+    {
+      "name": "A-cn-create-post",
+      "ok": true,
+      "detail": "CN-2026-0002 amount~125"
+    },
+    {
+      "name": "A-cn-gl-cr-1200",
+      "ok": true,
+      "detail": "cr=125"
+    },
+    {
+      "name": "A-cn-gl-dr-returns",
+      "ok": true,
+      "detail": "dr4010=125"
+    },
+    {
+      "name": "A-cn-gl-lines",
+      "ok": true,
+      "detail": "2 lines"
+    },
+    {
+      "name": "A-invoice-due-reduced",
+      "ok": true,
+      "detail": "before=1000 after=875"
+    },
+    {
+      "name": "B-dn-create-post",
+      "ok": true,
+      "detail": "dn=DN-2026-0002 amount=50"
+    },
+    {
+      "name": "B-dn-gl-dr-1200",
+      "ok": true,
+      "detail": "dr=50"
+    },
+    {
+      "name": "B-dn-gl-cr-revenue",
+      "ok": true,
+      "detail": "cr=50"
+    },
+    {
+      "name": "B-invoice-due-increased",
+      "ok": true,
+      "detail": "mid=875 after=925"
+    },
+    {
+      "name": "C-cash-sale",
+      "ok": true,
+      "detail": "SALE-2026-10907 total=1500"
+    },
+    {
+      "name": "C-refund",
+      "ok": true,
+      "detail": "REF-2026-0059 type=REFUND amount=500.00"
+    },
+    {
+      "name": "C-refund-gl-dr-4010",
+      "ok": true,
+      "detail": "dr=500"
+    },
+    {
+      "name": "C-refund-gl-cr-tender",
+      "ok": true,
+      "detail": "cr=500"
+    },
+    {
+      "name": "C-refund-partial",
+      "ok": true,
+      "detail": "not full void"
+    },
+    {
+      "name": "D-cash-sale-for-exchange",
+      "ok": true,
+      "detail": "SALE-2026-10908 total=500"
+    },
+    {
+      "name": "D-complete-exchange",
+      "ok": true,
+      "detail": "REF=REF-2026-0060 credit=500 applied=450 residualPaid=50 topUp=0"
+    },
+    {
+      "name": "D-exchange-gl-dr-4010",
+      "ok": true,
+      "detail": "dr=500"
+    },
+    {
+      "name": "D-exchange-gl-cr-store-credit",
+      "ok": true,
+      "detail": "cr2210/2200=500"
+    },
+    {
+      "name": "D-residual-cleared",
+      "ok": true,
+      "detail": "remaining=0"
+    },
+    {
+      "name": "D-cash-to-customer",
+      "ok": true,
+      "detail": "cashOut=50"
+    },
+    {
+      "name": "D-refund-row-fully-settled",
+      "ok": true,
+      "detail": "rem=0"
+    },
+    {
+      "name": "E-cn-not-on-2210",
+      "ok": true,
+      "detail": "credit note must settle AR not store credit"
+    },
+    {
+      "name": "E-dn-not-on-2210",
+      "ok": true,
+      "detail": "debit note must hit AR"
+    }
+  ],
+  "artifacts": {
+    "creditSale": {
+      "id": "6c3d3508-35ed-4a9b-ad50-0b2e700c1221",
+      "number": "SALE-2026-10906",
+      "total": 1000
+    },
+    "invoice": {
+      "id": "b7c7953f-d064-40a1-b324-526f9e596c1b",
+      "invoice_number": "INV-2026-0181",
+      "total_amount": 1000,
+      "amount_due": 1000,
+      "status": "UNPAID",
+      "document_type": "INVOICE"
+    },
+    "creditNote": {
+      "id": "28e16909-2579-40fc-a622-d455df196213",
+      "number": "CN-2026-0002",
+      "amount": 125
+    },
+    "creditNoteGl": [
+      {
+        "txn": "TXN-028476",
+        "ref_type": "CREDIT_NOTE",
+        "code": "1200",
+        "dr": "0.00",
+        "cr": "125.00"
+      },
+      {
+        "txn": "TXN-028476",
+        "ref_type": "CREDIT_NOTE",
+        "code": "4010",
+        "dr": "125.00",
+        "cr": "0.00"
+      }
+    ],
+    "debitNote": {
+      "id": "7fd20141-c0dc-4dab-96f7-c87bb42b0ae1",
+      "number": "DN-2026-0002",
+      "amount": 50
+    },
+    "debitNoteGl": [
+      {
+        "txn": "TXN-028477",
+        "ref_type": "DEBIT_NOTE",
+        "code": "1200",
+        "dr": "50.00",
+        "cr": "0.00"
+      },
+      {
+        "txn": "TXN-028477",
+        "ref_type": "DEBIT_NOTE",
+        "code": "4000",
+        "dr": "0.00",
+        "cr": "50.00"
+      }
+    ],
+    "cashSale": {
+      "id": "6197b371-89a7-4fcc-a4f3-bc06ac9d852b",
+      "number": "SALE-2026-10907"
+    },
+    "cashRefund": {
+      "id": "4a0b8205-4637-4336-9353-0d7105ee1165",
+      "number": "REF-2026-0059",
+      "total": "500.00",
+      "isFullRefund": false
+    },
+    "cashRefundGl": [
+      {
+        "txn": "TXN-028480",
+        "ref_type": "SALE_REFUND",
+        "code": "1010",
+        "dr": "0.00",
+        "cr": "500.00"
+      },
+      {
+        "txn": "TXN-028481",
+        "ref_type": "SALE_REFUND",
+        "code": "1300",
+        "dr": "125.00",
+        "cr": "0.00"
+      },
+      {
+        "txn": "TXN-028480",
+        "ref_type": "SALE_REFUND",
+        "code": "4010",
+        "dr": "500.00",
+        "cr": "0.00"
+      },
+      {
+        "txn": "TXN-028481",
+        "ref_type": "SALE_REFUND",
+        "code": "5000",
+        "dr": "0.00",
+        "cr": "125.00"
+      }
+    ],
+    "exchange": {
+      "refundId": "9b4d7020-ef08-4ef7-ae87-bc40f3e0fddb",
+      "refundNumber": "REF-2026-0060",
+      "replacementSaleId": "56bc06ea-66d5-46bd-b885-130f2909daa0",
+      "replacementSaleNumber": "SALE-2026-10909",
+      "creditTotal": 500,
+      "creditApplied": 450,
+      "cashToCustomer": 50,
+      "remainingOpen": 0,
+      "voucher": null
+    },
+    "exchangeRefundGl": [
+      {
+        "txn": "TXN-028485",
+        "ref_type": "SALE_REFUND",
+        "code": "1300",
+        "dr": "125.00",
+        "cr": "0.00"
+      },
+      {
+        "txn": "TXN-028484",
+        "ref_type": "SALE_REFUND",
+        "code": "2210",
+        "dr": "0.00",
+        "cr": "500.00"
+      },
+      {
+        "txn": "TXN-028484",
+        "ref_type": "SALE_REFUND",
+        "code": "4010",
+        "dr": "500.00",
+        "cr": "0.00"
+      },
+      {
+        "txn": "TXN-028485",
+        "ref_type": "SALE_REFUND",
+        "code": "5000",
+        "dr": "0.00",
+        "cr": "125.00"
+      }
+    ]
+  },
+  "pass": 30,
+  "fail": 0,
+  "result": "PASS"
+}

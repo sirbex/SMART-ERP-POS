@@ -119,6 +119,28 @@ const RefundSaleBodySchema = z.object({
   refundType: z.enum(['REFUND', 'EXCHANGE']).optional().default('REFUND'),
 });
 
+const CompleteProductExchangeBodySchema = z.object({
+  returnItems: z.array(z.object({
+    saleItemId: z.string().uuid(),
+    quantity: z.number().finite().positive(),
+  })).min(1),
+  reason: z.string().min(5).trim(),
+  replacementItems: z.array(z.object({
+    productId: z.string().uuid(),
+    productName: z.string().optional(),
+    quantity: z.number().finite().positive(),
+    unitPrice: z.number().finite().nonnegative(),
+  })).optional().default([]),
+  residualAction: z.enum(['REFUND_ORIGINAL_TENDER', 'KEEP_VOUCHER']),
+  topUpPaymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY', 'AIRTEL_MONEY']).optional(),
+  cashRegisterSessionId: z.string().uuid().optional(),
+});
+
+const SettleExchangeResidualBodySchema = z.object({
+  residualAction: z.enum(['REFUND_ORIGINAL_TENDER', 'KEEP_VOUCHER']),
+  cashRegisterSessionId: z.string().uuid().optional(),
+});
+
 export const salesController = {
   /**
    * Create a new sale
@@ -192,6 +214,7 @@ export const salesController = {
         saleDate: posData.saleDate || undefined, // Backdated sale date if provided
         paymentLines: posData.paymentLines || undefined, // Include payment lines for split payment
         exchangeRefundId: posData.exchangeRefundId || undefined,
+        exchangeResidualAction: posData.exchangeResidualAction || undefined,
         taxOverride: posData.taxOverride,
       };
     } else {
@@ -653,6 +676,89 @@ export const salesController = {
   },
 
   /**
+   * Guided product exchange (return → replace → residual settlement)
+   * POST /sales/:id/exchange
+   */
+  async completeProductExchange(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const { id } = UuidParamSchema.parse(req.params);
+    const body = CompleteProductExchangeBodySchema.parse(req.body);
+    const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
+
+    const permissionKeys = await getEffectivePermissionKeys(req);
+    const permitted = canProcessRefundType('EXCHANGE', permissionKeys, req.user?.role);
+    if (!permitted) {
+      res.status(403).json({ success: false, error: 'Insufficient permissions', code: 'PERMISSION_DENIED' });
+      return;
+    }
+
+    const result = await salesService.completeProductExchange(pool, id, userId, {
+      returnItems: body.returnItems,
+      reason: body.reason,
+      replacementItems: body.replacementItems,
+      residualAction: body.residualAction,
+      topUpPaymentMethod: body.topUpPaymentMethod,
+      cashRegisterSessionId: body.cashRegisterSessionId,
+      soldBy: userId,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: normalizeResponse(result),
+      message: result.replacementSale
+        ? `Exchange completed — ${result.refund.refundNumber}`
+        : result.voucherNumber
+          ? `Exchange credit held as voucher ${result.voucherNumber}`
+          : `Exchange residual paid out — ${result.refund.refundNumber}`,
+    });
+  },
+
+  /**
+   * Settle leftover exchange store credit
+   * POST /sales/exchange-credits/:refundId/settle
+   */
+  async settleExchangeResidual(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const refundId = z.string().uuid().parse(req.params.refundId);
+    const body = SettleExchangeResidualBodySchema.parse(req.body);
+    const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
+
+    const permissionKeys = await getEffectivePermissionKeys(req);
+    const permitted = canProcessRefundType('EXCHANGE', permissionKeys, req.user?.role)
+      || canProcessRefundType('REFUND', permissionKeys, req.user?.role);
+    if (!permitted) {
+      res.status(403).json({ success: false, error: 'Insufficient permissions', code: 'PERMISSION_DENIED' });
+      return;
+    }
+
+    const result = await salesService.settleExchangeResidual(pool, refundId, userId, {
+      residualAction: body.residualAction,
+      cashRegisterSessionId: body.cashRegisterSessionId,
+    });
+
+    res.json({
+      success: true,
+      data: result,
+      message: result.paidOut > 0
+        ? `Paid out ${result.paidOut}`
+        : result.voucherNumber
+          ? `Voucher remains open: ${result.voucherNumber}`
+          : 'No residual remaining',
+    });
+  },
+
+  /**
+   * List open exchange store credits (control report)
+   * GET /sales/exchange-credits/open
+   */
+  async listOpenExchangeCredits(req: Request, res: Response): Promise<void> {
+    const pool = req.tenantPool || globalPool;
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+    const rows = await salesService.listOpenExchangeCredits(pool, limit);
+    res.json({ success: true, data: rows });
+  },
+
+  /**
    * Get refunds for a sale
    * GET /sales/:id/refunds
    */
@@ -724,6 +830,57 @@ salesRoutes.post(
   asyncHandler(salesController.rebuildSummary)
 );
 
+// Tax restatement (omitted VAT) — manager/admin — must be before /:id
+salesRoutes.post(
+  '/tax-restatement/preview',
+  authenticate,
+  requirePermission('sales.tax_restatement'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (
+      await import('../../../../shared/zod/saleTaxRestatement.js')
+    ).SaleTaxRestatementBodySchema.safeParse(req.body);
+    if (!body.success) {
+      const { ValidationError } = await import('../../middleware/errorHandler.js');
+      throw new ValidationError(
+        body.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; '),
+      );
+    }
+    const { saleTaxRestatementService } = await import(
+      '../corrections/saleTaxRestatementService.js'
+    );
+    const pool = req.tenantPool || globalPool;
+    const data = await saleTaxRestatementService.preview(pool, body.data);
+    res.json({ success: true, data });
+  }),
+);
+
+salesRoutes.post(
+  '/tax-restatement/execute',
+  authenticate,
+  requirePermission('sales.tax_restatement'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (
+      await import('../../../../shared/zod/saleTaxRestatement.js')
+    ).SaleTaxRestatementExecuteSchema.safeParse(req.body);
+    if (!body.success) {
+      const { ValidationError } = await import('../../middleware/errorHandler.js');
+      throw new ValidationError(
+        body.error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; '),
+      );
+    }
+    if (!req.user?.id) {
+      const { ValidationError } = await import('../../middleware/errorHandler.js');
+      throw new ValidationError('User identity required');
+    }
+    const { saleTaxRestatementService } = await import(
+      '../corrections/saleTaxRestatementService.js'
+    );
+    const pool = req.tenantPool || globalPool;
+    const data = await saleTaxRestatementService.execute(pool, body.data, req.user.id);
+    res.status(201).json({ success: true, data });
+  }),
+);
+
 // Wrong-customer correction (manager/admin) — must be before /:id
 salesRoutes.post(
   '/customer-reassignment/preview',
@@ -775,6 +932,22 @@ salesRoutes.post(
   }),
 );
 
+// Open exchange store credits (control list) — must be before /:id
+salesRoutes.get(
+  '/exchange-credits/open',
+  authenticate,
+  requireAnyPermission(['sales.exchange', 'sales.refund', 'sales.read']),
+  asyncHandler(salesController.listOpenExchangeCredits)
+);
+
+// Settle residual exchange credit — must be before /:id
+salesRoutes.post(
+  '/exchange-credits/:refundId/settle',
+  authenticate,
+  requireAnyPermission(['sales.exchange', 'sales.refund']),
+  asyncHandler(salesController.settleExchangeResidual)
+);
+
 salesRoutes.get('/:id', authenticate, asyncHandler(salesController.getSaleById));
 
 // Sales reports - all authenticated users
@@ -813,6 +986,14 @@ salesRoutes.post(
   authenticate,
   requireAnyPermission(['sales.refund', 'sales.exchange']),
   asyncHandler(salesController.refundSale)
+);
+
+// Guided product exchange (return + replacement + residual in one flow)
+salesRoutes.post(
+  '/:id/exchange',
+  authenticate,
+  requireAnyPermission(['sales.exchange', 'sales.refund']),
+  asyncHandler(salesController.completeProductExchange)
 );
 
 // Get refunds for a sale - all authenticated users

@@ -443,6 +443,11 @@ export async function getCustomerSummary(customerId: string, dbPool?: pg.Pool) {
   return customerRepository.getCustomerSummary(customerId, dbPool);
 }
 
+/** Customer Center overview KPIs (portfolio-wide open-item AR). */
+export async function getCustomerCenterStats(dbPool?: pg.Pool) {
+  return customerRepository.getCustomerCenterStats(dbPool);
+}
+
 /**
  * Generate a precision customer statement using Decimal arithmetic.
  * Includes opening balance, ordered entries (invoices/payments), and closing balance.

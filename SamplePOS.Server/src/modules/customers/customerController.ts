@@ -144,6 +144,13 @@ export const getCustomers = asyncHandler(async (req: Request, res: Response) => 
   });
 });
 
+/** GET /customers/center-stats — portfolio AR KPIs for Customer Center overview */
+export const getCustomerCenterStats = asyncHandler(async (req: Request, res: Response) => {
+  const pool = req.tenantPool || globalPool;
+  const stats = await customerService.getCustomerCenterStats(pool);
+  res.json({ success: true, data: stats });
+});
+
 export const getCustomer = asyncHandler(async (req: Request, res: Response) => {
   const pool = req.tenantPool || globalPool;
   const { id } = UuidParamSchema.parse(req.params);

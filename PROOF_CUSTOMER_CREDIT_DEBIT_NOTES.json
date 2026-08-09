@@ -1,0 +1,207 @@
+{
+  "runAt": "2026-08-09T10:06:14.582Z",
+  "database": "postgresql://postgres:***@209.38.203.138:5432/pos_tenant_henber_pharmacy",
+  "checks": [
+    {
+      "name": "ssot-line-name",
+      "ok": true,
+      "detail": "Additional charge"
+    },
+    {
+      "name": "ssot-line-shape",
+      "ok": true,
+      "detail": "{\"productName\":\"Additional charge\",\"description\":\"freight\",\"quantity\":1,\"unitPrice\":100,\"taxRate\":0}"
+    },
+    {
+      "name": "zod-dn-amount-ok",
+      "ok": true
+    },
+    {
+      "name": "zod-dn-amount-required",
+      "ok": true
+    },
+    {
+      "name": "zod-cn-requires-lines",
+      "ok": true
+    },
+    {
+      "name": "db-connect",
+      "ok": true
+    },
+    {
+      "name": "fixture-user",
+      "ok": true,
+      "detail": "61bd9504-c86a-499d-9efd-db219dbdb51f"
+    },
+    {
+      "name": "fixture-product",
+      "ok": true,
+      "detail": "Zyncet tabs"
+    },
+    {
+      "name": "fixture-customer",
+      "ok": true,
+      "detail": "PROOF_CN_DN_AR Customer"
+    },
+    {
+      "name": "A-credit-sale",
+      "ok": true,
+      "detail": "SALE-2026-10913 total=1000"
+    },
+    {
+      "name": "A-invoice-from-credit-sale",
+      "ok": true,
+      "detail": "INV-2026-0182"
+    },
+    {
+      "name": "A-invoice-due-open",
+      "ok": true,
+      "detail": "due=1000"
+    },
+    {
+      "name": "A-cn-create-post",
+      "ok": true,
+      "detail": "CN-2026-0003 amount=125"
+    },
+    {
+      "name": "A-cn-gl-cr-1200",
+      "ok": true,
+      "detail": "cr=125"
+    },
+    {
+      "name": "A-cn-gl-dr-returns",
+      "ok": true,
+      "detail": "dr4010=125"
+    },
+    {
+      "name": "A-cn-gl-lines",
+      "ok": true,
+      "detail": "2 lines"
+    },
+    {
+      "name": "A-cn-not-on-2210",
+      "ok": true,
+      "detail": "CN settles AR not store credit"
+    },
+    {
+      "name": "A-invoice-due-reduced",
+      "ok": true,
+      "detail": "before=1000 after=875"
+    },
+    {
+      "name": "B-dn-synth-line-name",
+      "ok": true,
+      "detail": "Additional charge"
+    },
+    {
+      "name": "B-dn-create-post",
+      "ok": true,
+      "detail": "dn=DN-2026-0003 amount=50"
+    },
+    {
+      "name": "B-dn-gl-dr-1200",
+      "ok": true,
+      "detail": "dr=50"
+    },
+    {
+      "name": "B-dn-gl-amount-match",
+      "ok": true,
+      "detail": "dr=50 expected~50"
+    },
+    {
+      "name": "B-dn-gl-cr-revenue",
+      "ok": true,
+      "detail": "cr=50"
+    },
+    {
+      "name": "B-dn-not-on-2210",
+      "ok": true,
+      "detail": "DN hits AR"
+    },
+    {
+      "name": "B-invoice-due-increased",
+      "ok": true,
+      "detail": "mid=875 after=925"
+    },
+    {
+      "name": "C-cn-document-type",
+      "ok": true,
+      "detail": "CREDIT_NOTE"
+    },
+    {
+      "name": "C-dn-document-type",
+      "ok": true,
+      "detail": "DEBIT_NOTE"
+    },
+    {
+      "name": "C-cn-posted",
+      "ok": true,
+      "detail": "POSTED"
+    },
+    {
+      "name": "C-dn-posted",
+      "ok": true,
+      "detail": "POSTED"
+    }
+  ],
+  "artifacts": {
+    "creditSale": {
+      "id": "afac11a6-3280-45a1-ab56-de3752454a22",
+      "number": "SALE-2026-10913",
+      "total": 1000
+    },
+    "invoice": {
+      "id": "f5223eed-0bbb-4f3e-9026-027a29b42b27",
+      "invoice_number": "INV-2026-0182",
+      "total_amount": 1000,
+      "amount_due": 1000,
+      "status": "UNPAID"
+    },
+    "creditNote": {
+      "id": "1307f6ea-2b1e-4d9e-b5c7-d7ff5d6b647b",
+      "number": "CN-2026-0003",
+      "amount": 125
+    },
+    "creditNoteGl": [
+      {
+        "txn": "TXN-028499",
+        "ref_type": "CREDIT_NOTE",
+        "code": "1200",
+        "dr": "0.00",
+        "cr": "125.00"
+      },
+      {
+        "txn": "TXN-028499",
+        "ref_type": "CREDIT_NOTE",
+        "code": "4010",
+        "dr": "125.00",
+        "cr": "0.00"
+      }
+    ],
+    "debitNote": {
+      "id": "1f942921-0e7a-48f8-a80c-7261eb7ef900",
+      "number": "DN-2026-0003",
+      "amount": 50,
+      "lineName": "Additional charge"
+    },
+    "debitNoteGl": [
+      {
+        "txn": "TXN-028500",
+        "ref_type": "DEBIT_NOTE",
+        "code": "1200",
+        "dr": "50.00",
+        "cr": "0.00"
+      },
+      {
+        "txn": "TXN-028500",
+        "ref_type": "DEBIT_NOTE",
+        "code": "4000",
+        "dr": "0.00",
+        "cr": "50.00"
+      }
+    ]
+  },
+  "pass": 29,
+  "fail": 0,
+  "result": "PASS"
+}

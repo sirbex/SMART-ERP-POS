@@ -416,6 +416,8 @@ export const api = {
     getTransactions: (id: string, params?: { page?: number; limit?: number }) =>
       apiClient.get<ApiResponse>(`customers/${id}/transactions`, { params }),
     getSummary: (id: string) => apiClient.get<ApiResponse>(`customers/${id}/summary`),
+    /** Customer Center overview KPIs (portfolio open-item AR — not page-scoped). */
+    getCenterStats: () => apiClient.get<ApiResponse>('customers/center-stats'),
     getStatement: (
       id: string,
       params?: { start?: string; end?: string; page?: number; limit?: number }
@@ -523,6 +525,23 @@ export const api = {
       apiClient.post<ApiResponse>(`sales/${id}/void`, data),
     refundSale: (id: string, data: { items: { saleItemId: string; quantity: number }[]; reason: string; approvedById?: string; refundDate?: string; refundType?: 'REFUND' | 'EXCHANGE' }) =>
       apiClient.post<ApiResponse>(`sales/${id}/refund`, data),
+    completeExchange: (
+      id: string,
+      data: {
+        returnItems: { saleItemId: string; quantity: number }[];
+        reason: string;
+        replacementItems?: { productId: string; productName?: string; quantity: number; unitPrice: number }[];
+        residualAction: 'REFUND_ORIGINAL_TENDER' | 'KEEP_VOUCHER';
+        topUpPaymentMethod?: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY';
+        cashRegisterSessionId?: string;
+      },
+    ) => apiClient.post<ApiResponse>(`sales/${id}/exchange`, data),
+    settleExchangeCredit: (
+      refundId: string,
+      data: { residualAction: 'REFUND_ORIGINAL_TENDER' | 'KEEP_VOUCHER'; cashRegisterSessionId?: string },
+    ) => apiClient.post<ApiResponse>(`sales/exchange-credits/${refundId}/settle`, data),
+    listOpenExchangeCredits: (params?: { limit?: number }) =>
+      apiClient.get<ApiResponse>('sales/exchange-credits/open', { params }),
     getRefunds: (id: string) =>
       apiClient.get<ApiResponse>(`sales/${id}/refunds`),
   },

@@ -51,7 +51,7 @@ interface RefundSaleModalProps {
         totalPrice?: number | string;
         total_price?: number | string;
     }[];
-    /** refund = full/partial return; exchange = wrong-product swap (partial only, then POS) */
+    /** refund = full/partial return; exchange = wrong-product swap (store credit + replacement) */
     mode?: 'refund' | 'exchange';
     customerId?: string;
     customerName?: string;
@@ -177,10 +177,6 @@ export function RefundSaleModal({
     }, [refundItems]);
 
     const handleRefund = async () => {
-        if (isExchange && isFullRefund) {
-            setError('Exchange is for swapping wrong items only. Use Return when the customer is giving back the entire sale.');
-            return;
-        }
         if (selectedItems.length === 0) {
             setError('Select at least one item to refund');
             return;
@@ -346,34 +342,12 @@ export function RefundSaleModal({
 
                 {/* Body */}
                 <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
-                    {/* Business-logic explainer */}
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-900 flex gap-2">
-                        <svg className="h-5 w-5 flex-shrink-0 text-blue-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <div>
-                            <p className="font-medium">
-                                {isExchange ? 'Product exchange' : 'What happens when you return a sale'}
-                            </p>
-                            <ul className="mt-1 list-disc list-inside text-xs space-y-0.5 text-blue-800">
-                                {isExchange ? (
-                                    <>
-                                        <li>Return the wrong item(s) only — not the full sale</li>
-                                        <li>Stock is restored; store credit is held for the replacement sale</li>
-                                        <li>Continue at POS to sell the correct replacement product</li>
-                                        <li>Exchange credit applies automatically against the new sale total</li>
-                                    </>
-                                ) : (
-                                    <>
-                                        <li>Items are restored to stock at original cost</li>
-                                        <li>A return document (REF-*) is posted with revenue reversal</li>
-                                        <li>Refund is issued to the original payment method (cash drawer, card, or customer account)</li>
-                                        <li>The original sale remains in the audit trail — it is not deleted</li>
-                                    </>
-                                )}
-                            </ul>
-                        </div>
-                    </div>
+                    {/* Brief path label only */}
+                    <p className="text-sm text-gray-600">
+                        {isExchange
+                            ? 'Select items to exchange for a different product.'
+                            : 'Select items to return. Refund uses the original payment method.'}
+                    </p>
                     {refundItems.length === 0 ? (
                         <div className="bg-gray-50 rounded-lg p-6 text-center text-gray-500">
                             <p className="font-medium">No items available for return</p>

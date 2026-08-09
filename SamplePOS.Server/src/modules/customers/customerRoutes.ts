@@ -59,6 +59,7 @@ router.post(
   customerController.cancelCustomerOpeningBalance
 );
 router.get('/', customerController.getCustomers);
+router.get('/center-stats', customerController.getCustomerCenterStats);
 router.get('/search', customerController.searchCustomers);
 router.get('/by-number/:customerNumber', customerController.getCustomerByNumber);
 router.get('/:id', customerController.getCustomer);

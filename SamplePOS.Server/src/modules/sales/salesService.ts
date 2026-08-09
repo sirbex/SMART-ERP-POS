@@ -125,6 +125,12 @@ export interface CreateSaleInput {
   fromOrderId?: string; // POS order ID — if set, mark the order COMPLETED atomically with this sale
   /** Exchange refund document whose store credit is applied as cart discount */
   exchangeRefundId?: string;
+  /**
+   * When exchange credit exceeds the replacement sale total:
+   * - REFUND_ORIGINAL_TENDER: pay residual cash/card matching original sale tender (default)
+   * - KEEP_VOUCHER: leave remaining as walk-in store credit (refund number is the voucher)
+   */
+  exchangeResidualAction?: 'REFUND_ORIGINAL_TENDER' | 'KEEP_VOUCHER';
   /** Optional audit context for price-edit / below-cost audit rows */
   auditContext?: AuditContext;
   /** P4: opt-in phase timings (also CHECKOUT_PROFILE=1 / X-Checkout-Profile). */
@@ -144,6 +150,29 @@ export interface RefundSaleInput {
   approvedById?: string;
   refundDate?: string; // YYYY-MM-DD, defaults to today
   refundType?: 'REFUND' | 'EXCHANGE';
+}
+
+export type ExchangeResidualAction = 'REFUND_ORIGINAL_TENDER' | 'KEEP_VOUCHER';
+
+export interface CompleteProductExchangeInput {
+  returnItems: RefundItemInput[];
+  reason: string;
+  /** Replacement products sold in the same guided exchange (optional if hold/voucher or pure residual refund) */
+  replacementItems?: Array<{
+    productId: string;
+    productName?: string;
+    quantity: number;
+    unitPrice: number;
+  }>;
+  /**
+   * Required when residual money remains after the replacement (or when no replacement):
+   * payout cash/card vs keep numbered voucher.
+   */
+  residualAction: ExchangeResidualAction;
+  /** How customer pays when replacement costs more than returned value */
+  topUpPaymentMethod?: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'AIRTEL_MONEY';
+  cashRegisterSessionId?: string;
+  soldBy?: string;
 }
 
 export const salesService = {
@@ -1062,6 +1091,17 @@ export const salesService = {
           },
         );
       }
+      // SSOT hard gate — never proceed if charge math disagrees with DocumentTax
+      {
+        const { assertLineTaxEqualsHeader, money2 } = await import(
+          '../../services/documentTaxIntegrity.js'
+        );
+        assertLineTaxEqualsHeader(
+          money2(stampedLineTax.toNumber()),
+          money2(taxAmount.toNumber()),
+          'createSale.DocumentTax',
+        );
+      }
       profiler.mark('document_tax');
 
       logger.info('DocumentTaxService createSale tax', {
@@ -1152,7 +1192,7 @@ export const salesService = {
           );
         }
         const creditApplied = Money.toNumber(discountAmount);
-        const remainingCredit = exchangeRefund.totalAmount - exchangeRefund.exchangeAppliedAmount;
+        const remainingCredit = exchangeRefund.remainingAmount;
         if (creditApplied > remainingCredit + 0.01) {
           throw new BusinessError(
             `Exchange credit (${creditApplied.toFixed(2)}) exceeds available balance (${remainingCredit.toFixed(2)})`,
@@ -1921,10 +1961,83 @@ export const salesService = {
               saleNumber: sale.saleNumber,
               applicationDate: String(sale.saleDate || getBusinessDate()).slice(0, 10),
               amount: creditApplied,
+              customerId: input.customerId || undefined,
             },
             pool,
             client,
           );
+
+          // Residual after this application — pay out or leave as numbered voucher
+          const remainingAfter = exchangeRefund.remainingAmount - creditApplied;
+          if (remainingAfter > 0.01) {
+            const residualAction = input.exchangeResidualAction ?? 'REFUND_ORIGINAL_TENDER';
+            if (residualAction === 'REFUND_ORIGINAL_TENDER') {
+              // Look up original sale tender for residual payout source
+              const orig = await client.query<{
+                payment_method: string;
+                customer_id: string | null;
+              }>(
+                `SELECT s.payment_method, s.customer_id
+                 FROM sale_refunds r
+                 JOIN sales s ON s.id = r.sale_id
+                 WHERE r.id = $1`,
+                [exchangeRefund.id],
+              );
+              const paymentMethod = (orig.rows[0]?.payment_method || 'CASH') as
+                | 'CASH'
+                | 'CARD'
+                | 'MOBILE_MONEY'
+                | 'AIRTEL_MONEY'
+                | 'CREDIT'
+                | 'DEPOSIT';
+              await salesRepository.applyExchangeResidualPayout(
+                client,
+                exchangeRefund.id,
+                remainingAfter,
+              );
+              await glEntryService.recordExchangeResidualPayoutToGL(
+                {
+                  refundId: exchangeRefund.id,
+                  refundNumber: exchangeRefund.refundNumber,
+                  payoutDate: String(sale.saleDate || getBusinessDate()).slice(0, 10),
+                  amount: remainingAfter,
+                  paymentMethod,
+                  customerId: orig.rows[0]?.customer_id || input.customerId || undefined,
+                },
+                pool,
+                client,
+              );
+              // Drawer tracking when residual leaves as cash
+              if (paymentMethod === 'CASH' || paymentMethod === 'MOBILE_MONEY' || paymentMethod === 'AIRTEL_MONEY') {
+                try {
+                  let sessionId: string | null = input.cashRegisterSessionId || null;
+                  if (!sessionId) {
+                    const openSession = await cashRegisterRepository.getUserOpenSession(
+                      client,
+                      input.soldBy,
+                    );
+                    sessionId = openSession?.id || null;
+                  }
+                  if (sessionId) {
+                    await cashRegisterService.recordRefundMovement(
+                      sessionId,
+                      exchangeRefund.id,
+                      remainingAfter,
+                      input.soldBy,
+                      `Exchange residual ${exchangeRefund.refundNumber}`,
+                      pool,
+                    );
+                  }
+                } catch (regErr) {
+                  logger.warn('Cash register residual exchange movement failed', {
+                    refundId: exchangeRefund.id,
+                    error: regErr instanceof Error ? regErr.message : String(regErr),
+                  });
+                }
+              }
+            }
+            // KEEP_VOUCHER: remaining liability stays open on 2210, controlled by refund number
+          }
         }
       }
 
@@ -3488,36 +3601,9 @@ export const salesService = {
 
       const refundType = input.refundType === 'EXCHANGE' ? 'EXCHANGE' : 'REFUND';
 
-      // Exchange is partial-only: full return must use REFUND path
-      if (refundType === 'EXCHANGE') {
-        const saleItemsPreview = await salesRepository.getSaleItemsForRefund(client, saleId);
-        const previewMap = new Map(saleItemsPreview.map((si) => [si.id, si]));
-        let allFullySelected = true;
-        for (const refundItem of input.items) {
-          const si = previewMap.get(refundItem.saleItemId);
-          if (!si) continue;
-          const remaining = new Decimal(si.remainingQty);
-          if (new Decimal(refundItem.quantity).lessThan(remaining)) {
-            allFullySelected = false;
-            break;
-          }
-        }
-        for (const si of saleItemsPreview) {
-          const selected = input.items.find((i) => i.saleItemId === si.id);
-          const remaining = new Decimal(si.remainingQty);
-          if (remaining.greaterThan(0) && (!selected || new Decimal(selected.quantity).lessThan(remaining))) {
-            allFullySelected = false;
-            break;
-          }
-        }
-        if (allFullySelected) {
-          throw new BusinessError(
-            'Exchange is for swapping wrong items only. Use Return for a full sale reversal.',
-            'ERR_EXCHANGE_FULL',
-            { saleId },
-          );
-        }
-      }
+      // Full-line exchange is allowed (single-item "wrong product" swaps are the common case).
+      // Pure cash-out of a whole sale still belongs on the Return path, but EXCHANGE may reverse
+      // every remaining line when the cashier posts store credit / a replacement.
 
       // If approval provided, verify approver has sales.approve
       if (input.approvedById) {
@@ -4103,5 +4189,229 @@ export const salesService = {
     } finally {
       client.release();
     }
+  },
+
+  /**
+   * Guided product exchange: return wrong item(s) → optional replacement sale → residual settlement.
+   * Prefer this over isolated EXCHANGE + later POS so walk-in residual never becomes an anonymous deposit.
+   */
+  async completeProductExchange(
+    pool: Pool,
+    originalSaleId: string,
+    userId: string,
+    input: CompleteProductExchangeInput,
+  ): Promise<{
+    refund: RefundRecord;
+    replacementSale: SaleRecord | null;
+    creditTotal: number;
+    creditApplied: number;
+    residualAmount: number;
+    residualAction: ExchangeResidualAction;
+    topUpPaid: number;
+    voucherNumber: string | null;
+    cashToCustomer: number;
+  }> {
+    if (!input.returnItems?.length) {
+      throw new BusinessError('Select at least one item to exchange', 'ERR_EXCHANGE_ITEMS', {});
+    }
+    if (!input.reason?.trim()) {
+      throw new BusinessError('Exchange reason is required', 'ERR_EXCHANGE_REASON', {});
+    }
+
+    const residualAction = input.residualAction || 'REFUND_ORIGINAL_TENDER';
+    const replacementItems = input.replacementItems || [];
+
+    const origResult = await salesRepository.getSaleById(pool, originalSaleId);
+    if (!origResult) {
+      throw new NotFoundError(`Sale ${originalSaleId}`);
+    }
+    const origSaleRow = origResult.sale as SaleRecord & { customer_id?: string | null };
+    const originalCustomerId = origSaleRow.customerId ?? origSaleRow.customer_id ?? null;
+
+    // 1) Post EXCHANGE credit (store credit liability 2210)
+    const refundResult = await this.refundSale(pool, originalSaleId, userId, {
+      items: input.returnItems,
+      reason: input.reason.trim(),
+      refundType: 'EXCHANGE',
+    });
+
+    const creditTotal = Money.toNumber(Money.parseDb(refundResult.refund.totalAmount));
+    let creditApplied = 0;
+    let topUpPaid = 0;
+    let replacementSale: SaleRecord | null = null;
+    let cashToCustomer = 0;
+
+    // 2) Replacement sale with credit applied as discount
+    if (replacementItems.length > 0) {
+      const lineSubtotal = replacementItems.reduce(
+        (sum, it) => sum.plus(new Decimal(it.unitPrice).times(it.quantity)),
+        new Decimal(0),
+      );
+      creditApplied = Math.min(
+        creditTotal,
+        Money.toNumber(Money.round(lineSubtotal, 2)),
+      );
+      const residualBeforeSale = Money.toNumber(
+        Money.round(Money.subtract(Money.parseDb(creditTotal), Money.parseDb(creditApplied)), 2),
+      );
+      topUpPaid = Math.max(
+        0,
+        Money.toNumber(Money.round(lineSubtotal.minus(creditApplied), 2)),
+      );
+
+      const paymentMethod = topUpPaid > 0.009
+        ? (input.topUpPaymentMethod || 'CASH')
+        : 'CASH';
+
+      const saleResult = await this.createSale(pool, {
+        customerId: originalCustomerId || undefined,
+        items: replacementItems.map((it) => ({
+          productId: it.productId,
+          productName: it.productName || 'Product',
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+        })),
+        discountAmount: creditApplied,
+        paymentMethod,
+        paymentReceived: topUpPaid,
+        soldBy: input.soldBy || userId,
+        cashRegisterSessionId: input.cashRegisterSessionId,
+        exchangeRefundId: refundResult.refund.id,
+        exchangeResidualAction: residualAction,
+      });
+
+      replacementSale = saleResult.sale;
+      if (residualAction === 'REFUND_ORIGINAL_TENDER' && residualBeforeSale > 0.01) {
+        cashToCustomer = residualBeforeSale;
+      }
+    } else if (residualAction === 'REFUND_ORIGINAL_TENDER') {
+      await this.settleExchangeResidual(pool, refundResult.refund.id, userId, {
+        residualAction: 'REFUND_ORIGINAL_TENDER',
+        cashRegisterSessionId: input.cashRegisterSessionId,
+      });
+      cashToCustomer = creditTotal;
+    }
+
+    const openCredit = await salesRepository.getExchangeRefundForApplication(
+      pool,
+      refundResult.refund.id,
+    );
+    const remainingOpen = openCredit?.remainingAmount ?? 0;
+
+    return {
+      refund: refundResult.refund,
+      replacementSale,
+      creditTotal,
+      creditApplied,
+      residualAmount: remainingOpen,
+      residualAction,
+      topUpPaid,
+      voucherNumber: remainingOpen > 0.01 ? refundResult.refund.refundNumber : null,
+      cashToCustomer,
+    };
+  },
+
+  /**
+   * Settle leftover exchange store credit (cash/card out or leave as voucher intentionally).
+   */
+  async settleExchangeResidual(
+    pool: Pool,
+    refundId: string,
+    userId: string,
+    input: {
+      residualAction: ExchangeResidualAction;
+      cashRegisterSessionId?: string;
+    },
+  ): Promise<{ remainingAfter: number; paidOut: number; voucherNumber: string | null }> {
+    const exchangeRefund = await salesRepository.getExchangeRefundForApplication(pool, refundId);
+    if (!exchangeRefund || exchangeRefund.refundType !== 'EXCHANGE') {
+      throw new BusinessError('Exchange credit not found', 'ERR_EXCHANGE_RESIDUAL_002', { refundId });
+    }
+    const remaining = exchangeRefund.remainingAmount;
+    if (remaining <= 0.01) {
+      return { remainingAfter: 0, paidOut: 0, voucherNumber: null };
+    }
+
+    if (input.residualAction === 'KEEP_VOUCHER') {
+      return {
+        remainingAfter: remaining,
+        paidOut: 0,
+        voucherNumber: exchangeRefund.refundNumber,
+      };
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const orig = await client.query<{
+        payment_method: string;
+        customer_id: string | null;
+      }>(
+        `SELECT s.payment_method, s.customer_id
+         FROM sale_refunds r
+         JOIN sales s ON s.id = r.sale_id
+         WHERE r.id = $1
+         FOR UPDATE OF r`,
+        [refundId],
+      );
+      const paymentMethod = (orig.rows[0]?.payment_method || 'CASH') as
+        | 'CASH'
+        | 'CARD'
+        | 'MOBILE_MONEY'
+        | 'AIRTEL_MONEY'
+        | 'CREDIT'
+        | 'DEPOSIT';
+
+      await salesRepository.applyExchangeResidualPayout(client, refundId, remaining);
+      await glEntryService.recordExchangeResidualPayoutToGL(
+        {
+          refundId: exchangeRefund.id,
+          refundNumber: exchangeRefund.refundNumber,
+          payoutDate: getBusinessDate(),
+          amount: remaining,
+          paymentMethod,
+          customerId: orig.rows[0]?.customer_id || undefined,
+        },
+        pool,
+        client,
+      );
+
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    try {
+      let sessionId: string | null = input.cashRegisterSessionId || null;
+      if (!sessionId) {
+        const openSession = await cashRegisterRepository.getUserOpenSession(pool, userId);
+        sessionId = openSession?.id || null;
+      }
+      if (sessionId) {
+        await cashRegisterService.recordRefundMovement(
+          sessionId,
+          refundId,
+          remaining,
+          userId,
+          `Exchange residual payout ${exchangeRefund.refundNumber}`,
+          pool,
+        );
+      }
+    } catch (regErr) {
+      logger.warn('Cash register residual settlement movement failed', {
+        refundId,
+        error: regErr instanceof Error ? regErr.message : String(regErr),
+      });
+    }
+
+    return { remainingAfter: 0, paidOut: remaining, voucherNumber: null };
+  },
+
+  async listOpenExchangeCredits(pool: Pool, limit = 50) {
+    return salesRepository.listOpenExchangeCredits(pool, limit);
   },
 };

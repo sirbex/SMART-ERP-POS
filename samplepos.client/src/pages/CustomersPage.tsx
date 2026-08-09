@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import Decimal from 'decimal.js';
 import Layout from '../components/Layout';
-import { useCustomers, useCustomerStatement } from '../hooks/useApi';
+import { useCustomers, useCustomerStatement, useCustomerCenterStats } from '../hooks/useApi';
 import { formatCurrency } from '../utils/currency';
 import { downloadFile } from '../utils/download';
 import { DatePicker } from '../components/ui/date-picker';
@@ -143,12 +142,13 @@ export default function CustomersPage() {
   const pagination = customersResponse?.pagination;
   const displayCustomers = customers;
 
-  // Calculate summary statistics
-  const totalCustomers = pagination?.total || 0;
-  const activeCustomers = customers.filter((c: Customer) => c.isActive).length;
-  const totalBalance = customers.reduce((sum: number, c: Customer) => new Decimal(sum).plus(toNumber(c.balance)).toNumber(), 0);
-  const customersWithDebt = customers.filter((c: Customer) => toNumber(c.balance) > 0).length; // Balance > 0 = customer owes money
-
+  // Portfolio KPIs — open-item AR SSOT for entire customer base (not page-scoped list sum)
+  const { data: centerStats } = useCustomerCenterStats(activeTab === 'overview');
+  const totalCustomers = centerStats?.totalCustomers ?? pagination?.total ?? 0;
+  const activeCustomers = centerStats?.activeCustomers ?? customers.filter((c: Customer) => c.isActive).length;
+  const totalBalance = centerStats?.totalArBalance ?? 0;
+  const customersWithDebt = centerStats?.customersWithDebt ?? 0;
+  const recentActivityCount = centerStats?.recentActivityCount;
   return (
     <Layout>
       <div className="p-4 sm:p-6">
@@ -252,7 +252,9 @@ export default function CustomersPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-xs sm:text-sm font-medium text-gray-600">Recent Activity</p>
-                    <p className="text-xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">-</p>
+                    <p className="text-xl sm:text-3xl font-bold text-gray-900 mt-1 sm:mt-2">
+                      {recentActivityCount === undefined ? '—' : recentActivityCount}
+                    </p>
                   </div>
                   <div className="w-8 h-8 sm:w-12 sm:h-12 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
                     <span className="text-base sm:text-2xl">📊</span>

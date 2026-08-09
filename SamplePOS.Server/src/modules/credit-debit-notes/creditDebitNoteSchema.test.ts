@@ -11,6 +11,7 @@ import { describe, it, expect } from '@jest/globals';
 import {
     CreateSupplierCreditNoteSchema,
     CreateSupplierDebitNoteSchema,
+    CreateCustomerDebitNoteSchema,
 } from '../../../../shared/zod/creditDebitNote.js';
 
 // ── Shared fixtures ──────────────────────────────────────────────────────────
@@ -299,6 +300,31 @@ describe('CreateSupplierDebitNoteSchema', () => {
                 notes: 'Damaged packaging',
             });
             expect(result.success).toBe(true);
+        });
+    });
+});
+
+// ============================================================
+// CreateCustomerDebitNoteSchema — amount SSOT (no free-form products)
+// ============================================================
+
+describe('CreateCustomerDebitNoteSchema', () => {
+    describe('amount-only (no product lines)', () => {
+        it('accepts valid amount without lines', () => {
+            const result = CreateCustomerDebitNoteSchema.safeParse({
+                invoiceId: validInvoiceId,
+                reason: 'Underbilled freight',
+                amount: 2500,
+            });
+            expect(result.success).toBe(true);
+        });
+
+        it('rejects when neither lines nor amount provided', () => {
+            const result = CreateCustomerDebitNoteSchema.safeParse({
+                invoiceId: validInvoiceId,
+                reason: 'Missing amount',
+            });
+            expect(result.success).toBe(false);
         });
     });
 });
