@@ -10,7 +10,7 @@ export interface ServerListParams {
   stockGt?: boolean;
   paymentTerms?: string;
   /** Suppliers (and similar): active | inactive | all */
-  status?: 'active' | 'inactive' | 'all';
+  activeStatus?: 'active' | 'inactive' | 'all';
 }
 
 /** Serialize for axios/fetch query string. */
@@ -25,6 +25,6 @@ export function toServerListQuery(params: ServerListParams): Record<string, stri
   if (params.balanceGt != null && params.balanceGt > 0) q.balanceGt = params.balanceGt;
   if (params.stockGt) q.stockGt = 'true';
   if (params.paymentTerms) q.paymentTerms = params.paymentTerms;
-  if (params.status) q.status = params.status;
+  if (params.activeStatus) q.activeStatus = params.activeStatus;
   return q;
 }

@@ -15,8 +15,8 @@ export interface EnterpriseListQuery {
   stockGt?: boolean;
   paymentTerms?: string;
   search?: string;
-  /** Supplier (and similar master) list: active (default) | inactive | all */
-  status?: ActiveStatusFilter;
+  /** Master data list: active (default) | inactive | all — not document workflow status */
+  activeStatus?: ActiveStatusFilter;
 }
 
 export function parseSortOrder(raw?: string): SortOrder {

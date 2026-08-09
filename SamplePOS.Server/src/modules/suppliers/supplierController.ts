@@ -50,7 +50,7 @@ export const getSuppliers = asyncHandler(async (req: Request, res: Response) => 
     outstandingOnly,
     balanceGt,
     paymentTerms,
-    status,
+    activeStatus,
   } = parsed;
 
   const result = await supplierService.getAllSuppliers(pool, page, limit, {
@@ -60,7 +60,7 @@ export const getSuppliers = asyncHandler(async (req: Request, res: Response) => 
     outstandingOnly,
     balanceGt,
     paymentTerms,
-    status,
+    activeStatus,
   });
 
   res.json({

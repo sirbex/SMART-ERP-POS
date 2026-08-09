@@ -20,8 +20,11 @@ export const EnterpriseListQueryFields = {
     .optional()
     .transform((v) => v === true || v === 'true' || v === '1'),
   paymentTerms: z.string().optional(),
-  /** active (default) | inactive | all — master data list visibility */
-  status: z
+  /**
+   * Master data visibility: active (default) | inactive | all.
+   * Named activeStatus (not status) so list schemas can still use document status.
+   */
+  activeStatus: z
     .string()
     .optional()
     .transform((v) => {
@@ -38,5 +41,5 @@ export type EnterpriseListQueryInput = {
   balanceGt?: number;
   stockGt?: boolean;
   paymentTerms?: string;
-  status?: 'active' | 'inactive' | 'all';
+  activeStatus?: 'active' | 'inactive' | 'all';
 };

@@ -324,7 +324,7 @@ export default function SuppliersPage() {
     limit,
     search: debouncedSearch || undefined,
     paymentTerms: filterPaymentTerms || undefined,
-    status: filterStatus,
+    activeStatus: filterStatus,
     ...serverListParams,
   });
   const createMutation = useCreateSupplier();

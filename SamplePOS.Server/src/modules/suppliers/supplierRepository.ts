@@ -29,13 +29,13 @@ function buildSupplierListClauses(query: SupplierListQuery = {}) {
   const conditions: string[] = [];
   let paramIndex = 1;
 
-  const status = query.status ?? 'active';
-  if (status === 'active') {
+  const activeStatus = query.activeStatus ?? 'active';
+  if (activeStatus === 'active') {
     conditions.push('"IsActive" = true');
-  } else if (status === 'inactive') {
+  } else if (activeStatus === 'inactive') {
     conditions.push('"IsActive" = false');
   }
-  // status === 'all' → no IsActive filter
+  // activeStatus === 'all' → no IsActive filter
 
   if (query.search?.trim()) {
     params.push(`%${query.search.trim()}%`);
