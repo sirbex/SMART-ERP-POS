@@ -11,11 +11,14 @@
 import { useEffect, useRef } from 'react';
 import {
   getRefreshToken,
+  getAccessToken,
   isTokenExpired,
   willExpireInNext,
   refreshAccessTokenDeduped,
+  forceLogoutRedirect,
 } from './useTokenRefresh';
 import { shouldKeepSessionAlive, touchSessionActivity, ACTIVE_SESSION_WINDOW_MS } from '../lib/sessionActivity';
+import { getAuthState } from '../lib/authStateMachine';
 
 /** Check every 4 minutes; refresh if token expires within 5 minutes. */
 const KEEPALIVE_INTERVAL_MS = 4 * 60 * 1000;
@@ -33,6 +36,7 @@ export function useSessionKeepalive(enabled: boolean): void {
 
     const tick = async () => {
       if (tickingRef.current || !navigator.onLine) return;
+      if (getAuthState() === 'EXPIRED') return;
       if (!getRefreshToken()) return;
       if (!shouldKeepSessionAlive(ACTIVE_WINDOW_MS)) return;
 
@@ -44,7 +48,11 @@ export function useSessionKeepalive(enabled: boolean): void {
       try {
         await refreshAccessTokenDeduped();
       } catch {
-        // Network / transient — 401 handler on next API call; do not logout here
+        // Definitive death already forceLogoutRedirects inside _refreshOnce.
+        // Network/5xx must NOT logout here (enterprise preserve).
+        if (getAuthState() === 'EXPIRED' || (!getAccessToken() && !getRefreshToken())) {
+          forceLogoutRedirect('keepalive_session_dead');
+        }
       } finally {
         tickingRef.current = false;
       }

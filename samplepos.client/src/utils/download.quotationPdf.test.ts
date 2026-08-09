@@ -20,9 +20,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // getAccessToken must be hoisted so the mock factory can reference it.
 const getAccessTokenMock = vi.hoisted(() => vi.fn(() => 'test-token'));
+const refreshAccessTokenDedupedMock = vi.hoisted(() =>
+  vi.fn().mockRejectedValue(new Error('no refresh')),
+);
+const forceLogoutRedirectMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../hooks/useTokenRefresh', () => ({
   getAccessToken: getAccessTokenMock,
+  refreshAccessTokenDeduped: refreshAccessTokenDedupedMock,
+  forceLogoutRedirect: forceLogoutRedirectMock,
 }));
 
 // ---------------------------------------------------------------------------
@@ -140,6 +146,7 @@ describe('downloadFile — quotation PDF contract', () => {
 
   it('throws when server returns a non-2xx status', async () => {
     installBrowserShims();
+    vi.stubGlobal('navigator', { onLine: true });
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 401,
@@ -149,7 +156,8 @@ describe('downloadFile — quotation PDF contract', () => {
 
     await expect(
       downloadFile('/documents/QUOTATION/missing', 'quotation-missing.pdf'),
-    ).rejects.toThrow(/401/);
+    ).rejects.toThrow(/Session expired|401|Unauthorized/i);
+    expect(forceLogoutRedirectMock).toHaveBeenCalled();
   });
 
   it('propagates network errors', async () => {

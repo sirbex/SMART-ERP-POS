@@ -14,6 +14,7 @@ import {
   getAccessToken,
   build401Handler,
   refreshAccessTokenDeduped,
+  forceLogoutRedirect,
 } from '../hooks/useTokenRefresh';
 import { getAuthState, waitForAuthenticated } from '../lib/authStateMachine';
 import { enqueueOfflineRequest } from '../lib/offlineRequestQueue';
@@ -119,13 +120,22 @@ apiClient.interceptors.request.use(
       try {
         await waitForAuthenticated();
       } catch {
-        /* Timed out / expired — fall through and re-read tokens */
+        /* Expired — force login if tokens already wiped */
+        if (getAuthState() === 'EXPIRED' || !getAccessToken()) {
+          forceLogoutRedirect('auth_wait_expired');
+          return Promise.reject(new Error('Session expired'));
+        }
       }
     } else if (isTokenExpired() && getRefreshToken() && navigator.onLine) {
       try {
         await refreshAccessTokenDeduped();
       } catch {
-        // Refresh failed while online — response interceptor handles the resulting 401
+        // Definitive death already forceLogoutRedirects inside _refreshOnce.
+        // Network/5xx: may still have access token — fall through.
+        if (!getAccessToken() && !getRefreshToken()) {
+          forceLogoutRedirect('request_refresh_failed');
+          return Promise.reject(new Error('Session expired'));
+        }
       }
     }
 
@@ -140,7 +150,10 @@ apiClient.interceptors.request.use(
       token = getAccessToken() || localStorage.getItem('auth_token');
     }
     if (!token) {
-      // Avoid anonymous API calls that produce misleading "Authentication token required" 401s
+      // Dead session — never leave SPA authenticated without credentials
+      if (getAuthState() === 'EXPIRED' || !getRefreshToken()) {
+        forceLogoutRedirect('no_access_token');
+      }
       return Promise.reject(new Error('Session not ready — please sign in again'));
     }
     if (config.headers) {

@@ -1,0 +1,270 @@
+{
+  "proof": "OFFLINE_LOGIN_AND_PIN",
+  "date": "2026-08-09T13:56:10.432Z",
+  "verdict": "PASS",
+  "pass": 52,
+  "fail": 0,
+  "total": 52,
+  "gates": [
+    {
+      "id": "OFF_CACHE_OK",
+      "ok": true,
+      "detail": "validated cashier@shop.local"
+    },
+    {
+      "id": "OFF_BAD_PWD",
+      "ok": true,
+      "detail": "wrong password must be null"
+    },
+    {
+      "id": "OFF_UNKNOWN",
+      "ok": true,
+      "detail": "unknown user must be null"
+    },
+    {
+      "id": "OFF_EMAIL_CASE",
+      "ok": true,
+      "detail": "cashier@shop.local"
+    },
+    {
+      "id": "OFF_MULTI",
+      "ok": true,
+      "detail": "a=u-cashier-1 b=u-mgr"
+    },
+    {
+      "id": "OFF_EVICT",
+      "ok": true,
+      "detail": "cache size=10 max=10"
+    },
+    {
+      "id": "OFF_TOKEN_PREFIX",
+      "ok": true,
+      "detail": "offline-session-1786283770333-0214fd1d34"
+    },
+    {
+      "id": "OFF_ISO_TOKEN_NEW",
+      "ok": true,
+      "detail": "minted offline-session token"
+    },
+    {
+      "id": "OFF_ISO_NO_JWT",
+      "ok": true,
+      "detail": "prior JWT stripped before login()"
+    },
+    {
+      "id": "OFF_ISO_NO_RT",
+      "ok": true,
+      "detail": "prior RT stripped — prevents zombie refresh as user A"
+    },
+    {
+      "id": "OFF_ISO_NO_EXPIRY",
+      "ok": true,
+      "detail": "token_expiry cleared for offline session"
+    },
+    {
+      "id": "OFF_ISO_NO_FOREIGN_RBAC",
+      "ok": true,
+      "detail": "A permissions not left for B"
+    },
+    {
+      "id": "OFF_ISO_CREDS_INTACT",
+      "ok": true,
+      "detail": "offline password cache survives identity wipe"
+    },
+    {
+      "id": "OFF_ISO_SAME_TOKEN",
+      "ok": true,
+      "detail": "same-user mint"
+    },
+    {
+      "id": "OFF_ISO_SAME_RBAC",
+      "ok": true,
+      "detail": "same actor keeps offline permission cache"
+    },
+    {
+      "id": "OFF_ISO_SAME_NO_RT",
+      "ok": true,
+      "detail": "same actor still strips RT"
+    },
+    {
+      "id": "OFF_PAGE_BEGIN",
+      "ok": true,
+      "detail": "LoginPage uses beginOfflineLoginSession, not JWT reuse"
+    },
+    {
+      "id": "OFF_SURVIVES_CLEAR",
+      "ok": true,
+      "detail": "offline_login_credentials must survive JWT wipe"
+    },
+    {
+      "id": "OFF_CLEAR_SRC",
+      "ok": true,
+      "detail": "clearTokens must not remove offline credential key"
+    },
+    {
+      "id": "OFF_PAGE_IMPORT",
+      "ok": true,
+      "detail": "LoginPage wires offlineLoginCredentials + identity isolation"
+    },
+    {
+      "id": "OFF_PAGE_OFFLINE_PATH",
+      "ok": true,
+      "detail": "explicit offline + server-unreachable falls back to cache"
+    },
+    {
+      "id": "PIN_PUBLIC_auth_quick-login_users_GET",
+      "ok": true,
+      "detail": "GET auth/quick-login/users"
+    },
+    {
+      "id": "PIN_PUBLIC__api_auth_quick-login_users_GET",
+      "ok": true,
+      "detail": "GET /api/auth/quick-login/users"
+    },
+    {
+      "id": "PIN_PUBLIC_auth_quick-login_pin-only_POST",
+      "ok": true,
+      "detail": "POST auth/quick-login/pin-only"
+    },
+    {
+      "id": "PIN_PUBLIC_auth_quick-login_pin_POST",
+      "ok": true,
+      "detail": "POST auth/quick-login/pin"
+    },
+    {
+      "id": "PIN_PUBLIC_auth_quick-login_check-device_POST",
+      "ok": true,
+      "detail": "POST auth/quick-login/check-device"
+    },
+    {
+      "id": "PIN_PUBLIC_auth_login_POST",
+      "ok": true,
+      "detail": "POST auth/login"
+    },
+    {
+      "id": "PIN_SETUP_NOT_PUBLIC_BY_MISTAKE",
+      "ok": true,
+      "detail": "setup must stay protected"
+    },
+    {
+      "id": "PATH_LOGIN",
+      "ok": true,
+      "detail": "/login"
+    },
+    {
+      "id": "PATH_LOGIN_NEST",
+      "ok": true,
+      "detail": "endsWith /login"
+    },
+    {
+      "id": "PATH_QL",
+      "ok": true,
+      "detail": "/quick-login"
+    },
+    {
+      "id": "PATH_QL_NEST",
+      "ok": true,
+      "detail": "startsWith quick-login"
+    },
+    {
+      "id": "PATH_POS",
+      "ok": true,
+      "detail": "/pos must hard-nav"
+    },
+    {
+      "id": "PATH_SALES",
+      "ok": true,
+      "detail": "/sales must hard-nav"
+    },
+    {
+      "id": "FORCE_USES_RECOVERY",
+      "ok": true,
+      "detail": "forceLogoutRedirect must skip redirect on recovery paths"
+    },
+    {
+      "id": "FORCE_STILL_CLEARS",
+      "ok": true,
+      "detail": "still clears + hard-navs protected UI"
+    },
+    {
+      "id": "OFF_NET_KEEP",
+      "ok": true,
+      "detail": "network must keep tokens for offline resilience"
+    },
+    {
+      "id": "OFF_CLASSIFY_NET",
+      "ok": true,
+      "detail": "kind=network"
+    },
+    {
+      "id": "COLD_CASHIER_ROLE",
+      "ok": true,
+      "detail": "cashier"
+    },
+    {
+      "id": "COLD_WAITER_ROLE",
+      "ok": true,
+      "detail": "waiter"
+    },
+    {
+      "id": "COLD_ADMIN_ROLE",
+      "ok": true,
+      "detail": "admin restore"
+    },
+    {
+      "id": "COLD_MGR_ROLE",
+      "ok": true,
+      "detail": "manager restore"
+    },
+    {
+      "id": "COLD_HREF",
+      "ok": true,
+      "detail": "/quick-login"
+    },
+    {
+      "id": "COLD_IS",
+      "ok": true,
+      "detail": "fresh tab is cold"
+    },
+    {
+      "id": "COLD_ENFORCE_CASHIER",
+      "ok": true,
+      "detail": "cashier + stored session + cold → PIN"
+    },
+    {
+      "id": "COLD_AFTER_ALIVE",
+      "ok": true,
+      "detail": "after alive mark, no pin gate"
+    },
+    {
+      "id": "AUTH_RECOVERY_SSOT",
+      "ok": true,
+      "detail": "peer logout / cold-start share recovery path helper"
+    },
+    {
+      "id": "AUTH_LOGIN_STRIP_RT",
+      "ok": true,
+      "detail": "login() strips residual RT when no refresh issued"
+    },
+    {
+      "id": "WIRE_src_hooks_useQuickLogin_ts",
+      "ok": true,
+      "detail": "src/hooks/useQuickLogin.ts has pin-only"
+    },
+    {
+      "id": "WIRE_src_lib_sessionColdStartLock_ts",
+      "ok": true,
+      "detail": "src/lib/sessionColdStartLock.ts has roleRequiresColdStartPinGate"
+    },
+    {
+      "id": "WIRE_src_lib_apiPublicRoutes_ts",
+      "ok": true,
+      "detail": "src/lib/apiPublicRoutes.ts has auth/quick-login/pin-only"
+    },
+    {
+      "id": "WIRE_src_lib_offlineLoginCredentials_ts",
+      "ok": true,
+      "detail": "src/lib/offlineLoginCredentials.ts has validateOfflineLogin"
+    }
+  ]
+}

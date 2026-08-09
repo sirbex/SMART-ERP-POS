@@ -1,0 +1,64 @@
+{
+  "at": "2026-08-09T13:56:08.137Z",
+  "verdict": "PASS",
+  "pass": 11,
+  "fail": 0,
+  "total": 11,
+  "gates": [
+    {
+      "id": "POLICY_ACTIVE_DEFINITIVE",
+      "ok": true,
+      "detail": "active + definitive_auth → logout"
+    },
+    {
+      "id": "POLICY_NETWORK_PRESERVE",
+      "ok": true,
+      "detail": "active + network → stay"
+    },
+    {
+      "id": "POLICY_PEER_SESSION_EXPIRED",
+      "ok": true,
+      "detail": "SESSION_EXPIRED never ignored"
+    },
+    {
+      "id": "CLASSIFY_EXPIRED_MSG",
+      "ok": true,
+      "detail": "Refresh token expired"
+    },
+    {
+      "id": "CLASSIFY_BARE_401",
+      "ok": true,
+      "detail": "bare 401"
+    },
+    {
+      "id": "FORCE_CLEAR",
+      "ok": true,
+      "detail": "tokens cleared"
+    },
+    {
+      "id": "FORCE_REPLACE",
+      "ok": true,
+      "detail": "location.replace(/login)"
+    },
+    {
+      "id": "FORCE_FLAG",
+      "ok": true,
+      "detail": "session_expired banner flag"
+    },
+    {
+      "id": "HANDLER_CLEAR",
+      "ok": true,
+      "detail": "tokens cleared after 401 path"
+    },
+    {
+      "id": "HANDLER_NAV",
+      "ok": true,
+      "detail": "hard nav attempted"
+    },
+    {
+      "id": "IDLE_INACTIVE_LOGOUT",
+      "ok": true,
+      "detail": "idle definitive still logout"
+    }
+  ]
+}

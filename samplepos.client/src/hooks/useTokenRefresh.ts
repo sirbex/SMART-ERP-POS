@@ -17,6 +17,7 @@ import {
     classifyRefreshError,
     shouldPerformAutoLogout,
 } from '../lib/sessionLogoutPolicy';
+import { isAuthRecoveryPath } from '../lib/offlineLoginCredentials';
 
 // Bare axios instance used exclusively for the /token/refresh HTTP call.
 // Must have NO response interceptors so that a 401 from the refresh endpoint
@@ -159,25 +160,39 @@ function notifySessionDeferred(reason: string): void {
     );
 }
 
-function forceLogoutRedirect(): void {
-    clearTokens();
-    broadcastAuthEvent({ type: 'LOGOUT' });
-    const onLogin = window.location.pathname === '/login' || window.location.pathname.endsWith('/login');
-    if (onLogin) {
-      // Already on login — set banner flag once; do not reload (mobile loop)
-      try {
-        sessionStorage.setItem('session_expired', '1');
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
+/**
+ * Hard session death → clear local auth + force login UI.
+ * Originating tab must call this directly (BroadcastChannel does NOT echo back).
+ * Idempotent: safe from refresh catch + 401 handler double-call.
+ *
+ * INVARIANT_SESSION_DEATH_LOGIN_v1 — do not remove; structural lock tests require this token.
+ */
+let _forceLogoutInFlight = false;
+export function forceLogoutRedirect(reason = 'session_expired'): void {
+    if (_forceLogoutInFlight) return;
+    _forceLogoutInFlight = true;
     try {
-      sessionStorage.setItem('session_expired', '1');
-    } catch {
-      /* ignore */
+        setAuthState('EXPIRED');
+        clearTokens();
+        // LOGOUT: peer tabs always hard-redirect (never deferred for activity)
+        broadcastAuthEvent({ type: 'LOGOUT' });
+        try {
+            sessionStorage.setItem('session_expired', '1');
+            sessionStorage.setItem('session_expired_reason', reason);
+        } catch {
+            /* ignore */
+        }
+        const path = typeof window !== 'undefined' ? window.location.pathname : '';
+        // Preserve /login (offline password) and /quick-login (PIN) — do not bounce away.
+        if (isAuthRecoveryPath(path)) return;
+        // Hard navigation always flips SPA away from protected UI (React state alone can lag).
+        window.location.replace(`${window.location.origin}/login`);
+    } finally {
+        // Allow a second attempt if navigation was blocked (rare); next tick reset
+        window.setTimeout(() => {
+            _forceLogoutInFlight = false;
+        }, 2_000);
     }
-    window.location.href = '/login';
 }
 
 function mayAutoLogout(refreshError: unknown): boolean {
@@ -265,7 +280,10 @@ function _refreshOnce(): Promise<void> {
                         errorKind,
                         hasRefreshToken: Boolean(getRefreshToken()),
                     })) {
-                        setAuthState('EXPIRED');
+                        // Same-tab redirect is mandatory — broadcast alone does not fire here.
+                        forceLogoutRedirect(
+                            errorKind === 'definitive_auth' ? 'refresh_revoked' : 'session_expired',
+                        );
                         broadcastAuthEvent({ type: 'SESSION_EXPIRED' });
                     } else {
                         // Working user or transient issue — preserve session for keepalive retry
@@ -304,33 +322,54 @@ export function build401Handler(
     return async (error: AxiosError): Promise<unknown> => {
         const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
-        if (error.response?.status === 401 && !originalRequest?._retry) {
-            if (!navigator.onLine) return Promise.reject(error);
+        if (error.response?.status !== 401) {
+            return Promise.reject(error);
+        }
 
+        // Offline: keep tokens for retry after reconnect
+        if (!navigator.onLine) {
+            return Promise.reject(error);
+        }
+
+        // First 401 → refresh once + retry
+        if (originalRequest && !originalRequest._retry) {
             originalRequest._retry = true;
 
             if (getRefreshToken()) {
                 try {
                     await _refreshOnce();
                     const token = getAccessToken();
-                    if (token && originalRequest.headers) {
+                    if (!token) {
+                        // Definitive death already cleared session (or race)
+                        forceLogoutRedirect('refresh_cleared_access');
+                        return Promise.reject(error);
+                    }
+                    if (originalRequest.headers) {
                         originalRequest.headers.Authorization = `Bearer ${token}`;
                     }
                     return (instance as typeof axios)(originalRequest);
                 } catch (refreshError) {
                     if (mayAutoLogout(refreshError)) {
-                        forceLogoutRedirect();
+                        forceLogoutRedirect(
+                            classifyRefreshError(refreshError) === 'definitive_auth'
+                                ? 'refresh_revoked'
+                                : 'session_expired',
+                        );
                     } else {
                         notifySessionDeferred(classifyRefreshError(refreshError));
                     }
                     return Promise.reject(refreshError);
                 }
             }
-            if (mayAutoLogout(error)) {
-                forceLogoutRedirect();
-            }
+
+            // No refresh token on first 401
+            forceLogoutRedirect('no_refresh_token');
+            return Promise.reject(error);
         }
 
+        // Already retried (or missing config) and still 401 → session is dead.
+        // Prior hole: _retry=true skipped logout and only rejected (zombie SPA + toasts).
+        forceLogoutRedirect('401_after_retry');
         return Promise.reject(error);
     };
 }

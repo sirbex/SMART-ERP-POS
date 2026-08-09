@@ -12,7 +12,7 @@
  *   await downloadFile('/customers/123/statement/export.pdf', 'statement.pdf');
  */
 
-import { getAccessToken } from '../hooks/useTokenRefresh';
+import { getAccessToken, refreshAccessTokenDeduped, forceLogoutRedirect } from '../hooks/useTokenRefresh';
 import { resolveApiUrl } from '../lib/apiBase';
 
 async function assertPdfResponse(response: Response, filename: string): Promise<void> {
@@ -31,6 +31,30 @@ async function assertPdfResponse(response: Response, filename: string): Promise<
     );
 }
 
+async function authorizedFetch(url: string, retry = true): Promise<Response> {
+    const token = getAccessToken();
+    const response = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (response.status === 401 && retry && navigator.onLine) {
+        try {
+            await refreshAccessTokenDeduped();
+            return authorizedFetch(url, false);
+        } catch {
+            forceLogoutRedirect('download_401');
+            throw new Error('Session expired — please sign in again');
+        }
+    }
+
+    if (response.status === 401) {
+        forceLogoutRedirect('download_401_final');
+        throw new Error('Session expired — please sign in again');
+    }
+
+    return response;
+}
+
 /**
  * Download a file from the API with authentication.
  *
@@ -39,12 +63,9 @@ async function assertPdfResponse(response: Response, filename: string): Promise<
  * @throws Error if download fails or content type mismatch for PDFs
  */
 export async function downloadFile(apiPath: string, filename: string): Promise<void> {
-    const token = getAccessToken();
     const url = resolveApiUrl(apiPath);
 
-    const response = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+    const response = await authorizedFetch(url);
 
     if (!response.ok) {
         const text = await response.text();

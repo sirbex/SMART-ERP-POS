@@ -10,6 +10,10 @@
  *   TOKEN_REFRESH   — a tab successfully refreshed the token → others can skip their refresh
  *   SESSION_EXPIRED — refresh token is gone/revoked → all tabs must go to /login
  *
+ * NOTE: The originating tab does NOT receive the BroadcastChannel event back —
+ * same-tab logout MUST call forceLogoutRedirect() / clear + navigate locally.
+ * INVARIANT_SESSION_DEATH_LOGIN_v1
+ *
  * Usage:
  *   broadcastAuthEvent({ type: 'LOGOUT' });
  *   onAuthBroadcast((event) => { if (event.type === 'LOGOUT') doLogout(); });

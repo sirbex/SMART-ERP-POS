@@ -7,10 +7,14 @@
  * Odoo: long-lived sessions (7d default); OCA idle-timeout modules only logout
  * after real browser inactivity, pause on hidden tabs, and sync across tabs.
  *
- * SmartERP applies the same principles globally (all modules, all tabs):
+ * SmartERP:
  * - Never auto-logout on network or transient server (5xx) errors
- * - Never auto-logout while the user is typing/active in any tab or module
- * - Idle logout only when genuinely inactive (no input events for the full window)
+ * - Idle logout only when genuinely inactive (no input for the full window)
+ * - Definitive auth death (revoked/expired refresh, 401 refresh failure) ALWAYS
+ *   forces login — even while the user is typing. Deferring left users on the
+ *   app with dead tokens and "token expired" toasts (regression, fixed 2026-08).
+ *
+ * INVARIANT_SESSION_DEATH_LOGIN_v1 — do not remove; structural lock tests require this token.
  */
 
 import type { AxiosError } from 'axios';
@@ -24,6 +28,11 @@ const DEFINITIVE_AUTH_PATTERNS = [
   /no refresh token/i,
   /account is disabled/i,
   /session has been revoked/i,
+  /session expired/i,
+  /authentication token required/i,
+  /jwt expired/i,
+  /invalid token/i,
+  /unauthorized/i,
 ];
 
 function extractErrorMessage(err: unknown): string {
@@ -53,7 +62,13 @@ export function classifyRefreshError(err: unknown): RefreshErrorKind {
     if (DEFINITIVE_AUTH_PATTERNS.some((p) => p.test(message))) {
       return 'definitive_auth';
     }
+    // Bare 401/403 on refresh = session is dead on the server
     if (status === 401) return 'definitive_auth';
+    if (status === 403) return 'definitive_auth';
+  }
+
+  if (DEFINITIVE_AUTH_PATTERNS.some((p) => p.test(message))) {
+    return 'definitive_auth';
   }
 
   return 'unknown';
@@ -69,8 +84,11 @@ export interface AutoLogoutDecisionInput {
 }
 
 /**
- * Whether the app may clear tokens and redirect to /login automatically.
- * Returns false while the user is working — preserves session for retry/keepalive.
+ * Whether the app must clear tokens and send the user to /login.
+ *
+ * Definitive auth failure always returns true — session is dead server-side;
+ * staying on a protected screen only yields token-error toasts.
+ * Network/5xx never force logout (retry / keepalive).
  */
 export function shouldPerformAutoLogout(input: AutoLogoutDecisionInput): boolean {
   if (input.manualLogout) return true;
@@ -80,11 +98,14 @@ export function shouldPerformAutoLogout(input: AutoLogoutDecisionInput): boolean
     return false;
   }
 
-  if (input.activeOrGuarded) {
-    return false;
+  // Session proven dead — activity does not restore a revoked refresh token.
+  if (input.errorKind === 'definitive_auth') {
+    return true;
   }
 
-  return input.errorKind === 'definitive_auth';
+  // Unknown: preserve session (retry); do not force logout while active.
+  if (input.activeOrGuarded) return false;
+  return false;
 }
 
 /** Idle timer fired — only logout if user is not active and no guard is open. */
@@ -92,7 +113,11 @@ export function shouldPerformIdleLogout(activeOrGuarded: boolean): boolean {
   return !activeOrGuarded;
 }
 
-/** Another tab reported SESSION_EXPIRED — ignore if this tab is still working. */
-export function shouldIgnoreCrossTabSessionExpired(activeOrGuarded: boolean): boolean {
-  return activeOrGuarded;
+/**
+ * Another tab reported SESSION_EXPIRED.
+ * Never ignore: peer already proved refresh is dead; this tab must re-login too.
+ * (Previously ignored while “active”, which trapped working tabs on dead sessions.)
+ */
+export function shouldIgnoreCrossTabSessionExpired(_activeOrGuarded: boolean): boolean {
+  return false;
 }

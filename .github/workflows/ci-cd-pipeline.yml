@@ -352,12 +352,56 @@ jobs:
         continue-on-error: true
 
   # ============================================================
+  # 5b. PERMANENT AUTH SESSION INVARIANT (HARD FAIL)
+  # Server/session death MUST force Login — never zombie SPA + token toasts.
+  # Token: INVARIANT_SESSION_DEATH_LOGIN_v1
+  # ============================================================
+  session-death-login-invariant:
+    runs-on: ubuntu-latest
+    name: Session death → Login (permanent lock)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: samplepos.client/package-lock.json
+
+      - name: Shared - Install dependencies
+        working-directory: shared
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: samplepos.client
+        run: npm ci
+
+      - name: Permanent lock (hard fail)
+        run: node scripts/proof-session-death-login-invariant.mjs
+
+      - name: Upload seal artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: session-death-login-invariant-seal
+          path: |
+            PROOF_SESSION_DEATH_LOGIN_INVARIANT_LOCK.md
+            PROOF_SESSION_DEATH_LOGIN_INVARIANT_LOCK.json
+            PERMANENT_GUARANTEE_SESSION_DEATH_LOGIN.md
+            PROOF_SESSION_FORCE_LOGIN.md
+            PROOF_SESSION_FORCE_LOGIN.json
+          if-no-files-found: warn
+
+  # ============================================================
   # 6. BUILD VERIFICATION & DEPLOYMENT SAFETY
   # ============================================================
   build-verification:
     runs-on: ubuntu-latest
     name: Production Build & Deployment Safety
-    needs: [code-quality, backend-tests]
+    needs: [code-quality, backend-tests, session-death-login-invariant]
 
     steps:
       - name: Checkout code

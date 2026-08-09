@@ -13,6 +13,8 @@
     "test:at-cost-regression": "vitest run src/__tests__/posCartAtCost.spec.ts src/__tests__/posCartLine.spec.ts src/__tests__/posCartUom-at-cost.spec.ts",
     "test:pos-pricing-regression": "npm run test:at-cost-regression",
     "proof:gr-uom": "vitest run src/__tests__/gr-po-uom-display.test.ts",
+    "proof:session-death-login-lock": "vitest run src/__tests__/session-death-login.invariant.lock.test.ts src/__tests__/session-force-login-redirect.proof.test.ts",
+    "proof:offline-login-pin": "vitest run src/__tests__/offline-login-and-pin.proof.test.ts",
     "test:ui": "vitest --ui"
   },
   "dependencies": {

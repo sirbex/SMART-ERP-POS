@@ -85,6 +85,7 @@ import {
   build401Handler,
   getAccessToken,
   resetAuthState,
+  forceLogoutRedirect,
 } from '../hooks/useTokenRefresh';
 
 const ERP_MODULES = [
@@ -210,7 +211,7 @@ describe('Enterprise — module-agnostic auto-logout policy matrix', () => {
       ).toBe(false);
     });
 
-    it(`${moduleName}: active user + definitive auth → deferred (NO auto-logout)`, () => {
+    it(`${moduleName}: active user + definitive auth → MUST auto-logout to login`, () => {
       touchSessionActivity();
       expect(
         shouldPerformAutoLogout({
@@ -218,7 +219,7 @@ describe('Enterprise — module-agnostic auto-logout policy matrix', () => {
           activeOrGuarded: isUserActiveOrGuarded(),
           errorKind: 'definitive_auth',
         }),
-      ).toBe(false);
+      ).toBe(true);
     });
   }
 
@@ -302,12 +303,29 @@ describe('Enterprise — 401 handler integration (active user protected)', () =>
       }),
     ).toBe(true);
   });
+
+  it('active user + definitive session death hard-clears tokens via forceLogoutRedirect', () => {
+    touchSessionActivity();
+    storeTokens('access-active', 'refresh-active', 3600);
+    const replace = vi.fn();
+    (window as unknown as { location: Record<string, unknown>; setTimeout: typeof setTimeout }).location = {
+      pathname: '/sales',
+      origin: 'http://localhost',
+      href: 'http://localhost/sales',
+      replace,
+    };
+    (window as unknown as { setTimeout: typeof setTimeout }).setTimeout = setTimeout as never;
+    forceLogoutRedirect('refresh_revoked');
+    expect(getAccessToken()).toBeNull();
+    expect(localStorage.getItem('auth_token')).toBeNull();
+    expect(replace).toHaveBeenCalled();
+  });
 });
 
 describe('Enterprise — cross-tab SESSION_EXPIRED while working', () => {
-  it('working tab ignores peer SESSION_EXPIRED broadcast', () => {
+  it('working tab does NOT ignore peer SESSION_EXPIRED (must re-login)', () => {
     touchSessionActivity();
-    expect(shouldIgnoreCrossTabSessionExpired(isUserActiveOrGuarded())).toBe(true);
+    expect(shouldIgnoreCrossTabSessionExpired(isUserActiveOrGuarded())).toBe(false);
   });
 
   it('idle tab honors peer SESSION_EXPIRED broadcast', () => {

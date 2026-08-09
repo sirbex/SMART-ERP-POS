@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode, useMemo, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { storeTokens, clearTokens, getRefreshToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessTokenDeduped, resetAuthState } from '../hooks/useTokenRefresh';
+import { storeTokens, clearTokens, getRefreshToken, getAccessToken, setupAxiosInterceptors, isTokenExpired, willExpireInNext, refreshAccessTokenDeduped, resetAuthState, forceLogoutRedirect } from '../hooks/useTokenRefresh';
 import { apiClient } from '../utils/api';
 import { useIdleTimeout } from '../hooks/useIdleTimeout';
 import { useSessionKeepalive } from '../hooks/useSessionKeepalive';
@@ -9,7 +9,6 @@ import { setupAuthBroadcastListener, onAuthBroadcast, broadcastAuthEvent } from 
 import { setupOfflineQueueAutoFlush } from '../lib/offlineRequestQueue';
 import { isUserActiveOrGuarded, isTransactionGuardActive } from '../lib/sessionActivity';
 import {
-  shouldIgnoreCrossTabSessionExpired,
   shouldPerformIdleLogout,
 } from '../lib/sessionLogoutPolicy';
 import {
@@ -17,6 +16,7 @@ import {
   markBrowserSessionAlive,
   shouldEnforceColdStartPinGate,
 } from '../lib/sessionColdStartLock';
+import { isAuthRecoveryPath } from '../lib/offlineLoginCredentials';
 import { refreshRestaurantFloorSession } from '../lib/restaurantFloorSession';
 import type { AxiosError } from 'axios';
 import type { UserRole } from '../types';
@@ -119,11 +119,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           ) {
             clearTokens();
             const path = typeof window !== 'undefined' ? window.location.pathname : '';
-            const onAuthScreen =
-              path.startsWith('/quick-login') ||
-              path.startsWith('/login') ||
-              path.startsWith('/platform');
-            if (!onAuthScreen && typeof window !== 'undefined') {
+            if (!isAuthRecoveryPath(path) && typeof window !== 'undefined') {
               window.location.replace(COLD_START_QUICK_LOGIN_HREF);
             }
             return;
@@ -136,14 +132,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
           if (navigator.onLine && (isTokenExpired() || willExpireInNext(2)) && getRefreshToken()) {
             try {
               await refreshAccessTokenDeduped();
-              // Re-read the freshly stored token for the profile check below
-              token = localStorage.getItem('auth_token') || token;
+              token = getAccessToken() || localStorage.getItem('auth_token') || '';
             } catch {
-              // Refresh failed (revoked/expired refresh token) — fall through;
-              // the profile check will return 401 and force a clean re-login.
+              // _refreshOnce forceLogoutRedirect on definitive; never revive with a stale access token.
+              if (!getAccessToken()) {
+                if (!isAuthRecoveryPath(window.location.pathname)) {
+                  forceLogoutRedirect('boot_refresh_failed');
+                }
+                return;
+              }
+              token = getAccessToken() || '';
             }
           }
-          // ────────────────────────────────────────────────────────────────────────
 
           // ── SERVER-SIDE TOKEN VALIDATION ─────────────────────────────────────
           // SECURITY: Never trust localStorage alone. If online, verify the token
@@ -173,11 +173,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 axErr?.code === 'ERR_CANCELED' ||
                 axErr?.code === 'ECONNABORTED' ||
                 axErr?.message?.includes('aborted');
+              const sessionGone =
+                /Session not ready|Session expired/i.test(axErr?.message || '') ||
+                !getAccessToken();
               if (aborted) {
                 // Slow/unreachable API — use cached session; do not block the app
-              } else if (status === 401 || status === 403) {
-                // Token is invalid/revoked — interceptor already called clearTokens().
-                // Just bail out of initAuth so we don't set isAuthenticated.
+              } else if (status === 401 || status === 403 || sessionGone) {
+                // Must not set isAuthenticated with a dead/cleared session.
+                forceLogoutRedirect(
+                  status === 403 ? 'profile_forbidden' : 'profile_rejected',
+                );
                 return;
               }
               // Network error or 5xx — allow cached access (offline support)
@@ -185,6 +190,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
           // ─────────────────────────────────────────────────────────────────────
 
+          // Refuse to paint authenticated shell without a usable access token.
+          if (!getAccessToken() && !localStorage.getItem('auth_token')) {
+            return;
+          }
           setUser(userData);
           setIsAuthenticated(true);
           markBrowserSessionAlive();
@@ -236,30 +245,24 @@ export function AuthProvider({ children }: AuthProviderProps) {
         setUser(null);
         setIsAuthenticated(false);
         setPermissionKeys([]);
-        const onLogin =
-          window.location.pathname === '/login' || window.location.pathname.endsWith('/login');
-        if (!onLogin) {
-          window.location.href = '/login';
+        if (!isAuthRecoveryPath(window.location.pathname)) {
+          window.location.replace(`${window.location.origin}/login`);
         }
         return;
       }
       if (event.type === 'SESSION_EXPIRED') {
-        if (shouldIgnoreCrossTabSessionExpired(isUserActiveOrGuarded())) {
-          return;
-        }
+        // Peer tab proved refresh is dead — never keep a working UI on a dead session.
         clearTokens();
         setUser(null);
         setIsAuthenticated(false);
         setPermissionKeys([]);
-        const onLogin =
-          window.location.pathname === '/login' || window.location.pathname.endsWith('/login');
         try {
           sessionStorage.setItem('session_expired', '1');
         } catch {
           /* ignore */
         }
-        if (!onLogin) {
-          window.location.href = '/login';
+        if (!isAuthRecoveryPath(window.location.pathname)) {
+          window.location.replace(`${window.location.origin}/login`);
         }
       }
     });
@@ -285,6 +288,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (refreshToken && expiresIn) {
       storeTokens(token, refreshToken, expiresIn);
     } else {
+      // Access-only / offline session — never inherit prior RT (would revive wrong actor)
+      localStorage.removeItem('refresh_token');
+      localStorage.removeItem('token_expiry');
       localStorage.setItem('auth_token', token);
     }
     localStorage.setItem('user', JSON.stringify(userData));
@@ -295,6 +301,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (perms.length > 0) {
       setPermissionKeys(perms);
       localStorage.setItem('rbac_permissions', JSON.stringify(perms));
+    } else {
+      // Keep same-user offline cache if present; otherwise start empty (no foreign RBAC)
+      const cached = localStorage.getItem('rbac_permissions');
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached) as unknown;
+          if (Array.isArray(parsed)) {
+            setPermissionKeys(parsed.filter((p): p is string => typeof p === 'string'));
+          } else {
+            setPermissionKeys([]);
+            localStorage.removeItem('rbac_permissions');
+          }
+        } catch {
+          setPermissionKeys([]);
+          localStorage.removeItem('rbac_permissions');
+        }
+      } else {
+        setPermissionKeys([]);
+      }
     }
 
     // NOW set authenticated — routes will render with permissions already loaded
@@ -368,7 +393,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
     pendingIdleLogoutRef.current = false;
     logout();
-    sessionStorage.setItem('session_expired', '1');
+    try {
+      sessionStorage.setItem('session_expired', '1');
+    } catch {
+      /* ignore */
+    }
+    // Hard nav so SPA cannot remain on a protected module after idle wipe
+    if (!isAuthRecoveryPath(window.location.pathname)) {
+      window.location.replace(`${window.location.origin}/login`);
+    }
   }, [logout, IDLE_TIMEOUT_MS]);
 
   useEffect(() => {
@@ -382,7 +415,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       pendingIdleLogoutRef.current = false;
       logout();
-      sessionStorage.setItem('session_expired', '1');
+      try {
+        sessionStorage.setItem('session_expired', '1');
+      } catch {
+        /* ignore */
+      }
+      if (!isAuthRecoveryPath(window.location.pathname)) {
+        window.location.replace(`${window.location.origin}/login`);
+      }
     };
     window.addEventListener('app:transaction-guard', onGuard);
     return () => window.removeEventListener('app:transaction-guard', onGuard);

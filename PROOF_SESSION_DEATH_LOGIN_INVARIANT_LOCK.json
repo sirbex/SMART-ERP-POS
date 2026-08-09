@@ -1,0 +1,288 @@
+{
+  "invariantId": "INVARIANT_SESSION_DEATH_LOGIN_v1",
+  "at": "2026-08-09T13:56:07.803Z",
+  "purpose": "Permanent guarantee: server/session death always forces Login UI — never zombie SPA + token toasts",
+  "summary": {
+    "pass": 54,
+    "fail": 0,
+    "total": 54,
+    "verdict": "PASS"
+  },
+  "gates": [
+    {
+      "id": "BEHAVIOR_ACT_DEF",
+      "ok": true,
+      "detail": "ACT_DEF: expected logout=true got=true"
+    },
+    {
+      "id": "BEHAVIOR_IDLE_DEF",
+      "ok": true,
+      "detail": "IDLE_DEF: expected logout=true got=true"
+    },
+    {
+      "id": "BEHAVIOR_ACT_NET",
+      "ok": true,
+      "detail": "ACT_NET: expected logout=false got=false"
+    },
+    {
+      "id": "BEHAVIOR_IDLE_NET",
+      "ok": true,
+      "detail": "IDLE_NET: expected logout=false got=false"
+    },
+    {
+      "id": "BEHAVIOR_ACT_5XX",
+      "ok": true,
+      "detail": "ACT_5XX: expected logout=false got=false"
+    },
+    {
+      "id": "BEHAVIOR_IDLE_5XX",
+      "ok": true,
+      "detail": "IDLE_5XX: expected logout=false got=false"
+    },
+    {
+      "id": "BEHAVIOR_NO_RT",
+      "ok": true,
+      "detail": "NO_RT: expected logout=true got=true"
+    },
+    {
+      "id": "PEER_NEVER_IGNORE_ACTIVE",
+      "ok": true,
+      "detail": "active peer ignore must be false"
+    },
+    {
+      "id": "PEER_NEVER_IGNORE_IDLE",
+      "ok": true,
+      "detail": "idle peer ignore must be false"
+    },
+    {
+      "id": "CLASSIFY_REFRESH_EXPIRED",
+      "ok": true,
+      "detail": "Refresh token expired"
+    },
+    {
+      "id": "CLASSIFY_BARE_401",
+      "ok": true,
+      "detail": "bare 401"
+    },
+    {
+      "id": "CLASSIFY_REUSE",
+      "ok": true,
+      "detail": "token reuse"
+    },
+    {
+      "id": "TOKEN_src_lib_sessionLogoutPolicy_ts",
+      "ok": true,
+      "detail": "src/lib/sessionLogoutPolicy.ts embeds INVARIANT_SESSION_DEATH_LOGIN_v1"
+    },
+    {
+      "id": "TOKEN_src_hooks_useTokenRefresh_ts",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts embeds INVARIANT_SESSION_DEATH_LOGIN_v1"
+    },
+    {
+      "id": "TOKEN_src_lib_authBroadcast_ts",
+      "ok": true,
+      "detail": "src/lib/authBroadcast.ts embeds INVARIANT_SESSION_DEATH_LOGIN_v1"
+    },
+    {
+      "id": "REQ_sessionLogoutPolicy.ts_INVARIANT_SESSION_DEATH_",
+      "ok": true,
+      "detail": "src/lib/sessionLogoutPolicy.ts contains \"INVARIANT_SESSION_DEATH_LOGIN_v1\""
+    },
+    {
+      "id": "REQ_sessionLogoutPolicy.ts_if_input_errorKind_",
+      "ok": true,
+      "detail": "src/lib/sessionLogoutPolicy.ts contains \"if (input.errorKind === 'definitive_auth')\""
+    },
+    {
+      "id": "REQ_sessionLogoutPolicy.ts_return_true",
+      "ok": true,
+      "detail": "src/lib/sessionLogoutPolicy.ts contains \"return true\""
+    },
+    {
+      "id": "REQ_sessionLogoutPolicy.ts_export_function_shouldIg",
+      "ok": true,
+      "detail": "src/lib/sessionLogoutPolicy.ts contains \"export function shouldIgnoreCrossTabSessionExpired\""
+    },
+    {
+      "id": "REQ_sessionLogoutPolicy.ts_return_false",
+      "ok": true,
+      "detail": "src/lib/sessionLogoutPolicy.ts contains \"return false\""
+    },
+    {
+      "id": "REQ_useTokenRefresh.ts_INVARIANT_SESSION_DEATH_",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts contains \"INVARIANT_SESSION_DEATH_LOGIN_v1\""
+    },
+    {
+      "id": "REQ_useTokenRefresh.ts_export_function_forceLog",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts contains \"export function forceLogoutRedirect\""
+    },
+    {
+      "id": "REQ_useTokenRefresh.ts_clearTokens_",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts contains \"clearTokens()\""
+    },
+    {
+      "id": "REQ_useTokenRefresh.ts_location_replace",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts contains \"location.replace\""
+    },
+    {
+      "id": "REQ_useTokenRefresh.ts__login",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts contains \"/login\""
+    },
+    {
+      "id": "REQ_useTokenRefresh.ts_forceLogoutRedirect_",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts contains \"forceLogoutRedirect(\""
+    },
+    {
+      "id": "REQ_useTokenRefresh.ts_build401Handler",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts contains \"build401Handler\""
+    },
+    {
+      "id": "REQ_useTokenRefresh.ts_401_after_retry",
+      "ok": true,
+      "detail": "src/hooks/useTokenRefresh.ts contains \"401_after_retry\""
+    },
+    {
+      "id": "REQ_authBroadcast.ts_INVARIANT_SESSION_DEATH_",
+      "ok": true,
+      "detail": "src/lib/authBroadcast.ts contains \"INVARIANT_SESSION_DEATH_LOGIN_v1\""
+    },
+    {
+      "id": "REQ_authBroadcast.ts_originating_tab_does_NOT",
+      "ok": true,
+      "detail": "src/lib/authBroadcast.ts contains \"originating tab does NOT receive\""
+    },
+    {
+      "id": "REQ_authBroadcast.ts_forceLogoutRedirect",
+      "ok": true,
+      "detail": "src/lib/authBroadcast.ts contains \"forceLogoutRedirect\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_event_type_SESSION_",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"event.type === 'SESSION_EXPIRED'\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_event_type_LOGOUT_",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"event.type === 'LOGOUT'\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_location_replace",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"location.replace\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx__login",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"/login\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_forceLogoutRedirect",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"forceLogoutRedirect\""
+    },
+    {
+      "id": "REQ_AuthContext.tsx_boot_refresh_failed",
+      "ok": true,
+      "detail": "src/contexts/AuthContext.tsx contains \"boot_refresh_failed\""
+    },
+    {
+      "id": "REQ_download.ts_forceLogoutRedirect",
+      "ok": true,
+      "detail": "src/utils/download.ts contains \"forceLogoutRedirect\""
+    },
+    {
+      "id": "REQ_download.ts_authorizedFetch",
+      "ok": true,
+      "detail": "src/utils/download.ts contains \"authorizedFetch\""
+    },
+    {
+      "id": "ORDER_DEFINITIVE_BEFORE_ACTIVE_GATE",
+      "ok": true,
+      "detail": "definitive_auth handled before activeOrGuarded→false in shouldPerformAutoLogout"
+    },
+    {
+      "id": "REFRESH_CATCH_FORCE_LOGOUT",
+      "ok": true,
+      "detail": "_refreshOnce catch invokes forceLogoutRedirect"
+    },
+    {
+      "id": "FORCE_USES_LOCATION_REPLACE",
+      "ok": true,
+      "detail": "forceLogoutRedirect uses location.replace(.../login)"
+    },
+    {
+      "id": "BUILD401_FORCE_LOGOUT",
+      "ok": true,
+      "detail": "build401Handler still force-logout on dead refresh"
+    },
+    {
+      "id": "AUTHCTX_NO_IGNORE_PEER",
+      "ok": true,
+      "detail": "AuthContext does not early-return on shouldIgnoreCrossTabSessionExpired"
+    },
+    {
+      "id": "AUTHCTX_SESSION_REPLACE",
+      "ok": true,
+      "detail": "SESSION_EXPIRED hard-nav to login"
+    },
+    {
+      "id": "FORBIDDEN_NEVER_auto_logout_active_user_on_definit",
+      "ok": true,
+      "detail": "must not contain \"NEVER auto-logout active user on definitive auth\""
+    },
+    {
+      "id": "FORBIDDEN_defer_until_idle",
+      "ok": true,
+      "detail": "must not contain \"defer until idle\""
+    },
+    {
+      "id": "FORBIDDEN_deferred_NO_auto_logout_",
+      "ok": true,
+      "detail": "must not contain \"deferred (NO auto-logout)\""
+    },
+    {
+      "id": "FORBIDDEN_IGNORE_peer_SESSION_EXPIRED",
+      "ok": true,
+      "detail": "must not contain \"IGNORE peer SESSION_EXPIRED\""
+    },
+    {
+      "id": "RETRY_401_FORCE",
+      "ok": true,
+      "detail": "second 401 after retry forces login"
+    },
+    {
+      "id": "INITAUTH_NO_STALE_FALLBACK",
+      "ok": true,
+      "detail": "boot refuses stale token resurrection + forceLogout on dead refresh"
+    },
+    {
+      "id": "DOWNLOAD_AUTH_FORCE",
+      "ok": true,
+      "detail": "binary download path forces login on 401"
+    },
+    {
+      "id": "LOCK_MODULE_PRESENT",
+      "ok": true,
+      "detail": "sessionDeathLoginInvariant.ts present"
+    },
+    {
+      "id": "PROOF_TEST_PRESENT",
+      "ok": true,
+      "detail": "behavioral proof test present"
+    }
+  ],
+  "enforcement": {
+    "npm": "npm run proof:session-death-login-lock --prefix samplepos.client",
+    "ciJob": "session-death-login-invariant",
+    "hardFail": true
+  }
+}

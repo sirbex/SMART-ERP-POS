@@ -384,15 +384,15 @@ describe('Fix #6 — sessionLogoutPolicy (never logout while active)', () => {
         expect(classifyRefreshError(err)).toBe('definitive_auth');
     });
 
-    it('NEVER auto-logout active user on definitive auth (defer until idle)', () => {
+    it('ALWAYS auto-logout on definitive auth even while user is active (must reach login UI)', () => {
         expect(shouldPerformAutoLogout({
             ...base,
             activeOrGuarded: true,
             errorKind: 'definitive_auth',
-        })).toBe(false);
+        })).toBe(true);
     });
 
-    it('auto-logout inactive user on definitive auth only', () => {
+    it('auto-logout inactive user on definitive auth; never on network/5xx', () => {
         expect(shouldPerformAutoLogout({
             ...base,
             activeOrGuarded: false,
@@ -424,8 +424,8 @@ describe('Fix #6 — sessionLogoutPolicy (never logout while active)', () => {
         expect(shouldPerformIdleLogout(false)).toBe(true);
     });
 
-    it('cross-tab SESSION_EXPIRED ignored while this tab is working', () => {
-        expect(shouldIgnoreCrossTabSessionExpired(true)).toBe(true);
+    it('cross-tab SESSION_EXPIRED never ignored (dead session in any tab)', () => {
+        expect(shouldIgnoreCrossTabSessionExpired(true)).toBe(false);
         expect(shouldIgnoreCrossTabSessionExpired(false)).toBe(false);
     });
 
