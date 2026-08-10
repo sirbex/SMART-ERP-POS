@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgedReceivables, useAgedPayables } from '../../hooks/useAccountingModules';
 import { getBusinessDate } from '../../utils/businessDate';
@@ -11,7 +11,8 @@ import {
   type AdaptiveReportMetric,
 } from '../../components/adaptive';
 
-interface AgedBucket {
+/** Per-party aging row (API: entities) */
+interface AgedEntityRow {
   entityId: string;
   entityName: string;
   current: number;
@@ -30,9 +31,15 @@ interface AgedReport {
     days31to60: number;
     days61to90: number;
     over90: number;
-    total: number;
+    /** Prefer; falls back to grandTotal for older API shapes */
+    total?: number;
+    grandTotal?: number;
+    entityCount?: number;
   };
-  details: AgedBucket[];
+  /** Entity bucket matrix — primary table SSOT */
+  entities?: AgedEntityRow[];
+  /** @deprecated Never use for entity table — line-level docs only */
+  details?: unknown[];
 }
 
 const tabs = [
@@ -44,9 +51,68 @@ type TabKey = (typeof tabs)[number]['key'];
 
 const bucketHeaders = ['Current', '1–30', '31–60', '61–90', '90+', 'Total'];
 
-function fmt(n: number | undefined): string {
-  if (n == null) return '—';
-  return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+function fmt(n: number | undefined | null): string {
+  if (n == null || Number.isNaN(Number(n))) return '—';
+  return Number(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function num(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Normalize API → UI (entities table + total/grandTotal alias). */
+export function normalizeAgedReport(raw: unknown): AgedReport | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const summaryRaw = (r.summary ?? {}) as Record<string, unknown>;
+  const grand = num(summaryRaw.grandTotal ?? summaryRaw.total);
+  const total = num(summaryRaw.total ?? summaryRaw.grandTotal);
+
+  // Prefer entities; never treat invoice line "details" as bucket rows
+  const entitySource = Array.isArray(r.entities)
+    ? r.entities
+    : Array.isArray(r.details) &&
+        (r.details as Record<string, unknown>[]).every(
+          (d) => d && typeof d === 'object' && 'current' in d,
+        )
+      ? (r.details as Record<string, unknown>[])
+      : [];
+
+  const entities: AgedEntityRow[] = entitySource.map((row, idx) => {
+    const e = row as Record<string, unknown>;
+    const current = num(e.current);
+    const days1to30 = num(e.days1to30);
+    const days31to60 = num(e.days31to60);
+    const days61to90 = num(e.days61to90);
+    const over90 = num(e.over90);
+    const rowTotal = num(e.total) || current + days1to30 + days31to60 + days61to90 + over90;
+    return {
+      entityId: String(e.entityId ?? e.entity_id ?? `row-${idx}`),
+      entityName: String(e.entityName ?? e.entity_name ?? 'Unknown'),
+      current,
+      days1to30,
+      days31to60,
+      days61to90,
+      over90,
+      total: rowTotal,
+    };
+  });
+
+  return {
+    asOfDate: String(r.asOfDate ?? r.as_of_date ?? ''),
+    summary: {
+      current: num(summaryRaw.current),
+      days1to30: num(summaryRaw.days1to30),
+      days31to60: num(summaryRaw.days31to60),
+      days61to90: num(summaryRaw.days61to90),
+      over90: num(summaryRaw.over90),
+      total: total || grand,
+      grandTotal: grand || total,
+      entityCount: num(summaryRaw.entityCount ?? entities.length),
+    },
+    entities,
+  };
 }
 
 export default function AgedBalancePage() {
@@ -56,8 +122,11 @@ export default function AgedBalancePage() {
   const receivables = useAgedReceivables(activeTab === 'receivables' ? asOfDate : undefined);
   const payables = useAgedPayables(activeTab === 'payables' ? asOfDate : undefined);
 
-  const { data, isLoading } = activeTab === 'receivables' ? receivables : payables;
-  const report = data as AgedReport | undefined;
+  const { data, isLoading, isError, error } =
+    activeTab === 'receivables' ? receivables : payables;
+
+  const report = useMemo(() => normalizeAgedReport(data), [data]);
+  const entities = report?.entities ?? [];
 
   const agingMetrics: AdaptiveReportMetric[] = report
     ? [
@@ -66,7 +135,14 @@ export default function AgedBalancePage() {
         { id: 'd60', label: '31–60 Days', value: fmt(report.summary.days31to60), toneClassName: 'text-orange-500', priority: 'secondary' },
         { id: 'd90', label: '61–90 Days', value: fmt(report.summary.days61to90), toneClassName: 'text-red-500', priority: 'secondary' },
         { id: 'over90', label: '90+ Days', value: fmt(report.summary.over90), toneClassName: 'text-red-700', priority: 'secondary' },
-        { id: 'total', label: 'Total', value: fmt(report.summary.total), toneClassName: 'text-gray-900', priority: 'primary', accent: true },
+        {
+          id: 'total',
+          label: 'Total',
+          value: fmt(report.summary.total ?? report.summary.grandTotal),
+          toneClassName: 'text-gray-900',
+          priority: 'primary',
+          accent: true,
+        },
       ]
     : [];
 
@@ -85,12 +161,12 @@ export default function AgedBalancePage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {report.details.length === 0 ? (
+            {entities.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-4 py-8 text-center text-gray-500">No outstanding balances</td>
               </tr>
             ) : (
-              report.details.map((row) => (
+              entities.map((row) => (
                 <tr key={row.entityId} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-sm font-medium text-gray-900">{row.entityName}</td>
                   <td className="px-4 py-3 text-sm text-right text-green-600">{fmt(row.current)}</td>
@@ -153,6 +229,13 @@ export default function AgedBalancePage() {
         <div className="bg-white rounded-lg shadow p-12 text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-blue-500" />
         </div>
+      ) : isError ? (
+        <div className="bg-white rounded-lg shadow p-12 text-center text-red-600">
+          <p>Failed to load aged balances.</p>
+          <p className="text-sm text-gray-500 mt-2">
+            {(error as Error)?.message || 'Unknown error'}
+          </p>
+        </div>
       ) : report ? (
         <AdaptiveReportShell
           detailLabel="Aging detail"
@@ -160,10 +243,10 @@ export default function AgedBalancePage() {
           table={detailTable}
           cards={
             <div className="space-y-3" data-aged-detail="cards">
-              {report.details.length === 0 ? (
+              {entities.length === 0 ? (
                 <p className="text-center text-gray-500 py-6">No outstanding balances</p>
               ) : (
-                report.details.map((row) => (
+                entities.map((row) => (
                   <div key={row.entityId} className="rounded-lg border bg-white p-4 shadow-sm">
                     <div className="font-semibold text-gray-900">{row.entityName}</div>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-sm">

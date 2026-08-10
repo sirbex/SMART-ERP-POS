@@ -1451,8 +1451,8 @@ export default function CustomerDetailPage() {
         {customer && tab === 'deposits' ? (
           <CustomerDeposits
             customerId={id}
+            customerName={String((customer as { name?: string }).name ?? '').trim() || 'Customer'}
             onDepositChange={() => {
-              // Refresh customer data when deposits change
               window.location.reload();
             }}
           />

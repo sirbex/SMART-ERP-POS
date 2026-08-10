@@ -826,6 +826,72 @@ describe('PostingGovernanceService', () => {
             expect(() => PostingGovernanceService.validate(req)).not.toThrow();
         });
 
+        it('allows DEPOSIT_APPLICATION as Dr Customer Deposits / Cr AR (no cash)', () => {
+            const customerDepositsAccount = makeAccount({
+                accountCode: '2200',
+                accountName: 'Customer Deposits',
+                accountType: 'LIABILITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: true,
+                allowedSources: [],
+                systemAccountTag: 'CUSTOMER_DEPOSITS',
+            });
+            const req = makeRequest(
+                'DEPOSIT_APPLICATION',
+                [
+                    { accountCode: '2200', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '1200', debitAmount: 0, creditAmount: 100 },
+                ],
+                [customerDepositsAccount, arAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).not.toThrow();
+        });
+
+        it('rejects DEPOSIT_APPLICATION mislabeled as cash-style receipt structure', () => {
+            // Wrong: liability→AR must not use PAYMENT_RECEIPT source (lacks UF debit)
+            const customerDepositsAccount = makeAccount({
+                accountCode: '2200',
+                accountName: 'Customer Deposits',
+                accountType: 'LIABILITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: true,
+                allowedSources: [],
+                systemAccountTag: null,
+            });
+            const req = makeRequest(
+                'PAYMENT_RECEIPT',
+                [
+                    { accountCode: '2200', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '1200', debitAmount: 0, creditAmount: 100 },
+                ],
+                [customerDepositsAccount, arAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).toThrow('GOV_RULE_E_RECEIPT_STRUCTURE');
+        });
+
+        it('rejects DEPOSIT_APPLICATION without AR credit', () => {
+            const customerDepositsAccount = makeAccount({
+                accountCode: '2200',
+                accountName: 'Customer Deposits',
+                accountType: 'LIABILITY',
+                normalBalance: 'CREDIT',
+                allowManualPosting: true,
+                allowedSources: [],
+                systemAccountTag: 'CUSTOMER_DEPOSITS',
+            });
+            const req = makeRequest(
+                'DEPOSIT_APPLICATION',
+                [
+                    { accountCode: '2200', debitAmount: 100, creditAmount: 0 },
+                    { accountCode: '1015', debitAmount: 0, creditAmount: 100 },
+                ],
+                [customerDepositsAccount, undepositedFundsAccount],
+            );
+            expect(() => PostingGovernanceService.validate(req)).toThrow(
+                'GOV_RULE_E_DEPOSIT_APPLICATION_STRUCTURE',
+            );
+        });
+
         it('rejects PAYMENT_DEPOSIT without Cash debit', () => {
             const req = makeRequest(
                 'PAYMENT_DEPOSIT',

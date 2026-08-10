@@ -1,0 +1,126 @@
+{
+  "at": "2026-08-10T21:22:05.489Z",
+  "feature": "CUSTOMER_DEPOSIT_IDENTITY_SSOT",
+  "summary": {
+    "pass": 20,
+    "fail": 0,
+    "total": 20,
+    "verdict": "PASS"
+  },
+  "rules": {
+    "writeIdentity": "customers.id via findCustomerById",
+    "displayNameSources": [
+      "bound.customerName",
+      "GET customers/:id .name",
+      "GET deposits/customer/:id/balance .customerName"
+    ],
+    "listApiRole": "browse_picker_only",
+    "forbidden": [
+      "Paginated customer list as save gate",
+      "Name from list page slice when customerId is bound",
+      "Hard-coded Unknown when customerId is known"
+    ]
+  },
+  "gates": [
+    {
+      "id": "CAN_POST_ID",
+      "ok": true,
+      "detail": "uuid posts"
+    },
+    {
+      "id": "CAN_POST_EMPTY",
+      "ok": true,
+      "detail": "empty blocked"
+    },
+    {
+      "id": "NAME_ORDER",
+      "ok": true,
+      "detail": "bound wins"
+    },
+    {
+      "id": "NAME_NO_LIST",
+      "ok": true,
+      "detail": "master next"
+    },
+    {
+      "id": "NAME_SKIP_UNKNOWN",
+      "ok": true,
+      "detail": "drops Unknown literal"
+    },
+    {
+      "id": "SSOT_LIST_ROLE",
+      "ok": true,
+      "detail": "list is browse only"
+    },
+    {
+      "id": "FORBIDDEN_customers\\.find\\s*\\([^)]",
+      "ok": true,
+      "detail": "customers\\.find\\s*\\([^)]*\\)[\\s\\S]{0,80}Please select a customer"
+    },
+    {
+      "id": "FORBIDDEN_customers\\.find\\s*\\([^)]",
+      "ok": true,
+      "detail": "customers\\.find\\s*\\([^)]*\\)\\s*\\?\\.name\\s*\\|\\|\\s*['\"]Unknown['\"]"
+    },
+    {
+      "id": "FORBIDDEN_useCustomers\\s*\\(\\s*1\\s*",
+      "ok": true,
+      "detail": "useCustomers\\s*\\(\\s*1\\s*,\\s*100\\s*\\)[\\s\\S]{0,400}customers\\.find"
+    },
+    {
+      "id": "USES_CAN_POST",
+      "ok": true,
+      "detail": "save uses canPost SSOT"
+    },
+    {
+      "id": "USES_RESOLVE_NAME",
+      "ok": true,
+      "detail": "name SSOT helper"
+    },
+    {
+      "id": "NO_FIND_FOR_SAVE",
+      "ok": true,
+      "detail": "no find-for-save"
+    },
+    {
+      "id": "IMPORT_SSOT",
+      "ok": true,
+      "detail": "imports domain SSOT"
+    },
+    {
+      "id": "USE_CUSTOMER",
+      "ok": true,
+      "detail": "master GET by id"
+    },
+    {
+      "id": "PICKER_NOT_BOUND",
+      "ok": true,
+      "detail": "list scoped to browse mode"
+    },
+    {
+      "id": "DETAIL_PASSES_NAME",
+      "ok": true,
+      "detail": "detail passes customerName"
+    },
+    {
+      "id": "MODAL_PASSES_NAME",
+      "ok": true,
+      "detail": "modal passes customerName"
+    },
+    {
+      "id": "FIND_BY_ID",
+      "ok": true,
+      "detail": "findCustomerById"
+    },
+    {
+      "id": "CREATE_HAS_IDENTITY_SSOT_DOC",
+      "ok": true,
+      "detail": "SSOT documented on create"
+    },
+    {
+      "id": "GL_USES_MASTER_NAME",
+      "ok": true,
+      "detail": "GL name from master, not Unknown fallback"
+    }
+  ]
+}

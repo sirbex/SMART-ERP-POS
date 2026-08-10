@@ -1,0 +1,133 @@
+{
+  "at": "2026-08-10T21:22:01.699Z",
+  "feature": "DEPOSIT_APPLICATION_POSTING_SSOT",
+  "historicalBug": {
+    "error_code": "ERR_SALE_004",
+    "governance": "GOV_RULE_E_RECEIPT_STRUCTURE",
+    "symptom": "order complete with DEPOSIT payment failed: PAYMENT_RECEIPT must debit Undeposited Funds",
+    "cause": "deposit application JE stamped PAYMENT_RECEIPT while structure was DR 2200 / CR AR"
+  },
+  "ssot": {
+    "takeDeposit": {
+      "source": "PAYMENT_RECEIPT",
+      "lines": "DR 1015 UF / CR 2200"
+    },
+    "applyDeposit": {
+      "source": "DEPOSIT_APPLICATION",
+      "lines": "DR 2200 / CR 1200 AR"
+    }
+  },
+  "summary": {
+    "pass": 21,
+    "fail": 0,
+    "total": 21,
+    "verdict": "PASS"
+  },
+  "gates": [
+    {
+      "id": "MIGRATION_597_PRESENT",
+      "ok": true,
+      "detail": "597_deposit_application_posting_source.sql"
+    },
+    {
+      "id": "MIGRATION_AR_1200",
+      "ok": true,
+      "detail": "AR allowedSources append"
+    },
+    {
+      "id": "SOURCE_TYPE_DECL",
+      "ok": true,
+      "detail": "PostingSource has DEPOSIT_APPLICATION"
+    },
+    {
+      "id": "RULE_E_DEPOSIT_APP_BLOCK",
+      "ok": true,
+      "detail": "Rule E deposit-application structure"
+    },
+    {
+      "id": "SKIP_RULE_B_FOR_DEPOSIT_APP",
+      "ok": true,
+      "detail": "Rule B skipped for structural Rule E path"
+    },
+    {
+      "id": "HAS_APPLY_FN",
+      "ok": true,
+      "detail": "recordDepositApplicationToGL exists"
+    },
+    {
+      "id": "APPLY_SOURCE_DEPOSIT_APPLICATION",
+      "ok": true,
+      "detail": "source: DEPOSIT_APPLICATION"
+    },
+    {
+      "id": "APPLY_NOT_PAYMENT_RECEIPT",
+      "ok": true,
+      "detail": "apply body must not use PAYMENT_RECEIPT"
+    },
+    {
+      "id": "APPLY_DR_2200",
+      "ok": true,
+      "detail": "debits customer deposits"
+    },
+    {
+      "id": "APPLY_CR_AR",
+      "ok": true,
+      "detail": "credits AR"
+    },
+    {
+      "id": "APPLY_DOC_NEVER_RECEIPT",
+      "ok": true,
+      "detail": "docs forbid PAYMENT_RECEIPT label"
+    },
+    {
+      "id": "TAKE_IS_PAYMENT_RECEIPT",
+      "ok": true,
+      "detail": "taking deposit stays PAYMENT_RECEIPT"
+    },
+    {
+      "id": "BUG_REPRO_FAILS",
+      "ok": true,
+      "detail": "got GOV_RULE_E_RECEIPT_STRUCTURE"
+    },
+    {
+      "id": "APPLY_PASSES",
+      "ok": true,
+      "detail": "null"
+    },
+    {
+      "id": "TAKE_DEPOSIT_OK",
+      "ok": true,
+      "detail": "DR UF / CR 2200"
+    },
+    {
+      "id": "TAKE_STILL_STRICT",
+      "ok": true,
+      "detail": "non-UF receipt blocked"
+    },
+    {
+      "id": "APPLY_WRONG_CR_BLOCKED",
+      "ok": true,
+      "detail": "got GOV_RULE_E_DEPOSIT_APPLICATION_STRUCTURE"
+    },
+    {
+      "id": "JE_CONTRACT_SOURCE",
+      "ok": true,
+      "detail": "source: 'DEPOSIT_APPLICATION' as const"
+    },
+    {
+      "id": "JE_CONTRACT_ACCOUNTS",
+      "ok": true,
+      "detail": "lines: Customer Deposits then AR"
+    },
+    {
+      "id": "SALES_CALLS_APPLY_GL",
+      "ok": true,
+      "detail": "complete uses apply GL helper"
+    },
+    {
+      "id": "SALES_ERR_SALE_004",
+      "ok": true,
+      "detail": "deposit apply failures stay ERR_SALE_004"
+    }
+  ]
+}

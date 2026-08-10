@@ -1464,8 +1464,11 @@ export default function CustomerDetailModal({
                                 )}
 
                                 {/* Deposits Tab */}
-                                {tab === 'deposits' && customerId && (
-                                    <CustomerDeposits customerId={customerId} />
+                                {tab === 'deposits' && customerId && customer && (
+                                    <CustomerDeposits
+                                        customerId={customerId}
+                                        customerName={String((customer as { name?: string }).name ?? '').trim() || 'Customer'}
+                                    />
                                 )}
 
                                 {/* Quotations Tab */}

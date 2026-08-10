@@ -37,6 +37,7 @@ export type PostingSource =
     | 'SALES_REFUND'            // Sale refund/return — reverses revenue and credits cash/AR
     | 'PAYMENT_RECEIPT'         // Customer payment/deposit → Dr Undeposited Funds / Cr AR or Customer Deposits
     | 'PAYMENT_DEPOSIT'         // Bank deposit → Dr Cash / Cr Undeposited Funds
+    | 'DEPOSIT_APPLICATION'     // Apply prepayment liability → Dr Customer Deposits (2200) / Cr AR (no cash)
     | 'PURCHASE_BILL'           // Supplier bill / goods receipt (creates AP liability)
     | 'SUPPLIER_PAYMENT'        // Supplier payment — Dr AP / Cr Cash or Bank
     | 'INVENTORY_MOVE'          // Stock adjustment, damage, expiry, COGS
@@ -223,6 +224,7 @@ export class PostingGovernanceService {
             const isPaymentSource =
                 source === 'PAYMENT_RECEIPT' ||
                 source === 'PAYMENT_DEPOSIT' ||
+                source === 'DEPOSIT_APPLICATION' || // structure validated by Rule E (liability→AR)
                 source === 'TREASURY_DEPOSIT' ||
                 source === 'TREASURY_TRANSFER' ||
                 source === 'TREASURY_PETTY_CASH' ||
@@ -336,6 +338,34 @@ export class PostingGovernanceService {
                     `PAYMENT_RECEIPT must credit Accounts Receivable (tag: ACCOUNTS_RECEIVABLE) ` +
                     `or Customer Deposits (2200). Invoice payments reduce AR; advances increase deposit liability.`,
                     'GOV_RULE_E_RECEIPT_STRUCTURE',
+                    { source }
+                );
+            }
+        }
+
+        // Apply customer deposit (prepayment) to a sale/invoice:
+        //   DR Customer Deposits (2200)  — release liability
+        //   CR Accounts Receivable       — clear AR from the sale
+        // Cash already recognized when deposit was taken (PAYMENT_RECEIPT → Undeposited Funds).
+        if (source === 'DEPOSIT_APPLICATION') {
+            const hasDebitCustomerDeposits = lines.some((l) => {
+                const acct = findAccount(accounts, l.accountCode);
+                if (l.debitAmount <= 0 || !acct) return false;
+                return (
+                    acct.systemAccountTag === 'CUSTOMER_DEPOSITS' ||
+                    acct.accountCode === '2200'
+                );
+            });
+            const hasCreditAR = lines.some((l) => {
+                const acct = findAccount(accounts, l.accountCode);
+                return l.creditAmount > 0 && acct?.systemAccountTag === 'ACCOUNTS_RECEIVABLE';
+            });
+
+            if (!hasDebitCustomerDeposits || !hasCreditAR) {
+                throw new PostingGovernanceError(
+                    `DEPOSIT_APPLICATION must debit Customer Deposits (2200) and credit Accounts Receivable. ` +
+                    `This clears prepayment liability against sale AR — it is not a cash receipt.`,
+                    'GOV_RULE_E_DEPOSIT_APPLICATION_STRUCTURE',
                     { source }
                 );
             }

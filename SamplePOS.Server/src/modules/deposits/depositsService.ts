@@ -97,16 +97,22 @@ function normalizeApplication(row: depositsRepository.DepositApplicationDbRow): 
 /**
  * Create a new customer deposit
  * Atomic: deposit row + GL posting in single transaction
+ *
+ * IDENTITY SSOT (mandatory):
+ *   - customerId is written only after findCustomerById (customers master)
+ *   - GL description uses master customer.name — never a client/list label
+ *   - Client list pages are not identity and never authorize this write
  */
 export async function createDeposit(
     pool: Pool,
     input: CreateDepositInput
 ): Promise<Deposit> {
-    // Validate customer exists (use tenant pool)
+    // Master SSOT — reject unknown customers before any insert
     const customer = await findCustomerById(input.customerId, pool);
     if (!customer) {
         throw new Error(`Customer not found: ${input.customerId}`);
     }
+    const customerNameSsot = customer.name;
 
     // Validate amount
     if (input.amount <= 0) {
@@ -121,7 +127,7 @@ export async function createDeposit(
 
     logger.info('Creating deposit', {
         customerId: input.customerId,
-        customerName: customer.name,
+        customerName: customerNameSsot,
         amount: input.amount,
         paymentMethod: input.paymentMethod
     });
@@ -149,10 +155,13 @@ export async function createDeposit(
             amount: normalized.amount,
             paymentMethod: normalized.paymentMethod,
             customerId: input.customerId,
-            customerName: customer?.name || 'Unknown',
+            customerName: customerNameSsot,
         }, pool, client);
 
-        return normalized;
+        return {
+            ...normalized,
+            customerName: customerNameSsot,
+        };
     });
 
     return deposit;

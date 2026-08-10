@@ -1,0 +1,112 @@
+{
+  "at": "2026-08-10T21:22:01.775Z",
+  "feature": "AGED_BALANCE_INTEGRITY",
+  "summary": {
+    "pass": 19,
+    "fail": 0,
+    "total": 19,
+    "verdict": "PASS"
+  },
+  "rootCausesFixed": [
+    "UI used details instead of entities; summary.total alias",
+    "AR double-count / AP cartesian",
+    "COALESCE(payment_method, '') → 22P02; status NOT IN invented labels"
+  ],
+  "gates": [
+    {
+      "id": "HAS_TOTAL_ALIAS",
+      "ok": true,
+      "detail": "summary.total set"
+    },
+    {
+      "id": "HAS_GRAND_TOTAL",
+      "ok": true,
+      "detail": "grandTotal retained"
+    },
+    {
+      "id": "HAS_ENTITIES",
+      "ok": true,
+      "detail": "entities array"
+    },
+    {
+      "id": "AR_ANTI_DUPE",
+      "ok": true,
+      "detail": "credit sales skip when invoice exists"
+    },
+    {
+      "id": "AP_UNION_BILLS",
+      "ok": true,
+      "detail": "bills query"
+    },
+    {
+      "id": "AP_UNION_PO",
+      "ok": true,
+      "detail": "PO residual query"
+    },
+    {
+      "id": "AP_NO_CARTESIAN",
+      "ok": true,
+      "detail": "no SI×PO cartesian FROM suppliers"
+    },
+    {
+      "id": "NO_COALESCE_PM_EMPTY",
+      "ok": true,
+      "detail": "no COALESCE(payment_method, '')"
+    },
+    {
+      "id": "PM_COMPARE_AS_TEXT",
+      "ok": true,
+      "detail": "compares payment_method via ::text"
+    },
+    {
+      "id": "SALE_STATUS_AS_TEXT",
+      "ok": true,
+      "detail": "sale status via ::text (avoids invalid enum labels in NOT IN)"
+    },
+    {
+      "id": "CREDIT_ONLY_NOT_INVENTED",
+      "ok": true,
+      "detail": "CREDIT only — ON_ACCOUNT/CHARGE are not payment_method enum labels"
+    },
+    {
+      "id": "NO_IN_LIST_ON_ENUM_PM",
+      "ok": true,
+      "detail": "no payment_method IN with invalid labels"
+    },
+    {
+      "id": "UI_NORMALIZE",
+      "ok": true,
+      "detail": "normalizeAgedReport"
+    },
+    {
+      "id": "UI_ENTITIES",
+      "ok": true,
+      "detail": "uses entities"
+    },
+    {
+      "id": "UI_TOTAL",
+      "ok": true,
+      "detail": "total or grandTotal"
+    },
+    {
+      "id": "UI_NOT_DETAILS_AS_TABLE",
+      "ok": true,
+      "detail": "does not map details as entity rows"
+    },
+    {
+      "id": "NORM_TOTAL",
+      "ok": true,
+      "detail": "total=150"
+    },
+    {
+      "id": "NORM_ENTITIES_LEN",
+      "ok": true,
+      "detail": "n=1"
+    },
+    {
+      "id": "NORM_NAME",
+      "ok": true,
+      "detail": "Alice"
+    }
+  ]
+}

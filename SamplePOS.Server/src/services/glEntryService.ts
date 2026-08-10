@@ -2374,9 +2374,12 @@ export interface DepositApplicationGLData {
  * Record a deposit application to the general ledger.
  * Called when a customer deposit is applied to a POS sale.
  *
- * Journal entry:
+ * Journal entry (source DEPOSIT_APPLICATION — never PAYMENT_RECEIPT):
  *   DR Customer Deposits (2200)    amount   — reduce liability (deposit consumed)
  *   CR Accounts Receivable (1200)  amount   — clear the AR created by recordSaleToGL
+ *
+ * Cash already hit Undeposited Funds when the deposit was taken.
+ * Applying is liability↔AR only; Rule E receipt structure does not apply.
  *
  * Net effect: the DEPOSIT sale's AR debit is fully offset by this credit.
  */
@@ -2417,7 +2420,7 @@ export async function recordDepositApplicationToGL(
       ],
       userId: SYSTEM_USER_ID,
       idempotencyKey: `DEPOSIT_APPLICATION-${data.applicationId}`,
-      source: 'PAYMENT_RECEIPT' as const,
+      source: 'DEPOSIT_APPLICATION' as const,
     }, pool, txClient);
 
     logger.info('Recorded deposit application to GL', {

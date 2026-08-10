@@ -1,0 +1,120 @@
+{
+  "at": "2026-08-10T21:22:07.722Z",
+  "feature": "PG_DOMAIN_ENUM_INTEGRITY",
+  "summary": {
+    "pass": 16,
+    "fail": 0,
+    "total": 16,
+    "verdict": "PASS"
+  },
+  "ssot": {
+    "goodsReceipt": [
+      "DRAFT",
+      "COMPLETED",
+      "CANCELLED"
+    ],
+    "purchaseOrder": [
+      "DRAFT",
+      "PENDING",
+      "COMPLETED",
+      "CANCELLED"
+    ],
+    "paymentMethodCore": [
+      "CASH",
+      "CARD",
+      "MOBILE_MONEY",
+      "BANK_TRANSFER",
+      "CREDIT"
+    ],
+    "grPosted": "COMPLETED",
+    "forbiddenGrSqlLiterals": [
+      "FINALIZED",
+      "POSTED",
+      "OPEN",
+      "CLOSED",
+      "APPROVED"
+    ]
+  },
+  "gates": [
+    {
+      "id": "SCHEMA_GR_ENUM",
+      "ok": true,
+      "detail": "goods_receipt_status DRAFT|COMPLETED|CANCELLED"
+    },
+    {
+      "id": "SCHEMA_PO_ENUM",
+      "ok": true,
+      "detail": "purchase_order_status DRAFT|PENDING|COMPLETED|CANCELLED"
+    },
+    {
+      "id": "SSOT_GR_MATCHES",
+      "ok": true,
+      "detail": "DRAFT|COMPLETED|CANCELLED"
+    },
+    {
+      "id": "SSOT_PO_MATCHES",
+      "ok": true,
+      "detail": "DRAFT|PENDING|COMPLETED|CANCELLED"
+    },
+    {
+      "id": "SSOT_POSTED_IS_COMPLETED",
+      "ok": true,
+      "detail": "posted=COMPLETED"
+    },
+    {
+      "id": "HELPER_POSTED",
+      "ok": true,
+      "detail": "isGoodsReceiptPosted COMPLETED only (canonical)"
+    },
+    {
+      "id": "ZOD_IMPORTS_SSOT",
+      "ok": true,
+      "detail": "zod imports domain SSOT"
+    },
+    {
+      "id": "ZOD_NO_FINALIZED_ENUM",
+      "ok": true,
+      "detail": "zod does not enum FINALIZED"
+    },
+    {
+      "id": "SERVER_NO_FORBIDDEN_GR_SQL",
+      "ok": true,
+      "detail": "scanned 850 files"
+    },
+    {
+      "id": "SQL_NO_GR_FINALIZED_TYPE",
+      "ok": true,
+      "detail": "scanned 362 sql"
+    },
+    {
+      "id": "FORBIDDEN_LIST",
+      "ok": true,
+      "detail": "FINALIZED forbidden in SQL"
+    },
+    {
+      "id": "PO_BLOCKER_COMPLETED_ONLY",
+      "ok": true,
+      "detail": "COMPLETED only in blocker"
+    },
+    {
+      "id": "SCHEMA_PM_HAS_CREDIT",
+      "ok": true,
+      "detail": "payment_method includes CREDIT"
+    },
+    {
+      "id": "SSOT_PM_CORE_HAS_CREDIT",
+      "ok": true,
+      "detail": "CASH|CARD|MOBILE_MONEY|BANK_TRANSFER|CREDIT"
+    },
+    {
+      "id": "NO_COALESCE_PM_TO_EMPTY",
+      "ok": true,
+      "detail": "no COALESCE(payment_method, '')"
+    },
+    {
+      "id": "AGING_PM_VIA_TEXT",
+      "ok": true,
+      "detail": "aged receivables casts payment_method to text before filter"
+    }
+  ]
+}

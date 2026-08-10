@@ -554,6 +554,7 @@ describe('glEntryService — GL Posting Accuracy', () => {
             expect(findLine(lines, AccountCodes.ACCOUNTS_RECEIVABLE)!.creditAmount).toBe(8000);
             expect(capturedEntries[0].idempotencyKey).toBe('DEPOSIT_APPLICATION-app-1');
             expect(capturedEntries[0].referenceType).toBe('DEPOSIT_APPLICATION');
+            expect(capturedEntries[0].source).toBe('DEPOSIT_APPLICATION');
             assertBalanced(lines);
         });
 

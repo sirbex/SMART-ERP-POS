@@ -3,19 +3,15 @@
  *
  * Enterprise-grade aging analysis (Odoo Accounting Reports pattern).
  *
- * Features:
- *   ✔ Configurable aging buckets (current, 1-30, 31-60, 61-90, 90+)
- *   ✔ By customer / supplier breakdown
- *   ✔ As-of-date analysis (point-in-time)
- *   ✔ Summary and detail views
- *   ✔ Currency-aware output
- *   ✔ Decimal-safe via Money utility
+ * Integrity rules:
+ *   - AR: invoices SSOT when linked to a credit sale — never double-count sale + invoice
+ *   - AP: supplier invoices UNION open POs without open bill — never JOIN cartesian
+ *   - Response SSOT: summary.total === grandTotal; table rows = entities (not invoice details)
  */
 
 import type pg from 'pg';
 import { pool as globalPool } from '../db/pool.js';
 import { Money, Decimal } from '../utils/money.js';
-import logger from '../utils/logger.js';
 
 // =============================================================================
 // TYPES
@@ -50,25 +46,30 @@ export interface AgingEntitySummary {
   total: number;
 }
 
+export interface AgingReportSummary {
+  current: number;
+  days1to30: number;
+  days31to60: number;
+  days61to90: number;
+  over90: number;
+  /** Same as grandTotal — UI/report consumer SSOT */
+  total: number;
+  grandTotal: number;
+  entityCount: number;
+}
+
 export interface AgingReport {
   reportType: 'RECEIVABLE' | 'PAYABLE';
   asOfDate: string;
   generatedAt: string;
   buckets: AgingBucket[];
-  summary: {
-    current: number;
-    days1to30: number;
-    days31to60: number;
-    days61to90: number;
-    over90: number;
-    grandTotal: number;
-    entityCount: number;
-  };
+  summary: AgingReportSummary;
+  /** Per customer/supplier bucket matrix (UI table) */
   entities: AgingEntitySummary[];
+  /** Line-level invoices/sales (PDF detail; not the main table) */
   details: AgingLineItem[];
 }
 
-// Default aging buckets (Odoo standard)
 const DEFAULT_BUCKETS: AgingBucket[] = [
   { label: 'Current', minDays: 0, maxDays: 0 },
   { label: '1-30 Days', minDays: 1, maxDays: 30 },
@@ -82,9 +83,8 @@ const DEFAULT_BUCKETS: AgingBucket[] = [
 // =============================================================================
 
 export class AgedBalanceService {
-
   /**
-   * Generate Aged Receivables report
+   * Aged Receivables — open AR only, no sale+invoice double count.
    */
   static async agedReceivables(
     asOfDate: string,
@@ -92,53 +92,58 @@ export class AgedBalanceService {
   ): Promise<AgingReport> {
     const pool = dbPool || globalPool;
 
-    // Get all open customer invoices/sales with outstanding balances
-    const result = await pool.query(
-      `SELECT
-         c.id as entity_id,
-         c.name as entity_name,
-         s.sale_number as invoice_number,
-         s.sale_date as invoice_date,
-         s.sale_date as due_date,
-         s.total_amount as original_amount,
-         (s.total_amount - COALESCE(s.amount_paid, 0)) as outstanding_amount,
-         ($1::date - s.sale_date::date) as days_overdue
-       FROM sales s
-       LEFT JOIN customers c ON c.id = s.customer_id
-       WHERE s.payment_method = 'CREDIT'
-         AND s.status NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
-         AND (s.total_amount - COALESCE(s.amount_paid, 0)) > 0.01
-         AND s.sale_date <= $1
-       ORDER BY c.name, s.sale_date`,
-      [asOfDate]
-    );
-
-    // Also include customer invoices that have outstanding balances
+    // 1) Customer invoices with outstanding balance (include those linked to sales)
     const invoiceResult = await pool.query(
       `SELECT
-         c.id as entity_id,
-         c.name as entity_name,
+         COALESCE(c.id::text, i.customer_id::text, 'unknown') as entity_id,
+         COALESCE(c.name, i.customer_name, 'Unknown Customer') as entity_name,
          i.invoice_number as invoice_number,
-         i.issue_date as invoice_date,
-         i.due_date as due_date,
+         i.issue_date::date::text as invoice_date,
+         COALESCE(i.due_date, i.issue_date)::date::text as due_date,
          i.total_amount as original_amount,
          (i.total_amount - COALESCE(i.amount_paid, 0)) as outstanding_amount,
          ($1::date - COALESCE(i.due_date, i.issue_date)::date) as days_overdue
        FROM invoices i
        LEFT JOIN customers c ON c.id = i.customer_id
-       WHERE i.status NOT IN ('CANCELLED', 'PAID')
+       WHERE UPPER(COALESCE(i.status::text, '')) NOT IN ('CANCELLED', 'PAID', 'VOIDED', 'VOID')
          AND (i.total_amount - COALESCE(i.amount_paid, 0)) > 0.01
-         AND i.issue_date <= $1
-       ORDER BY c.name, i.issue_date`,
+         AND i.issue_date::date <= $1::date`,
       [asOfDate]
     );
 
-    const allRows = [...result.rows, ...invoiceResult.rows];
+    // 2) Credit sales still open that do NOT have a non-cancelled invoice (avoid double count)
+    // payment_method is PG enum — never COALESCE(enum, '') (casts '' → 22P02).
+    // Compare via ::text so unknown method codes never invent invalid enum labels.
+    const salesResult = await pool.query(
+      `SELECT
+         COALESCE(c.id::text, s.customer_id::text, 'unknown') as entity_id,
+         COALESCE(c.name, 'Walk-in / Unknown') as entity_name,
+         s.sale_number as invoice_number,
+         s.sale_date::date::text as invoice_date,
+         s.sale_date::date::text as due_date,
+         s.total_amount as original_amount,
+         (s.total_amount - COALESCE(s.amount_paid, 0)) as outstanding_amount,
+         ($1::date - s.sale_date::date) as days_overdue
+       FROM sales s
+       LEFT JOIN customers c ON c.id = s.customer_id
+       WHERE UPPER(COALESCE(s.payment_method::text, '')) = 'CREDIT'
+         AND UPPER(COALESCE(s.status::text, '')) NOT IN ('VOID', 'REFUNDED', 'VOIDED_BY_RETURN')
+         AND (s.total_amount - COALESCE(s.amount_paid, 0)) > 0.01
+         AND s.sale_date::date <= $1::date
+         AND NOT EXISTS (
+           SELECT 1 FROM invoices inv
+           WHERE inv.sale_id = s.id
+             AND UPPER(COALESCE(inv.status::text, '')) NOT IN ('CANCELLED', 'VOIDED', 'VOID')
+         )`,
+      [asOfDate]
+    );
+
+    const allRows = [...invoiceResult.rows, ...salesResult.rows];
     return this.buildReport('RECEIVABLE', asOfDate, allRows);
   }
 
   /**
-   * Generate Aged Payables report
+   * Aged Payables — open supplier bills UNION open POs (no cartesian product).
    */
   static async agedPayables(
     asOfDate: string,
@@ -146,37 +151,52 @@ export class AgedBalanceService {
   ): Promise<AgingReport> {
     const pool = dbPool || globalPool;
 
-    // Get all unpaid purchase orders / supplier invoices
-    const result = await pool.query(
+    const bills = await pool.query(
       `SELECT
-         s."Id" as entity_id,
-         s."CompanyName" as entity_name,
-         COALESCE(si."SupplierInvoiceNumber", po.order_number) as invoice_number,
-         COALESCE(si."InvoiceDate", po.order_date) as invoice_date,
-         COALESCE(si."DueDate", po.order_date) as due_date,
-         COALESCE(si."TotalAmount", po.total_amount) as original_amount,
-         COALESCE(si."OutstandingBalance", (po.total_amount - COALESCE(po.paid_amount, 0))) as outstanding_amount,
-         ($1::date - COALESCE(si."DueDate", po.order_date)::date) as days_overdue
-       FROM suppliers s
-       LEFT JOIN supplier_invoices si ON si."SupplierId" = s."Id"
-         AND si."Status" NOT IN ('PAID', 'CANCELLED')
-         AND si."OutstandingBalance" > 0.01
-         AND si."InvoiceDate" <= $1
-       LEFT JOIN purchase_orders po ON po.supplier_id = s."Id"
-         AND po.status NOT IN ('CANCELLED', 'DRAFT')
-         AND (po.total_amount - COALESCE(po.paid_amount, 0)) > 0.01
-         AND po.order_date <= $1
-         AND NOT EXISTS (
-           SELECT 1 FROM supplier_invoices si2
-           WHERE si2."PurchaseOrderId" = po.id
-             AND si2."Status" NOT IN ('PAID', 'CANCELLED')
-         )
-       WHERE (si."Id" IS NOT NULL OR po.id IS NOT NULL)
-       ORDER BY s."CompanyName", COALESCE(si."InvoiceDate", po.order_date)`,
+         COALESCE(s."Id"::text, si."SupplierId"::text, 'unknown') as entity_id,
+         COALESCE(s."CompanyName", 'Unknown Supplier') as entity_name,
+         COALESCE(si."SupplierInvoiceNumber", si."InternalReferenceNumber", si."Id"::text) as invoice_number,
+         si."InvoiceDate"::date::text as invoice_date,
+         COALESCE(si."DueDate", si."InvoiceDate")::date::text as due_date,
+         si."TotalAmount" as original_amount,
+         COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0)) as outstanding_amount,
+         ($1::date - COALESCE(si."DueDate", si."InvoiceDate")::date) as days_overdue
+       FROM supplier_invoices si
+       LEFT JOIN suppliers s ON s."Id" = si."SupplierId"
+       WHERE COALESCE(si.document_type, 'SUPPLIER_INVOICE') = 'SUPPLIER_INVOICE'
+         AND si.deleted_at IS NULL
+         AND COALESCE(si."Status", '') NOT IN ('PAID', 'CANCELLED', 'Cancelled', 'VOIDED', 'Voided')
+         AND COALESCE(si."OutstandingBalance", si."TotalAmount" - COALESCE(si."AmountPaid", 0), 0) > 0.01
+         AND si."InvoiceDate"::date <= $1::date`,
       [asOfDate]
     );
 
-    return this.buildReport('PAYABLE', asOfDate, result.rows);
+    // Unbilled PO residual only when no open SI is linked to the PO
+    const pos = await pool.query(
+      `SELECT
+         COALESCE(s."Id"::text, po.supplier_id::text, 'unknown') as entity_id,
+         COALESCE(s."CompanyName", 'Unknown Supplier') as entity_name,
+         po.order_number as invoice_number,
+         po.order_date::date::text as invoice_date,
+         COALESCE(po.expected_delivery_date, po.order_date)::date::text as due_date,
+         po.total_amount as original_amount,
+         (po.total_amount - COALESCE(po.paid_amount, 0)) as outstanding_amount,
+         ($1::date - COALESCE(po.expected_delivery_date, po.order_date)::date) as days_overdue
+       FROM purchase_orders po
+       LEFT JOIN suppliers s ON s."Id" = po.supplier_id
+       WHERE po.status NOT IN ('CANCELLED', 'DRAFT')
+         AND (po.total_amount - COALESCE(po.paid_amount, 0)) > 0.01
+         AND po.order_date::date <= $1::date
+         AND NOT EXISTS (
+           SELECT 1 FROM supplier_invoices si2
+           WHERE si2."PurchaseOrderId" = po.id
+             AND si2.deleted_at IS NULL
+             AND COALESCE(si2."Status", '') NOT IN ('PAID', 'CANCELLED', 'Cancelled', 'VOIDED', 'Voided')
+         )`,
+      [asOfDate]
+    );
+
+    return this.buildReport('PAYABLE', asOfDate, [...bills.rows, ...pos.rows]);
   }
 
   // ===========================================================================
@@ -200,11 +220,15 @@ export class AgedBalanceService {
     for (const row of rows) {
       const daysOverdue = Math.max(0, Number(row.days_overdue) || 0);
       const outstanding = Money.parseDb(String(row.outstanding_amount || 0));
+      if (outstanding.lte(0.01)) continue;
+
       const bucket = this.getBucketLabel(daysOverdue);
+      const entityId = String(row.entity_id || 'unknown');
+      const entityName = String(row.entity_name || 'Unknown');
 
       details.push({
-        entityId: String(row.entity_id || ''),
-        entityName: String(row.entity_name || 'Unknown'),
+        entityId,
+        entityName,
         invoiceNumber: String(row.invoice_number || ''),
         invoiceDate: String(row.invoice_date || ''),
         dueDate: String(row.due_date || ''),
@@ -214,12 +238,10 @@ export class AgedBalanceService {
         bucket,
       });
 
-      // Update entity summary
-      const entityId = String(row.entity_id || 'unknown');
       if (!entityMap.has(entityId)) {
         entityMap.set(entityId, {
           entityId,
-          entityName: String(row.entity_name || 'Unknown'),
+          entityName,
           current: 0,
           days1to30: 0,
           days31to60: 0,
@@ -230,7 +252,6 @@ export class AgedBalanceService {
       }
 
       const entity = entityMap.get(entityId)!;
-      const amt = outstanding.toNumber();
 
       if (daysOverdue <= 0) {
         entity.current = Money.add(new Decimal(entity.current), outstanding).toNumber();
@@ -258,7 +279,7 @@ export class AgedBalanceService {
         Money.add(total31to60, total61to90)
       ),
       totalOver90
-    );
+    ).toNumber();
 
     return {
       reportType,
@@ -271,11 +292,11 @@ export class AgedBalanceService {
         days31to60: total31to60.toNumber(),
         days61to90: total61to90.toNumber(),
         over90: totalOver90.toNumber(),
-        grandTotal: grandTotal.toNumber(),
+        total: grandTotal,
+        grandTotal,
         entityCount: entityMap.size,
       },
-      entities: Array.from(entityMap.values())
-        .sort((a, b) => b.total - a.total), // Largest outstanding first
+      entities: Array.from(entityMap.values()).sort((a, b) => b.total - a.total),
       details,
     };
   }
