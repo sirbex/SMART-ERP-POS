@@ -362,12 +362,34 @@ describe('Supplier return worklist — structural e2e chain (API → UI)', () =>
       'doc flow to worklist',
     );
 
+    const repo = readRepo('SamplePOS.Server/src/modules/return-grn/returnGrnRepository.ts');
+    gate(
+      'LIST_GETBYGRN_SCN_SAME_FILTER',
+      (repo.match(/UPPER\(COALESCE\(si\."Status",''\)\) NOT IN \('CANCELLED', 'VOID', 'VOIDED', 'DELETED'\)/g) || [])
+        .length >= 3,
+      'list + lateral + getByGrnId cancel filters aligned',
+    );
+    gate(
+      'BILL_STATUS_UPPER_COALESCE',
+      repo.includes(
+        `document_type = 'SUPPLIER_INVOICE'`,
+      ) &&
+        repo.includes(`UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')`) &&
+        !repo.includes(`NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')`),
+      'bill status filter no mixed-case drift',
+    );
+
     // SCN product path still requires bill (ERR_RETURN_GRN_001)
     const svc = readRepo('SamplePOS.Server/src/modules/return-grn/returnGrnService.ts');
     gate(
       'SVC_BILL_GATE',
       svc.includes('SUPPLIER_BILL_REQUIRED_FOR_SCN') || svc.includes('ERR_RETURN_GRN_001'),
       'SCN requires bill',
+    );
+    gate(
+      'SVC_BILL_STATUS_ALIGN',
+      svc.includes(`UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')`),
+      'service bill filter matches list',
     );
     gate(
       'SVC_CLEARING',

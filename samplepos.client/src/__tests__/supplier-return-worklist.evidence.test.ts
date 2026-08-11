@@ -15,6 +15,7 @@ import {
   SUPPLIER_RETURNS_DEFAULT_FILTER,
   SUPPLIER_RETURNS_ROUTE,
 } from '../../../shared/domain/supplierReturnWorklist';
+import { unwrapReturnGrnListPayload } from '../hooks/useReturnGrn';
 
 const repoRoot = path.resolve(__dirname, '../../..');
 
@@ -71,6 +72,61 @@ describe('Supplier return worklist domain SSOT (client)', () => {
       'nested under GR + default filter',
     );
   });
+
+  it('list response unwrapping never silently drops rows or totals', () => {
+    const rows = [
+      {
+        id: '1',
+        returnGrnNumber: 'RGRN-1',
+        grnId: 'g',
+        grnNumber: '',
+        supplierId: 's',
+        supplierName: 'A',
+        returnDate: '2026-01-01',
+        status: 'POSTED' as const,
+        reason: 'x',
+        totalAmount: 1,
+        createdBy: '',
+        createdAt: '',
+        updatedAt: '',
+      },
+    ];
+
+    const standard = unwrapReturnGrnListPayload({
+      data: {
+        success: true,
+        data: rows,
+        pagination: { page: 1, limit: 50, total: 8, totalPages: 1 },
+      },
+    });
+    gate(
+      'UNWRAP_STANDARD',
+      standard.rows.length === 1 && standard.pagination?.total === 8,
+      `rows=${standard.rows.length} total=${standard.pagination?.total}`,
+    );
+
+    const double = unwrapReturnGrnListPayload({
+      data: {
+        data: rows,
+        pagination: { page: 2, total: 3, totalPages: 2 },
+      },
+    });
+    gate(
+      'UNWRAP_NESTED',
+      double.rows.length === 1 && double.pagination?.total === 3,
+      'double-wrap',
+    );
+
+    const bare = unwrapReturnGrnListPayload({ data: rows });
+    gate('UNWRAP_ARRAY_BODY', bare.rows.length === 1, 'array body');
+
+    const empty = unwrapReturnGrnListPayload(undefined);
+    gate(
+      'UNWRAP_EMPTY_EXPLICIT',
+      empty.rows.length === 0 && empty.pagination === null,
+      'empty is explicit not invent',
+    );
+  });
 });
 
 describe('Supplier return worklist UI/API wiring', () => {
@@ -101,6 +157,7 @@ describe('Supplier return worklist UI/API wiring', () => {
     gate('LIST_HOOK', page.includes('useReturnGrns'), 'list hook');
     gate('POST_HOOK', page.includes('usePostReturnGrn'), 'post draft');
     gate('CN_HOOK', page.includes('useCreateCreditNoteFromReturn'), 'create SCN');
+    gate('UNWRAP_LIST', page.includes('unwrapReturnGrnListPayload'), 'no ad-hoc silent list parse');
     gate('CREDIT_NOTES_LINK', page.includes('/accounting/credit-debit-notes'), 'apply SCN path');
     gate('GR_LINK', page.includes('/inventory/goods-receipts'), 'source GR path');
     gate(
@@ -144,8 +201,9 @@ describe('Supplier return worklist UI/API wiring', () => {
       'WORKBENCH_TABS',
       workbench.includes('receiving-tab-receipts') &&
         workbench.includes('receiving-tab-returns') &&
-        workbench.includes(SUPPLIER_RETURNS_ROUTE),
-      'Receipts | Returns sub-tabs',
+        workbench.includes(SUPPLIER_RETURNS_ROUTE) &&
+        workbench.includes('unwrapReturnGrnListPayload'),
+      'Receipts | Returns sub-tabs + attention unwrap',
     );
 
     const app = read('samplepos.client/src/App.tsx');
@@ -186,8 +244,8 @@ describe('Supplier return worklist UI/API wiring', () => {
     const gr = read('samplepos.client/src/pages/inventory/GoodsReceiptsPage.tsx');
     gate(
       'GR_EMBEDDED',
-      gr.includes('useOutletContext') && gr.includes('embedded'),
-      'receipts page embeds under workbench',
+      gr.includes('useOutletContext') && gr.includes('embedded') && gr.includes('unwrapReturnGrnListPayload'),
+      'receipts page embeds under workbench + same list unwrap',
     );
     gate('GR_NO_TOP_CTA', !gr.includes('/inventory/supplier-returns'), 'no orphan returns CTA on GR');
   });

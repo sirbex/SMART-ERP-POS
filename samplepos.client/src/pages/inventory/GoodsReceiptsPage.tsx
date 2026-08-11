@@ -26,6 +26,7 @@ import {
 import {
   useReturnableItems,
   useReturnGrnsByGrn,
+  unwrapReturnGrnListPayload,
   useCreateReturnGrn,
   usePostReturnGrn,
   useCreateCreditNoteFromReturn,
@@ -567,8 +568,7 @@ export default function GoodsReceiptsPage() {
   }, [returnableData]);
 
   const existingReturns = useMemo(() => {
-    const raw = (returnGrnData as { data?: { data?: Array<{ id: string; returnGrnNumber: string; return_grn_number?: string; status: string; totalAmount?: number; total_amount?: number; hasCreditNote?: boolean; hasSupplierBill?: boolean }> } })?.data?.data;
-    return Array.isArray(raw) ? raw : [];
+    return unwrapReturnGrnListPayload(returnGrnData).rows;
   }, [returnGrnData]);
 
   // PDF Export for Goods Receipt — direct authenticated download (same pattern as Customer statement)

@@ -10,6 +10,7 @@ import {
   useCreateCreditNoteFromReturn,
   usePostReturnGrn,
   useReturnGrns,
+  unwrapReturnGrnListPayload,
   type ReturnGrnRecord,
 } from '../../hooks/useReturnGrn';
 import { formatCurrency } from '../../utils/currency';
@@ -90,30 +91,16 @@ export default function SupplierReturnsPage() {
   const createCn = useCreateCreditNoteFromReturn();
   const postRgrn = usePostReturnGrn();
 
-  const rows: ReturnGrnRecord[] = useMemo(() => {
-    const axiosBody = (data as { data?: unknown } | undefined)?.data;
-    if (Array.isArray(axiosBody)) return axiosBody as ReturnGrnRecord[];
-    if (axiosBody && typeof axiosBody === 'object') {
-      const nested = axiosBody as { data?: unknown };
-      if (Array.isArray(nested.data)) return nested.data as ReturnGrnRecord[];
-    }
-    if (Array.isArray(data)) return data as ReturnGrnRecord[];
-    return [];
-  }, [data]);
+  const { rows, pagination: listPagination } = useMemo(
+    () => unwrapReturnGrnListPayload(data),
+    [data],
+  );
 
-  const pagination = useMemo(() => {
-    const axiosBody = (
-      data as { data?: { pagination?: { total?: number; totalPages?: number; page?: number } } } | undefined
-    )?.data;
-    if (axiosBody && typeof axiosBody === 'object' && 'pagination' in axiosBody && axiosBody.pagination) {
-      return axiosBody.pagination;
-    }
-    const top = data as { pagination?: { total?: number; totalPages?: number; page?: number } } | undefined;
-    return top?.pagination || { total: rows.length, totalPages: 1, page };
-  }, [data, rows.length, page]);
-
-  const total = Number(pagination.total) || 0;
-  const totalPages = Math.max(1, Number(pagination.totalPages) || Math.ceil(total / limit) || 1);
+  const total = Number(listPagination?.total) || rows.length;
+  const totalPages = Math.max(
+    1,
+    Number(listPagination?.totalPages) || Math.ceil(total / limit) || 1,
+  );
   const attentionCount = rows.filter((r) => isSupplierReturnNeedsAttention(r)).length;
 
   const applySearch = () => {

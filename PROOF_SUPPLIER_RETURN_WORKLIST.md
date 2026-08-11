@@ -1,7 +1,7 @@
 # PROOF: Supplier return worklist
 
 **Result:** PASS
-**As of:** 2026-08-11T11:37:34.741Z
+**As of:** 2026-08-11T11:59:41.463Z
 
 ## Claims
 - All-supplier RGRN list API with needsAttention + search
@@ -67,5 +67,8 @@
 - ✅ `GR_EMBEDDED` — GR embeds under workbench
 - ✅ `GR_NO_ORPHAN_CTA` — no top-tab path on GR
 - ✅ `DOC_FLOW_RGRN` — doc flow to worklist
+- ✅ `LIST_GETBYGRN_SCN_SAME_FILTER` — list + lateral + getByGrnId cancel filters aligned
+- ✅ `BILL_STATUS_UPPER_COALESCE` — bill status filter no mixed-case drift
 - ✅ `SVC_BILL_GATE` — SCN requires bill
+- ✅ `SVC_BILL_STATUS_ALIGN` — service bill filter matches list
 - ✅ `SVC_CLEARING` — SCN clears 2150/2160

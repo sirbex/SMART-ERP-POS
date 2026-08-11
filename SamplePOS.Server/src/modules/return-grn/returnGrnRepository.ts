@@ -286,12 +286,13 @@ export const returnGrnRepository = {
              AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
          )`;
 
+        // Cancelled/void filters use UPPER(COALESCE(...)) so list ≡ getByGrnId ≡ SCN bill gate.
         const hasSupplierBillSql = `EXISTS (
            SELECT 1
            FROM supplier_invoices si
            WHERE si.document_type = 'SUPPLIER_INVOICE'
              AND si.deleted_at IS NULL
-             AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+             AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
              AND (
                si."Id" IN (
                  SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
@@ -371,7 +372,7 @@ export const returnGrnRepository = {
          FROM supplier_invoices si
          WHERE si.document_type = 'SUPPLIER_INVOICE'
            AND si.deleted_at IS NULL
-           AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+           AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
            AND (
              si."Id" IN (
                SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
@@ -581,14 +582,14 @@ export const returnGrnRepository = {
            WHERE si.return_grn_id = r.id
              AND si.document_type = 'SUPPLIER_CREDIT_NOTE'
              AND si.deleted_at IS NULL
-             AND UPPER(si."Status") NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
+             AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
          ) AS "hasCreditNote",
          EXISTS (
            SELECT 1
            FROM supplier_invoices si
            WHERE si.document_type = 'SUPPLIER_INVOICE'
              AND si.deleted_at IS NULL
-             AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+             AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
              AND (
                si."Id" IN (
                  SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl

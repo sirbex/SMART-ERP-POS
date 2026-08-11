@@ -501,7 +501,8 @@ export const returnGrnService = {
                         SELECT 1
                         FROM supplier_invoices si
                         WHERE si.deleted_at IS NULL
-                          AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+                          AND si.document_type = 'SUPPLIER_INVOICE'
+                          AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
                           AND (
                             si."Id" IN (
                               SELECT sigl.invoice_id
@@ -712,7 +713,7 @@ export const returnGrnService = {
                      FROM supplier_invoices si
                      WHERE si.document_type = 'SUPPLIER_INVOICE'
                        AND si.deleted_at IS NULL
-                       AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+                       AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
                        AND (
                          si."Id" IN (
                            SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl

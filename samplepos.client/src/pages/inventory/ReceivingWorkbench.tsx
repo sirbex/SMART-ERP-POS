@@ -8,7 +8,7 @@
  */
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useMemo } from 'react';
-import { useReturnGrns } from '../../hooks/useReturnGrn';
+import { unwrapReturnGrnListPayload, useReturnGrns } from '../../hooks/useReturnGrn';
 import {
   RECEIVING_RECEIPTS_ROUTE,
   SUPPLIER_RETURNS_ROUTE,
@@ -18,21 +18,6 @@ export type ReceivingWorkbenchContext = {
   embedded: true;
   area: 'receipts' | 'returns';
 };
-
-function parseAttentionTotal(data: unknown): number | null {
-  const d = data as {
-    data?: { pagination?: { total?: number }; total?: number } | unknown[];
-    pagination?: { total?: number };
-  } | null;
-  if (!d) return null;
-  const body = d.data;
-  if (body && typeof body === 'object' && !Array.isArray(body)) {
-    const p = (body as { pagination?: { total?: number } }).pagination;
-    if (p?.total != null) return Number(p.total);
-  }
-  if (d.pagination?.total != null) return Number(d.pagination.total);
-  return null;
-}
 
 export default function ReceivingWorkbench() {
   const location = useLocation();
@@ -45,7 +30,10 @@ export default function ReceivingWorkbench() {
     limit: 1,
     needsAttention: true,
   });
-  const openReturns = useMemo(() => parseAttentionTotal(attentionData), [attentionData]);
+  const openReturns = useMemo(() => {
+    const { pagination } = unwrapReturnGrnListPayload(attentionData);
+    return pagination?.total ?? null;
+  }, [attentionData]);
 
   const area: 'receipts' | 'returns' = isReturns ? 'returns' : 'receipts';
   const outletCtx: ReceivingWorkbenchContext = { embedded: true, area };

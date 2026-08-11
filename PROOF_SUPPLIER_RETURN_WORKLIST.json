@@ -1,7 +1,7 @@
 {
   "proof": "SUPPLIER_RETURN_WORKLIST",
   "passed": true,
-  "asOf": "2026-08-11T11:37:34.741Z",
+  "asOf": "2026-08-11T11:59:41.463Z",
   "gates": [
     {
       "id": "SSOT_DRAFT",
@@ -289,9 +289,24 @@
       "detail": "doc flow to worklist"
     },
     {
+      "id": "LIST_GETBYGRN_SCN_SAME_FILTER",
+      "ok": true,
+      "detail": "list + lateral + getByGrnId cancel filters aligned"
+    },
+    {
+      "id": "BILL_STATUS_UPPER_COALESCE",
+      "ok": true,
+      "detail": "bill status filter no mixed-case drift"
+    },
+    {
       "id": "SVC_BILL_GATE",
       "ok": true,
       "detail": "SCN requires bill"
+    },
+    {
+      "id": "SVC_BILL_STATUS_ALIGN",
+      "ok": true,
+      "detail": "service bill filter matches list"
     },
     {
       "id": "SVC_CLEARING",

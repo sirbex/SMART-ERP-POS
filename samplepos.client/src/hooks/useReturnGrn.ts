@@ -73,6 +73,86 @@ export interface ReturnGrnRecord {
     actionStatus?: 'DRAFT' | 'NEED_BILL' | 'NEED_SCN' | 'HAS_SCN' | 'COMPLETE';
 }
 
+export type ReturnGrnListPagination = {
+    page: number;
+    total: number;
+    totalPages: number;
+    limit?: number;
+};
+
+/**
+ * Unwrap axios `return-grn` list/by-grn responses without silent shape misses.
+ * Controller: { success, data: rows[], pagination? }
+ * React-query stores full AxiosResponse → .data is that body.
+ */
+export function unwrapReturnGrnListPayload(data: unknown): {
+    rows: ReturnGrnRecord[];
+    pagination: ReturnGrnListPagination | null;
+} {
+    if (!data) return { rows: [], pagination: null };
+
+    // AxiosResponse: { data: ApiBody }
+    const maybeAxios = data as { data?: unknown; status?: number };
+    const body =
+        maybeAxios && typeof maybeAxios === 'object' && 'data' in maybeAxios
+            ? maybeAxios.data
+            : data;
+
+    if (Array.isArray(body)) {
+        return { rows: body as ReturnGrnRecord[], pagination: null };
+    }
+
+    if (body && typeof body === 'object') {
+        const apiBody = body as {
+            data?: unknown;
+            pagination?: Partial<ReturnGrnListPagination>;
+            success?: boolean;
+        };
+        // Standard { success, data: rows, pagination }
+        if (Array.isArray(apiBody.data)) {
+            const p = apiBody.pagination;
+            return {
+                rows: apiBody.data as ReturnGrnRecord[],
+                pagination: p
+                    ? {
+                          page: Number(p.page) || 1,
+                          total: Number(p.total) || apiBody.data.length,
+                          totalPages: Number(p.totalPages) || 1,
+                          limit: p.limit,
+                      }
+                    : null,
+            };
+        }
+        // Nested double-wrap: { data: { data: rows, pagination } }
+        if (apiBody.data && typeof apiBody.data === 'object' && !Array.isArray(apiBody.data)) {
+            const nested = apiBody.data as {
+                data?: unknown;
+                pagination?: Partial<ReturnGrnListPagination>;
+            };
+            if (Array.isArray(nested.data)) {
+                const p = nested.pagination || apiBody.pagination;
+                return {
+                    rows: nested.data as ReturnGrnRecord[],
+                    pagination: p
+                        ? {
+                              page: Number(p.page) || 1,
+                              total: Number(p.total) || nested.data.length,
+                              totalPages: Number(p.totalPages) || 1,
+                              limit: p.limit,
+                          }
+                        : null,
+                };
+            }
+        }
+    }
+
+    if (Array.isArray(data)) {
+        return { rows: data as ReturnGrnRecord[], pagination: null };
+    }
+
+    return { rows: [], pagination: null };
+}
+
 // Query keys
 export const RETURN_GRN_KEYS = {
     all: ['return-grn'] as const,
