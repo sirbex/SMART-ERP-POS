@@ -420,7 +420,7 @@ async function traceApSupplier(
         `
         SELECT si."Id"::text AS id,
             si.document_type,
-            si."InvoiceNumber" AS document_number,
+            si."SupplierInvoiceNumber" AS document_number,
             COALESCE(si."OutstandingBalance", 0)::numeric AS amount,
             si."InvoiceDate"::text AS doc_date,
             si."Status" AS status
