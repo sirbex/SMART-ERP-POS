@@ -55,6 +55,7 @@ export interface ReturnGrnRecord {
     returnGrnNumber: string;
     grnId: string;
     grnNumber: string;
+    grNumber?: string;
     supplierId: string;
     supplierName: string;
     returnDate: string;
@@ -64,6 +65,12 @@ export interface ReturnGrnRecord {
     createdBy: string;
     createdAt: string;
     updatedAt: string;
+    hasCreditNote?: boolean;
+    hasSupplierBill?: boolean;
+    creditNoteNumber?: string | null;
+    creditNoteStatus?: string | null;
+    supplierBillNumber?: string | null;
+    actionStatus?: 'DRAFT' | 'NEED_BILL' | 'NEED_SCN' | 'HAS_SCN' | 'COMPLETE';
 }
 
 // Query keys
@@ -84,6 +91,8 @@ export function useReturnGrns(params?: {
     grnId?: string;
     supplierId?: string;
     status?: string;
+    search?: string;
+    needsAttention?: boolean;
 }) {
     return useQuery({
         queryKey: RETURN_GRN_KEYS.list(params || {}),

@@ -73,6 +73,8 @@ const ProductsPage = lazyWithRetry(() => import('./pages/inventory/ProductsPage'
 const StockMovementsPage = lazyWithRetry(() => import('./pages/inventory/StockMovementsPage'));
 const PurchaseOrdersPage = lazyWithRetry(() => import('./pages/inventory/PurchaseOrdersPage'));
 const GoodsReceiptsPage = lazyWithRetry(() => import('./pages/inventory/GoodsReceiptsPage'));
+const SupplierReturnsPage = lazyWithRetry(() => import('./pages/inventory/SupplierReturnsPage'));
+const ReceivingWorkbench = lazyWithRetry(() => import('./pages/inventory/ReceivingWorkbench'));
 const UomManagementPage = lazyWithRetry(() => import('./pages/inventory/UomManagementPage'));
 const BatchManagementPage = lazyWithRetry(() => import('./pages/inventory/BatchManagementPage'));
 const InventoryAdjustmentsPage = lazyWithRetry(() => import('./pages/inventory/InventoryAdjustmentsPage'));
@@ -1698,10 +1700,17 @@ function App() {
                     element={
                       <ProtectedRoute requiredPermissions={['purchasing.read']} requiredFeature="purchase_orders">
                         <InventoryLayout>
-                          <GoodsReceiptsPage />
+                          <ReceivingWorkbench />
                         </InventoryLayout>
                       </ProtectedRoute>
                     }
+                  >
+                    <Route index element={<GoodsReceiptsPage />} />
+                    <Route path="returns" element={<SupplierReturnsPage />} />
+                  </Route>
+                  <Route
+                    path="/inventory/supplier-returns"
+                    element={<Navigate to="/inventory/goods-receipts/returns" replace />}
                   />
                   <Route
                     path="/inventory/uoms"

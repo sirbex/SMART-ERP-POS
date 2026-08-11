@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 /**
  * Goods Receipt / GRN (spec: GoodsReceipt.tsx) — route `/inventory/goods-receipts`
+ * Nested under Receiving workbench (Receipts tab); returns live on sibling tab.
  * Multistore: per-line Destination Store selector, default MAIN warehouse when flag is on.
  */
+import { useOutletContext } from 'react-router-dom';
 import { ZINDEX } from '../../hooks/useTransactionGuard';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Decimal from 'decimal.js';
@@ -10,6 +12,7 @@ import { downloadFile } from '../../utils/download';
 import { getBusinessDate } from '../../utils/businessDate';
 import { grBillableLineTotal, splitGRReceiptQuantities } from '../../utils/grReceiptQuantity';
 import { grItemTrackExpiry, grLineExpirySatisfied } from '../../utils/grExpiryGate';
+import { isGoodsReceiptPosted } from '@shared/domain/pgDomainEnums';
 import {
   useGoodsReceipts,
   useFinalizeGoodsReceipt,
@@ -346,6 +349,8 @@ const getDateRange = (preset: DateRangePreset): { start: string; end: string } =
 };
 
 export default function GoodsReceiptsPage() {
+  const workbench = useOutletContext<{ embedded?: boolean } | null>();
+  const embedded = Boolean(workbench?.embedded);
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [billingFilter, setBillingFilter] = useState<'' | 'TO_INVOICE' | 'INVOICED'>('');
@@ -524,7 +529,7 @@ export default function GoodsReceiptsPage() {
 
   // Return GRN data for selected GRN
   const selectedGRId = selectedGR?.id || '';
-  const isFinalized = selectedGR?.status === 'COMPLETED' || selectedGR?.status === 'FINALIZED';
+  const isFinalized = isGoodsReceiptPosted(selectedGR?.status);
 
   const { data: reverseEligibilityData } = useQuery({
     queryKey: ['gr-reverse-eligibility', selectedGRId],
@@ -900,7 +905,7 @@ export default function GoodsReceiptsPage() {
       // list-row state (selectedGR) so a retry after a failed bill creation
       // does not hit the backend with stale DRAFT status.
       const freshStatus = (grDetail?.gr?.status || selectedGR?.status || '').toUpperCase();
-      const grAlreadyFinalized = freshStatus === 'COMPLETED' || freshStatus === 'FINALIZED';
+      const grAlreadyFinalized = isGoodsReceiptPosted(freshStatus);
       if (batchItems.length > 0 && !grAlreadyFinalized) {
         await api.goodsReceipts.batchUpdateItems(id, batchItems);
       }
@@ -1360,8 +1365,12 @@ export default function GoodsReceiptsPage() {
   return (
     <div className="p-4 sm:p-6">
       <AdaptivePage
-        title="Goods Receipts"
-        description="Receiving workflow with batch creation and cost change alerts"
+        title={embedded ? 'Receipts' : 'Goods Receipts'}
+        description={
+          embedded
+            ? 'Inward goods: receive stock, finalize, and create supplier bills. Use the Returns tab above for open RGRNs.'
+            : 'Receiving workflow with batch creation and cost change alerts'
+        }
         primaryActions={
           <div className="flex flex-col gap-3 w-full sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
             <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center">
@@ -2055,7 +2064,7 @@ export default function GoodsReceiptsPage() {
                     </button>
                   </ResponsiveActionBar>
                 )}
-                {(selectedGR.status === 'COMPLETED' || selectedGR.status === 'FINALIZED') && (
+                {isGoodsReceiptPosted(selectedGR.status) && (
                   <div className="flex flex-col gap-2 w-full">
                     {isGrReversed && (
                       <div className="text-sm rounded-lg border border-rose-300 bg-rose-50 text-rose-900 px-3 py-2">

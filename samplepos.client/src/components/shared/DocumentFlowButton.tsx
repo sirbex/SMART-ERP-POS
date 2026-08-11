@@ -91,9 +91,10 @@ function getNavigationPath(entityType: string, entityId: string): string | null 
     INVOICE: `/accounting/invoices`,
     PURCHASE_ORDER: `/inventory/purchase-orders`,
     GOODS_RECEIPT: `/inventory/goods-receipts`,
-    RETURN_GRN: `/inventory/goods-receipts`,
+    RETURN_GRN: `/inventory/goods-receipts/returns`,
     CREDIT_NOTE: `/accounting/credit-debit-notes`,
     DEBIT_NOTE: `/accounting/credit-debit-notes`,
+    SUPPLIER_CREDIT_NOTE: `/accounting/credit-debit-notes`,
     SUPPLIER_INVOICE: `/accounting/supplier-payments`,
     SUPPLIER_PAYMENT: `/accounting/supplier-payments`,
   };

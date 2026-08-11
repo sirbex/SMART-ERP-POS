@@ -1,0 +1,142 @@
+{
+  "proof": "SUPPLIER_RETURN_WORKLIST_CLIENT",
+  "passed": true,
+  "asOf": "2026-08-11T11:37:36.867Z",
+  "gates": [
+    {
+      "id": "UI_SSOT_NEED_SCN",
+      "ok": true,
+      "detail": "open return → create SCN"
+    },
+    {
+      "id": "UI_SSOT_NEED_BILL",
+      "ok": true,
+      "detail": "no SCN without bill"
+    },
+    {
+      "id": "LABELS",
+      "ok": true,
+      "detail": "labels locked"
+    },
+    {
+      "id": "DEFAULTS",
+      "ok": true,
+      "detail": "nested under GR + default filter"
+    },
+    {
+      "id": "USES_SSOT_IMPORT",
+      "ok": true,
+      "detail": "imports domain SSOT"
+    },
+    {
+      "id": "USES_CAN_CREATE",
+      "ok": true,
+      "detail": "gates Create credit note via SSOT"
+    },
+    {
+      "id": "USES_MUST_BILL",
+      "ok": true,
+      "detail": "gates Bill CTA via SSOT"
+    },
+    {
+      "id": "USES_RESOLVE_STATUS",
+      "ok": true,
+      "detail": "badge uses domain labels/status"
+    },
+    {
+      "id": "DEFAULT_ATTENTION",
+      "ok": true,
+      "detail": "default attn filter"
+    },
+    {
+      "id": "LIST_HOOK",
+      "ok": true,
+      "detail": "list hook"
+    },
+    {
+      "id": "POST_HOOK",
+      "ok": true,
+      "detail": "post draft"
+    },
+    {
+      "id": "CN_HOOK",
+      "ok": true,
+      "detail": "create SCN"
+    },
+    {
+      "id": "CREDIT_NOTES_LINK",
+      "ok": true,
+      "detail": "apply SCN path"
+    },
+    {
+      "id": "GR_LINK",
+      "ok": true,
+      "detail": "source GR path"
+    },
+    {
+      "id": "NO_PER_GR_ONLY",
+      "ok": true,
+      "detail": "all-supplier worklist"
+    },
+    {
+      "id": "EMBEDDED_WORKBENCH",
+      "ok": true,
+      "detail": "nested under Receiving workbench"
+    },
+    {
+      "id": "SSOT_GATES_ONLY",
+      "ok": true,
+      "detail": "create SCN / bill / open count use domain SSOT only"
+    },
+    {
+      "id": "NAV_NO_TOP_TAB",
+      "ok": true,
+      "detail": "returns not a primary inventory tab"
+    },
+    {
+      "id": "NAV_GR_DESK",
+      "ok": true,
+      "detail": "Goods Receipts is receiving desk"
+    },
+    {
+      "id": "WORKBENCH_TABS",
+      "ok": true,
+      "detail": "Receipts | Returns sub-tabs"
+    },
+    {
+      "id": "APP_NESTED",
+      "ok": true,
+      "detail": "nested GR/returns routes"
+    },
+    {
+      "id": "APP_REDIRECT",
+      "ok": true,
+      "detail": "legacy redirect"
+    },
+    {
+      "id": "APP_PERM",
+      "ok": true,
+      "detail": "purchasing.read on receiving desk"
+    },
+    {
+      "id": "API_PARAMS",
+      "ok": true,
+      "detail": "API params"
+    },
+    {
+      "id": "DOC_FLOW",
+      "ok": true,
+      "detail": "document flow"
+    },
+    {
+      "id": "GR_EMBEDDED",
+      "ok": true,
+      "detail": "receipts page embeds under workbench"
+    },
+    {
+      "id": "GR_NO_TOP_CTA",
+      "ok": true,
+      "detail": "no orphan returns CTA on GR"
+    }
+  ]
+}

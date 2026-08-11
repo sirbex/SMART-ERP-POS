@@ -913,8 +913,15 @@ export const api = {
 
   // Return GRN (Goods Return to Supplier)
   returnGrn: {
-    list: (params?: { page?: number; limit?: number; grnId?: string; supplierId?: string; status?: string }) =>
-      apiClient.get<ApiResponse>('return-grn', { params }),
+    list: (params?: {
+      page?: number;
+      limit?: number;
+      grnId?: string;
+      supplierId?: string;
+      status?: string;
+      search?: string;
+      needsAttention?: boolean;
+    }) => apiClient.get<ApiResponse>('return-grn', { params }),
     getById: (id: string) => apiClient.get<ApiResponse>(`return-grn/${id}`),
     create: (data: { grnId: string; returnDate?: string; reason: string; lines: Array<{ productId: string; batchId?: string; uomId?: string; quantity: number; unitCost: number }> }) =>
       apiClient.post<ApiResponse>('return-grn', data),

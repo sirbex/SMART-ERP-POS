@@ -33,6 +33,16 @@ export interface ReturnGrn {
     hasCreditNote?: boolean;
     /** True when a SUPPLIER_INVOICE exists for this return's parent GRN (required before SCN). */
     hasSupplierBill?: boolean;
+    /** Sum of return line totals (purchase UOM × cost). */
+    totalAmount?: number;
+    creditNoteNumber?: string | null;
+    creditNoteStatus?: string | null;
+    supplierBillNumber?: string | null;
+    /**
+     * Worklist next step (SSOT for UI):
+     * DRAFT | NEED_BILL | NEED_SCN | HAS_SCN | COMPLETE
+     */
+    actionStatus?: 'DRAFT' | 'NEED_BILL' | 'NEED_SCN' | 'HAS_SCN' | 'COMPLETE';
 }
 
 export interface ReturnGrnLine {
@@ -225,26 +235,90 @@ export const returnGrnRepository = {
     },
 
     /**
-     * List Return GRNs with pagination.
+     * List Return GRNs with pagination + worklist fields (all suppliers).
+     * SSOT for "what needs attention": POSTED returns without an active SCN.
      */
     async list(
         pool: Pool,
-        options: { grnId?: string; supplierId?: string; status?: string; page: number; limit: number },
+        options: {
+            grnId?: string;
+            supplierId?: string;
+            status?: string;
+            search?: string;
+            needsAttention?: boolean;
+            page: number;
+            limit: number;
+        },
     ): Promise<{ rows: ReturnGrn[]; total: number }> {
         const conditions: string[] = ['1=1'];
-        const params: (string | number)[] = [];
+        const params: (string | number | boolean)[] = [];
         let idx = 1;
 
-        if (options.grnId) { conditions.push(`r.grn_id = $${idx++}`); params.push(options.grnId); }
-        if (options.supplierId) { conditions.push(`r.supplier_id = $${idx++}`); params.push(options.supplierId); }
-        if (options.status) { conditions.push(`r.status = $${idx++}`); params.push(options.status); }
+        if (options.grnId) {
+            conditions.push(`r.grn_id = $${idx++}`);
+            params.push(options.grnId);
+        }
+        if (options.supplierId) {
+            conditions.push(`r.supplier_id = $${idx++}`);
+            params.push(options.supplierId);
+        }
+        if (options.status) {
+            conditions.push(`r.status = $${idx++}`);
+            params.push(options.status);
+        }
+        if (options.search?.trim()) {
+            conditions.push(
+                `(r.return_grn_number ILIKE $${idx}
+                  OR g.receipt_number ILIKE $${idx}
+                  OR s."CompanyName" ILIKE $${idx}
+                  OR COALESCE(s."SupplierCode", '') ILIKE $${idx}
+                  OR COALESCE(r.reason, '') ILIKE $${idx})`,
+            );
+            params.push(`%${options.search.trim()}%`);
+            idx++;
+        }
+
+        const hasActiveScnSql = `EXISTS (
+           SELECT 1 FROM supplier_invoices si
+           WHERE si.return_grn_id = r.id
+             AND si.document_type = 'SUPPLIER_CREDIT_NOTE'
+             AND si.deleted_at IS NULL
+             AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
+         )`;
+
+        const hasSupplierBillSql = `EXISTS (
+           SELECT 1
+           FROM supplier_invoices si
+           WHERE si.document_type = 'SUPPLIER_INVOICE'
+             AND si.deleted_at IS NULL
+             AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+             AND (
+               si."Id" IN (
+                 SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+                 WHERE sigl.grn_id = r.grn_id
+               )
+               OR si."InternalReferenceNumber" = g.receipt_number
+               OR si."PurchaseOrderId" = g.purchase_order_id
+             )
+         )`;
+
+        if (options.needsAttention) {
+            // POSTED stock return still waiting for Supplier Credit Note
+            conditions.push(`r.status = 'POSTED'`);
+            conditions.push(`NOT (${hasActiveScnSql})`);
+        }
 
         const where = conditions.join(' AND ');
 
         const countRes = await pool.query(
-            `SELECT COUNT(*) FROM return_grn r WHERE ${where}`, params
+            `SELECT COUNT(*)::int AS count
+             FROM return_grn r
+             JOIN suppliers s ON s."Id" = r.supplier_id
+             JOIN goods_receipts g ON g.id = r.grn_id
+             WHERE ${where}`,
+            params,
         );
-        const total = parseInt(countRes.rows[0].count);
+        const total = Number(countRes.rows[0].count) || 0;
 
         const offset = (options.page - 1) * options.limit;
         const dataRes = await pool.query(
@@ -260,14 +334,66 @@ export const returnGrnRepository = {
          r.reason,
          r.created_by          AS "createdBy",
          r.created_at          AS "createdAt",
-         r.updated_at          AS "updatedAt"
+         r.updated_at          AS "updatedAt",
+         COALESCE(lines.total, 0)::float8 AS "totalAmount",
+         (${hasActiveScnSql}) AS "hasCreditNote",
+         (${hasSupplierBillSql}) AS "hasSupplierBill",
+         scn."SupplierInvoiceNumber" AS "creditNoteNumber",
+         scn."Status"::text AS "creditNoteStatus",
+         bill."SupplierInvoiceNumber" AS "supplierBillNumber",
+         CASE
+           WHEN r.status = 'DRAFT' THEN 'DRAFT'
+           WHEN NOT (${hasActiveScnSql}) AND NOT (${hasSupplierBillSql}) THEN 'NEED_BILL'
+           WHEN NOT (${hasActiveScnSql}) THEN 'NEED_SCN'
+           WHEN UPPER(COALESCE(scn."Status",'')) IN ('POSTED', 'OPEN', 'DRAFT') THEN 'HAS_SCN'
+           ELSE 'COMPLETE'
+         END AS "actionStatus"
        FROM return_grn r
        JOIN suppliers s ON s."Id" = r.supplier_id
        JOIN goods_receipts g ON g.id = r.grn_id
+       LEFT JOIN (
+         SELECT rgrn_id, SUM(line_total) AS total
+         FROM return_grn_lines
+         GROUP BY rgrn_id
+       ) lines ON lines.rgrn_id = r.id
+       LEFT JOIN LATERAL (
+         SELECT si."SupplierInvoiceNumber", si."Status"
+         FROM supplier_invoices si
+         WHERE si.return_grn_id = r.id
+           AND si.document_type = 'SUPPLIER_CREDIT_NOTE'
+           AND si.deleted_at IS NULL
+           AND UPPER(COALESCE(si."Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
+         ORDER BY si."CreatedAt" DESC
+         LIMIT 1
+       ) scn ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT si."SupplierInvoiceNumber"
+         FROM supplier_invoices si
+         WHERE si.document_type = 'SUPPLIER_INVOICE'
+           AND si.deleted_at IS NULL
+           AND COALESCE(si."Status",'') NOT IN ('Cancelled','CANCELLED','Voided','VOIDED')
+           AND (
+             si."Id" IN (
+               SELECT sigl.invoice_id FROM supplier_invoice_grn_links sigl
+               WHERE sigl.grn_id = r.grn_id
+             )
+             OR si."InternalReferenceNumber" = g.receipt_number
+             OR si."PurchaseOrderId" = g.purchase_order_id
+           )
+         ORDER BY si."CreatedAt" DESC
+         LIMIT 1
+       ) bill ON TRUE
        WHERE ${where}
-       ORDER BY r.created_at DESC
+       ORDER BY
+         CASE
+           WHEN r.status = 'POSTED' AND NOT (${hasActiveScnSql}) THEN 0
+           WHEN r.status = 'DRAFT' THEN 1
+           ELSE 2
+         END,
+         r.return_date DESC NULLS LAST,
+         r.created_at DESC
        LIMIT $${idx++} OFFSET $${idx++}`,
-            [...params, options.limit, offset]
+            [...params, options.limit, offset],
         );
 
         return { rows: dataRes.rows, total };

@@ -51,6 +51,7 @@ import { resolveCanonicalProductUom } from '../products/uomService.js';
 import { goodsReceiptRepository } from '../goods-receipts/goodsReceiptRepository.js';
 import { purchaseOrderRepository } from '../purchase-orders/purchaseOrderRepository.js';
 import { warehouseSupplierReturnDeductionService } from '../inventory/warehouse/warehouseSupplierReturnDeductionService.js';
+import { isGoodsReceiptPosted } from '@shared/domain/pgDomainEnums.js';
 import {
     assertWithinReturnableLimits,
     pickReturnableRow,
@@ -107,8 +108,8 @@ export const returnGrnService = {
             );
             if (grResult.rows.length === 0) throw new Error('Goods receipt not found');
             const gr = grResult.rows[0];
-            if (gr.status !== 'COMPLETED' && gr.status !== 'FINALIZED') {
-                throw new Error('Can only return items from a finalized goods receipt');
+            if (!isGoodsReceiptPosted(gr.status)) {
+                throw new Error('Can only return items from a posted (COMPLETED) goods receipt');
             }
             if (!gr.supplierId) throw new Error('GRN has no linked supplier');
 
@@ -571,7 +572,15 @@ export const returnGrnService = {
      */
     async list(
         pool: Pool,
-        options: { grnId?: string; supplierId?: string; status?: string; page: number; limit: number },
+        options: {
+            grnId?: string;
+            supplierId?: string;
+            status?: string;
+            search?: string;
+            needsAttention?: boolean;
+            page: number;
+            limit: number;
+        },
     ) {
         return returnGrnRepository.list(pool, options);
     },

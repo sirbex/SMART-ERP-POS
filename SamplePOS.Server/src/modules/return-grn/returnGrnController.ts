@@ -41,6 +41,12 @@ const ListQuerySchema = z.object({
     grnId: z.string().uuid().optional(),
     supplierId: z.string().uuid().optional(),
     status: z.enum(['DRAFT', 'POSTED']).optional(),
+    search: z.string().max(200).optional(),
+    /** When true/1: only POSTED returns still missing a supplier credit note */
+    needsAttention: z
+        .union([z.string(), z.boolean()])
+        .optional()
+        .transform((v) => v === true || v === 'true' || v === '1'),
 });
 
 // ============================================================
@@ -116,8 +122,10 @@ export const returnGrnController = {
             grnId: q.grnId,
             supplierId: q.supplierId,
             status: q.status,
+            search: q.search,
+            needsAttention: q.needsAttention,
             page: q.page,
-            limit: q.limit,
+            limit: Math.min(q.limit || 50, 200),
         });
 
         res.json({

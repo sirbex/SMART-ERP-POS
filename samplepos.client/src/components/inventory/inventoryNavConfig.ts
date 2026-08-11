@@ -49,7 +49,13 @@ export const INVENTORY_PRIMARY_NAV: InventoryNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', path: '/inventory', icon: '📊' },
   { id: 'products', label: 'Products', path: '/inventory/products', icon: '🏷️' },
   { id: 'stock', label: 'Stock', path: '/inventory/stock-levels', icon: '📦' },
-  { id: 'goods-receipts', label: 'Goods Receipts', path: '/inventory/goods-receipts', icon: '📥' },
+  {
+    id: 'goods-receipts',
+    label: 'Goods Receipts',
+    path: '/inventory/goods-receipts',
+    icon: '📥',
+    description: 'Receive stock and attend supplier returns from one desk',
+  },
   {
     id: 'purchase-orders',
     label: 'Purchase Orders',
@@ -203,6 +209,13 @@ export function isInventoryNavActive(pathname: string, path: string): boolean {
   }
   if (path === '/inventory/stock-levels') {
     return pathname === '/inventory/stock-levels';
+  }
+  // Receiving workbench: highlight Goods Receipts for receipts + returns sub-routes
+  if (path === '/inventory/goods-receipts') {
+    return (
+      pathname === '/inventory/goods-receipts' ||
+      pathname.startsWith('/inventory/goods-receipts/')
+    );
   }
   if (path.startsWith('/inventory/store-network')) {
     return isStoreNetworkSectionPath(pathname);
