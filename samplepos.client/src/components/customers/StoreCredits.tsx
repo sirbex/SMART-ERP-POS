@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Decimal from 'decimal.js';
 import { formatCurrency } from '../../utils/currency';
-import { useCustomers } from '../../hooks/useApi';
+import { useCustomers, useCustomer } from '../../hooks/useApi';
 import { DatePicker } from '../ui/date-picker';
 import { formatTimestampDate } from '../../utils/businessDate';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
+import {
+    canActOnCustomerId,
+    resolveCustomerDisplayName,
+} from '@shared/domain/customerDepositSsot';
 
 interface StoreCredit {
     id: string;
@@ -24,17 +28,30 @@ interface StoreCredit {
     lastUsedAt?: string;
 }
 
-interface StoreCreditsProps {
-    customerId?: string;
+/** Bound: opened on a known customer — name prop is mandatory (SSOT). */
+type BoundStoreCreditsProps = {
+    customerId: string;
+    customerName: string;
     className?: string;
     onCreditChange?: () => void;
-}
+};
 
-const StoreCredits: React.FC<StoreCreditsProps> = ({
-    customerId,
-    className = '',
-    onCreditChange
-}) => {
+/** Browse: pick customer first; list is catalog only, not write identity. */
+type BrowseStoreCreditsProps = {
+    customerId?: undefined;
+    customerName?: undefined;
+    className?: string;
+    onCreditChange?: () => void;
+};
+
+export type StoreCreditsProps = BoundStoreCreditsProps | BrowseStoreCreditsProps;
+
+const StoreCredits: React.FC<StoreCreditsProps> = (props) => {
+    const { className = '', onCreditChange } = props;
+    const isBound = typeof props.customerId === 'string' && props.customerId.length > 0;
+    const boundId = isBound ? props.customerId : '';
+    const boundName = isBound ? props.customerName : '';
+
     const [credits, setCredits] = useState<StoreCredit[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [showAddModal, setShowAddModal] = useState(false);
@@ -50,7 +67,11 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [showAddModal]);
 
-    const [selectedCustomer, setSelectedCustomer] = useState<string>(customerId || '');
+    const [selectedCustomer, setSelectedCustomer] = useState<string>(boundId);
+
+    useEffect(() => {
+        if (boundId) setSelectedCustomer(boundId);
+    }, [boundId]);
 
     // Add credit form state
     const [creditForm, setCreditForm] = useState({
@@ -61,8 +82,23 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
         source: ''
     });
 
+    // Browse catalog ONLY — never save gate / never bound identity
     const { data: customersResponse } = useCustomers(1, 100);
-    const customers = (customersResponse?.data || []) as Array<{ id: string; name: string }>;
+    const pickerCustomers = useMemo(
+        () => (isBound ? [] : ((customersResponse?.data || []) as Array<{ id: string; name: string }>)),
+        [isBound, customersResponse?.data],
+    );
+
+    const { data: customerDetail, isLoading: isLoadingMaster } = useCustomer(selectedCustomer);
+    const masterName = (customerDetail as { name?: string } | undefined)?.name;
+    const resolvedCustomerName = useMemo(
+        () =>
+            resolveCustomerDisplayName({
+                boundName: boundName || null,
+                masterName: masterName ?? null,
+            }),
+        [boundName, masterName],
+    );
 
     useEffect(() => {
         loadCredits();
@@ -99,8 +135,8 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
 
     const saveCredit = async () => {
         try {
-            const customer = customers.find(c => c.id === selectedCustomer);
-            if (!customer) {
+            // SSOT: UUID only — never require presence on first list page
+            if (!canActOnCustomerId(selectedCustomer)) {
                 alert('Please select a customer');
                 return;
             }
@@ -116,10 +152,19 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                 return;
             }
 
+            const customerNameSsot =
+                resolveCustomerDisplayName({
+                    boundName: boundName || null,
+                    masterName: masterName ?? null,
+                }) ||
+                // After picker: label from option is not identity SSOT; master GET preferred above.
+                // Last resort for display-only localStorage prototype:
+                (isLoadingMaster ? 'Customer' : 'Customer');
+
             const newCredit: StoreCredit = {
                 id: `credit-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                 customerId: selectedCustomer,
-                customerName: customer.name,
+                customerName: customerNameSsot,
                 amount: amount,
                 type: creditForm.type,
                 source: creditForm.source || 'Manual Entry',
@@ -263,16 +308,27 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                         </p>
                     </div>
                     <button
-                        onClick={() => setShowAddModal(true)}
-                        className="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+                        onClick={() => {
+                            if (!canActOnCustomerId(selectedCustomer)) {
+                                alert('Please select a customer first');
+                                return;
+                            }
+                            setShowAddModal(true);
+                        }}
+                        disabled={!canActOnCustomerId(selectedCustomer)}
+                        className={`px-4 py-2 rounded text-white ${
+                            canActOnCustomerId(selectedCustomer)
+                                ? 'bg-purple-600 hover:bg-purple-700'
+                                : 'bg-gray-400 cursor-not-allowed'
+                        }`}
                     >
                         + Issue Credit
                     </button>
                 </div>
             </div>
 
-            {/* Customer Selector (if not specific to one customer) */}
-            {!customerId && (
+            {/* Customer Selector — browse catalog only (not identity SSOT) */}
+            {!isBound && (
                 <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
                     <select
                         value={selectedCustomer}
@@ -281,12 +337,25 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                         aria-label="Filter by customer"
                     >
                         <option value="">All Customers</option>
-                        {customers.map(customer => (
+                        {pickerCustomers.map(customer => (
                             <option key={customer.id} value={customer.id}>
                                 {customer.name}
                             </option>
                         ))}
                     </select>
+                    {pickerCustomers.length >= 100 && (
+                        <p className="mt-1 text-xs text-amber-700">
+                            Picker shows a partial list. For other customers, open Customer Detail → Credits
+                            (identity SSOT uses the customer record, not this list).
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* Bound customer name */}
+            {isBound && resolvedCustomerName && (
+                <div className="px-6 py-2 bg-gray-50 border-b border-gray-200 text-sm text-gray-700">
+                    <span className="font-medium">{resolvedCustomerName}</span>
                 </div>
             )}
 
@@ -445,7 +514,16 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                         <h3 className="text-lg font-semibold mb-4">Issue Store Credit</h3>
 
                         <div className="space-y-4">
-                            {!customerId && (
+                            {canActOnCustomerId(selectedCustomer) && (
+                                <div className="p-3 bg-gray-50 rounded-md">
+                                    <p className="text-sm text-gray-600">Customer:</p>
+                                    <p className="font-medium">
+                                        {resolvedCustomerName ||
+                                            (isLoadingMaster ? 'Loading customer…' : 'Customer')}
+                                    </p>
+                                </div>
+                            )}
+                            {!isBound && (
                                 <div>
                                     <label htmlFor="credit-customer-select" className="block text-sm font-medium text-gray-700 mb-1">
                                         Customer
@@ -458,7 +536,7 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                                         required
                                     >
                                         <option value="">Select Customer</option>
-                                        {customers.map(customer => (
+                                        {pickerCustomers.map(customer => (
                                             <option key={customer.id} value={customer.id}>
                                                 {customer.name}
                                             </option>
@@ -549,7 +627,12 @@ const StoreCredits: React.FC<StoreCreditsProps> = ({
                             </button>
                             <button
                                 onClick={saveCredit}
-                                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700"
+                                disabled={!canActOnCustomerId(selectedCustomer)}
+                                className={`flex-1 px-4 py-2 rounded text-white ${
+                                    canActOnCustomerId(selectedCustomer)
+                                        ? 'bg-purple-600 hover:bg-purple-700'
+                                        : 'bg-gray-400 cursor-not-allowed'
+                                }`}
                             >
                                 Issue Credit
                             </button>

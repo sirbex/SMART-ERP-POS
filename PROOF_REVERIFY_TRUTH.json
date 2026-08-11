@@ -1,0 +1,52 @@
+{
+  "at": "2026-08-10T22:19:45.000Z",
+  "feature": "REVERIFY_TRUTH",
+  "verdict": "PASS",
+  "liveTenantE2E": false,
+  "suites": [
+    {
+      "id": "DEPOSIT_APPLICATION_POSTING_SSOT",
+      "verdict": "PASS",
+      "gates": "21/21",
+      "artifact": "PROOF_DEPOSIT_APPLICATION_POSTING_SSOT"
+    },
+    {
+      "id": "CUSTOMER_DEPOSIT_IDENTITY_SSOT",
+      "verdict": "PASS",
+      "gates": "30/30",
+      "includesStoreCredits": true,
+      "artifact": "PROOF_CUSTOMER_DEPOSIT_IDENTITY_SSOT"
+    },
+    {
+      "id": "AGED_BALANCE_INTEGRITY",
+      "verdict": "PASS",
+      "gates": "19/19",
+      "artifact": "PROOF_AGED_BALANCE_INTEGRITY"
+    },
+    {
+      "id": "PG_DOMAIN_ENUM_INTEGRITY",
+      "verdict": "PASS",
+      "gates": "16/16",
+      "artifact": "PROOF_PG_DOMAIN_ENUM_INTEGRITY"
+    },
+    {
+      "id": "JEST_MATCHED_DEPOSIT_GOV_BATCH",
+      "verdict": "PASS",
+      "tests": 135
+    }
+  ],
+  "truth": {
+    "depositApplySource": "DEPOSIT_APPLICATION",
+    "depositTakeSource": "PAYMENT_RECEIPT",
+    "bugReproPaymentReceiptStillBlocked": true,
+    "customerListNotSaveGate": true,
+    "storeCreditsSameIdentitySsot": true,
+    "agedPaymentMethodViaText": true,
+    "grirTs2352AddressedAsUnknownCast": true
+  },
+  "nonClaims": [
+    "No live order-complete with DEPOSIT payment re-run against tenant",
+    "No store-credit server GL proven",
+    "No GRIR F.13 business proof in this re-verify"
+  ]
+}

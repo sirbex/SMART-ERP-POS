@@ -1,6 +1,6 @@
 # PROOF — Aged Balances integrity
 
-**Generated:** 2026-08-10T21:22:01.775Z  
+**Generated:** 2026-08-11T04:06:43.914Z  
 **Verdict:** **PASS** (19/19 gates)
 
 ## Bugs fixed

@@ -67,10 +67,18 @@ describe('Customer deposit identity SSOT', () => {
   it('CustomerDeposits UI: no list save-gate; uses SSOT helpers; bound mounts pass name', () => {
     const ui = read('samplepos.client/src/components/customers/CustomerDeposits.tsx');
     for (const re of FORBIDDEN_CUSTOMER_DEPOSIT_CLIENT_PATTERNS) {
-      gate(`FORBIDDEN_${re.source.slice(0, 24)}`, !re.test(ui), re.source);
+      gate(`FORBIDDEN_DEP_${re.source.slice(0, 20)}`, !re.test(ui), re.source);
     }
-    gate('USES_CAN_POST', ui.includes('canPostCustomerDeposit'), 'save uses canPost SSOT');
-    gate('USES_RESOLVE_NAME', ui.includes('resolveCustomerDepositDisplayName'), 'name SSOT helper');
+    gate(
+      'USES_CAN_POST',
+      ui.includes('canPostCustomerDeposit') || ui.includes('canActOnCustomerId'),
+      'save uses canAct/canPost SSOT',
+    );
+    gate(
+      'USES_RESOLVE_NAME',
+      ui.includes('resolveCustomerDepositDisplayName') || ui.includes('resolveCustomerDisplayName'),
+      'name SSOT helper',
+    );
     gate(
       'NO_FIND_FOR_SAVE',
       !/customers\.find\s*\(/.test(ui) && !/pickerCustomers\.find\s*\(/.test(ui),
@@ -96,6 +104,42 @@ describe('Customer deposit identity SSOT', () => {
       'MODAL_PASSES_NAME',
       /CustomerDeposits[\s\S]{0,200}customerName=/.test(modal),
       'modal passes customerName',
+    );
+  });
+
+  it('StoreCredits UI: same identity SSOT (no list save-gate)', () => {
+    const ui = read('samplepos.client/src/components/customers/StoreCredits.tsx');
+    for (const re of FORBIDDEN_CUSTOMER_DEPOSIT_CLIENT_PATTERNS) {
+      gate(`FORBIDDEN_CR_${re.source.slice(0, 20)}`, !re.test(ui), re.source);
+    }
+    gate(
+      'CREDITS_USES_CAN_ACT',
+      ui.includes('canActOnCustomerId') || ui.includes('canPostCustomerDeposit'),
+      'save uses identity SSOT',
+    );
+    gate(
+      'CREDITS_NO_FIND_SAVE',
+      !/customers\.find\s*\(/.test(ui),
+      'no customers.find for save',
+    );
+    gate('CREDITS_USE_CUSTOMER', ui.includes('useCustomer'), 'master GET by id');
+    gate('CREDITS_IMPORT_SSOT', ui.includes('customerDepositSsot'), 'imports domain SSOT');
+    gate(
+      'CREDITS_PICKER_BROWSE',
+      ui.includes('pickerCustomers') || /isBound/.test(ui),
+      'list scoped to browse mode',
+    );
+
+    const page = read('samplepos.client/src/pages/customers/CustomerDetailPage.tsx');
+    gate(
+      'CREDITS_DETAIL_NAME',
+      /StoreCredits[\s\S]{0,200}customerName=/.test(page),
+      'detail passes customerName to StoreCredits',
+    );
+    gate(
+      'SSOT_APPLIES_TO_CREDITS',
+      (CUSTOMER_DEPOSIT_IDENTITY_SSOT.appliesTo as readonly string[]).includes('StoreCredits'),
+      'domain SSOT appliesTo includes StoreCredits',
     );
   });
 

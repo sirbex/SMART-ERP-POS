@@ -1462,8 +1462,8 @@ export default function CustomerDetailPage() {
         {customer && tab === 'credits' ? (
           <StoreCredits
             customerId={id}
+            customerName={String((customer as { name?: string }).name ?? '').trim() || 'Customer'}
             onCreditChange={() => {
-              // Refresh customer data when credits change
               window.location.reload();
             }}
           />

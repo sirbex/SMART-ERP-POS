@@ -1,6 +1,6 @@
 # PROOF — Postgres domain enum integrity
 
-**Generated:** 2026-08-10T21:22:07.722Z  
+**Generated:** 2026-08-11T04:06:44.906Z  
 **Verdict:** **PASS** (16/16 gates)
 
 ## Why this exists

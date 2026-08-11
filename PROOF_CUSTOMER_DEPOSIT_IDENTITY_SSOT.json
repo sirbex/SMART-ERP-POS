@@ -1,20 +1,24 @@
 {
-  "at": "2026-08-10T21:22:05.489Z",
+  "at": "2026-08-11T04:07:01.144Z",
   "feature": "CUSTOMER_DEPOSIT_IDENTITY_SSOT",
   "summary": {
-    "pass": 20,
+    "pass": 30,
     "fail": 0,
-    "total": 20,
+    "total": 30,
     "verdict": "PASS"
   },
   "rules": {
-    "writeIdentity": "customers.id via findCustomerById",
+    "writeIdentity": "customers.id (bound prop or picker selection → master GET)",
     "displayNameSources": [
       "bound.customerName",
       "GET customers/:id .name",
       "GET deposits/customer/:id/balance .customerName"
     ],
     "listApiRole": "browse_picker_only",
+    "appliesTo": [
+      "CustomerDeposits",
+      "StoreCredits"
+    ],
     "forbidden": [
       "Paginated customer list as save gate",
       "Name from list page slice when customerId is bound",
@@ -53,24 +57,24 @@
       "detail": "list is browse only"
     },
     {
-      "id": "FORBIDDEN_customers\\.find\\s*\\([^)]",
+      "id": "FORBIDDEN_DEP_customers\\.find\\s*\\(",
       "ok": true,
       "detail": "customers\\.find\\s*\\([^)]*\\)[\\s\\S]{0,80}Please select a customer"
     },
     {
-      "id": "FORBIDDEN_customers\\.find\\s*\\([^)]",
+      "id": "FORBIDDEN_DEP_customers\\.find\\s*\\(",
       "ok": true,
       "detail": "customers\\.find\\s*\\([^)]*\\)\\s*\\?\\.name\\s*\\|\\|\\s*['\"]Unknown['\"]"
     },
     {
-      "id": "FORBIDDEN_useCustomers\\s*\\(\\s*1\\s*",
+      "id": "FORBIDDEN_DEP_useCustomers\\s*\\(\\s*",
       "ok": true,
       "detail": "useCustomers\\s*\\(\\s*1\\s*,\\s*100\\s*\\)[\\s\\S]{0,400}customers\\.find"
     },
     {
       "id": "USES_CAN_POST",
       "ok": true,
-      "detail": "save uses canPost SSOT"
+      "detail": "save uses canAct/canPost SSOT"
     },
     {
       "id": "USES_RESOLVE_NAME",
@@ -106,6 +110,56 @@
       "id": "MODAL_PASSES_NAME",
       "ok": true,
       "detail": "modal passes customerName"
+    },
+    {
+      "id": "FORBIDDEN_CR_customers\\.find\\s*\\(",
+      "ok": true,
+      "detail": "customers\\.find\\s*\\([^)]*\\)[\\s\\S]{0,80}Please select a customer"
+    },
+    {
+      "id": "FORBIDDEN_CR_customers\\.find\\s*\\(",
+      "ok": true,
+      "detail": "customers\\.find\\s*\\([^)]*\\)\\s*\\?\\.name\\s*\\|\\|\\s*['\"]Unknown['\"]"
+    },
+    {
+      "id": "FORBIDDEN_CR_useCustomers\\s*\\(\\s*",
+      "ok": true,
+      "detail": "useCustomers\\s*\\(\\s*1\\s*,\\s*100\\s*\\)[\\s\\S]{0,400}customers\\.find"
+    },
+    {
+      "id": "CREDITS_USES_CAN_ACT",
+      "ok": true,
+      "detail": "save uses identity SSOT"
+    },
+    {
+      "id": "CREDITS_NO_FIND_SAVE",
+      "ok": true,
+      "detail": "no customers.find for save"
+    },
+    {
+      "id": "CREDITS_USE_CUSTOMER",
+      "ok": true,
+      "detail": "master GET by id"
+    },
+    {
+      "id": "CREDITS_IMPORT_SSOT",
+      "ok": true,
+      "detail": "imports domain SSOT"
+    },
+    {
+      "id": "CREDITS_PICKER_BROWSE",
+      "ok": true,
+      "detail": "list scoped to browse mode"
+    },
+    {
+      "id": "CREDITS_DETAIL_NAME",
+      "ok": true,
+      "detail": "detail passes customerName to StoreCredits"
+    },
+    {
+      "id": "SSOT_APPLIES_TO_CREDITS",
+      "ok": true,
+      "detail": "domain SSOT appliesTo includes StoreCredits"
     },
     {
       "id": "FIND_BY_ID",
