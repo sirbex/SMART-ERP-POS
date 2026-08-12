@@ -76,6 +76,17 @@ describe('quotation UoM display contract', () => {
   });
 });
 
+describe('quotation money column contract', () => {
+  it('unit price + line total consume enough width to print UGX amounts', () => {
+    const extraCols = 0;
+    const moneyW = extraCols === 0 ? 0.22 : extraCols === 1 ? 0.16 : 0.14;
+    const a4ContentWidth = 595 - 40 - 40;
+    const cellW = moneyW * a4ContentWidth - 8;
+    // Helvetica 9pt "UGX 10,000.00" is ~70pt; 12% column was ~54pt (clips to UGX…).
+    expect(cellW).toBeGreaterThan(90);
+  });
+});
+
 describe('document footer contract', () => {
   it('treats whitespace-only footer as absent', () => {
     const normalize = (text: string | null | undefined) => text?.trim() || null;

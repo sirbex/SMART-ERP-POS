@@ -1,0 +1,44 @@
+{
+  "superseded": true,
+  "use": "PROOF_HR_SALARY_ADVANCES_CONSOLIDATED",
+  "generatedAt": "2026-08-12T13:28:18.885Z",
+  "summary": {
+    "passed": 55,
+    "failed": 0,
+    "total": 55,
+    "bySection": {
+      "A": {
+        "pass": 8,
+        "fail": 0
+      },
+      "B": {
+        "pass": 8,
+        "fail": 0
+      },
+      "C": {
+        "pass": 8,
+        "fail": 0
+      },
+      "D": {
+        "pass": 5,
+        "fail": 0
+      },
+      "E": {
+        "pass": 3,
+        "fail": 0
+      },
+      "F": {
+        "pass": 3,
+        "fail": 0
+      },
+      "G": {
+        "pass": 16,
+        "fail": 0
+      },
+      "H": {
+        "pass": 4,
+        "fail": 0
+      }
+    }
+  }
+}

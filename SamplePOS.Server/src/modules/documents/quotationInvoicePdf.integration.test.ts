@@ -183,6 +183,56 @@ describe('Quotation PDF integration proof', () => {
     expect(withFooter.length).toBeGreaterThan(withoutFooter.length);
   });
 
+  it('shows full unit price — never clips UGX 10,000.00 to UGX…', async () => {
+    const buf = await renderPdf(
+      { title: 'QUOTATION', number: 'Q-2026-0140', subtitle: 'kabaata' },
+      null,
+      (ctx) =>
+        renderQuotationBody(ctx, {
+          showTax: false,
+          showDiscount: false,
+          quotation: {
+            quoteNumber: 'Q-2026-0140',
+            quoteType: 'standard',
+            status: 'DRAFT',
+            validFrom: '2026-08-12',
+            validUntil: '2026-09-11',
+            customerName: 'kabaata',
+            customerEmail: null,
+            customerPhone: '+2567542450214',
+            reference: null,
+            description: null,
+            subtotal: 20000,
+            discountAmount: 0,
+            taxAmount: 0,
+            totalAmount: 20000,
+            paymentTerms: 'Net 30',
+            deliveryTerms: '7-14 business days',
+            termsAndConditions: null,
+          },
+          items: [
+            {
+              lineNumber: 1,
+              sku: null,
+              description: 'Abmist Eye drops',
+              quantity: 2,
+              uomName: 'EA',
+              unitPrice: 10000,
+              discountAmount: 0,
+              taxAmount: 0,
+              lineTotal: 20000,
+            },
+          ],
+        }),
+    );
+    assertValidPdf(buf);
+    const text = extractPdfText(buf);
+    expect(text.includes('Abmist Eye drops')).toBe(true);
+    expect(text.includes('UGX 10,000.00')).toBe(true);
+    expect(text.includes('UGX 20,000.00')).toBe(true);
+    expect(text.includes('UGX…') || text.includes('UGX...')).toBe(false);
+  });
+
   it('shows quote number as reference when user reference is empty', async () => {
     expect(
       quotationReferenceDetailLines(null, null),

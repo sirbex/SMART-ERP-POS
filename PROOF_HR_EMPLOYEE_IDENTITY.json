@@ -1,0 +1,221 @@
+{
+  "proof": "PROOF_HR_EMPLOYEE_IDENTITY",
+  "generatedAt": "2026-08-12T13:28:18.577Z",
+  "summary": {
+    "total": 33,
+    "passed": 33,
+    "failed": 0,
+    "ok": true
+  },
+  "gates": [
+    {
+      "id": "types",
+      "section": "ssot",
+      "ok": true,
+      "detail": "PERMANENT,CASUAL,CONTRACT"
+    },
+    {
+      "id": "normalize_default",
+      "section": "ssot",
+      "ok": true,
+      "detail": "defaults PERMANENT"
+    },
+    {
+      "id": "casual_no_login_required",
+      "section": "ssot",
+      "ok": true,
+      "detail": "casuals need no user"
+    },
+    {
+      "id": "permanent_no_login_required",
+      "section": "ssot",
+      "ok": true,
+      "detail": "login always optional"
+    },
+    {
+      "id": "block_double_link",
+      "section": "ssot",
+      "ok": true,
+      "detail": "user cannot link to two employees"
+    },
+    {
+      "id": "allow_same_employee",
+      "section": "ssot",
+      "ok": true,
+      "detail": "re-save same link ok"
+    },
+    {
+      "id": "null_user_ok",
+      "section": "ssot",
+      "ok": true,
+      "detail": "no login is valid"
+    },
+    {
+      "id": "end_ok",
+      "section": "ssot",
+      "ok": true,
+      "detail": "INACTIVE + EndDate valid"
+    },
+    {
+      "id": "end_requires_date",
+      "section": "ssot",
+      "ok": true,
+      "detail": "EndDate required when ending"
+    },
+    {
+      "id": "end_before_hire",
+      "section": "ssot",
+      "ok": true,
+      "detail": "EndDate before HireDate rejected"
+    },
+    {
+      "id": "file",
+      "section": "schema",
+      "ok": true,
+      "detail": "shared/sql/602_hr_employee_identity.sql"
+    },
+    {
+      "id": "employment_type",
+      "section": "schema",
+      "ok": true,
+      "detail": "EmploymentType column"
+    },
+    {
+      "id": "end_date",
+      "section": "schema",
+      "ok": true,
+      "detail": "EndDate column"
+    },
+    {
+      "id": "unique_userid",
+      "section": "schema",
+      "ok": true,
+      "detail": "partial unique UserId"
+    },
+    {
+      "id": "types_check",
+      "section": "schema",
+      "ok": true,
+      "detail": "PERMANENT in CHECK"
+    },
+    {
+      "id": "casual",
+      "section": "schema",
+      "ok": true,
+      "detail": "CASUAL in CHECK"
+    },
+    {
+      "id": "linkable_route",
+      "section": "api",
+      "ok": true,
+      "detail": "GET linkable-users"
+    },
+    {
+      "id": "related_user_route",
+      "section": "api",
+      "ok": true,
+      "detail": "POST related-user"
+    },
+    {
+      "id": "end_route",
+      "section": "api",
+      "ok": true,
+      "detail": "POST end-employment"
+    },
+    {
+      "id": "createRelatedUser",
+      "section": "api",
+      "ok": true,
+      "detail": "service createRelatedUser"
+    },
+    {
+      "id": "endEmployment",
+      "section": "api",
+      "ok": true,
+      "detail": "service endEmployment"
+    },
+    {
+      "id": "findByUserId",
+      "section": "api",
+      "ok": true,
+      "detail": "repo findByUserId"
+    },
+    {
+      "id": "employmentType_schema",
+      "section": "api",
+      "ok": true,
+      "detail": "controller EmploymentType"
+    },
+    {
+      "id": "assert_link",
+      "section": "api",
+      "ok": true,
+      "detail": "link uniqueness enforced"
+    },
+    {
+      "id": "employmentType",
+      "section": "ui",
+      "ok": true,
+      "detail": "employment type field"
+    },
+    {
+      "id": "related_login",
+      "section": "ui",
+      "ok": true,
+      "detail": "related login picker"
+    },
+    {
+      "id": "create_login",
+      "section": "ui",
+      "ok": true,
+      "detail": "create login API"
+    },
+    {
+      "id": "end_employment",
+      "section": "ui",
+      "ok": true,
+      "detail": "end employment API"
+    },
+    {
+      "id": "casual_filter",
+      "section": "ui",
+      "ok": true,
+      "detail": "casual filter/option"
+    },
+    {
+      "id": "math_ssot",
+      "section": "payroll",
+      "ok": true,
+      "detail": "payrollMath still SSOT"
+    },
+    {
+      "id": "advance_journal",
+      "section": "payroll",
+      "ok": true,
+      "detail": "advance journal builder intact"
+    },
+    {
+      "id": "disbursement",
+      "section": "payroll",
+      "ok": true,
+      "detail": "cash governance intact"
+    },
+    {
+      "id": "service_uses_math",
+      "section": "payroll",
+      "ok": true,
+      "detail": "hr.service still posts via payrollMath"
+    }
+  ],
+  "model": {
+    "employee": "HR/payroll master (always)",
+    "user": "optional related login / POS / RBAC",
+    "link": "1:1 when set; NULL allowed for casuals",
+    "types": [
+      "PERMANENT",
+      "CASUAL",
+      "CONTRACT"
+    ],
+    "end": "INACTIVE + EndDate; optionally deactivate login"
+  }
+}

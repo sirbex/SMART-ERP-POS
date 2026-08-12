@@ -40,6 +40,8 @@ export type PermissionAction =
   | 'manage'
   | 'payroll_process'
   | 'payroll_post'
+  | 'payroll_pay'
+  | 'advance'
   | 'adjust'
   | 'execute'
   | 'sales_view'

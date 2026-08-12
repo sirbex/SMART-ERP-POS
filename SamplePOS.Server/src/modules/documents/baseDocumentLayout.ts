@@ -222,16 +222,27 @@ export const Layout = {
                 const value = c.format ? c.format(raw, row) : (raw == null ? '' : String(raw));
                 // Keep every cell strictly single-line: flatten newlines/tabs and collapse whitespace.
                 const safeValue = String(value).replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+                const cellW = Math.max(4, widths[i] - 8);
+                const align = c.align ?? 'left';
+                // Money/qty columns must never become "UGX…" — shrink font instead of ellipsis.
+                const allowEllipsis = align !== 'right';
+                let fontSize = theme.fonts.size.base;
+                doc.font(theme.fonts.family).fontSize(fontSize);
+                if (!allowEllipsis) {
+                    const minSize = 6;
+                    while (doc.widthOfString(safeValue) > cellW && fontSize > minSize) {
+                        fontSize -= 0.5;
+                        doc.fontSize(fontSize);
+                    }
+                }
                 doc
                     .fillColor(theme.colors.text)
-                    .font(theme.fonts.family)
-                    .fontSize(theme.fonts.size.base)
                     .text(safeValue, x + 4, y + 6, {
-                        width: widths[i] - 8,
+                        width: cellW,
                         height: rowH - 8,
-                        align: c.align ?? 'left',
+                        align,
                         lineBreak: false,
-                        ellipsis: true,
+                        ellipsis: allowEllipsis,
                     });
                 x += widths[i];
             });

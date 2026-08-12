@@ -1,0 +1,393 @@
+{
+  "proof": "HR_SALARY_ADVANCES_CONSOLIDATED",
+  "soleAcceptance": true,
+  "supersedes": [
+    "PROOF_HR_PAYROLL_INTEGRITY"
+  ],
+  "generatedAt": "2026-08-12T13:28:18.885Z",
+  "summary": {
+    "passed": 55,
+    "failed": 0,
+    "total": 55,
+    "bySection": {
+      "A": {
+        "pass": 8,
+        "fail": 0
+      },
+      "B": {
+        "pass": 8,
+        "fail": 0
+      },
+      "C": {
+        "pass": 8,
+        "fail": 0
+      },
+      "D": {
+        "pass": 5,
+        "fail": 0
+      },
+      "E": {
+        "pass": 3,
+        "fail": 0
+      },
+      "F": {
+        "pass": 3,
+        "fail": 0
+      },
+      "G": {
+        "pass": 16,
+        "fail": 0
+      },
+      "H": {
+        "pass": 4,
+        "fail": 0
+      }
+    }
+  },
+  "identities": {
+    "salaryAdvance": "DR 1410 / CR 1012|bank|MoMo · source PAYROLL",
+    "tillShortageCharge": "DR 1410 / CR 1010 · source CASH_VARIANCE",
+    "accrual": "DR 6000 gross / CR 1410 recovered / CR 2400 net",
+    "pay": "DR 2400 / CR 1012|bank|MoMo · source PAYROLL",
+    "ruleD": "PAYROLL cannot credit CASH 1010; CASH_VARIANCE can",
+    "cashLoop": "advanceOut + netPay = gross (no float)",
+    "tillNotesPath": "TREASURY_PETTY_CASH fund 1012 from 1010, then salary advance from 1012"
+  },
+  "requiredMigrations": [
+    "598_hr_payroll_complete.sql",
+    "599_hr_payroll_integrity.sql",
+    "601_hr_cash_governance.sql"
+  ],
+  "gates": [
+    {
+      "id": "ANTI_NO_DEFAULT_1010_UI",
+      "section": "A",
+      "ok": true,
+      "detail": "UI must not default pay-from to 1010"
+    },
+    {
+      "id": "ANTI_LIST_EXCLUDES_1010",
+      "section": "A",
+      "ok": true,
+      "detail": "payment account list excludes till/UF"
+    },
+    {
+      "id": "ANTI_598_NO_PAYROLL_ON_1010",
+      "section": "A",
+      "ok": true,
+      "detail": "598 must not grant PAYROLL onto 1010"
+    },
+    {
+      "id": "ANTI_SHORTAGE_NOT_PAYROLL_SOURCE",
+      "section": "A",
+      "ok": true,
+      "detail": "shortage must not post as PAYROLL"
+    },
+    {
+      "id": "ANTI_TILL_VAR_NOT_RECEIPT",
+      "section": "A",
+      "ok": true,
+      "detail": "till variance must not use PAYMENT_RECEIPT"
+    },
+    {
+      "id": "ANTI_SVC_NO_CATCH_SWALLOW",
+      "section": "A",
+      "ok": true,
+      "detail": "no swallowed payment-account errors"
+    },
+    {
+      "id": "ANTI_GOV_HAS_CASH_VARIANCE",
+      "section": "A",
+      "ok": true,
+      "detail": "CASH_VARIANCE in PostingSource"
+    },
+    {
+      "id": "ANTI_GOV_RULE_D_ALLOWS_VARIANCE",
+      "section": "A",
+      "ok": true,
+      "detail": "Rule D allows CASH_VARIANCE"
+    },
+    {
+      "id": "DISB_TILL",
+      "section": "B",
+      "ok": true,
+      "detail": "till=1010"
+    },
+    {
+      "id": "DISB_PETTY",
+      "section": "B",
+      "ok": true,
+      "detail": "petty=1012"
+    },
+    {
+      "id": "DISB_1010_FORBIDDEN",
+      "section": "B",
+      "ok": true,
+      "detail": "1010+CASH blocked"
+    },
+    {
+      "id": "DISB_1015_FORBIDDEN",
+      "section": "B",
+      "ok": true,
+      "detail": "1015 blocked"
+    },
+    {
+      "id": "DISB_1012_OK",
+      "section": "B",
+      "ok": true,
+      "detail": "1012 allowed"
+    },
+    {
+      "id": "DISB_ASSERT_THROWS",
+      "section": "B",
+      "ok": true,
+      "detail": "assert throws for till"
+    },
+    {
+      "id": "DISB_PICK",
+      "section": "B",
+      "ok": true,
+      "detail": "pick prefers 1012"
+    },
+    {
+      "id": "DISB_ASSERT_LOADS_TAG",
+      "section": "B",
+      "ok": true,
+      "detail": "assertPaymentAccount loads code+tag from DB"
+    },
+    {
+      "id": "MATH_DECIMAL",
+      "section": "C",
+      "ok": true,
+      "detail": "decimal.js"
+    },
+    {
+      "id": "MATH_NO_ROUND",
+      "section": "C",
+      "ok": true,
+      "detail": "no Math.round"
+    },
+    {
+      "id": "MATH_NO_MIN",
+      "section": "C",
+      "ok": true,
+      "detail": "no Math.min"
+    },
+    {
+      "id": "MATH_2DP",
+      "section": "C",
+      "ok": true,
+      "detail": "gross dp=2"
+    },
+    {
+      "id": "MATH_IDENTITY",
+      "section": "C",
+      "ok": true,
+      "detail": "1100000.02 = 400000.01+700000.01"
+    },
+    {
+      "id": "EXPORT_BOM",
+      "section": "C",
+      "ok": true,
+      "detail": "UTF-8 BOM"
+    },
+    {
+      "id": "EXPORT_TOTAL_IDENTITY",
+      "section": "C",
+      "ok": true,
+      "detail": "export totals identity"
+    },
+    {
+      "id": "EXPORT_UNBALANCED_FAILS",
+      "section": "C",
+      "ok": true,
+      "detail": "unbalanced export refused"
+    },
+    {
+      "id": "GL_ACCRUAL",
+      "section": "D",
+      "ok": true,
+      "detail": "DR 6000 / CR 1410 / CR 2400"
+    },
+    {
+      "id": "GL_ADVANCE",
+      "section": "D",
+      "ok": true,
+      "detail": "salary advance CR 1012"
+    },
+    {
+      "id": "GL_SHORTAGE_TILL",
+      "section": "D",
+      "ok": true,
+      "detail": "shortage CR 1010 only"
+    },
+    {
+      "id": "GL_PAY",
+      "section": "D",
+      "ok": true,
+      "detail": "pay CR 1012"
+    },
+    {
+      "id": "FIFO",
+      "section": "D",
+      "ok": true,
+      "detail": "[{\"advanceId\":\"a1\",\"amount\":100000},{\"advanceId\":\"a2\",\"amount\":200000}]"
+    },
+    {
+      "id": "GOV_PAYROLL_CR_1010_BLOCKED",
+      "section": "E",
+      "ok": true,
+      "detail": "Rule D blocks PAYROLL+CR 1010"
+    },
+    {
+      "id": "GOV_VARIANCE_CR_1010_OK",
+      "section": "E",
+      "ok": true,
+      "detail": "CASH_VARIANCE+CR 1010 allowed"
+    },
+    {
+      "id": "GOV_PAYROLL_CR_1012_OK",
+      "section": "E",
+      "ok": true,
+      "detail": "PAYROLL+CR 1012 allowed"
+    },
+    {
+      "id": "LOOP_MATH",
+      "section": "F",
+      "ok": true,
+      "detail": "{\"basicSalary\":1000000,\"allowances\":100000,\"gross\":1100000,\"advanceRecovered\":400000,\"deductions\":400000,\"netPay\":700000}"
+    },
+    {
+      "id": "LOOP_CASH_EQ_GROSS",
+      "section": "F",
+      "ok": true,
+      "detail": "cashOut 1100000 = gross 1100000"
+    },
+    {
+      "id": "LOOP_NO_DOUBLE_SHORTAGE",
+      "section": "F",
+      "ok": true,
+      "detail": "shortage never credits petty"
+    },
+    {
+      "id": "WIRE_PROCESS_LOCK",
+      "section": "G",
+      "ok": true,
+      "detail": "processPayroll FOR UPDATE"
+    },
+    {
+      "id": "WIRE_PROCESS_NO_REPOST",
+      "section": "G",
+      "ok": true,
+      "detail": "refuse re-process after GL"
+    },
+    {
+      "id": "WIRE_LIQUIDITY_PAY",
+      "section": "G",
+      "ok": true,
+      "detail": "pay checks liquidity"
+    },
+    {
+      "id": "WIRE_LIQUIDITY_ADV",
+      "section": "G",
+      "ok": true,
+      "detail": "advance checks liquidity"
+    },
+    {
+      "id": "WIRE_POST_LOCK",
+      "section": "G",
+      "ok": true,
+      "detail": "postPayroll locks"
+    },
+    {
+      "id": "WIRE_PAY_LOCK",
+      "section": "G",
+      "ok": true,
+      "detail": "payPayroll locks"
+    },
+    {
+      "id": "WIRE_DUP_ACCRUAL",
+      "section": "G",
+      "ok": true,
+      "detail": "dup accrual blocked"
+    },
+    {
+      "id": "WIRE_DUP_PAY",
+      "section": "G",
+      "ok": true,
+      "detail": "dup pay blocked"
+    },
+    {
+      "id": "WIRE_MIG_601",
+      "section": "G",
+      "ok": true,
+      "detail": "601 strips PAYROLL from till + grants CASH_VARIANCE"
+    },
+    {
+      "id": "WIRE_MIG_598_ADV",
+      "section": "G",
+      "ok": true,
+      "detail": "598 advances table"
+    },
+    {
+      "id": "WIRE_MIG_599_UQ",
+      "section": "G",
+      "ok": true,
+      "detail": "599 integrity constraints"
+    },
+    {
+      "id": "WIRE_SUBLEDGER_ACTIVE",
+      "section": "G",
+      "ok": true,
+      "detail": "heal inactive/missing 2400 sub-ledger before post"
+    },
+    {
+      "id": "WIRE_DELETE_NO_ORPHAN",
+      "section": "G",
+      "ok": true,
+      "detail": "block delete that deactivates sub-ledger then fails FK"
+    },
+    {
+      "id": "WIRE_POST_ENSURE_ALL",
+      "section": "G",
+      "ok": true,
+      "detail": "post always ensures sub-ledgers (not only when code null)"
+    },
+    {
+      "id": "WIRE_UI_SHORTAGE",
+      "section": "G",
+      "ok": true,
+      "detail": "UI shortage forces 1010 / hides pay-from"
+    },
+    {
+      "id": "WIRE_UI_PICK",
+      "section": "G",
+      "ok": true,
+      "detail": "UI pick SSOT"
+    },
+    {
+      "id": "FAIL_IDENTITY",
+      "section": "H",
+      "ok": true,
+      "detail": "must throw"
+    },
+    {
+      "id": "FAIL_PAY_ZERO",
+      "section": "H",
+      "ok": true,
+      "detail": "must throw"
+    },
+    {
+      "id": "FAIL_ADV_ZERO",
+      "section": "H",
+      "ok": true,
+      "detail": "must throw"
+    },
+    {
+      "id": "FAIL_FIFO_SHORT",
+      "section": "H",
+      "ok": true,
+      "detail": "must throw"
+    }
+  ]
+}

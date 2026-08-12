@@ -35,14 +35,22 @@ export interface EmployeeDbRow {
     PositionId: string | null;
     HireDate: string;
     Status: string;
+    EmploymentType?: string;
+    EndDate?: string | null;
     LedgerAccountId: string | null;
+    AdvanceAccountId?: string | null;
+    MonthlyAllowance?: string | null;
     CreatedAt: Date;
     // Joined fields
     department_name?: string;
     position_title?: string;
     position_base_salary?: string | null;
     user_full_name?: string;
+    user_email?: string | null;
+    user_is_active?: boolean | null;
     ledger_account_code?: string | null;
+    advance_account_code?: string | null;
+    open_advance_remaining?: string | null;
 }
 
 export interface PayrollPeriodDbRow {
@@ -63,7 +71,10 @@ export interface PayrollEntryDbRow {
     Allowances: string | null;
     Deductions: string | null;
     NetPay: string | null;
+    AdvanceRecovered?: string | null;
     JournalEntryId: string | null;
+    PaymentJournalEntryId?: string | null;
+    PaidAt?: Date | null;
     CreatedAt: Date;
     // Joined fields
     employee_first_name?: string;
@@ -71,7 +82,9 @@ export interface PayrollEntryDbRow {
     department_name?: string;
     position_title?: string;
     employee_account_code?: string | null;
+    advance_account_code?: string | null;
     journal_transaction_number?: string | null;
+    payment_transaction_number?: string | null;
 }
 
 // ============================================================================
@@ -191,7 +204,14 @@ export const positionRepository = {
 export const employeeRepository = {
     async list(
         pool: Pool | PoolClient,
-        opts: { limit: number; offset: number; status?: string; search?: string; departmentId?: string }
+        opts: {
+            limit: number;
+            offset: number;
+            status?: string;
+            search?: string;
+            departmentId?: string;
+            employmentType?: string;
+        }
     ): Promise<{ rows: EmployeeDbRow[]; total: number }> {
         const conditions: string[] = [];
         const values: unknown[] = [];
@@ -204,6 +224,10 @@ export const employeeRepository = {
         if (opts.departmentId) {
             conditions.push(`e."DepartmentId" = $${idx++}`);
             values.push(opts.departmentId);
+        }
+        if (opts.employmentType) {
+            conditions.push(`e."EmploymentType" = $${idx++}`);
+            values.push(opts.employmentType);
         }
         if (opts.search) {
             conditions.push(`(e."FirstName" ILIKE $${idx} OR e."LastName" ILIKE $${idx} OR e."Email" ILIKE $${idx})`);
@@ -225,12 +249,16 @@ export const employeeRepository = {
               p."Title" AS position_title,
               p."BaseSalary" AS position_base_salary,
               u.full_name AS user_full_name,
-              a."AccountCode" AS ledger_account_code
+              u.email AS user_email,
+              u.is_active AS user_is_active,
+              a."AccountCode" AS ledger_account_code,
+              adv."AccountCode" AS advance_account_code
        FROM employees e
        LEFT JOIN departments d ON d."Id" = e."DepartmentId"
        LEFT JOIN positions p ON p."Id" = e."PositionId"
        LEFT JOIN users u ON u.id = e."UserId"
        LEFT JOIN accounts a ON a."Id" = e."LedgerAccountId"
+       LEFT JOIN accounts adv ON adv."Id" = e."AdvanceAccountId"
        ${where}
        ORDER BY e."LastName", e."FirstName"
        LIMIT $${idx++} OFFSET $${idx}`,
@@ -250,16 +278,62 @@ export const employeeRepository = {
               p."Title" AS position_title,
               p."BaseSalary" AS position_base_salary,
               u.full_name AS user_full_name,
-              a."AccountCode" AS ledger_account_code
+              u.email AS user_email,
+              u.is_active AS user_is_active,
+              a."AccountCode" AS ledger_account_code,
+              adv."AccountCode" AS advance_account_code
        FROM employees e
        LEFT JOIN departments d ON d."Id" = e."DepartmentId"
        LEFT JOIN positions p ON p."Id" = e."PositionId"
        LEFT JOIN users u ON u.id = e."UserId"
        LEFT JOIN accounts a ON a."Id" = e."LedgerAccountId"
+       LEFT JOIN accounts adv ON adv."Id" = e."AdvanceAccountId"
        WHERE e."Id" = $1`,
             [id]
         );
         return result.rows[0] || null;
+    },
+
+    async findByUserId(pool: Pool | PoolClient, userId: string): Promise<EmployeeDbRow | null> {
+        const result = await pool.query(
+            `SELECT e.*,
+              d."Name" AS department_name,
+              p."Title" AS position_title,
+              p."BaseSalary" AS position_base_salary,
+              u.full_name AS user_full_name,
+              u.email AS user_email,
+              u.is_active AS user_is_active,
+              a."AccountCode" AS ledger_account_code,
+              adv."AccountCode" AS advance_account_code
+       FROM employees e
+       LEFT JOIN departments d ON d."Id" = e."DepartmentId"
+       LEFT JOIN positions p ON p."Id" = e."PositionId"
+       LEFT JOIN users u ON u.id = e."UserId"
+       LEFT JOIN accounts a ON a."Id" = e."LedgerAccountId"
+       LEFT JOIN accounts adv ON adv."Id" = e."AdvanceAccountId"
+       WHERE e."UserId" = $1`,
+            [userId]
+        );
+        return result.rows[0] || null;
+    },
+
+    async listLinkableUsers(
+        pool: Pool | PoolClient,
+        opts?: { includeUserId?: string | null }
+    ): Promise<Array<{ id: string; fullName: string; email: string; role: string; isActive: boolean }>> {
+        const includeId = opts?.includeUserId ?? null;
+        const result = await pool.query(
+            `SELECT u.id, u.full_name AS "fullName", u.email, u.role, u.is_active AS "isActive"
+       FROM users u
+       WHERE u.is_active = true
+         AND (
+           NOT EXISTS (SELECT 1 FROM employees e WHERE e."UserId" = u.id)
+           OR ($1::uuid IS NOT NULL AND u.id = $1)
+         )
+       ORDER BY u.full_name`,
+            [includeId]
+        );
+        return result.rows;
     },
 
     async create(
@@ -273,11 +347,18 @@ export const employeeRepository = {
             departmentId?: string | null;
             positionId?: string | null;
             hireDate: string;
+            employmentType?: string;
+            endDate?: string | null;
+            status?: string;
         }
     ): Promise<EmployeeDbRow> {
         const result = await pool.query(
-            `INSERT INTO employees ("UserId", "FirstName", "LastName", "Phone", "Email", "DepartmentId", "PositionId", "HireDate")
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `INSERT INTO employees (
+              "UserId", "FirstName", "LastName", "Phone", "Email",
+              "DepartmentId", "PositionId", "HireDate",
+              "EmploymentType", "EndDate", "Status"
+            )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
             [
                 data.userId ?? null,
@@ -288,6 +369,9 @@ export const employeeRepository = {
                 data.departmentId ?? null,
                 data.positionId ?? null,
                 data.hireDate,
+                data.employmentType ?? 'PERMANENT',
+                data.endDate ?? null,
+                data.status ?? 'ACTIVE',
             ]
         );
         return result.rows[0];
@@ -306,6 +390,9 @@ export const employeeRepository = {
             positionId?: string | null;
             hireDate?: string;
             status?: string;
+            employmentType?: string;
+            endDate?: string | null;
+            monthlyAllowance?: number;
         }
     ): Promise<EmployeeDbRow | null> {
         const sets: string[] = [];
@@ -322,6 +409,9 @@ export const employeeRepository = {
             positionId: '"PositionId"',
             hireDate: '"HireDate"',
             status: '"Status"',
+            employmentType: '"EmploymentType"',
+            endDate: '"EndDate"',
+            monthlyAllowance: '"MonthlyAllowance"',
         };
 
         for (const [key, col] of Object.entries(fieldMap)) {
@@ -373,11 +463,18 @@ export const employeeRepository = {
               d."Name" AS department_name,
               p."Title" AS position_title,
               p."BaseSalary" AS position_base_salary,
-              a."AccountCode" AS ledger_account_code
+              a."AccountCode" AS ledger_account_code,
+              adv."AccountCode" AS advance_account_code,
+              COALESCE((
+                SELECT SUM(ea."RemainingAmount")
+                FROM employee_advances ea
+                WHERE ea."EmployeeId" = e."Id" AND ea."Status" IN ('OPEN', 'PARTIAL')
+              ), 0) AS open_advance_remaining
        FROM employees e
        LEFT JOIN departments d ON d."Id" = e."DepartmentId"
        LEFT JOIN positions p ON p."Id" = e."PositionId"
        LEFT JOIN accounts a ON a."Id" = e."LedgerAccountId"
+       LEFT JOIN accounts adv ON adv."Id" = e."AdvanceAccountId"
        WHERE e."Status" = 'ACTIVE'
        ORDER BY e."LastName", e."FirstName"`
         );
@@ -393,6 +490,28 @@ export const employeeRepository = {
             `UPDATE employees SET "LedgerAccountId" = $1 WHERE "Id" = $2`,
             [accountId, employeeId]
         );
+    },
+
+    async setAdvanceAccountId(
+        client: Pool | PoolClient,
+        employeeId: string,
+        accountId: string
+    ): Promise<void> {
+        await client.query(
+            `UPDATE employees SET "AdvanceAccountId" = $1 WHERE "Id" = $2`,
+            [accountId, employeeId]
+        );
+    },
+
+    async hasFinancialHistory(pool: Pool | PoolClient, employeeId: string): Promise<boolean> {
+        const result = await pool.query(
+            `SELECT (
+         EXISTS (SELECT 1 FROM payroll_entries WHERE "EmployeeId" = $1)
+         OR EXISTS (SELECT 1 FROM employee_advances WHERE "EmployeeId" = $1)
+       ) AS has_history`,
+            [employeeId]
+        );
+        return Boolean(result.rows[0]?.has_history);
     },
 };
 
@@ -451,6 +570,15 @@ export const payrollPeriodRepository = {
         return result.rows[0] || null;
     },
 
+    /** Exclusive lock — required before post/pay to prevent duplicate GL */
+    async lockForUpdate(client: PoolClient, id: string): Promise<PayrollPeriodDbRow | null> {
+        const result = await client.query(
+            `SELECT * FROM payroll_periods WHERE "Id" = $1 FOR UPDATE`,
+            [id]
+        );
+        return result.rows[0] || null;
+    },
+
     async delete(pool: Pool | PoolClient, id: string): Promise<boolean> {
         const result = await pool.query(
             `DELETE FROM payroll_periods WHERE "Id" = $1`,
@@ -488,13 +616,17 @@ export const payrollEntryRepository = {
               d."Name" AS department_name,
               p."Title" AS position_title,
               a."AccountCode" AS employee_account_code,
-              lt."TransactionNumber" AS journal_transaction_number
+              adv."AccountCode" AS advance_account_code,
+              lt."TransactionNumber" AS journal_transaction_number,
+              plt."TransactionNumber" AS payment_transaction_number
        FROM payroll_entries pe
        JOIN employees e ON e."Id" = pe."EmployeeId"
        LEFT JOIN departments d ON d."Id" = e."DepartmentId"
        LEFT JOIN positions p ON p."Id" = e."PositionId"
        LEFT JOIN accounts a ON a."Id" = e."LedgerAccountId"
+       LEFT JOIN accounts adv ON adv."Id" = e."AdvanceAccountId"
        LEFT JOIN ledger_transactions lt ON lt."Id" = pe."JournalEntryId"
+       LEFT JOIN ledger_transactions plt ON plt."Id" = pe."PaymentJournalEntryId"
        WHERE pe."PayrollPeriodId" = $1
        ORDER BY e."LastName", e."FirstName"`,
             [periodId]
@@ -511,6 +643,7 @@ export const payrollEntryRepository = {
             allowances: number;
             deductions: number;
             netPay: number;
+            advanceRecovered: number;
         }>
     ): Promise<PayrollEntryDbRow[]> {
         if (entries.length === 0) return [];
@@ -520,12 +653,25 @@ export const payrollEntryRepository = {
         let idx = 1;
 
         for (const e of entries) {
-            placeholders.push(`($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`);
-            values.push(e.payrollPeriodId, e.employeeId, e.basicSalary, e.allowances, e.deductions, e.netPay);
+            placeholders.push(
+                `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`
+            );
+            values.push(
+                e.payrollPeriodId,
+                e.employeeId,
+                e.basicSalary,
+                e.allowances,
+                e.deductions,
+                e.netPay,
+                e.advanceRecovered
+            );
         }
 
         const result = await client.query(
-            `INSERT INTO payroll_entries ("PayrollPeriodId", "EmployeeId", "BasicSalary", "Allowances", "Deductions", "NetPay")
+            `INSERT INTO payroll_entries (
+               "PayrollPeriodId", "EmployeeId", "BasicSalary", "Allowances",
+               "Deductions", "NetPay", "AdvanceRecovered"
+             )
        VALUES ${placeholders.join(', ')}
        RETURNING *`,
             values
@@ -534,6 +680,13 @@ export const payrollEntryRepository = {
     },
 
     async deleteByPeriod(client: PoolClient, periodId: string): Promise<void> {
+        await client.query(
+            `DELETE FROM employee_advance_recoveries
+             WHERE "PayrollEntryId" IN (
+               SELECT "Id" FROM payroll_entries WHERE "PayrollPeriodId" = $1
+             )`,
+            [periodId]
+        );
         await client.query(
             `DELETE FROM payroll_entries WHERE "PayrollPeriodId" = $1`,
             [periodId]
@@ -548,6 +701,19 @@ export const payrollEntryRepository = {
         await client.query(
             `UPDATE payroll_entries SET "JournalEntryId" = $1 WHERE "Id" = $2`,
             [journalEntryId, entryId]
+        );
+    },
+
+    async setPaymentJournal(
+        client: PoolClient,
+        entryId: string,
+        paymentJournalEntryId: string
+    ): Promise<void> {
+        await client.query(
+            `UPDATE payroll_entries
+             SET "PaymentJournalEntryId" = $1, "PaidAt" = NOW()
+             WHERE "Id" = $2`,
+            [paymentJournalEntryId, entryId]
         );
     },
 };
@@ -580,7 +746,19 @@ export const subledgerRepository = {
     },
 
     /**
+     * True when account exists and is active (postable via AccountingCore).
+     */
+    async isAccountActive(client: Pool | PoolClient, accountId: string): Promise<boolean> {
+        const result = await client.query(
+            `SELECT 1 FROM accounts WHERE "Id" = $1 AND "IsActive" = true LIMIT 1`,
+            [accountId]
+        );
+        return result.rows.length > 0;
+    },
+
+    /**
      * Create a posting sub-ledger account under a parent.
+     * HR subledgers (2400-*, 1410-*) get PAYROLL in AllowedSources when parent uses restricted sources.
      */
     async createAccount(
         client: Pool | PoolClient,
@@ -593,19 +771,35 @@ export const subledgerRepository = {
             level: number;
         }
     ): Promise<SubLedgerAccountRow> {
+        const payrollSubledger =
+            data.code.startsWith('2400-') ||
+            data.code.startsWith('1410-') ||
+            data.parentCode === '2400' ||
+            data.parentCode === '1410';
+
         const result = await client.query(
             `INSERT INTO accounts (
          "Id", "AccountCode", "AccountName", "AccountType", "NormalBalance",
          "ParentAccountId", "Level", "IsPostingAccount", "IsActive",
-         "CurrentBalance", "CreatedAt", "UpdatedAt", "AllowAutomatedPosting"
+         "CurrentBalance", "CreatedAt", "UpdatedAt", "AllowAutomatedPosting",
+         "AllowedSources"
        )
        VALUES (
          gen_random_uuid(), $1, $2, $3, $4,
          (SELECT "Id" FROM accounts WHERE "AccountCode" = $5),
-         $6, true, true, 0, NOW(), NOW(), true
+         $6, true, true, 0, NOW(), NOW(), true,
+         CASE WHEN $7 THEN ARRAY['PAYROLL']::text[] ELSE '{}'::text[] END
        )
        RETURNING "Id", "AccountCode"`,
-            [data.code, data.name, data.type, data.normalBalance, data.parentCode, data.level]
+            [
+                data.code,
+                data.name,
+                data.type,
+                data.normalBalance,
+                data.parentCode,
+                data.level,
+                payrollSubledger,
+            ]
         );
         return result.rows[0];
     },

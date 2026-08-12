@@ -36,7 +36,7 @@ export const PERMISSIONS: Record<string, Permission> = {
     'sales.tax_restatement',
     'sales',
     'update',
-    'Restate tax on posted sales/invoices from DocumentTax (omitted VAT correction; manager/admin)',
+    'Restate tax on posted sales/invoices from DocumentTax (omitted VAT correction; manager/admin/accountant)',
   ),
 
   INVENTORY_READ: p('inventory.read', 'inventory', 'read', 'View inventory levels'),
@@ -185,6 +185,8 @@ export const PERMISSIONS: Record<string, Permission> = {
   HR_DELETE: p('hr.delete', 'hr', 'delete', 'Delete HR records'),
   HR_PAYROLL_PROCESS: p('hr.payroll_process', 'hr', 'payroll_process', 'Process payroll (calculate entries)'),
   HR_PAYROLL_POST: p('hr.payroll_post', 'hr', 'payroll_post', 'Post payroll to General Ledger'),
+  HR_PAYROLL_PAY: p('hr.payroll_pay', 'hr', 'payroll_pay', 'Pay salaries (clear Salaries Payable from cash/bank)'),
+  HR_ADVANCE: p('hr.advance', 'hr', 'advance', 'Issue salary advances and charge cash shortages to employees'),
 
   // Inventory extended
   INVENTORY_STOCKCOUNT: p(

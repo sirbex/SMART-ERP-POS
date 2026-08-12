@@ -7,6 +7,7 @@ import { Request, Response } from 'express';
 import { Pool } from 'pg';
 import { z } from 'zod';
 import { hrService } from './hr.service.js';
+import { exportAdvances, exportBalances, exportPayrollPeriod } from './hrExport.js';
 import { asyncHandler, NotFoundError } from '../../middleware/errorHandler.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
 
@@ -37,6 +38,8 @@ const UpdatePositionSchema = z.object({
 });
 
 // --- Employees ---
+const EmploymentTypeEnum = z.enum(['PERMANENT', 'CASUAL', 'CONTRACT']);
+
 const CreateEmployeeSchema = z.object({
     userId: z.string().uuid().optional().nullable(),
     firstName: z.string().min(1).max(255),
@@ -46,6 +49,9 @@ const CreateEmployeeSchema = z.object({
     departmentId: z.string().uuid().optional().nullable(),
     positionId: z.string().uuid().optional().nullable(),
     hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional().nullable(),
+    employmentType: EmploymentTypeEnum.optional().default('PERMANENT'),
+    monthlyAllowance: z.number().nonnegative().optional(),
 });
 
 const UpdateEmployeeSchema = z.object({
@@ -57,13 +63,56 @@ const UpdateEmployeeSchema = z.object({
     departmentId: z.string().uuid().optional().nullable(),
     positionId: z.string().uuid().optional().nullable(),
     hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional().nullable(),
+    employmentType: EmploymentTypeEnum.optional(),
     status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
+    monthlyAllowance: z.number().nonnegative().optional(),
+});
+
+const CreateRelatedUserSchema = z.object({
+    email: z.string().email().max(255),
+    password: z.string().min(8).max(128),
+    role: z.enum(['ADMIN', 'MANAGER', 'CASHIER', 'STAFF']).optional(),
+    rbacRoleId: z.string().uuid().optional(),
+});
+
+const EndEmploymentSchema = z.object({
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
+    deactivateLogin: z.boolean().optional().default(true),
+});
+
+const LinkableUsersQuerySchema = z.object({
+    includeUserId: z.string().uuid().optional(),
 });
 
 // --- Payroll Periods ---
 const CreatePayrollPeriodSchema = z.object({
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
     endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
+});
+
+const PayPayrollSchema = z.object({
+    paymentAccountCode: z.string().min(1).max(20),
+    paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    notes: z.string().max(1000).optional().nullable(),
+});
+
+const CreateAdvanceSchema = z.object({
+    employeeId: z.string().uuid(),
+    amount: z.number().positive(),
+    reason: z.enum(['SALARY_ADVANCE', 'CASH_SHORTAGE', 'OTHER']).default('SALARY_ADVANCE'),
+    paymentAccountCode: z.string().min(1).max(20),
+    advanceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    notes: z.string().max(1000).optional().nullable(),
+});
+
+const AdvanceListQuerySchema = z.object({
+    employeeId: z.string().uuid().optional(),
+    status: z.enum(['OPEN', 'PARTIAL', 'CLEARED']).optional(),
+});
+
+const ExportFormatQuerySchema = z.object({
+    format: z.enum(['pdf', 'csv']),
 });
 
 // --- Query params ---
@@ -73,6 +122,7 @@ const EmployeeListQuerySchema = z.object({
     status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
     search: z.string().optional(),
     departmentId: z.string().uuid().optional(),
+    employmentType: EmploymentTypeEnum.optional(),
 });
 
 // ============================================================================
@@ -193,6 +243,7 @@ export const hrController = {
             status: query.status,
             search: query.search,
             departmentId: query.departmentId,
+            employmentType: query.employmentType,
         });
         res.json({ success: true, ...result });
     }),
@@ -203,6 +254,15 @@ export const hrController = {
         const emp = await hrService.getEmployeeById(pool, id);
         if (!emp) throw new NotFoundError('Employee');
         res.json({ success: true, data: emp });
+    }),
+
+    listLinkableUsers: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const query = LinkableUsersQuerySchema.parse(req.query);
+        const users = await hrService.listLinkableUsers(pool, {
+            includeUserId: query.includeUserId,
+        });
+        res.json({ success: true, data: users });
     }),
 
     createEmployee: asyncHandler(async (req: Request, res: Response) => {
@@ -219,6 +279,26 @@ export const hrController = {
         const emp = await hrService.updateEmployee(pool, id, data, buildAuditContext(req));
         if (!emp) throw new NotFoundError('Employee');
         res.json({ success: true, data: emp, message: 'Employee updated' });
+    }),
+
+    createRelatedUser: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const data = CreateRelatedUserSchema.parse(req.body);
+        const result = await hrService.createRelatedUser(pool, id, data, buildAuditContext(req));
+        res.status(201).json({
+            success: true,
+            data: result,
+            message: 'Related user created and linked',
+        });
+    }),
+
+    endEmployment: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const data = EndEmploymentSchema.parse(req.body ?? {});
+        const emp = await hrService.endEmployment(pool, id, data, buildAuditContext(req));
+        res.json({ success: true, data: emp, message: 'Employment ended' });
     }),
 
     deleteEmployee: asyncHandler(async (req: Request, res: Response) => {
@@ -285,5 +365,59 @@ export const hrController = {
         const { id } = UuidParam.parse(req.params);
         const result = await hrService.postPayroll(pool, id, buildAuditContext(req));
         res.json({ success: true, data: result, message: 'Payroll posted to GL' });
+    }),
+
+    payPayroll: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const data = PayPayrollSchema.parse(req.body);
+        const result = await hrService.payPayroll(pool, id, data, buildAuditContext(req));
+        res.json({ success: true, data: result, message: 'Payroll paid' });
+    }),
+
+    listPaymentAccounts: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const accounts = await hrService.listPaymentAccounts(pool);
+        res.json({ success: true, data: accounts });
+    }),
+
+    listEmployeeBalances: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const balances = await hrService.listEmployeeBalances(pool);
+        res.json({ success: true, data: balances });
+    }),
+
+    listAdvances: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const query = AdvanceListQuerySchema.parse(req.query);
+        const advances = await hrService.listAdvances(pool, query);
+        res.json({ success: true, data: advances });
+    }),
+
+    createAdvance: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const data = CreateAdvanceSchema.parse(req.body);
+        const advance = await hrService.createAdvance(pool, data, buildAuditContext(req));
+        res.status(201).json({ success: true, data: advance, message: 'Advance recorded' });
+    }),
+
+    exportPayrollPeriod: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const { format } = ExportFormatQuerySchema.parse(req.query);
+        await exportPayrollPeriod(pool, res, id, format);
+    }),
+
+    exportAdvances: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { format } = ExportFormatQuerySchema.parse(req.query);
+        const filters = AdvanceListQuerySchema.parse(req.query);
+        await exportAdvances(pool, res, format, filters);
+    }),
+
+    exportBalances: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { format } = ExportFormatQuerySchema.parse(req.query);
+        await exportBalances(pool, res, format);
     }),
 };

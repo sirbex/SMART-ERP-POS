@@ -205,23 +205,25 @@ function buildQuotationItemColumns(
     fmt: (n: number) => string,
 ): QuotationItemTableColumn[] {
     const extraCols = (showDiscount ? 1 : 0) + (showTax ? 1 : 0);
-    const descWidth = extraCols === 0 ? 0.38 : extraCols === 1 ? 0.28 : 0.22;
-    const lineTotalWidth = extraCols === 0 ? 0.18 : 0.15;
+    // Money columns must fit "UGX 9,999,999.00". Old 0.12 Unit Price clipped to "UGX…".
+    const moneyW = extraCols === 0 ? 0.22 : extraCols === 1 ? 0.16 : 0.14;
+    const extraMoneyW = extraCols === 0 ? 0 : extraCols === 1 ? 0.14 : 0.12;
+    const descWidth = 1 - (0.05 + 0.08 + 0.08 + moneyW + extraCols * extraMoneyW + moneyW);
 
     const cols: QuotationItemTableColumn[] = [
-        { header: '#', key: 'lineNumber' as const, width: 0.04, align: 'right' as const, format: v => String(v) },
+        { header: '#', key: 'lineNumber' as const, width: 0.05, align: 'right' as const, format: v => String(v) },
         { header: 'Description', key: 'description' as const, width: descWidth },
         { header: 'Qty', key: 'quantity' as const, width: 0.08, align: 'right' as const, format: (v) => String(v) },
         {
-            header: 'UoM', key: 'uomName' as const, width: 0.1, align: 'left' as const,
+            header: 'UoM', key: 'uomName' as const, width: 0.08, align: 'left' as const,
             format: (v) => (v as string)?.trim() || '—',
         },
-        { header: 'Unit Price', key: 'unitPrice' as const, width: 0.12, align: 'right' as const, format: v => fmt(v as number) },
+        { header: 'Unit Price', key: 'unitPrice' as const, width: moneyW, align: 'right' as const, format: v => fmt(v as number) },
     ];
 
     if (showDiscount) {
         cols.push({
-            header: 'Discount', key: 'discountAmount' as const, width: 0.12, align: 'right' as const,
+            header: 'Discount', key: 'discountAmount' as const, width: extraMoneyW, align: 'right' as const,
             format: (v) => {
                 const n = v as number;
                 return n > 0 ? `-${fmt(n)}` : '—';
@@ -230,7 +232,7 @@ function buildQuotationItemColumns(
     }
     if (showTax) {
         cols.push({
-            header: 'Tax', key: 'taxAmount' as const, width: 0.12, align: 'right' as const,
+            header: 'Tax', key: 'taxAmount' as const, width: extraMoneyW, align: 'right' as const,
             format: (v) => {
                 const n = v as number;
                 return n > 0 ? fmt(n) : '—';
@@ -239,7 +241,7 @@ function buildQuotationItemColumns(
     }
 
     cols.push({
-        header: 'Line Total', key: 'lineTotal' as const, width: lineTotalWidth, align: 'right' as const,
+        header: 'Line Total', key: 'lineTotal' as const, width: moneyW, align: 'right' as const,
         format: v => fmt(v as number),
     });
 

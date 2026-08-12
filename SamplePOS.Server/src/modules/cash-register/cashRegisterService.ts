@@ -423,7 +423,7 @@ export const cashRegisterService = {
                     lines,
                     userId,
                     idempotencyKey,
-                    source: 'PAYMENT_RECEIPT' as const,
+                    source: 'CASH_VARIANCE' as const,
                 },
                 dbPool
             );
