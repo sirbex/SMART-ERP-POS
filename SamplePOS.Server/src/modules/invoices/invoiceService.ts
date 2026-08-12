@@ -15,6 +15,11 @@ import * as arPaymentService from '../ar-payments/arPaymentService.js';
 import { AR_SSOT_INVOICE_PAYMENT_METHODS } from '../ar-payments/arPaymentService.js';
 import * as openItemEngine from '../ar-payments/openItemAllocationEngine.js';
 import { ValidationError } from '../../middleware/errorHandler.js';
+import {
+  assertAppliedEqualsRequested,
+  assertDepositPaymentAmount,
+  money2,
+} from '@shared/domain/invoiceDepositPayment.js';
 
 /** Raw DB row from payment_lines table as returned by salesRepository */
 interface PaymentLineRow {
@@ -187,33 +192,32 @@ async function addLegacyInvoicePayment(
         throw new Error('Cannot use deposit payment method for invoices without a customer');
       }
 
-      const depositBalance = await depositsService.getCustomerDepositBalance(pool, inv.customer_id);
-      if (new Decimal(depositBalance.availableBalance).lessThan(input.amount)) {
-        throw new Error(
-          `INSUFFICIENT DEPOSIT: Customer has ${new Decimal(depositBalance.availableBalance).toFixed(2)} available, ` +
-            `but payment requires ${new Decimal(input.amount).toFixed(2)}`,
-        );
-      }
+      const depositBalance = await depositsService.getCustomerDepositBalance(client, inv.customer_id);
+      const paymentExact = assertDepositPaymentAmount({
+        amount: paymentDec,
+        outstanding: amountDueDec,
+        depositAvailable: depositBalance.availableBalance,
+      });
 
-      const saleIdForDeposit = inv.sale_id || invoiceId;
       const depositApplicationResult = await depositsService.applyDepositsToSaleInTransaction(
         client,
         inv.customer_id,
-        saleIdForDeposit,
-        input.amount,
+        inv.sale_id,
+        paymentExact.toFixed(2),
         input.processedById || undefined,
+        inv.sale_id ? undefined : { invoiceId },
       );
+      assertAppliedEqualsRequested(depositApplicationResult.totalApplied, paymentExact);
 
       logger.info('Deposit applied to invoice payment', {
         invoiceId,
         invoiceNumber: inv.invoice_number,
         customerId: inv.customer_id,
-        amount: input.amount,
-        depositBalanceBefore: depositBalance.availableBalance,
-        depositBalanceAfter: Money.toNumber(
-          new Decimal(depositBalance.availableBalance).minus(input.amount),
-        ),
+        amount: paymentExact.toFixed(2),
+        depositBalanceBefore: money2(depositBalance.availableBalance).toFixed(2),
+        depositBalanceAfter: money2(depositBalance.availableBalance).minus(paymentExact).toFixed(2),
         applicationsCount: depositApplicationResult.applications.length,
+        saleId: inv.sale_id,
       });
 
       const paymentDateStrDeposit =
@@ -225,14 +229,19 @@ async function addLegacyInvoicePayment(
       const customerRow = await client.query('SELECT name FROM customers WHERE id = $1', [
         inv.customer_id,
       ]);
-      const customerNameForDeposit = customerRow.rows[0]?.name || 'Unknown';
+      const customerNameForDeposit = customerRow.rows[0]?.name;
+      if (!customerNameForDeposit) {
+        throw new Error(
+          `GHOST CUSTOMER NAME: Invoice ${inv.invoice_number} customer ${inv.customer_id} has no name on master.`,
+        );
+      }
       for (const app of depositApplicationResult.applications) {
         await glEntryService.recordDepositApplicationToGL(
           {
             applicationId: app.id,
             depositId: app.depositId,
             depositNumber: app.depositNumber || '',
-            saleId: saleIdForDeposit,
+            saleId: inv.sale_id || invoiceId,
             saleNumber: inv.invoice_number,
             applicationDate: paymentDateStrDeposit,
             amount: app.amountApplied,
@@ -247,7 +256,7 @@ async function addLegacyInvoicePayment(
 
     const payment = await invoiceRepository.addPayment(client, {
       invoiceId,
-      amount: input.amount,
+      amount: Money.toNumber(paymentDec),
       paymentMethod: input.paymentMethod,
       paymentDate: input.paymentDate || getBusinessDate(),
       referenceNumber: input.referenceNumber || null,

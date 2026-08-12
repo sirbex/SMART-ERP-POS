@@ -11,6 +11,11 @@ import * as glEntryService from '../../services/glEntryService.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import logger from '../../utils/logger.js';
 import { Money } from '../../utils/money.js';
+import {
+    allocateDepositFifo,
+    assertAppliedEqualsRequested,
+    money2,
+} from '@shared/domain/invoiceDepositPayment.js';
 
 // Type for either a Pool or PoolClient - allows reuse in transactions
 type DbConnection = Pool | PoolClient;
@@ -35,7 +40,8 @@ export interface Deposit {
 export interface DepositApplication {
     id: string;
     depositId: string;
-    saleId: string;
+    saleId: string | null;
+    invoiceId?: string | null;
     amountApplied: number;
     appliedAt: string;
     appliedBy?: string;
@@ -86,6 +92,7 @@ function normalizeApplication(row: depositsRepository.DepositApplicationDbRow): 
         id: row.id,
         depositId: row.deposit_id,
         saleId: row.sale_id,
+        invoiceId: row.invoice_id || null,
         amountApplied: Money.toNumber(Money.parseDb(row.amount_applied)),
         appliedAt: row.applied_at,
         appliedBy: row.applied_by || undefined,
@@ -194,14 +201,14 @@ export async function getCustomerDeposits(
  * Get customer's available deposit balance
  */
 export async function getCustomerDepositBalance(
-    pool: Pool,
+    dbConn: DbConnection,
     customerId: string
 ): Promise<CustomerDepositBalance> {
-    const summary = await depositsRepository.getCustomerDepositSummary(pool, customerId);
+    const summary = await depositsRepository.getCustomerDepositSummary(dbConn, customerId);
 
     if (!summary) {
         // Customer exists but no deposits
-        const customer = await findCustomerById(customerId, pool);
+        const customer = await findCustomerById(customerId, dbConn);
         return {
             customerId,
             customerName: customer?.name || 'Unknown',
@@ -223,68 +230,69 @@ export async function getCustomerDepositBalance(
 }
 
 /**
- * Apply deposits to a sale using FIFO (oldest deposits first)
- * This version works within an existing transaction client
- * Returns the applications created and total amount applied
+ * Apply deposits using FIFO (oldest first) inside an existing transaction.
+ * Locks all active deposit rows for the customer before allocating.
+ * totalApplied is always exactly equal to requested (2dp) or this throws.
  */
 export async function applyDepositsToSaleInTransaction(
     client: PoolClient,
     customerId: string,
-    saleId: string,
-    amountToApply: number,
-    appliedBy?: string
+    saleId: string | null,
+    amountToApply: number | string,
+    appliedBy?: string,
+    options?: { invoiceId?: string | null }
 ): Promise<{ applications: DepositApplication[]; totalApplied: number }> {
-    if (amountToApply <= 0) {
+    const invoiceId = options?.invoiceId ?? null;
+    if (!saleId && !invoiceId) {
+        throw new Error('DEPOSIT_APPLY_TARGET_REQUIRED: saleId or invoiceId must be provided');
+    }
+
+    const requested = money2(amountToApply);
+    if (requested.lte(0)) {
         throw new Error('Amount to apply must be greater than zero');
     }
 
-    // Get active deposits with FIFO ordering (using the client)
-    const activeDeposits = await depositsRepository.getActiveDepositsForCustomer(client, customerId);
+    const activeDeposits = await depositsRepository.lockActiveDepositsForCustomer(client, customerId);
 
     if (activeDeposits.length === 0) {
         throw new Error('No active deposits available for this customer');
     }
 
-    // Calculate total available
-    const totalAvailable = activeDeposits.reduce(
-        (sum, d) => sum.plus(d.amount_available),
-        new Decimal(0)
+    const plan = allocateDepositFifo(
+        activeDeposits.map((d) => ({ id: d.id, available: d.amount_available })),
+        requested,
     );
 
-    if (totalAvailable.lessThan(amountToApply)) {
-        throw new Error(`Insufficient deposit balance. Available: ${totalAvailable.toFixed(2)}, Requested: ${amountToApply}`);
-    }
-
     const applications: DepositApplication[] = [];
-    let remaining = new Decimal(amountToApply);
-
-    for (const deposit of activeDeposits) {
-        if (remaining.lessThanOrEqualTo(0)) break;
-
-        const available = new Decimal(deposit.amount_available);
-        const toApply = Decimal.min(remaining, available);
-
-        // Use the transaction-safe version
+    for (const alloc of plan.allocations) {
+        const deposit = activeDeposits.find((d) => d.id === alloc.id);
         const applicationRow = await depositsRepository.applyDepositToSaleInTransaction(client, {
-            depositId: deposit.id,
+            depositId: alloc.id,
             saleId,
-            amount: toApply.toNumber(),
+            invoiceId,
+            amount: alloc.amount.toFixed(2),
             appliedBy
         });
 
         applications.push(normalizeApplication(applicationRow));
-        remaining = remaining.minus(toApply);
 
         logger.info('Deposit applied to sale', {
-            depositNumber: deposit.deposit_number,
-            amountApplied: toApply.toFixed(2),
-            saleId
+            depositNumber: deposit?.deposit_number,
+            amountApplied: alloc.amount.toFixed(2),
+            saleId,
+            invoiceId
         });
     }
 
+    const totalApplied = applications.reduce(
+        (sum, app) => sum.plus(money2(app.amountApplied)),
+        new Decimal(0),
+    );
+    assertAppliedEqualsRequested(totalApplied, requested);
+
     return {
         applications,
-        totalApplied: new Decimal(amountToApply).minus(remaining).toNumber()
+        totalApplied: Money.toNumber(totalApplied),
     };
 }
 
@@ -296,9 +304,10 @@ export async function applyDepositsToSaleInTransaction(
 export async function applyDepositsToSale(
     dbConn: DbConnection,
     customerId: string,
-    saleId: string,
-    amountToApply: number,
-    appliedBy?: string
+    saleId: string | null,
+    amountToApply: number | string,
+    appliedBy?: string,
+    options?: { invoiceId?: string | null }
 ): Promise<{ applications: DepositApplication[]; totalApplied: number }> {
     // Check if this is a Pool or PoolClient
     // Pool has 'totalCount' and 'idleCount' properties
@@ -306,10 +315,17 @@ export async function applyDepositsToSale(
 
     if (isPool) {
         // Use pool - the repository will create its own transaction
-        return applyDepositsToSaleWithPool(dbConn as Pool, customerId, saleId, amountToApply, appliedBy);
+        return applyDepositsToSaleWithPool(dbConn as Pool, customerId, saleId, amountToApply, appliedBy, options);
     } else {
         // Use existing client - use the transaction-safe version
-        return applyDepositsToSaleInTransaction(dbConn as PoolClient, customerId, saleId, amountToApply, appliedBy);
+        return applyDepositsToSaleInTransaction(
+            dbConn as PoolClient,
+            customerId,
+            saleId,
+            amountToApply,
+            appliedBy,
+            options,
+        );
     }
 }
 
@@ -319,61 +335,21 @@ export async function applyDepositsToSale(
 async function applyDepositsToSaleWithPool(
     pool: Pool,
     customerId: string,
-    saleId: string,
-    amountToApply: number,
-    appliedBy?: string
+    saleId: string | null,
+    amountToApply: number | string,
+    appliedBy?: string,
+    options?: { invoiceId?: string | null }
 ): Promise<{ applications: DepositApplication[]; totalApplied: number }> {
-    if (amountToApply <= 0) {
-        throw new Error('Amount to apply must be greater than zero');
-    }
-
-    // Get active deposits with FIFO ordering
-    const activeDeposits = await depositsRepository.getActiveDepositsForCustomer(pool, customerId);
-
-    if (activeDeposits.length === 0) {
-        throw new Error('No active deposits available for this customer');
-    }
-
-    // Calculate total available
-    const totalAvailable = activeDeposits.reduce(
-        (sum, d) => sum.plus(d.amount_available),
-        new Decimal(0)
-    );
-
-    if (totalAvailable.lessThan(amountToApply)) {
-        throw new Error(`Insufficient deposit balance. Available: ${totalAvailable.toFixed(2)}, Requested: ${amountToApply}`);
-    }
-
-    const applications: DepositApplication[] = [];
-    let remaining = new Decimal(amountToApply);
-
-    for (const deposit of activeDeposits) {
-        if (remaining.lessThanOrEqualTo(0)) break;
-
-        const available = new Decimal(deposit.amount_available);
-        const toApply = Decimal.min(remaining, available);
-
-        const applicationRow = await depositsRepository.applyDepositToSale(pool, {
-            depositId: deposit.id,
+    return UnitOfWork.run(pool, async (client) => {
+        return applyDepositsToSaleInTransaction(
+            client,
+            customerId,
             saleId,
-            amount: toApply.toNumber(),
-            appliedBy
-        });
-
-        applications.push(normalizeApplication(applicationRow));
-        remaining = remaining.minus(toApply);
-
-        logger.info('Deposit applied to sale', {
-            depositNumber: deposit.deposit_number,
-            amountApplied: toApply.toFixed(2),
-            saleId
-        });
-    }
-
-    return {
-        applications,
-        totalApplied: new Decimal(amountToApply).minus(remaining).toNumber()
-    };
+            amountToApply,
+            appliedBy,
+            options,
+        );
+    });
 }
 
 /**

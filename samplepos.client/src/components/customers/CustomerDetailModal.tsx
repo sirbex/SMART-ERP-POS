@@ -1,6 +1,12 @@
 import { useState, useEffect, Fragment, useRef, useMemo } from 'react';
 import Decimal from 'decimal.js';
 import { useModalAccessibility } from '../../hooks/useFocusTrap';
+import { useInvoiceDepositBalance } from '../../hooks/useInvoiceDepositBalance';
+import {
+    assertDepositPaymentAmount,
+    depositPaymentCap,
+    money2,
+} from '@shared/domain/invoiceDepositPayment';
 import { useCustomer, useCustomerSummary, useUpdateCustomer, useToggleCustomerActive, useDeleteCustomer, useCustomerStatement, useInvoices, useRecordInvoicePayment } from '../../hooks/useApi';
 import { formatCurrency } from '../../utils/currency';
 import { downloadFile } from '../../utils/download';
@@ -193,6 +199,7 @@ export default function CustomerDetailModal({
     const [payMethod, setPayMethod] = useState<string>('CASH');
     const [payRefNum, setPayRefNum] = useState('');
     const [payNotes, setPayNotes] = useState('');
+    const depositBalance = useInvoiceDepositBalance(customerId, paymentOpen);
     const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
     const [expandedInvoiceDetails, setExpandedInvoiceDetails] = useState<InvoiceDetailResponse | null>(null);
     const [loadingExpandedInvoiceId, setLoadingExpandedInvoiceId] = useState<string | null>(null);
@@ -219,10 +226,29 @@ export default function CustomerDetailModal({
     });
 
     const { data: invoicesData, isLoading: isLoadingInvoices, refetch: refetchInvoices } = useInvoices(invoicePage, 20, customerId || undefined);
+    const recordPayment = useRecordInvoicePayment();
+
+    useEffect(() => {
+        if (!paymentOpen || !selectedInvoice || !depositBalance.hasDeposit) return;
+        setPayMethod((current) => {
+            if (current !== 'CASH') return current;
+            const cap = depositPaymentCap(selectedInvoice.outstanding, depositBalance.available);
+            if (cap.gt(0)) setPayAmount(cap.toFixed(2));
+            return 'DEPOSIT';
+        });
+    }, [paymentOpen, selectedInvoice, depositBalance.hasDeposit, depositBalance.available]);
+
+    const openReceivePayment = (invoice: InvoiceRow & { outstanding: number }) => {
+        setSelectedInvoice(invoice);
+        setPayAmount(String(invoice.outstanding));
+        setPayMethod('CASH');
+        setPayRefNum('');
+        setPayNotes('');
+        setPaymentOpen(true);
+    };
     const allInvoiceRows: InvoiceRow[] = Array.isArray(invoicesData) ? invoicesData : [];
     /** Full invoice list (incl. paid / OB); Adjust button still gated by isAdjustableCustomerInvoice */
     const salesInvoices = allInvoiceRows.filter(isListableCustomerInvoice);
-    const recordPayment = useRecordInvoicePayment();
 
     const updateCustomer = useUpdateCustomer();
     const toggleActiveM = useToggleCustomerActive();
@@ -896,14 +922,7 @@ export default function CustomerDetailModal({
                                                                 )}
                                                                 {status !== 'PAID' && outstanding > 0 && (
                                                                     <button
-                                                                        onClick={() => {
-                                                                            setSelectedInvoice({ ...inv, outstanding });
-                                                                            setPayAmount('');
-                                                                            setPayMethod('CASH');
-                                                                            setPayRefNum('');
-                                                                            setPayNotes('');
-                                                                            setPaymentOpen(true);
-                                                                        }}
+                                                                        onClick={() => openReceivePayment({ ...inv, outstanding })}
                                                                         className="w-full py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700"
                                                                     >
                                                                         Receive Payment
@@ -985,12 +1004,7 @@ export default function CustomerDetailModal({
                                                                                         <button
                                                                                             onClick={(e) => {
                                                                                                 e.stopPropagation();
-                                                                                                setSelectedInvoice({ ...inv, outstanding });
-                                                                                                setPayAmount('');
-                                                                                                setPayMethod('CASH');
-                                                                                                setPayRefNum('');
-                                                                                                setPayNotes('');
-                                                                                                setPaymentOpen(true);
+                                                                                                openReceivePayment({ ...inv, outstanding });
                                                                                             }}
                                                                                             className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
                                                                                         >
@@ -1129,21 +1143,30 @@ export default function CustomerDetailModal({
                                                     <form className="space-y-3" onSubmit={async (e) => {
                                                         e.preventDefault();
                                                         try {
-                                                            const amt = Number(payAmount);
-                                                            if (amt <= 0 || amt > selectedInvoice.outstanding) {
+                                                            const outstanding = money2(selectedInvoice.outstanding);
+                                                            const amt = money2(payAmount);
+                                                            if (payMethod === 'DEPOSIT') {
+                                                                assertDepositPaymentAmount({
+                                                                    amount: amt,
+                                                                    outstanding,
+                                                                    depositAvailable: depositBalance.available,
+                                                                });
+                                                            } else if (amt.lte(0) || amt.gt(outstanding)) {
                                                                 alert('Invalid amount');
                                                                 return;
                                                             }
                                                             await recordPayment.mutateAsync({
                                                                 invoiceId: String(selectedInvoice.id),
                                                                 data: {
-                                                                    amount: amt,
+                                                                    amount: amt.toNumber(),
                                                                     paymentMethod: payMethod,
                                                                     referenceNumber: payRefNum || undefined,
                                                                     notes: payNotes || undefined,
                                                                 },
                                                             });
-                                                            alert('✅ Payment recorded successfully!');
+                                                            alert(payMethod === 'DEPOSIT'
+                                                                ? '✅ Payment recorded from customer deposit.'
+                                                                : '✅ Payment recorded successfully!');
                                                             setPaymentOpen(false);
                                                             setSelectedInvoice(null);
                                                             refetchInvoices();
@@ -1159,10 +1182,14 @@ export default function CustomerDetailModal({
                                                                 type="number"
                                                                 value={payAmount}
                                                                 onChange={(e) => setPayAmount(e.target.value)}
-                                                                max={selectedInvoice.outstanding}
-                                                                min={1}
-                                                                step="any"
-                                                                placeholder={`Max: ${selectedInvoice.outstanding}`}
+                                                                max={payMethod === 'DEPOSIT'
+                                                                    ? depositPaymentCap(selectedInvoice.outstanding, depositBalance.available).toNumber()
+                                                                    : money2(selectedInvoice.outstanding).toNumber()}
+                                                                min={0.01}
+                                                                step="0.01"
+                                                                placeholder={`Max: ${payMethod === 'DEPOSIT'
+                                                                    ? depositPaymentCap(selectedInvoice.outstanding, depositBalance.available).toFixed(2)
+                                                                    : money2(selectedInvoice.outstanding).toFixed(2)}`}
                                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                                                                 autoFocus
                                                                 required
@@ -1172,14 +1199,52 @@ export default function CustomerDetailModal({
                                                             <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
                                                             <select
                                                                 value={payMethod}
-                                                                onChange={(e) => setPayMethod(e.target.value)}
+                                                                onChange={(e) => {
+                                                                    const next = e.target.value;
+                                                                    setPayMethod(next);
+                                                                    if (next === 'DEPOSIT' && depositBalance.hasDeposit) {
+                                                                        setPayAmount(
+                                                                            depositPaymentCap(
+                                                                                selectedInvoice.outstanding,
+                                                                                depositBalance.available,
+                                                                            ).toFixed(2),
+                                                                        );
+                                                                    }
+                                                                }}
                                                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                                                disabled={depositBalance.status === 'loading'}
                                                             >
                                                                 <option value="CASH">Cash</option>
                                                                 <option value="CARD">Card</option>
                                                                 <option value="MOBILE_MONEY">Mobile Money</option>
                                                                 <option value="BANK_TRANSFER">Bank Transfer</option>
+                                                                <option
+                                                                    value="DEPOSIT"
+                                                                    disabled={depositBalance.status !== 'ready' || depositBalance.available.lte(0)}
+                                                                >
+                                                                    {depositBalance.status === 'loading'
+                                                                        ? 'Customer Deposit (Loading...)'
+                                                                        : depositBalance.status === 'error'
+                                                                            ? 'Customer Deposit (unavailable — retry)'
+                                                                            : depositBalance.available.gt(0)
+                                                                                ? `Customer Deposit (${formatCurrency(depositBalance.available.toNumber())} available)`
+                                                                                : 'Customer Deposit (none available)'}
+                                                                </option>
                                                             </select>
+                                                            {depositBalance.status === 'error' && (
+                                                                <p className="mt-1 text-sm text-red-700">
+                                                                    Could not load deposit balance. {depositBalance.error}
+                                                                    {' '}
+                                                                    <button type="button" className="underline font-medium" onClick={depositBalance.retry}>
+                                                                        Retry
+                                                                    </button>
+                                                                </p>
+                                                            )}
+                                                            {payMethod === 'DEPOSIT' && depositBalance.hasDeposit && (
+                                                                <p className="mt-1 text-sm text-amber-700">
+                                                                    Applying customer deposit. Available: {formatCurrency(depositBalance.available.toNumber())}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                         <div>
                                                             <label className="block text-sm font-medium text-gray-700 mb-1">Reference #</label>
@@ -1218,7 +1283,18 @@ export default function CustomerDetailModal({
                                                             </button>
                                                             <button
                                                                 type="submit"
-                                                                disabled={recordPayment.isPending || !payAmount || Number(payAmount) <= 0 || Number(payAmount) > selectedInvoice.outstanding}
+                                                                disabled={
+                                                                    recordPayment.isPending
+                                                                    || depositBalance.status === 'loading'
+                                                                    || (payMethod === 'DEPOSIT' && depositBalance.status !== 'ready')
+                                                                    || !payAmount
+                                                                    || money2(payAmount).lte(0)
+                                                                    || money2(payAmount).gt(
+                                                                        payMethod === 'DEPOSIT'
+                                                                            ? depositPaymentCap(selectedInvoice.outstanding, depositBalance.available)
+                                                                            : money2(selectedInvoice.outstanding),
+                                                                    )
+                                                                }
                                                                 className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50"
                                                             >
                                                                 {recordPayment.isPending ? 'Processing...' : 'Save Payment'}

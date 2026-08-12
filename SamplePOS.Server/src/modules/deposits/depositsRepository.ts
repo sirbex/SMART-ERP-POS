@@ -7,6 +7,7 @@ import { Pool, PoolClient } from 'pg';
 import Decimal from 'decimal.js';
 import { UnitOfWork } from '../../db/unitOfWork.js';
 import { getBusinessYear } from '../../utils/dateRange.js';
+import { Money } from '../../utils/money.js';
 
 // Type for either a Pool or PoolClient - allows reuse in transactions
 type DbConnection = Pool | PoolClient;
@@ -31,7 +32,8 @@ export interface DepositDbRow {
 export interface DepositApplicationDbRow {
     id: string;
     deposit_id: string;
-    sale_id: string;
+    sale_id: string | null;
+    invoice_id?: string | null;
     amount_applied: string;
     applied_at: string;
     applied_by: string | null;
@@ -59,8 +61,9 @@ export interface CreateDepositInput {
 
 export interface ApplyDepositInput {
     depositId: string;
-    saleId: string;
-    amount: number;
+    saleId: string | null;
+    invoiceId?: string | null;
+    amount: number | string;
     appliedBy?: string;
 }
 
@@ -162,7 +165,29 @@ export async function getActiveDepositsForCustomer(
      WHERE d.customer_id = $1 
        AND d.status = 'ACTIVE'
        AND d.amount_available > 0
-     ORDER BY d.created_at ASC`,
+     ORDER BY d.created_at ASC, d.id ASC`,
+        [customerId]
+    );
+    return result.rows;
+}
+
+/**
+ * Lock all active customer deposits in FIFO order (same order as apply).
+ * Prevents concurrent Receive Payment / POS apply from over-consuming 2200.
+ */
+export async function lockActiveDepositsForCustomer(
+    client: PoolClient,
+    customerId: string
+): Promise<DepositDbRow[]> {
+    const result = await client.query<DepositDbRow>(
+        `SELECT d.*, c.name as customer_name
+     FROM pos_customer_deposits d
+     JOIN customers c ON d.customer_id = c.id
+     WHERE d.customer_id = $1
+       AND d.status = 'ACTIVE'
+       AND d.amount_available > 0
+     ORDER BY d.created_at ASC, d.id ASC
+     FOR UPDATE OF d`,
         [customerId]
     );
     return result.rows;
@@ -172,10 +197,10 @@ export async function getActiveDepositsForCustomer(
  * Get customer deposit summary (available balance)
  */
 export async function getCustomerDepositSummary(
-    pool: Pool,
+    dbConn: DbConnection,
     customerId: string
 ): Promise<CustomerDepositSummary | null> {
-    const result = await pool.query<CustomerDepositSummary>(
+    const result = await dbConn.query<CustomerDepositSummary>(
         `SELECT * FROM customer_deposit_summary WHERE customer_id = $1`,
         [customerId]
     );
@@ -214,6 +239,10 @@ export async function applyDepositToSaleInTransaction(
     client: PoolClient,
     input: ApplyDepositInput
 ): Promise<DepositApplicationDbRow> {
+    if (!input.saleId && !input.invoiceId) {
+        throw new Error('DEPOSIT_APPLY_TARGET_REQUIRED: saleId or invoiceId must be provided');
+    }
+
     // Lock the deposit row to prevent race conditions
     const depositResult = await client.query<DepositDbRow>(
         `SELECT * FROM pos_customer_deposits 
@@ -227,34 +256,73 @@ export async function applyDepositToSaleInTransaction(
     }
 
     const deposit = depositResult.rows[0];
-    const available = new Decimal(deposit.amount_available);
-    const amountToApply = new Decimal(input.amount);
+    const available = Money.parseDb(deposit.amount_available);
+    const amountToApply = Money.round(input.amount);
 
+    if (amountToApply.lte(0)) {
+        throw new Error('DEPOSIT_APPLY_AMOUNT_INVALID: amount must be greater than zero');
+    }
     if (amountToApply.greaterThan(available)) {
         throw new Error(`Insufficient deposit balance. Available: ${available.toFixed(2)}, Requested: ${amountToApply.toFixed(2)}`);
     }
 
-    // Create application record
-    const applicationResult = await client.query<DepositApplicationDbRow>(
-        `INSERT INTO pos_deposit_applications 
-     (deposit_id, sale_id, amount_applied, applied_by)
-     VALUES ($1, $2, $3, $4)
-     RETURNING *`,
-        [input.depositId, input.saleId, input.amount, input.appliedBy || null]
-    );
+    const amountFixed = amountToApply.toFixed(2);
+
+    // invoice_id column is added by migration 600. Sale-only apply stays compatible
+    // with the original schema so POS does not depend on 600.
+    let applicationResult;
+    if (!input.saleId && input.invoiceId) {
+        try {
+            applicationResult = await client.query<DepositApplicationDbRow>(
+                `INSERT INTO pos_deposit_applications
+             (deposit_id, sale_id, invoice_id, amount_applied, applied_by)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING *`,
+                [
+                    input.depositId,
+                    null,
+                    input.invoiceId,
+                    amountFixed,
+                    input.appliedBy || null,
+                ],
+            );
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (/invoice_id/i.test(msg) && /does not exist|undefined column/i.test(msg)) {
+                throw new Error(
+                    'DEPOSIT_APPLY_INVOICE_TARGET: apply shared/sql/600_deposit_apply_invoice.sql before using deposit on invoices without a linked sale.',
+                );
+            }
+            throw err;
+        }
+    } else {
+        applicationResult = await client.query<DepositApplicationDbRow>(
+            `INSERT INTO pos_deposit_applications
+         (deposit_id, sale_id, amount_applied, applied_by)
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+            [
+                input.depositId,
+                input.saleId,
+                amountFixed,
+                input.appliedBy || null,
+            ],
+        );
+    }
 
     // Update deposit used amount, available amount, and status
     // (replaces trg_update_deposit_status trigger)
-    const newUsed = new Decimal(deposit.amount_used).plus(amountToApply);
-    const depositAmount = new Decimal(deposit.amount);
+    const newUsed = Money.parseDb(deposit.amount_used).plus(amountToApply);
+    const depositAmount = Money.parseDb(deposit.amount);
     const newAvailable = depositAmount.minus(newUsed);
     const newStatus = newAvailable.lessThanOrEqualTo(0) ? 'DEPLETED' : 'ACTIVE';
+    const availableFixed = (newAvailable.greaterThan(0) ? newAvailable : new Decimal(0)).toFixed(2);
 
     await client.query(
         `UPDATE pos_customer_deposits 
      SET amount_used = $1, amount_available = $2, status = $3
      WHERE id = $4`,
-        [newUsed.toFixed(2), (newAvailable.greaterThan(0) ? newAvailable : new Decimal(0)).toFixed(2), newStatus, input.depositId]
+        [newUsed.toFixed(2), availableFixed, newStatus, input.depositId]
     );
 
     return applicationResult.rows[0];
@@ -331,7 +399,7 @@ export async function getDepositApplicationsBySale(
         `SELECT a.*, d.deposit_number, s.sale_number
      FROM pos_deposit_applications a
      JOIN pos_customer_deposits d ON a.deposit_id = d.id
-     JOIN sales s ON a.sale_id = s.id
+     LEFT JOIN sales s ON a.sale_id = s.id
      WHERE a.sale_id = $1
      ORDER BY a.applied_at`,
         [saleId]

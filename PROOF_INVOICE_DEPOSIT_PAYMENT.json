@@ -1,0 +1,236 @@
+{
+  "feature": "INVOICE_DEPOSIT_PAYMENT",
+  "generatedAt": "2026-08-12T14:11:31.343Z",
+  "passed": true,
+  "gateCount": 44,
+  "failedCount": 0,
+  "gates": [
+    {
+      "id": "SSOT_DECIMAL",
+      "ok": true,
+      "detail": "decimal.js"
+    },
+    {
+      "id": "SSOT_NO_MATH_ROUND",
+      "ok": true,
+      "detail": "no Math.round"
+    },
+    {
+      "id": "SSOT_NO_MATH_MIN",
+      "ok": true,
+      "detail": "no Math.min"
+    },
+    {
+      "id": "SSOT_FIFO",
+      "ok": true,
+      "detail": "FIFO allocator"
+    },
+    {
+      "id": "SSOT_CAP",
+      "ok": true,
+      "detail": "cap helper"
+    },
+    {
+      "id": "SSOT_ASSERT_APPLIED",
+      "ok": true,
+      "detail": "applied==requested"
+    },
+    {
+      "id": "CAP_MIN",
+      "ok": true,
+      "detail": "deposit smaller"
+    },
+    {
+      "id": "CAP_OUTSTANDING",
+      "ok": true,
+      "detail": "outstanding smaller"
+    },
+    {
+      "id": "CAP_ZERO_DEP",
+      "ok": true,
+      "detail": "no deposit → 0"
+    },
+    {
+      "id": "CAP_ZERO_AR",
+      "ok": true,
+      "detail": "no AR → 0"
+    },
+    {
+      "id": "ASSERT_OK",
+      "ok": true,
+      "detail": "exact deposit apply"
+    },
+    {
+      "id": "ASSERT_OVER_CAP",
+      "ok": true,
+      "detail": "over deposit rejected"
+    },
+    {
+      "id": "ASSERT_ZERO",
+      "ok": true,
+      "detail": "zero rejected"
+    },
+    {
+      "id": "FIFO_COUNT",
+      "ok": true,
+      "detail": "2 rows"
+    },
+    {
+      "id": "FIFO_OLD",
+      "ok": true,
+      "detail": "old 100"
+    },
+    {
+      "id": "FIFO_NEW",
+      "ok": true,
+      "detail": "new 30"
+    },
+    {
+      "id": "FIFO_TOTAL",
+      "ok": true,
+      "detail": "130.00 applied"
+    },
+    {
+      "id": "FIFO_SHORT",
+      "ok": true,
+      "detail": "shortfall throws INSUFFICIENT_DEPOSIT"
+    },
+    {
+      "id": "INV_USES_ASSERT_AMOUNT",
+      "ok": true,
+      "detail": "server validates via SSOT"
+    },
+    {
+      "id": "INV_USES_ASSERT_APPLIED",
+      "ok": true,
+      "detail": "applied == requested"
+    },
+    {
+      "id": "INV_NO_INVOICE_AS_SALE",
+      "ok": true,
+      "detail": "never invoice UUID as sale_id"
+    },
+    {
+      "id": "INV_PASSES_INVOICE_ID",
+      "ok": true,
+      "detail": "passes invoiceId option"
+    },
+    {
+      "id": "INV_BALANCE_ON_CLIENT",
+      "ok": true,
+      "detail": "balance check inside tx"
+    },
+    {
+      "id": "GL_SKIP_DEPOSIT_CASH",
+      "ok": true,
+      "detail": "DEPOSIT invoice payment does not post cash"
+    },
+    {
+      "id": "GL_APPLY_SOURCE",
+      "ok": true,
+      "detail": "apply posts DEPOSIT_APPLICATION"
+    },
+    {
+      "id": "LOCK_FN",
+      "ok": true,
+      "detail": "lock helper"
+    },
+    {
+      "id": "LOCK_SQL",
+      "ok": true,
+      "detail": "FOR UPDATE"
+    },
+    {
+      "id": "APPLY_USES_FIFO",
+      "ok": true,
+      "detail": "service uses FIFO SSOT"
+    },
+    {
+      "id": "APPLY_USES_LOCK",
+      "ok": true,
+      "detail": "service locks first"
+    },
+    {
+      "id": "APPLY_MONEY_FIXED",
+      "ok": true,
+      "detail": "2dp write"
+    },
+    {
+      "id": "APPLY_NO_TONUMBER_LOOP",
+      "ok": true,
+      "detail": "no toNumber in apply loop"
+    },
+    {
+      "id": "MIG_600",
+      "ok": true,
+      "detail": "migration 600 present"
+    },
+    {
+      "id": "UI_HOOK",
+      "ok": true,
+      "detail": "shared fetch hook"
+    },
+    {
+      "id": "HOOK_NO_SILENT_ZERO",
+      "ok": true,
+      "detail": "fetch fail → error, not 0"
+    },
+    {
+      "id": "MODAL_HOOK",
+      "ok": true,
+      "detail": "modal uses hook"
+    },
+    {
+      "id": "MODAL_DEPOSIT_OPTION",
+      "ok": true,
+      "detail": "DEPOSIT option"
+    },
+    {
+      "id": "MODAL_SSOT_CAP",
+      "ok": true,
+      "detail": "modal uses cap SSOT"
+    },
+    {
+      "id": "MODAL_SSOT_ASSERT",
+      "ok": true,
+      "detail": "modal asserts amount"
+    },
+    {
+      "id": "MODAL_NO_SILENT_CATCH",
+      "ok": true,
+      "detail": "modal no silent 0"
+    },
+    {
+      "id": "PAGE_HOOK",
+      "ok": true,
+      "detail": "page uses hook"
+    },
+    {
+      "id": "PAGE_DEPOSIT_OPTION",
+      "ok": true,
+      "detail": "page DEPOSIT option"
+    },
+    {
+      "id": "PAGE_SSOT_ASSERT",
+      "ok": true,
+      "detail": "page asserts amount"
+    },
+    {
+      "id": "PAGE_NO_SILENT_ZERO",
+      "ok": true,
+      "detail": "page no silent 0"
+    },
+    {
+      "id": "SALE_ASSERT_APPLIED",
+      "ok": true,
+      "detail": "POS deposit apply identity"
+    }
+  ],
+  "identities": {
+    "apply": "DEPOSIT_APPLICATION DR 2200 / CR 1200",
+    "cashSkip": "recordInvoicePaymentToGL skips DEPOSIT",
+    "amount": "applied == requested (2dp ROUND_HALF_UP)",
+    "fifo": "oldest deposit first",
+    "lock": "FOR UPDATE on active customer deposits"
+  }
+}

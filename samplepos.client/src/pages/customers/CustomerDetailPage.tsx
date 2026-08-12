@@ -30,6 +30,12 @@ import { useCanAccess } from '../../components/auth/ProtectedRoute';
 import { useWhtTypes } from '../../hooks/useAccountingModules';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { useInvoiceDepositBalance } from '../../hooks/useInvoiceDepositBalance';
+import {
+  assertDepositPaymentAmount,
+  depositPaymentCap,
+  money2,
+} from '@shared/domain/invoiceDepositPayment';
 // ── Local interfaces for Customer Detail page ──────────────────
 
 /** Raw invoice row from API (supports camelCase, snake_case, PascalCase keys) */
@@ -417,38 +423,23 @@ export default function CustomerDetailPage() {
   const [payReferenceNumber, setPayReferenceNumber] = useState('');
   const [payNotes, setPayNotes] = useState('');
   const [payDate, setPayDate] = useState<string>(() => getBusinessDate()); // yyyy-MM-dd
-  const [customerDepositBalance, setCustomerDepositBalance] = useState<number>(0);
-  const [isLoadingDeposits, setIsLoadingDeposits] = useState(false);
   const [showInvoicePicker, setShowInvoicePicker] = useState(false);
   const [fetchedUnpaidInvoices, setFetchedUnpaidInvoices] = useState<NormalizedInvoice[]>([]);
   const [isFetchingUnpaid, setIsFetchingUnpaid] = useState(false);
   const modalRef = useModalAccessibility(isPaymentOpen, () => setPaymentOpen(false));
   const recordPayment = useRecordInvoicePayment();
+  const depositBalance = useInvoiceDepositBalance(id, isPaymentOpen);
 
-  // Fetch customer deposit balance when payment modal opens
   useEffect(() => {
-    const fetchDepositBalance = async () => {
-      if (!isPaymentOpen || !id) {
-        return;
-      }
-      setIsLoadingDeposits(true);
-      try {
-        const response = await api.deposits.getCustomerBalance(id);
-        const depositData = response.data?.data as { availableBalance?: number } | undefined;
-        if (response.data?.success && depositData) {
-          setCustomerDepositBalance(depositData.availableBalance || 0);
-        } else {
-          setCustomerDepositBalance(0);
-        }
-      } catch (error) {
-        console.error('Failed to fetch deposit balance:', error);
-        setCustomerDepositBalance(0);
-      } finally {
-        setIsLoadingDeposits(false);
-      }
-    };
-    fetchDepositBalance();
-  }, [isPaymentOpen, id]);
+    if (!isPaymentOpen || !selectedInvoice || !depositBalance.hasDeposit) return;
+    setPayMethod((current) => {
+      if (current !== 'CASH') return current;
+      const outstanding = money2(selectedInvoice.balance);
+      const cap = depositPaymentCap(outstanding, depositBalance.available);
+      if (cap.gt(0)) setPayAmount(cap.toFixed(2));
+      return 'DEPOSIT';
+    });
+  }, [isPaymentOpen, selectedInvoice, depositBalance.hasDeposit, depositBalance.available]);
 
   const openPaymentModal = (invoice: NormalizedInvoice) => {
     setSelectedInvoice(invoice);
@@ -472,26 +463,23 @@ export default function CustomerDetailPage() {
       return;
     }
 
-    const amountNum = Number(payAmount);
-
-    // Validation
-    if (!payAmount || isNaN(amountNum)) {
+    let amountDec;
+    try {
+      amountDec = money2(payAmount);
+    } catch {
       alert('⚠️ Invalid Amount\n\nPlease enter a valid payment amount.\n\nExample: 50000 for UGX 50,000');
       return;
     }
 
-    if (amountNum <= 0) {
+    if (amountDec.lte(0)) {
       alert('⚠️ Invalid Amount\n\nPayment amount must be greater than zero.');
       return;
     }
 
-    const invoiceBalance = typeof selectedInvoice.balance === 'number'
-      ? selectedInvoice.balance
-      : Number(selectedInvoice.balance || 0);
+    const invoiceBalance = money2(selectedInvoice.balance);
 
-    // Block overpayment - backend rejects payments exceeding invoice balance
-    if (amountNum > invoiceBalance + 0.01) {
-      alert(`⚠️ Payment Exceeds Balance\n\nInvoice Balance: ${formatCurrency(invoiceBalance)}\nPayment Amount: ${formatCurrency(amountNum)}\nOverpayment: ${formatCurrency(amountNum - invoiceBalance)}\n\n❌ Overpayment is not allowed.\nPlease enter an amount up to ${formatCurrency(invoiceBalance)}.`);
+    if (amountDec.gt(invoiceBalance)) {
+      alert(`⚠️ Payment Exceeds Balance\n\nInvoice Balance: ${formatCurrency(invoiceBalance.toNumber())}\nPayment Amount: ${formatCurrency(amountDec.toNumber())}\nOverpayment: ${formatCurrency(amountDec.minus(invoiceBalance).toNumber())}\n\n❌ Overpayment is not allowed.\nPlease enter an amount up to ${formatCurrency(invoiceBalance.toNumber())}.`);
       return;
     }
 
@@ -500,10 +488,15 @@ export default function CustomerDetailPage() {
       return;
     }
 
-    // Validate deposit payment doesn't exceed available balance
     if (payMethod === 'DEPOSIT') {
-      if (amountNum > customerDepositBalance) {
-        alert(`⚠️ Insufficient Deposit Balance\n\nAvailable Deposit: ${formatCurrency(customerDepositBalance)}\nPayment Amount: ${formatCurrency(amountNum)}\n\nPlease reduce the payment amount or use a different payment method.`);
+      try {
+        assertDepositPaymentAmount({
+          amount: amountDec,
+          outstanding: invoiceBalance,
+          depositAvailable: depositBalance.available,
+        });
+      } catch (err: unknown) {
+        alert(`⚠️ Deposit payment rejected\n\n${err instanceof Error ? err.message : String(err)}`);
         return;
       }
     }
@@ -512,7 +505,7 @@ export default function CustomerDetailPage() {
       await recordPayment.mutateAsync({
         invoiceId: String(selectedInvoice.id),
         data: {
-          amount: amountNum,
+          amount: amountDec.toNumber(),
           paymentMethod: payMethod,
           referenceNumber: payReferenceNumber || undefined,
           paymentDate: payDate ? new Date(payDate).toISOString() : undefined,
@@ -521,12 +514,7 @@ export default function CustomerDetailPage() {
       });
       setPaymentOpen(false);
 
-      // Update local deposit balance if deposit was used
-      if (payMethod === 'DEPOSIT') {
-        setCustomerDepositBalance(prev => Math.max(0, prev - amountNum));
-      }
-
-      alert(`✅ Payment Recorded\n\nAmount: ${formatCurrency(amountNum)}\nMethod: ${payMethod}${payMethod === 'DEPOSIT' ? '\n\n🏦 Deposit balance updated.' : ''}\n\nInvoice updated successfully!`);
+      alert(`✅ Payment Recorded\n\nAmount: ${formatCurrency(amountDec.toNumber())}\nMethod: ${payMethod}${payMethod === 'DEPOSIT' ? '\n\n🏦 Deposit balance updated.' : ''}\n\nInvoice updated successfully!`);
     } catch (error: unknown) {
       console.error('Payment recording error:', error);
       const axErr = error instanceof AxiosError ? error.response?.data?.error : undefined;
@@ -1495,19 +1483,39 @@ export default function CustomerDetailPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="method" className="block text-sm font-medium text-gray-700">Method</label>
-                  <select id="method" name="method" value={payMethod} onChange={(e) => setPayMethod(e.target.value)} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+                  <select id="method" name="method" value={payMethod} onChange={(e) => {
+                    const next = e.target.value;
+                    setPayMethod(next);
+                    if (next === 'DEPOSIT' && depositBalance.hasDeposit) {
+                      setPayAmount(
+                        depositPaymentCap(selectedInvoice?.balance ?? 0, depositBalance.available).toFixed(2),
+                      );
+                    }
+                  }} className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" disabled={depositBalance.status === 'loading'}>
                     <option value="CASH">Cash</option>
                     <option value="CARD">Card</option>
                     <option value="MOBILE_MONEY">Mobile Money</option>
                     <option value="BANK_TRANSFER">Bank Transfer</option>
                     <option value="CREDIT">Credit</option>
-                    <option value="DEPOSIT" disabled={customerDepositBalance <= 0}>
-                      Deposit {isLoadingDeposits ? '(Loading...)' : customerDepositBalance > 0 ? `(${formatCurrency(customerDepositBalance)} available)` : '(No deposits)'}
+                    <option value="DEPOSIT" disabled={depositBalance.status !== 'ready' || depositBalance.available.lte(0)}>
+                      {depositBalance.status === 'loading'
+                        ? 'Customer Deposit (Loading...)'
+                        : depositBalance.status === 'error'
+                          ? 'Customer Deposit (unavailable — retry)'
+                          : depositBalance.available.gt(0)
+                            ? `Customer Deposit (${formatCurrency(depositBalance.available.toNumber())} available)`
+                            : 'Customer Deposit (none available)'}
                     </option>
                   </select>
-                  {payMethod === 'DEPOSIT' && customerDepositBalance > 0 && (
+                  {depositBalance.status === 'error' && (
+                    <p className="mt-1 text-sm text-red-700">
+                      Could not load deposit balance. {depositBalance.error}{' '}
+                      <button type="button" className="underline font-medium" onClick={depositBalance.retry}>Retry</button>
+                    </p>
+                  )}
+                  {payMethod === 'DEPOSIT' && depositBalance.hasDeposit && (
                     <p className="mt-1 text-sm text-amber-600 font-medium">
-                      🏦 Using customer deposit. Available: {formatCurrency(customerDepositBalance)}
+                      Using customer deposit. Available: {formatCurrency(depositBalance.available.toNumber())}
                     </p>
                   )}
                 </div>
@@ -1529,7 +1537,7 @@ export default function CustomerDetailPage() {
               )}
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button type="button" className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50" onClick={() => setPaymentOpen(false)}>Cancel</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50" disabled={recordPayment.isPending}>Save Payment</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50" disabled={recordPayment.isPending || depositBalance.status === 'loading' || (payMethod === 'DEPOSIT' && depositBalance.status !== 'ready')}>Save Payment</button>
               </div>
             </form>
           </div>

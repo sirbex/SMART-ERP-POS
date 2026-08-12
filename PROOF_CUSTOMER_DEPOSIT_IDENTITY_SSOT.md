@@ -1,6 +1,6 @@
 # PROOF — Customer deposit identity SSOT
 
-**Generated:** 2026-08-11T04:07:01.144Z  
+**Generated:** 2026-08-12T06:18:02.511Z  
 **Verdict:** **PASS** (30/30 gates)
 
 ## Mandatory rules

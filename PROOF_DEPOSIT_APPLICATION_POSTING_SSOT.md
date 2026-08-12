@@ -1,6 +1,6 @@
 # PROOF — Deposit application posting SSOT
 
-**Generated:** 2026-08-11T04:06:43.950Z  
+**Generated:** 2026-08-12T14:11:31.288Z  
 **Verdict:** **PASS** (21/21 gates)
 
 ## Why this proof exists
