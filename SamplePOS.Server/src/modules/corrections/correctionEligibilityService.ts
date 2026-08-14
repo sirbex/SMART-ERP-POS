@@ -16,6 +16,7 @@ import type {
     CorrectionKind,
     CorrectionRoute,
 } from './correctionEligibilityTypes.js';
+import { isGoodsReceiptPosted } from '@shared/domain/pgDomainEnums.js';
 
 function result(
     base: Pick<CorrectionEligibilityResult, 'documentType' | 'documentId' | 'documentNumber'>,
@@ -461,11 +462,11 @@ export const correctionEligibilityService = {
             });
         }
 
-        if (header.status !== 'COMPLETED' && header.status !== 'FINALIZED') {
+        if (!isGoodsReceiptPosted(header.status)) {
             return result(base, {
                 allowed: false,
                 route: 'BLOCKED',
-                blockers: [`Goods receipt status "${header.status}" is not eligible for reversal.`],
+                blockers: [`Goods receipt status "${header.status}" is not eligible for reversal (need COMPLETED).`],
             });
         }
 

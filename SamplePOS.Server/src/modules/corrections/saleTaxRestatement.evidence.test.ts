@@ -23,6 +23,16 @@ describe('Sale tax restatement (omitted VAT) — structural integrity', () => {
     const sql = readRepo('shared/sql/594_sale_tax_restatement.sql');
     expect(sql).toMatch(/sale_tax_restatement_events/);
     expect(sql).toMatch(/sales\.tax_restatement/);
+    expect(sql).toMatch(/Manager/);
+    expect(sql).toMatch(/Accountant/);
+  });
+
+  it('heal migration grants tax restatement to manager/admin/accountant', () => {
+    const sql = readRepo('shared/sql/596_sale_tax_restatement_manager_accountant_grant.sql');
+    expect(sql).toMatch(/sales\.tax_restatement/);
+    expect(sql).toMatch(/manager/);
+    expect(sql).toMatch(/accountant/);
+    expect(sql).toMatch(/administrator/);
   });
 
   it('permission is catalogued in server PERMISSIONS', () => {
@@ -111,5 +121,20 @@ describe('Sale tax restatement (omitted VAT) — structural integrity', () => {
     expect(src).toMatch(/function gate\(/);
     expect(src).toMatch(/PROOF_SALE_TAX_RESTATEMENT\.md/);
     expect(src).toMatch(/DOCTYPE_PARITY|JOURNAL_BALANCED/);
+  });
+
+  it('RBAC proof artifacts and shared SSOT exist', () => {
+    const ssot = readRepo('shared/authorization/saleTaxRestatementRbac.ts');
+    expect(ssot).toMatch(/SALES_TAX_RESTATEMENT_DEFAULT_ROLES/);
+    expect(ssot).toMatch(/accountant/);
+    expect(ssot).toMatch(/manager/);
+    expect(
+      existsSync(path.join(serverRoot, 'scripts/proof-sale-tax-restatement-rbac-live.ts')),
+    ).toBe(true);
+    expect(
+      existsSync(
+        path.join(serverRoot, 'src/modules/corrections/saleTaxRestatementRbac.evidence.test.ts'),
+      ),
+    ).toBe(true);
   });
 });

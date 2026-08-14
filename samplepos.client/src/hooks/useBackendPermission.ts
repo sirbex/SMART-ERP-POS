@@ -27,6 +27,10 @@ const BACKEND_TO_LEGACY: Record<string, Permission> = {
     'sales.void': Permission.VOID_SALES,
     'sales.refund': Permission.REFUND_SALES,
     'sales.reprint': Permission.REPRINT_RECEIPT,
+    // Omitted-VAT restatement — manager/admin only in legacy fallback (not cashier)
+    'sales.tax_restatement': Permission.EDIT_SALES,
+    'sales.tax_override': Permission.EDIT_SALES,
+    'sales.reassign_customer': Permission.EDIT_SALES,
     // Inventory
     'inventory.read': Permission.VIEW_INVENTORY,
     'inventory.create': Permission.CREATE_INVENTORY,

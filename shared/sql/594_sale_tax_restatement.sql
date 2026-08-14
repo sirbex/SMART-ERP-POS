@@ -33,5 +33,5 @@ ON CONFLICT (key) DO NOTHING;
 INSERT INTO rbac_role_permissions (role_id, permission_key, granted_by)
 SELECT r.id, 'sales.tax_restatement', '00000000-0000-0000-0000-000000000001'
 FROM rbac_roles r
-WHERE r.name IN ('Super Administrator', 'Administrator', 'Manager')
+WHERE r.name IN ('Super Administrator', 'Administrator', 'Manager', 'Accountant')
 ON CONFLICT (role_id, permission_key) DO NOTHING;

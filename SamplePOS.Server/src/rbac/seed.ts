@@ -324,9 +324,19 @@ export async function seedRbacTables(pool: Pool): Promise<void> {
       ['Sales Representative', 'Sales operations - sales, customers, CRM, and quotations', systemUserId]
     );
     const salesRepRoleId = salesRepResult.rows[0].id;
-    const salesRepPerms = permissions.filter(p =>
-      ['sales', 'customers', 'crm', 'reports', 'quotations'].includes(p.module) ||
-      ['pos.read', 'pos.create', 'inventory.read', 'delivery.read', 'settings.read'].includes(p.key)
+    // Privileged sales corrections stay on Manager / Admin / Accountant (not Sales Rep).
+    const salesRepDeniedSalesKeys = new Set([
+      'sales.tax_restatement',
+      'sales.tax_override',
+      'sales.reassign_customer',
+    ]);
+    const salesRepPerms = permissions.filter(
+      (p) =>
+        !salesRepDeniedSalesKeys.has(p.key) &&
+        (['sales', 'customers', 'crm', 'reports', 'quotations'].includes(p.module) ||
+          ['pos.read', 'pos.create', 'inventory.read', 'delivery.read', 'settings.read'].includes(
+            p.key,
+          )),
     );
     for (const permission of salesRepPerms) {
       await client.query(

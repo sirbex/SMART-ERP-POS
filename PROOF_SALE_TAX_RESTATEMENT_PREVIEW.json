@@ -1,0 +1,135 @@
+{
+  "at": "2026-08-09T12:11:31.064Z",
+  "database": "postgresql://postgres:***@localhost:5432/pos_system",
+  "saleId": "a0530882-bd1b-4917-b562-9ab1bd751665",
+  "execute": false,
+  "gates": [
+    {
+      "id": "MIG_594",
+      "ok": true,
+      "detail": "sale_tax_restatement migration applied (IF NOT EXISTS)"
+    },
+    {
+      "id": "SSOT_MODEL_DOC",
+      "ok": true,
+      "detail": "smart model proof doc present with key terms"
+    },
+    {
+      "id": "SVC_PATH",
+      "ok": true,
+      "detail": "service recomputes via DocumentTaxService"
+    },
+    {
+      "id": "ROUTES",
+      "ok": true,
+      "detail": "API routes tax-restatement execute present"
+    },
+    {
+      "id": "PERM",
+      "ok": true,
+      "detail": "RBAC catalog key sales.tax_restatement"
+    },
+    {
+      "id": "UI",
+      "ok": true,
+      "detail": "Sales UI wires SaleTaxRestatementModal"
+    },
+    {
+      "id": "SALE_PICK",
+      "ok": true,
+      "detail": "saleId=a0530882-bd1b-4917-b562-9ab1bd751665"
+    },
+    {
+      "id": "PREVIEW_NO_FATAL",
+      "ok": true,
+      "detail": "blockers (acceptable if already restated): Computed tax matches posted tax (no omitted VAT to apply). Ensure products are VAT-liable and the customer is not exempt before restating."
+    },
+    {
+      "id": "ALREADY_CORRECT_OR_RESTED",
+      "ok": true,
+      "detail": "tax already matches DocumentTax (posted=43200 new=43200) — post-apply integrity path N/A without a zero-tax fixture"
+    },
+    {
+      "id": "POLICY_INCREASE_ONLY",
+      "ok": true,
+      "detail": "service encodes increase-only + CN for reductions"
+    },
+    {
+      "id": "POLICY_NO_VOID",
+      "ok": true,
+      "detail": "restatement path does not call voidSale"
+    }
+  ],
+  "beforeSale": {
+    "sale_number": "SALE-2026-0208",
+    "tax": 43200,
+    "total": 303200,
+    "customer_id": "fd289f0b-dc79-48ad-b13b-052137f38897",
+    "status": "COMPLETED"
+  },
+  "beforeInvoices": [
+    {
+      "invoice_number": "INV-2026-0001",
+      "tax": 43200,
+      "total": 303200,
+      "due": 303200,
+      "status": "UNPAID"
+    }
+  ],
+  "glBefore": {
+    "tax2300Net": 203760,
+    "ar1200Net": 303200
+  },
+  "preview": {
+    "saleNumber": "SALE-2026-0208",
+    "postedTax": 43200,
+    "newTax": 43200,
+    "taxDelta": 0,
+    "totalDelta": 0,
+    "taxInclusive": false,
+    "blockers": [
+      "Computed tax matches posted tax (no omitted VAT to apply). Ensure products are VAT-liable and the customer is not exempt before restating."
+    ],
+    "warnings": [],
+    "lines": [
+      {
+        "saleItemId": "69859efa-a4d2-464a-943e-3f6a502a586d",
+        "productId": "98cc5e26-bd41-462d-b072-0e73a2c02229",
+        "productName": "Abchlor eye drops",
+        "postedTax": 0,
+        "newTax": 0,
+        "taxRate": 0,
+        "determination": "NONE",
+        "isTaxable": false
+      },
+      {
+        "saleItemId": "c70de60e-ca86-473a-8198-ab96b85301cb",
+        "productId": "d16639cf-2195-4cbd-bee6-a952e9d3aeef",
+        "productName": "Abdominal support 8inch M",
+        "postedTax": 43200,
+        "newTax": 43200,
+        "taxRate": 18,
+        "determination": "BRIDGE",
+        "isTaxable": true
+      }
+    ],
+    "invoices": [
+      {
+        "invoiceId": "a93d960c-990b-461b-8995-9e29d1a192af",
+        "invoiceNumber": "INV-2026-0001",
+        "postedTax": 43200,
+        "newTax": 43200,
+        "postedTotal": 303200,
+        "newTotal": 303200,
+        "newAmountDue": 303200
+      }
+    ],
+    "journalLines": []
+  },
+  "summary": {
+    "pass": 11,
+    "fail": 0,
+    "total": 11,
+    "verdict": "PASS"
+  }
+}

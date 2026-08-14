@@ -1,0 +1,207 @@
+{
+  "at": "2026-08-14T07:38:25.738Z",
+  "permission": "sales.tax_restatement",
+  "allowRoles": [
+    "super administrator",
+    "administrator",
+    "manager",
+    "accountant"
+  ],
+  "denyRoles": [
+    "cashier",
+    "waiter",
+    "auditor",
+    "warehouse clerk",
+    "sales representative",
+    "hr manager"
+  ],
+  "seedProfile": {
+    "manager": true,
+    "accountant": true,
+    "cashier": false,
+    "waiter": false
+  },
+  "gates": [
+    {
+      "id": "SSOT_MANAGER",
+      "ok": true,
+      "detail": "manager=true"
+    },
+    {
+      "id": "SSOT_ACCOUNTANT",
+      "ok": true,
+      "detail": "accountant=true"
+    },
+    {
+      "id": "SSOT_CASHIER_DENY",
+      "ok": true,
+      "detail": "cashier=false"
+    },
+    {
+      "id": "SSOT_WAITER_DENY",
+      "ok": true,
+      "detail": "waiter=false"
+    },
+    {
+      "id": "ROLE_ALLOW_super_administrator",
+      "ok": true,
+      "detail": "super administrator"
+    },
+    {
+      "id": "ROLE_ALLOW_administrator",
+      "ok": true,
+      "detail": "administrator"
+    },
+    {
+      "id": "ROLE_ALLOW_manager",
+      "ok": true,
+      "detail": "manager"
+    },
+    {
+      "id": "ROLE_ALLOW_accountant",
+      "ok": true,
+      "detail": "accountant"
+    },
+    {
+      "id": "ROLE_DENY_cashier",
+      "ok": true,
+      "detail": "cashier"
+    },
+    {
+      "id": "ROLE_DENY_waiter",
+      "ok": true,
+      "detail": "waiter"
+    },
+    {
+      "id": "ROLE_DENY_auditor",
+      "ok": true,
+      "detail": "auditor"
+    },
+    {
+      "id": "ROLE_DENY_warehouse_clerk",
+      "ok": true,
+      "detail": "warehouse clerk"
+    },
+    {
+      "id": "ROLE_DENY_sales_representative",
+      "ok": true,
+      "detail": "sales representative"
+    },
+    {
+      "id": "ROLE_DENY_hr_manager",
+      "ok": true,
+      "detail": "hr manager"
+    },
+    {
+      "id": "LEGACY_ADMIN",
+      "ok": true,
+      "detail": "ADMIN"
+    },
+    {
+      "id": "LEGACY_MANAGER",
+      "ok": true,
+      "detail": "MANAGER"
+    },
+    {
+      "id": "LEGACY_CASHIER",
+      "ok": true,
+      "detail": "CASHIER deny"
+    },
+    {
+      "id": "LEGACY_STAFF",
+      "ok": true,
+      "detail": "STAFF deny"
+    },
+    {
+      "id": "PERM_CATALOG",
+      "ok": true,
+      "detail": "permissions.ts catalogues key"
+    },
+    {
+      "id": "MIG_594",
+      "ok": true,
+      "detail": "594 grants Manager + Accountant (+ admins)"
+    },
+    {
+      "id": "MIG_596_super_administrator",
+      "ok": true,
+      "detail": "596 lists super administrator"
+    },
+    {
+      "id": "MIG_596_administrator",
+      "ok": true,
+      "detail": "596 lists administrator"
+    },
+    {
+      "id": "MIG_596_manager",
+      "ok": true,
+      "detail": "596 lists manager"
+    },
+    {
+      "id": "MIG_596_accountant",
+      "ok": true,
+      "detail": "596 lists accountant"
+    },
+    {
+      "id": "MIG_596_NO_CASHIER",
+      "ok": true,
+      "detail": "596 does not grant cashier"
+    },
+    {
+      "id": "MIG_596_NO_WAITER",
+      "ok": true,
+      "detail": "596 does not grant waiter"
+    },
+    {
+      "id": "API_PREVIEW",
+      "ok": true,
+      "detail": "preview requires sales.tax_restatement"
+    },
+    {
+      "id": "API_EXECUTE",
+      "ok": true,
+      "detail": "execute requires sales.tax_restatement"
+    },
+    {
+      "id": "UI_HOOK",
+      "ok": true,
+      "detail": "SalesPage uses useBackendPermission(sales.tax_restatement)"
+    },
+    {
+      "id": "UI_BUTTON",
+      "ok": true,
+      "detail": "button gated by canRestateTax"
+    },
+    {
+      "id": "UI_NOT_SALES_UPDATE",
+      "ok": true,
+      "detail": "button not gated on sales.update alone"
+    },
+    {
+      "id": "CLIENT_LEGACY_MAP",
+      "ok": true,
+      "detail": "BACKEND_TO_LEGACY maps tax_restatement"
+    },
+    {
+      "id": "SEED_REP_DENY",
+      "ok": true,
+      "detail": "seed excludes tax_restatement from Sales Rep"
+    },
+    {
+      "id": "TENANT_REP_DENY",
+      "ok": true,
+      "detail": "tenantService excludes tax_restatement from Sales Rep"
+    },
+    {
+      "id": "LIVE_SCRIPT",
+      "ok": true,
+      "detail": "proof-sale-tax-restatement-rbac-live.ts exists"
+    }
+  ],
+  "summary": {
+    "pass": 35,
+    "fail": 0,
+    "total": 35,
+    "verdict": "PASS"
+  }
+}

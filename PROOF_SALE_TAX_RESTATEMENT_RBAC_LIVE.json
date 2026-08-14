@@ -1,0 +1,126 @@
+{
+  "at": "2026-08-09T13:06:48.513Z",
+  "permission": "sales.tax_restatement",
+  "grantedRoles": [
+    "Administrator",
+    "Manager",
+    "Super Administrator"
+  ],
+  "presentRoles": [
+    "Administrator",
+    "Auditor",
+    "Cashier",
+    "Inventory Manager",
+    "Manager",
+    "Super Administrator",
+    "Test API Role 126074080",
+    "Test Sales Rep 1767378273124",
+    "Test Sales Rep 1767381012047",
+    "Test Sales Rep 1767381016473",
+    "Test Sales Rep 1767381993211",
+    "Test Sales Rep 1767381994699",
+    "Test Sales Rep 1772741150979",
+    "Test Sales Rep 1772741203452",
+    "Test Sales Rep 1772741228905",
+    "Test Sales Rep 1772823454227",
+    "Test Sales Rep 1772884564060",
+    "Test Sales Rep 1772884595929",
+    "Test Sales Rep 1772885632067",
+    "Test Sales Rep 1779402393578",
+    "Waiter"
+  ],
+  "seedProfile": {
+    "manager": true,
+    "accountant": true,
+    "cashier": false,
+    "waiter": false
+  },
+  "gates": [
+    {
+      "id": "MIG_596_APPLY",
+      "ok": true,
+      "detail": "applied heal grant migration"
+    },
+    {
+      "id": "CATALOG",
+      "ok": true,
+      "detail": "catalog row module=sales"
+    },
+    {
+      "id": "ALLOW_super_administrator",
+      "ok": true,
+      "detail": "granted"
+    },
+    {
+      "id": "ALLOW_administrator",
+      "ok": true,
+      "detail": "granted"
+    },
+    {
+      "id": "ALLOW_manager",
+      "ok": true,
+      "detail": "granted"
+    },
+    {
+      "id": "ALLOW_accountant",
+      "ok": true,
+      "detail": "role absent on tenant — N/A (skip grant assert)"
+    },
+    {
+      "id": "DENY_cashier",
+      "ok": true,
+      "detail": "not granted"
+    },
+    {
+      "id": "DENY_waiter",
+      "ok": true,
+      "detail": "not granted"
+    },
+    {
+      "id": "DENY_auditor",
+      "ok": true,
+      "detail": "not granted"
+    },
+    {
+      "id": "DENY_warehouse_clerk",
+      "ok": true,
+      "detail": "role absent on tenant — N/A"
+    },
+    {
+      "id": "DENY_sales_representative",
+      "ok": true,
+      "detail": "role absent on tenant — N/A"
+    },
+    {
+      "id": "DENY_hr_manager",
+      "ok": true,
+      "detail": "role absent on tenant — N/A"
+    },
+    {
+      "id": "SSOT_MANAGER",
+      "ok": true,
+      "detail": "code SSOT manager"
+    },
+    {
+      "id": "SSOT_ACCOUNTANT",
+      "ok": true,
+      "detail": "code SSOT accountant"
+    },
+    {
+      "id": "SSOT_CASHIER_DENY",
+      "ok": true,
+      "detail": "code SSOT cashier denied"
+    },
+    {
+      "id": "SSOT_WAITER_DENY",
+      "ok": true,
+      "detail": "code SSOT waiter denied"
+    }
+  ],
+  "summary": {
+    "pass": 16,
+    "fail": 0,
+    "total": 16,
+    "verdict": "PASS"
+  }
+}

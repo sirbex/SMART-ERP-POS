@@ -52,6 +52,22 @@ describe('systemRoleGrants SSOT', () => {
     ).toBe(true);
   });
 
+  it('Manager + Accountant may apply omitted VAT (sales.tax_restatement)', () => {
+    expect(SYSTEM_ACCOUNTANT_EXTRA_KEYS).toContain('sales.tax_restatement');
+    expect(
+      isSystemAccountantPermission({ key: 'sales.tax_restatement', module: 'sales' }),
+    ).toBe(true);
+    expect(
+      isSystemManagerPermission({ key: 'sales.tax_restatement', module: 'sales' }),
+    ).toBe(true);
+    expect(
+      isSystemCashierPermission({ key: 'sales.tax_restatement', module: 'sales' }),
+    ).toBe(false);
+    expect(
+      isSystemWaiterPermission({ key: 'sales.tax_restatement', module: 'sales' }),
+    ).toBe(false);
+  });
+
   it('restaurant.pay is accountant/cashier/admin — not Manager', () => {
     expect(SYSTEM_ACCOUNTANT_EXTRA_KEYS).toContain('restaurant.pay');
     expect(
