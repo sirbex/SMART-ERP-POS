@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "contract": "shared/hr/payrollPaySsot.ts + shared/zod/hrPayrollPay.ts + 607",
+  "checks": {
+    "modes": "ALL|SELECTED|PARTIAL",
+    "remainingIdentity": true,
+    "periodStatuses": "POSTED|PARTIALLY_PAID|PAID"
+  },
+  "at": "2026-08-14T06:17:59.401Z"
+}

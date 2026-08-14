@@ -1,29 +1,29 @@
 /**
  * Employee ↔ User identity SSOT (Odoo/SAP-style, SamplePOS-smart).
  *
- * Rules:
- * - Employee is the HR/payroll master (always). User is optional login/POS identity.
- * - At most one employee per user (1:1 when linked).
- * - Casuals / contractors may exist with no login.
- * - EndDate + INACTIVE ends employment; login may be deactivated without deleting history.
+ * Employment types + contract lifecycle: shared/hr/employmentContractSsot.ts (canonical).
+ * This module re-exports types and keeps hire/end + user-link rules.
  */
 
-export const EMPLOYMENT_TYPES = ['PERMANENT', 'CASUAL', 'CONTRACT'] as const;
-export type EmploymentType = (typeof EMPLOYMENT_TYPES)[number];
+export {
+  EMPLOYMENT_TYPES,
+  type EmploymentType,
+  isEmploymentType,
+  FIXED_TERM_EMPLOYMENT_TYPES,
+  requiresContractEndDate,
+} from './employmentContractSsot.js';
+
+import { isEmploymentType, type EmploymentType } from './employmentContractSsot.js';
 
 export const EMPLOYEE_STATUSES = ['ACTIVE', 'INACTIVE'] as const;
 export type EmployeeStatus = (typeof EMPLOYEE_STATUSES)[number];
-
-export function isEmploymentType(value: unknown): value is EmploymentType {
-  return typeof value === 'string' && (EMPLOYMENT_TYPES as readonly string[]).includes(value);
-}
 
 export function normalizeEmploymentType(value: unknown): EmploymentType {
   if (isEmploymentType(value)) return value;
   return 'PERMANENT';
 }
 
-/** Login is never required — casuals and contractors often have none. */
+/** Login is never required — casuals / interns / contractors often have none. */
 export function requiresRelatedUser(_employmentType: EmploymentType): boolean {
   return false;
 }

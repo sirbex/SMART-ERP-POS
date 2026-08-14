@@ -18,7 +18,12 @@ export interface PayrollExportInput {
   positionTitle?: string | null;
   basicSalary: number | string;
   allowances: number | string;
+  overtimePay?: number | string;
+  bonus?: number | string;
+  leaveDeduction?: number | string;
   advanceRecovered: number | string;
+  nssfEmployee?: number | string;
+  paye?: number | string;
   netPay: number | string;
   journalTransactionNumber?: string | null;
   paymentTransactionNumber?: string | null;
@@ -30,7 +35,12 @@ export interface PayrollExportRow {
   position: string;
   basicSalary: number;
   allowances: number;
+  overtimePay: number;
+  bonus: number;
+  leaveDeduction: number;
   gross: number;
+  nssfEmployee: number;
+  paye: number;
   advanceRecovered: number;
   netPay: number;
   accrualJe: string;
@@ -45,7 +55,12 @@ export interface PayrollExportSheet {
   totals: {
     basicSalary: number;
     allowances: number;
+    overtimePay: number;
+    bonus: number;
+    leaveDeduction: number;
     gross: number;
+    nssfEmployee: number;
+    paye: number;
     advanceRecovered: number;
     netPay: number;
     count: number;
@@ -95,6 +110,8 @@ export interface BalanceExportInput {
   advanceAccountCode?: string | null;
   salariesPayable: number | string;
   advancesOutstanding: number | string;
+  registerAdvancesOutstanding?: number | string;
+  advanceSsotDrift?: boolean;
 }
 
 export interface BalanceExportSheet {
@@ -104,11 +121,15 @@ export interface BalanceExportSheet {
     salariesPayable: number;
     advanceAccountCode: string;
     advancesOutstanding: number;
+    registerAdvancesOutstanding: number;
+    advanceSsotDrift: boolean;
   }>;
   totals: {
     salariesPayable: number;
     advancesOutstanding: number;
+    registerAdvancesOutstanding: number;
     count: number;
+    driftCount: number;
   };
 }
 
@@ -141,17 +162,27 @@ export function buildPayrollExportSheet(
   const rows: PayrollExportRow[] = entries.map((e, i) => {
     const basicSalary = money2Number(e.basicSalary);
     const allowances = money2Number(e.allowances);
+    const overtimePay = money2Number(e.overtimePay ?? 0);
+    const bonus = money2Number(e.bonus ?? 0);
+    const leaveDeduction = money2Number(e.leaveDeduction ?? 0);
     const advanceRecovered = money2Number(e.advanceRecovered);
+    const nssfEmployee = money2Number(e.nssfEmployee ?? 0);
+    const paye = money2Number(e.paye ?? 0);
     const netPay = money2Number(e.netPay);
-    const gross = money2Number(money2(basicSalary).plus(money2(allowances)));
+    const gross = money2Number(
+      money2(basicSalary)
+        .plus(allowances)
+        .plus(overtimePay)
+        .plus(bonus)
+        .minus(leaveDeduction)
+    );
 
     try {
       assertPayrollIdentity({
-        basicSalary,
-        allowances,
         gross,
         advanceRecovered,
-        deductions: advanceRecovered,
+        nssfEmployee,
+        paye,
         netPay,
       });
     } catch (err) {
@@ -166,7 +197,12 @@ export function buildPayrollExportSheet(
       position: e.positionTitle ?? '',
       basicSalary,
       allowances,
+      overtimePay,
+      bonus,
+      leaveDeduction,
       gross,
+      nssfEmployee,
+      paye,
       advanceRecovered,
       netPay,
       accrualJe: e.journalTransactionNumber ?? '',
@@ -177,18 +213,22 @@ export function buildPayrollExportSheet(
   const totals = {
     basicSalary: sum2(rows.map((r) => r.basicSalary)),
     allowances: sum2(rows.map((r) => r.allowances)),
+    overtimePay: sum2(rows.map((r) => r.overtimePay)),
+    bonus: sum2(rows.map((r) => r.bonus)),
+    leaveDeduction: sum2(rows.map((r) => r.leaveDeduction)),
     gross: sum2(rows.map((r) => r.gross)),
+    nssfEmployee: sum2(rows.map((r) => r.nssfEmployee)),
+    paye: sum2(rows.map((r) => r.paye)),
     advanceRecovered: sum2(rows.map((r) => r.advanceRecovered)),
     netPay: sum2(rows.map((r) => r.netPay)),
     count: rows.length,
   };
 
   assertPayrollIdentity({
-    basicSalary: totals.basicSalary,
-    allowances: totals.allowances,
     gross: totals.gross,
     advanceRecovered: totals.advanceRecovered,
-    deductions: totals.advanceRecovered,
+    nssfEmployee: totals.nssfEmployee,
+    paye: totals.paye,
     netPay: totals.netPay,
   });
 
@@ -215,7 +255,12 @@ export function payrollSheetToCsv(sheet: PayrollExportSheet): string {
     'Position',
     'Basic',
     'Allowances',
+    'OT',
+    'Bonus',
+    'Leave ded.',
     'Gross',
+    'NSSF',
+    'PAYE',
     'Advance recovered',
     'Net to pay',
     'Status',
@@ -228,7 +273,12 @@ export function payrollSheetToCsv(sheet: PayrollExportSheet): string {
     r.position,
     moneyCell(r.basicSalary),
     moneyCell(r.allowances),
+    moneyCell(r.overtimePay),
+    moneyCell(r.bonus),
+    moneyCell(r.leaveDeduction),
     moneyCell(r.gross),
+    moneyCell(r.nssfEmployee),
+    moneyCell(r.paye),
     moneyCell(r.advanceRecovered),
     moneyCell(r.netPay),
     sheet.status,
@@ -241,7 +291,12 @@ export function payrollSheetToCsv(sheet: PayrollExportSheet): string {
     '',
     moneyCell(sheet.totals.basicSalary),
     moneyCell(sheet.totals.allowances),
+    moneyCell(sheet.totals.overtimePay),
+    moneyCell(sheet.totals.bonus),
+    moneyCell(sheet.totals.leaveDeduction),
     moneyCell(sheet.totals.gross),
+    moneyCell(sheet.totals.nssfEmployee),
+    moneyCell(sheet.totals.paye),
     moneyCell(sheet.totals.advanceRecovered),
     moneyCell(sheet.totals.netPay),
     '',
@@ -325,13 +380,17 @@ export function buildBalanceExportSheet(balances: BalanceExportInput[]): Balance
     salariesPayable: money2Number(b.salariesPayable),
     advanceAccountCode: b.advanceAccountCode ?? '',
     advancesOutstanding: money2Number(b.advancesOutstanding),
+    registerAdvancesOutstanding: money2Number(b.registerAdvancesOutstanding ?? b.advancesOutstanding),
+    advanceSsotDrift: Boolean(b.advanceSsotDrift),
   }));
   return {
     rows,
     totals: {
       salariesPayable: sum2(rows.map((r) => r.salariesPayable)),
       advancesOutstanding: sum2(rows.map((r) => r.advancesOutstanding)),
+      registerAdvancesOutstanding: sum2(rows.map((r) => r.registerAdvancesOutstanding)),
       count: rows.length,
+      driftCount: rows.filter((r) => r.advanceSsotDrift).length,
     },
   };
 }
@@ -342,7 +401,9 @@ export function balanceSheetToCsv(sheet: BalanceExportSheet): string {
     'Payable account',
     'Salaries payable',
     'Advance account',
-    'Advances outstanding',
+    'Advances GL',
+    'Advances register',
+    'SSOT drift',
   ];
   const dataRows = sheet.rows.map((r) => [
     r.employeeName,
@@ -350,6 +411,8 @@ export function balanceSheetToCsv(sheet: BalanceExportSheet): string {
     moneyCell(r.salariesPayable),
     r.advanceAccountCode,
     moneyCell(r.advancesOutstanding),
+    moneyCell(r.registerAdvancesOutstanding),
+    r.advanceSsotDrift ? 'YES' : 'NO',
   ]);
   const totalRow = [
     'TOTALS',
@@ -357,6 +420,8 @@ export function balanceSheetToCsv(sheet: BalanceExportSheet): string {
     moneyCell(sheet.totals.salariesPayable),
     '',
     moneyCell(sheet.totals.advancesOutstanding),
+    moneyCell(sheet.totals.registerAdvancesOutstanding),
+    sheet.totals.driftCount > 0 ? String(sheet.totals.driftCount) : '',
   ];
   return csvBody(headers, [...dataRows, totalRow]);
 }
@@ -385,11 +450,13 @@ export function assertPayrollCsvConsistent(csv: string): {
     throw new Error('EXPORT_CSV_NO_TOTALS_ROW');
   }
   const staff = body.slice(0, -1);
-  const idx = { gross: 5, recovered: 6, net: 7 };
+  const idx = { gross: 8, nssf: 9, paye: 10, recovered: 11, net: 12 };
   const parseLine = (line: string) => {
     const cols = parseCsvLine(line);
     return {
       gross: money2Number(cols[idx.gross]),
+      nssf: money2Number(cols[idx.nssf]),
+      paye: money2Number(cols[idx.paye]),
       recovered: money2Number(cols[idx.recovered]),
       net: money2Number(cols[idx.net]),
     };
@@ -400,11 +467,10 @@ export function assertPayrollCsvConsistent(csv: string): {
   for (const line of staff) {
     const r = parseLine(line);
     assertPayrollIdentity({
-      basicSalary: 0,
-      allowances: 0,
       gross: r.gross,
       advanceRecovered: r.recovered,
-      deductions: r.recovered,
+      nssfEmployee: r.nssf,
+      paye: r.paye,
       netPay: r.net,
     });
     sumGross = money2(sumGross.plus(money2(r.gross)));

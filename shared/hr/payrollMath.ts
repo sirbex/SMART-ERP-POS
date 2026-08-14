@@ -1,11 +1,22 @@
 /**
  * Payroll monetary SSOT (shared).
  *
- * Rules (Tally/QB/SAP simplified):
- *   gross = basic + allowances
- *   advanceRecovered = min(openAdvances, gross)  — never drives net negative
- *   netPay = gross − advanceRecovered
- *   Accrual JE must balance: DR expense(gross) = CR advance + CR payable(net)
+ * Rules (Tally/QB/SAP simplified, Uganda-ready):
+ *   contractual = basic + allowances
+ *   earnings = contractual + overtime + bonus − leaveDeduction
+ *   gross = max(0, earnings)   // pensionable / expense base
+ *   statutory = NSSF EE + PAYE (optional)
+ *   advanceRecovered = min(openAdvances, max(0, gross − statutory))
+ *   netPay = gross − statutory − advanceRecovered
+ *   Accrual JE: DR expense(gross) [+ employer NSSF] =
+ *               CR advance + CR NSSF + CR PAYE + CR payable(net) [+ CR NSSF employer]
+ *
+ * Allowance boundary (SAP / Odoo / Tally / QuickBooks):
+ *   - MonthlyAllowance / payroll "allowances" = contractual recurring wage component
+ *     (fixed monthly transport/housing baked into salary). Part of gross pay.
+ *   - Daily / ad-hoc transport, fuel, per-diems paid by Accounts = Expenses module
+ *     (category ALLOWANCE / travel). Operating expense — NOT payroll gross, NOT
+ *     recovered from salary. Do not put those amounts in MonthlyAllowance.
  *
  * Precision: decimal.js ROUND_HALF_UP to 2dp — never native float arithmetic.
  */
@@ -15,6 +26,12 @@ import {
   assertJournalBalanced,
   type ActualJournalLine,
 } from '../financial-accuracy/journalAccuracy.js';
+import { unpaidLeaveDeduction } from './leaveMath.js';
+import {
+  computeStatutoryDeductions,
+  DEFAULT_STATUTORY_SETTINGS,
+  type StatutorySettings,
+} from './statutoryMath.js';
 
 Decimal.set({
   precision: 20,
@@ -42,41 +59,112 @@ export interface PayrollComputeInput {
   basicSalary: number | string;
   monthlyAllowance: number | string;
   openAdvanceRemaining: number | string;
+  overtimePay?: number | string;
+  bonus?: number | string;
+  unpaidLeaveDays?: number | string;
+  workingDaysPerMonth?: number | string;
+  statutory?: StatutorySettings | null;
 }
 
 export interface PayrollComputeResult {
   basicSalary: number;
   allowances: number;
+  overtimePay: number;
+  bonus: number;
+  unpaidLeaveDays: number;
+  leaveDeduction: number;
   gross: number;
+  nssfEmployee: number;
+  paye: number;
+  nssfEmployer: number;
   advanceRecovered: number;
   deductions: number;
   netPay: number;
 }
 
 export function computePayrollAmounts(input: PayrollComputeInput): PayrollComputeResult {
-  const zero = new Decimal(0);
   const basicRaw = money2(input.basicSalary);
   const allowRaw = money2(input.monthlyAllowance);
+  const otRaw = money2(input.overtimePay ?? 0);
+  const bonusRaw = money2(input.bonus ?? 0);
   const openRaw = money2(input.openAdvanceRemaining);
+  const unpaidDays = money2(input.unpaidLeaveDays ?? 0);
+  const workingDays = money2(input.workingDaysPerMonth ?? 26);
 
-  const basicSalary = basicRaw.lt(0) ? zero : basicRaw;
-  const allowances = allowRaw.lt(0) ? zero : allowRaw;
-  const gross = money2(basicSalary.plus(allowances));
-  const openAdv = openRaw.lt(0) ? zero : openRaw;
-  const advanceRecovered = money2(openAdv.lt(gross) ? openAdv : gross);
-  const deductions = advanceRecovered;
+  if (basicRaw.lt(0)) throw new Error(`PAYROLL_INPUT_NEGATIVE: basicSalary=${basicRaw}`);
+  if (allowRaw.lt(0)) throw new Error(`PAYROLL_INPUT_NEGATIVE: monthlyAllowance=${allowRaw}`);
+  if (otRaw.lt(0)) throw new Error(`PAYROLL_INPUT_NEGATIVE: overtimePay=${otRaw}`);
+  if (bonusRaw.lt(0)) throw new Error(`PAYROLL_INPUT_NEGATIVE: bonus=${bonusRaw}`);
+  if (openRaw.lt(0)) throw new Error(`PAYROLL_INPUT_NEGATIVE: openAdvanceRemaining=${openRaw}`);
+  if (unpaidDays.lt(0)) throw new Error(`PAYROLL_INPUT_NEGATIVE: unpaidLeaveDays=${unpaidDays}`);
+  if (workingDays.lte(0)) {
+    throw new Error(`PAYROLL_WORKING_DAYS: must be > 0, got ${workingDays}`);
+  }
+
+  const basicSalary = basicRaw;
+  const allowances = allowRaw;
+  const overtimePay = otRaw;
+  const bonus = bonusRaw;
+  const unpaidLeaveDaysNum = unpaidDays.toNumber();
+
+  const leaveDeduction = money2(
+    unpaidLeaveDeduction({
+      basicSalary: basicSalary.toNumber(),
+      unpaidDays: unpaidLeaveDaysNum,
+      workingDaysPerMonth: workingDays.toNumber(),
+    })
+  );
+
+  const contractual = money2(basicSalary.plus(allowances).plus(overtimePay).plus(bonus));
+  const grossRaw = money2(contractual.minus(leaveDeduction));
+  if (grossRaw.lt(0)) {
+    throw new Error(
+      `PAYROLL_GROSS_NEGATIVE: contractual=${contractual} leaveDeduction=${leaveDeduction}`
+    );
+  }
+  const gross = grossRaw;
+
+  const settings = input.statutory ?? {
+    ...DEFAULT_STATUTORY_SETTINGS,
+    enabled: false,
+  };
+  const statutory = computeStatutoryDeductions({
+    pensionableGross: gross.toNumber(),
+    settings,
+  });
+  const nssfEmployee = money2(statutory.nssfEmployee);
+  const paye = money2(statutory.paye);
+  const nssfEmployer = money2(statutory.nssfEmployer);
+
+  const afterStatutory = money2(gross.minus(nssfEmployee).minus(paye));
+  if (afterStatutory.lt(0)) {
+    throw new Error(
+      `PAYROLL_AFTER_STATUTORY_NEGATIVE: gross=${gross} nssf=${nssfEmployee} paye=${paye}`
+    );
+  }
+  const maxRecoverable = afterStatutory;
+  const openAdv = openRaw;
+  const advanceRecovered = money2(openAdv.lt(maxRecoverable) ? openAdv : maxRecoverable);
+  const deductions = money2(advanceRecovered.plus(nssfEmployee).plus(paye));
   const netPay = money2(gross.minus(deductions));
 
   if (netPay.lt(0)) {
     throw new Error(
-      `PAYROLL_MATH_NEGATIVE_NET: gross=${gross} recovered=${advanceRecovered}`
+      `PAYROLL_MATH_NEGATIVE_NET: gross=${gross} nssf=${nssfEmployee} paye=${paye} recovered=${advanceRecovered}`
     );
   }
 
   const result: PayrollComputeResult = {
     basicSalary: basicSalary.toNumber(),
     allowances: allowances.toNumber(),
+    overtimePay: overtimePay.toNumber(),
+    bonus: bonus.toNumber(),
+    unpaidLeaveDays: unpaidLeaveDaysNum,
+    leaveDeduction: leaveDeduction.toNumber(),
     gross: gross.toNumber(),
+    nssfEmployee: nssfEmployee.toNumber(),
+    paye: paye.toNumber(),
+    nssfEmployer: nssfEmployer.toNumber(),
     advanceRecovered: advanceRecovered.toNumber(),
     deductions: deductions.toNumber(),
     netPay: netPay.toNumber(),
@@ -86,34 +174,44 @@ export function computePayrollAmounts(input: PayrollComputeInput): PayrollComput
   return result;
 }
 
-/** Fail loud if gross ≠ advanceRecovered + netPay */
-export function assertPayrollIdentity(r: PayrollComputeResult): void {
+/** Fail loud if gross ≠ advanceRecovered + nssf + paye + netPay */
+export function assertPayrollIdentity(r: {
+  gross: number | string;
+  advanceRecovered: number | string;
+  netPay: number | string;
+  nssfEmployee?: number | string;
+  paye?: number | string;
+}): void {
+  const nssf = money2(r.nssfEmployee ?? 0);
+  const paye = money2(r.paye ?? 0);
   const lhs = money2(r.gross);
-  const rhs = money2(money2(r.advanceRecovered).plus(money2(r.netPay)));
+  const rhs = money2(money2(r.advanceRecovered).plus(nssf).plus(paye).plus(money2(r.netPay)));
   if (!lhs.equals(rhs)) {
     throw new Error(
-      `PAYROLL_IDENTITY_BROKEN: gross ${lhs} ≠ recovered ${r.advanceRecovered} + net ${r.netPay}`
+      `PAYROLL_IDENTITY_BROKEN: gross ${lhs} ≠ recovered ${r.advanceRecovered} + nssf ${nssf} + paye ${paye} + net ${r.netPay}`
     );
   }
 }
 
-/** @deprecated use assertPayrollIdentity — kept for call-site compatibility */
+/** @deprecated use assertPayrollIdentity — returns false on break (legacy callers only) */
 export function accrualLinesBalance(
   gross: number,
   advanceRecovered: number,
-  netPay: number
+  netPay: number,
+  nssfEmployee = 0,
+  paye = 0
 ): boolean {
   try {
     assertPayrollIdentity({
-      basicSalary: 0,
-      allowances: 0,
       gross,
       advanceRecovered,
-      deductions: advanceRecovered,
+      nssfEmployee,
+      paye,
       netPay,
     });
     return true;
   } catch {
+    // Intentionally boolean for legacy call-sites — new code must use assertPayrollIdentity.
     return false;
   }
 }
@@ -124,16 +222,25 @@ export function buildPayrollAccrualJournal(input: {
   gross: number;
   advanceRecovered: number;
   netPay: number;
+  nssfEmployee?: number;
+  paye?: number;
+  nssfEmployer?: number;
   payableAccountCode: string;
   advanceAccountCode?: string | null;
+  nssfPayableAccount?: string | null;
+  payePayableAccount?: string | null;
+  employerNssfExpenseAccount?: string | null;
   empName: string;
 }): ActualJournalLine[] {
+  const nssfEmployee = money2Number(input.nssfEmployee ?? 0);
+  const paye = money2Number(input.paye ?? 0);
+  const nssfEmployer = money2Number(input.nssfEmployer ?? 0);
+
   assertPayrollIdentity({
-    basicSalary: 0,
-    allowances: 0,
     gross: input.gross,
     advanceRecovered: input.advanceRecovered,
-    deductions: input.advanceRecovered,
+    nssfEmployee,
+    paye,
     netPay: input.netPay,
   });
 
@@ -141,7 +248,7 @@ export function buildPayrollAccrualJournal(input: {
   const recovered = money2Number(input.advanceRecovered);
   const net = money2Number(input.netPay);
 
-  if (gross <= 0 && recovered <= 0 && net <= 0) {
+  if (gross <= 0 && recovered <= 0 && net <= 0 && nssfEmployee <= 0 && paye <= 0) {
     throw new Error('PAYROLL_ACCRUAL_EMPTY: nothing to post');
   }
   if (!input.payableAccountCode?.trim() && net > 0) {
@@ -149,6 +256,20 @@ export function buildPayrollAccrualJournal(input: {
   }
   if (recovered > 0 && !input.advanceAccountCode?.trim()) {
     throw new Error('PAYROLL_ACCRUAL_NO_ADVANCE_ACCT: missing employee advance account');
+  }
+  if (nssfEmployee > 0 && !input.nssfPayableAccount?.trim()) {
+    throw new Error('PAYROLL_ACCRUAL_NO_NSSF_ACCT: missing NSSF payable account');
+  }
+  if (paye > 0 && !input.payePayableAccount?.trim()) {
+    throw new Error('PAYROLL_ACCRUAL_NO_PAYE_ACCT: missing PAYE payable account');
+  }
+  if (nssfEmployer > 0) {
+    if (!input.employerNssfExpenseAccount?.trim()) {
+      throw new Error('PAYROLL_ACCRUAL_NO_EMPLOYER_NSSF_EXPENSE');
+    }
+    if (!input.nssfPayableAccount?.trim()) {
+      throw new Error('PAYROLL_ACCRUAL_NO_NSSF_ACCT: missing NSSF payable for employer portion');
+    }
   }
 
   const lines: ActualJournalLine[] = [
@@ -159,11 +280,36 @@ export function buildPayrollAccrualJournal(input: {
     },
   ];
 
+  if (nssfEmployer > 0) {
+    lines.push({
+      accountCode: input.employerNssfExpenseAccount!,
+      debitAmount: nssfEmployer,
+      creditAmount: 0,
+    });
+  }
+
   if (recovered > 0) {
     lines.push({
       accountCode: input.advanceAccountCode!,
       debitAmount: 0,
       creditAmount: recovered,
+    });
+  }
+
+  const nssfTotal = money2Number(money2(nssfEmployee).plus(nssfEmployer));
+  if (nssfTotal > 0) {
+    lines.push({
+      accountCode: input.nssfPayableAccount!,
+      debitAmount: 0,
+      creditAmount: nssfTotal,
+    });
+  }
+
+  if (paye > 0) {
+    lines.push({
+      accountCode: input.payePayableAccount!,
+      debitAmount: 0,
+      creditAmount: paye,
     });
   }
 

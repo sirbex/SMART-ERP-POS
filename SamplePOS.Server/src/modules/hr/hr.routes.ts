@@ -48,6 +48,13 @@ router.get('/employees/:id', authenticate, requirePermission('hr.read'), hrContr
 router.put('/employees/:id', authenticate, requirePermission('hr.update'), hrController.updateEmployee);
 router.post('/employees/:id/related-user', authenticate, requirePermission('hr.update'), hrController.createRelatedUser);
 router.post('/employees/:id/end-employment', authenticate, requirePermission('hr.update'), hrController.endEmployment);
+router.get('/employees/:id/contracts', authenticate, requirePermission('hr.read'), hrController.listEmployeeContracts);
+router.post('/employees/:id/contracts', authenticate, requirePermission('hr.create'), hrController.createEmployeeContract);
+router.post('/employees/:id/contracts/:contractId/sign', authenticate, requirePermission('hr.update'), hrController.signEmployeeContract);
+router.post('/employees/:id/contracts/:contractId/renew', authenticate, requirePermission('hr.update'), hrController.renewEmployeeContract);
+router.post('/employees/:id/contracts/:contractId/convert', authenticate, requirePermission('hr.update'), hrController.convertEmployeeEngagement);
+router.post('/employees/:id/contracts/:contractId/expire', authenticate, requirePermission('hr.update'), hrController.expireEmployeeContract);
+router.get('/contracts/expiring', authenticate, requirePermission('hr.read'), hrController.listExpiringContracts);
 router.delete('/employees/:id', authenticate, requirePermission('hr.delete'), hrController.deleteEmployee);
 
 // ============================================================================
@@ -76,6 +83,21 @@ router.get('/employee-balances', authenticate, requirePermission('hr.read'), hrC
 router.get('/advances/export', authenticate, requirePermission('hr.read'), hrController.exportAdvances);
 router.get('/advances', authenticate, requirePermission('hr.read'), hrController.listAdvances);
 router.post('/advances', authenticate, requirePermission('hr.advance'), hrController.createAdvance);
+
+router.get('/employees/:id/salary-history', authenticate, requirePermission('hr.read'), hrController.listSalaryHistory);
+router.post('/employees/:id/salary-change', authenticate, requirePermission('hr.update'), hrController.promoteEmployee);
+
+router.get('/leave-types', authenticate, requirePermission('hr.read'), hrController.listLeaveTypes);
+router.post('/leave-types', authenticate, requirePermission('hr.create'), hrController.createLeaveType);
+router.get('/leave-requests', authenticate, requirePermission('hr.read'), hrController.listLeaveRequests);
+router.post('/leave-requests', authenticate, requirePermission('hr.create'), hrController.createLeaveRequest);
+router.post('/leave-requests/:id/status', authenticate, requirePermission('hr.update'), hrController.setLeaveRequestStatus);
+
+router.get('/statutory-settings', authenticate, requirePermission('hr.read'), hrController.getStatutorySettings);
+router.put('/statutory-settings', authenticate, requirePermission('hr.update'), hrController.updateStatutorySettings);
+
+router.get('/payroll-periods/:id/adjustments', authenticate, requirePermission('hr.read'), hrController.listPeriodAdjustments);
+router.put('/payroll-periods/:id/adjustments', authenticate, requirePermission('hr.payroll_process'), hrController.upsertPeriodAdjustment);
 
 export const hrRoutes = router;
 export default router;

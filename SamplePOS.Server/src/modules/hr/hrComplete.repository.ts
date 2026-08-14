@@ -35,7 +35,10 @@ export interface EmployeeBalanceDbRow {
   payable_account_code: string | null;
   advance_account_code: string | null;
   salaries_payable: string;
+  /** GL CurrentBalance on 1410-* (asset) */
   advances_outstanding: string;
+  /** SUM(RemainingAmount) OPEN/PARTIAL — Process recovery SSOT */
+  register_advances_outstanding: string;
 }
 
 export const employeeAdvanceRepository = {
@@ -240,7 +243,12 @@ export const employeeBalanceRepository = {
          pa."AccountCode" AS payable_account_code,
          aa."AccountCode" AS advance_account_code,
          COALESCE(pa."CurrentBalance", 0) AS salaries_payable,
-         COALESCE(aa."CurrentBalance", 0) AS advances_outstanding
+         COALESCE(aa."CurrentBalance", 0) AS advances_outstanding,
+         COALESCE((
+           SELECT SUM(ea."RemainingAmount")
+           FROM employee_advances ea
+           WHERE ea."EmployeeId" = e."Id" AND ea."Status" IN ('OPEN', 'PARTIAL')
+         ), 0) AS register_advances_outstanding
        FROM employees e
        LEFT JOIN accounts pa ON pa."Id" = e."LedgerAccountId"
        LEFT JOIN accounts aa ON aa."Id" = e."AdvanceAccountId"

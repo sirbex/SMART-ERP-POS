@@ -1,6 +1,6 @@
 {
   "proof": "PROOF_HR_EMPLOYEE_IDENTITY",
-  "generatedAt": "2026-08-12T13:28:18.577Z",
+  "generatedAt": "2026-08-14T06:17:38.367Z",
   "summary": {
     "total": 33,
     "passed": 33,
@@ -12,7 +12,7 @@
       "id": "types",
       "section": "ssot",
       "ok": true,
-      "detail": "PERMANENT,CASUAL,CONTRACT"
+      "detail": "PERMANENT,CASUAL,CONTRACT,INTERN"
     },
     {
       "id": "normalize_default",
@@ -144,7 +144,7 @@
       "id": "employmentType_schema",
       "section": "api",
       "ok": true,
-      "detail": "controller EmploymentType"
+      "detail": "controller+service employment type"
     },
     {
       "id": "assert_link",
@@ -214,7 +214,8 @@
     "types": [
       "PERMANENT",
       "CASUAL",
-      "CONTRACT"
+      "CONTRACT",
+      "INTERN"
     ],
     "end": "INACTIVE + EndDate; optionally deactivate login"
   }

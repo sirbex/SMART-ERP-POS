@@ -1,0 +1,15 @@
+{
+  "ok": true,
+  "rule": "Screens declare domain FormSectionDef catalogs; render via FormSectionCatalog — never invent local FormBundle",
+  "checks": {
+    "globalSsot": "shared/ui/formSectionsSsot.ts",
+    "hrCatalog": "shared/hr/employeeFormSections.ts",
+    "react": "components/ui/FormSection.tsx + hooks/useFormSections.ts",
+    "sectionCount": 7,
+    "openByDefault": [
+      "employment",
+      "contract"
+    ]
+  },
+  "at": "2026-08-14T06:17:59.046Z"
+}

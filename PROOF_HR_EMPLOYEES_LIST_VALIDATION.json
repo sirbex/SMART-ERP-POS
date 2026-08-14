@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "contract": "shared/hr/employeeListQuerySsot.ts",
+  "bugClass": "UI limit outside Zod max → 400 ERR_VALIDATION_FIELDS (permanent fix via shared SSOT)",
+  "checks": {
+    "sharedMax": 500,
+    "pickerLimit": 500,
+    "pickerParses": true,
+    "clampWorks": true,
+    "serverReexportsShared": true,
+    "clientUsesBuilders": true
+  },
+  "at": "2026-08-14T06:17:59.067Z"
+}

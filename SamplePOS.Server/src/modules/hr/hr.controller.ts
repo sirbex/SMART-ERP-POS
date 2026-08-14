@@ -8,8 +8,18 @@ import { Pool } from 'pg';
 import { z } from 'zod';
 import { hrService } from './hr.service.js';
 import { exportAdvances, exportBalances, exportPayrollPeriod } from './hrExport.js';
-import { asyncHandler, NotFoundError } from '../../middleware/errorHandler.js';
+import { asyncHandler, NotFoundError, ValidationError } from '../../middleware/errorHandler.js';
 import type { AuditContext } from '../../../../shared/types/audit.js';
+import { EmployeeListQuerySchema } from './hrEmployeeListQuery.js';
+import { CreateEmployeeSchema, UpdateEmployeeSchema } from '../../../../shared/zod/hrEmployee.js';
+import {
+    CreateContractSchema,
+    SignContractSchema,
+    RenewContractSchema,
+    ConvertEmploymentSchema,
+    ExpireContractSchema,
+} from '../../../../shared/zod/hrEmploymentContract.js';
+import { PayPayrollSchema } from '../../../../shared/zod/hrPayrollPay.js';
 
 // ============================================================================
 // ZOD SCHEMAS
@@ -37,37 +47,7 @@ const UpdatePositionSchema = z.object({
     baseSalary: z.number().nonnegative().optional().nullable(),
 });
 
-// --- Employees ---
-const EmploymentTypeEnum = z.enum(['PERMANENT', 'CASUAL', 'CONTRACT']);
-
-const CreateEmployeeSchema = z.object({
-    userId: z.string().uuid().optional().nullable(),
-    firstName: z.string().min(1).max(255),
-    lastName: z.string().min(1).max(255),
-    phone: z.string().max(50).optional().nullable(),
-    email: z.string().email().max(255).optional().nullable(),
-    departmentId: z.string().uuid().optional().nullable(),
-    positionId: z.string().uuid().optional().nullable(),
-    hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
-    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional().nullable(),
-    employmentType: EmploymentTypeEnum.optional().default('PERMANENT'),
-    monthlyAllowance: z.number().nonnegative().optional(),
-});
-
-const UpdateEmployeeSchema = z.object({
-    userId: z.string().uuid().optional().nullable(),
-    firstName: z.string().min(1).max(255).optional(),
-    lastName: z.string().min(1).max(255).optional(),
-    phone: z.string().max(50).optional().nullable(),
-    email: z.string().email().max(255).optional().nullable(),
-    departmentId: z.string().uuid().optional().nullable(),
-    positionId: z.string().uuid().optional().nullable(),
-    hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional(),
-    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD').optional().nullable(),
-    employmentType: EmploymentTypeEnum.optional(),
-    status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
-    monthlyAllowance: z.number().nonnegative().optional(),
-});
+// CreateEmployeeSchema / UpdateEmployeeSchema → shared/zod/hrEmployee.ts (SSOT)
 
 const CreateRelatedUserSchema = z.object({
     email: z.string().email().max(255),
@@ -91,12 +71,6 @@ const CreatePayrollPeriodSchema = z.object({
     endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD'),
 });
 
-const PayPayrollSchema = z.object({
-    paymentAccountCode: z.string().min(1).max(20),
-    paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    notes: z.string().max(1000).optional().nullable(),
-});
-
 const CreateAdvanceSchema = z.object({
     employeeId: z.string().uuid(),
     amount: z.number().positive(),
@@ -115,15 +89,7 @@ const ExportFormatQuerySchema = z.object({
     format: z.enum(['pdf', 'csv']),
 });
 
-// --- Query params ---
-const EmployeeListQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-    status: z.enum(['ACTIVE', 'INACTIVE']).optional(),
-    search: z.string().optional(),
-    departmentId: z.string().uuid().optional(),
-    employmentType: EmploymentTypeEnum.optional(),
-});
+// EmployeeListQuerySchema: ./hrEmployeeListQuery.ts (SSOT)
 
 // ============================================================================
 // HELPERS
@@ -301,6 +267,97 @@ export const hrController = {
         res.json({ success: true, data: emp, message: 'Employment ended' });
     }),
 
+    listEmployeeContracts: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const data = await hrService.listEmployeeContracts(pool, id);
+        res.json({ success: true, data });
+    }),
+
+    createEmployeeContract: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const data = CreateContractSchema.parse(req.body);
+        const contract = await hrService.createEmployeeContract(pool, id, data, buildAuditContext(req));
+        res.status(201).json({ success: true, data: contract, message: 'Contract created' });
+    }),
+
+    signEmployeeContract: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id, contractId } = z
+            .object({ id: z.string().uuid(), contractId: z.string().uuid() })
+            .parse(req.params);
+        const data = SignContractSchema.parse(req.body ?? {});
+        const contract = await hrService.signEmployeeContract(
+            pool,
+            id,
+            contractId,
+            data,
+            buildAuditContext(req)
+        );
+        res.json({ success: true, data: contract, message: 'Contract signed' });
+    }),
+
+    renewEmployeeContract: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id, contractId } = z
+            .object({ id: z.string().uuid(), contractId: z.string().uuid() })
+            .parse(req.params);
+        const data = RenewContractSchema.parse(req.body);
+        const contract = await hrService.renewEmployeeContract(
+            pool,
+            id,
+            contractId,
+            data,
+            buildAuditContext(req)
+        );
+        res.json({ success: true, data: contract, message: 'Contract renewed' });
+    }),
+
+    convertEmployeeEngagement: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id, contractId } = z
+            .object({ id: z.string().uuid(), contractId: z.string().uuid() })
+            .parse(req.params);
+        const data = ConvertEmploymentSchema.parse(req.body);
+        const contract = await hrService.convertEmployeeEngagement(
+            pool,
+            id,
+            contractId,
+            data,
+            buildAuditContext(req)
+        );
+        res.json({ success: true, data: contract, message: 'Engagement converted' });
+    }),
+
+    expireEmployeeContract: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id, contractId } = z
+            .object({ id: z.string().uuid(), contractId: z.string().uuid() })
+            .parse(req.params);
+        const data = ExpireContractSchema.parse(req.body ?? {});
+        const contract = await hrService.expireEmployeeContract(
+            pool,
+            id,
+            contractId,
+            data,
+            buildAuditContext(req)
+        );
+        res.json({ success: true, data: contract, message: 'Contract expired' });
+    }),
+
+    listExpiringContracts: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const q = z
+            .object({
+                asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+                withinDays: z.coerce.number().int().min(1).max(365).optional(),
+            })
+            .parse(req.query);
+        const data = await hrService.listExpiringContracts(pool, q);
+        res.json({ success: true, data });
+    }),
+
     deleteEmployee: asyncHandler(async (req: Request, res: Response) => {
         const pool: Pool = req.pool!;
         const { id } = UuidParam.parse(req.params);
@@ -419,5 +476,136 @@ export const hrController = {
         const pool: Pool = req.pool!;
         const { format } = ExportFormatQuerySchema.parse(req.query);
         await exportBalances(pool, res, format);
+    }),
+
+    listSalaryHistory: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const data = await hrService.listSalaryHistory(pool, id);
+        res.json({ success: true, data });
+    }),
+
+    promoteEmployee: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const body = req.body as {
+            effectiveFrom: string;
+            basicSalary: number;
+            monthlyAllowance: number;
+            positionId?: string | null;
+            reason?: string;
+            notes?: string | null;
+        };
+        if (!body.effectiveFrom || body.basicSalary == null || body.monthlyAllowance == null) {
+            throw new ValidationError('effectiveFrom, basicSalary, monthlyAllowance are required');
+        }
+        const data = await hrService.promoteEmployee(pool, id, body, buildAuditContext(req));
+        res.status(201).json({ success: true, data, message: 'Salary change recorded' });
+    }),
+
+    listLeaveTypes: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const data = await hrService.listLeaveTypes(pool);
+        res.json({ success: true, data });
+    }),
+
+    createLeaveType: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const body = req.body as { name: string; isPaid: boolean };
+        if (!body.name?.trim()) throw new ValidationError('name is required');
+        const data = await hrService.createLeaveType(
+            pool,
+            { name: body.name.trim(), isPaid: Boolean(body.isPaid) },
+            buildAuditContext(req)
+        );
+        res.status(201).json({ success: true, data });
+    }),
+
+    listLeaveRequests: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const employeeId = typeof req.query.employeeId === 'string' ? req.query.employeeId : undefined;
+        const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+        const data = await hrService.listLeaveRequests(pool, { employeeId, status });
+        res.json({ success: true, data });
+    }),
+
+    createLeaveRequest: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const body = req.body as {
+            employeeId: string;
+            leaveTypeId: string;
+            startDate: string;
+            endDate: string;
+            notes?: string | null;
+            status?: string;
+        };
+        if (!body.employeeId || !body.leaveTypeId || !body.startDate || !body.endDate) {
+            throw new ValidationError('employeeId, leaveTypeId, startDate, endDate required');
+        }
+        const data = await hrService.createLeaveRequest(pool, body, buildAuditContext(req));
+        res.status(201).json({ success: true, data });
+    }),
+
+    setLeaveRequestStatus: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const status = String((req.body as { status?: string }).status || '').toUpperCase();
+        if (!['APPROVED', 'REJECTED', 'CANCELLED'].includes(status)) {
+            throw new ValidationError('status must be APPROVED, REJECTED, or CANCELLED');
+        }
+        const data = await hrService.setLeaveRequestStatus(
+            pool,
+            id,
+            status as 'APPROVED' | 'REJECTED' | 'CANCELLED',
+            buildAuditContext(req)
+        );
+        res.json({ success: true, data });
+    }),
+
+    getStatutorySettings: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const data = await hrService.getStatutorySettings(pool);
+        res.json({ success: true, data });
+    }),
+
+    updateStatutorySettings: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const data = await hrService.updateStatutorySettings(
+            pool,
+            req.body as Record<string, unknown>,
+            buildAuditContext(req)
+        );
+        res.json({ success: true, data });
+    }),
+
+    listPeriodAdjustments: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const data = await hrService.listPeriodAdjustments(pool, id);
+        res.json({ success: true, data });
+    }),
+
+    upsertPeriodAdjustment: asyncHandler(async (req: Request, res: Response) => {
+        const pool: Pool = req.pool!;
+        const { id } = UuidParam.parse(req.params);
+        const body = req.body as {
+            employeeId: string;
+            overtimePay?: number;
+            bonus?: number;
+            notes?: string | null;
+        };
+        if (!body.employeeId) throw new ValidationError('employeeId is required');
+        const data = await hrService.upsertPeriodAdjustment(
+            pool,
+            id,
+            {
+                employeeId: body.employeeId,
+                overtimePay: Number(body.overtimePay ?? 0),
+                bonus: Number(body.bonus ?? 0),
+                notes: body.notes ?? null,
+            },
+            buildAuditContext(req)
+        );
+        res.json({ success: true, data });
     }),
 };

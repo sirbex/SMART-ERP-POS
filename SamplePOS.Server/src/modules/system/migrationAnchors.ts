@@ -151,6 +151,54 @@ export const MIGRATION_COLUMN_ANCHORS: Readonly<
     '532_transfer_line_negotiation.sql': {
         store_transfer_lines: ['quantity_approved', 'quantity_shortage', 'approval_comment'],
     },
+    '603_expense_employee_link.sql': {
+        expenses: ['employee_id'],
+    },
+    '604_hr_enterprise_payroll.sql': {
+        employee_salary_history: ['EmployeeId', 'EffectiveFrom', 'BasicSalary', 'MonthlyAllowance'],
+        leave_types: ['Name', 'IsPaid'],
+        leave_requests: ['EmployeeId', 'LeaveTypeId', 'StartDate', 'EndDate', 'Status'],
+        payroll_period_adjustments: ['PayrollPeriodId', 'EmployeeId', 'OvertimePay', 'Bonus'],
+        hr_statutory_settings: ['Enabled', 'NssfEmployeeRate', 'PayeEnabled', 'WorkingDaysPerMonth'],
+        payroll_entries: ['OvertimePay', 'Bonus', 'UnpaidLeaveDays', 'LeaveDeduction', 'NssfEmployee', 'Paye', 'NssfEmployer'],
+        employees: ['BankName', 'BankAccountNumber', 'NssfNumber', 'TinNumber'],
+    },
+    '605_hr_employee_master.sql': {
+        employees: [
+            'EmployeeNumber',
+            'NationalId',
+            'DateOfBirth',
+            'Gender',
+            'Nationality',
+            'MaritalStatus',
+            'AddressLine1',
+            'AddressDistrict',
+            'NextOfKinName',
+            'NextOfKinPhone',
+            'NextOfKinRelation',
+            'BankBranch',
+            'BankAccountName',
+            'MobileMoneyNumber',
+            'MobileMoneyProvider',
+            'PreferredPaymentMethod',
+        ],
+    },
+    '606_hr_employment_contracts.sql': {
+        employee_contracts: [
+            'EmployeeId',
+            'EmploymentType',
+            'StartDate',
+            'EndDate',
+            'ProbationEndDate',
+            'Status',
+            'SignedAt',
+            'PreviousContractId',
+        ],
+    },
+    '607_hr_payroll_pay_modes.sql': {
+        payroll_entries: ['AmountPaid'],
+        payroll_periods: ['Status'],
+    },
 };
 
 export type TableColumnMap = ReadonlyMap<string, ReadonlySet<string>>;

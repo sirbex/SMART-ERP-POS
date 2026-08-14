@@ -193,23 +193,28 @@ export async function exportBalances(pool: Pool, res: Response, format: ExportFo
     });
     gen.addSummaryCards([
         { label: 'Salaries payable', value: moneyPdf(sheet.totals.salariesPayable), color: PDFColors.primary },
-        { label: 'Advances outstanding', value: moneyPdf(sheet.totals.advancesOutstanding), color: PDFColors.warning },
+        { label: 'Advances GL', value: moneyPdf(sheet.totals.advancesOutstanding), color: PDFColors.warning },
+        { label: 'Advances register', value: moneyPdf(sheet.totals.registerAdvancesOutstanding), color: PDFColors.info },
         { label: 'Staff', value: String(sheet.totals.count), color: PDFColors.info },
     ]);
     gen.addTable(
         [
-            { header: 'Employee', key: 'name', width: 0.28, align: 'left' },
-            { header: 'Payable acct', key: 'payAcct', width: 0.16, align: 'left' },
-            { header: 'Salaries payable', key: 'payable', width: 0.2, align: 'right' },
-            { header: 'Advance acct', key: 'advAcct', width: 0.16, align: 'left' },
-            { header: 'Advances due', key: 'adv', width: 0.2, align: 'right' },
+            { header: 'Employee', key: 'name', width: 0.22, align: 'left' },
+            { header: 'Payable acct', key: 'payAcct', width: 0.12, align: 'left' },
+            { header: 'Salaries payable', key: 'payable', width: 0.14, align: 'right' },
+            { header: 'Advance acct', key: 'advAcct', width: 0.12, align: 'left' },
+            { header: 'Advances GL', key: 'advGl', width: 0.14, align: 'right' },
+            { header: 'Register', key: 'advReg', width: 0.14, align: 'right' },
+            { header: 'Drift', key: 'drift', width: 0.12, align: 'left' },
         ],
         sheet.rows.map((r) => ({
             name: r.employeeName,
             payAcct: r.payableAccountCode || '—',
             payable: moneyPdf(r.salariesPayable),
             advAcct: r.advanceAccountCode || '—',
-            adv: moneyPdf(r.advancesOutstanding),
+            advGl: moneyPdf(r.advancesOutstanding),
+            advReg: moneyPdf(r.registerAdvancesOutstanding),
+            drift: r.advanceSsotDrift ? 'YES' : '—',
         }))
     );
     gen.end();

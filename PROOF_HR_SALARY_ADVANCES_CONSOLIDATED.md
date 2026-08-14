@@ -2,7 +2,7 @@
 
 **Sole acceptance proof.** Do not accept payroll/advance work on partial proofs.
 
-Generated: 2026-08-12T13:28:18.885Z
+Generated: 2026-08-14T06:17:38.455Z
 
 **PASS** — 55/55 gates
 
@@ -65,7 +65,7 @@ Generated: 2026-08-12T13:28:18.885Z
 | E | GOV_PAYROLL_CR_1010_BLOCKED | PASS | Rule D blocks PAYROLL+CR 1010 |
 | E | GOV_VARIANCE_CR_1010_OK | PASS | CASH_VARIANCE+CR 1010 allowed |
 | E | GOV_PAYROLL_CR_1012_OK | PASS | PAYROLL+CR 1012 allowed |
-| F | LOOP_MATH | PASS | {"basicSalary":1000000,"allowances":100000,"gross":1100000,"advanceRecovered":400000,"deductions":400000,"netPay":700000} |
+| F | LOOP_MATH | PASS | {"basicSalary":1000000,"allowances":100000,"overtimePay":0,"bonus":0,"unpaidLeaveDays":0,"leaveDeduction":0,"gross":1100000,"nssfEmployee":0,"paye":0,"nssfEmployer":0,"advanceRecovered":400000,"deductions":400000,"netPay":700000} |
 | F | LOOP_CASH_EQ_GROSS | PASS | cashOut 1100000 = gross 1100000 |
 | F | LOOP_NO_DOUBLE_SHORTAGE | PASS | shortage never credits petty |
 | G | WIRE_PROCESS_LOCK | PASS | processPayroll FOR UPDATE |
@@ -75,7 +75,7 @@ Generated: 2026-08-12T13:28:18.885Z
 | G | WIRE_POST_LOCK | PASS | postPayroll locks |
 | G | WIRE_PAY_LOCK | PASS | payPayroll locks |
 | G | WIRE_DUP_ACCRUAL | PASS | dup accrual blocked |
-| G | WIRE_DUP_PAY | PASS | dup pay blocked |
+| G | WIRE_DUP_PAY | PASS | dup/overpay blocked via pay-mode SSOT |
 | G | WIRE_MIG_601 | PASS | 601 strips PAYROLL from till + grants CASH_VARIANCE |
 | G | WIRE_MIG_598_ADV | PASS | 598 advances table |
 | G | WIRE_MIG_599_UQ | PASS | 599 integrity constraints |

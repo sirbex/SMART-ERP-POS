@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "checks": {
+    "leaveDateFailLoud": true,
+    "leaveOverlapMerge": true,
+    "noSilentNegativeClamp": true,
+    "statutoryBandsFailLoud": true,
+    "processCoaAssert": true,
+    "identity2dp": true
+  },
+  "at": "2026-08-14T06:17:59.191Z"
+}

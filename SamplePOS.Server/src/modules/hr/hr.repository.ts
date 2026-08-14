@@ -6,6 +6,7 @@
  */
 
 import { Pool, PoolClient } from 'pg';
+import { EMPLOYEE_MASTER_CAMEL_TO_DB } from '../../../../shared/hr/employeeMasterSsot.js';
 
 // ============================================================================
 // DB ROW INTERFACES (PascalCase quoted identifiers from PostgreSQL)
@@ -40,6 +41,26 @@ export interface EmployeeDbRow {
     LedgerAccountId: string | null;
     AdvanceAccountId?: string | null;
     MonthlyAllowance?: string | null;
+    BankName?: string | null;
+    BankAccountNumber?: string | null;
+    NssfNumber?: string | null;
+    TinNumber?: string | null;
+    EmployeeNumber?: string | null;
+    NationalId?: string | null;
+    DateOfBirth?: string | null;
+    Gender?: string | null;
+    Nationality?: string | null;
+    MaritalStatus?: string | null;
+    AddressLine1?: string | null;
+    AddressDistrict?: string | null;
+    NextOfKinName?: string | null;
+    NextOfKinPhone?: string | null;
+    NextOfKinRelation?: string | null;
+    BankBranch?: string | null;
+    BankAccountName?: string | null;
+    MobileMoneyNumber?: string | null;
+    MobileMoneyProvider?: string | null;
+    PreferredPaymentMethod?: string | null;
     CreatedAt: Date;
     // Joined fields
     department_name?: string;
@@ -51,6 +72,7 @@ export interface EmployeeDbRow {
     ledger_account_code?: string | null;
     advance_account_code?: string | null;
     open_advance_remaining?: string | null;
+    advance_gl_balance?: string | null;
 }
 
 export interface PayrollPeriodDbRow {
@@ -72,6 +94,14 @@ export interface PayrollEntryDbRow {
     Deductions: string | null;
     NetPay: string | null;
     AdvanceRecovered?: string | null;
+    OvertimePay?: string | null;
+    Bonus?: string | null;
+    UnpaidLeaveDays?: string | null;
+    LeaveDeduction?: string | null;
+    NssfEmployee?: string | null;
+    Paye?: string | null;
+    NssfEmployer?: string | null;
+    AmountPaid?: string | null;
     JournalEntryId: string | null;
     PaymentJournalEntryId?: string | null;
     PaidAt?: Date | null;
@@ -338,27 +368,27 @@ export const employeeRepository = {
 
     async create(
         pool: Pool | PoolClient,
-        data: {
-            userId?: string | null;
+        data: Record<string, unknown> & {
             firstName: string;
             lastName: string;
-            phone?: string | null;
-            email?: string | null;
-            departmentId?: string | null;
-            positionId?: string | null;
             hireDate: string;
-            employmentType?: string;
-            endDate?: string | null;
-            status?: string;
         }
     ): Promise<EmployeeDbRow> {
         const result = await pool.query(
             `INSERT INTO employees (
               "UserId", "FirstName", "LastName", "Phone", "Email",
               "DepartmentId", "PositionId", "HireDate",
-              "EmploymentType", "EndDate", "Status"
+              "EmploymentType", "EndDate", "Status", "MonthlyAllowance",
+              "BankName", "BankAccountNumber", "NssfNumber", "TinNumber",
+              "EmployeeNumber", "NationalId", "DateOfBirth", "Gender", "Nationality", "MaritalStatus",
+              "AddressLine1", "AddressDistrict",
+              "NextOfKinName", "NextOfKinPhone", "NextOfKinRelation",
+              "BankBranch", "BankAccountName", "MobileMoneyNumber", "MobileMoneyProvider", "PreferredPaymentMethod"
             )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       VALUES (
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+         $17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32
+       )
        RETURNING *`,
             [
                 data.userId ?? null,
@@ -372,6 +402,27 @@ export const employeeRepository = {
                 data.employmentType ?? 'PERMANENT',
                 data.endDate ?? null,
                 data.status ?? 'ACTIVE',
+                data.monthlyAllowance ?? 0,
+                data.bankName ?? null,
+                data.bankAccountNumber ?? null,
+                data.nssfNumber ?? null,
+                data.tinNumber ?? null,
+                data.employeeNumber ?? null,
+                data.nationalId ?? null,
+                data.dateOfBirth ?? null,
+                data.gender ?? null,
+                data.nationality ?? null,
+                data.maritalStatus ?? null,
+                data.addressLine1 ?? null,
+                data.addressDistrict ?? null,
+                data.nextOfKinName ?? null,
+                data.nextOfKinPhone ?? null,
+                data.nextOfKinRelation ?? null,
+                data.bankBranch ?? null,
+                data.bankAccountName ?? null,
+                data.mobileMoneyNumber ?? null,
+                data.mobileMoneyProvider ?? null,
+                data.preferredPaymentMethod ?? null,
             ]
         );
         return result.rows[0];
@@ -380,44 +431,21 @@ export const employeeRepository = {
     async update(
         pool: Pool | PoolClient,
         id: string,
-        data: {
-            userId?: string | null;
-            firstName?: string;
-            lastName?: string;
-            phone?: string | null;
-            email?: string | null;
-            departmentId?: string | null;
-            positionId?: string | null;
-            hireDate?: string;
-            status?: string;
-            employmentType?: string;
-            endDate?: string | null;
-            monthlyAllowance?: number;
-        }
+        data: Record<string, unknown>
     ): Promise<EmployeeDbRow | null> {
         const sets: string[] = [];
         const values: unknown[] = [];
         let idx = 1;
 
-        const fieldMap: Record<string, string> = {
-            userId: '"UserId"',
-            firstName: '"FirstName"',
-            lastName: '"LastName"',
-            phone: '"Phone"',
-            email: '"Email"',
-            departmentId: '"DepartmentId"',
-            positionId: '"PositionId"',
-            hireDate: '"HireDate"',
-            status: '"Status"',
-            employmentType: '"EmploymentType"',
-            endDate: '"EndDate"',
-            monthlyAllowance: '"MonthlyAllowance"',
-        };
+        // SSOT lock — every camel key in EMPLOYEE_MASTER_CAMEL_TO_DB is updatable; no silent drop.
+        const fieldMap: Record<string, string> = Object.fromEntries(
+            Object.entries(EMPLOYEE_MASTER_CAMEL_TO_DB).map(([camel, pascal]) => [camel, `"${pascal}"`])
+        );
 
         for (const [key, col] of Object.entries(fieldMap)) {
-            if ((data as Record<string, unknown>)[key] !== undefined) {
+            if (data[key] !== undefined) {
                 sets.push(`${col} = $${idx++}`);
-                values.push((data as Record<string, unknown>)[key]);
+                values.push(data[key]);
             }
         }
 
@@ -469,7 +497,8 @@ export const employeeRepository = {
                 SELECT SUM(ea."RemainingAmount")
                 FROM employee_advances ea
                 WHERE ea."EmployeeId" = e."Id" AND ea."Status" IN ('OPEN', 'PARTIAL')
-              ), 0) AS open_advance_remaining
+              ), 0) AS open_advance_remaining,
+              COALESCE(adv."CurrentBalance", 0) AS advance_gl_balance
        FROM employees e
        LEFT JOIN departments d ON d."Id" = e."DepartmentId"
        LEFT JOIN positions p ON p."Id" = e."PositionId"
@@ -644,6 +673,13 @@ export const payrollEntryRepository = {
             deductions: number;
             netPay: number;
             advanceRecovered: number;
+            overtimePay?: number;
+            bonus?: number;
+            unpaidLeaveDays?: number;
+            leaveDeduction?: number;
+            nssfEmployee?: number;
+            paye?: number;
+            nssfEmployer?: number;
         }>
     ): Promise<PayrollEntryDbRow[]> {
         if (entries.length === 0) return [];
@@ -654,7 +690,7 @@ export const payrollEntryRepository = {
 
         for (const e of entries) {
             placeholders.push(
-                `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`
+                `($${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++}, $${idx++})`
             );
             values.push(
                 e.payrollPeriodId,
@@ -663,14 +699,23 @@ export const payrollEntryRepository = {
                 e.allowances,
                 e.deductions,
                 e.netPay,
-                e.advanceRecovered
+                e.advanceRecovered,
+                e.overtimePay ?? 0,
+                e.bonus ?? 0,
+                e.unpaidLeaveDays ?? 0,
+                e.leaveDeduction ?? 0,
+                e.nssfEmployee ?? 0,
+                e.paye ?? 0,
+                e.nssfEmployer ?? 0
             );
         }
 
         const result = await client.query(
             `INSERT INTO payroll_entries (
                "PayrollPeriodId", "EmployeeId", "BasicSalary", "Allowances",
-               "Deductions", "NetPay", "AdvanceRecovered"
+               "Deductions", "NetPay", "AdvanceRecovered",
+               "OvertimePay", "Bonus", "UnpaidLeaveDays", "LeaveDeduction",
+               "NssfEmployee", "Paye", "NssfEmployer"
              )
        VALUES ${placeholders.join(', ')}
        RETURNING *`,
@@ -711,10 +756,35 @@ export const payrollEntryRepository = {
     ): Promise<void> {
         await client.query(
             `UPDATE payroll_entries
-             SET "PaymentJournalEntryId" = $1, "PaidAt" = NOW()
+             SET "PaymentJournalEntryId" = $1, "PaidAt" = NOW(),
+                 "AmountPaid" = "NetPay"
              WHERE "Id" = $2`,
             [paymentJournalEntryId, entryId]
         );
+    },
+
+    /** Apply a cash tranche (full or partial). AmountPaid accumulates; never exceeds NetPay. */
+    async applyPaymentTranche(
+        client: PoolClient,
+        entryId: string,
+        payAmount: number,
+        paymentJournalEntryId: string
+    ): Promise<void> {
+        const result = await client.query(
+            `UPDATE payroll_entries
+             SET "AmountPaid" = "AmountPaid" + $1::numeric,
+                 "PaymentJournalEntryId" = $2,
+                 "PaidAt" = NOW()
+             WHERE "Id" = $3
+               AND "AmountPaid" + $1::numeric <= "NetPay" + 0.0001
+             RETURNING "Id"`,
+            [payAmount, paymentJournalEntryId, entryId]
+        );
+        if ((result.rowCount ?? 0) === 0) {
+            throw new Error(
+                `PAYROLL_PAY_APPLY_FAILED: entry ${entryId} — overpay or missing row`
+            );
+        }
     },
 };
 

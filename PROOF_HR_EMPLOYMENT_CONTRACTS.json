@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "contract": "shared/hr/employmentContractSsot.ts + employee_contracts (606)",
+  "lifecycle": "DRAFT→sign→ACTIVE→renew|convert|expire|terminate",
+  "checks": {
+    "types": "PERMANENT|CASUAL|CONTRACT|INTERN",
+    "statuses": "DRAFT|ACTIVE|EXPIRED|RENEWED|CONVERTED|TERMINATED",
+    "formSections": [
+      "employment:open",
+      "contract:open",
+      "identity:closed",
+      "contact:closed",
+      "nextOfKin:closed",
+      "compliance:closed",
+      "payment:closed"
+    ],
+    "convertIntern": "CONTRACT→PERMANENT"
+  },
+  "at": "2026-08-14T06:17:59.217Z"
+}

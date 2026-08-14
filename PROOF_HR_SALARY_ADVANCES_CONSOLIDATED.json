@@ -4,7 +4,7 @@
   "supersedes": [
     "PROOF_HR_PAYROLL_INTEGRITY"
   ],
-  "generatedAt": "2026-08-12T13:28:18.885Z",
+  "generatedAt": "2026-08-14T06:17:38.455Z",
   "summary": {
     "passed": 55,
     "failed": 0,
@@ -255,7 +255,7 @@
       "id": "LOOP_MATH",
       "section": "F",
       "ok": true,
-      "detail": "{\"basicSalary\":1000000,\"allowances\":100000,\"gross\":1100000,\"advanceRecovered\":400000,\"deductions\":400000,\"netPay\":700000}"
+      "detail": "{\"basicSalary\":1000000,\"allowances\":100000,\"overtimePay\":0,\"bonus\":0,\"unpaidLeaveDays\":0,\"leaveDeduction\":0,\"gross\":1100000,\"nssfEmployee\":0,\"paye\":0,\"nssfEmployer\":0,\"advanceRecovered\":400000,\"deductions\":400000,\"netPay\":700000}"
     },
     {
       "id": "LOOP_CASH_EQ_GROSS",
@@ -315,7 +315,7 @@
       "id": "WIRE_DUP_PAY",
       "section": "G",
       "ok": true,
-      "detail": "dup pay blocked"
+      "detail": "dup/overpay blocked via pay-mode SSOT"
     },
     {
       "id": "WIRE_MIG_601",

@@ -1,6 +1,6 @@
 # PROOF_HR_EMPLOYEE_IDENTITY
 
-Generated: 2026-08-12T13:28:18.577Z
+Generated: 2026-08-14T06:17:38.367Z
 
 **Result: PASS** — 33/33 gates
 
@@ -14,7 +14,7 @@ Generated: 2026-08-12T13:28:18.577Z
 
 ## Gates
 
-- [x] **ssot/types** — PERMANENT,CASUAL,CONTRACT
+- [x] **ssot/types** — PERMANENT,CASUAL,CONTRACT,INTERN
 - [x] **ssot/normalize_default** — defaults PERMANENT
 - [x] **ssot/casual_no_login_required** — casuals need no user
 - [x] **ssot/permanent_no_login_required** — login always optional
@@ -36,7 +36,7 @@ Generated: 2026-08-12T13:28:18.577Z
 - [x] **api/createRelatedUser** — service createRelatedUser
 - [x] **api/endEmployment** — service endEmployment
 - [x] **api/findByUserId** — repo findByUserId
-- [x] **api/employmentType_schema** — controller EmploymentType
+- [x] **api/employmentType_schema** — controller+service employment type
 - [x] **api/assert_link** — link uniqueness enforced
 - [x] **ui/employmentType** — employment type field
 - [x] **ui/related_login** — related login picker

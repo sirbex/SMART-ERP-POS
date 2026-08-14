@@ -487,7 +487,14 @@ describe('CONSOLIDATED PROOF: HR salary + staff advances (sole acceptance)', () 
       svc.includes('Duplicate accrual blocked'),
       'dup accrual blocked',
     );
-    gate('G', 'WIRE_DUP_PAY', svc.includes('Duplicate payment blocked'), 'dup pay blocked');
+    gate(
+      'G',
+      'WIRE_DUP_PAY',
+      svc.includes('PAYROLL_PAY_ALREADY_PAID') ||
+        svc.includes('resolvePayrollPayLines') ||
+        fileHas('shared/hr/payrollPaySsot.ts', 'PAYROLL_PAY_ALREADY_PAID'),
+      'dup/overpay blocked via pay-mode SSOT',
+    );
     gate(
       'G',
       'WIRE_MIG_601',

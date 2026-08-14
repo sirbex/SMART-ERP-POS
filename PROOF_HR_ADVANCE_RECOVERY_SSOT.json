@@ -1,0 +1,91 @@
+{
+  "proof": "PROOF_HR_ADVANCE_RECOVERY_SSOT",
+  "generatedAt": "2026-08-14T06:17:38.199Z",
+  "summary": {
+    "total": 12,
+    "passed": 12,
+    "failed": 0,
+    "ok": true
+  },
+  "model": {
+    "recoverySsot": "employee_advances RemainingAmount OPEN/PARTIAL",
+    "gl": "accounts.CurrentBalance on 1410-* must match register",
+    "process": "fail loud on drift; recover min(register, gross)",
+    "pay": "clears full net payable for period — no partial % of salary",
+    "expenses": "not advances; do not reduce net"
+  },
+  "gates": [
+    {
+      "id": "recover_500k",
+      "section": "math",
+      "ok": true,
+      "detail": "{\"basicSalary\":3500000,\"allowances\":0,\"overtimePay\":0,\"bonus\":0,\"unpaidLeaveDays\":0,\"leaveDeduction\":0,\"gross\":3500000,\"nssfEmployee\":0,\"paye\":0,\"nssfEmployer\":0,\"advanceRecovered\":500000,\"deductions\":500000,\"netPay\":3000000}"
+    },
+    {
+      "id": "zero_register_full_net",
+      "section": "math",
+      "ok": true,
+      "detail": "{\"basicSalary\":3500000,\"allowances\":0,\"overtimePay\":0,\"bonus\":0,\"unpaidLeaveDays\":0,\"leaveDeduction\":0,\"gross\":3500000,\"nssfEmployee\":0,\"paye\":0,\"nssfEmployer\":0,\"advanceRecovered\":0,\"deductions\":0,\"netPay\":3500000}"
+    },
+    {
+      "id": "aligned_zero",
+      "section": "ssot",
+      "ok": true,
+      "detail": "both zero"
+    },
+    {
+      "id": "aligned_equal",
+      "section": "ssot",
+      "ok": true,
+      "detail": "100k=100k"
+    },
+    {
+      "id": "drift_gl_only",
+      "section": "ssot",
+      "ok": true,
+      "detail": "GL without register"
+    },
+    {
+      "id": "drift_register_only",
+      "section": "ssot",
+      "ok": true,
+      "detail": "register without GL"
+    },
+    {
+      "id": "assert_throws_gl_orphan",
+      "section": "ssot",
+      "ok": true,
+      "detail": "fail loud when GL asset has no register"
+    },
+    {
+      "id": "process_assert",
+      "section": "wire",
+      "ok": true,
+      "detail": "processPayroll fails on register≠GL"
+    },
+    {
+      "id": "list_active_gl",
+      "section": "wire",
+      "ok": true,
+      "detail": "listActiveWithPosition selects advance_gl_balance"
+    },
+    {
+      "id": "balances_register",
+      "section": "wire",
+      "ok": true,
+      "detail": "balances query includes register remaining"
+    },
+    {
+      "id": "ui_drift",
+      "section": "wire",
+      "ok": true,
+      "detail": "Balances UI shows register + drift"
+    },
+    {
+      "id": "partial_pay_copy",
+      "section": "wire",
+      "ok": true,
+      "detail": "Pay UI shows gross − advances auto = cash net"
+    }
+  ]
+}

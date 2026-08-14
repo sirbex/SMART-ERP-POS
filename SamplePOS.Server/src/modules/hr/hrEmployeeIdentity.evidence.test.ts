@@ -50,7 +50,7 @@ function fileHas(rel: string, re: RegExp | string): boolean {
 
 describe('PROOF_HR_EMPLOYEE_IDENTITY', () => {
   it('SSOT: employment types + optional login', () => {
-    gate('ssot', 'types', EMPLOYMENT_TYPES.length === 3, EMPLOYMENT_TYPES.join(','));
+    gate('ssot', 'types', EMPLOYMENT_TYPES.length === 4, EMPLOYMENT_TYPES.join(','));
     gate('ssot', 'normalize_default', normalizeEmploymentType('nope') === 'PERMANENT', 'defaults PERMANENT');
     gate('ssot', 'casual_no_login_required', requiresRelatedUser('CASUAL') === false, 'casuals need no user');
     gate('ssot', 'permanent_no_login_required', requiresRelatedUser('PERMANENT') === false, 'login always optional');
@@ -153,7 +153,7 @@ describe('PROOF_HR_EMPLOYEE_IDENTITY', () => {
     gate('api', 'createRelatedUser', fileHas(svc, 'createRelatedUser'), 'service createRelatedUser');
     gate('api', 'endEmployment', fileHas(svc, 'endEmployment'), 'service endEmployment');
     gate('api', 'findByUserId', fileHas(repo, 'findByUserId'), 'repo findByUserId');
-    gate('api', 'employmentType_schema', fileHas(ctrl, 'EmploymentType'), 'controller EmploymentType');
+    gate('api', 'employmentType_schema', fileHas(ctrl, 'employmentType') && fileHas(svc, 'EmploymentType'), 'controller+service employment type');
     gate('api', 'assert_link', fileHas(svc, 'assertUserAvailableForLink'), 'link uniqueness enforced');
   });
 
