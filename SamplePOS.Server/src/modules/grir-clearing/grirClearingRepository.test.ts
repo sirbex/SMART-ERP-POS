@@ -1,12 +1,20 @@
 /**
  * Regression: grir_clearing INSERT must not reuse $9 for status + CASE (PG 42P08).
  * Also: supplier filter must never bind free-text into UUID columns (PG 22P02).
+ * Integrity: multi-path SSOT, soft cancel, status whitelist.
  */
 import { describe, it, expect } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveSupplierFilter, isUuid } from './supplierFilter.js';
+import {
+  F13_DEFAULT_TOLERANCE_PERCENT,
+  normalizeOpenStatusFilter,
+  selectF13Pairs,
+  SI_ACTIVE_SQL,
+  SI_LINKS_GR_SQL,
+} from './grirIntegrity.js';
 
 const repoPath = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -28,6 +36,44 @@ describe('grirClearingRepository.createClearingRecord SQL', () => {
   it('match-candidates / open list resolve supplier via resolveSupplierFilter (not raw UUID bind)', () => {
     expect(src).toMatch(/resolveSupplierFilter/);
     expect(src).toMatch(/CompanyName" ILIKE/);
+  });
+
+  it('uses multi-path integrity SSOT (not grn_links-only or CANCELLED-only)', () => {
+    expect(src).toContain('SI_LINKS_GR_SQL');
+    expect(src).toContain('SI_ACTIVE_SQL');
+    expect(src).toContain('GR_HAS_LINES_SQL');
+    expect(src).not.toContain("NOT IN ('CANCELLED')");
+    // PG enum: never COALESCE(enum_col, '—') — casts em-dash into purchase_order_status
+    expect(src).toContain('po.status::text');
+    expect(src).not.toMatch(/COALESCE\(po\.status,\s*'—'\)/);
+  });
+});
+
+describe('grirIntegrity SSOT', () => {
+  it('multi-path + soft cancel predicates', () => {
+    expect(SI_LINKS_GR_SQL).toContain('supplier_invoice_grn_links');
+    expect(SI_LINKS_GR_SQL).toContain('InternalReferenceNumber');
+    expect(SI_ACTIVE_SQL).toMatch(/Cancelled/);
+    expect(SI_ACTIVE_SQL).toMatch(/Voided|VOIDED/);
+    expect(F13_DEFAULT_TOLERANCE_PERCENT).toBe(2);
+  });
+
+  it('status whitelist rejects injection', () => {
+    expect(normalizeOpenStatusFilter('UNMATCHED')).toBe('UNMATCHED');
+    expect(normalizeOpenStatusFilter("'; DROP--")).toBeNull();
+  });
+
+  it('selectF13Pairs is 1:1 within tolerance', () => {
+    const sel = selectF13Pairs(
+      [
+        { gr_id: 'a', invoice_id: '1', gr_line_total: 100, amount_diff: 0 },
+        { gr_id: 'a', invoice_id: '2', gr_line_total: 100, amount_diff: 0 },
+        { gr_id: 'b', invoice_id: '1', gr_line_total: 50, amount_diff: 0 },
+      ],
+      2,
+    );
+    expect(sel).toHaveLength(1);
+    expect(sel[0].invoice_id).toBe('1');
   });
 });
 

@@ -1,9 +1,10 @@
 // Shared Zod Schemas - Goods Receipts
-// Used by both frontend and backend for validation
+// Status labels must match shared/domain/pgDomainEnums.ts + 001_initial_schema.sql
 
 import { z } from 'zod';
+import { GOODS_RECEIPT_STATUSES } from '../domain/pgDomainEnums.js';
 
-export const GRStatusEnum = z.enum(['DRAFT', 'FINALIZED']);
+export const GRStatusEnum = z.enum(GOODS_RECEIPT_STATUSES);
 export type GRStatus = z.infer<typeof GRStatusEnum>;
 
 export const GoodsReceiptItemSchema = z.object({

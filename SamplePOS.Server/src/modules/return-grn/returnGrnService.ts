@@ -658,10 +658,15 @@ export const returnGrnService = {
             if (!rgrn) throw new Error('Return GRN not found');
             if (rgrn.status !== 'POSTED') throw new Error('Return GRN must be POSTED before creating a Credit Note');
 
-            // 2. Prevent duplicate: check if a Credit Note already exists for this RGRN
+            // 2. Prevent duplicate: active SCN only (list/hasCreditNote SSOT).
+            // Cancelled/void notes keep return_grn_id for audit but must not block re-create
+            // after cancel reverses GL (POSTED/APPLIED → CANCELLED with ledger reverse).
             const existing = await client.query(
-                `SELECT "Id" FROM supplier_invoices
-                 WHERE return_grn_id = $1 AND document_type = 'SUPPLIER_CREDIT_NOTE' AND deleted_at IS NULL
+                `SELECT "Id", "Status" FROM supplier_invoices
+                 WHERE return_grn_id = $1
+                   AND document_type = 'SUPPLIER_CREDIT_NOTE'
+                   AND deleted_at IS NULL
+                   AND UPPER(COALESCE("Status",'')) NOT IN ('CANCELLED', 'VOID', 'VOIDED', 'DELETED')
                  LIMIT 1`,
                 [rgrnId],
             );

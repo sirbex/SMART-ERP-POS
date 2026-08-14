@@ -792,6 +792,12 @@ export const goodsReceiptRepository = {
       whereClauses.push(`gr.status = 'COMPLETED'`);
       whereClauses.push(`NOT (${supplierBillExistsSql})`);
       whereClauses.push(`NOT (${fullyReversedSql})`);
+      // Empty opening-import shells have no lines — never treat as billable “To invoice”
+      whereClauses.push(`EXISTS (
+        SELECT 1 FROM goods_receipt_items gri0
+        WHERE gri0.goods_receipt_id = gr.id
+          AND COALESCE(gri0.received_quantity, 0) > 0
+      )`);
     }
 
     const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';

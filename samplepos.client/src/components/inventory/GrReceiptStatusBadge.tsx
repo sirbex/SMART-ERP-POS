@@ -2,6 +2,7 @@ export function GrReceiptStatusBadge({ status }: { status: string }) {
     const config: Record<string, { bg: string; text: string; label: string }> = {
         DRAFT: { bg: 'bg-gray-100', text: 'text-gray-800', label: 'Draft' },
         COMPLETED: { bg: 'bg-green-100', text: 'text-green-800', label: 'Completed' },
+        // Historic alias only for display if dirty data ever surfaces
         FINALIZED: { bg: 'bg-green-100', text: 'text-green-800', label: 'Completed' },
         CANCELLED: { bg: 'bg-red-100', text: 'text-red-800', label: 'Cancelled' },
     };

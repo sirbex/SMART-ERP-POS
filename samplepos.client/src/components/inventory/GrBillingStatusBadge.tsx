@@ -1,4 +1,6 @@
 /** SAP GR/IR vs AP billing lane for goods receipts (Odoo: To Bill / Billed). */
+import { isGoodsReceiptPosted } from '@shared/domain/pgDomainEnums';
+
 export type GrBillingStatus =
     | 'DRAFT_GR'
     | 'TO_INVOICE'
@@ -78,7 +80,7 @@ export function GrBillingStatusBadge({
             </span>
         );
     }
-    if (billing === 'TO_INVOICE' || (!billing && receiptStatus === 'COMPLETED') || receiptStatus === 'FINALIZED') {
+    if (billing === 'TO_INVOICE' || (!billing && isGoodsReceiptPosted(receiptStatus))) {
         return (
             <span
                 className={`inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-900 ring-1 ring-amber-200/80 ${className}`}

@@ -1,8 +1,12 @@
 /**
  * Proof: RGRN → SCN requires supplier bill first (ERR_RETURN_GRN_001).
+ * Proof: cancelled SCN does not block re-create; active SCN still conflicts.
  */
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import type { Pool, PoolClient } from 'pg';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 type AnyMock = jest.Mock<(...args: unknown[]) => Promise<unknown>>;
 
@@ -79,6 +83,15 @@ const {
     SUPPLIER_BILL_REQUIRED_FOR_SCN_MESSAGE,
 } = await import('./returnGrnMessages.js');
 
+/** Active SCN gate shared by create + worklist (cancelled can re-issue). */
+function isActiveScnExistenceSql(sql: string): boolean {
+    return (
+        sql.includes('return_grn_id = $1') &&
+        sql.includes('SUPPLIER_CREDIT_NOTE') &&
+        sql.includes('CANCELLED')
+    );
+}
+
 describe('returnGrnService — SCN requires supplier bill', () => {
     const pool = {} as Pool;
 
@@ -86,7 +99,7 @@ describe('returnGrnService — SCN requires supplier bill', () => {
         jest.clearAllMocks();
         mockClientQuery.mockImplementation(async (sql: unknown) => {
             const s = String(sql);
-            if (s.includes('return_grn_id = $1') && s.includes('SUPPLIER_CREDIT_NOTE')) {
+            if (isActiveScnExistenceSql(s)) {
                 return { rows: [] };
             }
             if (s.includes('FROM goods_receipts g') && s.includes('supplier')) {
@@ -110,5 +123,61 @@ describe('returnGrnService — SCN requires supplier bill', () => {
         await expect(
             returnGrnService.createCreditNoteFromReturn(pool, 'rgrn-uuid'),
         ).rejects.toBeInstanceOf(BusinessError);
+    });
+
+    it('conflicts when an active SCN still links the Return GRN', async () => {
+        mockClientQuery.mockImplementation(async (sql: unknown) => {
+            const s = String(sql);
+            if (isActiveScnExistenceSql(s)) {
+                return { rows: [{ Id: 'scn-active', Status: 'POSTED' }] };
+            }
+            return { rows: [] };
+        });
+
+        await expect(
+            returnGrnService.createCreditNoteFromReturn(pool, 'rgrn-uuid'),
+        ).rejects.toThrow(/already exists for this Return GRN/i);
+    });
+
+    it('ignores cancelled SCN so gate reaches bill check (cancel → re-create path)', async () => {
+        // SQL itself filters CANCELLED; only active rows are returned. Empty = cancelled/soft-del free.
+        mockClientQuery.mockImplementation(async (sql: unknown) => {
+            const s = String(sql);
+            if (isActiveScnExistenceSql(s)) {
+                return { rows: [] };
+            }
+            if (s.includes('FROM goods_receipts g') && s.includes('supplier')) {
+                return { rows: [{ supplier_id: 'sup-1', supplier_name: 'Test Supplier' }] };
+            }
+            if (s.includes('document_type = \'SUPPLIER_INVOICE\'')) {
+                return { rows: [] };
+            }
+            return { rows: [] };
+        });
+
+        await expect(
+            returnGrnService.createCreditNoteFromReturn(pool, 'rgrn-uuid'),
+        ).rejects.toMatchObject({ errorCode: SUPPLIER_BILL_REQUIRED_FOR_SCN_CODE });
+    });
+});
+
+describe('returnGrnService — active SCN SQL SSOT (cancel re-create)', () => {
+    it('createCreditNoteFromReturn excludes CANCELLED/VOID SCN like worklist hasActiveScn', () => {
+        const dir = path.dirname(fileURLToPath(import.meta.url));
+        const serviceSrc = readFileSync(path.join(dir, 'returnGrnService.ts'), 'utf8');
+        const repoSrc = readFileSync(path.join(dir, 'returnGrnRepository.ts'), 'utf8');
+        expect(serviceSrc).toMatch(
+            /NOT IN \('CANCELLED', 'VOID', 'VOIDED', 'DELETED'\)/,
+        );
+        expect(repoSrc).toMatch(
+            /NOT IN \('CANCELLED', 'VOID', 'VOIDED', 'DELETED'\)/,
+        );
+        // Must not reintroduce soft-delete-only duplicate gate
+        const gateBlock = serviceSrc.slice(
+            serviceSrc.indexOf('Prevent duplicate'),
+            serviceSrc.indexOf('Prevent duplicate') + 600,
+        );
+        expect(gateBlock).toContain('CANCELLED');
+        expect(gateBlock).toContain('return_grn_id');
     });
 });

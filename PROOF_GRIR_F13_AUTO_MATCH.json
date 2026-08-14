@@ -1,0 +1,122 @@
+{
+  "at": "2026-08-14T07:38:21.739Z",
+  "feature": "GRIR_F13_AUTO_MATCH",
+  "summary": {
+    "pass": 21,
+    "fail": 0,
+    "total": 21,
+    "verdict": "PASS"
+  },
+  "rootCauseFixed": [
+    "Multi-path candidates via grirIntegrity SSOT",
+    "selectF13Pairs shared by preview + run, default 2%",
+    "already-posted bills: grir_clearing only (no second AP/GL)"
+  ],
+  "gates": [
+    {
+      "id": "REPO_SSOT",
+      "ok": true,
+      "detail": "uses grirIntegrity SSOT"
+    },
+    {
+      "id": "REPO_EMPTY_GR",
+      "ok": true,
+      "detail": "empty GR excluded"
+    },
+    {
+      "id": "REPO_NO_RECLEAR",
+      "ok": true,
+      "detail": "skip cleared pairs"
+    },
+    {
+      "id": "SVC_SELECT",
+      "ok": true,
+      "detail": "selectF13Pairs SSOT"
+    },
+    {
+      "id": "SVC_DEFAULT_2",
+      "ok": true,
+      "detail": "default tol from SSOT"
+    },
+    {
+      "id": "SVC_ALREADY_POSTED",
+      "ok": true,
+      "detail": "posted bills bookkeeping only"
+    },
+    {
+      "id": "SVC_AUTO_CLEAR",
+      "ok": true,
+      "detail": "autoMatch → clearItem"
+    },
+    {
+      "id": "ROUTE_CANDIDATES",
+      "ok": true,
+      "detail": "GET candidates"
+    },
+    {
+      "id": "ROUTE_AUTO",
+      "ok": true,
+      "detail": "POST auto-match"
+    },
+    {
+      "id": "ROUTE_WRITE",
+      "ok": true,
+      "detail": "reconcile write"
+    },
+    {
+      "id": "CLIENT_API",
+      "ok": true,
+      "detail": "client API tolerance"
+    },
+    {
+      "id": "UI_F13",
+      "ok": true,
+      "detail": "F.13 modal"
+    },
+    {
+      "id": "DEFAULT_TOL",
+      "ok": true,
+      "detail": "default 2"
+    },
+    {
+      "id": "ALGO_ONE_TO_ONE",
+      "ok": true,
+      "detail": "selected=2"
+    },
+    {
+      "id": "ALGO_FIRST",
+      "ok": true,
+      "detail": "g1-i1 first"
+    },
+    {
+      "id": "ALGO_G3",
+      "ok": true,
+      "detail": "g3 in at 5%"
+    },
+    {
+      "id": "ALGO_G4",
+      "ok": true,
+      "detail": "g4 out at 5%"
+    },
+    {
+      "id": "ALGO_TOL2",
+      "ok": true,
+      "detail": "3% out at default 2%"
+    },
+    {
+      "id": "FILTER_SEARCH",
+      "ok": true,
+      "detail": "ONCO search"
+    },
+    {
+      "id": "FILTER_UUID",
+      "ok": true,
+      "detail": "UUID id"
+    },
+    {
+      "id": "FILTER_NONE",
+      "ok": true,
+      "detail": "empty none"
+    }
+  ]
+}

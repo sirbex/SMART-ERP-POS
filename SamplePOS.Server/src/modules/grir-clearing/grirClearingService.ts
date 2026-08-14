@@ -31,6 +31,10 @@ import { NotFoundError, ValidationError, ConflictError } from '../../middleware/
 import logger from '../../utils/logger.js';
 import * as repo from './grirClearingRepository.js';
 import { getBusinessDate } from '../../utils/dateRange.js';
+import {
+  F13_DEFAULT_TOLERANCE_PERCENT,
+  selectF13Pairs,
+} from './grirIntegrity.js';
 
 const GRIR_CLEARING_ACCOUNT = '2150';
 
@@ -185,11 +189,17 @@ export async function searchClearingItems(
 /**
  * Get clearing account balance summary.
  */
+export interface ClearingBalanceSummaryExtended extends ClearingBalanceSummary {
+  /** True ledger CR − DR on account 2150 (authoritative residual). */
+  trueGlBalance: number;
+}
+
 export async function getClearingBalance(
   pool?: pg.Pool
-): Promise<ClearingBalanceSummary> {
+): Promise<ClearingBalanceSummaryExtended> {
   const dbPool = pool || globalPool;
   const row = await repo.getBalanceSummary(dbPool);
+  const gl = await repo.getTrueGlBalance(dbPool);
 
   return {
     totalGrValue: Money.toNumber(Money.parseDb(row.total_gr_value)),
@@ -205,6 +215,7 @@ export async function getClearingBalance(
     avgClearingDays: row.avg_clearing_days != null
       ? Math.round(Number(row.avg_clearing_days))
       : null,
+    trueGlBalance: Money.toNumber(Money.parseDb(gl.gl_balance_cr)),
   };
 }
 
@@ -299,13 +310,16 @@ export async function getGrItemDetails(
 /**
  * Manually clear a GR against an invoice.
  *
- * GL Posting:
+ * GL Posting (when invoice is NOT yet posted to GL):
  *   DR GR/IR Clearing 2150 (GR amount — reverses the credit from GR posting)
  *   CR Accounts Payable 2100 (invoice amount)
  *   DR/CR Price Variance 5020 (difference, if any)
  *
- * SAP Reference: Transaction MR11N — the user picks a GR and an invoice,
- * confirms the amounts, and the system clears and posts the variance.
+ * When invoice is already GL-posted (createInvoiceFromGRN / postInvoiceToGL):
+ *   Record grir_clearing only — AP must not be double-posted. Residual 2150
+ *   gaps should use clear-residual instead of inventing a second AP leg.
+ *
+ * SAP Reference: Transaction MR11N
  */
 export async function clearItem(
   data: {
@@ -322,14 +336,14 @@ export async function clearItem(
   try {
     await client.query('BEGIN');
 
-    // 1. Verify GR exists and get amount
+    // 1. Verify GR exists and get amount (PO optional for non-PO receipts)
     const grResult = await client.query(
       `SELECT gr.id, gr.receipt_number, gr.purchase_order_id, gr.status,
               po.order_number AS po_number,
-              po.total_amount AS po_total,
+              COALESCE(po.total_amount, 0) AS po_total,
               COALESCE(items.total, 0) AS gr_total
        FROM goods_receipts gr
-       JOIN purchase_orders po ON gr.purchase_order_id = po.id
+       LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
        LEFT JOIN (
          SELECT goods_receipt_id, SUM(received_quantity * cost_price) AS total
          FROM goods_receipt_items GROUP BY goods_receipt_id
@@ -343,14 +357,17 @@ export async function clearItem(
 
     // 2. Verify invoice exists and get amount
     const invResult = await client.query(
-      `SELECT "Id", "SupplierInvoiceNumber", "TotalAmount", "Status", "PurchaseOrderId"
+      `SELECT "Id", "SupplierInvoiceNumber", "TotalAmount", "Status", "PurchaseOrderId",
+              COALESCE(is_posted_to_gl, false) AS is_posted_to_gl
        FROM supplier_invoices
        WHERE "Id" = $1 AND deleted_at IS NULL`,
       [data.invoiceId]
     );
     if (invResult.rows.length === 0) throw new NotFoundError('Supplier invoice not found');
     const inv = invResult.rows[0];
-    if (inv.Status === 'CANCELLED') throw new ValidationError('Cannot clear against a cancelled invoice');
+    if (['Cancelled', 'CANCELLED', 'Voided', 'VOIDED'].includes(String(inv.Status || ''))) {
+      throw new ValidationError('Cannot clear against a cancelled/voided invoice');
+    }
 
     // 3. Check not already cleared
     const existing = await repo.findClearingRecord(client, { grId: data.grId, invoiceId: data.invoiceId });
@@ -366,10 +383,23 @@ export async function clearItem(
     const isExactMatch = Math.abs(variance) < 0.01;
     const status = isExactMatch ? 'MATCHED' : 'VARIANCE';
 
+    // purchase_order_id required on grir_clearing — create synthetic placeholder if missing?
+    // Schema may require NOT NULL. Check via existing code path using gr.purchase_order_id.
+    let purchaseOrderId = gr.purchase_order_id as string | null;
+    if (!purchaseOrderId) {
+      // Prefer invoice PO when GR has no PO
+      purchaseOrderId = inv.PurchaseOrderId || null;
+    }
+    if (!purchaseOrderId) {
+      throw new ValidationError(
+        `Cannot record GR/IR clear for ${gr.receipt_number}: no purchase order on GR or invoice. Link the bill to a PO or GR first.`,
+      );
+    }
+
     // 5. Create clearing record
     const clearingRecord = await repo.createClearingRecord(client, {
       id: existing?.id || uuidv4(),
-      purchaseOrderId: gr.purchase_order_id,
+      purchaseOrderId,
       goodsReceiptId: data.grId,
       invoiceId: data.invoiceId,
       poAmount,
@@ -379,10 +409,29 @@ export async function clearItem(
       status,
     });
 
-    // 6. Post GL entries — SAP standard clearing journal
+    const alreadyPosted = inv.is_posted_to_gl === true || inv.is_posted_to_gl === 't';
+
+    if (alreadyPosted) {
+      // Bookkeeping only — GL already posted via supplier invoice path
+      await client.query('COMMIT');
+      logger.info('GR/IR clearing recorded without GL (invoice already posted)', {
+        grId: data.grId,
+        invoiceId: data.invoiceId,
+        grAmount,
+        invoiceAmount,
+        variance,
+        status,
+      });
+      return {
+        clearingRecord: normalizeClearingRow(clearingRecord),
+        variancePosted: !isExactMatch,
+        varianceAmount: variance,
+      };
+    }
+
+    // 6. Post GL entries — SAP standard clearing journal (unposted invoice only)
     const entryDate = data.date || getBusinessDate();
     const lines: JournalLine[] = [
-      // Debit GR/IR Clearing (reverses the credit from GR posting)
       {
         accountCode: GRIR_CLEARING_ACCOUNT,
         description: `GR/IR Clear: ${gr.receipt_number} ↔ ${inv.SupplierInvoiceNumber || data.invoiceId.slice(0, 8)}`,
@@ -391,10 +440,9 @@ export async function clearItem(
         entityType: 'GRIR_CLEARING',
         entityId: clearingRecord.id,
       },
-      // Credit AP (recognise the payable from the invoice)
       {
         accountCode: AccountCodes.ACCOUNTS_PAYABLE,
-        description: `AP: Invoice ${inv.SupplierInvoiceNumber || data.invoiceId.slice(0, 8)} for ${gr.po_number}`,
+        description: `AP: Invoice ${inv.SupplierInvoiceNumber || data.invoiceId.slice(0, 8)} for ${gr.po_number || gr.receipt_number}`,
         debitAmount: 0,
         creditAmount: invoiceAmount,
         entityType: 'GRIR_CLEARING',
@@ -402,24 +450,21 @@ export async function clearItem(
       },
     ];
 
-    // Price variance line (SAP posts to account 5020)
     if (!isExactMatch) {
       const absVariance = Math.abs(variance);
       if (variance > 0) {
-        // GR > Invoice → credit Price Variance (cost reduction)
         lines.push({
           accountCode: AccountCodes.PRICE_VARIANCE,
-          description: `Price variance (GR > Invoice) on ${gr.po_number}: ${variance.toFixed(2)}`,
+          description: `Price variance (GR > Invoice) on ${gr.po_number || gr.receipt_number}: ${variance.toFixed(2)}`,
           debitAmount: 0,
           creditAmount: absVariance,
           entityType: 'GRIR_CLEARING',
           entityId: clearingRecord.id,
         });
       } else {
-        // Invoice > GR → debit Price Variance (additional cost)
         lines.push({
           accountCode: AccountCodes.PRICE_VARIANCE,
-          description: `Price variance (Invoice > GR) on ${gr.po_number}: ${Math.abs(variance).toFixed(2)}`,
+          description: `Price variance (Invoice > GR) on ${gr.po_number || gr.receipt_number}: ${Math.abs(variance).toFixed(2)}`,
           debitAmount: absVariance,
           creditAmount: 0,
           entityType: 'GRIR_CLEARING',
@@ -468,14 +513,13 @@ export async function clearItem(
 // =============================================================================
 
 /**
- * Automatically match GRs to invoices on the same PO.
- * SAP F.13 logic: exact amount matches first, then within tolerance.
+ * Automatically match GRs to invoices (F.13).
  *
- * Rules:
- *   1. Only match COMPLETED GRs with non-CANCELLED invoices.
- *   2. Must share the same PO reference.
- *   3. Skip pairs already cleared.
- *   4. Post GL for each match (including variance).
+ * Rules (shared with getMatchCandidates via selectF13Pairs):
+ *   1. Multi-path GR↔bill links (grn_links / PO / internal ref).
+ *   2. 1:1 greedy assignment (exact first from repo order).
+ *   3. Within tolerance % (default F13_DEFAULT_TOLERANCE_PERCENT = 2).
+ *   4. clearItem posts GL when bill not posted; bookkeeping-only when already posted.
  */
 export async function autoMatch(
   options: {
@@ -486,34 +530,27 @@ export async function autoMatch(
   pool?: pg.Pool
 ): Promise<AutoMatchResult> {
   const dbPool = pool || globalPool;
-  const tolerancePct = options.tolerancePercent ?? 5; // SAP default: 5% tolerance
+  const tolerancePct =
+    options.tolerancePercent != null && Number.isFinite(options.tolerancePercent)
+      ? Number(options.tolerancePercent)
+      : F13_DEFAULT_TOLERANCE_PERCENT;
 
-  // Get unmatched candidates
-  const candidates = await repo.getMatchCandidates(dbPool, {
+  const rawCandidates = await repo.getMatchCandidates(dbPool, {
     supplierId: options.supplierId,
-    tolerancePercent: tolerancePct,
   });
+
+  const selected = selectF13Pairs(rawCandidates, tolerancePct);
 
   const result: AutoMatchResult = {
     matched: 0,
     withVariance: 0,
-    skipped: 0,
+    skipped: Math.max(0, rawCandidates.length - selected.length),
     details: [],
   };
 
-  for (const candidate of candidates) {
+  for (const candidate of selected) {
     const grAmount = Money.toNumber(Money.parseDb(candidate.gr_line_total));
     const invoiceAmount = Money.toNumber(Money.parseDb(candidate.invoice_total));
-    const diff = Money.toNumber(Money.parseDb(candidate.amount_diff));
-
-    // Check tolerance: skip if variance exceeds tolerance %
-    if (grAmount > 0) {
-      const variancePct = (diff / grAmount) * 100;
-      if (variancePct > tolerancePct) {
-        result.skipped++;
-        continue;
-      }
-    }
 
     try {
       const clearResult = await clearItem({
@@ -537,7 +574,6 @@ export async function autoMatch(
         status: clearResult.clearingRecord.status,
       });
     } catch (err) {
-      // Skip individual match failures (already cleared, etc.)
       logger.warn('Auto-match skipped pair', {
         grId: candidate.gr_id,
         invoiceId: candidate.invoice_id,
@@ -551,6 +587,8 @@ export async function autoMatch(
     matched: result.matched,
     withVariance: result.withVariance,
     skipped: result.skipped,
+    candidatePairsRaw: rawCandidates.length,
+    selectedPairs: selected.length,
   });
 
   return result;
@@ -562,19 +600,28 @@ export async function autoMatch(
 
 /**
  * Get GR↔Invoice match candidates for the auto-match UI preview.
+ * Same selectF13Pairs as Run Auto-Match so preview count = run count.
  */
 export async function getMatchCandidates(
-  options: { supplierId?: string } = {},
+  options: { supplierId?: string; tolerancePercent?: number } = {},
   pool?: pg.Pool
 ): Promise<MatchCandidate[]> {
   const dbPool = pool || globalPool;
-  const rows = await repo.getMatchCandidates(dbPool, options);
+  const tolerancePct =
+    options.tolerancePercent != null && Number.isFinite(options.tolerancePercent)
+      ? Number(options.tolerancePercent)
+      : F13_DEFAULT_TOLERANCE_PERCENT;
 
-  return rows.map((r) => ({
+  const rows = await repo.getMatchCandidates(dbPool, {
+    supplierId: options.supplierId,
+  });
+  const selected = selectF13Pairs(rows, tolerancePct);
+
+  return selected.map((r) => ({
     grId: r.gr_id,
     grNumber: r.gr_number,
     grDate: r.gr_date,
-    poId: r.po_id,
+    poId: r.po_id || '',
     poNumber: r.po_number,
     supplierId: r.supplier_id,
     supplierName: r.supplier_name,
@@ -586,6 +633,322 @@ export async function getMatchCandidates(
     amountDiff: Money.toNumber(Money.parseDb(r.amount_diff)),
     isExactMatch: r.is_exact_match,
   }));
+}
+
+// =============================================================================
+// GL RESIDUAL WORKLIST + SAFE CLEAR (no second AP leg)
+// =============================================================================
+
+export type ResidualClearMethod =
+  | 'TO_PRICE_VARIANCE'
+  | 'TO_RETURN_CLEARING'
+  | 'RECLASS_FROM_EXPENSE';
+
+export interface GrirGlResidualItem {
+  referenceNumber: string;
+  referenceType: string;
+  /** CR − DR on 2150 for this document. Positive = credit residual (typical open GR). */
+  netCr: number;
+  firstDate: string | null;
+  lastDate: string | null;
+  txnCount: number;
+  description: string | null;
+  recommendedMethod: ResidualClearMethod;
+  reasonCode: string;
+}
+
+export interface ResidualClearResult {
+  referenceNumber: string;
+  method: ResidualClearMethod;
+  amountCleared: number;
+  /** Remaining net after clear (should be ~0). */
+  remainingNetCr: number;
+  journalReference: string;
+}
+
+function recommendResidualMethod(
+  referenceType: string,
+  netCr: number,
+): { method: ResidualClearMethod; reasonCode: string } {
+  const t = (referenceType || '').toUpperCase();
+  if (t === 'RETURN_GRN' || t === 'SUPPLIER_CREDIT_NOTE') {
+    return { method: 'TO_RETURN_CLEARING', reasonCode: 'RETURN_POLLUTION' };
+  }
+  if (t === 'GOODS_RECEIPT' && netCr > 0.01) {
+    // Open GR credit: either invoice still needed, expense-path misbill, or write to variance.
+    return { method: 'RECLASS_FROM_EXPENSE', reasonCode: 'UNCLEARED_GR_OR_EXPENSE_BILL' };
+  }
+  if (t === 'SUPPLIER_INVOICE' && netCr < -0.01) {
+    return { method: 'TO_PRICE_VARIANCE', reasonCode: 'PRICE_GAP_OR_OVERCLEAR' };
+  }
+  return { method: 'TO_PRICE_VARIANCE', reasonCode: 'GL_RESIDUAL' };
+}
+
+/**
+ * List non-zero 2150 residuals by reference (true ledger SSOT).
+ */
+export async function getGlResiduals(
+  options: { limit?: number; minAbs?: number } = {},
+  pool?: pg.Pool
+): Promise<{ items: GrirGlResidualItem[]; trueGlBalance: number }> {
+  const dbPool = pool || globalPool;
+  const [rows, gl] = await Promise.all([
+    repo.getGlResiduals(dbPool, options),
+    repo.getTrueGlBalance(dbPool),
+  ]);
+
+  const items = rows.map((r) => {
+    const netCr = Money.toNumber(Money.parseDb(r.net_cr));
+    const { method, reasonCode } = recommendResidualMethod(r.reference_type, netCr);
+    return {
+      referenceNumber: r.reference_number,
+      referenceType: r.reference_type,
+      netCr,
+      firstDate: r.first_date,
+      lastDate: r.last_date,
+      txnCount: parseInt(r.txn_count, 10) || 0,
+      description: r.description_sample,
+      recommendedMethod: method,
+      reasonCode,
+    };
+  });
+
+  return {
+    items,
+    trueGlBalance: Money.toNumber(Money.parseDb(gl.gl_balance_cr)),
+  };
+}
+
+/**
+ * Clear a GL residual on 2150 without re-posting Accounts Payable.
+ *
+ * Methods:
+ *  - TO_PRICE_VARIANCE: offset residual to 5020 (price variance / small write-off)
+ *  - TO_RETURN_CLEARING: move polluted residual to 2160
+ *  - RECLASS_FROM_EXPENSE: DR 2150 / CR 6900 when goods were received on 2150
+ *    but the supplier bill hit expense instead of GR/IR (common INV-GR- misroute)
+ *
+ * Amount defaults to the full current residual for the reference.
+ */
+export async function clearGlResidual(
+  data: {
+    referenceNumber: string;
+    method: ResidualClearMethod;
+    userId: string;
+    amount?: number;
+    date?: string;
+    notes?: string;
+  },
+  pool?: pg.Pool
+): Promise<ResidualClearResult> {
+  const dbPool = pool || globalPool;
+  const ref = (data.referenceNumber || '').trim();
+  if (!ref) throw new ValidationError('referenceNumber is required');
+
+  const allowed: ResidualClearMethod[] = [
+    'TO_PRICE_VARIANCE',
+    'TO_RETURN_CLEARING',
+    'RECLASS_FROM_EXPENSE',
+  ];
+  if (!allowed.includes(data.method)) {
+    throw new ValidationError(`Invalid method. Use one of: ${allowed.join(', ')}`);
+  }
+
+  const client = await dbPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const residual = await repo.getGlResidualForReference(client, ref);
+    if (!residual) {
+      throw new NotFoundError(`No open 2150 residual for reference ${ref}`);
+    }
+
+    const netCr = Money.toNumber(Money.parseDb(residual.net_cr));
+    const absNet = Math.abs(netCr);
+    if (absNet < 0.01) {
+      throw new ValidationError('Residual already cleared');
+    }
+
+    let clearAbs = absNet;
+    if (data.amount != null && Number.isFinite(data.amount)) {
+      clearAbs = Math.abs(Number(data.amount));
+      if (clearAbs < 0.01) throw new ValidationError('amount must be positive');
+      if (clearAbs > absNet + 0.01) {
+        throw new ValidationError(
+          `amount ${clearAbs.toFixed(2)} exceeds open residual ${absNet.toFixed(2)} on ${ref}`,
+        );
+      }
+    }
+
+    // Preserve sign: netCr > 0 means credit residual (need DR 2150 to clear)
+    const residualSign = netCr >= 0 ? 1 : -1;
+    const clearSigned = clearAbs * residualSign; // amount of CR to remove (= signed amount)
+
+    if (data.method === 'RECLASS_FROM_EXPENSE') {
+      // Only clears credit residual by DR 2150 / CR 6900
+      if (netCr <= 0.01) {
+        throw new ValidationError(
+          'RECLASS_FROM_EXPENSE only applies when 2150 still has a credit residual (open GR). For debit residual use TO_PRICE_VARIANCE.',
+        );
+      }
+    }
+
+    const entryDate = data.date || getBusinessDate();
+    const note = (data.notes || '').trim();
+    const methodLabel =
+      data.method === 'TO_PRICE_VARIANCE'
+        ? 'price variance'
+        : data.method === 'TO_RETURN_CLEARING'
+          ? 'return clearing 2160'
+          : 'expense reclass 6900';
+
+    if (data.method === 'TO_RETURN_CLEARING') {
+      const { ensureSupplierReturnClearingAccount } = await import(
+        '../return-grn/ensureSupplierReturnClearingAccount.js'
+      );
+      await ensureSupplierReturnClearingAccount(client);
+    }
+
+    const lines: JournalLine[] = [];
+
+    if (data.method === 'RECLASS_FROM_EXPENSE') {
+      // DR 2150, CR 6900 — reverse wrong expense, clear GR/IR credit
+      lines.push(
+        {
+          accountCode: GRIR_CLEARING_ACCOUNT,
+          description: `Clear residual ${ref} (expense reclass)`,
+          debitAmount: clearAbs,
+          creditAmount: 0,
+        },
+        {
+          accountCode: AccountCodes.GENERAL_EXPENSE,
+          description: `Reclass expense → GR/IR for ${ref}`,
+          debitAmount: 0,
+          creditAmount: clearAbs,
+        },
+      );
+    } else if (data.method === 'TO_RETURN_CLEARING') {
+      // Move residual to 2160 (same-sign move: if 2150 is debit residual, DR 2160? wait)
+      // Net residual netCr on 2150: to zero 2150 by amount clearAbs with sign residualSign:
+      // entry on 2150 must be opposite to residual: DR if residual credit, CR if residual debit.
+      // Offset goes to 2160 with same direction as residual (moving the residual across accounts).
+      if (residualSign > 0) {
+        // Credit residual on 2150 → DR 2150, CR 2160 (liability moves to return clearing)
+        lines.push(
+          {
+            accountCode: GRIR_CLEARING_ACCOUNT,
+            description: `Move residual ${ref} off GR/IR`,
+            debitAmount: clearAbs,
+            creditAmount: 0,
+          },
+          {
+            accountCode: AccountCodes.SUPPLIER_RETURN_CLEARING,
+            description: `Return clearing residual from ${ref}`,
+            debitAmount: 0,
+            creditAmount: clearAbs,
+          },
+        );
+      } else {
+        // Debit residual on 2150 → CR 2150, DR 2160
+        lines.push(
+          {
+            accountCode: GRIR_CLEARING_ACCOUNT,
+            description: `Move residual ${ref} off GR/IR`,
+            debitAmount: 0,
+            creditAmount: clearAbs,
+          },
+          {
+            accountCode: AccountCodes.SUPPLIER_RETURN_CLEARING,
+            description: `Return clearing residual from ${ref}`,
+            debitAmount: clearAbs,
+            creditAmount: 0,
+          },
+        );
+      }
+    } else {
+      // TO_PRICE_VARIANCE
+      if (residualSign > 0) {
+        // Credit residual → DR 2150, CR 5020 (favorable / write-off credit)
+        lines.push(
+          {
+            accountCode: GRIR_CLEARING_ACCOUNT,
+            description: `Clear residual ${ref} to price variance`,
+            debitAmount: clearAbs,
+            creditAmount: 0,
+          },
+          {
+            accountCode: AccountCodes.PRICE_VARIANCE,
+            description: `GR/IR residual write-off ${ref}`,
+            debitAmount: 0,
+            creditAmount: clearAbs,
+          },
+        );
+      } else {
+        // Debit residual → CR 2150, DR 5020
+        lines.push(
+          {
+            accountCode: GRIR_CLEARING_ACCOUNT,
+            description: `Clear residual ${ref} to price variance`,
+            debitAmount: 0,
+            creditAmount: clearAbs,
+          },
+          {
+            accountCode: AccountCodes.PRICE_VARIANCE,
+            description: `GR/IR residual write-off ${ref}`,
+            debitAmount: clearAbs,
+            creditAmount: 0,
+          },
+        );
+      }
+    }
+
+    const journalRef = `GRIR-RES-${ref}`.slice(0, 60);
+    const clearingId = uuidv4();
+
+    await AccountingCore.createJournalEntry({
+      entryDate,
+      description: `GR/IR residual clear (${methodLabel}): ${ref}${note ? ` — ${note}` : ''}`,
+      referenceType: 'GRIR_CLEARING',
+      referenceId: clearingId,
+      referenceNumber: journalRef,
+      lines,
+      userId: data.userId,
+      idempotencyKey: `GRIR-RESIDUAL-${data.method}-${ref}-${clearAbs.toFixed(2)}-${entryDate}`,
+    }, undefined, client);
+
+    await client.query('COMMIT');
+
+    // Re-read residual after post
+    const after = await repo.getGlResidualForReference(dbPool, ref);
+    const remaining = after
+      ? Money.toNumber(Money.parseDb(after.net_cr))
+      : 0;
+
+    logger.info('GR/IR residual cleared', {
+      referenceNumber: ref,
+      method: data.method,
+      clearAbs,
+      remaining,
+      userId: data.userId,
+    });
+
+    return {
+      referenceNumber: ref,
+      method: data.method,
+      amountCleared: clearSigned,
+      remainingNetCr: remaining,
+      journalReference: journalRef,
+    };
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // =============================================================================

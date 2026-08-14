@@ -1189,6 +1189,7 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
                     si."TotalAmount", si.is_posted_to_gl, si."Status", si.deleted_at,
                     si.document_type, si."InternalReferenceNumber",
                     si.grn_computed_total, si.variance_reason,
+                    si."PurchaseOrderId",
                     s."CompanyName" AS supplier_name
              FROM supplier_invoices si
              LEFT JOIN suppliers s ON s."Id" = si."SupplierId"
@@ -1243,30 +1244,80 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
         //
         // Detection order:
         //   1. InternalReferenceNumber starts with 'GR-' and the GR exists in goods_receipts
-        //   2. Fallback: check supplier_invoice_grn_links (authoritative 3-way match table)
-        //      Handles cases where InternalReferenceNumber has a non-standard prefix (e.g. 'INV-GR-...')
-        const grRef = (inv.InternalReferenceNumber || '').trim();
-        let hasGrReference = grRef.startsWith('GR-') &&
-            (await client.query(
-                `SELECT 1 FROM goods_receipts WHERE receipt_number = $1 AND status = 'COMPLETED' LIMIT 1`,
-                [grRef],
-            )).rows.length > 0;
+        //   2. INV-GR-… or any token containing GR-YYYY-NNNN that maps to a COMPLETED GR
+        //   3. Fallback: supplier_invoice_grn_links (authoritative 3-way match table)
+        const grRefRaw = (inv.InternalReferenceNumber || '').trim();
+        let linkedGrNumber: string | null = null;
+
+        const resolveCompletedGr = async (receiptNumber: string): Promise<boolean> => {
+            const r = await client.query(
+                `SELECT receipt_number FROM goods_receipts
+                  WHERE receipt_number = $1 AND status = 'COMPLETED' LIMIT 1`,
+                [receiptNumber],
+            );
+            if (r.rows.length > 0) {
+                linkedGrNumber = r.rows[0].receipt_number;
+                return true;
+            }
+            return false;
+        };
+
+        let hasGrReference = false;
+        if (grRefRaw.startsWith('GR-')) {
+            hasGrReference = await resolveCompletedGr(grRefRaw);
+        }
+        if (!hasGrReference && grRefRaw) {
+            // INV-GR-2026-0290, "GR: GR-2026-0290", etc.
+            const embedded = grRefRaw.match(/GR-\d{4}-\d+/i);
+            if (embedded) {
+                hasGrReference = await resolveCompletedGr(embedded[0].toUpperCase());
+            }
+        }
 
         // Fallback: supplier_invoice_grn_links is the authoritative source for 3-way match
         if (!hasGrReference) {
             const linkCheck = await client.query(
-                `SELECT 1
+                `SELECT gr.receipt_number
                    FROM supplier_invoice_grn_links sigl
                    JOIN goods_receipts gr ON gr.id = sigl.grn_id AND gr.status = 'COMPLETED'
                   WHERE sigl.invoice_id = $1
                   LIMIT 1`,
                 [invoiceId],
             );
-            hasGrReference = linkCheck.rows.length > 0;
+            if (linkCheck.rows.length > 0) {
+                hasGrReference = true;
+                linkedGrNumber = linkCheck.rows[0].receipt_number;
+            }
+        }
+
+        // PO-linked COMPLETED unbilled GR: never silent-expense the bill
+        if (!hasGrReference && inv.PurchaseOrderId) {
+            const poGr = await client.query(
+                `SELECT gr.receipt_number
+                   FROM goods_receipts gr
+                  WHERE gr.purchase_order_id = $1
+                    AND gr.status = 'COMPLETED'
+                    AND EXISTS (
+                      SELECT 1 FROM goods_receipt_items gri WHERE gri.goods_receipt_id = gr.id
+                    )
+                  ORDER BY gr.received_date DESC
+                  LIMIT 1`,
+                [inv.PurchaseOrderId],
+            );
+            if (poGr.rows.length > 0) {
+                hasGrReference = true;
+                linkedGrNumber = poGr.rows[0].receipt_number;
+                logger.info('Supplier invoice treated as GR-linked via PO unbilled GR', {
+                    invoiceId,
+                    invoiceNumber: inv.SupplierInvoiceNumber,
+                    grNumber: linkedGrNumber,
+                });
+            }
         }
 
         // ── Variance data ──────────────────────────────────────────────────────
         // grn_computed_total: PricingEngine total at GRN receipt time (stored on invoice).
+        // When missing, compute from linked GR line totals so price gaps hit 5020 instead of 2150 residual.
         // When it differs from TotalAmount (supplier AP amount), post a 3-line entry
         // so GR/IR is cleared at the full GRN value, AP is set to supplier amount,
         // and the delta goes to Price Variance (5020).
@@ -1274,8 +1325,35 @@ export async function postInvoiceToGL(pool: Pool, invoiceId: string): Promise<vo
         let varianceAmount: number | undefined;
         const varianceReason: string | undefined = inv.variance_reason || undefined;
 
-        if (hasGrReference && inv.grn_computed_total !== null && inv.grn_computed_total !== undefined) {
-            const computedTotal = new Decimal(inv.grn_computed_total).toNumber();
+        let computedTotal: number | null =
+            inv.grn_computed_total !== null && inv.grn_computed_total !== undefined
+                ? new Decimal(inv.grn_computed_total).toNumber()
+                : null;
+
+        if (hasGrReference && (computedTotal === null || !Number.isFinite(computedTotal))) {
+            // Prefer sum of all linked GRs; else the single GR we resolved
+            const sumQ = await client.query(
+                `SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)::float AS t
+                   FROM supplier_invoice_grn_links sigl
+                   JOIN goods_receipt_items gri ON gri.goods_receipt_id = sigl.grn_id
+                  WHERE sigl.invoice_id = $1`,
+                [invoiceId],
+            );
+            let t = Number(sumQ.rows[0]?.t || 0);
+            if (t < 0.005 && linkedGrNumber) {
+                const one = await client.query(
+                    `SELECT COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)::float AS t
+                       FROM goods_receipts gr
+                       JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
+                      WHERE gr.receipt_number = $1`,
+                    [linkedGrNumber],
+                );
+                t = Number(one.rows[0]?.t || 0);
+            }
+            if (t >= 0.005) computedTotal = t;
+        }
+
+        if (hasGrReference && computedTotal !== null && Number.isFinite(computedTotal)) {
             const variance = new Decimal(computedTotal).minus(totalAmount);
             if (variance.abs().greaterThan(0.005)) {
                 grnComputedTotal = computedTotal;

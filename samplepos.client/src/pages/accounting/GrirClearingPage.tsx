@@ -8,6 +8,8 @@ import {
   useGrirHistory,
   useClearGrirItem,
   useGrirAutoMatch,
+  useGrirResiduals,
+  useClearGrirResidual,
   type GrirOpenFilters,
 } from '../../hooks/useAccountingModules';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
@@ -66,6 +68,7 @@ interface ClearingBalanceSummary {
   varianceCount: number;
   oldestUnmatchedDays: number | null;
   avgClearingDays: number | null;
+  trueGlBalance?: number;
 }
 
 interface MatchCandidate {
@@ -120,9 +123,11 @@ const fmtDate = (val: string | null | undefined) => {
 function StatusBadge({ status }: { status: string }) {
   const cfg: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
     OPEN: { bg: 'bg-yellow-100', text: 'text-yellow-700', icon: <Clock className="h-3 w-3" /> },
+    UNMATCHED: { bg: 'bg-yellow-100', text: 'text-yellow-700', icon: <Clock className="h-3 w-3" /> },
     PARTIALLY_MATCHED: { bg: 'bg-blue-100', text: 'text-blue-700', icon: <ArrowRightLeft className="h-3 w-3" /> },
     MATCHED: { bg: 'bg-green-100', text: 'text-green-700', icon: <CheckCircle2 className="h-3 w-3" /> },
     VARIANCE: { bg: 'bg-red-100', text: 'text-red-700', icon: <AlertTriangle className="h-3 w-3" /> },
+    CLEARED: { bg: 'bg-green-100', text: 'text-green-700', icon: <CheckCircle2 className="h-3 w-3" /> },
   };
   const s = cfg[status] || { bg: 'bg-gray-100', text: 'text-gray-600', icon: null };
   return (
@@ -178,7 +183,11 @@ export default function GrirClearingPage() {
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
-  const [activeTab, setActiveTab] = useState<'worklist' | 'search' | 'candidates'>('worklist');
+  const [activeTab, setActiveTab] = useState<'worklist' | 'search' | 'candidates' | 'residuals'>('worklist');
+  const [residualMethod, setResidualMethod] = useState<
+    'TO_PRICE_VARIANCE' | 'TO_RETURN_CLEARING' | 'RECLASS_FROM_EXPENSE'
+  >('TO_PRICE_VARIANCE');
+  const [clearingResidualRef, setClearingResidualRef] = useState<string | null>(null);
 
   // ── Modal state ──────────────────────────────────────────────────
   const [clearingModal, setClearingModal] = useState<GrirOpenItem | null>(null);
@@ -231,15 +240,23 @@ export default function GrirClearingPage() {
   const activeFilters = useMemo(() => ({ ...filters, page, limit: 50 }), [filters, page]);
   const { data: openData, isLoading: loadingOpen, refetch: refetchOpen } = useGrirOpenItems(activeFilters);
   const { data: balanceData } = useGrirBalance();
+  const { data: residualsData, isLoading: loadingResiduals, refetch: refetchResiduals } = useGrirResiduals(
+    activeTab === 'residuals',
+  );
   const { data: searchResults, isLoading: loadingSearch } = useGrirSearch(searchQuery);
   const { data: candidatesData, isLoading: loadingCandidates } = useGrirMatchCandidates(
-    autoMatchSupplier || undefined
+    autoMatchSupplier || undefined,
+    (() => {
+      const t = parseFloat(autoMatchTolerance);
+      return Number.isFinite(t) ? t : 2;
+    })(),
   );
   const { data: grItemsData, isLoading: loadingGrItems } = useGrirGrItems(drillDownGrId);
   const { data: historyData, isLoading: loadingHistory } = useGrirHistory(historyPoId);
 
   // ── Mutations ────────────────────────────────────────────────────
   const clearItem = useClearGrirItem();
+  const clearResidual = useClearGrirResidual();
   const autoMatch = useGrirAutoMatch();
 
   // ── Derived data ─────────────────────────────────────────────────
@@ -268,8 +285,12 @@ export default function GrirClearingPage() {
       varianceCount: 0,
       oldestUnmatchedDays: null,
       avgClearingDays: null,
+      trueGlBalance: 0,
     };
   }, [balanceData]);
+
+  const residualItems = useMemo(() => residualsData?.items ?? [], [residualsData]);
+  const ledgerBalance = residualsData?.trueGlBalance ?? balance.trueGlBalance ?? 0;
 
   const searchItems: GrirOpenItem[] = useMemo(
     () => (Array.isArray(searchResults) ? searchResults : []),
@@ -318,6 +339,19 @@ export default function GrirClearingPage() {
     );
   };
 
+  const confirmClearResidual = (referenceNumber: string, method: typeof residualMethod) => {
+    setClearingResidualRef(referenceNumber);
+    clearResidual.mutate(
+      { referenceNumber, method, notes: `Manual residual clear from GR/IR UI` },
+      {
+        onSettled: () => setClearingResidualRef(null),
+        onSuccess: () => {
+          refetchResiduals();
+        },
+      },
+    );
+  };
+
   const runAutoMatch = () => {
     const tolerance = parseFloat(autoMatchTolerance);
     autoMatch.mutate(
@@ -355,12 +389,15 @@ export default function GrirClearingPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">GR/IR Clearing</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Match goods receipts with supplier invoices
+            Match goods receipts with supplier invoices — and clear true GL residuals on 2150
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => refetchOpen()}
+            onClick={() => {
+              refetchOpen();
+              if (activeTab === 'residuals') refetchResiduals();
+            }}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-sm border rounded-lg hover:bg-gray-50"
           >
             <RefreshCcw className="h-4 w-4" /> Refresh
@@ -375,8 +412,14 @@ export default function GrirClearingPage() {
       </div>
 
       {/* ── Balance Summary Cards ───────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
-        <SummaryCard label="Clearing Balance" value={fmt(balance.clearingBalance)} color="text-orange-600" sub="Account 2150" />
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <SummaryCard
+          label="True GL 2150"
+          value={fmtDecimal(typeof ledgerBalance === 'number' ? ledgerBalance : balance.trueGlBalance)}
+          color={Number(ledgerBalance || balance.trueGlBalance || 0) === 0 ? 'text-green-600' : 'text-orange-700'}
+          sub="CR − DR (ledger)"
+        />
+        <SummaryCard label="Subledger Gap" value={fmt(balance.clearingBalance)} color="text-orange-600" sub="MR11 math" />
         <SummaryCard label="GR Value (Uncleared)" value={fmt(balance.totalGrValue)} color="text-blue-600" sub={`${balance.outstandingCount} items`} />
         <SummaryCard label="Invoiced Value" value={fmt(balance.totalInvoicedValue)} color="text-green-600" sub={`${balance.fullyMatchedCount} matched`} />
         <SummaryCard label="Variances" value={String(balance.varianceCount)} color="text-red-600" sub={`${balance.partiallyMatchedCount} partial`} />
@@ -447,8 +490,7 @@ export default function GrirClearingPage() {
                 className="w-full px-3 py-2 border rounded-lg text-sm"
               >
                 <option value="">All Statuses</option>
-                <option value="OPEN">Open</option>
-                <option value="PARTIALLY_MATCHED">Partially Matched</option>
+                <option value="UNMATCHED">Unmatched</option>
                 <option value="MATCHED">Matched</option>
                 <option value="VARIANCE">Variance</option>
               </select>
@@ -475,8 +517,8 @@ export default function GrirClearingPage() {
       </div>
 
       {/* ── Tab Bar ─────────────────────────────────────────────── */}
-      <div className="border-b flex gap-1">
-        {(['worklist', 'search', 'candidates'] as const).map((tab) => (
+      <div className="border-b flex gap-1 flex-wrap">
+        {(['worklist', 'residuals', 'search', 'candidates'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -486,6 +528,7 @@ export default function GrirClearingPage() {
               }`}
           >
             {tab === 'worklist' && 'MR11 — Work List'}
+            {tab === 'residuals' && `GL Residuals${residualItems.length ? ` (${residualItems.length})` : ''}`}
             {tab === 'search' && `Search Results${searchItems.length > 0 ? ` (${searchItems.length})` : ''}`}
             {tab === 'candidates' && `Match Candidates${candidates.length > 0 ? ` (${candidates.length})` : ''}`}
           </button>
@@ -501,6 +544,90 @@ export default function GrirClearingPage() {
           onDrillDown={(grId) => setDrillDownGrId(grId)}
           onHistory={(poId) => setHistoryPoId(poId)}
         />
+      )}
+
+      {activeTab === 'residuals' && (
+        <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b bg-amber-50 text-sm text-amber-900 space-y-1">
+            <p>
+              <strong>True ledger residual on 2150</strong> by document — use this when AP is already posted or
+              the MR11 list looks clean but trial balance still shows a balance.
+            </p>
+            <p className="text-xs">
+              <strong>Reclass expense</strong>: GR open but bill hit expense 6900 ·
+              <strong> Price variance</strong>: amount gap / small write-off (5020) ·
+              <strong> Return clearing</strong>: move polluted RGRN/SCN residual to 2160. Never double-posts AP.
+            </p>
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <label className="text-xs font-medium">Default clear method</label>
+              <select
+                value={residualMethod}
+                onChange={(e) => setResidualMethod(e.target.value as typeof residualMethod)}
+                className="text-xs border rounded px-2 py-1 bg-white"
+              >
+                <option value="TO_PRICE_VARIANCE">To price variance (5020)</option>
+                <option value="TO_RETURN_CLEARING">To return clearing (2160)</option>
+                <option value="RECLASS_FROM_EXPENSE">Reclass from expense (6900)</option>
+              </select>
+            </div>
+          </div>
+          {loadingResiduals ? (
+            <LoadingState message="Loading residuals..." />
+          ) : residualItems.length === 0 ? (
+            <EmptyState icon={<CheckCircle2 className="h-8 w-8" />} message="No open GL residuals on 2150" />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-left text-xs uppercase text-gray-500">
+                  <tr>
+                    <th className="px-3 py-2">Reference</th>
+                    <th className="px-3 py-2">Type</th>
+                    <th className="px-3 py-2 text-right">Net CR (2150)</th>
+                    <th className="px-3 py-2">Reason</th>
+                    <th className="px-3 py-2">Suggested</th>
+                    <th className="px-3 py-2">Last date</th>
+                    <th className="px-3 py-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {residualItems.map((row) => (
+                    <tr key={`${row.referenceType}:${row.referenceNumber}`} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-mono text-xs">{row.referenceNumber}</td>
+                      <td className="px-3 py-2 text-xs">{row.referenceType}</td>
+                      <td className={`px-3 py-2 text-right font-medium ${row.netCr >= 0 ? 'text-orange-700' : 'text-blue-700'}`}>
+                        {fmtDecimal(row.netCr)}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-600">{row.reasonCode}</td>
+                      <td className="px-3 py-2 text-xs">{row.recommendedMethod.replace(/_/g, ' ')}</td>
+                      <td className="px-3 py-2 text-xs">{fmtDate(row.lastDate)}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          <button
+                            type="button"
+                            disabled={clearResidual.isPending && clearingResidualRef === row.referenceNumber}
+                            onClick={() => confirmClearResidual(row.referenceNumber, residualMethod)}
+                            className="px-2 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            Clear
+                          </button>
+                          <button
+                            type="button"
+                            disabled={clearResidual.isPending}
+                            onClick={() => confirmClearResidual(row.referenceNumber, row.recommendedMethod)}
+                            className="px-2 py-1 text-xs rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+                            title="Use system recommendation"
+                          >
+                            Suggested
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {activeTab === 'search' && (
@@ -684,9 +811,10 @@ export default function GrirClearingPage() {
       <Modal open={autoMatchModal} onClose={() => setAutoMatchModal(false)} title="Automatic Clearing — F.13" zIndex={autoGuardRef.current?.panelZIndex ?? ZINDEX.PANEL}>
         <div className="space-y-4">
           <p className="text-sm text-gray-600">
-            Automatically match goods receipts with supplier invoices.
-            Matched pairs will be cleared with GL postings. Items within the tolerance
-            threshold will be matched with variance postings to account 5020.
+            Automatically match goods receipts to supplier invoices using GR links, same PO,
+            or internal GR reference. Pairs are assigned 1:1 (greedy best fit) within the
+            tolerance. If the bill is not yet posted to GL, F.13 posts 2150 / 2100 / 5020.
+            If the bill is already posted, only the clearing record is written (no double AP).
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -697,7 +825,7 @@ export default function GrirClearingPage() {
                 value={autoMatchSupplier}
                 onChange={(e) => setAutoMatchSupplier(e.target.value)}
                 className="w-full px-3 py-2 border rounded-lg text-sm"
-                placeholder="Name, code, or UUID"
+                placeholder="Name, code, or UUID — leave blank for all"
               />
             </div>
             <div>
@@ -712,17 +840,29 @@ export default function GrirClearingPage() {
                 step="0.5"
               />
               <p className="text-xs text-gray-400 mt-1">
-                Items within this % difference will be matched with variance posting.
+                Amount difference ≤ this % of GR value can still match (variance → 5020).
               </p>
             </div>
           </div>
 
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-sm text-blue-700">
-              <strong>Preview:</strong> {candidates.length} candidate pairs found.
-              {' '}{candidates.filter((c) => c.isExactMatch).length} exact matches,{' '}
-              {candidates.filter((c) => !c.isExactMatch).length} with variance.
-            </p>
+          <div className={`rounded-lg p-3 border ${candidates.length === 0 ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'}`}>
+            {loadingCandidates ? (
+              <p className="text-sm text-gray-600">Loading candidates…</p>
+            ) : (
+              <p className={`text-sm ${candidates.length === 0 ? 'text-amber-800' : 'text-blue-700'}`}>
+                <strong>Preview:</strong> {candidates.length} candidate pair{candidates.length === 1 ? '' : 's'} found.
+                {' '}{candidates.filter((c) => c.isExactMatch).length} exact,{' '}
+                {candidates.filter((c) => !c.isExactMatch).length} with variance (within {autoMatchTolerance || '0'}%).
+              </p>
+            )}
+            {candidates.length === 0 && !loadingCandidates && (
+              <p className="text-xs text-amber-700 mt-2">
+                No open GR↔bill pairs left to clear. Common reasons: no supplier invoice linked
+                to the GR/PO, bills already cleared in grir_clearing, empty GR lines, or supplier
+                filter too narrow. Use <strong>GL Residuals</strong> for remaining 2150 balances
+                without a matching bill pair.
+              </p>
+            )}
           </div>
 
           <div className="flex justify-end gap-3 pt-2">

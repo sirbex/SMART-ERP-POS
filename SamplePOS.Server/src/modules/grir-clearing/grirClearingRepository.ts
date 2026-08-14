@@ -5,11 +5,21 @@
  * Follows Controller → Service → Repository layering.
  *
  * SAP Reference: Transaction MR11 (GR/IR Maintenance), F.13 (Automatic Clearing)
+ *
+ * Integrity SSOT:
+ *   - GR↔bill multi-path via SI_LINKS_GR_SQL (grn_links / PO / internal ref)
+ *   - Soft cancel statuses via SI_ACTIVE_SQL
+ *   - Empty-shell GRs excluded via GR_HAS_LINES_SQL
  */
 
 import type pg from 'pg';
-import { Money } from '../../utils/money.js';
 import { resolveSupplierFilter } from './supplierFilter.js';
+import {
+    GR_HAS_LINES_SQL,
+    normalizeOpenStatusFilter,
+    SI_ACTIVE_SQL,
+    SI_LINKS_GR_SQL,
+} from './grirIntegrity.js';
 
 // =============================================================================
 // TYPES
@@ -92,9 +102,7 @@ export interface GrirMatchCandidateRow {
 
 /**
  * Get all open GR/IR clearing items.
- * Joins goods_receipts → PO → supplier, then LEFT JOINs invoices via PO link.
- *
- * SAP equivalent: MR11 (GR/IR Account Maintenance) work list
+ * Multi-path bill link + grir_clearing status preference; empty GRs excluded.
  */
 export async function getOpenItems(
     client: pg.Pool | pg.PoolClient,
@@ -109,127 +117,165 @@ export async function getOpenItems(
         offset?: number;
     } = {}
 ): Promise<{ rows: GrirOpenItemRow[]; total: number }> {
-    const conditions: string[] = [`gr.status = 'COMPLETED'`];
-    const params: unknown[] = [];
-    let idx = 0;
-
-    const supplierFilter = resolveSupplierFilter(filters.supplierId);
-    if (supplierFilter.mode === 'id') {
-        conditions.push(`po.supplier_id = $${++idx}`);
-        params.push(supplierFilter.supplierId);
-    } else if (supplierFilter.mode === 'search') {
-        // Free-text: name / code — never bind non-UUID into supplier_id (PG 22P02).
-        conditions.push(
-            `(s."CompanyName" ILIKE $${++idx} OR COALESCE(s."SupplierCode", '') ILIKE $${idx})`,
-        );
-        params.push(`%${supplierFilter.supplierSearch}%`);
-    }
-    if (filters.poNumber) {
-        conditions.push(`po.order_number ILIKE $${++idx}`);
-        params.push(`%${filters.poNumber}%`);
-    }
-    if (filters.grNumber) {
-        conditions.push(`gr.receipt_number ILIKE $${++idx}`);
-        params.push(`%${filters.grNumber}%`);
-    }
-    if (filters.dateFrom) {
-        conditions.push(`gr.received_date >= $${++idx}::date`);
-        params.push(filters.dateFrom);
-    }
-    if (filters.dateTo) {
-        conditions.push(`gr.received_date <= $${++idx}::date`);
-        params.push(filters.dateTo);
-    }
-    if (filters.status) {
-        // Filter by clearing status (computed below)
-        // UNMATCHED = no invoice, PARTIALLY_MATCHED = invoice exists but variance, MATCHED = exact match
-        // We handle this with a HAVING clause in the CTE
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const supplierJoin =
-        supplierFilter.mode === 'search'
-            ? `JOIN suppliers s ON po.supplier_id = s."Id"`
-            : '';
-
-    // Count query
-    const countResult = await client.query(
-        `SELECT COUNT(DISTINCT gr.id) as total
-     FROM goods_receipts gr
-     JOIN purchase_orders po ON gr.purchase_order_id = po.id
-     ${supplierJoin}
-     ${whereClause}`,
-        params
-    );
-    const total = parseInt(countResult.rows[0].total, 10);
-
-    // Main query — SAP MR11 work list structure
+    const sf = resolveSupplierFilter(filters.supplierId);
+    const statusNorm = normalizeOpenStatusFilter(filters.status);
     const limit = filters.limit || 50;
     const offset = filters.offset || 0;
-    const limitIdx = ++idx;
-    const offsetIdx = ++idx;
-    params.push(limit, offset);
 
-    const statusFilter = filters.status
-        ? `WHERE clearing_status = '${filters.status === 'UNMATCHED' ? 'UNMATCHED' : filters.status === 'MATCHED' ? 'MATCHED' : filters.status === 'VARIANCE' ? 'VARIANCE' : filters.status}'`
-        : '';
+    const qParams: unknown[] = [];
+    let q = 0;
+    const grWhere: string[] = [`gr.status = 'COMPLETED'`, GR_HAS_LINES_SQL];
+    if (filters.poNumber) {
+        grWhere.push(`COALESCE(po.order_number, '') ILIKE $${++q}`);
+        qParams.push(`%${filters.poNumber}%`);
+    }
+    if (filters.grNumber) {
+        grWhere.push(`gr.receipt_number ILIKE $${++q}`);
+        qParams.push(`%${filters.grNumber}%`);
+    }
+    if (filters.dateFrom) {
+        grWhere.push(`gr.received_date >= $${++q}::date`);
+        qParams.push(filters.dateFrom);
+    }
+    if (filters.dateTo) {
+        grWhere.push(`gr.received_date <= $${++q}::date`);
+        qParams.push(filters.dateTo);
+    }
 
-    const result = await client.query(
-        `WITH gr_totals AS (
-       SELECT
-         gr.id AS gr_id,
-         gr.receipt_number AS gr_number,
-         gr.received_date::date::text AS gr_date,
-         gr.status AS gr_status,
-         po.id AS po_id,
-         po.order_number AS po_number,
-         po.status AS po_status,
-         po.total_amount::text AS po_total,
-         po.supplier_id,
-         s."CompanyName" AS supplier_name,
-         s."SupplierCode" AS supplier_code,
-         COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)::text AS gr_line_total,
-         si."Id" AS invoice_id,
-         si."SupplierInvoiceNumber" AS invoice_number,
-         si."InvoiceDate"::date::text AS invoice_date,
-         si."TotalAmount"::text AS invoice_total,
-         si."Status" AS invoice_status,
-         EXTRACT(DAY FROM (NOW() - gr.received_date))::int AS days_since_gr,
-         CASE
-           WHEN si."Id" IS NULL THEN 'UNMATCHED'
-           WHEN ABS(COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) - si."TotalAmount") < 0.01 THEN 'MATCHED'
-           ELSE 'VARIANCE'
-         END AS clearing_status,
-         CASE
-           WHEN si."Id" IS NOT NULL
-           THEN (COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) - si."TotalAmount")::text
-           ELSE NULL
-         END AS variance
-       FROM goods_receipts gr
-       JOIN purchase_orders po ON gr.purchase_order_id = po.id
-       JOIN suppliers s ON po.supplier_id = s."Id"
-       LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
-       LEFT JOIN supplier_invoice_grn_links sigl ON sigl.grn_id = gr.id
-       LEFT JOIN supplier_invoices si
-         ON si."Id" = sigl.invoice_id
-         AND si."Status" NOT IN ('CANCELLED')
-         AND (si.deleted_at IS NULL)
-       ${whereClause}
-       GROUP BY gr.id, gr.receipt_number, gr.received_date, gr.status,
-                po.id, po.order_number, po.status, po.total_amount, po.supplier_id,
-                s."CompanyName", s."SupplierCode",
-                si."Id", si."SupplierInvoiceNumber", si."InvoiceDate", si."TotalAmount", si."Status"
-     )
-     SELECT * FROM gr_totals
-     ${statusFilter}
-     ORDER BY
-       CASE clearing_status WHEN 'UNMATCHED' THEN 0 WHEN 'VARIANCE' THEN 1 ELSE 2 END,
-       gr_date ASC
-     LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-        params
-    );
+    const outerWhere: string[] = ['rn = 1'];
+    if (sf.mode === 'id') {
+        outerWhere.push(`COALESCE(supplier_id::text, '') = $${++q}`);
+        qParams.push(sf.supplierId);
+    } else if (sf.mode === 'search') {
+        outerWhere.push(
+            `(COALESCE(supplier_name, '') ILIKE $${++q} OR COALESCE(supplier_code, '') ILIKE $${q})`,
+        );
+        qParams.push(`%${sf.supplierSearch}%`);
+    }
+    if (statusNorm) {
+        outerWhere.push(`clearing_status = $${++q}`);
+        qParams.push(statusNorm);
+    }
 
-    return { rows: result.rows, total };
+    const limitIdx = ++q;
+    const offsetIdx = ++q;
+    qParams.push(limit, offset);
+
+    const pageSql = `
+      WITH gr_base AS (
+        SELECT
+          gr.id AS gr_id,
+          gr.receipt_number AS gr_number,
+          gr.received_date::date::text AS gr_date,
+          gr.status AS gr_status,
+          po.id AS po_id,
+          COALESCE(po.order_number, '—') AS po_number,
+          COALESCE(po.status::text, '—') AS po_status,
+          COALESCE(po.total_amount, 0)::text AS po_total,
+          po.supplier_id AS po_supplier_id,
+          COALESCE(gr_items.total, 0) AS gr_line_total_n,
+          EXTRACT(DAY FROM (NOW() - gr.received_date))::int AS days_since_gr
+        FROM goods_receipts gr
+        LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
+        LEFT JOIN (
+          SELECT goods_receipt_id, SUM(received_quantity * cost_price) AS total
+          FROM goods_receipt_items
+          GROUP BY goods_receipt_id
+        ) gr_items ON gr_items.goods_receipt_id = gr.id
+        WHERE ${grWhere.join(' AND ')}
+      ),
+      ranked AS (
+        SELECT
+          b.gr_id,
+          b.gr_number,
+          b.gr_date,
+          b.gr_status,
+          b.po_id,
+          b.po_number,
+          b.po_status,
+          b.po_total,
+          b.gr_line_total_n,
+          b.days_since_gr,
+          COALESCE(b.po_supplier_id, si."SupplierId") AS supplier_id,
+          COALESCE(s."CompanyName", 'Unknown') AS supplier_name,
+          COALESCE(s."SupplierCode", '') AS supplier_code,
+          si."Id" AS invoice_id,
+          si."SupplierInvoiceNumber" AS invoice_number,
+          si."InvoiceDate"::date::text AS invoice_date,
+          si."TotalAmount" AS invoice_total_n,
+          si."Status" AS invoice_status,
+          gc.status AS gc_status,
+          gc.variance AS gc_variance,
+          ROW_NUMBER() OVER (
+            PARTITION BY b.gr_id
+            ORDER BY
+              CASE WHEN gc.status IN ('MATCHED', 'VARIANCE') THEN 0 ELSE 1 END,
+              ABS(b.gr_line_total_n - COALESCE(si."TotalAmount", 0)),
+              si."InvoiceDate" DESC NULLS LAST
+          ) AS rn,
+          CASE
+            WHEN gc.status IN ('MATCHED', 'VARIANCE') THEN gc.status
+            WHEN si."Id" IS NULL THEN 'UNMATCHED'
+            WHEN ABS(b.gr_line_total_n - COALESCE(si."TotalAmount", 0)) < 0.01 THEN 'MATCHED'
+            ELSE 'VARIANCE'
+          END AS clearing_status
+        FROM gr_base b
+        LEFT JOIN goods_receipts gr ON gr.id = b.gr_id
+        LEFT JOIN supplier_invoices si ON (${SI_ACTIVE_SQL}) AND (${SI_LINKS_GR_SQL})
+        LEFT JOIN grir_clearing gc
+          ON gc.goods_receipt_id = b.gr_id
+          AND (si."Id" IS NULL OR gc.invoice_id = si."Id")
+          AND gc.status IN ('MATCHED', 'VARIANCE')
+        LEFT JOIN suppliers s ON s."Id" = COALESCE(b.po_supplier_id, si."SupplierId")
+      )
+      SELECT
+        gr_id,
+        gr_number,
+        gr_date,
+        gr_status,
+        COALESCE(po_id::text, '') AS po_id,
+        po_number,
+        po_status,
+        po_total,
+        COALESCE(supplier_id::text, '') AS supplier_id,
+        supplier_name,
+        supplier_code,
+        gr_line_total_n::text AS gr_line_total,
+        invoice_id,
+        invoice_number,
+        invoice_date,
+        invoice_total_n::text AS invoice_total,
+        invoice_status,
+        days_since_gr,
+        clearing_status,
+        CASE
+          WHEN gc_status IN ('MATCHED', 'VARIANCE') AND gc_variance IS NOT NULL
+            THEN gc_variance::text
+          WHEN invoice_id IS NOT NULL
+            THEN (gr_line_total_n - invoice_total_n)::text
+          ELSE NULL
+        END AS variance,
+        COUNT(*) OVER()::int AS _total
+      FROM ranked
+      WHERE ${outerWhere.join(' AND ')}
+      ORDER BY
+        CASE clearing_status WHEN 'UNMATCHED' THEN 0 WHEN 'VARIANCE' THEN 1 ELSE 2 END,
+        gr_date ASC
+      LIMIT $${limitIdx} OFFSET $${offsetIdx}
+    `;
+
+    const result = await client.query(pageSql, qParams);
+    const total =
+        result.rows.length > 0 ? parseInt(String(result.rows[0]._total), 10) : 0;
+
+    const rows = result.rows.map((r: Record<string, unknown>): GrirOpenItemRow => {
+        const { _total, ...rest } = r;
+        void _total;
+        // pg returns Record-shaped rows; double assertion is intentional (query aliases match GrirOpenItemRow).
+        return rest as unknown as GrirOpenItemRow;
+    });
+
+    return { rows, total };
 }
 
 // =============================================================================
@@ -238,7 +284,6 @@ export async function getOpenItems(
 
 /**
  * SAP-style search across PO numbers, GR numbers, supplier names, invoice numbers.
- * Matches any containing substring (ILIKE).
  */
 export async function searchClearingItems(
     client: pg.Pool | pg.PoolClient,
@@ -247,37 +292,34 @@ export async function searchClearingItems(
 ): Promise<GrirSearchRow[]> {
     const searchPattern = `%${query}%`;
     const result = await client.query(
-        `WITH matches AS (
+        `WITH ranked AS (
        SELECT
          gr.id AS gr_id,
          gr.receipt_number AS gr_number,
          gr.received_date::date::text AS gr_date,
          gr.status AS gr_status,
          po.id AS po_id,
-         po.order_number AS po_number,
-         po.status AS po_status,
-         po.total_amount::text AS po_total,
-         po.supplier_id,
-         s."CompanyName" AS supplier_name,
-         s."SupplierCode" AS supplier_code,
-         COALESCE(SUM(gri.received_quantity * gri.cost_price), 0)::text AS gr_line_total,
+         COALESCE(po.order_number, '—') AS po_number,
+         COALESCE(po.status::text, '—') AS po_status,
+         COALESCE(po.total_amount, 0)::text AS po_total,
+         COALESCE(po.supplier_id, si."SupplierId") AS supplier_id,
+         COALESCE(s."CompanyName", 'Unknown') AS supplier_name,
+         COALESCE(s."SupplierCode", '') AS supplier_code,
+         COALESCE(gr_items.total, 0) AS gr_line_total_n,
          si."Id" AS invoice_id,
          si."SupplierInvoiceNumber" AS invoice_number,
          si."InvoiceDate"::date::text AS invoice_date,
-         si."TotalAmount"::text AS invoice_total,
+         si."TotalAmount" AS invoice_total_n,
          si."Status" AS invoice_status,
          EXTRACT(DAY FROM (NOW() - gr.received_date))::int AS days_since_gr,
+         gc.status AS gc_status,
+         gc.variance AS gc_variance,
          CASE
+           WHEN gc.status IN ('MATCHED', 'VARIANCE') THEN gc.status
            WHEN si."Id" IS NULL THEN 'UNMATCHED'
-           WHEN ABS(COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) - si."TotalAmount") < 0.01 THEN 'MATCHED'
+           WHEN ABS(COALESCE(gr_items.total, 0) - COALESCE(si."TotalAmount", 0)) < 0.01 THEN 'MATCHED'
            ELSE 'VARIANCE'
          END AS clearing_status,
-         CASE
-           WHEN si."Id" IS NOT NULL
-           THEN (COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) - si."TotalAmount")::text
-           ELSE NULL
-         END AS variance,
-         -- Rank by match quality
          CASE
            WHEN po.order_number ILIKE $1 THEN 1
            WHEN gr.receipt_number ILIKE $1 THEN 2
@@ -285,30 +327,62 @@ export async function searchClearingItems(
            WHEN s."CompanyName" ILIKE $1 THEN 4
            WHEN s."SupplierCode" ILIKE $1 THEN 5
            ELSE 6
-         END AS rank
+         END AS rank,
+         ROW_NUMBER() OVER (
+           PARTITION BY gr.id
+           ORDER BY ABS(COALESCE(gr_items.total, 0) - COALESCE(si."TotalAmount", 0)), si."InvoiceDate" DESC NULLS LAST
+         ) AS rn
        FROM goods_receipts gr
-       JOIN purchase_orders po ON gr.purchase_order_id = po.id
-       JOIN suppliers s ON po.supplier_id = s."Id"
-       LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
-       LEFT JOIN supplier_invoice_grn_links sigl ON sigl.grn_id = gr.id
-       LEFT JOIN supplier_invoices si
-         ON si."Id" = sigl.invoice_id
-         AND si."Status" NOT IN ('CANCELLED')
-         AND (si.deleted_at IS NULL)
+       LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
+       LEFT JOIN (
+         SELECT goods_receipt_id, SUM(received_quantity * cost_price) AS total
+         FROM goods_receipt_items
+         GROUP BY goods_receipt_id
+       ) gr_items ON gr_items.goods_receipt_id = gr.id
+       LEFT JOIN supplier_invoices si ON (${SI_ACTIVE_SQL}) AND (${SI_LINKS_GR_SQL})
+       LEFT JOIN grir_clearing gc
+         ON gc.goods_receipt_id = gr.id
+         AND (si."Id" IS NULL OR gc.invoice_id = si."Id")
+         AND gc.status IN ('MATCHED', 'VARIANCE')
+       LEFT JOIN suppliers s ON s."Id" = COALESCE(po.supplier_id, si."SupplierId")
        WHERE gr.status = 'COMPLETED'
+         AND ${GR_HAS_LINES_SQL}
          AND (
-           po.order_number ILIKE $1
+           COALESCE(po.order_number, '') ILIKE $1
            OR gr.receipt_number ILIKE $1
-           OR s."CompanyName" ILIKE $1
-           OR s."SupplierCode" ILIKE $1
-           OR si."SupplierInvoiceNumber" ILIKE $1
+           OR COALESCE(s."CompanyName", '') ILIKE $1
+           OR COALESCE(s."SupplierCode", '') ILIKE $1
+           OR COALESCE(si."SupplierInvoiceNumber", '') ILIKE $1
          )
-       GROUP BY gr.id, gr.receipt_number, gr.received_date, gr.status,
-                po.id, po.order_number, po.status, po.total_amount, po.supplier_id,
-                s."CompanyName", s."SupplierCode",
-                si."Id", si."SupplierInvoiceNumber", si."InvoiceDate", si."TotalAmount", si."Status"
      )
-     SELECT * FROM matches
+     SELECT
+       gr_id,
+       gr_number,
+       gr_date,
+       gr_status,
+       COALESCE(po_id::text, '') AS po_id,
+       po_number,
+       po_status,
+       po_total,
+       COALESCE(supplier_id::text, '') AS supplier_id,
+       supplier_name,
+       supplier_code,
+       gr_line_total_n::text AS gr_line_total,
+       invoice_id,
+       invoice_number,
+       invoice_date,
+       invoice_total_n::text AS invoice_total,
+       invoice_status,
+       days_since_gr,
+       clearing_status,
+       CASE
+         WHEN gc_status IN ('MATCHED', 'VARIANCE') AND gc_variance IS NOT NULL THEN gc_variance::text
+         WHEN invoice_id IS NOT NULL THEN (gr_line_total_n - invoice_total_n)::text
+         ELSE NULL
+       END AS variance,
+       rank
+     FROM ranked
+     WHERE rn = 1
      ORDER BY rank, gr_date ASC
      LIMIT $2`,
         [searchPattern, limit]
@@ -322,24 +396,28 @@ export async function searchClearingItems(
 // =============================================================================
 
 /**
- * Find GR-Invoice match candidates: GRs that have invoices on the same PO.
- * Returns pairs with amount difference for manual or auto clearing.
+ * Find GR↔invoice match candidates for F.13 auto-match / preview.
+ * Returns all possible pairs (may be many:1); service applies 1:1 + tolerance SSOT.
  */
 export async function getMatchCandidates(
     client: pg.Pool | pg.PoolClient,
     options: { supplierId?: string; tolerancePercent?: number } = {}
 ): Promise<GrirMatchCandidateRow[]> {
-    const invoiceConditions: string[] = [
-        `si."Status" NOT IN ('CANCELLED')`,
-        `si.deleted_at IS NULL`,
+    // tolerancePercent intentionally ignored here — selection is service SSOT (selectF13Pairs)
+    void options.tolerancePercent;
+
+    const whereConditions: string[] = [
+        `gr.status = 'COMPLETED'`,
+        GR_HAS_LINES_SQL,
     ];
-    const whereConditions: string[] = [`gr.status = 'COMPLETED'`];
     const params: unknown[] = [];
     let idx = 0;
 
     const supplierFilter = resolveSupplierFilter(options.supplierId);
     if (supplierFilter.mode === 'id') {
-        whereConditions.push(`po.supplier_id = $${++idx}`);
+        whereConditions.push(
+            `COALESCE(po.supplier_id, si."SupplierId") = $${++idx}`,
+        );
         params.push(supplierFilter.supplierId);
     } else if (supplierFilter.mode === 'search') {
         whereConditions.push(
@@ -354,9 +432,9 @@ export async function getMatchCandidates(
        gr.receipt_number AS gr_number,
        gr.received_date::date::text AS gr_date,
        po.id AS po_id,
-       po.order_number AS po_number,
-       po.supplier_id,
-       s."CompanyName" AS supplier_name,
+       COALESCE(po.order_number, '—') AS po_number,
+       COALESCE(po.supplier_id, si."SupplierId") AS supplier_id,
+       COALESCE(s."CompanyName", 'Unknown') AS supplier_name,
        COALESCE(gr_items.total, 0)::text AS gr_line_total,
        si."Id" AS invoice_id,
        si."SupplierInvoiceNumber" AS invoice_number,
@@ -365,15 +443,14 @@ export async function getMatchCandidates(
        ABS(COALESCE(gr_items.total, 0) - si."TotalAmount")::text AS amount_diff,
        ABS(COALESCE(gr_items.total, 0) - si."TotalAmount") < 0.01 AS is_exact_match
      FROM goods_receipts gr
-     JOIN purchase_orders po ON gr.purchase_order_id = po.id
-     JOIN suppliers s ON po.supplier_id = s."Id"
+     LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
      LEFT JOIN (
        SELECT goods_receipt_id, SUM(received_quantity * cost_price) AS total
-       FROM goods_receipt_items GROUP BY goods_receipt_id
+       FROM goods_receipt_items
+       GROUP BY goods_receipt_id
      ) gr_items ON gr_items.goods_receipt_id = gr.id
-     JOIN supplier_invoices si
-       ON si."PurchaseOrderId" = po.id
-       AND ${invoiceConditions.join(' AND ')}
+     INNER JOIN supplier_invoices si ON (${SI_ACTIVE_SQL}) AND (${SI_LINKS_GR_SQL})
+     LEFT JOIN suppliers s ON s."Id" = COALESCE(po.supplier_id, si."SupplierId")
      WHERE ${whereConditions.join(' AND ')}
        AND NOT EXISTS (
          SELECT 1 FROM grir_clearing gc
@@ -381,7 +458,7 @@ export async function getMatchCandidates(
            AND gc.invoice_id = si."Id"
            AND gc.status IN ('MATCHED', 'VARIANCE')
        )
-     ORDER BY is_exact_match DESC, amount_diff ASC`,
+     ORDER BY is_exact_match DESC, amount_diff ASC, gr.received_date ASC`,
         params
     );
 
@@ -488,37 +565,58 @@ export async function updateClearingStatus(
 // =============================================================================
 
 /**
- * Aggregate clearing account balance.
- * Computes from actual GR item totals vs. matched invoices.
+ * Aggregate clearing account balance from multi-path GR↔bill pairs (one row per GR).
  */
 export async function getBalanceSummary(
     client: pg.Pool | pg.PoolClient
 ): Promise<GrirBalanceSummaryRow> {
     const result = await client.query(
-        `WITH gr_data AS (
+        `WITH gr_base AS (
        SELECT
          gr.id AS gr_id,
-         gr.purchase_order_id,
-         COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) AS gr_value,
+         gr.received_date,
+         COALESCE(gr_items.total, 0) AS gr_value
+       FROM goods_receipts gr
+       LEFT JOIN (
+         SELECT goods_receipt_id, SUM(received_quantity * cost_price) AS total
+         FROM goods_receipt_items
+         GROUP BY goods_receipt_id
+       ) gr_items ON gr_items.goods_receipt_id = gr.id
+       WHERE gr.status = 'COMPLETED'
+         AND ${GR_HAS_LINES_SQL}
+     ),
+     ranked AS (
+       SELECT
+         b.gr_id,
+         b.gr_value,
+         b.received_date,
          si."Id" AS invoice_id,
          COALESCE(si."TotalAmount", 0) AS invoice_value,
+         gc.status AS gc_status,
+         ROW_NUMBER() OVER (
+           PARTITION BY b.gr_id
+           ORDER BY
+             CASE WHEN gc.status IN ('MATCHED', 'VARIANCE') THEN 0 ELSE 1 END,
+             ABS(b.gr_value - COALESCE(si."TotalAmount", 0)),
+             si."InvoiceDate" DESC NULLS LAST
+         ) AS rn,
          CASE
+           WHEN gc.status IN ('MATCHED', 'VARIANCE') THEN gc.status
            WHEN si."Id" IS NULL THEN 'UNMATCHED'
-           WHEN ABS(COALESCE(SUM(gri.received_quantity * gri.cost_price), 0) - si."TotalAmount") < 0.01 THEN 'MATCHED'
+           WHEN ABS(b.gr_value - COALESCE(si."TotalAmount", 0)) < 0.01 THEN 'MATCHED'
            ELSE 'VARIANCE'
          END AS clearing_status,
-         EXTRACT(DAY FROM (NOW() - gr.received_date)) AS days_since_gr
-       FROM goods_receipts gr
-       LEFT JOIN goods_receipt_items gri ON gri.goods_receipt_id = gr.id
-       LEFT JOIN purchase_orders po ON gr.purchase_order_id = po.id
-       LEFT JOIN supplier_invoice_grn_links sigl ON sigl.grn_id = gr.id
-       LEFT JOIN supplier_invoices si
-         ON si."Id" = sigl.invoice_id
-         AND si."Status" NOT IN ('CANCELLED')
-         AND (si.deleted_at IS NULL)
-       WHERE gr.status = 'COMPLETED'
-       GROUP BY gr.id, gr.purchase_order_id, gr.received_date,
-                si."Id", si."TotalAmount"
+         EXTRACT(DAY FROM (NOW() - b.received_date)) AS days_since_gr
+       FROM gr_base b
+       LEFT JOIN goods_receipts gr ON gr.id = b.gr_id
+       LEFT JOIN supplier_invoices si ON (${SI_ACTIVE_SQL}) AND (${SI_LINKS_GR_SQL})
+       LEFT JOIN grir_clearing gc
+         ON gc.goods_receipt_id = b.gr_id
+         AND (si."Id" IS NULL OR gc.invoice_id = si."Id")
+         AND gc.status IN ('MATCHED', 'VARIANCE')
+     ),
+     gr_data AS (
+       SELECT * FROM ranked WHERE rn = 1
      )
      SELECT
        COALESCE(SUM(gr_value), 0)::text AS total_gr_value,
@@ -599,10 +697,15 @@ export async function getGrItemDetails(
 // PURITY DIAGNOSTIC — detect 2150 pollution from RGRN / supplier credit notes
 // =============================================================================
 
-/**
- * Split GR/IR (2150) GL balance into "pure" (GR/Invoice only) vs. "polluted"
- * (RETURN_GRN or SUPPLIER_CREDIT_NOTE entries that should live in 2160).
- */
+const GL_NET_ACTIVE = `
+  lt."Status" = 'POSTED'
+  AND COALESCE(lt."IsReversed", FALSE) = FALSE
+  AND lt."Id" NOT IN (
+    SELECT "ReversedByTransactionId" FROM ledger_transactions
+    WHERE "ReversedByTransactionId" IS NOT NULL
+  )
+`;
+
 export async function getGrirPurityDiagnostic(
     client: pg.Pool | pg.PoolClient
 ): Promise<{
@@ -613,21 +716,17 @@ export async function getGrirPurityDiagnostic(
 }> {
     const result = await client.query(
         `SELECT
-           -- Pure entries: only GOODS_RECEIPT and SUPPLIER_INVOICE reference types
            COALESCE(SUM(CASE
              WHEN lt."ReferenceType" IN ('GOODS_RECEIPT', 'SUPPLIER_INVOICE')
              THEN le."CreditAmount" - le."DebitAmount"
              ELSE 0
            END), 0)::text AS pure_balance,
-           -- Polluted entries: RETURN_GRN or SUPPLIER_CREDIT_NOTE
            COALESCE(SUM(CASE
              WHEN lt."ReferenceType" IN ('RETURN_GRN', 'SUPPLIER_CREDIT_NOTE')
              THEN le."CreditAmount" - le."DebitAmount"
              ELSE 0
            END), 0)::text AS polluted_balance,
-           -- Total GL balance for 2150
            COALESCE(SUM(le."CreditAmount" - le."DebitAmount"), 0)::text AS total_gl_balance,
-           -- Count of polluted entries
            COUNT(*) FILTER (
              WHERE lt."ReferenceType" IN ('RETURN_GRN', 'SUPPLIER_CREDIT_NOTE')
            )::text AS polluted_entry_count
@@ -635,7 +734,82 @@ export async function getGrirPurityDiagnostic(
          JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
          JOIN accounts a ON a."Id" = le."AccountId"
          WHERE a."AccountCode" = '2150'
-           AND lt."Status" = 'POSTED'`
+           AND ${GL_NET_ACTIVE}`
+    );
+    return result.rows[0];
+}
+
+export async function getGlResiduals(
+    client: pg.Pool | pg.PoolClient,
+    options: { limit?: number; minAbs?: number } = {}
+): Promise<Array<{
+    reference_number: string;
+    reference_type: string;
+    net_cr: string;
+    first_date: string | null;
+    last_date: string | null;
+    txn_count: string;
+    description_sample: string | null;
+}>> {
+    const limit = Math.min(Math.max(options.limit ?? 100, 1), 500);
+    const minAbs = options.minAbs ?? 0.01;
+    const result = await client.query(
+        `SELECT
+           COALESCE(lt."ReferenceNumber", '(blank)') AS reference_number,
+           COALESCE(lt."ReferenceType", 'UNKNOWN') AS reference_type,
+           ROUND(SUM(le."CreditAmount" - le."DebitAmount")::numeric, 2)::text AS net_cr,
+           MIN(lt."TransactionDate")::date::text AS first_date,
+           MAX(lt."TransactionDate")::date::text AS last_date,
+           COUNT(DISTINCT lt."Id")::text AS txn_count,
+           LEFT(MAX(COALESCE(lt."Description", '')), 120) AS description_sample
+         FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE a."AccountCode" = '2150'
+           AND ${GL_NET_ACTIVE}
+         GROUP BY COALESCE(lt."ReferenceNumber", '(blank)'), COALESCE(lt."ReferenceType", 'UNKNOWN')
+         HAVING ABS(SUM(le."CreditAmount" - le."DebitAmount")) >= $1
+         ORDER BY ABS(SUM(le."CreditAmount" - le."DebitAmount")) DESC
+         LIMIT $2`,
+        [minAbs, limit]
+    );
+    return result.rows;
+}
+
+export async function getGlResidualForReference(
+    client: pg.Pool | pg.PoolClient,
+    referenceNumber: string
+): Promise<{ reference_number: string; reference_type: string; net_cr: string } | null> {
+    const result = await client.query(
+        `SELECT
+           COALESCE(lt."ReferenceNumber", '(blank)') AS reference_number,
+           COALESCE(MAX(lt."ReferenceType"), 'UNKNOWN') AS reference_type,
+           ROUND(SUM(le."CreditAmount" - le."DebitAmount")::numeric, 2)::text AS net_cr
+         FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE a."AccountCode" = '2150'
+           AND ${GL_NET_ACTIVE}
+           AND lt."ReferenceNumber" = $1
+         GROUP BY COALESCE(lt."ReferenceNumber", '(blank)')
+         HAVING ABS(SUM(le."CreditAmount" - le."DebitAmount")) >= 0.01`,
+        [referenceNumber]
+    );
+    return result.rows[0] || null;
+}
+
+export async function getTrueGlBalance(
+    client: pg.Pool | pg.PoolClient
+): Promise<{ gl_balance_cr: string; entry_count: string }> {
+    const result = await client.query(
+        `SELECT
+           ROUND(COALESCE(SUM(le."CreditAmount" - le."DebitAmount"), 0)::numeric, 2)::text AS gl_balance_cr,
+           COUNT(*)::text AS entry_count
+         FROM ledger_entries le
+         JOIN ledger_transactions lt ON lt."Id" = le."TransactionId"
+         JOIN accounts a ON a."Id" = le."AccountId"
+         WHERE a."AccountCode" = '2150'
+           AND ${GL_NET_ACTIVE}`
     );
     return result.rows[0];
 }

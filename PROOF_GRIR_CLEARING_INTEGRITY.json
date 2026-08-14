@@ -1,0 +1,195 @@
+{
+  "at": "2026-08-14T07:38:21.732Z",
+  "feature": "GRIR_CLEARING_INTEGRITY",
+  "summary": {
+    "pass": 35,
+    "fail": 0,
+    "total": 35,
+    "verdict": "PASS"
+  },
+  "fixes": [
+    "Single SI_LINKS / SI_ACTIVE / GR_HAS_LINES SSOT for open, search, candidates, balance",
+    "F.13 preview and run share selectF13Pairs + default 2% tolerance",
+    "Open status whitelist (no SQL string injection)",
+    "grir_clearing MATCHED/VARIANCE preferred on worklist",
+    "Soft cancel/void for all list queries (not CANCELLED-only)",
+    "UI UNMATCHED badge"
+  ],
+  "gates": [
+    {
+      "id": "SSOT_LINKS_GRN",
+      "ok": true,
+      "detail": "path 1 grn_links"
+    },
+    {
+      "id": "SSOT_LINKS_PO",
+      "ok": true,
+      "detail": "path 2 PO"
+    },
+    {
+      "id": "SSOT_LINKS_REF",
+      "ok": true,
+      "detail": "path 3 internal ref"
+    },
+    {
+      "id": "SSOT_ACTIVE_CANCELLED",
+      "ok": true,
+      "detail": "soft cancel variants"
+    },
+    {
+      "id": "SSOT_ACTIVE_VOIDED",
+      "ok": true,
+      "detail": "void status excluded"
+    },
+    {
+      "id": "SSOT_HAS_LINES",
+      "ok": true,
+      "detail": "empty GR shells excluded"
+    },
+    {
+      "id": "SSOT_DEFAULT_TOL_2",
+      "ok": true,
+      "detail": "default tol=2"
+    },
+    {
+      "id": "REPO_IMPORTS_SSOT",
+      "ok": true,
+      "detail": "imports integrity SSOT"
+    },
+    {
+      "id": "REPO_OPEN_MULTI",
+      "ok": true,
+      "detail": "open list multi-path"
+    },
+    {
+      "id": "REPO_OPEN_GC",
+      "ok": true,
+      "detail": "open prefers grir_clearing status"
+    },
+    {
+      "id": "REPO_OPEN_STATUS_WL",
+      "ok": true,
+      "detail": "status whitelist"
+    },
+    {
+      "id": "REPO_SEARCH_MULTI",
+      "ok": true,
+      "detail": "search multi-path"
+    },
+    {
+      "id": "REPO_CAND_MULTI",
+      "ok": true,
+      "detail": "candidates multi-path"
+    },
+    {
+      "id": "REPO_BAL_MULTI",
+      "ok": true,
+      "detail": "balance multi-path"
+    },
+    {
+      "id": "REPO_NO_CANCELLED_ONLY",
+      "ok": true,
+      "detail": "no hard-coded CANCELLED-only filter left"
+    },
+    {
+      "id": "REPO_PO_STATUS_TEXT",
+      "ok": true,
+      "detail": "po.status cast to text before em-dash (enum-safe)"
+    },
+    {
+      "id": "SVC_SELECT_IMPORT",
+      "ok": true,
+      "detail": "imports selectF13Pairs"
+    },
+    {
+      "id": "SVC_DEFAULT_TOL",
+      "ok": true,
+      "detail": "uses default tolerance SSOT"
+    },
+    {
+      "id": "SVC_AUTO_SELECT",
+      "ok": true,
+      "detail": "autoMatch uses selectF13Pairs"
+    },
+    {
+      "id": "SVC_PREVIEW_SELECT",
+      "ok": true,
+      "detail": "preview uses selectF13Pairs"
+    },
+    {
+      "id": "SVC_POSTED_BOOKKEEP",
+      "ok": true,
+      "detail": "posted bill bookkeeping only"
+    },
+    {
+      "id": "ALGO_AT2_COUNT",
+      "ok": true,
+      "detail": "at2=1 first=g1-i1"
+    },
+    {
+      "id": "ALGO_AT5_HAS_G3",
+      "ok": true,
+      "detail": "5% includes 3% variance g3"
+    },
+    {
+      "id": "ALGO_AT5_NO_G4",
+      "ok": true,
+      "detail": "5% excludes 10% g4"
+    },
+    {
+      "id": "ALGO_NO_DOUBLE_INV",
+      "ok": true,
+      "detail": "invoice i1 not reused"
+    },
+    {
+      "id": "STATUS_UNMATCHED",
+      "ok": true,
+      "detail": "UNMATCHED ok"
+    },
+    {
+      "id": "STATUS_INJECT",
+      "ok": true,
+      "detail": "injection rejected"
+    },
+    {
+      "id": "STATUS_PARTIAL",
+      "ok": true,
+      "detail": "partial→VARIANCE"
+    },
+    {
+      "id": "FILTER_TEXT",
+      "ok": true,
+      "detail": "text is search"
+    },
+    {
+      "id": "FILTER_UUID",
+      "ok": true,
+      "detail": "uuid is id"
+    },
+    {
+      "id": "ROUTE_AUTO_PARSE",
+      "ok": true,
+      "detail": "auto-match tol parse"
+    },
+    {
+      "id": "ROUTE_RES_BEFORE_PO",
+      "ok": true,
+      "detail": "residuals before :poId"
+    },
+    {
+      "id": "CRUD_NO_CASE_$9",
+      "ok": true,
+      "detail": "createClearingRecord no $9 CASE reuse"
+    },
+    {
+      "id": "UI_UNMATCHED",
+      "ok": true,
+      "detail": "UI badge supports UNMATCHED"
+    },
+    {
+      "id": "UI_TOL_DEFAULT",
+      "ok": true,
+      "detail": "UI default tolerance 2%"
+    }
+  ]
+}

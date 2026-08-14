@@ -90,12 +90,20 @@ router.get('/purity', authenticate, requireGrirRead, asyncHandler(async (req, re
 // ─── AUTO-MATCH CANDIDATES PREVIEW ─────────────────────────────────
 
 /**
- * GET /api/grir-clearing/match-candidates?supplierId=xxx
+ * GET /api/grir-clearing/match-candidates?supplierId=xxx&tolerancePercent=2
  * Preview which GR-Invoice pairs would be matched by auto-match.
  */
 router.get('/match-candidates', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
+  const toleranceRaw = req.query.tolerancePercent;
+  const tolerancePercent =
+    toleranceRaw != null && String(toleranceRaw).trim() !== ''
+      ? parseFloat(String(toleranceRaw))
+      : undefined;
   const candidates = await grirService.getMatchCandidates(
-    { supplierId: req.query.supplierId as string | undefined },
+    {
+      supplierId: req.query.supplierId as string | undefined,
+      tolerancePercent: Number.isFinite(tolerancePercent) ? tolerancePercent : undefined,
+    },
     req.tenantPool
   );
   res.json({ success: true, data: candidates });
@@ -123,6 +131,44 @@ router.get('/history/:poId', authenticate, requireGrirRead, asyncHandler(async (
   res.json({ success: true, data: history });
 }));
 
+// ─── GL RESIDUAL WORKLIST (true 2150 by document) ───────────────────
+// IMPORTANT: declared BEFORE /:poId so "residuals" is not captured as a UUID/po id.
+
+/**
+ * GET /api/grir-clearing/residuals
+ * Ledger residuals on 2150 grouped by ReferenceNumber (finance clear list).
+ */
+router.get('/residuals', authenticate, requireGrirRead, asyncHandler(async (req, res) => {
+  const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : undefined;
+  const minAbs = req.query.minAbs ? parseFloat(String(req.query.minAbs)) : undefined;
+  const result = await grirService.getGlResiduals({ limit, minAbs }, req.tenantPool);
+  res.json({ success: true, data: result });
+}));
+
+/**
+ * POST /api/grir-clearing/clear-residual
+ * Clear a 2150 residual WITHOUT re-posting AP (safe after invoice already posted).
+ * Body: { referenceNumber, method, amount?, date?, notes? }
+ * method: TO_PRICE_VARIANCE | TO_RETURN_CLEARING | RECLASS_FROM_EXPENSE
+ */
+router.post('/clear-residual', authenticate, requireGrirWrite, asyncHandler(async (req, res) => {
+  const { referenceNumber, method, amount, date, notes } = req.body || {};
+  if (!referenceNumber || !method) {
+    throw new ValidationError('referenceNumber and method are required');
+  }
+
+  const result = await grirService.clearGlResidual({
+    referenceNumber: String(referenceNumber),
+    method,
+    userId: req.user!.id,
+    amount: amount != null ? Number(amount) : undefined,
+    date,
+    notes: notes != null ? String(notes) : undefined,
+  }, req.tenantPool);
+
+  res.json({ success: true, data: result });
+}));
+
 // ─── LEGACY: PO STATUS ─────────────────────────────────────────────
 
 /**
@@ -142,6 +188,7 @@ router.get('/:poId', authenticate, requireGrirRead, asyncHandler(async (req, res
  * Body: { grId, invoiceId, date? }
  *
  * GL: DR GR/IR Clearing 2150, CR AP 2100, +/- Price Variance 5020
+ * Prefer billing path first. Use /clear-residual when AP is already posted.
  */
 router.post('/clear', authenticate, requireGrirWrite, asyncHandler(async (req, res) => {
   const { grId, invoiceId, date } = req.body;
@@ -163,17 +210,21 @@ router.post('/clear', authenticate, requireGrirWrite, asyncHandler(async (req, r
 
 /**
  * POST /api/grir-clearing/auto-match
- * Automatically match all GRs to invoices on the same PO.
+ * Automatically match GRs to invoices (multi-path link SSOT).
  * Body: { supplierId?, tolerancePercent? }
  *
- * SAP F.13: exact matches first, then within tolerance (default 5%).
+ * SAP F.13: exact first, then within tolerance (default 2% — same as preview UI).
  */
 router.post('/auto-match', authenticate, requireGrirWrite, asyncHandler(async (req, res) => {
   const { supplierId, tolerancePercent } = req.body || {};
+  const tol =
+    tolerancePercent != null && String(tolerancePercent).trim() !== ''
+      ? parseFloat(String(tolerancePercent))
+      : undefined;
 
   const result = await grirService.autoMatch({
     supplierId,
-    tolerancePercent,
+    tolerancePercent: Number.isFinite(tol) ? tol : undefined,
     userId: req.user!.id,
   }, req.tenantPool);
 

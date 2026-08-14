@@ -28,6 +28,8 @@ export interface PurchaseOrder {
   id: string;
   poNumber: string;
   supplierId: string;
+  /** Present on get/list joins with suppliers.CompanyName */
+  supplierName?: string;
   orderDate: string;
   expectedDate: string | null;
   status: 'DRAFT' | 'PENDING' | 'COMPLETED' | 'CANCELLED';
@@ -89,6 +91,7 @@ function mapPurchaseOrderRow(row: DbRow): PurchaseOrder {
     id: row.id as string,
     poNumber: (row.poNumber ?? row.order_number) as string,
     supplierId: (row.supplierId ?? row.supplier_id) as string,
+    supplierName: (row.supplierName ?? row.supplier_name ?? undefined) as string | undefined,
     orderDate: String(row.orderDate ?? row.order_date ?? ''),
     expectedDate: (row.expectedDate ?? row.expected_delivery_date ?? null) as string | null,
     status: row.status as PurchaseOrder['status'],
@@ -522,8 +525,10 @@ export const purchaseOrderRepository = {
     }
 
     const completedGrRes = await pool.query(
+      // goods_receipt_status enum is DRAFT | COMPLETED | CANCELLED only (not FINALIZED).
+      // Never list invalid enum labels here — PG 22P02 on prepare/bind.
       `SELECT COUNT(*)::int AS cnt FROM goods_receipts
-       WHERE purchase_order_id = $1 AND status IN ('COMPLETED', 'FINALIZED')`,
+       WHERE purchase_order_id = $1 AND status = 'COMPLETED'`,
       [poId]
     );
     if ((completedGrRes.rows[0]?.cnt ?? 0) > 0) {
