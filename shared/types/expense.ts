@@ -62,6 +62,9 @@ export interface Expense {
   categoryId?: string; // UUID - Reference to expense_categories
   categoryName?: string;
   vendor?: string;
+  /** HR employee who received/claimed (audit). Not payroll. */
+  employeeId?: string | null;
+  employeeName?: string | null;
   receiptNumber?: string; // Optional receipt/invoice number
   paymentMethod: PaymentMethod;
   status: ExpenseStatus;
@@ -100,6 +103,8 @@ export interface CreateExpenseData {
   category: string; // DB category code (e.g. 'OFFICE', 'TRAVEL')
   categoryId?: string; // UUID of the expense_categories record
   vendor?: string;
+  /** Link staff payout to HR employee for audit (required for ALLOWANCE). */
+  employeeId?: string | null;
   paymentMethod: PaymentMethod;
   receiptRequired?: boolean;
   notes?: string;
@@ -114,8 +119,10 @@ export interface UpdateExpenseData {
   description?: string | null;
   amount?: number;
   expenseDate?: string; // YYYY-MM-DD
-  category?: ExpenseCategory;
+  category?: ExpenseCategory | string;
+  categoryId?: string;
   vendor?: string | null;
+  employeeId?: string | null;
   paymentMethod?: PaymentMethod;
   status?: ExpenseStatus;
   receiptRequired?: boolean;
@@ -126,6 +133,7 @@ export interface ExpenseFilter {
   status?: ExpenseStatus;
   category?: string;
   categoryId?: string;
+  employeeId?: string;
   startDate?: string; // YYYY-MM-DD
   endDate?: string; // YYYY-MM-DD
   minAmount?: number;
@@ -147,6 +155,8 @@ export interface ExpenseDbRow {
   expense_date: string;
   category: string;
   vendor?: string;
+  employee_id?: string | null;
+  employee_name?: string | null;
   payment_method: string;
   status: string;
   receipt_required: boolean;
@@ -171,6 +181,8 @@ export function normalizeExpense(dbRow: ExpenseDbRow): Expense {
     expenseDate: dbRow.expense_date,
     category: dbRow.category as ExpenseCategory,
     vendor: dbRow.vendor,
+    employeeId: dbRow.employee_id ?? null,
+    employeeName: dbRow.employee_name ?? null,
     paymentMethod: dbRow.payment_method as PaymentMethod,
     status: dbRow.status as ExpenseStatus,
     receiptRequired: dbRow.receipt_required,

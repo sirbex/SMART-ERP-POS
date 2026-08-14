@@ -22,6 +22,10 @@ const mockExpenseRepo = {
     updateApprovalRecord: jest.fn<MockFn>(),
     getExpenseCountByCategory: jest.fn<MockFn>(),
     getPaymentAccounts: jest.fn<MockFn>(),
+    resolveExpenseCategory: jest.fn<MockFn>(),
+    resolveExpenseGlAccountCode: jest.fn<MockFn>().mockResolvedValue('6900'),
+    assertActiveEmployeeForExpense: jest.fn<MockFn>(),
+    listStaffOptionsForExpense: jest.fn<MockFn>(),
 };
 
 jest.unstable_mockModule('../repositories/expenseRepository', () => ({
@@ -56,6 +60,12 @@ jest.unstable_mockModule('../middleware/errorHandler.js', () => ({
         constructor(msg: string) {
             super(`${msg} not found`);
             this.name = 'NotFoundError';
+        }
+    },
+    ValidationError: class extends Error {
+        constructor(msg: string) {
+            super(msg);
+            this.name = 'ValidationError';
         }
     },
 }));

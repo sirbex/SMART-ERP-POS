@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTransactionGuard, ZINDEX } from '../../hooks/useTransactionGuard';
 import type { GuardHandle } from '../../hooks/useTransactionGuard';
 import { Plus, Download, FileText, Eye, CheckCircle, XCircle, Send, DollarSign, Wallet, Loader2, BarChart3 } from 'lucide-react';
-import { useExpenses, useSubmitExpense, useApproveExpense, useRejectExpense, useMarkAsPaid, useDeleteExpense, usePaymentAccounts, useExpenseCategories } from '../../hooks/useExpenses';
+import { useExpenses, useSubmitExpense, useApproveExpense, useRejectExpense, useMarkAsPaid, useDeleteExpense, usePaymentAccounts, useExpenseCategories, useExpenseStaffOptions } from '../../hooks/useExpenses';
 import { ExpenseFilter, Expense } from '@shared/types/expense';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -82,6 +82,7 @@ const ExpensesPage: React.FC = () => {
   const { data, isLoading, error, refetch } = useExpenses(filter);
   const { data: paymentAccounts } = usePaymentAccounts();
   const { data: dbCategories = [] } = useExpenseCategories();
+  const { data: staffOptions = [] } = useExpenseStaffOptions();
 
   // Permission gating
   const canCreateExpense = useCanAccess([], ['expenses.create']);
@@ -219,7 +220,7 @@ const ExpensesPage: React.FC = () => {
     <AdaptivePage
       className="p-4 lg:p-6"
       title="Expenses"
-      description="Create expense vouchers for approval, then mark them paid from bank or cash. Spending from the petty float belongs under Banking → Petty cash — not here."
+      description="Create expense vouchers for approval, then mark them paid from bank or cash. Daily staff transport and similar operating payouts go here (e.g. Employee Allowances category) — not HR payroll. Spending from the petty float belongs under Banking → Petty cash."
       primaryActions={
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Link to="/reports/expenses">
@@ -293,6 +294,22 @@ const ExpensesPage: React.FC = () => {
                     <SelectItem value="all">All Categories</SelectItem>
                     {dbCategories.map((cat) => (
                       <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={filter.employeeId || 'all'}
+                  onValueChange={(value) =>
+                    handleFilterChange('employeeId', value === 'all' ? undefined : value)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Staff" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Staff</SelectItem>
+                    {staffOptions.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -386,6 +403,7 @@ const ExpensesPage: React.FC = () => {
                       <th className="text-left py-3 px-4 font-medium text-gray-900">Title</th>
                       <th className="text-left py-3 px-4 font-medium text-gray-900">Amount</th>
                       <th className="text-left py-3 px-4 font-medium text-gray-900">Category</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900">Staff</th>
                       <th className="text-left py-3 px-4 font-medium text-gray-900">Date</th>
                       <th className="text-left py-3 px-4 font-medium text-gray-900">Status</th>
                       <th className="text-left py-3 px-4 font-medium text-gray-900">Created By</th>
@@ -414,6 +432,11 @@ const ExpensesPage: React.FC = () => {
                         <td className="py-3 px-4">
                           <span className="text-sm text-gray-600">
                             {expense.categoryName || dbCategories.find(c => c.code === expense.category)?.name || expense.category}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="text-sm text-gray-600">
+                            {expense.employeeName || '—'}
                           </span>
                         </td>
                         <td className="py-3 px-4">
@@ -560,6 +583,11 @@ const ExpensesPage: React.FC = () => {
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Vendor</label>
                   <p className="text-gray-900 font-medium">{selectedExpense.vendor || '-'}</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Staff / employee</label>
+                  <p className="text-gray-900 font-medium">{selectedExpense.employeeName || '—'}</p>
+                  <p className="text-[11px] text-gray-500">Audit link only — not payroll / NSSF</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-gray-500 uppercase tracking-wide">Payment Method</label>

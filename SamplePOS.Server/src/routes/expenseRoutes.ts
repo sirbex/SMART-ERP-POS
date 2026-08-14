@@ -75,6 +75,16 @@ router.get('/categories', requirePermission('expenses.read'), expenseController.
 router.get('/payment-accounts', requirePermission('expenses.read'), expenseController.getPaymentAccounts);
 
 /**
+ * @route GET /api/expenses/staff-options
+ * @desc Active HR employees for expense audit link (no hr.read required)
+ */
+router.get(
+  '/staff-options',
+  requireAnyPermission(['expenses.read', 'expenses.create']),
+  expenseController.listStaffOptions
+);
+
+/**
  * @route POST /api/expenses/categories
  * @desc Create new expense category
  */

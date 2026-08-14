@@ -1,0 +1,272 @@
+{
+  "proof": "PROOF_EXPENSE_EMPLOYEE_AUDIT",
+  "generatedAt": "2026-08-14T07:39:31.069Z",
+  "summary": {
+    "total": 35,
+    "passed": 35,
+    "failed": 0,
+    "ok": true,
+    "inconsistenciesFound": 8,
+    "inconsistenciesOpen": 0,
+    "inconsistenciesFixed": 8
+  },
+  "model": {
+    "expenseEmployeeId": "audit who received/claimed — optional except ALLOWANCE",
+    "payrollMonthlyAllowance": "contractual gross component on employees.MonthlyAllowance",
+    "nssfPaye": "not implemented in SamplePOS payroll; expense link does not create statutory"
+  },
+  "inconsistencies": [
+    {
+      "id": "update_allowance_parity",
+      "severity": "fixed",
+      "detail": "Create required employeeId for ALLOWANCE but UpdateExpenseSchema/service did not — both now enforce"
+    },
+    {
+      "id": "client_filter_employeeId",
+      "severity": "fixed",
+      "detail": "ExpenseFilter.employeeId existed but getExpenses did not append it — now wired"
+    },
+    {
+      "id": "update_category_drop",
+      "severity": "fixed",
+      "detail": "Update accepted zod.category but controller dropped it — now mapped + repo resolves code"
+    },
+    {
+      "id": "export_missing_staff",
+      "severity": "fixed",
+      "detail": "DETAILED_LIST had employeeName; CSV export omitted Staff — now included"
+    },
+    {
+      "id": "migration_anchor_missing_603",
+      "severity": "fixed",
+      "detail": "603 employee_id had no MIGRATION_COLUMN_ANCHORS entry — column drift could go unrepaired"
+    },
+    {
+      "id": "hr_create_allowance_skip",
+      "severity": "fixed",
+      "detail": "createEmployee only post-updated MonthlyAllowance when >0 — now INSERT includes allowance"
+    },
+    {
+      "id": "ui_staff_filter_missing",
+      "severity": "fixed",
+      "detail": "employeeId filter API existed but ExpensesPage had no Staff filter — added"
+    },
+    {
+      "id": "create_log_referenceNumber",
+      "severity": "fixed",
+      "detail": "create logged expense.referenceNumber (usually undefined) — now expenseNumber"
+    }
+  ],
+  "gates": [
+    {
+      "id": "migration_603",
+      "section": "schema",
+      "ok": true,
+      "detail": "603 adds expenses.employee_id"
+    },
+    {
+      "id": "fk_employees",
+      "section": "schema",
+      "ok": true,
+      "detail": "FK to employees.Id ON DELETE SET NULL"
+    },
+    {
+      "id": "not_payroll_comment",
+      "section": "schema",
+      "ok": true,
+      "detail": "column comment: audit only, not payroll"
+    },
+    {
+      "id": "allowance_requires_employee",
+      "section": "zod_create",
+      "ok": true,
+      "detail": "ALLOWANCE without employeeId rejected"
+    },
+    {
+      "id": "allowance_with_employee",
+      "section": "zod_create",
+      "ok": true,
+      "detail": "ALLOWANCE + employeeId accepted"
+    },
+    {
+      "id": "travel_optional_employee",
+      "section": "zod_create",
+      "ok": true,
+      "detail": "TRAVEL without employee allowed (optional audit)"
+    },
+    {
+      "id": "allowance_requires_employee",
+      "section": "zod_update",
+      "ok": true,
+      "detail": "UpdateExpenseSchema rejects ALLOWANCE + null employeeId"
+    },
+    {
+      "id": "update_allowance_guard",
+      "section": "service",
+      "ok": true,
+      "detail": "updateExpense resolves category_id then refuses ALLOWANCE without employee"
+    },
+    {
+      "id": "insert_employee_id",
+      "section": "repo",
+      "ok": true,
+      "detail": "INSERT includes employee_id"
+    },
+    {
+      "id": "list_join_employee",
+      "section": "repo",
+      "ok": true,
+      "detail": "list/get JOIN employees for employee_name"
+    },
+    {
+      "id": "normalize_fields",
+      "section": "repo",
+      "ok": true,
+      "detail": "normalizeExpenseFromDb maps employeeId + employeeName"
+    },
+    {
+      "id": "staff_options",
+      "section": "repo",
+      "ok": true,
+      "detail": "staff picker query (ACTIVE employees)"
+    },
+    {
+      "id": "create_maps_employee",
+      "section": "api",
+      "ok": true,
+      "detail": "createExpense maps employeeId → employee_id"
+    },
+    {
+      "id": "staff_route_no_hr_read",
+      "section": "api",
+      "ok": true,
+      "detail": "GET /expenses/staff-options uses expenses.* not hr.read"
+    },
+    {
+      "id": "filter_employeeId",
+      "section": "api",
+      "ok": true,
+      "detail": "list filter accepts employeeId"
+    },
+    {
+      "id": "create_form_picker",
+      "section": "ui",
+      "ok": true,
+      "detail": "CreateExpenseForm staff picker"
+    },
+    {
+      "id": "create_form_not_payroll",
+      "section": "ui",
+      "ok": true,
+      "detail": "UI states audit-only (not payroll/NSSF)"
+    },
+    {
+      "id": "list_staff_column",
+      "section": "ui",
+      "ok": true,
+      "detail": "Expenses list/detail show employeeName"
+    },
+    {
+      "id": "reports_staff_column",
+      "section": "ui",
+      "ok": true,
+      "detail": "DETAILED_LIST report column Staff"
+    },
+    {
+      "id": "hook_filter_employeeId",
+      "section": "ui",
+      "ok": true,
+      "detail": "useExpenses appends employeeId query param"
+    },
+    {
+      "id": "gross_basic_plus_monthly",
+      "section": "payroll",
+      "ok": true,
+      "detail": "gross=1100000"
+    },
+    {
+      "id": "deduction_is_advance_only",
+      "section": "payroll",
+      "ok": true,
+      "detail": "recovered=50000"
+    },
+    {
+      "id": "net_after_advance",
+      "section": "payroll",
+      "ok": true,
+      "detail": "net=1050000"
+    },
+    {
+      "id": "ssot_boundary_comment",
+      "section": "payroll",
+      "ok": true,
+      "detail": "payrollMath documents expense vs MonthlyAllowance boundary"
+    },
+    {
+      "id": "no_expense_import",
+      "section": "payroll",
+      "ok": true,
+      "detail": "hr.service / payrollMath do not read expenses.employee_id"
+    },
+    {
+      "id": "monthly_allowance_field",
+      "section": "hr_ui",
+      "ok": true,
+      "detail": "Employees form exposes Monthly Allowance (payroll)"
+    },
+    {
+      "id": "points_daily_to_expenses",
+      "section": "hr_ui",
+      "ok": true,
+      "detail": "HR form points daily transport to Expenses"
+    },
+    {
+      "id": "update_maps_category",
+      "section": "drift",
+      "ok": true,
+      "detail": "update maps zod.category → UpdateExpenseData.category"
+    },
+    {
+      "id": "repo_resolves_category_code",
+      "section": "drift",
+      "ok": true,
+      "detail": "update resolves category from code or id"
+    },
+    {
+      "id": "export_staff_column",
+      "section": "drift",
+      "ok": true,
+      "detail": "CSV export includes Staff (employeeName)"
+    },
+    {
+      "id": "migration_anchor_603",
+      "section": "drift",
+      "ok": true,
+      "detail": "MIGRATION_COLUMN_ANCHORS includes expenses.employee_id"
+    },
+    {
+      "id": "hr_create_inserts_allowance",
+      "section": "drift",
+      "ok": true,
+      "detail": "employee create INSERT includes MonthlyAllowance (no >0-only post-update)"
+    },
+    {
+      "id": "ui_staff_filter",
+      "section": "drift",
+      "ok": true,
+      "detail": "Expenses list Staff filter wired"
+    },
+    {
+      "id": "create_log_expenseNumber",
+      "section": "drift",
+      "ok": true,
+      "detail": "create log uses expenseNumber (not undefined referenceNumber)"
+    },
+    {
+      "id": "service_test_validation_error_mock",
+      "section": "drift",
+      "ok": true,
+      "detail": "expenseService.test mocks ValidationError (import no longer breaks)"
+    }
+  ]
+}

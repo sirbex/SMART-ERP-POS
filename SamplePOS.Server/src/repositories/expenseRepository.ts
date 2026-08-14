@@ -142,6 +142,7 @@ export const getExpenses = async (filters: ExpenseFilters, dbPool?: pg.Pool | pg
         e.category,
         e.category_id,
         e.vendor,
+        e.employee_id,
         e.payment_method,
         e.notes,
         e.status,
@@ -160,13 +161,15 @@ export const getExpenses = async (filters: ExpenseFilters, dbPool?: pg.Pool | pg
         uc.full_name as created_by_name,
         ua.full_name as approved_by_name,
         ur.full_name as rejected_by_name,
-        up.full_name as paid_by_name
+        up.full_name as paid_by_name,
+        NULLIF(TRIM(CONCAT(COALESCE(emp."FirstName", ''), ' ', COALESCE(emp."LastName", ''))), '') AS employee_name
       FROM expenses e
       LEFT JOIN expense_categories ec ON e.category_id = ec.id
       LEFT JOIN users uc ON e.created_by = uc.id
       LEFT JOIN users ua ON e.approved_by = ua.id
       LEFT JOIN users ur ON e.rejected_by = ur.id
       LEFT JOIN users up ON e.paid_by = up.id
+      LEFT JOIN employees emp ON e.employee_id = emp."Id"
       WHERE 1=1
     `;
 
@@ -199,6 +202,12 @@ export const getExpenses = async (filters: ExpenseFilters, dbPool?: pg.Pool | pg
       paramIndex++;
     }
 
+    if (filters.employeeId) {
+      query += ` AND e.employee_id = $${paramIndex}`;
+      queryParams.push(filters.employeeId);
+      paramIndex++;
+    }
+
     if (filters.startDate) {
       query += ` AND e.expense_date >= $${paramIndex}`;
       queryParams.push(filters.startDate);
@@ -212,7 +221,14 @@ export const getExpenses = async (filters: ExpenseFilters, dbPool?: pg.Pool | pg
     }
 
     if (filters.search) {
-      query += ` AND (e.title ILIKE $${paramIndex} OR e.description ILIKE $${paramIndex} OR e.category ILIKE $${paramIndex})`;
+      query += ` AND (
+        e.title ILIKE $${paramIndex}
+        OR e.description ILIKE $${paramIndex}
+        OR e.category ILIKE $${paramIndex}
+        OR e.vendor ILIKE $${paramIndex}
+        OR emp."FirstName" ILIKE $${paramIndex}
+        OR emp."LastName" ILIKE $${paramIndex}
+      )`;
       queryParams.push(`%${filters.search}%`);
       paramIndex++;
     }
@@ -269,6 +285,12 @@ export const getExpenseCount = async (filters: ExpenseFilters, dbPool?: pg.Pool 
       paramIndex++;
     }
 
+    if (filters.employeeId) {
+      query += ` AND e.employee_id = $${paramIndex}`;
+      queryParams.push(filters.employeeId);
+      paramIndex++;
+    }
+
     if (filters.startDate) {
       query += ` AND e.expense_date >= $${paramIndex}`;
       queryParams.push(filters.startDate);
@@ -282,7 +304,17 @@ export const getExpenseCount = async (filters: ExpenseFilters, dbPool?: pg.Pool 
     }
 
     if (filters.search) {
-      query += ` AND (e.title ILIKE $${paramIndex} OR e.description ILIKE $${paramIndex} OR e.category ILIKE $${paramIndex})`;
+      query += ` AND (
+        e.title ILIKE $${paramIndex}
+        OR e.description ILIKE $${paramIndex}
+        OR e.category ILIKE $${paramIndex}
+        OR e.vendor ILIKE $${paramIndex}
+        OR EXISTS (
+          SELECT 1 FROM employees emp
+          WHERE emp."Id" = e.employee_id
+            AND (emp."FirstName" ILIKE $${paramIndex} OR emp."LastName" ILIKE $${paramIndex})
+        )
+      )`;
       queryParams.push(`%${filters.search}%`);
     }
 
@@ -311,6 +343,7 @@ export const getExpenseById = async (id: string, dbPool?: pg.Pool | pg.PoolClien
         e.category,
         e.category_id,
         e.vendor,
+        e.employee_id,
         e.payment_method,
         e.notes,
         e.status,
@@ -329,13 +362,15 @@ export const getExpenseById = async (id: string, dbPool?: pg.Pool | pg.PoolClien
         uc.full_name as created_by_name,
         ua.full_name as approved_by_name,
         ur.full_name as rejected_by_name,
-        up.full_name as paid_by_name
+        up.full_name as paid_by_name,
+        NULLIF(TRIM(CONCAT(COALESCE(emp."FirstName", ''), ' ', COALESCE(emp."LastName", ''))), '') AS employee_name
       FROM expenses e
       LEFT JOIN expense_categories ec ON e.category_id = ec.id
       LEFT JOIN users uc ON e.created_by = uc.id
       LEFT JOIN users ua ON e.approved_by = ua.id
       LEFT JOIN users ur ON e.rejected_by = ur.id
       LEFT JOIN users up ON e.paid_by = up.id
+      LEFT JOIN employees emp ON e.employee_id = emp."Id"
       WHERE e.id = $1
     `;
 
@@ -368,10 +403,10 @@ export const createExpense = async (data: CreateExpenseData & { expense_number: 
     const query = `
       INSERT INTO expenses (
         expense_number, title, description, amount, expense_date,
-        category, category_id, vendor, payment_method, notes,
+        category, category_id, vendor, employee_id, payment_method, notes,
         status, created_by, account_id, payment_status, payment_account_id
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
       ) RETURNING *
     `;
 
@@ -384,6 +419,7 @@ export const createExpense = async (data: CreateExpenseData & { expense_number: 
       category.code,
       category.id,
       data.vendor || null,
+      data.employee_id || null,
       data.payment_method || null,
       data.notes || null,
       data.status,
@@ -394,7 +430,8 @@ export const createExpense = async (data: CreateExpenseData & { expense_number: 
     ];
 
     const result = await pool.query(query, values);
-    return normalizeExpenseFromDb(result.rows[0]);
+    // Re-fetch with employee join for display name
+    return (await getExpenseById(result.rows[0].id, pool)) ?? normalizeExpenseFromDb(result.rows[0]);
   } catch (error) {
     logger.error('Error in expenseRepository createExpense', { error, data });
     throw error;
@@ -421,18 +458,22 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?
       }
     }
 
-    // When category_id changes, sync legacy category text + GL account_id
+    // When category_id or category code changes, sync legacy category text + GL account_id
     const updatePayload: Record<string, unknown> = { ...data };
-    if (data.category_id) {
-      const category = await resolveExpenseCategory({ categoryId: data.category_id }, pool);
+    if (data.category_id || data.category) {
+      const category = await resolveExpenseCategory(
+        { categoryId: data.category_id, categoryCode: data.category },
+        pool
+      );
       updatePayload.category = category.code;
+      updatePayload.category_id = category.id;
       updatePayload.account_id = await resolveGlAccountIdForCategory(category, pool);
     }
 
     // Whitelist of allowed column names to prevent SQL injection
     const ALLOWED_UPDATE_FIELDS = new Set([
       'title', 'description', 'amount', 'expense_date', 'category', 'category_id',
-      'account_id', 'supplier_id', 'vendor', 'payment_method', 'receipt_number',
+      'account_id', 'supplier_id', 'vendor', 'employee_id', 'payment_method', 'receipt_number',
       'reference_number', 'notes', 'tags', 'status', 'approved_by',
       'approved_at', 'rejected_by', 'rejected_at', 'rejection_reason',
       'paid_by', 'paid_at', 'payment_status', 'payment_account_id'
@@ -467,7 +508,8 @@ export const updateExpense = async (id: string, data: UpdateExpenseData, dbPool?
     values.push(id);
 
     const result = await pool.query(query, values);
-    return result.rows.length > 0 ? normalizeExpenseFromDb(result.rows[0]) : null;
+    if (result.rows.length === 0) return null;
+    return (await getExpenseById(id, pool)) ?? normalizeExpenseFromDb(result.rows[0]);
   } catch (error) {
     logger.error('Error in expenseRepository updateExpense', { error, id, data });
     throw error;
@@ -1049,6 +1091,8 @@ const normalizeExpenseFromDb = (row: ExpenseDbRow): Expense => {
     supplierId: row.supplier_id,
     supplierName: row.supplier_name,
     vendor: row.vendor,
+    employeeId: row.employee_id ?? null,
+    employeeName: row.employee_name ?? null,
     paymentMethod: row.payment_method as Expense['paymentMethod'],
     receiptNumber: row.receipt_number,
     referenceNumber: row.reference_number,
@@ -1158,6 +1202,54 @@ export const getExpenseCountByCategory = async (categoryId: string, dbPool?: pg.
 };
 
 /**
+ * Active HR employees for expense audit picker (expenses.create/read — no hr.read required).
+ */
+export const listStaffOptionsForExpense = async (
+  dbPool?: pg.Pool | pg.PoolClient
+): Promise<Array<{ id: string; firstName: string; lastName: string; fullName: string }>> => {
+  const pool = dbPool || globalPool;
+  const result = await pool.query(
+    `SELECT e."Id" AS id,
+            e."FirstName" AS first_name,
+            e."LastName" AS last_name
+     FROM employees e
+     WHERE e."Status" = 'ACTIVE'
+     ORDER BY e."LastName" ASC, e."FirstName" ASC
+     LIMIT 500`
+  );
+  return result.rows.map((row: { id: string; first_name: string; last_name: string }) => {
+    const firstName = row.first_name || '';
+    const lastName = row.last_name || '';
+    return {
+      id: row.id,
+      firstName,
+      lastName,
+      fullName: `${firstName} ${lastName}`.trim(),
+    };
+  });
+};
+
+/**
+ * Ensure employee_id points at an active HR employee (audit link).
+ */
+export const assertActiveEmployeeForExpense = async (
+  employeeId: string,
+  dbPool?: pg.Pool | pg.PoolClient
+): Promise<void> => {
+  const pool = dbPool || globalPool;
+  const result = await pool.query(
+    `SELECT "Id", "Status" FROM employees WHERE "Id" = $1`,
+    [employeeId]
+  );
+  if (!result.rows[0]) {
+    throw new ValidationError('Employee not found for expense link');
+  }
+  if (result.rows[0].Status !== 'ACTIVE') {
+    throw new ValidationError('Cannot link expense to an inactive employee');
+  }
+};
+
+/**
  * Enterprise Detailed Expense List with approval, GL account, and payment tracking
  */
 export const getExpenseDetailedList = async (
@@ -1209,6 +1301,7 @@ export const getExpenseDetailedList = async (
         e.payment_status,
         e.payment_method,
         COALESCE(NULLIF(TRIM(e.vendor), ''), 'N/A') as vendor,
+        NULLIF(TRIM(CONCAT(COALESCE(emp."FirstName", ''), ' ', COALESCE(emp."LastName", ''))), '') AS employee_name,
         e.receipt_number,
         e.reference_number,
         COALESCE(uc.full_name, 'System') as created_by,
@@ -1233,6 +1326,7 @@ export const getExpenseDetailedList = async (
       LEFT JOIN users ua ON e.approved_by = ua.id
       LEFT JOIN users ur ON e.rejected_by = ur.id
       LEFT JOIN users up ON e.paid_by = up.id
+      LEFT JOIN employees emp ON e.employee_id = emp."Id"
       ${whereFinal}
       ORDER BY e.expense_date DESC, e.created_at DESC
     `;
@@ -1257,6 +1351,7 @@ export const getExpenseDetailedList = async (
         paymentStatus: row.payment_status,
         paymentMethod: row.payment_method || 'N/A',
         vendor: row.vendor,
+        employeeName: row.employee_name || '',
         receiptNumber: row.receipt_number || '',
         referenceNumber: row.reference_number || '',
         createdBy: row.created_by,

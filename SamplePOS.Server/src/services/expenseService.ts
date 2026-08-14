@@ -1,7 +1,7 @@
 import * as expenseRepository from '../repositories/expenseRepository.js';
 import { ExpenseFilters, CreateExpenseData, UpdateExpenseData } from '../types/expense.js';
 import logger from '../utils/logger.js';
-import { BusinessError, NotFoundError } from '../middleware/errorHandler.js';
+import { BusinessError, NotFoundError, ValidationError } from '../middleware/errorHandler.js';
 import * as glEntryService from './glEntryService.js';
 import { BankingService } from './bankingService.js';
 import { pool as globalPool } from '../db/pool.js';
@@ -55,6 +55,10 @@ export const createExpense = async (data: CreateExpenseData, pool?: Pool) => {
     // Generate expense number
     const expenseNumber = await generateExpenseNumber(dbPool);
 
+    if (data.employee_id) {
+      await expenseRepository.assertActiveEmployeeForExpense(data.employee_id, dbPool);
+    }
+
     const expenseData = {
       ...data,
       expense_number: expenseNumber,
@@ -76,7 +80,7 @@ export const createExpense = async (data: CreateExpenseData, pool?: Pool) => {
     return expense;
   } catch (error) {
     logger.error('Error in expense service createExpense', { error, data });
-    throw new Error(`Failed to create expense: ${(error as Error).message}`);
+    throw error;
   }
 };
 
@@ -103,6 +107,30 @@ export const updateExpense = async (
         expenseId: id,
         currentStatus: existingExpense.status,
       });
+    }
+
+    if (data.employee_id) {
+      await expenseRepository.assertActiveEmployeeForExpense(data.employee_id, dbPool);
+    }
+
+    // ALLOWANCE must stay linked to an employee (create zod + update parity).
+    // Category may change via category_id only — resolve code before checking.
+    let nextCategory = String(existingExpense.category ?? '').toUpperCase();
+    if (data.category_id) {
+      const resolved = await expenseRepository.resolveExpenseCategory(
+        { categoryId: data.category_id },
+        dbPool
+      );
+      nextCategory = String(resolved.code || '').toUpperCase();
+    } else if (data.category) {
+      nextCategory = String(data.category).toUpperCase();
+    }
+    const nextEmployeeId =
+      data.employee_id !== undefined ? data.employee_id : (existingExpense.employeeId ?? null);
+    if (nextCategory === 'ALLOWANCE' && !nextEmployeeId) {
+      throw new ValidationError(
+        'Employee is required for Employee Allowances (audit who received the payout)'
+      );
     }
 
     return await expenseRepository.updateExpense(id, data, dbPool);
@@ -501,6 +529,16 @@ export const getPaymentAccounts = async (pool?: Pool) => {
   } catch (error) {
     logger.error('Error in expense service getPaymentAccounts', { error });
     throw new Error(`Failed to retrieve payment accounts: ${(error as Error).message}`);
+  }
+};
+
+/** Active HR employees for expense audit picker (staff daily allowance). */
+export const listStaffOptions = async (pool?: Pool) => {
+  try {
+    return await expenseRepository.listStaffOptionsForExpense(pool || globalPool);
+  } catch (error) {
+    logger.error('Error in expense service listStaffOptions', { error });
+    throw error;
   }
 };
 

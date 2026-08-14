@@ -157,6 +157,7 @@ const COLUMN_CATALOG: Record<ExpenseReportType, ColumnDef[]> = {
     { id: 'paymentStatus', label: 'Payment status' },
     { id: 'paymentMethod', label: 'Pay method' },
     { id: 'vendor', label: 'Vendor', default: true },
+    { id: 'employeeName', label: 'Staff', default: true },
     { id: 'receiptNumber', label: 'Receipt #' },
     { id: 'referenceNumber', label: 'Reference' },
     { id: 'createdBy', label: 'Created by' },

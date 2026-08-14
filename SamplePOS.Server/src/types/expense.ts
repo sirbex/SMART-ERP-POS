@@ -15,6 +15,9 @@ export interface Expense {
   supplierId?: string;
   supplierName?: string;
   vendor?: string;
+  /** HR employee who received/claimed — audit only, not payroll. */
+  employeeId?: string | null;
+  employeeName?: string | null;
   paymentMethod: PaymentMethod;
   receiptNumber?: string;
   referenceNumber?: string;
@@ -117,6 +120,7 @@ export interface CreateExpenseData {
   category_id?: string;
   supplier_id?: string;
   vendor?: string;
+  employee_id?: string | null;
   payment_method?: PaymentMethod;
   receipt_number?: string;
   reference_number?: string;
@@ -134,9 +138,11 @@ export interface UpdateExpenseData {
   description?: string;
   amount?: number;
   expense_date?: string;
+  category?: string;
   category_id?: string;
   supplier_id?: string;
   vendor?: string;
+  employee_id?: string | null;
   payment_method?: PaymentMethod;
   receipt_number?: string;
   reference_number?: string;
@@ -162,6 +168,7 @@ export interface ExpenseFilters {
   categoryId?: string;
   /** Filter by category code (e.g. OFFICE) when UUID not provided */
   categoryCode?: string;
+  employeeId?: string;
   startDate?: string;
   endDate?: string;
   search?: string;
@@ -179,6 +186,8 @@ export interface ExpenseDbRow {
   category_id?: string;
   supplier_id?: string;
   vendor?: string;
+  employee_id?: string | null;
+  employee_name?: string | null;
   payment_method: string;
   receipt_number?: string;
   reference_number?: string;

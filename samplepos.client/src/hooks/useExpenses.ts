@@ -32,6 +32,7 @@ const expenseApi = {
     if (filter.minAmount) params.append('minAmount', filter.minAmount.toString());
     if (filter.maxAmount) params.append('maxAmount', filter.maxAmount.toString());
     if (filter.search) params.append('search', filter.search);
+    if (filter.employeeId) params.append('employeeId', filter.employeeId);
     if (filter.page) params.append('page', filter.page.toString());
     if (filter.limit) params.append('limit', filter.limit.toString());
     if (filter.includeSummary) params.append('includeSummary', 'true');
@@ -219,7 +220,36 @@ const expenseApi = {
         hasFunds: acc.hasFunds ?? balance > 0.0001,
       };
     });
-  }
+  },
+
+  getStaffOptions: async (): Promise<Array<{ id: string; firstName: string; lastName: string; fullName: string }>> => {
+    const { data: result } = await api.get<ApiEnvelope<Array<{
+      id: string;
+      firstName?: string;
+      lastName?: string;
+      fullName?: string;
+      first_name?: string;
+      last_name?: string;
+    }>>>('/expenses/staff-options');
+    const rows = (result.data ?? result) as Array<{
+      id: string;
+      firstName?: string;
+      lastName?: string;
+      fullName?: string;
+      first_name?: string;
+      last_name?: string;
+    }>;
+    return (rows || []).map((r) => {
+      const firstName = r.firstName || r.first_name || '';
+      const lastName = r.lastName || r.last_name || '';
+      return {
+        id: r.id,
+        firstName,
+        lastName,
+        fullName: r.fullName || `${firstName} ${lastName}`.trim(),
+      };
+    });
+  },
 };
 
 // React Query hooks
@@ -244,6 +274,14 @@ export const usePaymentAccounts = () => {
     queryKey: ['payment-accounts'],
     queryFn: expenseApi.getPaymentAccounts,
     staleTime: 30 * 1000, // balances change when paying expenses
+  });
+};
+
+export const useExpenseStaffOptions = () => {
+  return useQuery({
+    queryKey: ['expenses', 'staff-options'],
+    queryFn: expenseApi.getStaffOptions,
+    staleTime: 5 * 60 * 1000,
   });
 };
 

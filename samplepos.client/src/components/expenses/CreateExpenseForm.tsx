@@ -7,7 +7,7 @@ import {
   PAYMENT_METHODS,
   Expense,
 } from '@shared/types/expense';
-import { useCreateExpense, useExpenseCategories } from '../../hooks/useExpenses';
+import { useCreateExpense, useExpenseCategories, useExpenseStaffOptions } from '../../hooks/useExpenses';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,6 +35,7 @@ interface CreateExpenseFormProps {
 export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess, onCancel }) => {
   const createExpense = useCreateExpense();
   const { data: dbCategories = [], isLoading: categoriesLoading } = useExpenseCategories();
+  const { data: staffOptions = [] } = useExpenseStaffOptions();
   const [uploadedDocuments] = useState<string[]>([]);
 
   const {
@@ -50,6 +51,7 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
       expenseDate: new Date().toLocaleDateString('en-CA'),
       receiptRequired: false,
       documentIds: [],
+      employeeId: null,
       // Always create unpaid — pay after approval via Mark as paid (create API ignores PAID today)
       paymentStatus: 'UNPAID',
       paymentAccountId: null,
@@ -59,6 +61,7 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
 
   const watchedAmount = watch('amount');
   const watchedCategory = watch('category');
+  const staffRequired = String(watchedCategory || '').toUpperCase() === 'ALLOWANCE';
 
   const onSubmit = async (data: CreateExpenseData) => {
     try {
@@ -235,6 +238,42 @@ export const CreateExpenseForm: React.FC<CreateExpenseFormProps> = ({ onSuccess,
                   {...register('vendor')}
                   className="h-9"
                 />
+              </div>
+
+              {/* Employee (audit) */}
+              <div className="md:col-span-2">
+                <Label className="text-sm font-medium">
+                  Staff / employee {staffRequired ? '*' : '(optional)'}
+                </Label>
+                <Controller
+                  name="employeeId"
+                  control={control}
+                  render={({ field }) => (
+                    <Select
+                      value={field.value ?? '__none__'}
+                      onValueChange={(v) => field.onChange(v === '__none__' ? null : v)}
+                    >
+                      <SelectTrigger className={errors.employeeId ? 'border-red-500 h-9' : 'h-9'}>
+                        <SelectValue placeholder="Who received / claimed this payout?" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">— Not linked (vendor / general) —</SelectItem>
+                        {staffOptions.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.fullName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {errors.employeeId && (
+                  <p className="text-xs text-red-600 mt-0.5">{errors.employeeId.message}</p>
+                )}
+                <p className="text-[11px] text-gray-500 mt-1 leading-snug">
+                  Audit only — who took the money. Does not add to payroll, NSSF, or advances.
+                  {staffRequired ? ' Required for Employee Allowances.' : ' Recommended for daily transport paid to staff.'}
+                </p>
               </div>
 
               {/* Description */}

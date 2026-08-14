@@ -45,7 +45,9 @@ export const getExpenses = asyncHandler(async (req, res) => {
     startDate,
     end_date,
     endDate,
-    search
+    search,
+    employeeId,
+    employee_id,
   } = req.query;
 
   const categoryParam = (categoryId || category_id || category || categoryCode) as string | undefined;
@@ -57,6 +59,7 @@ export const getExpenses = asyncHandler(async (req, res) => {
     status: status as string,
     categoryId: isUuid ? categoryParam : undefined,
     categoryCode: !isUuid && categoryParam ? categoryParam : undefined,
+    employeeId: (employeeId || employee_id) as string | undefined,
     startDate: (startDate || start_date) as string,
     endDate: (endDate || end_date) as string,
     search: search as string
@@ -103,6 +106,7 @@ export const createExpense = asyncHandler(async (req, res) => {
     category: validated.category,
     category_id: validated.categoryId,
     vendor: validated.vendor,
+    employee_id: validated.employeeId ?? null,
     payment_method: validated.paymentMethod,
     notes: validated.notes,
     receipt_required: validated.receiptRequired,
@@ -114,8 +118,9 @@ export const createExpense = asyncHandler(async (req, res) => {
 
   logger.info('Expense created', {
     expenseId: expense.id,
-    expenseNumber: expense.referenceNumber,
+    expenseNumber: expense.expenseNumber,
     amount: expense.amount,
+    employeeId: expense.employeeId ?? null,
     user: user.userId
   });
 
@@ -142,8 +147,10 @@ export const updateExpense = asyncHandler(async (req, res) => {
       description: validated.description,
       amount: validated.amount,
       expense_date: validated.expenseDate,
+      category: validated.category,
       category_id: validated.categoryId,
       vendor: validated.vendor,
+      employee_id: validated.employeeId === undefined ? undefined : validated.employeeId,
       payment_method: validated.paymentMethod,
       status: validated.status,
       receipt_number: undefined,
@@ -400,6 +407,18 @@ export const getPaymentAccounts = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Active HR employees for expense audit link (staff daily allowance / claim)
+ */
+export const listStaffOptions = asyncHandler(async (req, res) => {
+  const pool = req.tenantPool || globalPool;
+  const staff = await expenseService.listStaffOptions(pool);
+  res.json({
+    success: true,
+    data: staff,
+  });
+});
+
+/**
  * Create expense category
  */
 export const createExpenseCategory = asyncHandler(async (req, res) => {
@@ -569,6 +588,7 @@ export const exportExpenses = asyncHandler(async (req, res) => {
     'Payment Status',
     'Payment Method',
     'Vendor',
+    'Staff',
     'Receipt Number',
     'Reference Number',
     'Created By',
@@ -598,6 +618,7 @@ export const exportExpenses = asyncHandler(async (req, res) => {
       expense.paymentStatus,
       expense.paymentMethod,
       esc(expense.vendor),
+      esc(expense.employeeName),
       esc(expense.receiptNumber),
       esc(expense.referenceNumber),
       esc(expense.createdBy),

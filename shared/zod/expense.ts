@@ -76,6 +76,9 @@ export const CreateExpenseSchema = z.object({
     .trim()
     .optional(),
 
+  /** HR employee for audit (who received/claimed). Not payroll. */
+  employeeId: z.string().uuid('Invalid employee ID').optional().nullable(),
+
   paymentMethod: PaymentMethodSchema,
 
   receiptRequired: z.boolean().optional(),
@@ -101,6 +104,15 @@ export const CreateExpenseSchema = z.object({
 }, {
   message: 'Payment account is required when expense is marked as PAID',
   path: ['paymentAccountId']
+}).refine((data) => {
+  // Staff allowance payouts must name the employee (audit) — still not payroll
+  if (String(data.category).toUpperCase() === 'ALLOWANCE' && !data.employeeId) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Employee is required for Employee Allowances (audit who received the payout)',
+  path: ['employeeId']
 });
 
 // Update Expense Schema
@@ -133,6 +145,8 @@ export const UpdateExpenseSchema = z.object({
     .trim()
     .optional(),
 
+  employeeId: z.string().uuid('Invalid employee ID').optional().nullable(),
+
   paymentMethod: PaymentMethodSchema.optional(),
 
   status: ExpenseStatusSchema.optional(),
@@ -143,13 +157,22 @@ export const UpdateExpenseSchema = z.object({
     .max(1000, 'Notes cannot exceed 1000 characters')
     .trim()
     .optional()
-}).strict();
+}).strict().refine((data) => {
+  if (data.category && String(data.category).toUpperCase() === 'ALLOWANCE' && !data.employeeId) {
+    return false;
+  }
+  return true;
+}, {
+  message: 'Employee is required for Employee Allowances (audit who received the payout)',
+  path: ['employeeId']
+});
 
 // Expense Filter Schema
 export const ExpenseFilterSchema = z.object({
   status: ExpenseStatusSchema.optional(),
   category: z.string().min(1).max(100).optional(),
   categoryId: z.string().uuid().optional(),
+  employeeId: z.string().uuid().optional(),
 
   startDate: z.string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Start date must be in YYYY-MM-DD format')
