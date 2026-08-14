@@ -1,0 +1,160 @@
+{
+  "proof": "SHARED_TERMINAL_SESSION_LOCK",
+  "integrity": "FAIL_CLOSED",
+  "date": "2026-08-14T06:07:12.811Z",
+  "verdict": "PASS",
+  "pass": 30,
+  "fail": 0,
+  "gates": [
+    {
+      "id": "DEFAULT_SHARED",
+      "ok": true,
+      "detail": "unset storage/env → SHARED"
+    },
+    {
+      "id": "GARBAGE_NOT_PERSONAL",
+      "ok": true,
+      "detail": "invalid stored mode never becomes PERSONAL"
+    },
+    {
+      "id": "IDLE_SHARED_3M",
+      "ok": true,
+      "detail": "180000ms"
+    },
+    {
+      "id": "IDLE_PERSONAL_60M",
+      "ok": true,
+      "detail": "3600000ms"
+    },
+    {
+      "id": "SAME_SESSION_OK",
+      "ok": true,
+      "detail": "alive browser session may continue"
+    },
+    {
+      "id": "ACTOR_LOCK_SET_OK",
+      "ok": true,
+      "detail": "durable lock"
+    },
+    {
+      "id": "ACTOR_LOCK_SET",
+      "ok": true,
+      "detail": "smarterp_actor_lock_v1"
+    },
+    {
+      "id": "NEXT_OPENER_BLOCKED",
+      "ok": true,
+      "detail": "actor lock beats restored sessionStorage"
+    },
+    {
+      "id": "NEXT_OPENER_ADMIN_BLOCKED",
+      "ok": true,
+      "detail": "SHARED never silent-restores admin either"
+    },
+    {
+      "id": "AFTER_RELOGIN",
+      "ok": true,
+      "detail": "fresh login clears lock and may operate"
+    },
+    {
+      "id": "FAIL_CLOSED_LOCK_READ",
+      "ok": true,
+      "detail": "unreadable storage ⇒ locked"
+    },
+    {
+      "id": "WIPE_ASSERT_FAILS_LOUD",
+      "ok": true,
+      "detail": "leftover JWT throws DeviceSessionIntegrityError"
+    },
+    {
+      "id": "WIPE_ASSERT_PASS",
+      "ok": true,
+      "detail": "clearTokens + assertSessionWiped"
+    },
+    {
+      "id": "UNLOAD_LOCK_FAIL_WIPES",
+      "ok": true,
+      "detail": "lock not durable"
+    },
+    {
+      "id": "UNLOAD_TOKENS_GONE",
+      "ok": true,
+      "detail": "fail-closed wipe on unload"
+    },
+    {
+      "id": "SHARED_ALL",
+      "ok": true,
+      "detail": "admin"
+    },
+    {
+      "id": "MODE_PERSONAL",
+      "ok": true,
+      "detail": "smarterp_device_session_mode"
+    },
+    {
+      "id": "PERSONAL_ADMIN_OK",
+      "ok": true,
+      "detail": "office admin restore"
+    },
+    {
+      "id": "PERSONAL_FLOOR_GATE",
+      "ok": true,
+      "detail": "floor still gated"
+    },
+    {
+      "id": "AUTH_WIPE_ASSERT",
+      "ok": true,
+      "detail": "boot gate verifies wipe"
+    },
+    {
+      "id": "AUTH_UNLOAD_SSOT",
+      "ok": true,
+      "detail": "unload uses SSOT helper"
+    },
+    {
+      "id": "AUTH_IDLE_MODE",
+      "ok": true,
+      "detail": "idle follows device mode"
+    },
+    {
+      "id": "AUTH_CLEAR_LOCK_BEFORE_AUTH",
+      "ok": true,
+      "detail": "lock cleared before authenticated paint"
+    },
+    {
+      "id": "POLICY_FAIL_CLOSED",
+      "ok": true,
+      "detail": "lock read errors ⇒ locked"
+    },
+    {
+      "id": "SSOT_INTEGRITY_ERROR",
+      "ok": true,
+      "detail": "integrity error type"
+    },
+    {
+      "id": "BOOT_KEY_SSOT",
+      "ok": true,
+      "detail": "boot key owned by SSOT (no client fork)"
+    },
+    {
+      "id": "WIPE_KEY_CATALOG",
+      "ok": true,
+      "detail": "wipe key catalog"
+    },
+    {
+      "id": "NO_EMPTY_CATCH_LOCK_OPEN",
+      "ok": true,
+      "detail": "isActorLockSet must not fail-open"
+    },
+    {
+      "id": "BEACON_SAFE",
+      "ok": true,
+      "detail": "unload-safe"
+    },
+    {
+      "id": "ASSERT_CLEARED_HELPER",
+      "ok": true,
+      "detail": "empty session passes assert"
+    }
+  ]
+}

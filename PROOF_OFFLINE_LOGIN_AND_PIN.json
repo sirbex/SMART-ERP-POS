@@ -1,10 +1,10 @@
 {
   "proof": "OFFLINE_LOGIN_AND_PIN",
-  "date": "2026-08-09T13:56:10.432Z",
+  "date": "2026-08-14T06:07:14.947Z",
   "verdict": "PASS",
-  "pass": 52,
+  "pass": 56,
   "fail": 0,
-  "total": 52,
+  "total": 56,
   "gates": [
     {
       "id": "OFF_CACHE_OK",
@@ -39,7 +39,7 @@
     {
       "id": "OFF_TOKEN_PREFIX",
       "ok": true,
-      "detail": "offline-session-1786283770333-0214fd1d34"
+      "detail": "offline-session-1786687634836-3f2d84df7b"
     },
     {
       "id": "OFF_ISO_TOKEN_NEW",
@@ -209,12 +209,12 @@
     {
       "id": "COLD_ADMIN_ROLE",
       "ok": true,
-      "detail": "admin restore"
+      "detail": "SHARED admin must re-auth"
     },
     {
       "id": "COLD_MGR_ROLE",
       "ok": true,
-      "detail": "manager restore"
+      "detail": "SHARED manager must re-auth"
     },
     {
       "id": "COLD_HREF",
@@ -232,9 +232,29 @@
       "detail": "cashier + stored session + cold → PIN"
     },
     {
+      "id": "COLD_ENFORCE_ADMIN",
+      "ok": true,
+      "detail": "SHARED admin + cold → PIN (no silent restore)"
+    },
+    {
       "id": "COLD_AFTER_ALIVE",
       "ok": true,
-      "detail": "after alive mark, no pin gate"
+      "detail": "after alive mark, no pin gate (same browser session)"
+    },
+    {
+      "id": "ACTOR_LOCK_BEATS_RESTORE",
+      "ok": true,
+      "detail": "pagehide actor lock → next opener cannot inherit prior user"
+    },
+    {
+      "id": "PERSONAL_ADMIN_RESTORE",
+      "ok": true,
+      "detail": "PERSONAL mode allows admin restore"
+    },
+    {
+      "id": "PERSONAL_CASHIER_GATE",
+      "ok": true,
+      "detail": "PERSONAL still gates floor roles"
     },
     {
       "id": "AUTH_RECOVERY_SSOT",

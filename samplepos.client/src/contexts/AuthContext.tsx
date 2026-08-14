@@ -16,6 +16,14 @@ import {
   markBrowserSessionAlive,
   shouldEnforceColdStartPinGate,
 } from '../lib/sessionColdStartLock';
+import {
+  assertSessionWiped,
+  beaconRevokeRefreshToken,
+  clearActorLock,
+  getDeviceSessionMode,
+  idleTimeoutMsForMode,
+  lockSharedSessionOnUnload,
+} from '../lib/deviceSessionPolicy';
 import { isAuthRecoveryPath } from '../lib/offlineLoginCredentials';
 import { refreshRestaurantFloorSession } from '../lib/restaurantFloorSession';
 import type { AxiosError } from 'axios';
@@ -84,7 +92,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [permissionKeys, setPermissionKeys] = useState<string[]>([]);
   const pendingIdleLogoutRef = useRef(false);
-  const IDLE_TIMEOUT_MS = 60 * 60 * 1000;
+  // SHARED terminals: short idle. PERSONAL office PCs: legacy 60m.
+  const IDLE_TIMEOUT_MS = idleTimeoutMsForMode(getDeviceSessionMode());
 
   // Global activity — all modules/tabs (enterprise SSOT; independent of idle/guard)
   useGlobalSessionActivity(isAuthenticated);
@@ -117,7 +126,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
               hasStoredSession: true,
             })
           ) {
+            // Mandatory wipe + verify — never leave JWT material for the next opener.
+            beaconRevokeRefreshToken(getRefreshToken());
             clearTokens();
+            assertSessionWiped();
             const path = typeof window !== 'undefined' ? window.location.pathname : '';
             if (!isAuthRecoveryPath(path) && typeof window !== 'undefined') {
               window.location.replace(COLD_START_QUICK_LOGIN_HREF);
@@ -194,9 +206,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
           if (!getAccessToken() && !localStorage.getItem('auth_token')) {
             return;
           }
+          // Lock must clear before we paint as authenticated (fail-loud).
+          clearActorLock();
+          markBrowserSessionAlive();
           setUser(userData);
           setIsAuthenticated(true);
-          markBrowserSessionAlive();
 
           // Restore cached permissions immediately (prevents flash)
           const cachedPerms = localStorage.getItem('rbac_permissions');
@@ -323,9 +337,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     // NOW set authenticated — routes will render with permissions already loaded
+    clearActorLock();
+    markBrowserSessionAlive();
     setUser(userData);
     setIsAuthenticated(true);
-    markBrowserSessionAlive();
     resetAuthState();
 
     // FOH session isolation: drop prior actor floor RQ so User B never paints User A.
@@ -367,6 +382,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       // Clear all tokens using the single authority (also removes user + rbac_permissions)
       clearTokens();
+      assertSessionWiped();
+      try {
+        clearActorLock();
+      } catch (lockErr) {
+        // Tokens already wiped — lock residue still fail-closes next boot. Surface loudly.
+        console.error('[Auth] Actor lock clear failed after logout wipe:', lockErr);
+      }
       setUser(null);
       setIsAuthenticated(false);
       setPermissionKeys([]);
@@ -381,7 +403,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [queryClient]);
 
-  // ── Auto-logout on idle (60 minutes without deliberate interaction) ────────
+  // ── Auto-logout on idle (device-mode aware) ────────────────────────────────
   const idleLogout = useCallback(() => {
     // SAP/Odoo: never idle-logout while this or any peer tab is still working.
     if (!shouldPerformIdleLogout(isUserActiveOrGuarded(IDLE_TIMEOUT_MS))) {
@@ -428,12 +450,34 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => window.removeEventListener('app:transaction-guard', onGuard);
   }, [logout, IDLE_TIMEOUT_MS]);
 
+  // SHARED POS: closing the tab/window without logout must not leave the next
+  // person as the previous actor (Chrome restore + durable localStorage).
+  // If actor lock cannot be persisted, tokens are wiped immediately (fail closed).
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const lockSharedSession = () => {
+      lockSharedSessionOnUnload({
+        mode: getDeviceSessionMode(),
+        clearSession: clearTokens,
+        refreshToken: getRefreshToken(),
+      });
+    };
+
+    window.addEventListener('pagehide', lockSharedSession);
+    window.addEventListener('beforeunload', lockSharedSession);
+    return () => {
+      window.removeEventListener('pagehide', lockSharedSession);
+      window.removeEventListener('beforeunload', lockSharedSession);
+    };
+  }, [isAuthenticated]);
+
   useIdleTimeout({
     timeoutMs: IDLE_TIMEOUT_MS,
     onIdle: idleLogout,
     onWarning: () => {
       window.dispatchEvent(new CustomEvent('app:session-warning'));
-      console.warn('[Auth] Session expiring in 60 seconds due to inactivity');
+      console.warn('[Auth] Session expiring soon due to inactivity');
     },
     enabled: isAuthenticated,
   });

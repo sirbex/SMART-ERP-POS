@@ -35,6 +35,11 @@ import {
   AUTH_BOOT_SESSION_KEY,
 } from '../lib/sessionColdStartLock';
 import {
+  setActorLock,
+  clearActorLock,
+  setDeviceSessionMode,
+} from '../lib/deviceSessionPolicy';
+import {
   shouldPerformAutoLogout,
   classifyRefreshError,
 } from '../lib/sessionLogoutPolicy';
@@ -344,11 +349,11 @@ describe('PROOF: PIN / quick-login public recovery', () => {
     gate('OFF_CLASSIFY_NET', kind === 'network', `kind=${kind}`);
   });
 
-  it('cold-start PIN gate for cashiers, not admin', () => {
+  it('cold-start PIN gate: SHARED locks all roles; actor lock beats Chrome restore', () => {
     gate('COLD_CASHIER_ROLE', roleRequiresColdStartPinGate('CASHIER') === true, 'cashier');
     gate('COLD_WAITER_ROLE', roleRequiresColdStartPinGate('WAITER') === true, 'waiter');
-    gate('COLD_ADMIN_ROLE', roleRequiresColdStartPinGate('ADMIN') === false, 'admin restore');
-    gate('COLD_MGR_ROLE', roleRequiresColdStartPinGate('MANAGER') === false, 'manager restore');
+    gate('COLD_ADMIN_ROLE', roleRequiresColdStartPinGate('ADMIN') === true, 'SHARED admin must re-auth');
+    gate('COLD_MGR_ROLE', roleRequiresColdStartPinGate('MANAGER') === true, 'SHARED manager must re-auth');
     gate('COLD_HREF', COLD_START_QUICK_LOGIN_HREF === '/quick-login', COLD_START_QUICK_LOGIN_HREF);
 
     // cold start = no auth_boot_session
@@ -358,12 +363,43 @@ describe('PROOF: PIN / quick-login public recovery', () => {
       shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }) === true,
       'cashier + stored session + cold → PIN',
     );
+    gate(
+      'COLD_ENFORCE_ADMIN',
+      shouldEnforceColdStartPinGate({ role: 'ADMIN', hasStoredSession: true }) === true,
+      'SHARED admin + cold → PIN (no silent restore)',
+    );
     markBrowserSessionAlive();
     gate(
       'COLD_AFTER_ALIVE',
       sessionStorage.getItem(AUTH_BOOT_SESSION_KEY) === '1' &&
         shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }) === false,
-      'after alive mark, no pin gate',
+      'after alive mark, no pin gate (same browser session)',
+    );
+
+    // Close-without-logout: actor lock must force re-auth even if sessionStorage restored
+    setActorLock();
+    gate(
+      'ACTOR_LOCK_BEATS_RESTORE',
+      shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }) === true &&
+        shouldEnforceColdStartPinGate({ role: 'ADMIN', hasStoredSession: true }) === true,
+      'pagehide actor lock → next opener cannot inherit prior user',
+    );
+    clearActorLock();
+
+    // PERSONAL office opt-in: admin may silent-restore
+    setDeviceSessionMode('PERSONAL');
+    sessionStorage.clear();
+    gate(
+      'PERSONAL_ADMIN_RESTORE',
+      roleRequiresColdStartPinGate('ADMIN') === false &&
+        shouldEnforceColdStartPinGate({ role: 'ADMIN', hasStoredSession: true }) === false,
+      'PERSONAL mode allows admin restore',
+    );
+    gate(
+      'PERSONAL_CASHIER_GATE',
+      roleRequiresColdStartPinGate('CASHIER') === true &&
+        shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }) === true,
+      'PERSONAL still gates floor roles',
     );
   });
 

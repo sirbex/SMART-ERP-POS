@@ -1,8 +1,8 @@
 # PROOF: Offline login + PIN recovery
 
-- Date: 2026-08-09T13:56:10.432Z
+- Date: 2026-08-14T06:07:14.947Z
 - Runner: `npx vitest run src/__tests__/offline-login-and-pin.proof.test.ts`
-- Gates: 52/52 pass (0 fail)
+- Gates: 56/56 pass (0 fail)
 - Verdict: **PASS**
 
 ## Scope
@@ -22,7 +22,7 @@
 | OFF_EMAIL_CASE | PASS | cashier@shop.local |
 | OFF_MULTI | PASS | a=u-cashier-1 b=u-mgr |
 | OFF_EVICT | PASS | cache size=10 max=10 |
-| OFF_TOKEN_PREFIX | PASS | offline-session-1786283770333-0214fd1d34 |
+| OFF_TOKEN_PREFIX | PASS | offline-session-1786687634836-3f2d84df7b |
 | OFF_ISO_TOKEN_NEW | PASS | minted offline-session token |
 | OFF_ISO_NO_JWT | PASS | prior JWT stripped before login() |
 | OFF_ISO_NO_RT | PASS | prior RT stripped — prevents zombie refresh as user A |
@@ -56,12 +56,16 @@
 | OFF_CLASSIFY_NET | PASS | kind=network |
 | COLD_CASHIER_ROLE | PASS | cashier |
 | COLD_WAITER_ROLE | PASS | waiter |
-| COLD_ADMIN_ROLE | PASS | admin restore |
-| COLD_MGR_ROLE | PASS | manager restore |
+| COLD_ADMIN_ROLE | PASS | SHARED admin must re-auth |
+| COLD_MGR_ROLE | PASS | SHARED manager must re-auth |
 | COLD_HREF | PASS | /quick-login |
 | COLD_IS | PASS | fresh tab is cold |
 | COLD_ENFORCE_CASHIER | PASS | cashier + stored session + cold → PIN |
-| COLD_AFTER_ALIVE | PASS | after alive mark, no pin gate |
+| COLD_ENFORCE_ADMIN | PASS | SHARED admin + cold → PIN (no silent restore) |
+| COLD_AFTER_ALIVE | PASS | after alive mark, no pin gate (same browser session) |
+| ACTOR_LOCK_BEATS_RESTORE | PASS | pagehide actor lock → next opener cannot inherit prior user |
+| PERSONAL_ADMIN_RESTORE | PASS | PERSONAL mode allows admin restore |
+| PERSONAL_CASHIER_GATE | PASS | PERSONAL still gates floor roles |
 | AUTH_RECOVERY_SSOT | PASS | peer logout / cold-start share recovery path helper |
 | AUTH_LOGIN_STRIP_RT | PASS | login() strips residual RT when no refresh issued |
 | WIRE_src_hooks_useQuickLogin_ts | PASS | src/hooks/useQuickLogin.ts has pin-only |

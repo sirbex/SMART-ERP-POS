@@ -76,12 +76,17 @@ describe('EVIDENCE — cold-start PIN gate (reboot walk-up)', () => {
       value: memoryStorage(),
       configurable: true,
     });
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: memoryStorage(),
+      configurable: true,
+    });
     vi.mocked(toast.error).mockClear();
   });
 
-  it('structural: AuthContext wires clearTokens + quick-login hard-nav', () => {
+  it('structural: AuthContext wires clearTokens + quick-login hard-nav + shared lock', () => {
     const lock = read('lib/sessionColdStartLock.ts');
     const auth = read('contexts/AuthContext.tsx');
+    const policy = read('lib/deviceSessionPolicy.ts');
 
     expect(lock).toMatch(/shouldEnforceColdStartPinGate/);
     expect(lock).toMatch(/roleRequiresColdStartPinGate/);
@@ -91,11 +96,18 @@ describe('EVIDENCE — cold-start PIN gate (reboot walk-up)', () => {
 
     expect(auth).toMatch(/shouldEnforceColdStartPinGate/);
     expect(auth).toMatch(/clearTokens\(\)/);
+    expect(auth).toMatch(/assertSessionWiped\(\)/);
     expect(auth).toMatch(/COLD_START_QUICK_LOGIN_HREF/);
     expect(auth).toMatch(/markBrowserSessionAlive\(\)/);
+    expect(auth).toMatch(/lockSharedSessionOnUnload/);
+    expect(auth).toMatch(/idleTimeoutMsForMode/);
+
+    expect(policy).toMatch(/ACTOR_LOCK_KEY/);
+    expect(policy).toMatch(/assertSessionWiped/);
+    expect(policy).toMatch(/FAIL CLOSED/);
   });
 
-  it('runtime: cold start enforces PIN for cashier; admin restores; alive clears gate', () => {
+  it('runtime SHARED: cold start enforces PIN for all roles including admin', () => {
     expect(isBrowserColdStart()).toBe(true);
     expect(
       shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }),
@@ -105,8 +117,8 @@ describe('EVIDENCE — cold-start PIN gate (reboot walk-up)', () => {
     ).toBe(true);
     expect(
       shouldEnforceColdStartPinGate({ role: 'ADMIN', hasStoredSession: true }),
-    ).toBe(false);
-    expect(roleRequiresColdStartPinGate('MANAGER')).toBe(false);
+    ).toBe(true);
+    expect(roleRequiresColdStartPinGate('MANAGER')).toBe(true);
 
     markBrowserSessionAlive();
     expect(isBrowserColdStart()).toBe(false);
