@@ -180,7 +180,7 @@ export function computeStatutoryDeductions(input: {
     throw new Error(`STATUTORY_NEGATIVE_GROSS: ${gross}`);
   }
 
-  const nssfEmployee = computeNssfEmployee(gross, input.settings.nssfEmployeeRate);
+  const nssfEmployee = computeNssfEmployee(money2Number(gross), input.settings.nssfEmployeeRate);
   const taxable = money2(gross.minus(nssfEmployee));
   if (taxable.lt(0)) {
     throw new Error(
@@ -189,9 +189,9 @@ export function computeStatutoryDeductions(input: {
   }
 
   const paye = input.settings.payeEnabled
-    ? computePaye(taxable, input.settings.payeBands)
+    ? computePaye(money2Number(taxable), input.settings.payeBands)
     : 0;
-  const nssfEmployer = computeNssfEmployer(gross, input.settings.nssfEmployerRate);
+  const nssfEmployer = computeNssfEmployer(money2Number(gross), input.settings.nssfEmployerRate);
 
   const employeeStatutory = money2(nssfEmployee).plus(paye);
   if (employeeStatutory.gt(gross)) {

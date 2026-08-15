@@ -28,7 +28,7 @@ export function assertAdvanceRegisterGlAligned(input: {
 }): void {
   const reg = money2(input.registerRemaining);
   const gl = money2(input.glBalance);
-  if (advanceRegisterGlAligned(reg, gl)) return;
+  if (advanceRegisterGlAligned(input.registerRemaining, input.glBalance)) return;
 
   const acct = input.advanceAccountCode ? ` (${input.advanceAccountCode})` : '';
   throw new Error(

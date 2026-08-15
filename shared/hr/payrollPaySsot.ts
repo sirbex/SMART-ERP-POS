@@ -46,10 +46,10 @@ export function isPayrollPayablePeriodStatus(v: unknown): v is PayrollPayablePer
 export function payrollEntryRemaining(netPay: number, amountPaid: number): number {
   const net = money2(netPay);
   const paid = money2(amountPaid);
-  if (net.isNeg()) {
+  if (net.lt(0)) {
     throw new Error('PAYROLL_PAY_NEG_NET: NetPay cannot be negative');
   }
-  if (paid.isNeg()) {
+  if (paid.lt(0)) {
     throw new Error('PAYROLL_PAY_NEG_PAID: AmountPaid cannot be negative');
   }
   if (paid.gt(net)) {

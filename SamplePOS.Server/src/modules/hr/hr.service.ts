@@ -860,8 +860,9 @@ export const hrService = {
                 await employeeRepository.setAdvanceAccountId(client, row.Id, advAccount.Id);
 
                 let basicForHistory = 0;
-                if (data.positionId) {
-                    const pos = await positionRepository.getById(client, data.positionId);
+                const hirePositionId = (data.positionId as string | null | undefined) ?? null;
+                if (hirePositionId) {
+                    const pos = await positionRepository.getById(client, hirePositionId);
                     basicForHistory = pos?.BaseSalary != null ? Money.toNumber(Money.parseDb(pos.BaseSalary)) : 0;
                 }
                 await salaryHistoryRepository.create(client, {
@@ -869,7 +870,7 @@ export const hrService = {
                     effectiveFrom: data.hireDate,
                     basicSalary: basicForHistory,
                     monthlyAllowance: data.monthlyAllowance ?? 0,
-                    positionId: data.positionId ?? null,
+                    positionId: hirePositionId,
                     reason: 'HIRE',
                     notes: 'Initial salary on hire',
                     createdBy: context.userId ?? null,
@@ -971,7 +972,11 @@ export const hrService = {
         }
 
         if (data.userId !== undefined) {
-            await this.assertUserAvailableForLink(pool, data.userId, id);
+            await this.assertUserAvailableForLink(
+                pool,
+                data.userId as string | null | undefined,
+                id,
+            );
         }
 
         const existingNorm = normalizeEmployee(existing);
