@@ -1,0 +1,20 @@
+{
+  "proof": "PRINT_AGENT_PREINSTALL",
+  "verdict": "ACCEPT_REBUILD_THEN_INSTALL",
+  "agentVersion": "1.4.0",
+  "doNotShipExistingSetupExeWithoutRebuild": true,
+  "gates": {
+    "tsc": "PASS",
+    "buildDistVersion": "1.4.0",
+    "agentVitest": { "passed": 17, "failed": 0 },
+    "clientEvidence": { "passed": 2, "failed": 0 }
+  },
+  "inconsistenciesFixed": [
+    "installer ISS 1.3.0 -> 1.4.0",
+    "build-product.ps1 1.3.1 -> 1.4.0",
+    "service-helper fallback 1.3.1 -> 1.4.0",
+    "verify-install-tree.mjs 1.3.1 -> 1.4.0",
+    "smart-print-agent.evidence.test.ts 1.3.1 -> 1.4.0"
+  ],
+  "timestamp": "2026-08-15T08:30:30.000Z"
+}

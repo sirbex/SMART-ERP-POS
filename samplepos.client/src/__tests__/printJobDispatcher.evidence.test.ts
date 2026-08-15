@@ -47,16 +47,29 @@ describe('EVIDENCE — print job delivered cache + logout race', () => {
     expect(dispatcher).toMatch(/wasPrintJobDeliveredLocally\(j\.id\)/);
   });
 
-  it('source: FOH awaits print when auto-logout; flush once per online session', () => {
+  it('source: FOH awaits spool confirm; flush once per online session', () => {
     const pos = readSrc('pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/printFlushOnceRef/);
-    expect(pos).toMatch(/awaitPrint:\s*willAutoLogout/);
+    expect(pos).toMatch(/awaitPrint:\s*true/);
     expect(pos).toMatch(/awaitStatusSync:\s*true/);
     expect(pos).toMatch(/decideRestaurantFohAutoLogout/);
     expect(pos).toMatch(/silentForbidden:\s*true/);
   });
 
   it('runtime: delivered cache skips re-dispatch of same job id', async () => {
+    vi.doMock('../lib/printRestaurant', () => ({
+      printKitchenTicket: vi.fn(async () => undefined),
+      printRestaurantBill: vi.fn(async () => undefined),
+    }));
+    vi.doMock('../utils/api', () => ({
+      api: {
+        printJobs: {
+          updateStatus: vi.fn(async () => ({ data: { success: true } })),
+          listPending: vi.fn(async () => ({ data: { data: [] } })),
+        },
+      },
+    }));
+
     const {
       rememberPrintJobDelivered,
       wasPrintJobDeliveredLocally,
@@ -83,7 +96,7 @@ describe('EVIDENCE — print job delivered cache + logout race', () => {
     const result = await dispatchPrintJobs([job!]);
     expect(result.delivered).toBe(0);
     expect(result.failures).toBe(0);
-  });
+  }, 15_000);
 
   it('ownership 403 keeps waiter-specific message', async () => {
     const { friendlyHttpErrorMessage } = await import('../utils/errorHandler');

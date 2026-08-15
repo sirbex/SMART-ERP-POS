@@ -19,7 +19,7 @@ Use a fresh Windows 10/11 VM with **no** Node.js, Git, or PowerShell skill assum
 ## Print Service
 
 - [ ] Start Menu → SMART-ERP-POS → SMART Print Service (if needed)
-- [ ] `http://127.0.0.1:1811/health` returns online + version ≥ 1.3.0
+- [ ] `http://127.0.0.1:1811/health` returns online + version ≥ 1.4.0
 - [ ] Wizard: select Receipt / Kitchen / Bar → Test prints succeed
 - [ ] Windows Services: **SMART Print Service** and **SMART Service Helper** Running / Automatic
 

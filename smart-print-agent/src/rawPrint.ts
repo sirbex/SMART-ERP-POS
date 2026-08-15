@@ -54,6 +54,9 @@ function Write-RawBytes([string]$printerName, [string]$docName, [string]$b64) {
         [Runtime.InteropServices.Marshal]::Copy($bytes, 0, $ptr, $bytes.Length)
         $written = 0
         if (-not [RawPrinterHelper]::WritePrinter($h, $ptr, $bytes.Length, [ref]$written)) { throw 'WritePrinter failed' }
+        if ($written -ne $bytes.Length) {
+          throw ("WritePrinter partial write: $written of $($bytes.Length) bytes")
+        }
       } finally {
         [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr)
       }

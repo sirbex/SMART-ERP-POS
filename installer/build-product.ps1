@@ -184,7 +184,7 @@ Copy-Item (Join-Path $PSScriptRoot 'manifest.example.json') (Join-Path $outRoot 
 $versionPath = Join-Path $outRoot 'version.json'
 $versionJson = @{
   productVersion = $productVersion
-  printServiceVersion = '1.3.1'
+  printServiceVersion = '1.4.0'
   helperVersion = '1.0.0'
   shellVersion = '2.0.0'
   channel = 'commercial'

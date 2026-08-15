@@ -1,5 +1,6 @@
 export const AGENT_NAME = 'SMART Print Agent';
-export const AGENT_VERSION = '1.3.1';
+/** 1.4.0: named printer required + X-Print-Wait spool confirm (no ghost 202). */
+export const AGENT_VERSION = '1.4.0';
 export const DEFAULT_PORT = 1811;
 export const DEFAULT_HOST = '127.0.0.1';
 

@@ -76,8 +76,8 @@ try {
   version = JSON.parse(raw);
   pass(`version.json product=${version.productVersion} print=${version.printServiceVersion}`);
   if (version.productVersion !== '2.0.0') warn(`productVersion expected 2.0.0 got ${version.productVersion}`);
-  if (version.printServiceVersion !== '1.3.1')
-    warn(`printServiceVersion expected 1.3.1 got ${version.printServiceVersion}`);
+  if (version.printServiceVersion !== '1.4.0')
+    warn(`printServiceVersion expected 1.4.0 got ${version.printServiceVersion}`);
   if (version.hasSmartErpExe !== true) fail('hasSmartErpExe !== true');
   else pass('hasSmartErpExe true');
 } catch (e) {
@@ -154,7 +154,7 @@ function startNode(nodeExe, entry, cwd, env) {
 
 async function smokeAgainst(printPort, helperPort) {
   const ph = await getJson(`http://127.0.0.1:${printPort}/health`);
-  if (ph.status === 'online' && ph.version === '1.3.1') {
+  if (ph.status === 'online' && ph.version === '1.4.0') {
     pass(`print /health online v${ph.version} channel=${ph.channel} port=${printPort}`);
   } else fail(`print /health unexpected ${JSON.stringify(ph)}`);
   if (!Array.isArray(ph.formats) || !ph.formats.includes('escpos')) fail('print formats missing escpos');

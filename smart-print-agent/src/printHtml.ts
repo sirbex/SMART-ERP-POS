@@ -6,6 +6,8 @@ import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 import { assertPrinterExists } from './printers.js';
+import { buildEscPosTestTicket } from './escposTestTicket.js';
+import { writeRawToPrinter } from './rawPrint.js';
 
 const execFileAsync = promisify(execFile);
 const AGENT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -236,6 +238,30 @@ async function printPdf(
   assertMs: number;
   spoolMs: number;
 }> {
+  const name = printerName?.trim();
+  let assertMs = 0;
+  if (name) {
+    const a0 = Date.now();
+    await assertPrinterExists(name);
+    assertMs = Date.now() - a0;
+  }
+
+  const s0 = Date.now();
+  // Prefer Windows shell PrintTo — avoids SumatraPDF-32 under LocalSystem (common POS failure).
+  if (os.platform() === 'win32' && name) {
+    try {
+      await printPdfViaShellPrintTo(pdfPath, name);
+      return { assertMs, spoolMs: Date.now() - s0 };
+    } catch (shellErr) {
+      const { appendAgentLog } = await import('./lifecycle.js');
+      appendAgentLog(
+        `[print] Shell PrintTo failed — trying pdf-to-printer: ${
+          shellErr instanceof Error ? shellErr.message : String(shellErr)
+        }`,
+      );
+    }
+  }
+
   const mod = (await import('pdf-to-printer')) as {
     print?: (file: string, opts?: object) => Promise<void>;
     default?: { print?: (file: string, opts?: object) => Promise<void> };
@@ -245,17 +271,36 @@ async function printPdf(
     throw new Error('pdf-to-printer print() unavailable in this runtime');
   }
   const options: { printer?: string; silent?: boolean } = { silent: true };
-  const name = printerName?.trim();
-  let assertMs = 0;
-  if (name) {
-    const a0 = Date.now();
-    await assertPrinterExists(name);
-    assertMs = Date.now() - a0;
-    options.printer = name;
+  if (name) options.printer = name;
+  try {
+    await print(pdfPath, options);
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `PDF spool failed for printer "${name || '(default)'}". ` +
+        `Thermal printers usually need ESC/POS (KOT path), not SumatraPDF. ` +
+        `Detail: ${raw.slice(0, 500)}`,
+    );
   }
-  const s0 = Date.now();
-  await print(pdfPath, options);
   return { assertMs, spoolMs: Date.now() - s0 };
+}
+
+/** Windows: associate PDF with default handler PrintTo verb (no bundled Sumatra). */
+async function printPdfViaShellPrintTo(pdfPath: string, printerName: string): Promise<void> {
+  const ps = `
+$ErrorActionPreference = 'Stop'
+$pdf = ${JSON.stringify(pdfPath)}
+$printer = ${JSON.stringify(printerName)}
+if (-not (Test-Path -LiteralPath $pdf)) { throw "PDF missing: $pdf" }
+$p = Get-CimInstance Win32_Printer | Where-Object { $_.Name -eq $printer } | Select-Object -First 1
+if (-not $p) { throw "Printer not found: $printer" }
+Start-Process -FilePath $pdf -Verb PrintTo -ArgumentList $printer -WindowStyle Hidden -Wait -ErrorAction Stop
+`.trim();
+  await execFileAsync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', ps],
+    { windowsHide: true, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 },
+  );
 }
 
 /**
@@ -293,10 +338,29 @@ export async function printHtmlDocument(
 }
 
 /**
- * Setup wizard Test Print — prefer Edge HTML path; fall back to a minimal PDF
- * so LocalSystem installs still prove the Windows spooler + printer mapping.
+ * Setup wizard Test Print — ESC/POS RAW first (same as KOT).
+ * Never depends on SumatraPDF for thermal POS printers.
  */
 export async function printTestPage(printerName?: string | null): Promise<void> {
+  const name = printerName?.trim();
+  if (!name) {
+    throw new Error('Named printer required for test print');
+  }
+
+  const { appendAgentLog } = await import('./lifecycle.js');
+  try {
+    const raw = buildEscPosTestTicket(name);
+    await writeRawToPrinter(raw, name, 'SMART-TEST-PRINT');
+    appendAgentLog(`[print] ok test (escpos-raw) printer=${name}`);
+    return;
+  } catch (rawErr) {
+    appendAgentLog(
+      `[print] ESC/POS test failed — falling back to HTML/PDF: ${
+        rawErr instanceof Error ? rawErr.message : String(rawErr)
+      }`,
+    );
+  }
+
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"/>
 <style>
@@ -307,16 +371,15 @@ export async function printTestPage(printerName?: string | null): Promise<void> 
   <div style="text-align:center">SMART Print Agent</div>
   <div style="text-align:center">TEST PRINT</div>
   <hr/>
-  <div>Printer: ${escapeHtml(printerName || '(default)')}</div>
+  <div>Printer: ${escapeHtml(name)}</div>
   <div>Time: ${escapeHtml(new Date().toLocaleString())}</div>
   <hr/>
   <div style="text-align:center">OK</div>
 </body></html>`;
   try {
-    await printHtmlDocument(html, printerName);
+    await printHtmlDocument(html, name);
     return;
   } catch (htmlErr) {
-    const { appendAgentLog } = await import('./lifecycle.js');
     appendAgentLog(
       `[print] HTML test failed — falling back to minimal PDF: ${
         htmlErr instanceof Error ? htmlErr.message : String(htmlErr)
@@ -332,14 +395,13 @@ export async function printTestPage(printerName?: string | null): Promise<void> 
     const pdf = buildMinimalTestPdf([
       'SMART Print Agent',
       'TEST PRINT',
-      `Printer: ${printerName || '(default)'}`,
+      `Printer: ${name}`,
       `Time: ${new Date().toLocaleString()}`,
       'OK',
     ]);
     await fs.writeFile(pdfPath, pdf);
-    await printPdf(pdfPath, printerName);
-    const { appendAgentLog } = await import('./lifecycle.js');
-    appendAgentLog(`[print] ok test (minimal-pdf fallback) printer=${printerName || '(default)'}`);
+    await printPdf(pdfPath, name);
+    appendAgentLog(`[print] ok test (minimal-pdf fallback) printer=${name}`);
   } finally {
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
   }

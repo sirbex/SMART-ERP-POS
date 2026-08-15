@@ -18,6 +18,10 @@ import {
 import { brandingFromTenant } from './documentCompanyBranding';
 import { startPrintPathTrace } from './printPathTiming';
 import { getApiBaseUrl } from './apiBase';
+import {
+  isPrintJobFreshForFlush as isFreshSsot,
+  PRINT_JOB_FLUSH_MAX_AGE_MS as FLUSH_MAX_AGE_SSOT,
+} from './printSpoolIntegritySsot';
 
 export type ClientPrintDocumentType = 'KOT' | 'VOID_KOT' | 'GUEST_BILL' | 'RECEIPT';
 
@@ -28,6 +32,8 @@ export interface ClientPrintJob {
   payloadJson: Record<string, unknown>;
   status?: string;
   stationCode?: string | null;
+  /** ISO created time — used to skip stale flush reprints */
+  createdAt?: string | null;
   /** Offline-only id — skip server status PATCH */
   offline?: boolean;
 }
@@ -36,6 +42,8 @@ const OFFLINE_QUEUE_KEY = 'pos.printJobs.offlineQueue.v1';
 /** Job IDs already printed on this terminal — survives logout; TTL 24h. */
 const DELIVERED_KEY = 'pos.printJobs.delivered.v1';
 const DELIVERED_TTL_MS = 24 * 60 * 60 * 1000;
+/** Do not auto-flush tickets older than this (stops late ghost reprints). */
+export const PRINT_JOB_FLUSH_MAX_AGE_MS = FLUSH_MAX_AGE_SSOT;
 const DOC_TYPES = new Set<string>(['KOT', 'VOID_KOT', 'GUEST_BILL', 'RECEIPT']);
 
 type DeliveredMap = Record<string, number>;
@@ -134,8 +142,16 @@ export function normalizePrintJob(raw: unknown): ClientPrintJob | null {
       (typeof r.stationCode === 'string' && r.stationCode) ||
       (typeof r.station_code === 'string' && r.station_code) ||
       null,
+    createdAt:
+      (typeof r.createdAt === 'string' && r.createdAt) ||
+      (typeof r.created_at === 'string' && r.created_at) ||
+      null,
     offline: Boolean(r.offline),
   };
+}
+
+export function isPrintJobFreshForFlush(job: ClientPrintJob, now = Date.now()): boolean {
+  return isFreshSsot(job.createdAt, now, PRINT_JOB_FLUSH_MAX_AGE_MS);
 }
 
 export function enqueueOfflinePrintJob(
@@ -146,6 +162,7 @@ export function enqueueOfflinePrintJob(
     id: job.id || `ofl_pj_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     offline: true,
     status: 'PENDING',
+    createdAt: job.createdAt || new Date().toISOString(),
   };
   const q = readOfflineQueue().filter((j) => j.id !== full.id);
   q.push(full);
@@ -400,11 +417,15 @@ export async function flushPendingPrintJobs(opts?: {
   branding?: ReturnType<typeof brandingFromTenant> | null;
   online?: boolean;
 }): Promise<{ delivered: number; failures: number }> {
+  const now = Date.now();
   const offline = readOfflineQueue()
     .map((j) => normalizePrintJob(j))
     .filter(
       (j): j is ClientPrintJob =>
-        !!j && j.status !== 'PRINTED' && !wasPrintJobDeliveredLocally(j.id),
+        !!j &&
+        j.status !== 'PRINTED' &&
+        !wasPrintJobDeliveredLocally(j.id) &&
+        isPrintJobFreshForFlush(j, now),
     );
 
   let serverJobs: ClientPrintJob[] = [];
@@ -414,7 +435,10 @@ export async function flushPendingPrintJobs(opts?: {
       const rows = (res.data.data || []) as unknown[];
       serverJobs = rows
         .map((j) => normalizePrintJob(j))
-        .filter((j): j is ClientPrintJob => !!j && !wasPrintJobDeliveredLocally(j.id));
+        .filter(
+          (j): j is ClientPrintJob =>
+            !!j && !wasPrintJobDeliveredLocally(j.id) && isPrintJobFreshForFlush(j, now),
+        );
 
       // Heal server rows for jobs we already printed locally (PATCH aborted by logout).
       for (const row of rows) {

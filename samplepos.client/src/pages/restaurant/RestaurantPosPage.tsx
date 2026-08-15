@@ -2413,7 +2413,9 @@ export default function RestaurantPosPage() {
     const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
     if (unsentCount === 0) return { kotCount: 0, printFailures: 0 };
 
-    const awaitPrint = opts?.awaitPrint === true;
+    // Integrity: await spool confirm (ESC/POS is near-instant) so toast matches paper.
+    // Floor return still happens after this returns — steward is not stuck on HTML→PDF.
+    const awaitPrint = opts?.awaitPrint !== false;
 
     const deliverJobs = async (
       jobs: ClientPrintJob[],
@@ -2566,7 +2568,7 @@ export default function RestaurantPosPage() {
       return { kotCount, printFailures };
     }
 
-    // Default: steward continues immediately after kitchen commit.
+    // Explicit awaitPrint:false — rare; background delivery with honest failure toast.
     void (printJobs && printJobs.length > 0 ? deliverJobs(printJobs) : runLegacyPrint()).then(
       (printFailures) => {
         if (printFailures > 0) {
@@ -2583,9 +2585,9 @@ export default function RestaurantPosPage() {
   };
 
   /**
-   * Expert POS rule: kitchen commit is SSOT; print is best-effort.
+   * Expert POS rule: kitchen commit is SSOT; print must be honest (spool-confirmed).
    * After KOT (including no new items), always return to the floor — never leave
-   * the waiter stuck on a check.
+   * the waiter stuck on a check. ESC/POS spool wait is near-instant.
    */
   const handleSendKot = async () => {
     if (!order) return;
@@ -2602,15 +2604,14 @@ export default function RestaurantPosPage() {
         return;
       }
 
-      // When FOH will auto-logout, await paper + PRINTED status so re-login
-      // flushPendingPrintJobs does not reprint the same tickets.
+      // Await spool + PRINTED so toast matches paper and re-login flush cannot re-paper.
       const willAutoLogout = decideRestaurantFohAutoLogout({
         kind: 'kot',
         role: user?.role,
         permissions,
       });
       const { kotCount, printFailures } = await fireUnsentKotTickets({
-        awaitPrint: willAutoLogout,
+        awaitPrint: true,
       });
       if (kotCount === 0) {
         toast.success('Nothing new for kitchen — back to tables');
@@ -2627,7 +2628,7 @@ export default function RestaurantPosPage() {
             : `Sent ${kotCount} KOT ticket(s)`,
         );
       } else {
-        toast.success(kotPrintPartialSuccessMessage(kotCount, printFailures), {
+        toast.error(kotPrintPartialSuccessMessage(kotCount, printFailures), {
           duration: 7000,
         });
       }
@@ -2860,28 +2861,18 @@ export default function RestaurantPosPage() {
             currencySymbol: config.currency?.symbol,
           },
         }));
-        if (willAutoLogoutBill) {
-          // Auto-logout: await PRINTED so re-login flush cannot re-paper.
-          const dispatched = await dispatchPrintJobs(jobs, {
-            branding: guestBillDispatchBranding,
-            awaitStatusSync: true,
+        // Await spool confirm (ESC/POS is fast) so toast matches paper.
+        const dispatched = await dispatchPrintJobs(jobs, {
+          branding: guestBillDispatchBranding,
+          awaitStatusSync: willAutoLogoutBill,
+        });
+        if (dispatched.failures > 0) {
+          toast.error('Bill marked (print unavailable — check guest-bill printer)', {
+            duration: 7000,
+            id: 'bill-print-bg-fail',
           });
-          if (dispatched.failures > 0) {
-            toast.error('Bill marked (print unavailable)', {
-              duration: 5000,
-              id: 'bill-print-bg-fail',
-            });
-          }
-        } else {
-          // Steward continues immediately — do not block floor return on paper.
-          void dispatchPrintJobs(jobs, { branding: guestBillDispatchBranding }).then((dispatched) => {
-            if (dispatched.failures > 0) {
-              toast.error('Bill marked (print unavailable)', {
-                duration: 5000,
-                id: 'bill-print-bg-fail',
-              });
-            }
-          });
+        } else if (dispatched.delivered > 0) {
+          toast.success('Bill printed', { id: 'bill-print-ok' });
         }
       } else if (willAutoLogoutBill) {
         try {

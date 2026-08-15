@@ -15,7 +15,9 @@ import {
   scheduleSelfRestart,
 } from './lifecycle.js';
 import {
+  enqueueAndWait,
   enqueuePrintJob,
+  getJobRecord,
   getQueueDepth,
   getQueueSnapshot,
   isPrinting,
@@ -56,7 +58,7 @@ export function createAgentApp(): Express {
     cors({
       origin: true,
       methods: ['GET', 'POST', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'X-Printer-Name', 'X-Print-Format'],
+      allowedHeaders: ['Content-Type', 'X-Printer-Name', 'X-Print-Format', 'X-Print-Wait'],
     }),
   );
 
@@ -167,10 +169,10 @@ export function createAgentApp(): Express {
   app.get('/list-printers', listPrintersHandler);
 
   /**
-   * POST /print — accept in milliseconds; never await Get-Printer or PDF/RAW render.
-   * Formats:
-   *   - text/html → Chromium PDF path (invoices / fallback)
-   *   - application/octet-stream + X-Print-Format: escpos → RAW ESC/POS (KOT)
+   * POST /print
+   * - Named printer required (header or wizard role) — never Windows default / PDF ghost.
+   * - X-Print-Wait: spool → await WritePrinter/HTML spool, then 200 { spooled:true }.
+   * - Without wait header → 202 accepted (legacy); clients should poll GET /print/jobs/:id.
    */
   app.post(
     '/print',
@@ -187,15 +189,30 @@ export function createAgentApp(): Express {
           ? req.headers['x-printer-name']
           : '') || null;
       const trimmed = printerName?.trim() || null;
-      // Prefer wizard roles when client omits name — never silent-null to wrong default without roles.
       const roles = readPrinterRoles();
+      const waitHeader = String(req.headers['x-print-wait'] || '')
+        .trim()
+        .toLowerCase();
+      const waitSpool = waitHeader === 'spool' || waitHeader === '1' || waitHeader === 'true';
+      const isEscPos = isEscPosRequest(req);
+      // Prefer explicit name; else wizard role for the document class (never OS default).
       const resolvedPrinter =
         trimmed ||
-        (roles.receipt?.trim() || null) ||
+        (isEscPos
+          ? roles.kitchen?.trim() || roles.bar?.trim() || roles.receipt?.trim() || null
+          : roles.receipt?.trim() || null) ||
         null;
+      if (!resolvedPrinter) {
+        res.status(400).json({
+          success: false,
+          error:
+            'Named printer required. Set X-Printer-Name or complete Print Agent setup roles (no Windows default).',
+        });
+        return;
+      }
       const id = `local_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
-      if (isEscPosRequest(req)) {
+      if (isEscPos) {
         const buf = Buffer.isBuffer(req.body)
           ? req.body
           : Buffer.from(typeof req.body === 'string' ? req.body : '');
@@ -203,20 +220,69 @@ export function createAgentApp(): Express {
           res.status(400).json({ success: false, error: 'Empty ESC/POS body' });
           return;
         }
-        enqueuePrintJob({
+        const job = {
           id,
-          format: 'escpos',
+          format: 'escpos' as const,
           payload: buf.toString('base64'),
           printerName: resolvedPrinter,
-        });
+        };
+        if (waitSpool) {
+          try {
+            const rec = await enqueueAndWait(job, 12_000);
+            const acceptMs = Date.now() - t0;
+            if (rec.status !== 'SPOOL_OK') {
+              appendAgentLog(
+                `[print] spool-fail id=${id} format=escpos status=${rec.status} err=${rec.lastError || ''}`,
+              );
+              res.status(502).json({
+                success: false,
+                id,
+                spooled: false,
+                status: rec.status,
+                error: rec.lastError || 'Spool failed',
+                printerName: resolvedPrinter,
+                acceptMs,
+              });
+              return;
+            }
+            appendAgentLog(
+              `[print] spooled id=${id} format=escpos bytes=${buf.length} printer=${resolvedPrinter} acceptMs=${acceptMs}`,
+            );
+            res.status(200).json({
+              success: true,
+              id,
+              accepted: true,
+              spooled: true,
+              status: 'SPOOL_OK',
+              format: 'escpos',
+              printerName: resolvedPrinter,
+              queueDepth: getQueueDepth(),
+              acceptMs,
+            });
+            return;
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            appendAgentLog(`[print] spool-timeout id=${id} format=escpos: ${message}`);
+            res.status(504).json({
+              success: false,
+              id,
+              spooled: false,
+              error: message,
+              printerName: resolvedPrinter,
+            });
+            return;
+          }
+        }
+        enqueuePrintJob(job);
         const acceptMs = Date.now() - t0;
         appendAgentLog(
-          `[print] accepted id=${id} format=escpos bytes=${buf.length} printer=${resolvedPrinter || '(windows-default)'} acceptMs=${acceptMs}`,
+          `[print] accepted id=${id} format=escpos bytes=${buf.length} printer=${resolvedPrinter} acceptMs=${acceptMs}`,
         );
         res.status(202).json({
           success: true,
           id,
           accepted: true,
+          spooled: false,
           format: 'escpos',
           printerName: resolvedPrinter,
           queueDepth: getQueueDepth(),
@@ -230,15 +296,69 @@ export function createAgentApp(): Express {
         res.status(400).json({ success: false, error: 'Empty print body' });
         return;
       }
-      enqueuePrintJob({ id, format: 'html', payload: html, printerName: resolvedPrinter });
+      const htmlJob = {
+        id,
+        format: 'html' as const,
+        payload: html,
+        printerName: resolvedPrinter,
+      };
+      if (waitSpool) {
+        try {
+          const rec = await enqueueAndWait(htmlJob, 45_000);
+          const acceptMs = Date.now() - t0;
+          if (rec.status !== 'SPOOL_OK') {
+            appendAgentLog(
+              `[print] spool-fail id=${id} format=html status=${rec.status} err=${rec.lastError || ''}`,
+            );
+            res.status(502).json({
+              success: false,
+              id,
+              spooled: false,
+              status: rec.status,
+              error: rec.lastError || 'Spool failed',
+              printerName: resolvedPrinter,
+              acceptMs,
+            });
+            return;
+          }
+          appendAgentLog(
+            `[print] spooled id=${id} format=html printer=${resolvedPrinter} acceptMs=${acceptMs}`,
+          );
+          res.status(200).json({
+            success: true,
+            id,
+            accepted: true,
+            spooled: true,
+            status: 'SPOOL_OK',
+            format: 'html',
+            printerName: resolvedPrinter,
+            queueDepth: getQueueDepth(),
+            acceptMs,
+          });
+          return;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          appendAgentLog(`[print] spool-timeout id=${id} format=html: ${message}`);
+          res.status(504).json({
+            success: false,
+            id,
+            spooled: false,
+            error: message,
+            printerName: resolvedPrinter,
+          });
+          return;
+        }
+      }
+      enqueuePrintJob(htmlJob);
       const acceptMs = Date.now() - t0;
       appendAgentLog(
-        `[print] accepted id=${id} format=html printer=${resolvedPrinter || '(windows-default)'} acceptMs=${acceptMs}`,
+        `[print] accepted id=${id} format=html printer=${resolvedPrinter} acceptMs=${acceptMs}`,
       );
       res.status(202).json({
         success: true,
         id,
         accepted: true,
+        spooled: false,
         format: 'html',
         printerName: resolvedPrinter,
         queueDepth: getQueueDepth(),
@@ -246,6 +366,15 @@ export function createAgentApp(): Express {
       });
     }),
   );
+
+  app.get('/print/jobs/:id', (req, res) => {
+    const rec = getJobRecord(String(req.params.id || ''));
+    if (!rec) {
+      res.status(404).json({ success: false, error: 'Job not found' });
+      return;
+    }
+    res.json({ success: true, job: rec });
+  });
 
   app.post(
     '/test-print',

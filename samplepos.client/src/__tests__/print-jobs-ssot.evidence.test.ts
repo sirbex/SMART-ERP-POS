@@ -167,29 +167,33 @@ describe('Print Job SSOT (multi-printer)', () => {
     const dispatcher = readRepo('samplepos.client/src/lib/printJobDispatcher.ts');
     expect(dispatcher).toMatch(/flushPendingPrintJobs/);
     expect(dispatcher).toMatch(/markJobStatusBackground/);
+    expect(dispatcher).toMatch(/PRINT_JOB_FLUSH_MAX_AGE_MS/);
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/flushPendingPrintJobs/);
-    // KOT tap must not block floor return on paper delivery.
-    expect(pos).toMatch(/awaitPrint/);
-    expect(pos).toMatch(/steward continues immediately after kitchen commit/);
-    // Bill commit unlocks steward; paper delivery must not block (same as KOT).
-    expect(pos).toMatch(/do not block floor return on paper/);
-    expect(pos).toMatch(/void dispatchPrintJobs\(jobs/);
+    // KOT awaits spool confirm (ESC/POS near-instant) so toast matches paper.
+    expect(pos).toMatch(/awaitPrint:\s*true/);
+    expect(pos).toMatch(/spool confirm|spool-confirmed|Await spool/i);
   });
 
-  it('EVIDENCE: agent /print accepts without Get-Printer on hot path', () => {
+  it('EVIDENCE: agent /print can await spool; named printer required', () => {
     const server = readRepo('smart-print-agent/src/server.ts');
-    expect(server).toMatch(/status\(202\)/);
-    expect(server).not.toMatch(/await assertPrinterExists/);
-    const printers = readRepo('smart-print-agent/src/printers.ts');
-    expect(printers).toMatch(/CACHE_TTL_MS/);
-    expect(printers).toMatch(/warmPrinterCache/);
+    expect(server).toMatch(/X-Print-Wait|waitSpool|enqueueAndWait/);
+    expect(server).toMatch(/Named printer required/);
+    expect(server).toMatch(/spooled:\s*true/);
+    expect(server).toMatch(/\/print\/jobs\/:id/);
+    const queue = readRepo('smart-print-agent/src/printQueue.ts');
+    expect(queue).toMatch(/SPOOL_OK/);
+    expect(queue).toMatch(/enqueueAndWait/);
+    const raw = readRepo('smart-print-agent/src/rawPrint.ts');
+    expect(raw).toMatch(/WritePrinter partial write/);
   });
 
   it('EVIDENCE: restaurant bridge never parallel-POSTs both loopback origins', () => {
     const restaurant = readRepo('samplepos.client/src/lib/printRestaurant.ts');
     expect(restaurant).toMatch(/try origins sequentially/);
     expect(restaurant).not.toMatch(/Promise\.all\(attempts\)/);
+    expect(restaurant).toMatch(/X-Print-Wait/);
+    expect(restaurant).toMatch(/allowUnnamedAgentDefault:\s*false/);
     const bridge = readRepo('samplepos.client/src/lib/localPrintBridge.ts');
     expect(bridge).toMatch(/127\.0\.0\.1:1811/);
   });

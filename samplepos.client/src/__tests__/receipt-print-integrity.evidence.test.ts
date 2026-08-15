@@ -258,7 +258,9 @@ describe('EVIDENCE — receipt integrity (enable independent of KOT/bill)', () =
 
     const thermal = readClient('lib/printRestaurant.ts');
     expect(thermal).toMatch(/allowUnnamedAgentDefault/);
-    expect(thermal).toMatch(/namedOnly|No receipt printer named|false success|OS default|unnamed/i);
+    expect(thermal).toMatch(/namedOnly|No receipt printer named|No printer named|false success|OS default|unnamed/i);
+    expect(thermal).toMatch(/allowUnnamedAgentDefault:\s*false/);
+    expect(thermal).toMatch(/X-Print-Wait/);
 
     const health = readClient('lib/printAgentHealth.ts');
     expect(health).toMatch(/export function resolveAgentPrinterRole/);

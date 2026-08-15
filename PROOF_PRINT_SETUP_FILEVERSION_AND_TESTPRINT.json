@@ -1,0 +1,17 @@
+{
+  "proof": "PRINT_SETUP_FILEVERSION_AND_TESTPRINT",
+  "verdict": "PASS",
+  "setupExe": "installer/dist/SMART-ERP-POS-PrintService-Setup.exe",
+  "fileVersion": "1.4.0.0",
+  "productVersion": "1.4.0",
+  "compiledAt": "2026-08-15T09:09:52Z",
+  "agentVitest": { "passed": 21, "failed": 0 },
+  "sumatraGap": {
+    "symptom": "SumatraPDF-3.4.6-32.exe -print-to Baristar -silent ticket.pdf",
+    "rootCause": "wizard test print used pdf-to-printer instead of ESC/POS RAW",
+    "fix": "printTestPage primary path = writeRawToPrinter(buildEscPosTestTicket)",
+    "priorTestsMissed": true,
+    "reasonMissed": "printTestPage was mocked in HTTP suite"
+  },
+  "timestamp": "2026-08-15T09:10:30.000Z"
+}

@@ -34,25 +34,42 @@ import {
 } from './restaurantPrintPolicy';
 import { getPrinterServiceHealthCache } from './printAgentHealth';
 import { startPrintPathTrace } from './printPathTiming';
+import {
+  agentSupportsSpoolWaitFromHealth,
+  bridgeRejectsUnnamedPrinter,
+  classifyAgentPrintHttp,
+  parseAgentVersion,
+  resolveJobPollOutcome,
+} from './printSpoolIntegritySsot';
 
 type BridgeResult = {
   ok: boolean;
   reason?: 'offline' | 'unknown_printer' | 'rejected';
   acceptMs?: number;
+  jobId?: string;
+  spooled?: boolean;
 };
 
-function bridgePreflight(printerName?: string | null): BridgeResult | null {
-  const name = printerName?.trim() || null;
+/** Agent ≥ 1.4 confirms spool before success (X-Print-Wait). */
+function agentSupportsSpoolWait(): boolean {
   const health = getPrinterServiceHealthCache();
-  if (name) {
-    if (health.status === 'offline') return { ok: false, reason: 'offline' };
-    const cached = readCachedBridgePrinters();
-    if (cached.length > 0) {
-      const hit = cached.some((p) => p.toLowerCase() === name.toLowerCase());
-      if (!hit) return { ok: false, reason: 'unknown_printer' };
-    }
-  } else if (health.status === 'offline') {
-    return { ok: false, reason: 'offline' };
+  return agentSupportsSpoolWaitFromHealth({
+    version: health.version,
+    status: health.status,
+  });
+}
+
+function bridgePreflight(printerName?: string | null): BridgeResult | null {
+  if (bridgeRejectsUnnamedPrinter(printerName)) {
+    return { ok: false, reason: 'rejected' };
+  }
+  const name = printerName!.trim();
+  const health = getPrinterServiceHealthCache();
+  if (health.status === 'offline') return { ok: false, reason: 'offline' };
+  const cached = readCachedBridgePrinters();
+  if (cached.length > 0) {
+    const hit = cached.some((p) => p.toLowerCase() === name.toLowerCase());
+    if (!hit) return { ok: false, reason: 'unknown_printer' };
   }
   return null;
 }
@@ -69,7 +86,79 @@ function finalizeBridgeMiss(
   return { ok: false, reason: 'offline' };
 }
 
-/** Agent returns 200 or 202 once the job is queued (paper prints async). */
+async function pollJobSpooled(
+  origin: string,
+  jobId: string,
+  timeoutMs: number,
+): Promise<'ok' | 'fail' | 'unsupported'> {
+  const deadline = Date.now() + timeoutMs;
+  let sawUnsupported = false;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${origin}/print/jobs/${encodeURIComponent(jobId)}`, {
+        signal: AbortSignal.timeout(1500),
+      });
+      if (res.status === 404) {
+        sawUnsupported = true;
+        break;
+      }
+      if (res.ok) {
+        const body = (await res.json()) as { job?: { status?: string } };
+        const status = body?.job?.status;
+        if (status === 'SPOOL_OK') return 'ok';
+        if (status === 'FAILED' || status === 'DROPPED') return 'fail';
+      }
+    } catch {
+      /* retry */
+    }
+    await new Promise((r) => setTimeout(r, 80));
+  }
+  return sawUnsupported ? 'unsupported' : 'fail';
+}
+
+async function interpretPrintResponse(
+  origin: string,
+  bridgeRes: Response,
+  waited: boolean,
+): Promise<BridgeResult | 'continue' | 'unknown'> {
+  let body: { id?: string; spooled?: boolean; success?: boolean } | null = null;
+  try {
+    body = (await bridgeRes.json()) as { id?: string; spooled?: boolean; success?: boolean };
+  } catch {
+    body = null;
+  }
+
+  const classified = classifyAgentPrintHttp(bridgeRes.status, body, { waited });
+  if (classified.kind === 'client_error') return 'unknown';
+  if (classified.kind === 'server_error_retry' || classified.kind === 'continue') {
+    return 'continue';
+  }
+  if (classified.kind === 'spooled_ok') {
+    return { ok: true, jobId: classified.jobId, spooled: true };
+  }
+  if (classified.kind === 'reject') {
+    return { ok: false, reason: 'rejected', jobId: classified.jobId };
+  }
+  if (classified.kind === 'ok_unspecified') {
+    return { ok: true, jobId: classified.jobId, spooled: false };
+  }
+
+  // legacy_202 — poll when possible
+  const polled = await pollJobSpooled(origin, classified.jobId, waited ? 12_000 : 8_000);
+  const outcome = resolveJobPollOutcome(polled);
+  if (outcome === 'spooled_ok') {
+    return { ok: true, jobId: classified.jobId, spooled: true };
+  }
+  if (outcome === 'reject') {
+    return { ok: false, reason: 'rejected', jobId: classified.jobId };
+  }
+  return { ok: true, jobId: classified.jobId, spooled: false };
+}
+
+/**
+ * Agent ≥1.4: X-Print-Wait spool → success only after WritePrinter/HTML spool.
+ * Named printer required — never Windows default (PDF ghost).
+ */
 async function postToPrintBridge(
   html: string,
   printerName?: string | null,
@@ -83,31 +172,37 @@ async function postToPrintBridge(
   }
   trace.mark('preflight_done');
 
+  const wait = agentSupportsSpoolWait();
   const headers: Record<string, string> = {
     'Content-Type': 'text/html; charset=utf-8',
+    'X-Printer-Name': name!,
   };
-  if (name) headers['X-Printer-Name'] = name;
+  if (wait) headers['X-Print-Wait'] = 'spool';
 
   // CRITICAL: try origins sequentially. Parallel POST to localhost + 127.0.0.1
   // both hit the same agent and enqueue TWO identical jobs → double paper.
   let sawUnknown = false;
+  const timeoutMs = wait ? 45_000 : 1500;
   for (const origin of LOCAL_PRINT_BRIDGE_ORIGINS) {
     try {
       const bridgeRes = await fetch(`${origin}/print`, {
         method: 'POST',
         headers,
         body: html,
-        signal: AbortSignal.timeout(1500),
+        signal: AbortSignal.timeout(timeoutMs),
       });
-      if (bridgeRes.ok || bridgeRes.status === 202) {
-        trace.mark('agent_responded');
-        trace.end({ ok: true, origin, format: 'html' });
-        return { ok: true, acceptMs: trace.elapsedMs() };
-      }
-      if (bridgeRes.status >= 400 && bridgeRes.status < 500) {
+      const interpreted = await interpretPrintResponse(origin, bridgeRes, wait);
+      if (interpreted === 'unknown') {
         sawUnknown = true;
         break;
       }
+      if (interpreted === 'continue') continue;
+      trace.mark('agent_responded');
+      trace.end({ ok: interpreted.ok, origin, format: 'html', spooled: interpreted.spooled });
+      if (interpreted.ok) {
+        return { ...interpreted, acceptMs: trace.elapsedMs() };
+      }
+      return interpreted;
     } catch {
       // try next origin
     }
@@ -118,7 +213,7 @@ async function postToPrintBridge(
   return miss;
 }
 
-/** RAW ESC/POS — no Chromium. Requires Print Agent ≥ 1.3.0. */
+/** RAW ESC/POS — no Chromium. Requires Print Agent ≥ 1.3.0; spool wait ≥ 1.4.0. */
 async function postEscPosToPrintBridge(
   raw: Uint8Array,
   printerName?: string | null,
@@ -132,30 +227,36 @@ async function postEscPosToPrintBridge(
   }
   trace.mark('preflight_done');
 
+  const wait = agentSupportsSpoolWait();
   const headers: Record<string, string> = {
     'Content-Type': 'application/octet-stream',
     'X-Print-Format': 'escpos',
+    'X-Printer-Name': name!,
   };
-  if (name) headers['X-Printer-Name'] = name;
+  if (wait) headers['X-Print-Wait'] = 'spool';
 
   let sawUnknown = false;
+  const timeoutMs = wait ? 12_000 : 1500;
   for (const origin of LOCAL_PRINT_BRIDGE_ORIGINS) {
     try {
       const bridgeRes = await fetch(`${origin}/print`, {
         method: 'POST',
         headers,
         body: raw,
-        signal: AbortSignal.timeout(1500),
+        signal: AbortSignal.timeout(timeoutMs),
       });
-      if (bridgeRes.ok || bridgeRes.status === 202) {
-        trace.mark('agent_responded');
-        trace.end({ ok: true, origin, format: 'escpos' });
-        return { ok: true, acceptMs: trace.elapsedMs() };
-      }
-      if (bridgeRes.status >= 400 && bridgeRes.status < 500) {
+      const interpreted = await interpretPrintResponse(origin, bridgeRes, wait);
+      if (interpreted === 'unknown') {
         sawUnknown = true;
         break;
       }
+      if (interpreted === 'continue') continue;
+      trace.mark('agent_responded');
+      trace.end({ ok: interpreted.ok, origin, format: 'escpos', spooled: interpreted.spooled });
+      if (interpreted.ok) {
+        return { ...interpreted, acceptMs: trace.elapsedMs() };
+      }
+      return interpreted;
     } catch {
       // try next origin
     }
@@ -168,14 +269,10 @@ async function postEscPosToPrintBridge(
 
 function agentSupportsEscPos(): boolean {
   const health = getPrinterServiceHealthCache();
-  const v = health.version;
-  if (v) {
-    const m = /^(\d+)\.(\d+)/.exec(v);
-    if (!m) return false;
-    const major = Number(m[1]);
-    const minor = Number(m[2]);
+  const ver = parseAgentVersion(health.version);
+  if (ver) {
     // Explicit old agent → HTML only (binary would be mis-handled as text).
-    if (!(major > 1 || (major === 1 && minor >= 3))) return false;
+    if (!(ver.major > 1 || (ver.major === 1 && ver.minor >= 3))) return false;
     return true;
   }
   // Version not cached yet but agent is up — try ESC/POS (HTML fallback on miss).
@@ -204,24 +301,22 @@ export function resolveStationPrinterName(stationCode: string | null | undefined
 /**
  * Silent restaurant print SSOT.
  * 1) Mapped name → bridge only (never send a kitchen ticket to the wrong default printer)
- * 2) Unmapped → default bridge printer
+ * 2) Unmapped → fail closed (no Windows default / PDF ghost)
  * 3) Browser dialog only if emergency fallback is enabled on this terminal
  */
 async function printHtml(html: string, printerName?: string | null): Promise<void> {
   const name = printerName?.trim() || null;
   const allowBrowser = isRestaurantBrowserPrintFallbackEnabled();
 
-  if (name) {
-    const delivered = await postToPrintBridge(html, name);
-    if (delivered.ok) return;
+  if (!name) {
     if (allowBrowser) return printHtmlDocument(html);
-    throw new Error(silentPrintFailureMessage(name));
+    throw new Error(silentPrintFailureMessage(null));
   }
 
-  const delivered = await postToPrintBridge(html, null);
+  const delivered = await postToPrintBridge(html, name);
   if (delivered.ok) return;
   if (allowBrowser) return printHtmlDocument(html);
-  throw new Error(silentPrintFailureMessage(null));
+  throw new Error(silentPrintFailureMessage(name));
 }
 
 export interface KotPrintData extends DocumentCompanyBranding {
@@ -283,7 +378,17 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   const printer = data.printerName || resolveStationPrinterName(data.station);
   const allowBrowser = isRestaurantBrowserPrintFallbackEnabled();
 
-  // Primary: ESC/POS RAW (near-instant). Fallback: HTML→PDF for agents < 1.3.0.
+  if (!printer?.trim()) {
+    if (allowBrowser) {
+      const html = renderThermalTicketHtml(ticket, buildThermalPrintCss(80));
+      return printHtmlDocument(html);
+    }
+    throw new Error(
+      'Kitchen station has no Windows printer mapped. Map it on Stations before sending KOT.',
+    );
+  }
+
+  // Primary: ESC/POS RAW (near-instant spool confirm). Fallback: HTML→PDF for agents < 1.3.0.
   if (agentSupportsEscPos()) {
     const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const raw = renderThermalTicketEscPos(ticket);
@@ -297,13 +402,10 @@ export async function printKitchenTicket(data: KotPrintData): Promise<void> {
   }
 
   const html = renderThermalTicketHtml(ticket, buildThermalPrintCss(80));
-  if (printer) {
-    const delivered = await postToPrintBridge(html, printer);
-    if (delivered.ok) return;
-    if (allowBrowser) return printHtmlDocument(html);
-    throw new Error(silentPrintFailureMessage(printer));
-  }
-  await printHtml(html, printer);
+  const delivered = await postToPrintBridge(html, printer);
+  if (delivered.ok) return;
+  if (allowBrowser) return printHtmlDocument(html);
+  throw new Error(silentPrintFailureMessage(printer));
 }
 
 export interface BillPrintData extends DocumentCompanyBranding {
@@ -367,10 +469,10 @@ export type GuestThermalPrintResult = {
  * Shared guest thermal delivery (GUEST BILL + paid RECEIPT).
  * Prefer ESC/POS + named agent printer (same path that makes bills work).
  *
- * IMPORTANT (sale receipts): after the browser grants "use local network devices",
+ * IMPORTANT (all silent thermal): after the browser grants "use local network devices",
  * POST :1811 often returns 202 for Windows **default** printer (PDF / ghost).
- * That looks like success but produces no thermal paper. Sale receipts must use
- * named printers only (`allowUnnamedAgentDefault: false`).
+ * That looks like success but produces no thermal paper. KOT, bills, and sale receipts
+ * must use named printers only (`allowUnnamedAgentDefault: false`).
  */
 export async function printGuestThermalDocument(
   doc: ThermalGuestDocument,
@@ -386,8 +488,8 @@ export async function printGuestThermalDocument(
     /** Prefer in-app modal (not window.open) so popup blockers cannot hide failure. */
     preferInAppPreview?: boolean;
     /**
-     * When true (KOT/bill default), last try uses agent Windows default (no name header).
-     * When false (sale receipts), never silent-accept unnamed default — use preview instead.
+     * When true, last try uses agent Windows default (no name header) — legacy only.
+     * Default false: never silent-accept unnamed default (PDF / ghost).
      */
     allowUnnamedAgentDefault?: boolean;
   },
@@ -404,8 +506,7 @@ export async function printGuestThermalDocument(
   };
   push(opts?.printerName);
   for (const f of opts?.fallbackPrinterNames || []) push(f);
-  // Unnamed Windows default — NOT for sale receipts (false 202 → PDF / no paper).
-  // Default false for safety after Chrome "local network" grant; bills/KOT pass true.
+  // Unnamed Windows default — forbidden (false 202 → PDF / no paper).
   if (opts?.allowUnnamedAgentDefault === true) {
     const key = '';
     if (!tried.has(key)) {
@@ -418,10 +519,10 @@ export async function printGuestThermalDocument(
   const triedList = [...queue];
   const namedOnly = queue.filter((p): p is string => !!p);
 
-  // No named destination: sale receipts → visible print; KOT/bill may still use OS default.
+  // No named destination → visible print / fail closed (never silent OS default).
   if (namedOnly.length === 0) {
     if (opts?.allowUnnamedAgentDefault === true) {
-      // continue below to agent with null (legacy KOT/bill default path)
+      // continue below to agent with null (legacy only — callers should not pass this)
     } else {
       const htmlEmpty = buildThermalGuestDocumentHtml(doc);
       if (opts?.openBrowserPreviewOnFailure !== false) {
@@ -441,7 +542,7 @@ export async function printGuestThermalDocument(
         return { method: 'browser', printerName: null, triedPrinters: triedList };
       }
       throw new Error(
-        'No receipt printer named in Settings → Printing or Print Agent roles. Set Thermal Printer Name to the exact Windows printer name.',
+        'No printer named in Settings → Printing, Stations, or Print Agent roles. Set the exact Windows printer name (never OS default).',
       );
     }
   }
@@ -700,7 +801,7 @@ export async function printRestaurantBill(data: BillPrintData): Promise<void> {
     // Bills stay silent — emergency browser only via stations policy when named miss.
     allowBrowserFallback: isRestaurantBrowserPrintFallbackEnabled(),
     openBrowserPreviewOnFailure: false,
-    // Named guest-bill preferred; still allow Windows default when unmapped (legacy).
-    allowUnnamedAgentDefault: true,
+    // Named guest-bill required — never Windows default (PDF / ghost).
+    allowUnnamedAgentDefault: false,
   });
 }

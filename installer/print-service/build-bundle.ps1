@@ -83,6 +83,7 @@ Copy-Item (Join-Path $PSScriptRoot 'SMART-Print-Service.xml') (Join-Path $outRoo
 # 5) User-facing launchers (no PowerShell window)
 Copy-Item (Join-Path $PSScriptRoot 'Start-PrintService.vbs') (Join-Path $outRoot 'Start-PrintService.vbs')
 Copy-Item (Join-Path $PSScriptRoot 'Open-Printer-Setup.vbs') (Join-Path $outRoot 'Open-Printer-Setup.vbs')
+Copy-Item (Join-Path $PSScriptRoot 'Stop-PrintService-ForUpgrade.cmd') (Join-Path $outRoot 'Stop-PrintService-ForUpgrade.cmd')
 Copy-Item (Join-Path $PSScriptRoot 'MANAGER-README.txt') (Join-Path $outRoot 'README.txt')
 
 # Marker for health / diagnostics (UTF-8 without BOM — Node JSON.parse rejects BOM)
