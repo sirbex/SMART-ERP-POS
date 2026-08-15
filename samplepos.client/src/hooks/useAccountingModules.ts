@@ -238,11 +238,38 @@ export function useGrirBalance() {
   });
 }
 
-export function useGrirMatchCandidates(supplierId?: string) {
+export function useGrirResiduals(enabled = true) {
   return useQuery({
-    queryKey: [...accountingKeys.grirClearing.all, 'candidates', supplierId],
+    queryKey: [...accountingKeys.grirClearing.all, 'residuals'],
     queryFn: async () => {
-      const res = await api.grirClearing.getMatchCandidates(supplierId ? { supplierId } : undefined);
+      const res = await api.grirClearing.getResiduals({ limit: 100 });
+      return res.data?.data as {
+        items: Array<{
+          referenceNumber: string;
+          referenceType: string;
+          netCr: number;
+          firstDate: string | null;
+          lastDate: string | null;
+          txnCount: number;
+          description: string | null;
+          recommendedMethod: 'TO_PRICE_VARIANCE' | 'TO_RETURN_CLEARING' | 'RECLASS_FROM_EXPENSE';
+          reasonCode: string;
+        }>;
+        trueGlBalance: number;
+      };
+    },
+    enabled,
+  });
+}
+
+export function useGrirMatchCandidates(supplierId?: string, tolerancePercent?: number) {
+  return useQuery({
+    queryKey: [...accountingKeys.grirClearing.all, 'candidates', supplierId, tolerancePercent],
+    queryFn: async () => {
+      const res = await api.grirClearing.getMatchCandidates({
+        ...(supplierId ? { supplierId } : {}),
+        ...(tolerancePercent != null ? { tolerancePercent } : {}),
+      });
       return res.data?.data;
     },
   });
@@ -278,6 +305,23 @@ export function useClearGrirItem() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
       toast.success('GR/IR item cleared');
+    },
+    onError: (err) => toastApiError(err),
+  });
+}
+
+export function useClearGrirResidual() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      referenceNumber: string;
+      method: 'TO_PRICE_VARIANCE' | 'TO_RETURN_CLEARING' | 'RECLASS_FROM_EXPENSE';
+      amount?: number;
+      notes?: string;
+    }) => api.grirClearing.clearResidual(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: accountingKeys.grirClearing.all });
+      toast.success('GR/IR residual cleared (no extra AP)');
     },
     onError: (err) => toastApiError(err),
   });

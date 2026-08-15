@@ -1126,7 +1126,10 @@ export const api = {
     search: (q: string) =>
       apiClient.get<ApiResponse>('grir-clearing/search', { params: { q } }),
     getBalance: () => apiClient.get<ApiResponse>('grir-clearing/balance'),
-    getMatchCandidates: (params?: { supplierId?: string }) =>
+    getPurity: () => apiClient.get<ApiResponse>('grir-clearing/purity'),
+    getResiduals: (params?: { limit?: number; minAbs?: number }) =>
+      apiClient.get<ApiResponse>('grir-clearing/residuals', { params }),
+    getMatchCandidates: (params?: { supplierId?: string; tolerancePercent?: number }) =>
       apiClient.get<ApiResponse>('grir-clearing/match-candidates', { params }),
     getGrItems: (grId: string) =>
       apiClient.get<ApiResponse>(`grir-clearing/gr/${grId}/items`),
@@ -1136,6 +1139,13 @@ export const api = {
       apiClient.get<ApiResponse>(`grir-clearing/${poId}`),
     clearItem: (data: { grId: string; invoiceId: string; date?: string }) =>
       apiClient.post<ApiResponse>('grir-clearing/clear', data),
+    clearResidual: (data: {
+      referenceNumber: string;
+      method: 'TO_PRICE_VARIANCE' | 'TO_RETURN_CLEARING' | 'RECLASS_FROM_EXPENSE';
+      amount?: number;
+      date?: string;
+      notes?: string;
+    }) => apiClient.post<ApiResponse>('grir-clearing/clear-residual', data),
     autoMatch: (data?: { supplierId?: string; tolerancePercent?: number }) =>
       apiClient.post<ApiResponse>('grir-clearing/auto-match', data),
   },

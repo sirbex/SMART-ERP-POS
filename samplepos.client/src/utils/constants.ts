@@ -54,11 +54,15 @@ export const PO_STATUS = {
 } as const;
 
 /**
- * Goods Receipt Status
+ * Goods Receipt Status — SSOT matches goods_receipt_status PG enum
+ * (DRAFT | COMPLETED | CANCELLED). COMPLETED = posted/finalized.
  */
 export const GR_STATUS = {
   DRAFT: 'DRAFT',
-  FINALIZED: 'FINALIZED',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+  /** @deprecated UI alias only — never send to API/SQL; use COMPLETED */
+  FINALIZED: 'COMPLETED',
 } as const;
 
 /**

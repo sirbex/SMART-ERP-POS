@@ -159,7 +159,7 @@ export interface GoodsReceipt {
   grNumber: string;
   purchaseOrderId: string;
   purchaseOrder?: PurchaseOrder;
-  status: 'DRAFT' | 'FINALIZED';
+  status: 'DRAFT' | 'COMPLETED' | 'CANCELLED';
   receivedDate: string;
   notes?: string;
   receivedById: string;
