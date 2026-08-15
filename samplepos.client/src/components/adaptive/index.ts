@@ -29,6 +29,7 @@ export { AdaptivePrintPreview } from './AdaptivePrintPreview';
 export {
   resolveAdaptiveChrome,
   resolveFohTicketPane,
+  resolveTypeScale,
   shouldShowCoach,
   resolveActionLabel,
   resolvePayButtonLabel,
@@ -37,7 +38,7 @@ export {
   ADAPTIVE_PRIMARY_SURFACES,
   ADAPTIVE_ON_DEMAND_SURFACES,
 } from '../../lib/adaptiveChrome';
-export type { AdaptiveChrome, AdaptiveFohTicketPane } from '../../lib/adaptiveChrome';
+export type { AdaptiveChrome, AdaptiveFohTicketPane, AdaptiveTypeScale } from '../../lib/adaptiveChrome';
 export {
   buildDeviceCapabilities,
   detectDeviceCapabilityExtras,

@@ -19,9 +19,11 @@ import {
   inlineRowEditorsOnSameLine,
   isAdaptiveDenseSurface,
   isAdaptiveUltraSurface,
+  resolveNewTicketLabel,
   resolvePayButtonLabel,
   shouldShowCoach,
   showInlineRowEditors,
+  showInlineTicketNote,
 } from '../../lib/adaptiveChrome';
 import {
   allocateVoidQuantity,
@@ -141,6 +143,8 @@ import {
   paintRestaurantTableFreeOffline,
 } from '../../lib/restaurantOfflineCache';
 import {
+  floorFiguresFromTicketTabs,
+  patchTableRowFloorFigures,
   resolveDiningFloorEmptyState,
   restaurantTablesQueryKey,
   restaurantWaitersQueryKey,
@@ -176,6 +180,9 @@ interface RestaurantWaiter {
   email: string;
   role: string;
 }
+
+/** Stable empty list — `data || []` was a new array every render while loading. */
+const EMPTY_RESTAURANT_WAITERS: RestaurantWaiter[] = [];
 
 interface MenuCategory {
   id: string;
@@ -321,18 +328,18 @@ interface CheckMeta {
 /** Touch-first POS controls — 44–48px targets, no 300ms delay, press feedback. */
 const TOUCH =
   'touch-manipulation select-none [-webkit-tap-highlight-color:transparent] transition-[transform,background-color,border-color,box-shadow] duration-100 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 disabled:active:scale-100';
-const touchBtn = `${TOUCH} min-h-12 px-4 inline-flex items-center justify-center gap-1 rounded-xl text-sm font-semibold`;
+const touchBtn = `${TOUCH} min-h-12 px-4 inline-flex items-center justify-center gap-1 rounded-xl type-cta font-semibold`;
 const touchBtnGhost = `${touchBtn} border border-stone-300 bg-white text-stone-800 active:bg-stone-100`;
 const touchBtnDark = `${touchBtn} bg-stone-900 text-white active:bg-stone-800`;
 const touchBtnDanger = `${touchBtn} border border-red-300 text-red-700 bg-white active:bg-red-50`;
-const touchChip = `${TOUCH} min-h-11 px-4 py-2.5 rounded-xl text-sm font-semibold whitespace-nowrap`;
+const touchChip = `${TOUCH} min-h-11 px-4 py-2.5 rounded-xl type-cta font-semibold whitespace-nowrap`;
 /** Thick Samba-style category targets — finger-friendly on phone + rail. */
 const touchCat =
-  `${TOUCH} min-h-14 px-5 rounded-xl text-base font-bold whitespace-nowrap shrink-0`;
+  `${TOUCH} min-h-14 px-5 rounded-xl type-title font-bold whitespace-nowrap shrink-0`;
 const touchCatRail =
-  `${TOUCH} min-h-16 w-full px-3 text-left text-base font-bold border-b border-stone-200`;
+  `${TOUCH} min-h-16 w-full px-3 text-left type-title font-bold border-b border-stone-200 type-ellipsis`;
 const touchField =
-  'touch-manipulation min-h-12 w-full border border-stone-300 rounded-xl px-3 py-2.5 text-base bg-white';
+  'touch-manipulation min-h-12 w-full border border-stone-300 rounded-xl px-3 py-2.5 type-body bg-white';
 const touchTile = `${TOUCH} active:brightness-[0.97]`;
 
 function isServiceLaneCode(code: string | null | undefined): boolean {
@@ -829,6 +836,7 @@ export default function RestaurantPosPage() {
   const canManage = useCanAccess(undefined, ['restaurant.manage']);
   /** Floor service (add/void/KOT/bill/transfer) — waiters/cashiers/managers with restaurant.order. */
   const canOrder = useCanAccess(undefined, ['restaurant.order']);
+  const canReadFloor = useCanAccess(undefined, ['restaurant.read', 'restaurant.order', 'restaurant.manage']);
   /** Pay is cashier / accountant / admin only — waiters and managers order but do not settle. */
   const canRestaurantPay = useCanAccess(undefined, ['restaurant.pay']);
   /**
@@ -980,13 +988,22 @@ export default function RestaurantPosPage() {
     ) as CheckUiPayload;
     // Drop optimistic tmp_ord_* ghosts before they reappear as fake sibling tickets.
     // After server SSOT, reset strip to order + siblings only (no stale UUID accumulation).
+    // Thin payloads (openCheck without siblings) must NOT wipe an existing party strip.
     const fromServer = ticketTabsFromPayload(data);
+    const prevTabs =
+      tableTicketsRef.current.tableId === tableId ? tableTicketsRef.current.tabs : [];
+    const serverHasParty =
+      fromServer.length > 1 || (data.siblingChecks && data.siblingChecks.length > 0);
     tableTicketsRef.current = {
       tableId,
       tabs: fromServer.length
-        ? fromServer
+        ? scrubRestaurantTicketTabs(
+            serverHasParty || fromServer.length >= prevTabs.length
+              ? fromServer
+              : [...prevTabs, ...fromServer],
+          )
         : scrubRestaurantTicketTabs([
-            ...tableTicketsRef.current.tabs.filter((t) => t.id !== preferredKeyOrderId),
+            ...prevTabs.filter((t) => t.id !== preferredKeyOrderId),
             ...(data.order
               ? [
                   {
@@ -1019,6 +1036,16 @@ export default function RestaurantPosPage() {
     if (preferredKeyOrderId == null || isTempRestaurantId(preferredKeyOrderId)) {
       queryClient.setQueryData(['restaurant', 'check', tableId, null, isOnline], painted);
     }
+    // Floor tile figures stay accurate without waiting for tables refetch.
+    queryClient.setQueryData(
+      restaurantTablesQueryKey(user?.id, isOnline),
+      (prev: RestaurantTable[] | undefined) =>
+        patchTableRowFloorFigures(
+          prev,
+          tableId,
+          floorFiguresFromTicketTabs(tableTicketsRef.current.tabs),
+        ),
+    );
     return painted;
   };
 
@@ -1084,7 +1111,8 @@ export default function RestaurantPosPage() {
         return getCachedRestaurantTables() as RestaurantTable[];
       }
       try {
-        const res = await api.restaurant.listTables();
+        // silentForbidden: RBAC deny must not spam Access denied + look like logout
+        const res = await api.restaurant.listTables(undefined, { silentForbidden: true });
         const tables = (res.data.data || []) as RestaurantTable[];
         // keep cache warm (never blank non-empty warm with [])
         const { cacheRestaurantTables } = await import('../../lib/restaurantOfflineCache');
@@ -1099,13 +1127,15 @@ export default function RestaurantPosPage() {
         throw err;
       }
     },
-    enabled: !!restaurantEnabled && !!user?.id,
-    staleTime: 0,
-    refetchOnMount: 'always',
+    enabled: !!restaurantEnabled && !!user?.id && canReadFloor,
+    staleTime: 10_000,
+    refetchOnMount: true,
     refetchInterval: isOnline ? 15_000 : false,
     retry: (failureCount, error) => {
       if (isBackendUnavailableError(error)) return failureCount < 6;
-      const status = (error as { response?: { status?: number } })?.response?.status;
+      const status =
+        (error as { httpStatus?: number; response?: { status?: number } })?.httpStatus ??
+        (error as { response?: { status?: number } })?.response?.status;
       if (status && status >= 400 && status < 500) return false;
       return failureCount < 1;
     },
@@ -1130,15 +1160,15 @@ export default function RestaurantPosPage() {
     queryKey: restaurantWaitersQueryKey(user?.id, isOnline),
     queryFn: async () => {
       if (!isOnline) return getCachedRestaurantWaiters() as RestaurantWaiter[];
-      const res = await api.restaurant.listWaiters();
+      const res = await api.restaurant.listWaiters({ silentForbidden: true });
       const waiters = (res.data.data || []) as RestaurantWaiter[];
       const { cacheRestaurantWaiters } = await import('../../lib/restaurantOfflineCache');
       cacheRestaurantWaiters(waiters);
       return waiters;
     },
-    enabled: !!restaurantEnabled && !!user?.id,
-    staleTime: 0,
-    refetchOnMount: 'always',
+    enabled: !!restaurantEnabled && !!user?.id && canReadFloor,
+    staleTime: 60_000,
+    refetchOnMount: false,
   });
 
   const checkQuery = useQuery({
@@ -1266,6 +1296,8 @@ export default function RestaurantPosPage() {
       return undefined;
     },
     enabled: !!restaurantEnabled && !!selectedTableId,
+    // Seed null→orderId must not immediately re-GET the same check (table-pick lag).
+    staleTime: 20_000,
   });
 
   const categoriesQuery = useQuery({
@@ -1278,7 +1310,10 @@ export default function RestaurantPosPage() {
       cacheRestaurantCategories(cats);
       return cats;
     },
-    enabled: !!restaurantEnabled && !!selectedTableId,
+    // Warm on floor — do not wait for first table tap / re-fetch every open.
+    enabled: !!restaurantEnabled && !!user?.id,
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
   });
 
   // Load full menu once; category + search filter client-side (SambaPOS-style type-to-find).
@@ -1291,7 +1326,9 @@ export default function RestaurantPosPage() {
       cacheRestaurantMenu(products);
       return products;
     },
-    enabled: !!restaurantEnabled && !!selectedTableId,
+    enabled: !!restaurantEnabled && !!user?.id,
+    staleTime: 5 * 60_000,
+    refetchOnMount: false,
   });
 
   const visibleProducts = useMemo(() => {
@@ -1415,8 +1452,15 @@ export default function RestaurantPosPage() {
   }) => {
     if (isTempRestaurantId(args.itemId) || isTempRestaurantId(args.orderId)) return;
     try {
-      const res = await api.restaurant.listOrderTagsForProduct(args.productId);
-      const groups = (res.data.data || []) as OrderTagGroupOption[];
+      // Cache per product — every menu tap used to hit the network (ticket lag).
+      const groups = await queryClient.fetchQuery({
+        queryKey: ['restaurant', 'order-tags', args.productId],
+        staleTime: 10 * 60_000,
+        queryFn: async () => {
+          const res = await api.restaurant.listOrderTagsForProduct(args.productId);
+          return (res.data.data || []) as OrderTagGroupOption[];
+        },
+      });
       if (groups.length === 0) return;
       const shouldPrompt = groups.some((g) => g.autoPrompt) || groups.length > 0;
       if (!shouldPrompt) return;
@@ -1520,24 +1564,23 @@ export default function RestaurantPosPage() {
         selectedCustomer?.address?.trim() || guestDraft.deliveryAddress.trim() || null;
 
       /**
-       * Party list (2+ tickets, list view): first menu tap opens a *new* order number
-       * and rings the item there — Toast/Samba style (never block; never append to #1).
+       * Toast/Samba: party list is for picking a ticket — not for silent force-new.
+       * New tickets come from "+ Ticket". Menu adds require an active ticket (detail).
        */
-      const forceNewTicket = showSambaTicketList;
-      if (forceNewTicket) {
-        setSambaTicketView('detail');
-        setSelectedLineIds([]);
-        if (chrome.fohTicketPane === 'sheet') setMobileSheet('order');
+      if (showSambaTicketList) {
+        throw new Error('Select a ticket to add items');
+      }
+      if (!activeOrderId && !order?.id) {
+        throw new Error('Select a ticket to add items');
       }
 
-      if (preferLocalRestaurantWrites(forceNewTicket ? null : order?.id)) {
+      if (preferLocalRestaurantWrites(order?.id ?? activeOrderId)) {
         const derived = appendRestaurantItemOffline({
           tableId: selectedTableId,
           tableCode: table.code,
           tableName: table.name,
           channel,
-          orderId: forceNewTicket ? null : order?.id ?? activeOrderId,
-          forceNewTicket,
+          orderId: order?.id ?? activeOrderId,
           customerId: selectedCustomer?.id || null,
           waiterId: selectedWaiterId,
           waiterName: waiter?.fullName,
@@ -1559,96 +1602,7 @@ export default function RestaurantPosPage() {
         }
         paintJournalCheck(selectedTableId, derived.orderId);
         if (derived.orderId) setActiveOrderId(derived.orderId);
-        if (forceNewTicket && derived.orderId && selectedTableId) {
-          const knownTabs = scrubRestaurantTicketTabs([
-            ...tableTicketsRef.current.tabs,
-            {
-              id: derived.orderId,
-              orderNumber: derived.offlineId || 'NEW',
-              totalAmount: String(
-                (derived.lines || []).reduce(
-                  (s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0),
-                  0,
-                ),
-              ),
-            },
-          ]);
-          tableTicketsRef.current = { tableId: selectedTableId, tabs: knownTabs };
-          bumpJournal();
-        }
-        return { offline: true as const, orderId: derived.orderId, quantity, forceNewTicket };
-      }
-
-      // Online force-new: post new check + item (no optimistic paint on a sibling ticket).
-      if (forceNewTicket) {
-        setPendingQtyDigits('');
-        setMenuQtyPadOpen(false);
-        try {
-          const res = await api.restaurant.addItems({
-            tableId: selectedTableId,
-            forceNewCheck: true,
-            waiterId: selectedWaiterId,
-            customerId: selectedCustomer?.id || null,
-            guestName,
-            guestPhone,
-            deliveryAddress,
-            pickupLabel: guestDraft.pickupLabel.trim() || null,
-            items: [{ productId: product.id, quantity }],
-          });
-          const payload = res.data.data as CheckUiPayload;
-          const newId = payload.order?.id;
-          if (!newId) throw new Error('New ticket created but no order id returned');
-          if (selectedTableId) {
-            clearRestaurantBillRequestedOffline(selectedTableId, newId);
-          }
-          const full = await api.restaurant.getTableCheck(selectedTableId, {
-            orderId: newId,
-          });
-          const data = (full.data.data || payload) as CheckUiPayload;
-          paintServerCheckWithInFlight(selectedTableId, data, newId);
-          setActiveOrderId(newId);
-          const knownTabs = scrubRestaurantTicketTabs([
-            ...tableTicketsRef.current.tabs,
-            ...(data.siblingChecks || []).map((s) => ({
-              id: s.id,
-              orderNumber: s.orderNumber,
-              totalAmount: s.totalAmount,
-            })),
-            {
-              id: newId,
-              orderNumber: data.order?.orderNumber || payload.order?.orderNumber || 'NEW',
-              totalAmount: String(
-                data.order?.totalAmount ?? payload.order?.totalAmount ?? 0,
-              ),
-            },
-          ]);
-          tableTicketsRef.current = { tableId: selectedTableId, tabs: knownTabs };
-          void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
-          const newest = [...(data.order?.items || payload.order?.items || [])]
-            .reverse()
-            .find((it) => it.productId === product.id);
-          if (newest?.id && product.id) {
-            void openOrderTagPad({
-              orderId: newId,
-              itemId: newest.id,
-              productId: product.id,
-              productName: product.name,
-              existingNotes: newest.lineNotes,
-              existingTags: newest.orderTags,
-            });
-          }
-          return {
-            offline: false as const,
-            refreshed: true as const,
-            quantity,
-            forceNewTicket: true as const,
-            orderId: newId,
-          };
-        } catch (err) {
-          // Recover list view if open failed so user can still pick an existing ticket.
-          setSambaTicketView('list');
-          throw err;
-        }
+        return { offline: true as const, orderId: derived.orderId, quantity };
       }
 
       // Online: paint ticket immediately; sync API in background (no menu lock).
@@ -1960,7 +1914,7 @@ export default function RestaurantPosPage() {
     return false;
   }, [selectedTable?.status, selectedTableId, order?.id, journalTick, siblingChecks]);
 
-  const waiters = waitersQuery.data || [];
+  const waiters = waitersQuery.data ?? EMPTY_RESTAURANT_WAITERS;
   const floorOccupancy = useMemo(
     () => deriveRestaurantFloorOccupancy(getAllEvents(), getAllSyncState()),
     [journalTick],
@@ -1997,12 +1951,19 @@ export default function RestaurantPosPage() {
         const totals = totalsFromLines(check.lines);
         const billed =
           !!check.orderId && (billRequested[t.id] || []).includes(check.orderId);
+        // Multi-ticket: keep patched openCheckCount / openChecksTotal (exact party sum).
+        // Single journal seed must not replace party floor figures with one check's lines.
+        const partyCount = Number(t.openCheckCount || 0);
+        const partyTotal =
+          partyCount > 1 && t.openChecksTotal != null && t.openChecksTotal !== ''
+            ? t.openChecksTotal
+            : String(totals.totalAmount);
         return {
           ...t,
           status: (billed ? 'BILLING' : 'OCCUPIED') as RestaurantTable['status'],
           currentOrderId: check.orderId,
           orderNumber: check.offlineId,
-          orderTotal: String(totals.totalAmount),
+          orderTotal: String(partyTotal),
           waiterId: check.waiterId,
           waiterName: check.waiterName,
           guestName: check.guestName,
@@ -2178,6 +2139,8 @@ export default function RestaurantPosPage() {
    */
   const useSheetTicket = chrome.fohTicketPane === 'sheet';
   const ctaMinH = chrome.primaryCtaMinHeightPx;
+  const newTicketLabel = resolveNewTicketLabel(chrome);
+  const inlineTicketNote = showInlineTicketNote(chrome);
   const partyTicketsTotal = useMemo(
     () => ticketTabs.reduce((sum, t) => sum + (Number(t.totalAmount) || 0), 0),
     [ticketTabs],
@@ -2187,6 +2150,18 @@ export default function RestaurantPosPage() {
   useEffect(() => {
     if (ticketTabs.length <= 1) setSambaTicketView('detail');
   }, [ticketTabs.length]);
+
+  /**
+   * Toast/Samba: opening a multi-ticket table lands on the party list first.
+   * Sheet FOH must surface that list immediately (ticket pane is otherwise hidden).
+   */
+  useEffect(() => {
+    if (!selectedTableId) return;
+    if (!isMultiTicketTable || sambaTicketView !== 'list') return;
+    if (chrome.fohTicketPane === 'sheet') {
+      setMobileSheet('order');
+    }
+  }, [selectedTableId, isMultiTicketTable, sambaTicketView, chrome.fohTicketPane]);
 
   /** Prefetch sibling checks so switching tickets is cache-instant. */
   useEffect(() => {
@@ -2290,11 +2265,18 @@ export default function RestaurantPosPage() {
 
   // Seed active ticket only when opening a table (never overwrite a user switch mid-flight).
   // Never seed optimistic tmp_ord_* — that would refetch GET check?orderId=tmp_* (Postgres 22P02).
+  // Copy cache null→orderId BEFORE setState so React Query does not fire a second GET.
   useEffect(() => {
     if (!selectedTableId || activeOrderId || !order?.id) return;
     if (isTempRestaurantId(order.id)) return;
+    const fromKey = ['restaurant', 'check', selectedTableId, null, isOnline] as const;
+    const toKey = ['restaurant', 'check', selectedTableId, order.id, isOnline] as const;
+    const cached = queryClient.getQueryData(fromKey) as CheckUiPayload | undefined;
+    if (cached) {
+      queryClient.setQueryData(toKey, cached);
+    }
     setActiveOrderId(order.id);
-  }, [selectedTableId, activeOrderId, order?.id]);
+  }, [selectedTableId, activeOrderId, order?.id, isOnline, queryClient]);
 
   useEffect(() => {
     setSelectedLineIds([]);
@@ -2386,6 +2368,8 @@ export default function RestaurantPosPage() {
                     currentOrderId: null,
                     orderNumber: null,
                     orderTotal: null,
+                    openCheckCount: 0,
+                    openChecksTotal: null,
                     guestName: null,
                   }
                 : t,
@@ -2955,18 +2939,26 @@ export default function RestaurantPosPage() {
   };
 
   /**
-   * Samba: open ticket from party list into line view (one tap always opens).
+   * Samba/Toast: pick a ticket from the party list → order on that ticket.
+   * Always returns to the menu for adding (sheet); ticket board opens from dock when needed.
    */
   const openTicketFromList = (orderId: string) => {
     if (!selectedTableId || isTempRestaurantId(orderId)) return;
-    // Force detail immediately so menu/bill are available even while network paints.
     setSambaTicketView('detail');
     setActiveOrderId(orderId);
     activeOrderIdRef.current = orderId;
     setSelectedLineIds([]);
     setLoadingTicketId(orderId);
-    if (chrome.fohTicketPane === 'sheet') setMobileSheet('order');
+    // Enterprise: after choosing a ticket, menu is primary for ringing items.
+    if (chrome.fohTicketPane === 'sheet') setMobileSheet(null);
     activateSibling(orderId, { fromPartyList: true });
+  };
+
+  /** Return to party list (multi-ticket) so user can switch tickets. */
+  const backToPartyTicketList = () => {
+    setSambaTicketView('list');
+    setSelectedLineIds([]);
+    if (chrome.fohTicketPane === 'sheet') setMobileSheet('order');
   };
 
   /**
@@ -3286,7 +3278,8 @@ export default function RestaurantPosPage() {
 
   /**
    * Samba multi-tab: open empty ticket on this table. Online only.
-   * Does not touch sibling lines, KOT, bills, or payments.
+   * Leaves detail + menu ready immediately — never trap user in party-list
+   * or invalidate the check just painted (that forced back/forth).
    */
   const openNewTicketOnTable = async () => {
     if (!selectedTableId || !isOnline) {
@@ -3298,6 +3291,10 @@ export default function RestaurantPosPage() {
       return;
     }
     if (busy) return;
+    // Instant: detail mode + MENU on screen (empty ticket must not cover the catalog).
+    setSambaTicketView('detail');
+    setSelectedLineIds([]);
+    if (chrome.fohTicketPane === 'sheet') setMobileSheet(null);
     setBusy(true);
     try {
       const res = await api.restaurant.openCheck(selectedTableId, {
@@ -3313,10 +3310,10 @@ export default function RestaurantPosPage() {
         toast.error('Ticket opened but no order id returned');
         return;
       }
-      const clamped = checkUiAfterServerSeed(selectedTableId, data);
+      // Keep prior party tabs — openCheck payload may omit siblings (must not wipe strip).
       const knownTabs = scrubRestaurantTicketTabs([
         ...tableTicketsRef.current.tabs,
-        ...(clamped.siblingChecks || []).map((s) => ({
+        ...(data.siblingChecks || []).map((s) => ({
           id: s.id,
           orderNumber: s.orderNumber,
           totalAmount: s.totalAmount,
@@ -3328,16 +3325,34 @@ export default function RestaurantPosPage() {
         },
       ]);
       tableTicketsRef.current = { tableId: selectedTableId, tabs: knownTabs };
-      setActiveOrderId(newId);
-      setSambaTicketView('detail');
-      setSelectedLineIds([]);
+      const painted = attachSiblingTabs(
+        checkUiAfterServerSeed(selectedTableId, data),
+        knownTabs,
+        selectedTableId,
+      );
+      // Paint under new ticket key only — do NOT invalidate check (menu target stays live).
       queryClient.setQueryData(
         ['restaurant', 'check', selectedTableId, newId, isOnline],
-        attachSiblingTabs(clamped, knownTabs, selectedTableId),
+        painted,
       );
-      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
-      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+      queryClient.setQueryData(
+        ['restaurant', 'check', selectedTableId, null, isOnline],
+        painted,
+      );
+      setActiveOrderId(newId);
+      activeOrderIdRef.current = newId;
+      queryClient.setQueryData(
+        restaurantTablesQueryKey(user?.id, isOnline),
+        (prev: RestaurantTable[] | undefined) =>
+          patchTableRowFloorFigures(
+            prev,
+            selectedTableId,
+            floorFiguresFromTicketTabs(knownTabs),
+          ),
+      );
       bumpJournal();
+      // Soft reconcile floor from server; figures already patched for precision.
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
       toast.success(
         `New ticket ${data.order?.orderNumber ? data.order.orderNumber : ''}`.trim() ||
           'New ticket open',
@@ -4514,6 +4529,11 @@ export default function RestaurantPosPage() {
           {
             '--pos-cta-min-h': `${ctaMinH}px`,
             '--pos-touch-target': `${tokens.touchTargetPx}px`,
+            '--type-caption': `${chrome.typeScale.captionPx}px`,
+            '--type-body': `${chrome.typeScale.bodyPx}px`,
+            '--type-title': `${chrome.typeScale.titlePx}px`,
+            '--type-amount': `${chrome.typeScale.amountPx}px`,
+            '--type-cta': `${chrome.typeScale.ctaPx}px`,
           } as CSSProperties
         }
         className="flex-1 min-h-0 flex flex-col bg-stone-100 overflow-hidden"
@@ -4822,10 +4842,17 @@ export default function RestaurantPosPage() {
             )}
           </div>
         ) : (
-          <div className="relative flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 lg:grid-rows-1 overflow-hidden">
-            {/* Menu — sheet mode: full remaining height; column mode: side panel (desktop) */}
+          <div
+            // Column mode: minmax ticket track so 10"/1366 laptops never crush KOT/Bill.
+            className={`relative flex-1 min-h-0 flex flex-col overflow-hidden ${
+              useSheetTicket
+                ? ''
+                : 'lg:grid lg:grid-rows-1 lg:grid-cols-[minmax(0,1fr)_minmax(19rem,24rem)] xl:grid-cols-[minmax(0,1fr)_minmax(22rem,28rem)]'
+            }`}
+          >
+            {/* Menu — sheet mode: full remaining height; column mode: fluid left track */}
             <div
-              className={`lg:col-span-8 flex flex-col min-h-0 min-w-0 flex-1 lg:flex-1 lg:h-full border-b lg:border-b-0 lg:border-r border-stone-200 bg-white ${
+              className={`flex flex-col min-h-0 min-w-0 flex-1 lg:h-full border-b lg:border-b-0 lg:border-r border-stone-200 bg-white ${
                 useSheetTicket ? 'max-h-none' : 'max-h-[42%] lg:max-h-none'
               }`}
               data-foh-menu-surface="true"
@@ -4974,30 +5001,58 @@ export default function RestaurantPosPage() {
                 ) : null}
 
                 <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                  {showSambaTicketList ? (
+                    <div
+                      className="shrink-0 px-3 py-2 bg-amber-50 border-b border-amber-200 text-amber-950 type-caption font-semibold"
+                      data-menu-party-gate="true"
+                    >
+                      Select a ticket on the right to add items — or use + for a new ticket
+                    </div>
+                  ) : null}
                   <div className="flex-1 overflow-auto p-3 pb-3">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                    <div
+                      className={`grid gap-2.5 ${
+                        useSheetTicket
+                          ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4'
+                          : 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-4'
+                      }`}
+                    >
                       {visibleProducts.map((product) => (
                         <button
                           key={product.id}
                           type="button"
+                          disabled={showSambaTicketList}
                           onClick={() => {
+                            if (showSambaTicketList) {
+                              toast.error('Select a ticket to add items', {
+                                id: 'select-ticket-first',
+                              });
+                              if (useSheetTicket) setMobileSheet('order');
+                              return;
+                            }
                             addItemMutation.mutate(product, {
                               onSuccess: () => {
                                 if (menuSearch.trim()) setMenuSearch('');
                               },
                             });
                           }}
-                          className={`${touchTile} min-h-[72px] sm:min-h-[84px] rounded-xl border border-emerald-700/40 bg-emerald-50/80 px-3 py-2.5 sm:py-3 text-left active:bg-emerald-100 active:border-emerald-600`}
+                          className={`${touchTile} min-h-[72px] sm:min-h-[84px] min-w-0 rounded-xl border border-emerald-700/40 bg-emerald-50/80 px-3 py-2.5 sm:py-3 text-left active:bg-emerald-100 active:border-emerald-600 disabled:opacity-50 disabled:active:bg-emerald-50/80`}
+                          title={
+                            showSambaTicketList
+                              ? 'Select a ticket first'
+                              : undefined
+                          }
+                          data-menu-add-gated={showSambaTicketList ? 'party-list' : 'ready'}
                         >
-                          <div className="text-sm font-semibold text-stone-900 leading-tight">
+                          <div className="type-body type-ellipsis font-semibold text-stone-900">
                             {product.name}
                           </div>
                           {deferredMenuSearch.trim() && product.categoryName ? (
-                            <div className="text-[11px] text-stone-500 mt-0.5 truncate">
+                            <div className="type-caption type-ellipsis text-stone-500 mt-0.5">
                               {product.categoryName}
                             </div>
                           ) : null}
-                          <div className="text-xs text-stone-600 mt-1">
+                          <div className="type-amount type-ellipsis text-stone-600 mt-1 font-medium">
                             {formatCurrency(Number(product.sellingPrice))}
                           </div>
                         </button>
@@ -5022,10 +5077,10 @@ export default function RestaurantPosPage() {
                         onClick={() => setMenuQtyPadOpen(true)}
                         className={`${TOUCH} flex min-w-[4.25rem] flex-col items-center justify-center rounded-xl border-2 border-emerald-600 bg-emerald-50 px-2 py-1`}
                       >
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-800">
+                        <span className="type-caption font-bold uppercase tracking-wider text-emerald-800">
                           Qty
                         </span>
-                        <span className="text-xl font-bold tabular-nums leading-none text-stone-900">
+                        <span className="type-title font-bold tabular-nums leading-none text-stone-900">
                           {parsePendingOrderQty(pendingQtyDigits)}
                         </span>
                       </button>
@@ -5068,10 +5123,10 @@ export default function RestaurantPosPage() {
                     ) : (
                     <div className="flex items-stretch gap-2 p-2" data-qty-pad-surface="docked">
                       <div className="w-[5.5rem] rounded-xl border-2 border-emerald-600 bg-emerald-50 flex flex-col items-center justify-center px-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-800">
+                        <span className="type-caption font-bold uppercase tracking-wide text-emerald-800">
                           Qty
                         </span>
-                        <span className="text-3xl font-bold tabular-nums leading-none text-stone-900">
+                        <span className="type-title font-bold tabular-nums leading-none text-stone-900">
                           {parsePendingOrderQty(pendingQtyDigits)}
                         </span>
                       </div>
@@ -5185,14 +5240,14 @@ export default function RestaurantPosPage() {
               </div>
             )}
 
-            {/* Order ticket — sheet mode: full overlay on demand; else column sidebar */}
+            {/* Order ticket — sheet mode: full overlay on demand; else minmax side column */}
             <div
               className={
                 useSheetTicket
                   ? mobileSheet === 'order'
                     ? 'fixed inset-0 z-[45] flex flex-col min-h-0 overflow-hidden bg-stone-50'
                     : 'hidden'
-                  : 'lg:col-span-4 flex flex-col min-h-0 min-w-0 lg:h-full overflow-hidden bg-stone-50 relative flex-1 lg:flex-1'
+                  : 'flex flex-col min-h-0 min-w-0 w-full lg:w-auto lg:h-full overflow-hidden bg-stone-50 relative'
               }
               data-samba-ticket-view={showSambaTicketList ? 'list' : 'detail'}
               data-multi-ticket={isMultiTicketTable ? '1' : '0'}
@@ -5211,12 +5266,19 @@ export default function RestaurantPosPage() {
                   <div className="flex items-center gap-2 mb-1.5">
                     <button
                       type="button"
-                      onClick={() => setMobileSheet(null)}
+                      onClick={() => {
+                        if (showSambaTicketList) {
+                          returnToFloor();
+                          return;
+                        }
+                        setMobileSheet(null);
+                      }}
                       className={`${touchBtnGhost} min-h-10 px-3 text-sm font-bold shrink-0`}
                       data-foh-menu-return="true"
-                      aria-label="Back to menu"
+                      data-foh-party-exit={showSambaTicketList ? 'tables' : 'menu'}
+                      aria-label={showSambaTicketList ? 'Back to tables' : 'Back to menu'}
                     >
-                      ← Menu
+                      {showSambaTicketList ? '← Tables' : '← Menu'}
                     </button>
                     <p className="text-xs text-stone-500 min-w-0 truncate">
                       {selectedTable?.code || selectedTable?.name || 'Table'}
@@ -5225,13 +5287,14 @@ export default function RestaurantPosPage() {
                   </div>
                 ) : null}
                 {showSambaTicketList ? (
-                  /* Samba party header: table code + sum of all open tickets */
+                  /* Samba party header: pick a ticket before ordering */
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <h2
                         className={`font-bold tracking-tight text-stone-900 truncate ${
                           isTouchDense ? 'text-xl' : 'text-2xl sm:text-3xl'
                         }`}
+                        data-samba-party-title="true"
                       >
                         {selectedTable?.code || selectedTable?.name || 'Table'}
                         {isTouchDense ? (
@@ -5240,11 +5303,13 @@ export default function RestaurantPosPage() {
                           </span>
                         ) : null}
                       </h2>
-                      {!isTouchDense ? (
-                        <p className="text-xs text-stone-500 mt-0.5">
-                          {ticketTabs.length} open tickets
-                        </p>
-                      ) : null}
+                      <p
+                        className={`text-stone-600 mt-0.5 ${isTouchDense ? 'type-caption' : 'text-xs'}`}
+                        data-samba-party-coach="true"
+                      >
+                        Select a ticket to add items
+                        {!isTouchDense ? ` · ${ticketTabs.length} open` : ''}
+                      </p>
                     </div>
                     <div className="text-right shrink-0 flex items-center gap-1.5">
                       <p
@@ -5259,12 +5324,13 @@ export default function RestaurantPosPage() {
                           type="button"
                           onClick={() => void openNewTicketOnTable()}
                           disabled={busy}
-                          className={`${touchChip} border-2 border-dashed border-emerald-500/70 bg-emerald-50 text-emerald-900 text-xs font-bold disabled:opacity-50 ${
-                            isTouchDense ? 'min-h-9 px-1.5' : 'min-h-9 px-2'
+                          className={`${touchChip} border-2 border-dashed border-emerald-500/70 bg-emerald-50 text-emerald-900 type-cta font-bold disabled:opacity-50 ${
+                            chrome.actionLabels === 'short' ? 'min-h-9 min-w-9 px-1.5' : 'min-h-9 px-2'
                           }`}
                           title="New independent ticket on this table"
+                          aria-label="New ticket on this table"
                         >
-                          {isTouchDense ? '+' : '+ Ticket'}
+                          {newTicketLabel}
                         </button>
                       ) : null}
                       <button
@@ -5280,62 +5346,66 @@ export default function RestaurantPosPage() {
                   </div>
                 ) : (
                   <>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-2 min-w-0">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
                     {isMultiTicketTable ? (
                       <button
                         type="button"
-                        onClick={() => setSambaTicketView('list')}
-                        className={`${touchBtnGhost} text-xs font-bold shrink-0 ${
+                        onClick={backToPartyTicketList}
+                        className={`${touchBtnGhost} type-caption font-bold shrink-0 ${
                           isTouchDense ? 'min-h-9 px-2' : 'min-h-10 px-2.5'
                         }`}
                         aria-label="Back to all tickets on this table"
                         title="All tickets"
                         data-samba-tickets-back="true"
                       >
-                        {isTouchDense ? '←' : '← Tickets'}
+                        {chrome.actionLabels === 'short' ? '←' : '← Tickets'}
                       </button>
                     ) : null}
-                    <div className="min-w-0">
-                      <h2 className="font-semibold text-stone-900 text-sm sm:text-base">
+                    <div className="min-w-0 flex-1 overflow-hidden" data-ticket-title="true">
+                      <h2 className="type-title font-semibold text-stone-900 type-ellipsis whitespace-nowrap">
                         {order?.orderNumber ? (
                           <>
-                            Ticket{' '}
+                            <span className="font-medium text-stone-600">Ticket </span>
                             <span className="font-bold tabular-nums">{order.orderNumber}</span>
                           </>
                         ) : (
                           'Ticket'
                         )}
                         {loadingTicketId && loadingTicketId === order?.id ? (
-                          <span className="ml-2 text-[10px] font-semibold uppercase tracking-wide text-sky-700">
+                          <span className="ml-2 type-caption font-semibold uppercase tracking-wide text-sky-700">
                             Loading…
                           </span>
                         ) : null}
                       </h2>
                       {isCheckBilled ? (
-                        <p className="text-[11px] text-rose-800 truncate">Guest bill printed</p>
+                        <p className="type-caption text-rose-800 type-ellipsis">Guest bill printed</p>
                       ) : order ? (
-                        <p className="text-xs text-stone-500 truncate">
+                        <p className="type-caption text-stone-500 type-ellipsis">
                           {orderLines.length} line{orderLines.length === 1 ? '' : 's'} ·{' '}
                           {formatCurrency(Number(order.totalAmount || 0))}
-                          {!isTouchDense ? ' · tap menu to add' : ''}
+                          {chrome.coach !== 'hidden' && !isTouchDense ? ' · tap menu to add' : ''}
                         </p>
                       ) : (
-                        <p className="text-xs text-stone-500 truncate">
+                        <p className="type-caption text-stone-500 type-ellipsis">
                           Select a ticket or start a new one
                         </p>
                       )}
                       {(selectedCustomer?.name || guestDraft.guestName) ? (
-                        <p className="text-xs font-semibold text-emerald-800 truncate">
+                        <p className="type-caption font-semibold text-emerald-800 type-ellipsis">
                           {selectedCustomer?.name || guestDraft.guestName}
                         </p>
                       ) : null}
                     </div>
                   </div>
-                  {/* Waiter · Note · ⋯ (Toast-style: secondary ops in overflow — keep lines visible) */}
-                  <div className="flex items-center gap-1.5 shrink-0" data-ticket-header-actions="true">
+                  {/* Adaptive: order # owns space; Note lives in ··· when secondaryActions=sheet */}
+                  <div
+                    className="flex items-center gap-1 shrink-0"
+                    data-ticket-header-actions="true"
+                    data-secondary-ops={chrome.secondaryActions}
+                  >
                       {isCheckBilled ? (
-                        <span className="text-[10px] uppercase tracking-wide font-bold text-rose-800 bg-rose-100 px-1.5 py-1 rounded-md">
+                        <span className="type-caption uppercase tracking-wide font-bold text-rose-800 bg-rose-100 px-1.5 py-1 rounded-md">
                           Bill
                         </span>
                       ) : null}
@@ -5344,38 +5414,49 @@ export default function RestaurantPosPage() {
                           type="button"
                           onClick={() => void openNewTicketOnTable()}
                           disabled={busy}
-                          className={`${touchChip} border-2 border-dashed border-emerald-500/70 bg-emerald-50 text-emerald-900 text-xs font-bold min-h-9 px-2 disabled:opacity-50`}
+                          className={`${touchChip} border-2 border-dashed border-emerald-500/70 bg-emerald-50 text-emerald-900 type-cta font-bold disabled:opacity-50 ${
+                            chrome.actionLabels === 'short'
+                              ? 'min-h-9 min-w-9 px-1.5'
+                              : 'min-h-9 px-2'
+                          }`}
                           title="Open another ticket for this table"
                           aria-label="New ticket on this table"
+                          data-ticket-new="header"
                         >
-                          + Ticket
+                          {newTicketLabel}
                         </button>
                       ) : null}
                       <button
                         type="button"
                         onClick={() => setMobileSheet('details')}
-                        className={`${touchBtnGhost} min-h-10 px-2.5 text-xs inline-flex items-center gap-1.5 max-w-[9rem]`}
+                        className={`${touchBtnGhost} min-h-10 inline-flex items-center gap-1 ${
+                          chrome.actionLabels === 'short'
+                            ? 'min-w-10 px-2'
+                            : 'px-2.5 max-w-[7.5rem]'
+                        }`}
                         aria-label="Waiter and customer"
                         title="Waiter / Customer"
                         data-restaurant-party="open"
                       >
                         <span aria-hidden>👤</span>
-                        <span className="truncate font-semibold text-stone-800">
-                          {selectedCustomer?.name || guestDraft.guestName
-                            ? (selectedCustomer?.name || guestDraft.guestName)
-                            : shortWaiterLabel(
-                                waiters.find((w) => w.id === selectedWaiterId)?.fullName ||
-                                  user?.fullName ||
-                                  'Waiter',
-                              ) || 'Guest'}
-                        </span>
+                        {chrome.actionLabels === 'short' ? null : (
+                          <span className="type-ellipsis type-caption font-semibold text-stone-800">
+                            {selectedCustomer?.name || guestDraft.guestName
+                              ? (selectedCustomer?.name || guestDraft.guestName)
+                              : shortWaiterLabel(
+                                  waiters.find((w) => w.id === selectedWaiterId)?.fullName ||
+                                    user?.fullName ||
+                                    'Waiter',
+                                ) || 'Guest'}
+                          </span>
+                        )}
                       </button>
-                      {order ? (
+                      {order && inlineTicketNote ? (
                         <button
                           type="button"
                           onClick={openTicketNoteEditor}
                           disabled={!canOrder && !displayTicketNote(order.notes)}
-                          className={`${touchBtnGhost} min-h-10 px-2 text-xs font-bold ${
+                          className={`${touchBtnGhost} min-h-10 px-2 type-caption font-bold ${
                             displayTicketNote(order.notes)
                               ? 'border-amber-400 bg-amber-50 text-amber-950'
                               : ''
@@ -5395,9 +5476,10 @@ export default function RestaurantPosPage() {
                       <button
                         type="button"
                         onClick={() => setMobileSheet('more')}
-                        className={`${touchBtnGhost} min-h-10 min-w-10 px-2 text-xs`}
-                        aria-label="Change table, merge, and more"
-                        title="Table / Merge / More"
+                        className={`${touchBtnGhost} min-h-10 min-w-10 px-2 type-cta`}
+                        aria-label="Change table, note, merge, and more"
+                        title="Table / Note / Merge / More"
+                        data-ticket-more="open"
                       >
                         ⋯
                       </button>
@@ -5510,16 +5592,31 @@ export default function RestaurantPosPage() {
                     </p>
                   </div>
                 ) : orderLines.length === 0 ? (
-                  <div className="py-4 lg:py-8 text-center space-y-3">
+                  <div
+                    className="py-4 lg:py-8 text-center space-y-3 px-3"
+                    data-ticket-empty="true"
+                  >
                     <p className="text-sm text-stone-500">
                       {order
-                        ? 'This ticket is empty — tap menu items to add to this ticket only'
+                        ? 'This ticket is empty — add items from the menu'
                         : 'No order yet — add items, or go back to the floor'}
                     </p>
+                    {useSheetTicket ? (
+                      <button
+                        type="button"
+                        onClick={() => setMobileSheet(null)}
+                        className={`${touchBtn} bg-emerald-600 text-white min-h-12 px-4 w-full max-w-xs mx-auto`}
+                        data-foh-empty-browse-menu="true"
+                        aria-label="Browse menu to add items"
+                      >
+                        Browse menu
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => returnToFloor()}
                       className={`${touchBtnGhost} min-h-12 px-4`}
+                      data-ticket-empty-back-floor="true"
                     >
                       ← Back to tables
                     </button>
@@ -5641,24 +5738,24 @@ export default function RestaurantPosPage() {
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <div
-                                  className={`font-medium min-w-0 ${
-                                    dense ? 'truncate' : ''
+                                  className={`font-medium min-w-0 type-body ${
+                                    dense ? 'type-ellipsis' : 'type-clamp-2'
                                   } ${selected ? 'text-amber-950' : 'text-stone-900'}`}
                                 >
-                                  <span className="tabular-nums">{group.quantity}</span>
+                                  <span className="type-amount">{group.quantity}</span>
                                   <span className="text-stone-400 font-normal"> × </span>
                                   {group.productName}
                                 </div>
                                 {dense ? (
                                   <span
-                                    className={`shrink-0 text-[10px] uppercase tracking-wide font-semibold ${st.className}`}
+                                    className={`shrink-0 type-caption uppercase tracking-wide font-semibold ${st.className}`}
                                   >
                                     {st.label}
                                   </span>
                                 ) : null}
                               </div>
                               {group.lineNotes ? (
-                                <div className="text-[11px] font-medium text-amber-800 mt-0.5 truncate">
+                                <div className="type-caption font-medium text-amber-800 mt-0.5 type-ellipsis">
                                   * {group.lineNotes}
                                 </div>
                               ) : null}
@@ -5699,9 +5796,9 @@ export default function RestaurantPosPage() {
                             {/* Dense: ± relocated onto the same row as name / total */}
                             {sameLineEditors ? qtyEditors : null}
                             <div
-                              className={`whitespace-nowrap font-medium tabular-nums ${
+                              className={`type-amount type-ellipsis font-medium ${
                                 selected ? 'text-amber-950' : 'text-stone-700'
-                              } ${dense ? 'text-xs' : ''}`}
+                              }`}
                             >
                               {formatCurrency(group.lineTotal)}
                             </div>
@@ -6081,18 +6178,16 @@ export default function RestaurantPosPage() {
                   </div>
                 ) : (
                   <>
-                <div className="flex justify-between items-baseline gap-2">
-                  <span className={`text-stone-600 ${isTouchDense ? 'text-xs' : 'text-sm'}`}>
+                <div className="flex justify-between items-baseline gap-2 min-w-0">
+                  <span
+                    className={`text-stone-600 min-w-0 type-ellipsis type-caption`}
+                  >
                     {orderLines.length} item{orderLines.length === 1 ? '' : 's'}
                     {Number(order?.taxAmount || 0) > 0
                       ? ` · Tax ${formatCurrency(Number(order?.taxAmount || 0))}`
                       : ''}
                   </span>
-                  <span
-                    className={`font-bold text-stone-900 ${
-                      isTouchDense ? 'text-sm' : 'text-base'
-                    }`}
-                  >
+                  <span className="font-bold text-stone-900 shrink-0 type-amount">
                     {formatCurrency(Number(order?.totalAmount || 0))}
                   </span>
                 </div>
@@ -6132,14 +6227,15 @@ export default function RestaurantPosPage() {
                   }
                   return null;
                 })()}
-                <div className={`grid grid-cols-2 ${isTouchDense ? 'gap-1.5' : 'gap-2'}`}>
+                <div
+                  className={`grid min-w-0 grid-cols-2 ${isTouchDense ? 'gap-1.5' : 'gap-2'}`}
+                  data-ticket-cta-grid="true"
+                >
                   <button
                     type="button"
                     disabled={!order || busy || !canOrder}
                     onClick={() => void handleSendKot()}
-                    className={`${TOUCH} col-span-1 rounded-xl bg-orange-600 text-white font-bold active:bg-orange-700 disabled:opacity-50 ${
-                      isTouchDense ? 'text-sm' : 'text-base'
-                    }`}
+                    className={`${TOUCH} col-span-1 min-w-0 type-ellipsis type-cta rounded-xl bg-orange-600 px-2 text-white font-bold active:bg-orange-700 disabled:opacity-50`}
                     style={{ minHeight: ctaMinH }}
                     data-pos-primary="kot"
                   >
@@ -6149,15 +6245,13 @@ export default function RestaurantPosPage() {
                     type="button"
                     disabled={!order || busy || orderLines.length === 0 || !canOrder}
                     onClick={() => void handleBill()}
-                    className={`${TOUCH} col-span-1 rounded-xl bg-rose-800 text-white font-bold active:bg-rose-950 disabled:opacity-50 ${
-                      isTouchDense ? 'text-sm' : 'text-base'
-                    }`}
+                    className={`${TOUCH} col-span-1 min-w-0 type-ellipsis type-cta rounded-xl bg-rose-800 px-2 text-white font-bold active:bg-rose-950 disabled:opacity-50`}
                     style={{ minHeight: ctaMinH }}
                     data-pos-primary="bill"
                   >
                     Bill
                     {ticketTabs.length > 1 && order && !isTouchDense ? (
-                      <span className="block text-[10px] font-semibold opacity-90 truncate max-w-full">
+                      <span className="block type-caption font-semibold opacity-90 type-ellipsis max-w-full">
                         {order.orderNumber}
                       </span>
                     ) : null}
@@ -6167,9 +6261,7 @@ export default function RestaurantPosPage() {
                       type="button"
                       disabled={!order || busy || orderLines.length === 0}
                       onClick={() => void handlePay()}
-                      className={`${TOUCH} col-span-2 rounded-xl bg-emerald-600 text-white font-bold active:bg-emerald-700 ${
-                        isTouchDense ? 'text-sm' : 'text-base'
-                      }`}
+                      className={`${TOUCH} col-span-2 min-w-0 type-ellipsis type-cta rounded-xl bg-emerald-600 px-2 text-white font-bold active:bg-emerald-700`}
                       style={{ minHeight: ctaMinH }}
                       data-pos-primary="pay"
                     >
@@ -6178,7 +6270,7 @@ export default function RestaurantPosPage() {
                         orderNumber: order?.orderNumber,
                       })}
                       {ticketTabs.length > 1 && order && chrome.actionLabels === 'verbose' && !isTouchDense ? (
-                        <span className="block text-[10px] font-semibold opacity-90 truncate max-w-full">
+                        <span className="block type-caption font-semibold opacity-90 type-ellipsis max-w-full">
                           {order.orderNumber}
                         </span>
                       ) : null}
@@ -6190,55 +6282,136 @@ export default function RestaurantPosPage() {
               </div>
             </div>
 
-            {/* Dense FOH: ticket dock only — menu stays full height until ticket is needed */}
+            {/* Dense FOH: see ticket items + KOT/Bill/Pay without hunting */}
             {useSheetTicket && mobileSheet !== 'order' ? (
               <div
-                className="shrink-0 border-t border-stone-200 bg-white px-2 py-1.5 flex items-stretch gap-1.5"
+                className="shrink-0 border-t border-stone-200 bg-white px-2 py-1.5 flex flex-col gap-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
                 data-foh-order-dock="true"
               >
-                <button
-                  type="button"
-                  onClick={() => setMobileSheet('order')}
-                  className={`${TOUCH} flex-1 min-w-0 rounded-xl border border-stone-300 bg-stone-50 px-3 flex items-center justify-between gap-2 active:bg-stone-100`}
-                  style={{ minHeight: ctaMinH }}
-                  data-foh-order-dock-open="true"
-                  aria-label="Open ticket board"
-                >
-                  <span className="min-w-0 text-left">
-                    <span className="block text-sm font-bold text-stone-900 truncate">
-                      {isMultiTicketTable
-                        ? `${ticketTabs.length} tickets`
-                        : order?.orderNumber
-                          ? order.orderNumber
-                          : 'Ticket'}
-                    </span>
-                    <span className="block text-[11px] text-stone-500 truncate">
-                      {orderLines.length > 0
-                        ? `${orderLines.length} line${orderLines.length === 1 ? '' : 's'} · open`
-                        : isMultiTicketTable
-                          ? 'Open tickets'
-                          : 'Open ticket'}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-base font-bold tabular-nums text-stone-900">
-                    {formatCurrency(
-                      isMultiTicketTable
-                        ? partyTicketsTotal
-                        : Number(order?.totalAmount ?? 0),
-                    )}
-                  </span>
-                </button>
-                {canOrder && order && orderLines.length > 0 && !isMultiTicketTable ? (
+                <div className="flex items-stretch gap-1.5 min-w-0">
                   <button
                     type="button"
-                    disabled={busy}
-                    onClick={() => void handleSendKot()}
-                    className={`${TOUCH} rounded-xl bg-amber-500 text-white font-bold px-3 active:bg-amber-600 disabled:opacity-50`}
-                    style={{ minHeight: ctaMinH }}
-                    data-foh-order-dock-kot="true"
+                    onClick={() => {
+                      // Always open the ticket board so user can SEE lines (Toast cart).
+                      if (sambaTicketView !== 'detail' && isMultiTicketTable) {
+                        setSambaTicketView('list');
+                      }
+                      setMobileSheet('order');
+                    }}
+                    className={`${TOUCH} flex-1 min-w-0 rounded-xl border-2 border-emerald-600/50 bg-emerald-50 px-3 flex items-center justify-between gap-2 active:bg-emerald-100`}
+                    style={{ minHeight: Math.max(48, ctaMinH - 2) }}
+                    data-foh-order-dock-open="true"
+                    data-foh-view-ticket="true"
+                    aria-label="View items on this ticket"
                   >
-                    KOT
+                    <span className="min-w-0 text-left">
+                      <span className="block type-body font-bold text-stone-900 type-ellipsis">
+                        {sambaTicketView === 'detail' && order?.orderNumber
+                          ? order.orderNumber
+                          : isMultiTicketTable
+                            ? `${ticketTabs.length} tickets`
+                            : order?.orderNumber || 'Ticket'}
+                      </span>
+                      <span className="block type-caption font-semibold text-emerald-900 type-ellipsis">
+                        {sambaTicketView !== 'detail' && isMultiTicketTable
+                          ? 'Tap to select a ticket'
+                          : orderLines.length > 0
+                            ? `Tap to see ${orderLines.length} item${orderLines.length === 1 ? '' : 's'}`
+                            : 'Tap to view ticket'}
+                      </span>
+                    </span>
+                    <span className="shrink-0 type-amount font-bold text-stone-900 tabular-nums">
+                      {formatCurrency(
+                        sambaTicketView !== 'detail' && isMultiTicketTable
+                          ? partyTicketsTotal
+                          : Number(order?.totalAmount ?? 0),
+                      )}
+                    </span>
                   </button>
+                  {/* Compact KOT beside total — appears once this ticket has items */}
+                  {canOrder &&
+                  order &&
+                  orderLines.length > 0 &&
+                  sambaTicketView === 'detail' &&
+                  !showSambaTicketList ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleSendKot()}
+                      className={`${TOUCH} shrink-0 min-w-[3.25rem] rounded-xl bg-orange-600 px-2.5 text-white type-cta font-bold active:bg-orange-700 disabled:opacity-50`}
+                      style={{ minHeight: Math.max(48, ctaMinH - 2) }}
+                      data-foh-order-dock-kot="true"
+                      data-pos-primary="kot"
+                      aria-label="Send KOT to kitchen"
+                      title="Send KOT"
+                    >
+                      KOT
+                    </button>
+                  ) : null}
+                  {isMultiTicketTable && sambaTicketView === 'detail' ? (
+                    <button
+                      type="button"
+                      onClick={backToPartyTicketList}
+                      className={`${touchBtnGhost} shrink-0 min-w-[3.5rem] px-1.5 type-caption font-bold`}
+                      style={{ minHeight: Math.max(48, ctaMinH - 2) }}
+                      data-foh-order-dock-tickets="true"
+                      aria-label="All tickets on this table"
+                      title="All tickets"
+                    >
+                      Tickets
+                    </button>
+                  ) : null}
+                </div>
+
+                {order &&
+                orderLines.length > 0 &&
+                !showSambaTicketList &&
+                sambaTicketView === 'detail' ? (
+                  <div
+                    className="grid min-w-0 grid-cols-2 gap-1.5"
+                    data-foh-order-dock-cta="true"
+                    data-ticket-cta-grid="true"
+                  >
+                    {canOrder ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handleBill()}
+                        className={`${TOUCH} col-span-1 min-w-0 type-ellipsis type-cta rounded-xl bg-rose-800 px-2 text-white font-bold active:bg-rose-950 disabled:opacity-50`}
+                        style={{ minHeight: ctaMinH }}
+                        data-foh-order-dock-bill="true"
+                        data-pos-primary="bill"
+                      >
+                        Bill
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setMobileSheet('order')}
+                      className={`${TOUCH} ${canRestaurantPay ? 'col-span-1' : canOrder ? 'col-span-1' : 'col-span-2'} min-w-0 type-ellipsis type-cta rounded-xl border-2 border-stone-800 bg-white px-2 text-stone-900 font-bold active:bg-stone-100`}
+                      style={{ minHeight: ctaMinH }}
+                      data-foh-order-dock-review="true"
+                      aria-label="View ticket items"
+                    >
+                      Order
+                    </button>
+                    {canRestaurantPay ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void handlePay()}
+                        className={`${TOUCH} col-span-2 min-w-0 type-ellipsis type-cta rounded-xl bg-emerald-600 px-2 text-white font-bold active:bg-emerald-700 disabled:opacity-50`}
+                        style={{ minHeight: ctaMinH }}
+                        data-foh-order-dock-pay="true"
+                        data-pos-primary="pay"
+                      >
+                        {resolvePayButtonLabel(chrome, {
+                          multiTicket: ticketTabs.length > 1,
+                          orderNumber: order?.orderNumber,
+                        })}
+                      </button>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             ) : null}

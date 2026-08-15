@@ -115,6 +115,12 @@ export function AdaptiveAppShell({ children, className, pathname }: AdaptiveAppS
     root.style.setProperty('--layout-sidebar-rail', `${layout.tokens.sidebarRailPx}px`);
     root.style.setProperty('--layout-form-columns', String(layout.tokens.formColumns));
     root.style.setProperty('--layout-content-max', layout.tokens.contentMaxWidth);
+    root.style.setProperty('--type-caption', `${layout.chrome.typeScale.captionPx}px`);
+    root.style.setProperty('--type-body', `${layout.chrome.typeScale.bodyPx}px`);
+    root.style.setProperty('--type-title', `${layout.chrome.typeScale.titlePx}px`);
+    root.style.setProperty('--type-amount', `${layout.chrome.typeScale.amountPx}px`);
+    root.style.setProperty('--type-cta', `${layout.chrome.typeScale.ctaPx}px`);
+    root.dataset.adaptiveDensity = layout.chrome.density;
     return () => {
       delete root.dataset.layoutTier;
       delete root.dataset.navMode;
@@ -130,6 +136,7 @@ export function AdaptiveAppShell({ children, className, pathname }: AdaptiveAppS
       delete root.dataset.workspaceNav;
       delete root.dataset.workspaceList;
       delete root.dataset.posPanel;
+      delete root.dataset.adaptiveDensity;
     };
   }, [layout, capabilities.printer, capabilities.isOffline, workspace]);
 
@@ -139,6 +146,11 @@ export function AdaptiveAppShell({ children, className, pathname }: AdaptiveAppS
     '--layout-sidebar-rail': `${layout.tokens.sidebarRailPx}px`,
     '--layout-form-columns': String(layout.tokens.formColumns),
     '--layout-content-max': layout.tokens.contentMaxWidth,
+    '--type-caption': `${layout.chrome.typeScale.captionPx}px`,
+    '--type-body': `${layout.chrome.typeScale.bodyPx}px`,
+    '--type-title': `${layout.chrome.typeScale.titlePx}px`,
+    '--type-amount': `${layout.chrome.typeScale.amountPx}px`,
+    '--type-cta': `${layout.chrome.typeScale.ctaPx}px`,
   } as CSSProperties;
 
   return (
@@ -156,6 +168,7 @@ export function AdaptiveAppShell({ children, className, pathname }: AdaptiveAppS
             data-adaptive-secondary={layout.chrome.secondaryActions}
             data-adaptive-labels={layout.chrome.actionLabels}
             data-adaptive-list-row={layout.chrome.listRow}
+            data-adaptive-density={layout.chrome.density}
             data-adaptive-foh-ticket={layout.chrome.fohTicketPane}
             data-printer-capability={capabilities.printer}
             data-device-offline={capabilities.isOffline ? 'true' : 'false'}

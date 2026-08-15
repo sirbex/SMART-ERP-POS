@@ -1,9 +1,9 @@
 {
   "proof": "SHARED_TERMINAL_SESSION_LOCK",
   "integrity": "FAIL_CLOSED",
-  "date": "2026-08-14T06:07:12.811Z",
+  "date": "2026-08-15T22:44:21.763Z",
   "verdict": "PASS",
-  "pass": 30,
+  "pass": 31,
   "fail": 0,
   "gates": [
     {
@@ -119,7 +119,12 @@
     {
       "id": "AUTH_CLEAR_LOCK_BEFORE_AUTH",
       "ok": true,
-      "detail": "lock cleared before authenticated paint"
+      "detail": "grace + lock cleared before authenticated paint"
+    },
+    {
+      "id": "AUTH_NO_SAME_TAB_INIT_ON_AUTH_CHANGED",
+      "ok": true,
+      "detail": "same-tab auth-changed must not re-initAuth (login bounce)"
     },
     {
       "id": "POLICY_FAIL_CLOSED",

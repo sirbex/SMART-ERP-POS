@@ -3,7 +3,7 @@
 | Field | Value |
 |-------|--------|
 | **Invariant** | `INVARIANT_SESSION_DEATH_LOGIN_v1` |
-| **Last proof** | 2026-08-09T13:56:07.803Z |
+| **Last proof** | 2026-08-15T05:37:25.086Z |
 | **Verdict** | **PASS** |
 | **Gates** | 54/54 |
 

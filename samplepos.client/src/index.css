@@ -34,6 +34,13 @@
     --layout-sidebar-rail: 80px;
     --layout-form-columns: 3;
     --layout-content-max: 100%;
+
+    /* Adaptive type scale (comfortable desk defaults) — stamped live by AdaptiveAppShell */
+    --type-caption: 12px;
+    --type-body: 14px;
+    --type-title: 16px;
+    --type-amount: 15px;
+    --type-cta: 16px;
   }
 
   .dark {
@@ -153,4 +160,45 @@ body,
 /* Phase 2 — form density mirrors shell token */
 .adaptive-app-shell {
   --adaptive-form-columns: var(--layout-form-columns, 3);
+}
+
+/*
+ * Global adaptive type roles — density-stepped via --type-* from AdaptiveAppShell.
+ * Prefer these over hardcoded text-sm/text-base on cards, amounts, and CTAs.
+ */
+.type-caption {
+  font-size: var(--type-caption);
+  line-height: 1.25;
+}
+.type-body {
+  font-size: var(--type-body);
+  line-height: 1.3;
+}
+.type-title {
+  font-size: var(--type-title);
+  line-height: 1.25;
+}
+.type-amount {
+  font-size: var(--type-amount);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.type-cta {
+  font-size: var(--type-cta);
+  line-height: 1.2;
+}
+.type-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}
+.type-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }

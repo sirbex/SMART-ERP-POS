@@ -155,6 +155,7 @@ export function clearActorLock(): void {
 export function shouldEnforceDeviceReauthGate(input: {
   role: string | null | undefined;
   hasStoredSession: boolean;
+  withinLoginGrace?: boolean;
 }): boolean {
   return shouldForceReauthOnBoot({
     mode: getDeviceSessionMode(),
@@ -162,6 +163,7 @@ export function shouldEnforceDeviceReauthGate(input: {
     hasStoredSession: input.hasStoredSession,
     actorLockSet: isActorLockSet(),
     isBrowserColdStart: isBrowserColdStartLocal(),
+    withinLoginGrace: input.withinLoginGrace === true,
   });
 }
 

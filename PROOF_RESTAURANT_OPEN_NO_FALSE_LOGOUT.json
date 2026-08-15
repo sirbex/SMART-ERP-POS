@@ -1,0 +1,48 @@
+{
+  "proof": "RESTAURANT_OPEN_NO_FALSE_LOGOUT",
+  "objective": "Turning restaurant ON and opening FOH must not wipe the session on 403 RBAC / refresh wait races; errors must be fail-loud and non-swallowing",
+  "runAt": "2026-08-15T22:44:11.434Z",
+  "result": "PASS",
+  "summary": {
+    "fail": 0,
+    "pass": 21,
+    "total": 21
+  },
+  "gates": [
+    {
+      "id": "R1_HANDLED_403_STATUS",
+      "ok": true
+    },
+    {
+      "id": "R2_NO_AUTH_WAIT_FALSE_LOGOUT",
+      "ok": true
+    },
+    {
+      "id": "R3_CASHIER_LOOP_BREAK",
+      "ok": true
+    },
+    {
+      "id": "R4_FOH_SILENT_FORBIDDEN",
+      "ok": true
+    },
+    {
+      "id": "R5_ENABLED_FETCH_LOG",
+      "ok": true
+    },
+    {
+      "id": "R6_AUTH_BOOT_NO_403_WIPE",
+      "ok": true
+    },
+    {
+      "id": "R7_API_STAMPS_403",
+      "ok": true
+    }
+  ],
+  "suites": [
+    "src/__tests__/restaurant-open-no-false-logout.proof.test.ts",
+    "src/__tests__/session-force-login-redirect.proof.test.ts",
+    "src/__tests__/access-denied-notification-proof.test.ts"
+  ],
+  "exitStatus": 0,
+  "stdoutTail": "\n RUN  v3.2.4 C:/Users/Chase/source/repos/SamplePOS/samplepos.client\n\n ✓ src/__tests__/restaurant-open-no-false-logout.proof.test.ts (7 tests) 25ms\n ✓ src/__tests__/session-force-login-redirect.proof.test.ts (5 tests) 25ms\n ✓ src/__tests__/access-denied-notification-proof.test.ts (9 tests) 30ms\n\n Test Files  3 passed (3)\n      Tests  21 passed (21)\n   Start at  01:44:13\n   Duration  3.27s (transform 1.15s, setup 0ms, collect 3.31s, tests 79ms, environment 2ms, prepare 2.95s)\n\n\n"
+}

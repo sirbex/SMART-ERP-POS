@@ -154,3 +154,89 @@ export function shouldPaintJournalOccupancyOnServerFree(input: {
   if (!input.actorUserId || !input.journalWaiterId) return false;
   return input.journalWaiterId === input.actorUserId;
 }
+
+/**
+ * Precise floor money (2dp) — table tiles must match ticket strip without refresh.
+ */
+export function roundFloorMoney(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+export function sumTicketTabTotals(
+  tabs: ReadonlyArray<{ totalAmount?: string | number | null }>,
+): number {
+  return roundFloorMoney(tabs.reduce((s, t) => s + (Number(t.totalAmount) || 0), 0));
+}
+
+export type FloorTicketTabLike = {
+  id: string;
+  orderNumber: string;
+  totalAmount: string | number;
+};
+
+export type FloorTableFigurePatch = {
+  openCheckCount: number;
+  openChecksTotal: string | null;
+  orderTotal: string | null;
+  status: 'FREE' | 'OCCUPIED';
+  currentOrderId: string | null;
+  orderNumber: string | null;
+};
+
+/**
+ * Derive floor tile figures from open ticket tabs (party SSOT).
+ * Empty tabs ⇒ FREE; otherwise OCCUPIED with exact count + summed totals.
+ */
+export function floorFiguresFromTicketTabs(
+  tabs: ReadonlyArray<FloorTicketTabLike>,
+): FloorTableFigurePatch {
+  const open = tabs.filter((t) => !!t?.id);
+  if (open.length === 0) {
+    return {
+      openCheckCount: 0,
+      openChecksTotal: null,
+      orderTotal: null,
+      status: 'FREE',
+      currentOrderId: null,
+      orderNumber: null,
+    };
+  }
+  const total = sumTicketTabTotals(open);
+  const totalStr = total.toFixed(2);
+  const focus = open[open.length - 1]!;
+  return {
+    openCheckCount: open.length,
+    openChecksTotal: totalStr,
+    orderTotal: totalStr,
+    status: 'OCCUPIED',
+    currentOrderId: focus.id,
+    orderNumber: focus.orderNumber || null,
+  };
+}
+
+/**
+ * Patch one table row inside a tables query payload (immutable).
+ */
+export function patchTableRowFloorFigures<T extends { id: string }>(
+  rows: readonly T[] | null | undefined,
+  tableId: string,
+  figures: FloorTableFigurePatch,
+): T[] {
+  const list = Array.isArray(rows) ? [...rows] : [];
+  return list.map((t) =>
+    t.id === tableId
+      ? ({
+          ...t,
+          status: figures.status,
+          openCheckCount: figures.openCheckCount,
+          openChecksTotal: figures.openChecksTotal,
+          orderTotal: figures.orderTotal,
+          currentOrderId: figures.currentOrderId,
+          orderNumber: figures.orderNumber,
+          ...(figures.status === 'FREE'
+            ? { guestName: null, waiterId: null, waiterName: null }
+            : {}),
+        } as T)
+      : t,
+  );
+}

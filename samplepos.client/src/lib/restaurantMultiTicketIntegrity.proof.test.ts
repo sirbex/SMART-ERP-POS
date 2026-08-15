@@ -377,19 +377,20 @@ describe('PROOF multi-ticket consistency · integrity · accuracy', () => {
 });
 
 describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () => {
-  it('S01 FOH party-list menu uses forceNewTicket; never toast-blocks with samba-open-ticket-first', () => {
+  it('S01 FOH party list requires ticket select; + Ticket opens new; menu gated on list', () => {
     const pos = readFileSync(
       resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'),
       'utf8',
     );
-    expect(pos).toMatch(/const forceNewTicket = showSambaTicketList/);
-    expect(pos).toMatch(/forceNewTicket/);
-    expect(pos).toMatch(/forceNewCheck:\s*true/);
+    expect(pos).toMatch(/Select a ticket to add items/);
+    expect(pos).toMatch(/data-samba-party-coach="true"/);
+    expect(pos).toMatch(/data-menu-add-gated=\{showSambaTicketList \? 'party-list' : 'ready'\}/);
+    expect(pos).toMatch(/const openNewTicketOnTable = async/);
     expect(pos).toMatch(/setSambaTicketView\('detail'\)/);
-    expect(pos).not.toMatch(/samba-open-ticket-first/);
-    expect(pos).not.toMatch(/Open a ticket first/);
-    // Detail path must NOT force new when viewing a selected ticket
     expect(pos).toMatch(/showSambaTicketList = isMultiTicketTable && sambaTicketView === 'list'/);
+    expect(pos).toMatch(/backToPartyTicketList/);
+    // Menu must not silent-force-new from party list
+    expect(pos).not.toMatch(/const forceNewTicket = showSambaTicketList/);
   });
 
   it('S02 client API carries forceNewCheck; offline ops honor forceNewTicket', () => {
@@ -404,18 +405,27 @@ describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () =>
     expect(resolveFohTicketPane('ultra')).toBe('sheet');
     expect(resolveFohTicketPane('dense')).toBe('sheet');
     expect(resolveFohTicketPane('comfortable')).toBe('column');
+    expect(resolveFohTicketPane('dense', 'desktop')).toBe('column');
     const phone = resolveAdaptiveChrome('mobile', {
       width: 390,
       height: 844,
       touchFirst: true,
     });
     expect(phone.fohTicketPane).toBe('sheet');
-    const desk = resolveAdaptiveChrome('desktop', {
+    const laptop = resolveAdaptiveChrome('desktop', {
       width: 1280,
+      height: 800,
+      touchFirst: false,
+    });
+    expect(laptop.density).toBe('dense');
+    expect(laptop.fohTicketPane).toBe('column');
+    const roomyDesk = resolveAdaptiveChrome('desktop', {
+      width: 1440,
       height: 900,
       touchFirst: false,
     });
-    expect(desk.fohTicketPane).toBe('column');
+    expect(roomyDesk.density).toBe('comfortable');
+    expect(roomyDesk.fohTicketPane).toBe('column');
   });
 
   it('S04 server forceNew short-circuits before orderId / currentOrderId append', () => {
@@ -455,5 +465,75 @@ describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () =>
     expect(pos).toMatch(/data-foh-menu-return="true"/);
     expect(pos).not.toMatch(/max-h-\[32%\]/);
     expect(pos).not.toMatch(/max-h-\[38%\]/);
+  });
+
+  it('S06 + Ticket keeps detail+menu; never invalidates painted check; patches floor figures', () => {
+    const pos = readFileSync(
+      resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'),
+      'utf8',
+    );
+    const floor = readFileSync(resolve(here, './restaurantFloorSession.ts'), 'utf8');
+    expect(pos).toMatch(/const openNewTicketOnTable = async/);
+    expect(pos).toMatch(/setSambaTicketView\('detail'\)/);
+    // Empty new ticket must expose MENU (sheet null) — never cover catalog with empty board.
+    expect(pos).toMatch(
+      /openNewTicketOnTable[\s\S]{0,500}fohTicketPane === 'sheet'\) setMobileSheet\(null\)/,
+    );
+    expect(pos).toContain('data-foh-empty-browse-menu="true"');
+    expect(pos).toContain('data-ticket-empty="true"');
+    // Must not wipe the check we just opened (menu target / back-forth bug).
+    expect(pos).not.toMatch(
+      /openNewTicketOnTable[\s\S]{0,1800}invalidateQueries\(\{\s*queryKey:\s*\['restaurant',\s*'check'/,
+    );
+    expect(pos).toContain('floorFiguresFromTicketTabs');
+    expect(pos).toContain('patchTableRowFloorFigures');
+    expect(floor).toContain('export function floorFiguresFromTicketTabs');
+    expect(floor).toContain('export function roundFloorMoney');
+    expect(floor).toContain('toFixed(2)');
+  });
+
+  it('S07 pick ticket returns to menu; party coach + backToPartyTicketList sealed', () => {
+    const pos = readFileSync(
+      resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'),
+      'utf8',
+    );
+    expect(pos).toMatch(/const openTicketFromList = /);
+    expect(pos).toMatch(
+      /openTicketFromList[\s\S]{0,600}fohTicketPane === 'sheet'\) setMobileSheet\(null\)/,
+    );
+    expect(pos).toContain('data-foh-empty-browse-menu="true"');
+    expect(pos).toMatch(/backToPartyTicketList/);
+    expect(pos).toMatch(/data-samba-party-coach="true"/);
+  });
+
+  it('S08 sheet dock exposes View ticket + KOT/Bill/Pay (never multi-ticket hide)', () => {
+    const pos = readFileSync(
+      resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'),
+      'utf8',
+    );
+    expect(pos).toContain('data-foh-order-dock-cta="true"');
+    expect(pos).toContain('data-foh-order-dock-kot="true"');
+    expect(pos).toContain('data-foh-order-dock-bill="true"');
+    expect(pos).toContain('data-foh-order-dock-pay="true"');
+    expect(pos).toContain('data-foh-view-ticket="true"');
+    expect(pos).toContain('data-foh-order-dock-review="true"');
+    expect(pos).toMatch(/Tap to see/);
+    // Compact KOT sits on the summary row (beside total), not only in the lower grid
+    const dock = pos.slice(
+      pos.indexOf('data-foh-order-dock="true"'),
+      pos.indexOf('data-foh-order-dock-cta="true"'),
+    );
+    expect(dock).toContain('data-foh-view-ticket="true"');
+    expect(dock).toContain('data-foh-order-dock-kot="true"');
+    expect(dock.indexOf('data-foh-view-ticket="true"')).toBeLessThan(
+      dock.indexOf('data-foh-order-dock-kot="true"'),
+    );
+    // Old bug: dock open jumped to party list instead of showing lines
+    expect(pos).not.toMatch(
+      /data-foh-order-dock-open[\s\S]{0,400}backToPartyTicketList\(\);\s*\n\s*return;/,
+    );
+    expect(pos).not.toMatch(
+      /canOrder && order && orderLines\.length > 0 && !isMultiTicketTable/,
+    );
   });
 });

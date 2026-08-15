@@ -1,0 +1,158 @@
+{
+  "proof": "ADAPTIVE_FOH_RESPONSIVE_INTEGRITY",
+  "objective": "OS-agnostic adaptive chrome SSOT: any CSS viewport → deterministic density, ticket pane, and dynamic CTA labels; FOH minmax ticket column never crushes KOT/Bill/Pay",
+  "runAt": "2026-08-15T22:43:59.362Z",
+  "result": "PASS",
+  "policy": {
+    "inputs": [
+      "widthPx",
+      "heightPx",
+      "touchFirst"
+    ],
+    "forbiddenInputs": [
+      "navigator.userAgent",
+      "navigator.platform",
+      "process.platform",
+      "device brand"
+    ],
+    "ssot": "samplepos.client/src/lib/adaptiveChrome.ts",
+    "consumers": [
+      "RestaurantPosPage.tsx",
+      "AdaptiveAppShell.tsx",
+      "POSPage.tsx",
+      "layoutTiers.buildLayoutCapabilities"
+    ]
+  },
+  "viewportMatrix": [
+    {
+      "classId": "phone-portrait",
+      "w": 390,
+      "h": 844,
+      "pane": "sheet",
+      "labels": "short"
+    },
+    {
+      "classId": "phone-landscape-short",
+      "w": 844,
+      "h": 390,
+      "pane": "sheet",
+      "labels": "short"
+    },
+    {
+      "classId": "pos-pad-compact",
+      "w": 800,
+      "h": 1280,
+      "pane": "sheet",
+      "labels": "short"
+    },
+    {
+      "classId": "laptop-10in-1280x800",
+      "w": 1280,
+      "h": 800,
+      "pane": "column",
+      "labels": "short"
+    },
+    {
+      "classId": "laptop-1366x768",
+      "w": 1366,
+      "h": 768,
+      "pane": "column",
+      "labels": "short"
+    },
+    {
+      "classId": "desk-1440x900",
+      "w": 1440,
+      "h": 900,
+      "pane": "column",
+      "labels": "verbose"
+    },
+    {
+      "classId": "wide-1920x1080",
+      "w": 1920,
+      "h": 1080,
+      "pane": "column",
+      "labels": "verbose"
+    },
+    {
+      "classId": "wide-short-half-window",
+      "w": 1800,
+      "h": 800,
+      "pane": "column",
+      "labels": "short"
+    }
+  ],
+  "summary": {
+    "client": {
+      "fail": 0,
+      "pass": 36,
+      "total": 36
+    },
+    "pass": 36,
+    "fail": 0,
+    "total": 36
+  },
+  "gates": [
+    {
+      "id": "R01_VIEWPORT_MATRIX",
+      "ok": true,
+      "detail": "8 viewport classes: sheet on pads/phones; column on desk/laptop incl. dense 10\""
+    },
+    {
+      "id": "D01_DYNAMIC_PAY_LABELS",
+      "ok": true,
+      "detail": "resolvePayButtonLabel / resolveActionLabel from chrome.actionLabels only"
+    },
+    {
+      "id": "D02_LAPTOP_PACKING",
+      "ok": true,
+      "detail": "isLaptopShortViewport + isNarrowDesktopViewport densify without phone sheet"
+    },
+    {
+      "id": "D03_TYPE_SCALE",
+      "ok": true,
+      "detail": "resolveTypeScale(density) SSOT; shell stamps --type-*; FOH uses type-body/amount/cta"
+    },
+    {
+      "id": "S01_CROSS_OS_IDENTITY",
+      "ok": true,
+      "detail": "identical CSS geometry → identical chrome (Win/macOS/Linux)"
+    },
+    {
+      "id": "S02_NO_UA_FORK",
+      "ok": true,
+      "detail": "adaptiveChrome + layoutTiers forbid UA/platform/brand runtime forks"
+    },
+    {
+      "id": "L01_MINMAX_TICKET",
+      "ok": true,
+      "detail": "RestaurantPosPage minmax(19rem) ticket track + data-ticket-cta-grid"
+    },
+    {
+      "id": "L02_SHELL_STAMP",
+      "ok": true,
+      "detail": "AdaptiveAppShell + FOH stamp fohTicketPane / density / --pos-cta-min-h"
+    },
+    {
+      "id": "L03_CTA_CONTRACT",
+      "ok": true,
+      "detail": "KOT/Bill short literals; Pay from SSOT (no hard-coded verbose Pay)"
+    },
+    {
+      "id": "EVIDENCE_CHROME_SSOT",
+      "ok": true,
+      "detail": "adaptive-chrome.ssot.evidence.test.ts included in suite"
+    },
+    {
+      "id": "EVIDENCE_MULTI_TICKET_S03",
+      "ok": true,
+      "detail": "restaurantMultiTicketIntegrity S03 sheet/column SSOT included"
+    }
+  ],
+  "suites": [
+    "src/lib/adaptiveFohResponsiveIntegrity.proof.test.ts",
+    "src/__tests__/adaptive-chrome.ssot.evidence.test.ts",
+    "src/lib/restaurantMultiTicketIntegrity.proof.test.ts"
+  ],
+  "exitStatus": 0,
+  "stdoutTail": "\n RUN  v3.2.4 C:/Users/Chase/source/repos/SamplePOS/samplepos.client\n\n ✓ src/__tests__/adaptive-chrome.ssot.evidence.test.ts (9 tests) 63ms\n ✓ src/lib/adaptiveFohResponsiveIntegrity.proof.test.ts (10 tests) 70ms\n ✓ src/lib/restaurantMultiTicketIntegrity.proof.test.ts (17 tests) 73ms\n\n Test Files  3 passed (3)\n      Tests  36 passed (36)\n   Start at  01:44:00\n   Duration  4.56s (transform 1.32s, setup 0ms, collect 3.57s, tests 205ms, environment 2ms, prepare 2.90s)\n\n\n"
+}

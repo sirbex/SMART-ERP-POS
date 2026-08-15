@@ -35,6 +35,13 @@ export const ACTOR_LOCK_KEY = 'smarterp_actor_lock_v1';
  */
 export const AUTH_BOOT_SESSION_KEY = 'auth_boot_session_v1';
 
+/**
+ * Set for a short window after successful login so initAuth / cross-tab storage
+ * handlers cannot apply SHARED cold-start wipe to a brand-new session.
+ */
+export const AUTH_LOGIN_GRACE_KEY = 'auth_login_grace_v1';
+export const AUTH_LOGIN_GRACE_MS = 30_000;
+
 export const SHARED_IDLE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
 export const PERSONAL_IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
 
@@ -150,6 +157,7 @@ export function isActorLockRawSet(raw: string | null | undefined): boolean {
 
 /**
  * Unified gate: force re-auth when actor lock, cold browser session, or role policy says so.
+ * Login grace (same tab / storage race) must never wipe a session just established.
  */
 export function shouldForceReauthOnBoot(input: {
   mode: DeviceSessionMode;
@@ -157,12 +165,15 @@ export function shouldForceReauthOnBoot(input: {
   hasStoredSession: boolean;
   actorLockSet: boolean;
   isBrowserColdStart: boolean;
+  /** When true, skip wipe — caller just completed login in this tab. */
+  withinLoginGrace?: boolean;
 }): boolean {
   if (!isDeviceSessionMode(input.mode)) {
     throw new DeviceSessionIntegrityError(
       `shouldForceReauthOnBoot: invalid mode '${String(input.mode)}'`,
     );
   }
+  if (input.withinLoginGrace) return false;
   if (!input.hasStoredSession) return false;
   if (input.actorLockSet) return true;
   if (!input.isBrowserColdStart) return false;

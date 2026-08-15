@@ -120,8 +120,9 @@ apiClient.interceptors.request.use(
       try {
         await waitForAuthenticated();
       } catch {
-        /* Expired — force login if tokens already wiped */
-        if (getAuthState() === 'EXPIRED' || !getAccessToken()) {
+        // Only hard-logout when session is proven dead — not on refresh wait timeout
+        // while a token refresh is still in flight (FOH mount storms used to false-logout).
+        if (getAuthState() === 'EXPIRED' || (!getAccessToken() && !getRefreshToken())) {
           forceLogoutRedirect('auth_wait_expired');
           return Promise.reject(new Error('Session expired'));
         }
@@ -272,7 +273,9 @@ apiClient.interceptors.response.use(
       });
       // After first toast: suppress catch-block re-toasts of the same message
       markApiErrorNotified(reason, 'Action Not Allowed', brvCode);
-      return Promise.reject(new HandledApiError(reason));
+      return Promise.reject(
+        new HandledApiError(reason, { httpStatus: error.response?.status ?? 422, errorCode: brvCode }),
+      );
     }
 
     // Handle 401 — single code path with token refresh + retry (useTokenRefresh)
@@ -290,7 +293,13 @@ apiClient.interceptors.response.use(
         markApiErrorNotified(msg, ACCESS_DENIED_MESSAGE, 'app-forbidden');
         window.dispatchEvent(new CustomEvent('app:forbidden', { detail: msg }));
       }
-      return Promise.reject(new HandledApiError(msg));
+      // Preserve 403 — never let callers treat RBAC deny as session death / 401.
+      return Promise.reject(
+        new HandledApiError(msg, {
+          httpStatus: 403,
+          errorCode: (error.response.data as { code?: string } | undefined)?.code,
+        }),
+      );
     }
 
     // SSOT: any other HTTP error → clear notification (never "Request failed with status code NNN")

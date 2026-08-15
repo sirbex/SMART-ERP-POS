@@ -29,10 +29,20 @@ import { formatCurrency } from './currency';
  */
 export class HandledApiError extends Error {
   readonly isHandled = true as const;
-  constructor(message: string) {
+  /** Original HTTP status when known (403 must never be treated as session death). */
+  readonly httpStatus?: number;
+  readonly errorCode?: string;
+  constructor(message: string, opts?: { httpStatus?: number; errorCode?: string }) {
     super(message);
     this.name = 'HandledApiError';
+    this.httpStatus = opts?.httpStatus;
+    this.errorCode = opts?.errorCode;
   }
+}
+
+/** True when interceptor already classified this as HTTP 403 (RBAC / ownership). */
+export function isHandledForbiddenError(error: unknown): boolean {
+  return error instanceof HandledApiError && error.httpStatus === 403;
 }
 
 // ── Global anti-double-toast (SSOT) ──────────────────────────────────
@@ -702,7 +712,9 @@ export function dispatchUserFacingApiNotification(error: unknown): HandledApiErr
   // App listener may toast a React node (not a string). Register body/title so
   // catch-block toast.error(message) does not double-fire.
   markApiErrorNotified(notification.message, notification.title, notification.toastId);
-  return new HandledApiError(notification.message);
+  return new HandledApiError(notification.message, {
+    httpStatus: notification.status,
+  });
 }
 
 // Install once on import (api.ts / App both pull this module).

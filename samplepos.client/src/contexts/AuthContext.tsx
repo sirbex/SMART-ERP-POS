@@ -14,6 +14,7 @@ import {
 import {
   COLD_START_QUICK_LOGIN_HREF,
   markBrowserSessionAlive,
+  markLoginGrace,
   shouldEnforceColdStartPinGate,
 } from '../lib/sessionColdStartLock';
 import {
@@ -27,6 +28,7 @@ import {
 import { isAuthRecoveryPath } from '../lib/offlineLoginCredentials';
 import { refreshRestaurantFloorSession } from '../lib/restaurantFloorSession';
 import type { AxiosError } from 'axios';
+import { HandledApiError, isHandledForbiddenError } from '../utils/errorHandler';
 import type { UserRole } from '../types';
 
 interface User {
@@ -179,21 +181,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 localStorage.setItem('user', JSON.stringify(userData));
               }
             } catch (err) {
+              const handled = err instanceof HandledApiError ? err : null;
               const axErr = err as AxiosError;
-              const status = axErr?.response?.status;
+              const status = handled?.httpStatus ?? axErr?.response?.status;
               const aborted =
                 axErr?.code === 'ERR_CANCELED' ||
                 axErr?.code === 'ECONNABORTED' ||
                 axErr?.message?.includes('aborted');
-              const sessionGone =
-                /Session not ready|Session expired/i.test(axErr?.message || '') ||
-                !getAccessToken();
-              if (aborted) {
-                // Slow/unreachable API — use cached session; do not block the app
-              } else if (status === 401 || status === 403 || sessionGone) {
+              // RBAC / plan 403 must NEVER wipe the session (restaurant open used to).
+              if (aborted || isHandledForbiddenError(err) || status === 403) {
+                if (status === 403 || isHandledForbiddenError(err)) {
+                  console.error(
+                    '[Auth] Profile forbidden — keeping session; check RBAC / plan',
+                    handled?.message || axErr?.message,
+                  );
+                }
+                // Slow/unreachable API or forbidden profile — use cached session
+              } else if (status === 401 || (!getAccessToken() && !getRefreshToken())) {
                 // Must not set isAuthenticated with a dead/cleared session.
                 forceLogoutRedirect(
-                  status === 403 ? 'profile_forbidden' : 'profile_rejected',
+                  status === 401 ? 'profile_rejected' : 'profile_rejected',
                 );
                 return;
               }
@@ -227,8 +234,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
       } catch (error) {
         console.error('Error initializing auth:', error);
-        // Clear corrupted auth data using the single authority
-        clearTokens();
+        // Never wipe a live session on non-auth failures (HandledApiError 403,
+        // network blips, assert noise). Only definitive token absence.
+        if (!getAccessToken() && !getRefreshToken()) {
+          clearTokens();
+        }
       } finally {
         setIsLoading(false);
       }
@@ -236,20 +246,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     initAuth();
 
-    // Listen for auth changes from other tabs/windows
+    // Cross-tab only: same-tab login/logout already apply React state.
+    // Re-running initAuth on same-tab `auth-changed` re-applied SHARED cold-start
+    // and bounced fresh logins to /quick-login (login → instant logout).
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === 'auth_token' || event.key === 'user') {
-        initAuth();
+        void initAuth();
       }
     };
 
-    // Listen for custom auth change events
-    const handleAuthChange = () => {
-      initAuth();
-    };
-
     window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('auth-changed', handleAuthChange);
 
     // ── Multi-tab broadcast: react to auth events from other tabs ──
     const cleanupBroadcastListener = setupAuthBroadcastListener();
@@ -286,7 +292,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     return () => {
       window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener('auth-changed', handleAuthChange);
       cleanupBroadcastListener();
       unsubscribeBroadcast();
       cleanupOfflineQueue();
@@ -336,7 +341,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }
 
-    // NOW set authenticated — routes will render with permissions already loaded
+    // NOW set authenticated — routes will render with permissions already loaded.
+    // Grace first: cross-tab storage → initAuth must not wipe this session.
+    markLoginGrace();
     clearActorLock();
     markBrowserSessionAlive();
     setUser(userData);
@@ -346,7 +353,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // FOH session isolation: drop prior actor floor RQ so User B never paints User A.
     refreshRestaurantFloorSession(queryClient);
 
-    // Notify other tabs/components
+    // Same-tab listeners (e.g. POSPage) — AuthProvider does NOT re-initAuth on this.
     window.dispatchEvent(new Event('auth-changed'));
   };
 

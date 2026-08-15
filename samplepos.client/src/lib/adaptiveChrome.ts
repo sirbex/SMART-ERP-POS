@@ -10,6 +10,8 @@
  * - Pads and dense editors open on demand (icon → sheet), dock when space allows
  * - Tiers are capability-based (viewport/pointer), never device brand
  * - Density adapts to short/narrow handhelds (Sunmi, phones) via height + touch
+ * - Small laptops densify chrome but keep a side ticket column (never phone sheet)
+ * - Type scale steps with density (global --type-* / .type-* roles) so cards/amounts fit
  */
 
 import type { LayoutTier } from './layoutTiers';
@@ -55,6 +57,14 @@ export type AdaptiveChromeOptions = {
  * Global chrome tokens — SSOT for progressive disclosure.
  * Extend carefully; do not fork per module.
  */
+export type AdaptiveTypeScale = {
+  captionPx: number;
+  bodyPx: number;
+  titlePx: number;
+  amountPx: number;
+  ctaPx: number;
+};
+
 export type AdaptiveChrome = {
   /** Inline coach / tip lines under search, tickets, toolbars */
   coach: AdaptiveCoachMode;
@@ -89,11 +99,33 @@ export type AdaptiveChrome = {
   fohTicketPane: AdaptiveFohTicketPane;
   /** Primary CTA min height (px) for touch FOH */
   primaryCtaMinHeightPx: number;
+  /**
+   * Global type scale (px) — cards, amounts, CTAs. Steps with density so
+   * numbers/labels never hide behind fixed Tailwind text-* on small screens.
+   */
+  typeScale: AdaptiveTypeScale;
 };
 
 /** Short physical height or phone landscape — reclaim space for lists. */
 export function isShortViewport(heightPx: number | undefined): boolean {
   return Number.isFinite(heightPx) && (heightPx as number) > 0 && (heightPx as number) < 720;
+}
+
+/**
+ * Short desk / browser chrome on ~10–14" laptops (e.g. 1366×768, 1280×800).
+ * Not phone-short (<720) — packs FOH without demoting to sheet.
+ */
+export function isLaptopShortViewport(heightPx: number | undefined): boolean {
+  return Number.isFinite(heightPx) && (heightPx as number) > 0 && (heightPx as number) < 900;
+}
+
+/** Narrow desktop band — side ticket must keep a usable min width. */
+export function isNarrowDesktopViewport(widthPx: number | undefined): boolean {
+  return (
+    Number.isFinite(widthPx) &&
+    (widthPx as number) >= 1024 &&
+    (widthPx as number) < 1366
+  );
 }
 
 /** Very narrow handset / order-pad column. */
@@ -104,6 +136,7 @@ export function isNarrowViewport(widthPx: number | undefined): boolean {
 /**
  * Pack FOH chrome from tier + viewport geometry + touch (never brand names).
  * Sunmi portrait tablets are often compact+tall; landscape phones are short → ultra.
+ * 10" / small laptops densify while staying on the desk column path.
  */
 export function resolveAdaptiveDensity(
   tier: LayoutTier,
@@ -125,6 +158,13 @@ export function resolveAdaptiveDensity(
     return 'dense';
   }
   if (short && touch) return 'dense';
+  // Small laptop / short desk: dense chrome, still column (see resolveFohTicketPane).
+  if (
+    (tier === 'desktop' || tier === 'wide') &&
+    (isLaptopShortViewport(h) || isNarrowDesktopViewport(w))
+  ) {
+    return 'dense';
+  }
   return 'comfortable';
 }
 
@@ -141,12 +181,49 @@ function ctaMinHeightForDensity(density: AdaptiveSurfaceDensity): number {
 }
 
 /**
- * Ticket pane placement from density SSOT.
- * Comfortable = side column; dense/ultra (phones, Sunmi, short pads) = sheet.
+ * Density → type scale SSOT.
+ * Smaller steps on ultra/dense so card names + currency fit; comfortable = desk.
+ */
+export function resolveTypeScale(density: AdaptiveSurfaceDensity): AdaptiveTypeScale {
+  switch (density) {
+    case 'ultra':
+      return {
+        captionPx: 10,
+        bodyPx: 12,
+        titlePx: 14,
+        amountPx: 13,
+        ctaPx: 13,
+      };
+    case 'dense':
+      return {
+        captionPx: 11,
+        bodyPx: 13,
+        titlePx: 15,
+        amountPx: 14,
+        ctaPx: 14,
+      };
+    case 'comfortable':
+    default:
+      return {
+        captionPx: 12,
+        bodyPx: 14,
+        titlePx: 16,
+        amountPx: 15,
+        ctaPx: 16,
+      };
+  }
+}
+
+/**
+ * Ticket pane placement from density + tier SSOT.
+ * Desk/wide always keep a side column (Toast/Square small-laptop pattern) —
+ * density only packs chrome. Phones / compact pads use sheet when not comfortable.
  */
 export function resolveFohTicketPane(
   density: AdaptiveSurfaceDensity,
+  tier?: LayoutTier,
 ): AdaptiveFohTicketPane {
+  if (tier === 'desktop' || tier === 'wide') return 'column';
   return density === 'comfortable' ? 'column' : 'sheet';
 }
 
@@ -156,7 +233,9 @@ export function resolveAdaptiveChrome(
 ): AdaptiveChrome {
   const density = resolveAdaptiveDensity(tier, opts);
   const primaryCtaMinHeightPx = ctaMinHeightForDensity(density);
-  const fohTicketPane = resolveFohTicketPane(density);
+  const typeScale = resolveTypeScale(density);
+  const fohTicketPane = resolveFohTicketPane(density, tier);
+  const laptopPacked = density === 'dense' || density === 'ultra';
 
   switch (tier) {
     case 'mobile':
@@ -172,6 +251,7 @@ export function resolveAdaptiveChrome(
         density,
         fohTicketPane,
         primaryCtaMinHeightPx,
+        typeScale,
       };
     case 'compact':
       return {
@@ -186,34 +266,38 @@ export function resolveAdaptiveChrome(
         density,
         fohTicketPane,
         primaryCtaMinHeightPx,
+        typeScale,
       };
     case 'desktop':
       return {
-        coach: 'compact',
+        // Small laptop: pack like FOH pad but keep the ticket column usable.
+        coach: laptopPacked ? 'hidden' : 'compact',
         fieldHelpers: 'compact',
-        selectHints: true,
-        numericPad: 'docked',
-        categoryNav: 'rail',
-        secondaryActions: 'inline',
-        actionLabels: 'verbose',
-        listRow: 'comfortable',
+        selectHints: !laptopPacked,
+        numericPad: laptopPacked ? 'icon-sheet' : 'docked',
+        categoryNav: laptopPacked ? 'chips' : 'rail',
+        secondaryActions: laptopPacked ? 'sheet' : 'inline',
+        actionLabels: laptopPacked ? 'short' : 'verbose',
+        listRow: laptopPacked ? 'dense' : 'comfortable',
         density,
         fohTicketPane,
         primaryCtaMinHeightPx,
+        typeScale,
       };
     case 'wide':
       return {
-        coach: 'full',
-        fieldHelpers: 'full',
+        coach: laptopPacked ? 'compact' : 'full',
+        fieldHelpers: laptopPacked ? 'compact' : 'full',
         selectHints: true,
-        numericPad: 'docked',
-        categoryNav: 'rail',
-        secondaryActions: 'inline',
-        actionLabels: 'verbose',
-        listRow: 'comfortable',
+        numericPad: laptopPacked ? 'icon-sheet' : 'docked',
+        categoryNav: laptopPacked ? 'chips' : 'rail',
+        secondaryActions: laptopPacked ? 'sheet' : 'inline',
+        actionLabels: laptopPacked ? 'short' : 'verbose',
+        listRow: laptopPacked ? 'dense' : 'comfortable',
         density,
         fohTicketPane,
         primaryCtaMinHeightPx,
+        typeScale,
       };
   }
 }
@@ -324,4 +408,21 @@ export function resolvePayButtonLabel(
       ? { suffix: opts.orderNumber }
       : undefined,
   );
+}
+
+/**
+ * Inline "Note" on the ticket header — desk only.
+ * Packed FOH (sheet secondary) keeps Note inside ··· so order # stays visible.
+ */
+export function showInlineTicketNote(chromeOrTier: AdaptiveChrome | LayoutTier): boolean {
+  const chrome =
+    typeof chromeOrTier === 'string'
+      ? resolveAdaptiveChrome(chromeOrTier)
+      : chromeOrTier;
+  return chrome.secondaryActions === 'inline';
+}
+
+/** "+ Ticket" / "+" from actionLabels SSOT — never invent per-page density forks. */
+export function resolveNewTicketLabel(chromeOrTier: AdaptiveChrome | LayoutTier): string {
+  return resolveActionLabel(chromeOrTier, { short: '+', verbose: '+ Ticket' });
 }

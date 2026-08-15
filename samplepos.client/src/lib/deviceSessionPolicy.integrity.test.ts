@@ -84,6 +84,19 @@ describe('deviceSessionPolicySsot integrity', () => {
     ).toBe(true);
   });
 
+  it('boot gate: login grace never wipes (even actor lock + cold)', () => {
+    expect(
+      shouldForceReauthOnBoot({
+        mode: 'SHARED',
+        role: 'CASHIER',
+        hasStoredSession: true,
+        actorLockSet: true,
+        isBrowserColdStart: true,
+        withinLoginGrace: true,
+      }),
+    ).toBe(false);
+  });
+
   it('assertAuthSessionCleared fails loud on leftovers', () => {
     expect(() =>
       assertAuthSessionCleared((k) => (k === 'auth_token' ? 'jwt' : null)),

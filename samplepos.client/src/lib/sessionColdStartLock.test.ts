@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   AUTH_BOOT_SESSION_KEY,
   isBrowserColdStart,
+  isWithinLoginGrace,
   markBrowserSessionAlive,
+  markLoginGrace,
   roleRequiresColdStartPinGate,
   shouldEnforceColdStartPinGate,
 } from './sessionColdStartLock';
@@ -104,6 +106,21 @@ describe('sessionColdStartLock', () => {
     clearActorLock();
     expect(
       shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }),
+    ).toBe(false);
+  });
+
+  it('EVIDENCE: login grace blocks cold-start wipe even with actor lock / cold boot', () => {
+    setActorLock();
+    expect(
+      shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }),
+    ).toBe(true);
+    markLoginGrace();
+    expect(isWithinLoginGrace()).toBe(true);
+    expect(
+      shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }),
+    ).toBe(false);
+    expect(
+      shouldEnforceColdStartPinGate({ role: 'ADMIN', hasStoredSession: true }),
     ).toBe(false);
   });
 

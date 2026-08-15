@@ -249,18 +249,18 @@ export function AdaptiveBottomNav({
         <Link
           key={item.path}
           to={item.path}
-          className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[var(--layout-touch-target)] text-[11px] font-semibold ${
+          className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[var(--layout-touch-target)] type-caption font-semibold ${
             isActive(item.path) ? 'text-blue-700' : 'text-gray-600'
           }`}
         >
           <span className={`text-lg ${item.color}`}>{item.icon}</span>
-          <span className="truncate max-w-[4.5rem]">{item.name.split(' ')[0]}</span>
+          <span className="type-ellipsis max-w-[4.5rem]">{item.name.split(' ')[0]}</span>
         </Link>
       ))}
       <button
         type="button"
         onClick={onOpenFullMenu}
-        className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[var(--layout-touch-target)] text-[11px] font-semibold text-gray-600"
+        className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 min-h-[var(--layout-touch-target)] type-caption font-semibold text-gray-600"
       >
         <span className="text-lg">☰</span>
         <span>More</span>

@@ -96,12 +96,40 @@ export function ProtectedRoute({
       return <RestaurantModeBoot />;
     }
 
-    return (
-      <Navigate
-        to={isCashierRole(user.role) ? resolveCashierHomePath(restaurantEnabled) : '/dashboard'}
-        replace
-      />
-    );
+    const denyFallback = isCashierRole(user.role)
+      ? resolveCashierHomePath(restaurantEnabled)
+      : '/dashboard';
+
+    // Restaurant ON + missing restaurant.* used to Navigate → /restaurant forever
+    // (cashier home === denied path), flashing errors and looking like a logout.
+    if (
+      location.pathname === denyFallback ||
+      (location.pathname === '/restaurant' && denyFallback === '/restaurant')
+    ) {
+      return (
+        <div className="flex items-center justify-center h-screen bg-gray-50" data-authz-deny="restaurant-loop-break">
+          <div className="text-center max-w-md px-4">
+            <div className="text-6xl mb-4">🔒</div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Restaurant access required</h1>
+            <p className="text-gray-600 mb-4">
+              Restaurant mode is on, but this account is missing{' '}
+              <span className="font-semibold">restaurant.read</span> or{' '}
+              <span className="font-semibold">restaurant.order</span>. Ask an admin to grant
+              those permissions — you stay signed in.
+            </p>
+            <button
+              type="button"
+              onClick={() => window.history.back()}
+              className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Go Back
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return <Navigate to={denyFallback} replace />;
 }
 
 /** @deprecated Import useCanAccess from authorization/useAuthorization instead. */

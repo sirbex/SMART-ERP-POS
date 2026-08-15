@@ -11,6 +11,8 @@
 
 import {
   AUTH_BOOT_SESSION_KEY,
+  AUTH_LOGIN_GRACE_KEY,
+  AUTH_LOGIN_GRACE_MS,
   roleRequiresReauthGate,
 } from '@shared/security/deviceSessionPolicySsot';
 import {
@@ -20,7 +22,12 @@ import {
   DeviceSessionIntegrityError,
 } from './deviceSessionPolicy';
 
-export { AUTH_BOOT_SESSION_KEY, COLD_START_QUICK_LOGIN_HREF };
+export {
+  AUTH_BOOT_SESSION_KEY,
+  AUTH_LOGIN_GRACE_KEY,
+  AUTH_LOGIN_GRACE_MS,
+  COLD_START_QUICK_LOGIN_HREF,
+};
 
 function sessionGet(key: string): string | null {
   try {
@@ -31,18 +38,35 @@ function sessionGet(key: string): string | null {
   }
 }
 
+function sessionSet(key: string, value: string): boolean {
+  try {
+    if (typeof sessionStorage === 'undefined') return false;
+    sessionStorage.setItem(key, value);
+    return sessionStorage.getItem(key) === value;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Mark tab session trusted. Returns false if not durable (caller may still proceed;
  * next hard navigation will re-gate — fail closed).
  */
 export function markBrowserSessionAlive(): boolean {
-  try {
-    if (typeof sessionStorage === 'undefined') return false;
-    sessionStorage.setItem(AUTH_BOOT_SESSION_KEY, '1');
-    return sessionStorage.getItem(AUTH_BOOT_SESSION_KEY) === '1';
-  } catch {
-    return false;
-  }
+  return sessionSet(AUTH_BOOT_SESSION_KEY, '1');
+}
+
+/** Call at the start of a successful login — blocks cold-start wipe for AUTH_LOGIN_GRACE_MS. */
+export function markLoginGrace(): boolean {
+  return sessionSet(AUTH_LOGIN_GRACE_KEY, String(Date.now()));
+}
+
+export function isWithinLoginGrace(now = Date.now()): boolean {
+  const raw = sessionGet(AUTH_LOGIN_GRACE_KEY);
+  if (!raw) return false;
+  const t = Number(raw);
+  if (!Number.isFinite(t)) return false;
+  return now - t >= 0 && now - t < AUTH_LOGIN_GRACE_MS;
 }
 
 /** True when boot marker absent or unreadable (fail closed → cold). */
@@ -60,12 +84,16 @@ export function roleRequiresColdStartPinGate(role: string | null | undefined): b
 
 /**
  * Enforce re-auth on boot when device policy / actor lock / cold start requires it.
+ * Honours login grace so auth-changed → initAuth cannot bounce a fresh login.
  */
 export function shouldEnforceColdStartPinGate(input: {
   role: string | null | undefined;
   hasStoredSession: boolean;
 }): boolean {
-  return shouldEnforceDeviceReauthGate(input);
+  return shouldEnforceDeviceReauthGate({
+    ...input,
+    withinLoginGrace: isWithinLoginGrace(),
+  });
 }
 
 export function coldStartMode() {

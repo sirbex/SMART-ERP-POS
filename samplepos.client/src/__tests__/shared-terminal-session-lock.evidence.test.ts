@@ -266,10 +266,20 @@ describe('PROOF: Shared terminal session lock', () => {
     );
     gate(
       'AUTH_CLEAR_LOCK_BEFORE_AUTH',
-      /clearActorLock\(\);\s*\n\s*markBrowserSessionAlive\(\);\s*\n\s*setUser/.test(auth) ||
+      /markLoginGrace\(\);\s*\n\s*clearActorLock\(\);\s*\n\s*markBrowserSessionAlive\(\);\s*\n\s*setUser/.test(
+        auth,
+      ) ||
         (auth.includes('clearActorLock()') &&
+          auth.includes('markLoginGrace()') &&
           auth.indexOf('clearActorLock()') < auth.indexOf('setIsAuthenticated(true)')),
-      'lock cleared before authenticated paint',
+      'grace + lock cleared before authenticated paint',
+    );
+    gate(
+      'AUTH_NO_SAME_TAB_INIT_ON_AUTH_CHANGED',
+      !/auth-changed[\s\S]{0,80}initAuth\(\)/.test(auth) &&
+        auth.includes("window.dispatchEvent(new Event('auth-changed'))") &&
+        !auth.includes("addEventListener('auth-changed'"),
+      'same-tab auth-changed must not re-initAuth (login bounce)',
     );
     gate(
       'POLICY_FAIL_CLOSED',

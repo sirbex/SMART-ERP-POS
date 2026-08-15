@@ -1,6 +1,6 @@
 # PROOF — Force login on session death
 
-**Generated:** 2026-08-09T13:56:08.137Z  
+**Generated:** 2026-08-15T22:44:16.036Z  
 **Verdict:** **PASS** (11/11 gates)
 
 ## Bug (integrity)

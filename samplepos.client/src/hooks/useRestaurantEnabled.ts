@@ -35,7 +35,12 @@ export async function fetchRestaurantEnabled(): Promise<boolean> {
     const enabled = Boolean(res.data?.data?.enabled);
     writeCachedRestaurantEnabled(enabled);
     return enabled;
-  } catch {
+  } catch (err) {
+    // Fail loud in console — never hide 401/network as "flag off"
+    console.error(
+      '[restaurant.enabled] fetch failed; using last-known cache',
+      err instanceof Error ? err.message : err,
+    );
     const cached = readCachedRestaurantEnabled();
     if (cached !== null) return cached;
     // Pre-migration / flag-off / unauthenticated — Layout must not break

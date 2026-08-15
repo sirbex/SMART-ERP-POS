@@ -27,6 +27,8 @@ function detectTouch(): boolean {
 
 /**
  * Capability-driven layout: viewport tier + pointer/touch — never device brand.
+ * Resize is debounced + noise-filtered so laptop density (height-gated) does not
+ * thrash FOH on every scrollbar / browser-chrome flicker.
  */
 export function useLayoutTier(): LayoutCapabilities {
   const [viewport, setViewport] = useState(readViewport);
@@ -34,11 +36,31 @@ export function useLayoutTier(): LayoutCapabilities {
   const isTouch = useMemo(() => detectTouch(), []);
 
   useEffect(() => {
-    const onResize = () => setViewport(readViewport());
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const publish = () => {
+      const next = readViewport();
+      setViewport((prev) => {
+        // Ignore tiny viewport noise (scrollbar, DPI jitter) that used to flip
+        // dense ↔ comfortable and re-layout the entire restaurant menu/ticket.
+        if (
+          Math.abs(prev.width - next.width) < 8 &&
+          Math.abs(prev.height - next.height) < 8 &&
+          prev.dpr === next.dpr
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    const onResize = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = setTimeout(publish, 120);
+    };
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onResize);
-    onResize();
+    publish();
     return () => {
+      if (timer !== undefined) clearTimeout(timer);
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onResize);
     };

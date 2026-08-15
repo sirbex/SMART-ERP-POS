@@ -1,0 +1,36 @@
+{
+  "proof": "LOGIN_NO_FALSE_LOGOUT",
+  "objective": "After successful login, SHARED cold-start / actor-lock must not wipe the new session (login → instant logout / quick-login bounce)",
+  "runAt": "2026-08-15T22:44:06.056Z",
+  "result": "PASS",
+  "summary": {
+    "fail": 0,
+    "pass": 23,
+    "total": 23
+  },
+  "gates": [
+    {
+      "id": "L1_NO_SAME_TAB_INIT_ON_AUTH_CHANGED",
+      "ok": true
+    },
+    {
+      "id": "L2_LOGIN_MARKS_GRACE",
+      "ok": true
+    },
+    {
+      "id": "L3_SSOT_GRACE_SHORT_CIRCUIT",
+      "ok": true
+    },
+    {
+      "id": "L4_CLIENT_GATE_HONOURS_GRACE",
+      "ok": true
+    }
+  ],
+  "suites": [
+    "src/__tests__/login-no-false-logout.proof.test.ts",
+    "src/lib/sessionColdStartLock.test.ts",
+    "src/lib/deviceSessionPolicy.integrity.test.ts"
+  ],
+  "exitStatus": 0,
+  "stdoutTail": "\n RUN  v3.2.4 C:/Users/Chase/source/repos/SamplePOS/samplepos.client\n\n ✓ src/__tests__/login-no-false-logout.proof.test.ts (4 tests) 19ms\n ✓ src/lib/sessionColdStartLock.test.ts (7 tests) 18ms\n ✓ src/lib/deviceSessionPolicy.integrity.test.ts (12 tests) 22ms\n\n Test Files  3 passed (3)\n      Tests  23 passed (23)\n   Start at  01:44:07\n   Duration  3.21s (transform 538ms, setup 0ms, collect 1.95s, tests 59ms, environment 2ms, prepare 2.91s)\n\n\n"
+}
