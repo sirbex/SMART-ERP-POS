@@ -1,9 +1,9 @@
 {
   "proof": "SHARED_TERMINAL_SESSION_LOCK",
   "integrity": "FAIL_CLOSED",
-  "date": "2026-08-16T05:27:00.916Z",
+  "date": "2026-08-16T07:49:29.964Z",
   "verdict": "PASS",
-  "pass": 31,
+  "pass": 37,
   "fail": 0,
   "gates": [
     {
@@ -17,9 +17,9 @@
       "detail": "invalid stored mode never becomes PERSONAL"
     },
     {
-      "id": "IDLE_SHARED_3M",
+      "id": "IDLE_SHARED_60M",
       "ok": true,
-      "detail": "180000ms"
+      "detail": "3600000ms"
     },
     {
       "id": "IDLE_PERSONAL_60M",
@@ -80,6 +80,36 @@
       "id": "UNLOAD_TOKENS_GONE",
       "ok": true,
       "detail": "fail-closed wipe on unload"
+    },
+    {
+      "id": "UNLOAD_LOCK_DURABLE",
+      "ok": true,
+      "detail": "lock set"
+    },
+    {
+      "id": "UNLOAD_WIPES_SESSION",
+      "ok": true,
+      "detail": "close = logout — no leftover JWT/RT for next user"
+    },
+    {
+      "id": "UNLOAD_BEACONS_REVOKE",
+      "ok": true,
+      "detail": "close best-effort revokes RT server-side"
+    },
+    {
+      "id": "BFCACHE_KEEPS",
+      "ok": true,
+      "detail": "bfcache freeze: no wipe and no actor lock"
+    },
+    {
+      "id": "AUTH_CLOSE_WIRING",
+      "ok": true,
+      "detail": "AuthContext: pagehide respects bfcache; beforeunload always destroys"
+    },
+    {
+      "id": "STALE_SOFT_STILL_BLOCKS",
+      "ok": true,
+      "detail": "expired soft stamp cannot bypass actor lock"
     },
     {
       "id": "SHARED_ALL",

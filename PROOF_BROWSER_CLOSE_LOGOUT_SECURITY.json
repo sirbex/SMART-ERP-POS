@@ -1,0 +1,179 @@
+{
+  "proof": "BROWSER_CLOSE_LOGOUT_SECURITY",
+  "token": "SECURITY_BROWSER_CLOSE_LOGOUT_v1",
+  "date": "2026-08-16T07:49:29.955Z",
+  "verdict": "PASS",
+  "pass": 28,
+  "fail": 0,
+  "criticalFail": 0,
+  "gates": [
+    {
+      "id": "WIPE_KEYS_COMPLETE",
+      "ok": true,
+      "detail": "auth_token,refresh_token,token_expiry,user,rbac_permissions",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLEAR_USES_WIPE_SSOT",
+      "ok": true,
+      "detail": "clearTokens iterates SSOT wipe keys",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "OFFLINE_SURVIVES_WIPE_LIST",
+      "ok": true,
+      "detail": "offline password cache not in wipe list",
+      "severity": "HIGH"
+    },
+    {
+      "id": "CLOSE_DESTROYED",
+      "ok": true,
+      "detail": "sessionDestroyed",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLOSE_LOCK",
+      "ok": true,
+      "detail": "smarterp_actor_lock_v1",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLOSE_GONE_auth_token",
+      "ok": true,
+      "detail": "auth_token must be absent after close",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLOSE_GONE_refresh_token",
+      "ok": true,
+      "detail": "refresh_token must be absent after close",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLOSE_GONE_token_expiry",
+      "ok": true,
+      "detail": "token_expiry must be absent after close",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLOSE_GONE_user",
+      "ok": true,
+      "detail": "user must be absent after close",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLOSE_GONE_rbac_permissions",
+      "ok": true,
+      "detail": "rbac_permissions must be absent after close",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLOSE_ASSERT_WIPED",
+      "ok": true,
+      "detail": "assertSessionWiped passes",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLOSE_KEEPS_OFFLINE_CACHE",
+      "ok": true,
+      "detail": "offline_login_credentials survives close wipe",
+      "severity": "HIGH"
+    },
+    {
+      "id": "BFCACHE_NOT_DESTROYED",
+      "ok": true,
+      "detail": "no wipe",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "BFCACHE_NO_LOCK",
+      "ok": true,
+      "detail": "bfcache must not set actor lock (would false-logout on resume)",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "BFCACHE_TOKENS_LIVE",
+      "ok": true,
+      "detail": "live page keeps session",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "PERSONAL_NO_DESTROY",
+      "ok": true,
+      "detail": "office restore",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "PERSONAL_TOKENS_LIVE",
+      "ok": true,
+      "detail": "PERSONAL keeps JWT",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "IDEM_FIRST",
+      "ok": true,
+      "detail": "first wipe",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "IDEM_SECOND",
+      "ok": true,
+      "detail": "second wipe ok",
+      "severity": "HIGH"
+    },
+    {
+      "id": "IDEM_EMPTY",
+      "ok": true,
+      "detail": "no leftover identity after double event",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "AUTH_DESTROY_HELPER",
+      "ok": true,
+      "detail": "RT snapshotted once per event; pagehide/beforeunload consistent",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "AUTH_LISTENERS",
+      "ok": true,
+      "detail": "both close signals wired",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "POLICY_BFCACHE_NOOP",
+      "ok": true,
+      "detail": "bfcache early-return no lock/wipe",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "POLICY_ALWAYS_WIPE_ON_DESTROY",
+      "ok": true,
+      "detail": "destroy path always wipes + beacon",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "SSOT_DOC_CLOSE",
+      "ok": true,
+      "detail": "SSOT documents close logout",
+      "severity": "CONTROL"
+    },
+    {
+      "id": "PROOF_TOKEN",
+      "ok": true,
+      "detail": "SECURITY_BROWSER_CLOSE_LOGOUT_v1",
+      "severity": "CONTROL"
+    },
+    {
+      "id": "NEXT_NO_JWT",
+      "ok": true,
+      "detail": "next person finds empty session store",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "NEXT_LOCK_SET",
+      "ok": true,
+      "detail": "actor lock blocks any residual restore path",
+      "severity": "CRITICAL"
+    }
+  ]
+}

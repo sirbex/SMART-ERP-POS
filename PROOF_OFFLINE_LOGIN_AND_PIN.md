@@ -1,8 +1,8 @@
 # PROOF: Offline login + PIN recovery
 
-- Date: 2026-08-14T06:07:14.947Z
+- Date: 2026-08-16T07:49:35.591Z
 - Runner: `npx vitest run src/__tests__/offline-login-and-pin.proof.test.ts`
-- Gates: 56/56 pass (0 fail)
+- Gates: 63/63 pass (0 fail)
 - Verdict: **PASS**
 
 ## Scope
@@ -22,7 +22,7 @@
 | OFF_EMAIL_CASE | PASS | cashier@shop.local |
 | OFF_MULTI | PASS | a=u-cashier-1 b=u-mgr |
 | OFF_EVICT | PASS | cache size=10 max=10 |
-| OFF_TOKEN_PREFIX | PASS | offline-session-1786687634836-3f2d84df7b |
+| OFF_TOKEN_PREFIX | PASS | offline-session-1786866575346-54dba1f8ff |
 | OFF_ISO_TOKEN_NEW | PASS | minted offline-session token |
 | OFF_ISO_NO_JWT | PASS | prior JWT stripped before login() |
 | OFF_ISO_NO_RT | PASS | prior RT stripped — prevents zombie refresh as user A |
@@ -32,6 +32,9 @@
 | OFF_ISO_SAME_TOKEN | PASS | same-user mint |
 | OFF_ISO_SAME_RBAC | PASS | same actor keeps offline permission cache |
 | OFF_ISO_SAME_NO_RT | PASS | same actor still strips RT |
+| PEEK_SAME | PASS | same user may reuse cache |
+| PEEK_FOREIGN | PASS | different user must not see prior RBAC |
+| PEEK_EMPTY | PASS | empty id rejected |
 | OFF_PAGE_BEGIN | PASS | LoginPage uses beginOfflineLoginSession, not JWT reuse |
 | OFF_SURVIVES_CLEAR | PASS | offline_login_credentials must survive JWT wipe |
 | OFF_CLEAR_SRC | PASS | clearTokens must not remove offline credential key |
@@ -48,6 +51,7 @@
 | PATH_LOGIN_NEST | PASS | endsWith /login |
 | PATH_QL | PASS | /quick-login |
 | PATH_QL_NEST | PASS | startsWith quick-login |
+| PATH_MY_QL | PASS | /my/quick-login PIN setup |
 | PATH_POS | PASS | /pos must hard-nav |
 | PATH_SALES | PASS | /sales must hard-nav |
 | FORCE_USES_RECOVERY | PASS | forceLogoutRedirect must skip redirect on recovery paths |
@@ -68,6 +72,9 @@
 | PERSONAL_CASHIER_GATE | PASS | PERSONAL still gates floor roles |
 | AUTH_RECOVERY_SSOT | PASS | peer logout / cold-start share recovery path helper |
 | AUTH_LOGIN_STRIP_RT | PASS | login() strips residual RT when no refresh issued |
+| AUTH_LOGIN_RBAC_ISO | PASS | login() must not reuse another actor rbac_permissions |
+| CLEAR_USES_WIPE_SSOT | PASS | clearTokens must iterate shared wipe key list |
+| REVOKE_ALL_FORCE_LOGOUT | PASS | revoke-all must use forceLogoutRedirect SSOT (not location.href) |
 | WIRE_src_hooks_useQuickLogin_ts | PASS | src/hooks/useQuickLogin.ts has pin-only |
 | WIRE_src_lib_sessionColdStartLock_ts | PASS | src/lib/sessionColdStartLock.ts has roleRequiresColdStartPinGate |
 | WIRE_src_lib_apiPublicRoutes_ts | PASS | src/lib/apiPublicRoutes.ts has auth/quick-login/pin-only |

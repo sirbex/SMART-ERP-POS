@@ -14,6 +14,7 @@ import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   ACTOR_LOCK_KEY,
+  ACTOR_LOCK_SOFT_RELOAD_KEY,
   AUTH_BOOT_SESSION_KEY,
   AUTH_SESSION_WIPE_KEYS,
   DEVICE_SESSION_MODE_KEY,
@@ -22,6 +23,7 @@ import {
   PERSONAL_IDLE_TIMEOUT_MS,
   assertAuthSessionCleared,
   idleTimeoutMsForMode,
+  isWithinActorLockSoftReloadGrace,
   resolveDeviceSessionMode,
   roleRequiresReauthGate,
   shouldForceReauthOnBoot,
@@ -97,14 +99,15 @@ describe('PROOF: Shared terminal session lock', () => {
       'invalid stored mode never becomes PERSONAL',
     );
     gate(
-      'IDLE_SHARED_3M',
+      'IDLE_SHARED_60M',
       idleTimeoutMsForMode('SHARED') === SHARED_IDLE_TIMEOUT_MS &&
-        SHARED_IDLE_TIMEOUT_MS === 3 * 60 * 1000,
+        SHARED_IDLE_TIMEOUT_MS === 60 * 60 * 1000,
       `${SHARED_IDLE_TIMEOUT_MS}ms`,
     );
     gate(
       'IDLE_PERSONAL_60M',
-      idleTimeoutMsForMode('PERSONAL') === PERSONAL_IDLE_TIMEOUT_MS,
+      idleTimeoutMsForMode('PERSONAL') === PERSONAL_IDLE_TIMEOUT_MS &&
+        PERSONAL_IDLE_TIMEOUT_MS === 60 * 60 * 1000,
       `${PERSONAL_IDLE_TIMEOUT_MS}ms`,
     );
   });
@@ -214,13 +217,93 @@ describe('PROOF: Shared terminal session lock', () => {
     const unloaded = lockSharedSessionOnUnload({
       mode: 'SHARED',
       clearSession: clearTokens,
-      refreshToken: 'rt',
     });
     gate('UNLOAD_LOCK_FAIL_WIPES', unloaded.lockDurable === false, 'lock not durable');
     gate(
       'UNLOAD_TOKENS_GONE',
       localStorage.getItem('auth_token') === null && localStorage.getItem('refresh_token') === null,
       'fail-closed wipe on unload',
+    );
+  });
+
+  it('browser close wipes session so next person cannot inherit account', () => {
+    markBrowserSessionAlive();
+    localStorage.setItem('auth_token', 'jwt-working');
+    localStorage.setItem('refresh_token', 'rt-working');
+    const unloaded = lockSharedSessionOnUnload({
+      mode: 'SHARED',
+      clearSession: clearTokens,
+      refreshToken: 'rt-working',
+      destroySession: true,
+    });
+    gate('UNLOAD_LOCK_DURABLE', unloaded.lockDurable === true, 'lock set');
+    gate(
+      'UNLOAD_WIPES_SESSION',
+      unloaded.sessionDestroyed === true &&
+        localStorage.getItem('refresh_token') === null &&
+        localStorage.getItem('auth_token') === null,
+      'close = logout — no leftover JWT/RT for next user',
+    );
+    gate(
+      'UNLOAD_BEACONS_REVOKE',
+      (() => {
+        const policy = readFileSync(join(clientRoot, 'src/lib/deviceSessionPolicy.ts'), 'utf8');
+        const fn = policy.slice(
+          policy.indexOf('export function lockSharedSessionOnUnload'),
+          policy.indexOf('export function lockSharedSessionOnUnload') + 1200,
+        );
+        return fn.includes('beaconRevokeRefreshToken');
+      })(),
+      'close best-effort revokes RT server-side',
+    );
+    gate(
+      'BFCACHE_KEEPS',
+      (() => {
+        localStorage.setItem('auth_token', 'jwt-bf');
+        localStorage.setItem('refresh_token', 'rt-bf');
+        clearActorLock();
+        const r = lockSharedSessionOnUnload({
+          mode: 'SHARED',
+          clearSession: clearTokens,
+          refreshToken: 'rt-bf',
+          destroySession: false,
+        });
+        return (
+          r.sessionDestroyed === false &&
+          localStorage.getItem('auth_token') === 'jwt-bf' &&
+          isActorLockSet() === false
+        );
+      })(),
+      'bfcache freeze: no wipe and no actor lock',
+    );
+    gate(
+      'AUTH_CLOSE_WIRING',
+      (() => {
+        const auth = readFileSync(join(clientRoot, 'src/contexts/AuthContext.tsx'), 'utf8');
+        return (
+          auth.includes('destroySharedSession') &&
+          auth.includes('destroySharedSession(!e.persisted)') &&
+          auth.includes('destroySharedSession(true)')
+        );
+      })(),
+      'AuthContext: pagehide respects bfcache; beforeunload always destroys',
+    );
+    // Next opener still blocked even if wipe interrupted
+    setActorLock();
+    sessionStorage.setItem(ACTOR_LOCK_SOFT_RELOAD_KEY, String(Date.now() - 60_000));
+    gate(
+      'STALE_SOFT_STILL_BLOCKS',
+      shouldForceReauthOnBoot({
+        mode: 'SHARED',
+        role: 'CASHIER',
+        hasStoredSession: true,
+        actorLockSet: true,
+        isBrowserColdStart: false,
+        withinSoftReloadGrace: isWithinActorLockSoftReloadGrace(
+          sessionStorage.getItem(ACTOR_LOCK_SOFT_RELOAD_KEY),
+        ),
+      }) === true,
+      'expired soft stamp cannot bypass actor lock',
     );
   });
 
@@ -366,9 +449,9 @@ afterAll(() => {
     `2. **Boot gate** clears JWT, **asserts wipe**, redirects to \`/quick-login\`.`,
     `3. **Storage errors ⇒ locked** (never fail-open into prior actor).`,
     `4. **Lock write failure ⇒ immediate token wipe** on unload.`,
-    `5. **Short idle** (${SHARED_IDLE_TIMEOUT_MS / 60000} min) on SHARED.`,
+    `5. **60-minute idle** on SHARED and PERSONAL (keyboard/mouse/touch inactivity).`,
     `6. **PERSONAL** opt-in only via verified mode write / env.`,
-    `7. Unload RT revoke is best-effort (browser constraint); boot wipe is mandatory.`,
+    `7. **Browser/tab close = logout** on SHARED (wipe JWT/RT + actor lock + beacon revoke). bfcache skip. Next person cannot inherit account.`,
     ``,
     `## Gates`,
     ``,

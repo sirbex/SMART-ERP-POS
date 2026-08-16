@@ -60,6 +60,37 @@ describe('deviceSessionPolicySsot integrity', () => {
     expect(() => idleTimeoutMsForMode('NOPE' as 'SHARED')).toThrow(DeviceSessionIntegrityError);
   });
 
+  it('idle is 60 minutes for SHARED and PERSONAL', () => {
+    expect(idleTimeoutMsForMode('SHARED')).toBe(60 * 60 * 1000);
+    expect(idleTimeoutMsForMode('PERSONAL')).toBe(60 * 60 * 1000);
+  });
+
+  it('boot gate: soft-reload grace allows same-tab F5 (warm session)', () => {
+    expect(
+      shouldForceReauthOnBoot({
+        mode: 'SHARED',
+        role: 'CASHIER',
+        hasStoredSession: true,
+        actorLockSet: true,
+        isBrowserColdStart: false,
+        withinSoftReloadGrace: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('boot gate: soft-reload grace never bypasses cold start + actor lock', () => {
+    expect(
+      shouldForceReauthOnBoot({
+        mode: 'SHARED',
+        role: 'CASHIER',
+        hasStoredSession: true,
+        actorLockSet: true,
+        isBrowserColdStart: true,
+        withinSoftReloadGrace: true,
+      }),
+    ).toBe(true);
+  });
+
   it('SHARED gates all roles; PERSONAL only floor', () => {
     expect(roleRequiresReauthGate({ mode: 'SHARED', role: 'ADMIN' })).toBe(true);
     expect(roleRequiresReauthGate({ mode: 'PERSONAL', role: 'ADMIN' })).toBe(false);
@@ -186,11 +217,53 @@ describe('deviceSessionPolicy client fail-closed', () => {
     const result = lockSharedSessionOnUnload({
       mode: 'SHARED',
       clearSession: clearTokens,
-      refreshToken: 'rt-must-die',
     });
     expect(result.lockDurable).toBe(false);
     expect(localStorage.getItem('auth_token')).toBeNull();
     expect(localStorage.getItem('refresh_token')).toBeNull();
+  });
+
+  it('durable SHARED unload wipes tokens (browser close = logout)', () => {
+    localStorage.setItem('auth_token', 'jwt-live');
+    localStorage.setItem('refresh_token', 'rt-live');
+    const result = lockSharedSessionOnUnload({
+      mode: 'SHARED',
+      clearSession: clearTokens,
+      refreshToken: 'rt-live',
+      destroySession: true,
+    });
+    expect(result.lockDurable).toBe(true);
+    expect(result.sessionDestroyed).toBe(true);
+    expect(localStorage.getItem('auth_token')).toBeNull();
+    expect(localStorage.getItem('refresh_token')).toBeNull();
+    expect(localStorage.getItem(ACTOR_LOCK_KEY)).toBe('1');
+  });
+
+  it('bfcache freeze (destroySession:false) is a no-op (no lock, no wipe)', () => {
+    localStorage.setItem('auth_token', 'jwt-bfcache');
+    localStorage.setItem('refresh_token', 'rt-bfcache');
+    clearActorLock();
+    const result = lockSharedSessionOnUnload({
+      mode: 'SHARED',
+      clearSession: clearTokens,
+      refreshToken: 'rt-bfcache',
+      destroySession: false,
+    });
+    expect(result.sessionDestroyed).toBe(false);
+    expect(localStorage.getItem('auth_token')).toBe('jwt-bfcache');
+    expect(localStorage.getItem(ACTOR_LOCK_KEY)).toBeNull();
+  });
+
+  it('PERSONAL unload does not wipe', () => {
+    localStorage.setItem('auth_token', 'jwt-office');
+    const result = lockSharedSessionOnUnload({
+      mode: 'PERSONAL',
+      clearSession: clearTokens,
+      refreshToken: 'rt',
+      destroySession: true,
+    });
+    expect(result.sessionDestroyed).toBe(false);
+    expect(localStorage.getItem('auth_token')).toBe('jwt-office');
   });
 
   it('assertSessionWiped fails loud if JWT remains', () => {

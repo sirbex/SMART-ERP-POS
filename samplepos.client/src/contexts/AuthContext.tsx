@@ -25,7 +25,7 @@ import {
   idleTimeoutMsForMode,
   lockSharedSessionOnUnload,
 } from '../lib/deviceSessionPolicy';
-import { isAuthRecoveryPath } from '../lib/offlineLoginCredentials';
+import { isAuthRecoveryPath, peekCachedPermissionKeysForUser } from '../lib/offlineLoginCredentials';
 import { refreshRestaurantFloorSession } from '../lib/restaurantFloorSession';
 import type { AxiosError } from 'axios';
 import { HandledApiError, isHandledForbiddenError } from '../utils/errorHandler';
@@ -64,6 +64,8 @@ setupAxiosInterceptors();
 /**
  * Fetch permissions from /rbac/me/permissions using raw fetch (no axios dependency
  * risk during auth init). Returns an array of permission key strings.
+ * Empty array means "unavailable / failed" — callers must not treat it as
+ * "user has zero permissions" without consulting same-user cache policy.
  */
 async function fetchPermissionKeys(): Promise<string[]> {
   try {
@@ -74,15 +76,20 @@ async function fetchPermissionKeys(): Promise<string[]> {
     const res = await fetch(`${baseUrl}/rbac/me/permissions`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`[Auth] Permission fetch HTTP ${res.status} — keeping prior same-user cache if any`);
+      return [];
+    }
 
     const json = await res.json();
     if (json.success && Array.isArray(json.data)) {
       return json.data.map((p: { permissionKey: string }) => p.permissionKey);
     }
+    console.warn('[Auth] Permission fetch returned unexpected shape');
     return [];
-  } catch {
-    // Network error / offline — use cached permissions
+  } catch (err) {
+    // Network error / offline — use cached permissions (same-user only at call site)
+    console.warn('[Auth] Permission fetch failed (offline/network):', err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -94,7 +101,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [permissionKeys, setPermissionKeys] = useState<string[]>([]);
   const pendingIdleLogoutRef = useRef(false);
-  // SHARED terminals: short idle. PERSONAL office PCs: legacy 60m.
+  // Idle auto-logout: 60 minutes with no deliberate keyboard/mouse/touch (SSOT).
+  // SHARED vs PERSONAL share the same window; walk-up security is actor-lock + cold-start PIN.
   const IDLE_TIMEOUT_MS = idleTimeoutMsForMode(getDeviceSessionMode());
 
   // Global activity — all modules/tabs (enterprise SSOT; independent of idle/guard)
@@ -200,7 +208,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
               } else if (status === 401 || (!getAccessToken() && !getRefreshToken())) {
                 // Must not set isAuthenticated with a dead/cleared session.
                 forceLogoutRedirect(
-                  status === 401 ? 'profile_rejected' : 'profile_rejected',
+                  status === 401 ? 'profile_rejected_401' : 'profile_rejected_no_token',
                 );
                 return;
               }
@@ -222,7 +230,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
           // Restore cached permissions immediately (prevents flash)
           const cachedPerms = localStorage.getItem('rbac_permissions');
           if (cachedPerms) {
-            try { setPermissionKeys(JSON.parse(cachedPerms)); } catch { /* ignore corrupt cache */ }
+            try {
+              const parsed = JSON.parse(cachedPerms) as unknown;
+              if (Array.isArray(parsed)) {
+                setPermissionKeys(parsed.filter((p): p is string => typeof p === 'string'));
+              } else {
+                localStorage.removeItem('rbac_permissions');
+              }
+            } catch {
+              console.warn('[Auth] Corrupt rbac_permissions cache — discarded');
+              localStorage.removeItem('rbac_permissions');
+            }
           }
 
           // Then fetch fresh permissions from server (updates cache)
@@ -309,6 +327,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     markLoginGrace();
     clearActorLock();
 
+    // Snapshot prior actor BEFORE overwrite — RBAC cache is only safe for same user.id.
+    const sameUserCachedPerms = peekCachedPermissionKeysForUser(userData.id);
+
     // Store tokens (fetchPermissionKeys reads from localStorage)
     if (refreshToken && expiresIn) {
       storeTokens(token, refreshToken, expiresIn);
@@ -326,25 +347,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (perms.length > 0) {
       setPermissionKeys(perms);
       localStorage.setItem('rbac_permissions', JSON.stringify(perms));
+    } else if (sameUserCachedPerms && sameUserCachedPerms.length > 0) {
+      // Same actor offline / fetch miss — keep last known rights for that user only
+      setPermissionKeys(sameUserCachedPerms);
     } else {
-      // Keep same-user offline cache if present; otherwise start empty (no foreign RBAC)
-      const cached = localStorage.getItem('rbac_permissions');
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached) as unknown;
-          if (Array.isArray(parsed)) {
-            setPermissionKeys(parsed.filter((p): p is string => typeof p === 'string'));
-          } else {
-            setPermissionKeys([]);
-            localStorage.removeItem('rbac_permissions');
-          }
-        } catch {
-          setPermissionKeys([]);
-          localStorage.removeItem('rbac_permissions');
-        }
-      } else {
-        setPermissionKeys([]);
-      }
+      // Different actor or no cache — never inherit foreign RBAC
+      setPermissionKeys([]);
+      localStorage.removeItem('rbac_permissions');
     }
 
     // NOW set authenticated — routes will render with permissions already loaded.
@@ -460,25 +469,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => window.removeEventListener('app:transaction-guard', onGuard);
   }, [logout, IDLE_TIMEOUT_MS]);
 
-  // SHARED POS: closing the tab/window without logout must not leave the next
-  // person as the previous actor (Chrome restore + durable localStorage).
-  // If actor lock cannot be persisted, tokens are wiped immediately (fail closed).
+  // SHARED POS (Toast/Square): browser/tab CLOSE = full logout so the next
+  // person cannot inherit this account. Capture RT before wipe (beforeunload
+  // may run first). bfcache (persisted) skips entirely. Tab switches do not
+  // fire pagehide — multi-tab work stays alive.
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    const lockSharedSession = () => {
+    const destroySharedSession = (destroySession: boolean) => {
+      // Snapshot RT before clearTokens — second event (pagehide after beforeunload)
+      // would otherwise beacon with null.
+      const refreshToken = getRefreshToken();
       lockSharedSessionOnUnload({
         mode: getDeviceSessionMode(),
         clearSession: clearTokens,
-        refreshToken: getRefreshToken(),
+        refreshToken,
+        destroySession,
       });
     };
 
-    window.addEventListener('pagehide', lockSharedSession);
-    window.addEventListener('beforeunload', lockSharedSession);
+    const onPageHide = (e: PageTransitionEvent) => {
+      destroySharedSession(!e.persisted);
+    };
+
+    const onBeforeUnload = () => {
+      destroySharedSession(true);
+    };
+
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('beforeunload', onBeforeUnload);
     return () => {
-      window.removeEventListener('pagehide', lockSharedSession);
-      window.removeEventListener('beforeunload', lockSharedSession);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('beforeunload', onBeforeUnload);
     };
   }, [isAuthenticated]);
 

@@ -24,6 +24,7 @@ import {
   isOfflineSessionToken,
   offlineCredentialsSurvivesClearTokens,
   isAuthRecoveryPath,
+  peekCachedPermissionKeysForUser,
 } from '../lib/offlineLoginCredentials';
 import { isPublicApiRoute } from '../lib/apiPublicRoutes';
 import {
@@ -234,6 +235,23 @@ describe('PROOF: Offline login credentials', () => {
     );
   });
 
+  it('peekCachedPermissionKeysForUser never returns foreign RBAC', () => {
+    localStorage.setItem('user', JSON.stringify({ id: 'u-a', email: 'a@x', fullName: 'A', role: 'CASHIER' }));
+    localStorage.setItem('rbac_permissions', JSON.stringify(['sales.read', 'admin.only']));
+    gate(
+      'PEEK_SAME',
+      JSON.stringify(peekCachedPermissionKeysForUser('u-a')) ===
+        JSON.stringify(['sales.read', 'admin.only']),
+      'same user may reuse cache',
+    );
+    gate(
+      'PEEK_FOREIGN',
+      peekCachedPermissionKeysForUser('u-b') === null,
+      'different user must not see prior RBAC',
+    );
+    gate('PEEK_EMPTY', peekCachedPermissionKeysForUser('') === null, 'empty id rejected');
+  });
+
   it('LoginPage never reuses existing JWT for offline login', () => {
     const src = readClient('src/pages/LoginPage.tsx');
     gate(
@@ -317,6 +335,7 @@ describe('PROOF: PIN / quick-login public recovery', () => {
     gate('PATH_LOGIN_NEST', isAuthRecoveryPath('/tenant/login') === true, 'endsWith /login');
     gate('PATH_QL', isAuthRecoveryPath('/quick-login') === true, '/quick-login');
     gate('PATH_QL_NEST', isAuthRecoveryPath('/quick-login/device') === true, 'startsWith quick-login');
+    gate('PATH_MY_QL', isAuthRecoveryPath('/my/quick-login') === true, '/my/quick-login PIN setup');
     gate('PATH_POS', isAuthRecoveryPath('/pos') === false, '/pos must hard-nav');
     gate('PATH_SALES', isAuthRecoveryPath('/sales') === false, '/sales must hard-nav');
   });
@@ -416,6 +435,27 @@ describe('PROOF: PIN / quick-login public recovery', () => {
       src.includes("localStorage.removeItem('refresh_token')") &&
         src.includes('// Access-only / offline session'),
       'login() strips residual RT when no refresh issued',
+    );
+    gate(
+      'AUTH_LOGIN_RBAC_ISO',
+      src.includes('peekCachedPermissionKeysForUser') &&
+        src.includes('never inherit foreign RBAC'),
+      'login() must not reuse another actor rbac_permissions',
+    );
+  });
+
+  it('clearTokens wipes via AUTH_SESSION_WIPE_KEYS SSOT', () => {
+    const clearSrc = readClient('src/hooks/useTokenRefresh.ts');
+    gate(
+      'CLEAR_USES_WIPE_SSOT',
+      clearSrc.includes('AUTH_SESSION_WIPE_KEYS') &&
+        clearSrc.includes("from '@shared/security/deviceSessionPolicySsot'"),
+      'clearTokens must iterate shared wipe key list',
+    );
+    gate(
+      'REVOKE_ALL_FORCE_LOGOUT',
+      clearSrc.includes("forceLogoutRedirect('revoke_all_sessions')"),
+      'revoke-all must use forceLogoutRedirect SSOT (not location.href)',
     );
   });
 

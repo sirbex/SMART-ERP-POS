@@ -18,6 +18,7 @@ import {
     shouldPerformAutoLogout,
 } from '../lib/sessionLogoutPolicy';
 import { isAuthRecoveryPath } from '../lib/offlineLoginCredentials';
+import { AUTH_SESSION_WIPE_KEYS } from '@shared/security/deviceSessionPolicySsot';
 
 // Bare axios instance used exclusively for the /token/refresh HTTP call.
 // Must have NO response interceptors so that a 401 from the refresh endpoint
@@ -94,21 +95,22 @@ export function getRefreshToken(): string | null {
 
 /**
  * Clear ALL authentication state — the single place allowed to do this.
- * Removes tokens, user, permissions, and the cross-tab refresh lock.
+ * Identity wipe keys come from deviceSessionPolicySsot (AUTH_SESSION_WIPE_KEYS).
+ * Does NOT touch offline_login_credentials (offline password re-entry SSOT).
  */
 export function clearTokens() {
-    localStorage.removeItem(ACCESS_TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-    localStorage.removeItem(TOKEN_EXPIRY_KEY);
-    localStorage.removeItem('user');
-    localStorage.removeItem('rbac_permissions');
+    for (const key of AUTH_SESSION_WIPE_KEYS) {
+        localStorage.removeItem(key);
+    }
+    // Cross-tab refresh mutex — not in wipe SSOT list but must never outlive the session.
     localStorage.removeItem(REFRESH_LOCK_KEY);
     // Drop cross-tab login grace so a later cold boot is not suppressed after logout.
     try {
         localStorage.removeItem('auth_login_grace_v1');
         sessionStorage.removeItem('auth_login_grace_v1');
     } catch {
-        /* private mode */
+        /* private mode — storage may throw; wipe keys above already applied best-effort */
+        console.warn('[Auth] Could not clear login grace markers (private/blocked storage)');
     }
 }
 
@@ -544,9 +546,9 @@ export function useRevokeAllSessions() {
             return response.data.data;
         },
         onSuccess: () => {
-            clearTokens();
             queryClient.clear();
-            window.location.href = '/login';
+            // Same-tab hard-nav + peer broadcast — never leave a zombie SPA.
+            forceLogoutRedirect('revoke_all_sessions');
         },
     });
 }

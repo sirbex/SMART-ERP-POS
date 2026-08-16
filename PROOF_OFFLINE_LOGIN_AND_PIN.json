@@ -1,10 +1,10 @@
 {
   "proof": "OFFLINE_LOGIN_AND_PIN",
-  "date": "2026-08-14T06:07:14.947Z",
+  "date": "2026-08-16T07:49:35.591Z",
   "verdict": "PASS",
-  "pass": 56,
+  "pass": 63,
   "fail": 0,
-  "total": 56,
+  "total": 63,
   "gates": [
     {
       "id": "OFF_CACHE_OK",
@@ -39,7 +39,7 @@
     {
       "id": "OFF_TOKEN_PREFIX",
       "ok": true,
-      "detail": "offline-session-1786687634836-3f2d84df7b"
+      "detail": "offline-session-1786866575346-54dba1f8ff"
     },
     {
       "id": "OFF_ISO_TOKEN_NEW",
@@ -85,6 +85,21 @@
       "id": "OFF_ISO_SAME_NO_RT",
       "ok": true,
       "detail": "same actor still strips RT"
+    },
+    {
+      "id": "PEEK_SAME",
+      "ok": true,
+      "detail": "same user may reuse cache"
+    },
+    {
+      "id": "PEEK_FOREIGN",
+      "ok": true,
+      "detail": "different user must not see prior RBAC"
+    },
+    {
+      "id": "PEEK_EMPTY",
+      "ok": true,
+      "detail": "empty id rejected"
     },
     {
       "id": "OFF_PAGE_BEGIN",
@@ -165,6 +180,11 @@
       "id": "PATH_QL_NEST",
       "ok": true,
       "detail": "startsWith quick-login"
+    },
+    {
+      "id": "PATH_MY_QL",
+      "ok": true,
+      "detail": "/my/quick-login PIN setup"
     },
     {
       "id": "PATH_POS",
@@ -265,6 +285,21 @@
       "id": "AUTH_LOGIN_STRIP_RT",
       "ok": true,
       "detail": "login() strips residual RT when no refresh issued"
+    },
+    {
+      "id": "AUTH_LOGIN_RBAC_ISO",
+      "ok": true,
+      "detail": "login() must not reuse another actor rbac_permissions"
+    },
+    {
+      "id": "CLEAR_USES_WIPE_SSOT",
+      "ok": true,
+      "detail": "clearTokens must iterate shared wipe key list"
+    },
+    {
+      "id": "REVOKE_ALL_FORCE_LOGOUT",
+      "ok": true,
+      "detail": "revoke-all must use forceLogoutRedirect SSOT (not location.href)"
     },
     {
       "id": "WIRE_src_hooks_useQuickLogin_ts",

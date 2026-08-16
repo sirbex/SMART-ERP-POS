@@ -154,8 +154,11 @@ export default function LoginPage() {
             navigate(await resolveHomeAfterAuth(offlineUser.role, from), { replace: true });
             return;
           }
-        } catch {
-          // crypto.subtle may be unavailable in non-HTTPS contexts
+        } catch (offlineErr) {
+          console.warn(
+            '[Auth] Offline login validation failed:',
+            offlineErr instanceof Error ? offlineErr.message : offlineErr,
+          );
         }
         setError('Offline login failed. You must have logged in online at least once with these credentials.');
         return;
@@ -221,8 +224,11 @@ export default function LoginPage() {
             navigate(await resolveHomeAfterAuth(offlineUser.role, from), { replace: true });
             return;
           }
-        } catch {
-          // Offline validation failed (e.g. crypto.subtle unavailable) — fall through to error
+        } catch (offlineErr) {
+          console.warn(
+            '[Auth] Offline fallback after unreachable server failed:',
+            offlineErr instanceof Error ? offlineErr.message : offlineErr,
+          );
         }
       }
 
@@ -271,7 +277,9 @@ export default function LoginPage() {
     await login(authUser, token, data.refreshToken, data.expiresIn);
     // Cache for offline login (email/password are still in component state)
     if (email && password) {
-      cacheLoginCredential(email, password, authUser).catch(() => { });
+      cacheLoginCredential(email, password, authUser).catch((cacheErr) => {
+        console.error('[Auth] Offline credential cache failed after 2FA:', cacheErr);
+      });
     }
     navigate(await resolveHomeAfterAuth(authUser.role, from), { replace: true });
   };

@@ -1,0 +1,155 @@
+{
+  "proof": "SESSION_IDLE_FALSE_LOGOUT_SECURITY",
+  "token": "SECURITY_IDLE_FALSE_LOGOUT_v1",
+  "date": "2026-08-16T07:49:29.947Z",
+  "verdict": "PASS",
+  "pass": 24,
+  "fail": 0,
+  "criticalFail": 0,
+  "gates": [
+    {
+      "id": "IDLE_SSOT_60M",
+      "ok": true,
+      "detail": "3600000ms",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "IDLE_MODE_SHARED",
+      "ok": true,
+      "detail": "SHARED=60m",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "IDLE_MODE_PERSONAL",
+      "ok": true,
+      "detail": "PERSONAL=60m",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "ACTIVE_WINDOW_ALIGNED",
+      "ok": true,
+      "detail": "activity window matches idle SSOT",
+      "severity": "HIGH"
+    },
+    {
+      "id": "WORKING_NO_IDLE_LOGOUT",
+      "ok": true,
+      "detail": "recent activity suppresses idle logout",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "TRUE_IDLE_LOGOUT",
+      "ok": true,
+      "detail": "60m+ zero input → idle logout allowed",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "EVENTS_HAS_KEY_MOUSE_TOUCH",
+      "ok": true,
+      "detail": "mousedown,keydown,input,click,touchstart,pointerdown,paste,compositionstart,compositionupdate",
+      "severity": "HIGH"
+    },
+    {
+      "id": "EVENTS_NO_PASSIVE_MOVE",
+      "ok": true,
+      "detail": "passive move/scroll must not keep session forever",
+      "severity": "HIGH"
+    },
+    {
+      "id": "UNLOAD_LOCKS",
+      "ok": true,
+      "detail": "actor lock set",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "UNLOAD_WIPES_TOKENS",
+      "ok": true,
+      "detail": "close = logout — JWT/RT gone",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "UNLOAD_BEACON_REVOKE",
+      "ok": true,
+      "detail": "close best-effort server revoke",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "BFCACHE_NO_WIPE",
+      "ok": true,
+      "detail": "bfcache freeze: no wipe, no lock",
+      "severity": "HIGH"
+    },
+    {
+      "id": "AUTH_CLOSE_SSOT",
+      "ok": true,
+      "detail": "AuthContext wires close logout + bfcache skip",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "NEXT_OPENER_BLOCKED",
+      "ok": true,
+      "detail": "stale actor lock forces re-auth",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "COLD_NOT_BYPASSED",
+      "ok": true,
+      "detail": "soft grace never bypasses cold start",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "DEATH_ACT_DEF",
+      "ok": true,
+      "detail": "definitive_auth active=true → logout=true",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "DEATH_IDLE_DEF",
+      "ok": true,
+      "detail": "definitive_auth active=false → logout=true",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "DEATH_ACT_NET",
+      "ok": true,
+      "detail": "network active=true → logout=false",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "DEATH_IDLE_NET",
+      "ok": true,
+      "detail": "network active=false → logout=false",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "DEATH_ACT_5XX",
+      "ok": true,
+      "detail": "transient_server active=true → logout=false",
+      "severity": "CRITICAL"
+    },
+    {
+      "id": "CLASSIFY_NET",
+      "ok": true,
+      "detail": "network classify",
+      "severity": "HIGH"
+    },
+    {
+      "id": "AUTH_IDLE_MODE",
+      "ok": true,
+      "detail": "AuthContext uses mode idle",
+      "severity": "HIGH"
+    },
+    {
+      "id": "SSOT_DOC_CLOSE_LOGOUT",
+      "ok": true,
+      "detail": "SSOT documents close=logout + 60m idle",
+      "severity": "CONTROL"
+    },
+    {
+      "id": "PROOF_TOKEN",
+      "ok": true,
+      "detail": "permanent proof token present",
+      "severity": "CONTROL"
+    }
+  ]
+}

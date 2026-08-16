@@ -1,8 +1,8 @@
 # PROOF: Shared terminal session lock
 
-- Date: 2026-08-16T05:27:00.916Z
+- Date: 2026-08-16T07:49:29.964Z
 - Runner: `npx vitest run src/__tests__/shared-terminal-session-lock.evidence.test.ts src/lib/deviceSessionPolicy.integrity.test.ts`
-- Gates: 31/31 pass (0 fail)
+- Gates: 37/37 pass (0 fail)
 - Verdict: **PASS**
 
 ## Problem
@@ -15,15 +15,15 @@ User logs in, closes the browser without logout. Next person opens the same brow
 2. **Boot gate** clears JWT, **asserts wipe**, redirects to `/quick-login`.
 3. **Storage errors ⇒ locked** (never fail-open into prior actor).
 4. **Lock write failure ⇒ immediate token wipe** on unload.
-5. **Short idle** (3 min) on SHARED.
+5. **60-minute idle** on SHARED and PERSONAL (keyboard/mouse/touch inactivity).
 6. **PERSONAL** opt-in only via verified mode write / env.
-7. Unload RT revoke is best-effort (browser constraint); boot wipe is mandatory.
+7. **Browser/tab close = logout** on SHARED (wipe JWT/RT + actor lock + beacon revoke). bfcache skip. Next person cannot inherit account.
 
 ## Gates
 
 - [x] `DEFAULT_SHARED` — unset storage/env → SHARED
 - [x] `GARBAGE_NOT_PERSONAL` — invalid stored mode never becomes PERSONAL
-- [x] `IDLE_SHARED_3M` — 180000ms
+- [x] `IDLE_SHARED_60M` — 3600000ms
 - [x] `IDLE_PERSONAL_60M` — 3600000ms
 - [x] `SAME_SESSION_OK` — alive browser session may continue
 - [x] `ACTOR_LOCK_SET_OK` — durable lock
@@ -36,6 +36,12 @@ User logs in, closes the browser without logout. Next person opens the same brow
 - [x] `WIPE_ASSERT_PASS` — clearTokens + assertSessionWiped
 - [x] `UNLOAD_LOCK_FAIL_WIPES` — lock not durable
 - [x] `UNLOAD_TOKENS_GONE` — fail-closed wipe on unload
+- [x] `UNLOAD_LOCK_DURABLE` — lock set
+- [x] `UNLOAD_WIPES_SESSION` — close = logout — no leftover JWT/RT for next user
+- [x] `UNLOAD_BEACONS_REVOKE` — close best-effort revokes RT server-side
+- [x] `BFCACHE_KEEPS` — bfcache freeze: no wipe and no actor lock
+- [x] `AUTH_CLOSE_WIRING` — AuthContext: pagehide respects bfcache; beforeunload always destroys
+- [x] `STALE_SOFT_STILL_BLOCKS` — expired soft stamp cannot bypass actor lock
 - [x] `SHARED_ALL` — admin
 - [x] `MODE_PERSONAL` — smarterp_device_session_mode
 - [x] `PERSONAL_ADMIN_OK` — office admin restore

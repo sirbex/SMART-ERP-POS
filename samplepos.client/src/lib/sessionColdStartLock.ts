@@ -3,7 +3,8 @@
  *
  * Chromium localStorage survives power cycles. sessionStorage does NOT survive
  * a true reboot — but Chrome "Continue where you left off" can restore it.
- * SHARED device mode therefore also uses ACTOR_LOCK (localStorage) on pagehide.
+ * SHARED device mode therefore also uses ACTOR_LOCK (localStorage) on close
+ * (with full session wipe) so the next opener cannot inherit the prior actor.
  *
  * Policy SSOT: shared/security/deviceSessionPolicySsot.ts
  * Storage failures FAIL CLOSED (treat as cold start / require re-auth).

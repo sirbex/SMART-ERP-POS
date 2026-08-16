@@ -263,13 +263,34 @@ export function offlineCredentialsSurvivesClearTokens(keysRemoved: string[]): bo
 /**
  * forceLogout / peer LOGOUT must stop on auth recovery surfaces so
  * /login (offline password) and /quick-login (PIN) remain usable.
+ * Includes `/my/quick-login` (cashier/waiter PIN setup) — same recovery family.
  */
 export function isAuthRecoveryPath(pathname: string): boolean {
   const path = pathname || '';
-  return (
-    path === '/login' ||
-    path.endsWith('/login') ||
-    path.startsWith('/quick-login') ||
-    path.startsWith('/platform')
-  );
+  if (path === '/login' || path.endsWith('/login')) return true;
+  if (path.startsWith('/platform')) return true;
+  // Any quick-login surface: /quick-login, /quick-login/*, /my/quick-login
+  if (/(^|\/)quick-login(\/|$)/.test(path)) return true;
+  return false;
+}
+
+/**
+ * RBAC cache is only safe to reuse when it belongs to the same actor.
+ * Call BEFORE overwriting `user` in localStorage when establishing a new session.
+ */
+export function peekCachedPermissionKeysForUser(userId: string | null | undefined): string[] | null {
+  if (!userId) return null;
+  try {
+    const rawUser = localStorage.getItem('user');
+    if (!rawUser) return null;
+    const prev = JSON.parse(rawUser) as { id?: string };
+    if (!prev?.id || prev.id !== userId) return null;
+    const rawPerms = localStorage.getItem('rbac_permissions');
+    if (!rawPerms) return null;
+    const parsed = JSON.parse(rawPerms) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((p): p is string => typeof p === 'string');
+  } catch {
+    return null;
+  }
 }

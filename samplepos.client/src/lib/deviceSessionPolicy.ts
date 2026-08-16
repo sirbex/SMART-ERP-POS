@@ -10,6 +10,8 @@
 
 import {
   ACTOR_LOCK_KEY,
+  ACTOR_LOCK_SOFT_RELOAD_KEY,
+  ACTOR_LOCK_SOFT_RELOAD_MS,
   AUTH_BOOT_SESSION_KEY,
   AUTH_SESSION_WIPE_KEYS,
   COLD_START_QUICK_LOGIN_HREF,
@@ -20,6 +22,7 @@ import {
   idleTimeoutMsForMode,
   isActorLockRawSet,
   isDeviceSessionMode,
+  isWithinActorLockSoftReloadGrace,
   resolveDeviceSessionMode,
   shouldForceReauthOnBoot,
   type DeviceSessionMode,
@@ -27,12 +30,15 @@ import {
 
 export {
   ACTOR_LOCK_KEY,
+  ACTOR_LOCK_SOFT_RELOAD_KEY,
+  ACTOR_LOCK_SOFT_RELOAD_MS,
   AUTH_BOOT_SESSION_KEY,
   AUTH_SESSION_WIPE_KEYS,
   COLD_START_QUICK_LOGIN_HREF,
   DEVICE_SESSION_MODE_KEY,
   DeviceSessionIntegrityError,
   idleTimeoutMsForMode,
+  isWithinActorLockSoftReloadGrace,
   type DeviceSessionMode,
 };
 
@@ -157,14 +163,53 @@ export function shouldEnforceDeviceReauthGate(input: {
   hasStoredSession: boolean;
   withinLoginGrace?: boolean;
 }): boolean {
-  return shouldForceReauthOnBoot({
+  const softReload = isWithinActorLockSoftReloadGrace(readSoftReloadStamp());
+  const force = shouldForceReauthOnBoot({
     mode: getDeviceSessionMode(),
     role: input.role,
     hasStoredSession: input.hasStoredSession,
     actorLockSet: isActorLockSet(),
     isBrowserColdStart: isBrowserColdStartLocal(),
     withinLoginGrace: input.withinLoginGrace === true,
+    withinSoftReloadGrace: softReload,
   });
+  // Same-tab F5: drop the lock so the working session continues.
+  if (!force && softReload && isActorLockSet()) {
+    try {
+      clearActorLock();
+    } catch {
+      /* lock residue still fail-closes next cold boot */
+    }
+    clearSoftReloadStamp();
+  }
+  return force;
+}
+
+function readSoftReloadStamp(): string | null {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    return sessionStorage.getItem(ACTOR_LOCK_SOFT_RELOAD_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeSoftReloadStamp(): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.setItem(ACTOR_LOCK_SOFT_RELOAD_KEY, String(Date.now()));
+  } catch {
+    /* private mode — soft-reload grace unavailable; actor lock still applies */
+  }
+}
+
+function clearSoftReloadStamp(): void {
+  try {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.removeItem(ACTOR_LOCK_SOFT_RELOAD_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
@@ -222,22 +267,43 @@ export function beaconRevokeRefreshToken(refreshToken: string | null | undefined
 }
 
 /**
- * SHARED unload handler: durable actor lock, else wipe tokens immediately.
- * Returns whether the lock was durable (false ⇒ tokens must already be wiped by caller).
+ * SHARED unload / browser-close handler (enterprise walk-up terminal).
+ *
+ * Toast / Square / Samba shared-POS pattern:
+ * - Closing the browser or tab MUST destroy local session material so the next
+ *   person cannot operate as the previous actor.
+ * - Sets durable actor lock (defense if wipe is interrupted).
+ * - Best-effort RT revoke via beacon (boot wipe remains mandatory).
+ *
+ * bfcache (destroySession:false): do nothing — same live page may restore;
+ * locking or wiping would false-logout a frozen tab.
+ *
+ * PERSONAL mode: no-op (office restore allowed).
  */
 export function lockSharedSessionOnUnload(input: {
   mode: DeviceSessionMode;
   clearSession: () => void;
-  refreshToken: string | null | undefined;
-}): { lockDurable: boolean } {
+  refreshToken?: string | null | undefined;
+  /**
+   * When true (default), wipe JWT/RT now — browser/tab close security.
+   * When false (bfcache), no lock and no wipe.
+   */
+  destroySession?: boolean;
+}): { lockDurable: boolean; sessionDestroyed: boolean } {
   if (input.mode !== 'SHARED') {
-    return { lockDurable: true };
+    return { lockDurable: true, sessionDestroyed: false };
   }
+
+  const destroy = input.destroySession !== false;
+  if (!destroy) {
+    // bfcache freeze — leave session and lock alone for the same page resume.
+    return { lockDurable: true, sessionDestroyed: false };
+  }
+
+  writeSoftReloadStamp();
   const lockDurable = setActorLock();
-  if (!lockDurable) {
-    // Cannot persist lock → fail closed: destroy session material now.
-    input.clearSession();
-  }
+  // Close security: always wipe. Fail-closed even if lock write failed.
+  input.clearSession();
   beaconRevokeRefreshToken(input.refreshToken);
-  return { lockDurable };
+  return { lockDurable, sessionDestroyed: true };
 }

@@ -1,15 +1,17 @@
 /**
  * Device session policy SSOT — shared POS vs personal office PC.
  *
- * SHARED (default, max security for walk-up terminals):
- *   - Never silent-restore any role after close/reboot/Chrome restore
- *   - Actor lock on pagehide so next opener must re-authenticate
- *   - Short idle → logout
- *   - Refresh-token revoke on lock/boot wipe (best-effort on unload)
+ * SHARED (default, max security for walk-up terminals — Toast/Square pattern):
+ *   - Browser/tab close ⇒ full local logout (wipe JWT/RT) + actor lock
+ *   - Next opener cannot inherit prior account (no silent restore, any role)
+ *   - Best-effort RT revoke on close (beacon); boot wipe remains mandatory
+ *   - 60-minute idle → logout (keyboard/mouse/touch inactivity)
+ *   - bfcache (pagehide.persisted) does NOT logout (same page may restore)
+ *   - Same-tab F5 on SHARED also requires re-auth (close vs reload indistinguishable)
  *
  * PERSONAL (opt-in dedicated office workstation):
  *   - ADMIN/MANAGER may restore durable session (legacy ERP behaviour)
- *   - Longer idle window
+ *   - Close does not wipe (office PC); same 60-minute idle window
  *
  * Storage keys live here — AuthContext / cold-start must not invent parallels.
  *
@@ -30,6 +32,13 @@ export const DEVICE_SESSION_MODE_KEY = 'smarterp_device_session_mode';
 export const ACTOR_LOCK_KEY = 'smarterp_actor_lock_v1';
 
 /**
+ * Optional soft-reload stamp (sessionStorage). Kept for diagnostics / future
+ * PERSONAL soft-nav; SHARED close always wipes tokens so F5 requires re-auth.
+ */
+export const ACTOR_LOCK_SOFT_RELOAD_KEY = 'smarterp_actor_lock_soft_v1';
+export const ACTOR_LOCK_SOFT_RELOAD_MS = 15_000;
+
+/**
  * sessionStorage — marks this browser tab/session as trusted after login/boot.
  * Chrome session restore can revive it; actor lock closes that hole.
  */
@@ -45,8 +54,14 @@ export const AUTH_BOOT_SESSION_KEY = 'auth_boot_session_v1';
 export const AUTH_LOGIN_GRACE_KEY = 'auth_login_grace_v1';
 export const AUTH_LOGIN_GRACE_MS = 30_000;
 
-export const SHARED_IDLE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
-export const PERSONAL_IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
+/**
+ * Idle auto-logout — no deliberate keyboard/mouse/touch for this long.
+ * Same for SHARED and PERSONAL: security guru baseline (walk-away protection)
+ * without logging out cashiers who pause to talk to a customer.
+ */
+export const IDLE_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes
+export const SHARED_IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MS;
+export const PERSONAL_IDLE_TIMEOUT_MS = IDLE_TIMEOUT_MS;
 
 export const COLD_START_QUICK_LOGIN_HREF = '/quick-login';
 
@@ -161,6 +176,7 @@ export function isActorLockRawSet(raw: string | null | undefined): boolean {
 /**
  * Unified gate: force re-auth when actor lock, cold browser session, or role policy says so.
  * Login grace (same tab / storage race) must never wipe a session just established.
+ * Soft-reload grace (F5 within ACTOR_LOCK_SOFT_RELOAD_MS) must not wipe a working tab.
  */
 export function shouldForceReauthOnBoot(input: {
   mode: DeviceSessionMode;
@@ -170,6 +186,12 @@ export function shouldForceReauthOnBoot(input: {
   isBrowserColdStart: boolean;
   /** When true, skip wipe — caller just completed login in this tab. */
   withinLoginGrace?: boolean;
+  /**
+   * Same-tab F5 / soft navigation: actor lock was just set by pagehide on this
+   * tab. When true, skip wipe so working users are not bounced to PIN/login.
+   * Chrome restore hours later must pass false (stamp expired / absent).
+   */
+  withinSoftReloadGrace?: boolean;
 }): boolean {
   if (!isDeviceSessionMode(input.mode)) {
     throw new DeviceSessionIntegrityError(
@@ -178,9 +200,23 @@ export function shouldForceReauthOnBoot(input: {
   }
   if (input.withinLoginGrace) return false;
   if (!input.hasStoredSession) return false;
+  if (input.actorLockSet && input.withinSoftReloadGrace && !input.isBrowserColdStart) {
+    return false;
+  }
   if (input.actorLockSet) return true;
   if (!input.isBrowserColdStart) return false;
   return roleRequiresReauthGate({ mode: input.mode, role: input.role });
+}
+
+/** True when unload soft-reload stamp is fresh (same-tab F5). */
+export function isWithinActorLockSoftReloadGrace(
+  stampRaw: string | null | undefined,
+  now = Date.now(),
+): boolean {
+  if (stampRaw == null || String(stampRaw).trim() === '') return false;
+  const t = Number(stampRaw);
+  if (!Number.isFinite(t)) return false;
+  return now - t >= 0 && now - t < ACTOR_LOCK_SOFT_RELOAD_MS;
 }
 
 /**
