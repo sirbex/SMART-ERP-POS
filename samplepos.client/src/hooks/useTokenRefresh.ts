@@ -103,6 +103,13 @@ export function clearTokens() {
     localStorage.removeItem('user');
     localStorage.removeItem('rbac_permissions');
     localStorage.removeItem(REFRESH_LOCK_KEY);
+    // Drop cross-tab login grace so a later cold boot is not suppressed after logout.
+    try {
+        localStorage.removeItem('auth_login_grace_v1');
+        sessionStorage.removeItem('auth_login_grace_v1');
+    } catch {
+        /* private mode */
+    }
 }
 
 /**

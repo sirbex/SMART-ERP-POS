@@ -48,6 +48,34 @@ function sessionSet(key: string, value: string): boolean {
   }
 }
 
+function localGet(key: string): string | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function localSet(key: string, value: string): boolean {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    localStorage.setItem(key, value);
+    return localStorage.getItem(key) === value;
+  } catch {
+    return false;
+  }
+}
+
+function localRemove(key: string): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
 /**
  * Mark tab session trusted. Returns false if not durable (caller may still proceed;
  * next hard navigation will re-gate — fail closed).
@@ -56,17 +84,37 @@ export function markBrowserSessionAlive(): boolean {
   return sessionSet(AUTH_BOOT_SESSION_KEY, '1');
 }
 
-/** Call at the start of a successful login — blocks cold-start wipe for AUTH_LOGIN_GRACE_MS. */
+/**
+ * Call at the start of a successful login — blocks cold-start wipe for AUTH_LOGIN_GRACE_MS.
+ * Writes localStorage (cross-tab) + sessionStorage (same-tab). PC multi-tab login depends
+ * on localStorage so a peer tab's storage→initAuth cannot wipe the new session.
+ */
 export function markLoginGrace(): boolean {
-  return sessionSet(AUTH_LOGIN_GRACE_KEY, String(Date.now()));
+  const stamp = String(Date.now());
+  const crossTab = localSet(AUTH_LOGIN_GRACE_KEY, stamp);
+  const sameTab = sessionSet(AUTH_LOGIN_GRACE_KEY, stamp);
+  return crossTab || sameTab;
+}
+
+/** Remove grace markers (logout / definitive wipe). */
+export function clearLoginGrace(): void {
+  localRemove(AUTH_LOGIN_GRACE_KEY);
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(AUTH_LOGIN_GRACE_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function isWithinLoginGrace(now = Date.now()): boolean {
-  const raw = sessionGet(AUTH_LOGIN_GRACE_KEY);
+  // Prefer localStorage so peer tabs see the same grace window after login.
+  const raw = localGet(AUTH_LOGIN_GRACE_KEY) ?? sessionGet(AUTH_LOGIN_GRACE_KEY);
   if (!raw) return false;
   const t = Number(raw);
   if (!Number.isFinite(t)) return false;
-  return now - t >= 0 && now - t < AUTH_LOGIN_GRACE_MS;
+  const ok = now - t >= 0 && now - t < AUTH_LOGIN_GRACE_MS;
+  if (!ok) clearLoginGrace();
+  return ok;
 }
 
 /** True when boot marker absent or unreadable (fail closed → cold). */

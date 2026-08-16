@@ -116,11 +116,22 @@ describe('sessionColdStartLock', () => {
     ).toBe(true);
     markLoginGrace();
     expect(isWithinLoginGrace()).toBe(true);
+    expect(localStorage.getItem('auth_login_grace_v1')).toBeTruthy();
     expect(
       shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }),
     ).toBe(false);
     expect(
       shouldEnforceColdStartPinGate({ role: 'ADMIN', hasStoredSession: true }),
+    ).toBe(false);
+  });
+
+  it('EVIDENCE: login grace survives without sessionStorage (peer PC tab)', () => {
+    markLoginGrace();
+    // Peer tabs do not share sessionStorage — only localStorage.
+    sessionStorage.removeItem('auth_login_grace_v1');
+    expect(isWithinLoginGrace()).toBe(true);
+    expect(
+      shouldEnforceColdStartPinGate({ role: 'CASHIER', hasStoredSession: true }),
     ).toBe(false);
   });
 

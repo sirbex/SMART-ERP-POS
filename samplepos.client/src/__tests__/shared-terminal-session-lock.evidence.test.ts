@@ -266,13 +266,18 @@ describe('PROOF: Shared terminal session lock', () => {
     );
     gate(
       'AUTH_CLEAR_LOCK_BEFORE_AUTH',
-      /markLoginGrace\(\);\s*\n\s*clearActorLock\(\);\s*\n\s*markBrowserSessionAlive\(\);\s*\n\s*setUser/.test(
-        auth,
-      ) ||
-        (auth.includes('clearActorLock()') &&
-          auth.includes('markLoginGrace()') &&
-          auth.indexOf('clearActorLock()') < auth.indexOf('setIsAuthenticated(true)')),
-      'grace + lock cleared before authenticated paint',
+      (() => {
+        const loginIdx = auth.indexOf('const login = async');
+        const loginFn = loginIdx >= 0 ? auth.slice(loginIdx, loginIdx + 2200) : '';
+        return (
+          loginFn.includes('markLoginGrace()') &&
+          loginFn.includes('clearActorLock()') &&
+          loginFn.indexOf('markLoginGrace()') < loginFn.indexOf('fetchPermissionKeys') &&
+          loginFn.indexOf('clearActorLock()') < loginFn.indexOf('setIsAuthenticated(true)') &&
+          /localSet\(AUTH_LOGIN_GRACE_KEY/.test(lock)
+        );
+      })(),
+      'cross-tab grace + lock cleared before authenticated paint',
     );
     gate(
       'AUTH_NO_SAME_TAB_INIT_ON_AUTH_CHANGED',

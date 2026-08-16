@@ -1,7 +1,7 @@
 # PROOF — Login must not false-logout
 
-**Generated:** 2026-08-15T22:44:06.056Z  
-**Verdict:** **PASS** (23/23 tests)
+**Generated:** 2026-08-16T05:27:01.512Z  
+**Verdict:** **PASS** (25/25 tests)
 
 ## Guarantee
 
@@ -21,14 +21,14 @@ src/lib/deviceSessionPolicy.integrity.test.ts
 
  RUN  v3.2.4 C:/Users/Chase/source/repos/SamplePOS/samplepos.client
 
- ✓ src/__tests__/login-no-false-logout.proof.test.ts (4 tests) 19ms
- ✓ src/lib/sessionColdStartLock.test.ts (7 tests) 18ms
- ✓ src/lib/deviceSessionPolicy.integrity.test.ts (12 tests) 22ms
+ ✓ src/__tests__/login-no-false-logout.proof.test.ts (5 tests) 17ms
+ ✓ src/lib/sessionColdStartLock.test.ts (8 tests) 18ms
+ ✓ src/lib/deviceSessionPolicy.integrity.test.ts (12 tests) 29ms
 
  Test Files  3 passed (3)
-      Tests  23 passed (23)
-   Start at  01:44:07
-   Duration  3.21s (transform 538ms, setup 0ms, collect 1.95s, tests 59ms, environment 2ms, prepare 2.91s)
+      Tests  25 passed (25)
+   Start at  08:27:03
+   Duration  2.84s (transform 459ms, setup 0ms, collect 1.82s, tests 64ms, environment 1ms, prepare 2.45s)
 
 
 

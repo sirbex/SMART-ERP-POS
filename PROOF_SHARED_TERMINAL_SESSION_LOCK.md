@@ -1,6 +1,6 @@
 # PROOF: Shared terminal session lock
 
-- Date: 2026-08-15T22:44:21.763Z
+- Date: 2026-08-16T05:27:00.916Z
 - Runner: `npx vitest run src/__tests__/shared-terminal-session-lock.evidence.test.ts src/lib/deviceSessionPolicy.integrity.test.ts`
 - Gates: 31/31 pass (0 fail)
 - Verdict: **PASS**
@@ -43,7 +43,7 @@ User logs in, closes the browser without logout. Next person opens the same brow
 - [x] `AUTH_WIPE_ASSERT` — boot gate verifies wipe
 - [x] `AUTH_UNLOAD_SSOT` — unload uses SSOT helper
 - [x] `AUTH_IDLE_MODE` — idle follows device mode
-- [x] `AUTH_CLEAR_LOCK_BEFORE_AUTH` — grace + lock cleared before authenticated paint
+- [x] `AUTH_CLEAR_LOCK_BEFORE_AUTH` — cross-tab grace + lock cleared before authenticated paint
 - [x] `AUTH_NO_SAME_TAB_INIT_ON_AUTH_CHANGED` — same-tab auth-changed must not re-initAuth (login bounce)
 - [x] `POLICY_FAIL_CLOSED` — lock read errors ⇒ locked
 - [x] `SSOT_INTEGRITY_ERROR` — integrity error type

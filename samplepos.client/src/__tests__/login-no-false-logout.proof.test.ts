@@ -62,12 +62,23 @@ describe('PROOF login must not false-logout', () => {
     expect(auth).toMatch(/addEventListener\(\s*['"]storage['"]/);
   });
 
-  it('L2 login marks grace then clears lock then marks alive', () => {
+  it('L2 login marks cross-tab grace + clears lock BEFORE writing tokens', () => {
     const auth = read('../contexts/AuthContext.tsx');
-    expect(auth).toMatch(/markLoginGrace\(\)/);
-    expect(auth).toMatch(
-      /markLoginGrace\(\);\s*\n\s*clearActorLock\(\);\s*\n\s*markBrowserSessionAlive\(\)/,
-    );
+    const loginIdx = auth.indexOf('const login = async');
+    expect(loginIdx).toBeGreaterThan(-1);
+    const loginFn = auth.slice(loginIdx, loginIdx + 2200);
+    expect(loginFn).toMatch(/markLoginGrace\(\)/);
+    expect(loginFn).toMatch(/clearActorLock\(\)/);
+    expect(loginFn.indexOf('markLoginGrace()')).toBeLessThan(loginFn.indexOf('storeTokens'));
+    expect(loginFn.indexOf('markLoginGrace()')).toBeLessThan(loginFn.indexOf("setItem('auth_token'"));
+    expect(loginFn.indexOf('clearActorLock()')).toBeLessThan(loginFn.indexOf('fetchPermissionKeys'));
+    expect(loginFn.indexOf('markLoginGrace()')).toBeLessThan(loginFn.indexOf('markBrowserSessionAlive()'));
+  });
+
+  it('L2b grace is durable in localStorage (cross-tab PC peers)', () => {
+    const lock = read('../lib/sessionColdStartLock.ts');
+    expect(lock).toMatch(/localSet\(AUTH_LOGIN_GRACE_KEY/);
+    expect(lock).toMatch(/localGet\(AUTH_LOGIN_GRACE_KEY\)\s*\?\?\s*sessionGet\(AUTH_LOGIN_GRACE_KEY\)/);
   });
 
   it('L3 SSOT: withinLoginGrace short-circuits wipe', () => {

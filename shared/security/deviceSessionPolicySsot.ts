@@ -38,6 +38,9 @@ export const AUTH_BOOT_SESSION_KEY = 'auth_boot_session_v1';
 /**
  * Set for a short window after successful login so initAuth / cross-tab storage
  * handlers cannot apply SHARED cold-start wipe to a brand-new session.
+ *
+ * MUST be readable cross-tab (localStorage): peer PC tabs share localStorage and
+ * fire `storage` on auth_token write — sessionStorage-only grace cannot protect them.
  */
 export const AUTH_LOGIN_GRACE_KEY = 'auth_login_grace_v1';
 export const AUTH_LOGIN_GRACE_MS = 30_000;

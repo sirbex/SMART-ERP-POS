@@ -1,12 +1,12 @@
 {
   "proof": "LOGIN_NO_FALSE_LOGOUT",
   "objective": "After successful login, SHARED cold-start / actor-lock must not wipe the new session (login → instant logout / quick-login bounce)",
-  "runAt": "2026-08-15T22:44:06.056Z",
+  "runAt": "2026-08-16T05:27:01.512Z",
   "result": "PASS",
   "summary": {
     "fail": 0,
-    "pass": 23,
-    "total": 23
+    "pass": 25,
+    "total": 25
   },
   "gates": [
     {
@@ -32,5 +32,5 @@
     "src/lib/deviceSessionPolicy.integrity.test.ts"
   ],
   "exitStatus": 0,
-  "stdoutTail": "\n RUN  v3.2.4 C:/Users/Chase/source/repos/SamplePOS/samplepos.client\n\n ✓ src/__tests__/login-no-false-logout.proof.test.ts (4 tests) 19ms\n ✓ src/lib/sessionColdStartLock.test.ts (7 tests) 18ms\n ✓ src/lib/deviceSessionPolicy.integrity.test.ts (12 tests) 22ms\n\n Test Files  3 passed (3)\n      Tests  23 passed (23)\n   Start at  01:44:07\n   Duration  3.21s (transform 538ms, setup 0ms, collect 1.95s, tests 59ms, environment 2ms, prepare 2.91s)\n\n\n"
+  "stdoutTail": "\n RUN  v3.2.4 C:/Users/Chase/source/repos/SamplePOS/samplepos.client\n\n ✓ src/__tests__/login-no-false-logout.proof.test.ts (5 tests) 17ms\n ✓ src/lib/sessionColdStartLock.test.ts (8 tests) 18ms\n ✓ src/lib/deviceSessionPolicy.integrity.test.ts (12 tests) 29ms\n\n Test Files  3 passed (3)\n      Tests  25 passed (25)\n   Start at  08:27:03\n   Duration  2.84s (transform 459ms, setup 0ms, collect 1.82s, tests 64ms, environment 1ms, prepare 2.45s)\n\n\n"
 }

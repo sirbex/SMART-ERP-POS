@@ -303,7 +303,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       throw new Error('Invalid token received from server');
     }
 
-    // Store tokens FIRST (fetchPermissionKeys reads from localStorage)
+    // Cross-tab FIRST: peer PC tabs fire storage→initAuth as soon as auth_token is written.
+    // Grace must be in localStorage (and lock cleared) *before* that write, or SHARED
+    // cold-start wipes the new session (phones usually single-tab — looked "fine").
+    markLoginGrace();
+    clearActorLock();
+
+    // Store tokens (fetchPermissionKeys reads from localStorage)
     if (refreshToken && expiresIn) {
       storeTokens(token, refreshToken, expiresIn);
     } else {
@@ -342,9 +348,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     // NOW set authenticated — routes will render with permissions already loaded.
-    // Grace first: cross-tab storage → initAuth must not wipe this session.
-    markLoginGrace();
-    clearActorLock();
     markBrowserSessionAlive();
     setUser(userData);
     setIsAuthenticated(true);
