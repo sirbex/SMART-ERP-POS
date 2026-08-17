@@ -29,6 +29,10 @@ import {
   allocateVoidQuantity,
   isServerOrderItemId,
 } from '../../lib/restaurantVoidQuantity';
+import {
+  fohMenuAddBlockedMessage,
+  resolveFohMenuAddTarget,
+} from '../../lib/fohMenuAddTarget';
 import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
 import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
 import { printKitchenTicket, printRestaurantBill, resolveStationPrinterName } from '../../lib/printRestaurant';
@@ -972,6 +976,11 @@ export default function RestaurantPosPage() {
     tableId: null,
     tabs: [],
   });
+  /**
+   * Party list auto-open is one-shot per table pick. Do not keep forcing `list`
+   * while ticketTabs.length > 1 — that fights ticket drill-in and + Ticket.
+   */
+  const partyListLandedForTableRef = useRef<string | null>(null);
   /** Online add: keep temp lines until their mutation soft-refresh finishes. */
   const inFlightOptimisticLinesRef = useRef<Map<string, InFlightOptimisticLine>>(new Map());
 
@@ -1564,23 +1573,69 @@ export default function RestaurantPosPage() {
         selectedCustomer?.address?.trim() || guestDraft.deliveryAddress.trim() || null;
 
       /**
-       * Toast/Samba: party list is for picking a ticket — not for silent force-new.
-       * New tickets come from "+ Ticket". Menu adds require an active ticket (detail).
+       * Toast/Samba: "Select a ticket" ONLY when 2+ tickets and party list is up.
+       * Sheet FOH clears activeOrderId on table pick — first tap must still add.
        */
-      if (showSambaTicketList) {
-        throw new Error('Select a ticket to add items');
+      const floorOpenCount = Number(table.openCheckCount || 0);
+      const tableOccupied =
+        floorOpenCount > 0 ||
+        (table.status != null && String(table.status) !== 'FREE');
+      let addDecision = resolveFohMenuAddTarget({
+        partyListVisible: showSambaTicketList,
+        ticketCount: ticketTabs.length,
+        soleTicketId: ticketTabs.length === 1 ? ticketTabs[0]?.id ?? null : null,
+        activeOrderId,
+        currentOrderId: order?.id ?? null,
+        checkSettled: checkQuery.isFetched && !checkQuery.isLoading,
+        tableOccupied,
+        floorOpenCount,
+      });
+      if (addDecision.action === 'wait-check' && isOnline) {
+        try {
+          const res = await api.restaurant.getTableCheck(
+            selectedTableId,
+            undefined,
+            { silentForbidden: true },
+          );
+          const data = res.data.data as CheckUiPayload;
+          const openIds = [
+            data.order?.id,
+            ...(data.siblingChecks || []).map((s) => s.id),
+          ].filter((id): id is string => !!id && !isTempRestaurantId(id));
+          const unique = [...new Set(openIds)];
+          addDecision = resolveFohMenuAddTarget({
+            partyListVisible: unique.length > 1,
+            ticketCount: unique.length,
+            soleTicketId: unique.length === 1 ? unique[0] : null,
+            activeOrderId: unique.length === 1 ? unique[0] : null,
+            currentOrderId: data.order?.id ?? null,
+            checkSettled: true,
+            tableOccupied: unique.length > 0,
+            floorOpenCount: unique.length,
+          });
+          if (addDecision.action === 'select-ticket') {
+            setSambaTicketView('list');
+            if (chrome.fohTicketPane === 'sheet') setMobileSheet('order');
+          }
+          if (addDecision.action === 'bind') {
+            setActiveOrderId(addDecision.orderId);
+          }
+        } catch {
+          // Keep wait-check → "Loading ticket…" not "Select a ticket".
+        }
       }
-      if (!activeOrderId && !order?.id) {
-        throw new Error('Select a ticket to add items');
-      }
+      const blocked = fohMenuAddBlockedMessage(addDecision);
+      if (blocked) throw new Error(blocked);
+      const targetOrderId =
+        addDecision.action === 'bind' ? addDecision.orderId : null;
 
-      if (preferLocalRestaurantWrites(order?.id ?? activeOrderId)) {
+      if (preferLocalRestaurantWrites(targetOrderId)) {
         const derived = appendRestaurantItemOffline({
           tableId: selectedTableId,
           tableCode: table.code,
           tableName: table.name,
           channel,
-          orderId: order?.id ?? activeOrderId,
+          orderId: targetOrderId,
           customerId: selectedCustomer?.id || null,
           waiterId: selectedWaiterId,
           waiterName: waiter?.fullName,
@@ -1606,7 +1661,7 @@ export default function RestaurantPosPage() {
       }
 
       // Online: paint ticket immediately; sync API in background (no menu lock).
-      const targetOrderId = activeOrderId || order?.id || null;
+      // null targetOrderId ⇒ server opens the first check on this table.
       const checkKey = ['restaurant', 'check', selectedTableId, targetOrderId, isOnline] as const;
       const prevSnapshot = queryClient.getQueryData(checkKey) as CheckUiPayload | undefined;
       const tempLineId = newTempLineId();
@@ -2146,10 +2201,27 @@ export default function RestaurantPosPage() {
     [ticketTabs],
   );
 
-  // Single open check always shows lines; multi stays list/detail as user navigates.
+  // After a table pick: empty/single → detail (menu adds immediately).
+  // 2+ tickets → party list once. Never keep forcing list (drill-in / + Ticket).
   useEffect(() => {
-    if (ticketTabs.length <= 1) setSambaTicketView('detail');
-  }, [ticketTabs.length]);
+    if (!selectedTableId) {
+      partyListLandedForTableRef.current = null;
+      return;
+    }
+    if (partyListLandedForTableRef.current === selectedTableId) {
+      if (ticketTabs.length <= 1) setSambaTicketView('detail');
+      return;
+    }
+    if (ticketTabs.length <= 1) {
+      setSambaTicketView('detail');
+      if (ticketTabs.length === 1 || (checkQuery.isFetched && !checkQuery.isLoading)) {
+        partyListLandedForTableRef.current = selectedTableId;
+      }
+      return;
+    }
+    partyListLandedForTableRef.current = selectedTableId;
+    setSambaTicketView('list');
+  }, [selectedTableId, ticketTabs.length, checkQuery.isFetched, checkQuery.isLoading]);
 
   /**
    * Toast/Samba: opening a multi-ticket table lands on the party list first.
@@ -2230,17 +2302,19 @@ export default function RestaurantPosPage() {
       setSelectedLineIds([]);
       setOpsMode(null);
       setSambaTicketView('detail');
+      partyListLandedForTableRef.current = null;
       tableTicketsRef.current = { tableId: null, tabs: [] };
       return;
     }
-    // Fresh table selection: clear stale customer from a previous ticket.
-    // Multi-ticket: open Samba-style list until user drills into a ticket.
+    // Fresh table: start in detail so empty/single tables can take menu taps.
+    // Hydration effect lands 2+ tables on the party list once.
     setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
     setSelectedCustomer(null);
     setActiveOrderId(null);
     setSelectedLineIds([]);
     setOpsMode(null);
-    setSambaTicketView('list');
+    setSambaTicketView('detail');
+    partyListLandedForTableRef.current = null;
     tableTicketsRef.current = { tableId: selectedTableId, tabs: [] };
   }, [selectedTableId]);
 
@@ -3946,7 +4020,27 @@ export default function RestaurantPosPage() {
       toast.error('Cannot change quantity for this line');
       return;
     }
-    if (preferLocalRestaurantWrites(order?.id)) {
+    const plusDecision = resolveFohMenuAddTarget({
+      partyListVisible: showSambaTicketList,
+      ticketCount: ticketTabs.length,
+      soleTicketId: ticketTabs.length === 1 ? ticketTabs[0]?.id ?? null : null,
+      activeOrderId,
+      currentOrderId: order?.id ?? null,
+      checkSettled: checkQuery.isFetched && !checkQuery.isLoading,
+      tableOccupied: Number(selectedTable?.openCheckCount || 0) > 0,
+      floorOpenCount: Number(selectedTable?.openCheckCount || 0),
+    });
+    const plusBlocked = fohMenuAddBlockedMessage(plusDecision);
+    if (plusBlocked) {
+      toast.error(plusBlocked, {
+        duration: 3500,
+        id: plusDecision.action === 'select-ticket' ? 'foh-select-ticket' : 'foh-wait-ticket',
+      });
+      return;
+    }
+    const plusTargetOrderId =
+      plusDecision.action === 'bind' ? plusDecision.orderId : null;
+    if (preferLocalRestaurantWrites(plusTargetOrderId)) {
       try {
         const table =
           tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
@@ -3957,7 +4051,7 @@ export default function RestaurantPosPage() {
           tableCode: table.code,
           tableName: table.name,
           channel: channelHint(table),
-          orderId: order?.id ?? activeOrderId,
+          orderId: plusTargetOrderId,
           customerId: selectedCustomer?.id || null,
           waiterId: selectedWaiterId,
           waiterName: waiter?.fullName,
@@ -3991,7 +4085,7 @@ export default function RestaurantPosPage() {
       toast.error('Table not available');
       return;
     }
-    const targetOrderId = activeOrderId || order?.id || null;
+    const targetOrderId = plusTargetOrderId;
     const checkKey = ['restaurant', 'check', selectedTableId, targetOrderId, isOnline] as const;
     const prevSnapshot = queryClient.getQueryData(checkKey) as CheckUiPayload | undefined;
     const tempLineId = newTempLineId();
@@ -5388,7 +5482,9 @@ export default function RestaurantPosPage() {
                         </p>
                       ) : (
                         <p className="type-caption text-stone-500 type-ellipsis">
-                          Select a ticket or start a new one
+                          {isMultiTicketTable
+                            ? 'Select a ticket or start a new one'
+                            : 'Tap the menu to start the first ticket'}
                         </p>
                       )}
                       {(selectedCustomer?.name || guestDraft.guestName) ? (
@@ -5599,7 +5695,7 @@ export default function RestaurantPosPage() {
                     <p className="text-sm text-stone-500">
                       {order
                         ? 'This ticket is empty — add items from the menu'
-                        : 'No order yet — add items, or go back to the floor'}
+                        : 'Tap the menu to start the first ticket'}
                     </p>
                     {useSheetTicket ? (
                       <button

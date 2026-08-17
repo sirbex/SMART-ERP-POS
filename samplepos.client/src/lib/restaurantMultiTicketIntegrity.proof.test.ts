@@ -377,7 +377,7 @@ describe('PROOF multi-ticket consistency · integrity · accuracy', () => {
 });
 
 describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () => {
-  it('S01 FOH party list requires ticket select; + Ticket opens new; menu gated on list', () => {
+  it('S01 FOH party list requires ticket select only when multi; first add opens check', () => {
     const pos = readFileSync(
       resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'),
       'utf8',
@@ -388,9 +388,26 @@ describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () =>
     expect(pos).toMatch(/const openNewTicketOnTable = async/);
     expect(pos).toMatch(/setSambaTicketView\('detail'\)/);
     expect(pos).toMatch(/showSambaTicketList = isMultiTicketTable && sambaTicketView === 'list'/);
+    expect(pos).toMatch(/isMultiTicketTable = ticketTabs\.length > 1/);
     expect(pos).toMatch(/backToPartyTicketList/);
     // Menu must not silent-force-new from party list
     expect(pos).not.toMatch(/const forceNewTicket = showSambaTicketList/);
+    // Empty / single-ticket: never block first add behind "select ticket"
+    expect(pos).not.toMatch(
+      /if\s*\(\s*!activeOrderId\s*&&\s*!order\?\.id\s*\)\s*\{\s*throw new Error\(\s*['"]Select a ticket to add items['"]/,
+    );
+    // Sole open ticket binds without party-list pick; 0 tickets ⇒ create
+    expect(pos).toMatch(/resolveFohMenuAddTarget/);
+    expect(pos).toMatch(/fohMenuAddBlockedMessage/);
+    expect(pos).toMatch(/Tap the menu to start the first ticket/);
+    // Table pick must not force party list (that gated menu on phones)
+    expect(pos).toMatch(/setSambaTicketView\('detail'\)/);
+    expect(pos).not.toMatch(
+      /setSambaTicketView\('list'\);\s*tableTicketsRef\.current = \{ tableId: selectedTableId/,
+    );
+    // +1 line sheet must share sole-ticket / party-list SSOT (no silent wrong target)
+    expect(pos).toMatch(/plusTargetOrderId/);
+    expect(pos).toMatch(/preferLocalRestaurantWrites\(plusTargetOrderId\)/);
   });
 
   it('S02 client API carries forceNewCheck; offline ops honor forceNewTicket', () => {
