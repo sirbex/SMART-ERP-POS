@@ -3,7 +3,15 @@
  * Payment reuses existing Order Payment page → createSale SSOT.
  */
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
@@ -32,6 +40,12 @@ import {
 import {
   fohMenuAddBlockedMessage,
   resolveFohMenuAddTarget,
+  resolveKotFireOrderId,
+  resolveKotSessionFinish,
+  resolveKotSessionLeave,
+  resolvePaintedOrder,
+  resolveTableOpenLand,
+  resolveTablePickView,
 } from '../../lib/fohMenuAddTarget';
 import { kotLineNotesMergeKey } from '@shared/utils/consolidateKotLines';
 import { computeVoidItemsFromUpdatedLines } from '@shared/utils/reconcileOrderLineVoids';
@@ -105,16 +119,26 @@ import {
   isJournalLocalOrderId,
   splitRestaurantCheckOffline,
   transferRestaurantCheckOffline,
+  updateRestaurantCheckNotesOffline,
   updateRestaurantGuestOffline,
   totalsFromLines,
 } from '../../lib/restaurantOfflineOps';
 import { hasPendingSales, syncOfflineSales } from '../../services/offlineSyncEngine';
 import {
   appendOptimisticMenuItem,
+  applyTicketNoteToCheck,
+  applyTicketNoteToTabs,
+  displayTicketNote,
+  preferUserTicketNote,
+  sanitizeCheckTicketNotes,
+  dropOptimisticCheckLines,
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
   mergeRestaurantSiblingTabs,
   newTempLineId,
+  readRestaurantAddItemsPayload,
+  restaurantCheckQueryPaintIds,
+  coalesceRestaurantCheckFetch,
   scrubRestaurantTicketTabs,
   toServerRestaurantOrderId,
   type InFlightOptimisticLine,
@@ -338,6 +362,43 @@ const touchBtnGhost = `${touchBtn} border border-stone-300 bg-white text-stone-8
 const touchBtnDark = `${touchBtn} bg-stone-900 text-white active:bg-stone-800`;
 const touchBtnDanger = `${touchBtn} border border-red-300 text-red-700 bg-white active:bg-red-50`;
 const touchChip = `${TOUCH} min-h-11 px-4 py-2.5 rounded-xl type-cta font-semibold whitespace-nowrap`;
+
+function TicketNotePreview({
+  note,
+  dense,
+  clamp,
+  canOrder,
+  onEdit,
+  preview,
+}: {
+  note: string;
+  dense: boolean;
+  clamp: '1' | '2';
+  canOrder: boolean;
+  onEdit: () => void;
+  preview: 'empty' | 'true';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onEdit}
+      disabled={!canOrder}
+      className={`w-full text-left rounded-lg border border-amber-200 bg-amber-50/90 leading-snug active:bg-amber-100 disabled:opacity-80 ${
+        dense
+          ? `px-2 py-1 text-[11px] ${clamp === '1' ? 'line-clamp-1' : 'line-clamp-2'}`
+          : preview === 'empty'
+            ? 'px-2.5 py-1.5 text-sm'
+            : 'px-2.5 py-1.5 text-[11px]'
+      }`}
+      data-pos-coach={preview === 'true' ? 'ticket' : undefined}
+      data-ticket-note-preview={preview}
+      title="Ticket note — tap to edit"
+    >
+      <span className="font-bold text-amber-900">Note · </span>
+      <span className="text-stone-800">{note}</span>
+    </button>
+  );
+}
 /** Thick Samba-style category targets — finger-friendly on phone + rail. */
 const touchCat =
   `${TOUCH} min-h-14 px-5 rounded-xl type-title font-bold whitespace-nowrap shrink-0`;
@@ -452,22 +513,6 @@ function partyTicketColor(index: number) {
   return PARTY_TICKET_COLORS[index % PARTY_TICKET_COLORS.length]!;
 }
 
-/** System-generated open-check notes — hide from FOH "ticket note" surface. */
-function isSystemGeneratedTicketNote(notes: string | null | undefined): boolean {
-  const n = (notes || '').trim();
-  if (!n) return true;
-  return (
-    /^Restaurant\s+.+\s*·\s*ticket$/i.test(n) ||
-    /^Restaurant\s+\S+$/i.test(n) ||
-    /^Split from\s+/i.test(n)
-  );
-}
-
-function displayTicketNote(notes: string | null | undefined): string {
-  if (isSystemGeneratedTicketNote(notes)) return '';
-  return (notes || '').trim();
-}
-
 function apiErr(err: unknown, fallback: string): string {
   // Message-only — interceptor may already have toasted (HandledApiError).
   return getStructuredErrorMessage(err, fallback);
@@ -515,6 +560,7 @@ function uiFromDerivedCheck(
       taxAmount: String(totals.taxAmount),
       totalAmount: String(totals.totalAmount),
       status: 'PENDING',
+      notes: derived.notes ?? null,
       items: derived.lines.map((l) => ({
         id: l.lineId || `${derived.orderId}-${l.productId}`,
         productId: l.productId,
@@ -592,7 +638,7 @@ function buildCheckUiFromJournal(
     return { table, order: null, meta: null, siblingChecks: [] };
   }
   const base = uiFromDerivedCheck(derived, table);
-  return {
+  return sanitizeCheckTicketNotes({
     ...base,
     siblingChecks: siblings.map((s) => {
       const tot = totalsFromLines(s.lines);
@@ -601,10 +647,10 @@ function buildCheckUiFromJournal(
         orderNumber: s.offlineId,
         totalAmount: String(tot.totalAmount),
         createdAt: new Date(s.createdTs).toISOString(),
-        notes: displayTicketNote(s.notes) || null,
+        notes: s.notes ?? null,
       };
     }),
-  };
+  });
 }
 
 type TicketTab = {
@@ -662,7 +708,7 @@ function ticketTabsFromPayload(data: CheckUiPayload | null | undefined): TicketT
       id,
       orderNumber,
       totalAmount: String(totalAmount ?? 0),
-      note: displayTicketNote(note) || null,
+      note: preferUserTicketNote(note),
     });
   };
   if (data.order?.id) {
@@ -732,16 +778,23 @@ function seedCheckPayloadIntoJournal(tableId: string, data: CheckUiPayload): voi
  * Multi-ticket: never adopt another open check's lines when orderId is known.
  */
 function checkUiAfterServerSeed(tableId: string, data: CheckUiPayload): CheckUiPayload {
-  if (!data.order?.id) return data;
+  if (!data.order?.id) return sanitizeCheckTicketNotes(data);
   seedCheckPayloadIntoJournal(tableId, data);
   const local = buildCheckUiFromJournal(tableId, data.order.id, data.table);
   const siblings =
     data.siblingChecks?.length
       ? data.siblingChecks
       : local?.siblingChecks || data.siblingChecks || [];
+  const withNotes = (payload: CheckUiPayload): CheckUiPayload =>
+    applyTicketNoteToCheck(
+      { ...payload, siblingChecks: siblings },
+      data.order!.id,
+      preferUserTicketNote(data.order?.notes, local?.order?.notes, payload.order?.notes),
+    ) as CheckUiPayload;
+
   // No journal (or wrong id): server is the only SSOT for that check.
   if (!local?.order || local.order.id !== data.order.id) {
-    return { ...data, siblingChecks: siblings };
+    return withNotes(data);
   }
 
   const byId = new Map((data.order.items || []).map((it) => [it.id, it] as const));
@@ -757,12 +810,11 @@ function checkUiAfterServerSeed(tableId: string, data: CheckUiPayload): CheckUiP
         addedAt: server.addedAt ?? it.addedAt ?? null,
       };
     });
-    return {
+    return withNotes({
       ...local,
       order: { ...local.order, items },
       table: data.table || local.table,
-      siblingChecks: siblings,
-    };
+    });
   }
 
   // Synced ticket: start from this check's server lines only + unsynced local adds.
@@ -792,17 +844,15 @@ function checkUiAfterServerSeed(tableId: string, data: CheckUiPayload): CheckUiP
       !serverIds.has(it.id) &&
       (String(it.id).startsWith('ofl_line_') || String(it.id).startsWith('tmp_line_')),
   );
-  return {
+  return withNotes({
     ...data,
     order: {
       ...data.order,
       items: [...itemsFromServer, ...pendingLocal],
-      notes: data.order.notes ?? local.order.notes,
     },
     table: data.table || local.table,
     meta: data.meta || local.meta,
-    siblingChecks: siblings,
-  };
+  });
 }
 
 export default function RestaurantPosPage() {
@@ -1000,6 +1050,8 @@ export default function RestaurantPosPage() {
   const partyListLandedForTableRef = useRef<string | null>(null);
   /** Online add: keep temp lines until their mutation soft-refresh finishes. */
   const inFlightOptimisticLinesRef = useRef<Map<string, InFlightOptimisticLine>>(new Map());
+  /** Increments on ticket paint so an older table GET cannot wipe a newer add. */
+  const checkPaintGenRef = useRef(0);
 
   const paintServerCheckWithInFlight = (
     tableId: string,
@@ -1048,19 +1100,13 @@ export default function RestaurantPosPage() {
     };
     const painted = attachSiblingTabs(merged, tableTicketsRef.current.tabs);
     const nextOrderId = data.order?.id ?? preferredKeyOrderId ?? null;
-    queryClient.setQueryData(
-      ['restaurant', 'check', tableId, nextOrderId, isOnline],
-      painted,
-    );
-    if (preferredKeyOrderId != null && preferredKeyOrderId !== nextOrderId) {
-      queryClient.setQueryData(
-        ['restaurant', 'check', tableId, preferredKeyOrderId, isOnline],
-        painted,
-      );
-    }
-    // Also refresh the null-key paint used during first optimistic open.
-    if (preferredKeyOrderId == null || isTempRestaurantId(preferredKeyOrderId)) {
-      queryClient.setQueryData(['restaurant', 'check', tableId, null, isOnline], painted);
+    checkPaintGenRef.current += 1;
+    for (const id of restaurantCheckQueryPaintIds({
+      paintedOrderId: nextOrderId,
+      targetOrderId: preferredKeyOrderId,
+      displayedOrderId: activeOrderId,
+    })) {
+      queryClient.setQueryData(['restaurant', 'check', tableId, id, isOnline], painted);
     }
     // Floor tile figures stay accurate without waiting for tables refetch.
     queryClient.setQueryData(
@@ -1201,6 +1247,20 @@ export default function RestaurantPosPage() {
     // journalTick is NOT in the key — local writes paint via setQueryData for instant FOH.
     queryKey: ['restaurant', 'check', selectedTableId, activeOrderId, isOnline],
     queryFn: async () => {
+      const fetchGen = checkPaintGenRef.current;
+      const keepIfStale = (payload: CheckUiPayload) =>
+        coalesceRestaurantCheckFetch({
+          startedGen: fetchGen,
+          paintGen: checkPaintGenRef.current,
+          cached: queryClient.getQueryData([
+            'restaurant',
+            'check',
+            selectedTableId,
+            activeOrderId,
+            isOnline,
+          ]) as CheckUiPayload | undefined,
+          incoming: payload,
+        });
       const cachedTable =
         getCachedRestaurantTables().find((t) => t.id === selectedTableId) ||
         tablesQuery.data?.find((t) => t.id === selectedTableId);
@@ -1261,9 +1321,11 @@ export default function RestaurantPosPage() {
           { silentForbidden: true },
         );
         const data = res.data.data as CheckUiPayload;
-        return attachSiblingTabs(
-          checkUiAfterServerSeed(selectedTableId, data),
-          tableTicketsRef.current.tabs,
+        return keepIfStale(
+          attachSiblingTabs(
+            checkUiAfterServerSeed(selectedTableId, data),
+            tableTicketsRef.current.tabs,
+          ),
         );
       } catch (err: unknown) {
         const structured = getStructuredError(err);
@@ -1319,7 +1381,32 @@ export default function RestaurantPosPage() {
       if (cached?.order?.id === activeOrderId) {
         return attachSiblingTabs(cached, tableTicketsRef.current.tabs);
       }
-      return undefined;
+      const tabMeta =
+        tableTicketsRef.current.tableId === selectedTableId
+          ? tableTicketsRef.current.tabs.find((t) => t.id === activeOrderId)
+          : undefined;
+      // Matching empty shell — never undefined (blank Close/KOT) and never
+      // keepPreviousData (wrong ticket lines).
+      return attachSiblingTabs(
+        {
+          table: (cachedTable || { id: selectedTableId }) as RestaurantTable,
+          order: {
+            id: activeOrderId,
+            orderNumber: tabMeta?.orderNumber || '…',
+            status: 'PENDING',
+            items: [],
+            subtotal: '0',
+            discountAmount: '0',
+            taxAmount: '0',
+            totalAmount: String(tabMeta?.totalAmount ?? 0),
+            notes: tabMeta?.note ?? null,
+            customerId: null,
+          },
+          meta: null,
+          siblingChecks: [],
+        },
+        tableTicketsRef.current.tabs,
+      );
     },
     enabled: !!restaurantEnabled && !!selectedTableId,
     // Seed null→orderId must not immediately re-GET the same check (table-pick lag).
@@ -1678,10 +1765,13 @@ export default function RestaurantPosPage() {
         return { offline: true as const, orderId: derived.orderId, quantity };
       }
 
-      // Online: paint ticket immediately; sync API in background (no menu lock).
-      // null targetOrderId ⇒ server opens the first check on this table.
+      // Online: paint the on-screen query key (activeOrderId, often null after table pick)
+      // AND the target ticket key. Writing only the target left the ticket stale until KOT.
+      const displayKey = ['restaurant', 'check', selectedTableId, activeOrderId, isOnline] as const;
       const checkKey = ['restaurant', 'check', selectedTableId, targetOrderId, isOnline] as const;
-      const prevSnapshot = queryClient.getQueryData(checkKey) as CheckUiPayload | undefined;
+      const prevSnapshot =
+        (queryClient.getQueryData(checkKey) as CheckUiPayload | undefined) ||
+        (queryClient.getQueryData(displayKey) as CheckUiPayload | undefined);
       const tempLineId = newTempLineId();
       const unitPrice = Number(product.sellingPrice) || 0;
       inFlightOptimisticLinesRef.current.set(tempLineId, {
@@ -1691,8 +1781,9 @@ export default function RestaurantPosPage() {
         quantity,
         unitPrice,
       });
-      queryClient.setQueryData(checkKey, (latest) =>
-        appendOptimisticMenuItem(latest as OptimisticCheckPayload | undefined, {
+      const optimistic = appendOptimisticMenuItem(
+        prevSnapshot as OptimisticCheckPayload | undefined,
+        {
           table,
           product,
           quantity,
@@ -1708,17 +1799,24 @@ export default function RestaurantPosPage() {
           deliveryAddress,
           pickupLabel: guestDraft.pickupLabel.trim() || null,
           knownTabs: tableTicketsRef.current.tabs,
-        }) as CheckUiPayload,
-      );
+        },
+      ) as CheckUiPayload;
+      for (const id of restaurantCheckQueryPaintIds({
+        paintedOrderId: optimistic.order?.id,
+        targetOrderId,
+        displayedOrderId: activeOrderId,
+      })) {
+        queryClient.setQueryData(['restaurant', 'check', selectedTableId, id, isOnline], optimistic);
+      }
+      checkPaintGenRef.current += 1;
       setPendingQtyDigits('');
       setMenuQtyPadOpen(false);
 
       const apiOrderId = toServerRestaurantOrderId(targetOrderId);
-      const refreshOrderId = apiOrderId || undefined;
 
       try {
         const postItems = async (orderIdForApi: string | null | undefined) => {
-          await api.restaurant.addItems({
+          const res = await api.restaurant.addItems({
             tableId: selectedTableId,
             orderId: orderIdForApi ?? undefined,
             waiterId: selectedWaiterId,
@@ -1729,10 +1827,9 @@ export default function RestaurantPosPage() {
             pickupLabel: guestDraft.pickupLabel.trim() || null,
             items: [{ productId: product.id, quantity }],
           });
+          return readRestaurantAddItemsPayload(res.data.data) || readRestaurantAddItemsPayload(res.data);
         };
-        try {
-          await postItems(apiOrderId);
-        } catch (firstErr) {
+        let added = await postItems(apiOrderId).catch(async (firstErr) => {
           if (!apiOrderId || !isRestaurantCheckClosedError(firstErr)) throw firstErr;
           // Paid/cancelled ticket still in cache — clear paint and retry only when
           // the table has no other open check (siblings → refresh UI, don't open a 3rd).
@@ -1746,24 +1843,44 @@ export default function RestaurantPosPage() {
             : undefined;
           const openIds = details?.openOrderIds;
           if (Array.isArray(openIds) && openIds.length > 0) throw firstErr;
-          await postItems(undefined);
-        }
+          return postItems(undefined);
+        });
         if (selectedTableId) {
-          const billOrderId = targetOrderId || order?.id;
+          const billOrderId = toServerRestaurantOrderId(added?.order?.id) || targetOrderId || order?.id;
           if (billOrderId) clearRestaurantBillRequestedOffline(selectedTableId, billOrderId);
         }
-        const res = await api.restaurant.getTableCheck(
-          selectedTableId,
-          refreshOrderId ? { orderId: refreshOrderId } : undefined,
-        );
-        const data = res.data.data as CheckUiPayload;
         inFlightOptimisticLinesRef.current.delete(tempLineId);
-        const stayOn = targetOrderId || data.order?.id || null;
+        if (!added) {
+          const res = await api.restaurant.getTableCheck(
+            selectedTableId,
+            apiOrderId ? { orderId: apiOrderId } : undefined,
+          );
+          const data = res.data.data as CheckUiPayload;
+          const stayOn =
+            toServerRestaurantOrderId(data.order?.id) ||
+            toServerRestaurantOrderId(targetOrderId) ||
+            null;
+          await queryClient.cancelQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+          paintServerCheckWithInFlight(selectedTableId, data, stayOn);
+          if (stayOn) setActiveOrderId(stayOn);
+          return { offline: false as const, refreshed: true as const, quantity };
+        }
+        await queryClient.cancelQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+        const prev =
+          (queryClient.getQueryData(displayKey) as CheckUiPayload | undefined) ||
+          (queryClient.getQueryData(checkKey) as CheckUiPayload | undefined);
+        const data: CheckUiPayload = {
+          table: added.table as CheckUiPayload['table'],
+          order: added.order as CheckUiPayload['order'],
+          meta: (added.meta as CheckUiPayload['meta']) || null,
+          siblingChecks: prev?.siblingChecks || [],
+        };
+        const stayOn = added.order.id;
         paintServerCheckWithInFlight(selectedTableId, data, stayOn);
-        if (stayOn) setActiveOrderId(stayOn);
-        const newest = [...(data.order?.items || [])]
+        setActiveOrderId(stayOn);
+        const newest = [...(added.order.items || [])]
           .reverse()
-          .find((it) => it.productId === product.id);
+          .find((it) => it.productId === product.id) as OrderItem | undefined;
         if (stayOn && newest?.id && product.id) {
           void openOrderTagPad({
             orderId: stayOn,
@@ -1780,10 +1897,13 @@ export default function RestaurantPosPage() {
         try {
           const res = await api.restaurant.getTableCheck(
             selectedTableId,
-            refreshOrderId ? { orderId: refreshOrderId } : undefined,
+            apiOrderId ? { orderId: apiOrderId } : undefined,
           );
           const data = res.data.data as CheckUiPayload;
-          const stayOn = targetOrderId || data.order?.id || null;
+          const stayOn =
+            toServerRestaurantOrderId(data.order?.id) ||
+            toServerRestaurantOrderId(targetOrderId) ||
+            null;
           paintServerCheckWithInFlight(selectedTableId, data, stayOn);
           if (stayOn) setActiveOrderId(stayOn);
           else setActiveOrderId(null);
@@ -1960,12 +2080,11 @@ export default function RestaurantPosPage() {
   });
 
   // Multi-ticket: strip selection wins — never show another check's shell/lines.
-  const order = useMemo(() => {
-    const o = checkQuery.data?.order ?? null;
-    if (!o) return null;
-    if (activeOrderId && o.id !== activeOrderId) return null;
-    return o;
-  }, [checkQuery.data?.order, activeOrderId]);
+  const order = useMemo(
+    () => resolvePaintedOrder(checkQuery.data?.order ?? null, activeOrderId),
+    [checkQuery.data?.order, activeOrderId],
+  );
+  const ticketNote = displayTicketNote(order?.notes);
   const meta =
     order && checkQuery.data?.order?.id === order.id ? checkQuery.data?.meta ?? null : null;
   const siblingChecks = checkQuery.data?.siblingChecks ?? [];
@@ -2142,11 +2261,12 @@ export default function RestaurantPosPage() {
     ) => {
       // Never surface optimistic tmp_ord_* as a switchable ticket (activate-check 400).
       if (!id || isTempRestaurantId(id)) return;
-      const noteText = displayTicketNote(note) || null;
+      const noteText = preferUserTicketNote(note);
       const existing = tabs.find((t) => t.id === id);
       if (existing) {
-        // Prefer non-empty note / fresher total when the same id arrives again.
-        if (noteText && !existing.note) existing.note = noteText;
+        // Live painted check is SSOT (including clear). Siblings fill/update when they have a note.
+        if (id === order?.id) existing.note = noteText;
+        else if (noteText) existing.note = noteText;
         if (totalAmount != null && totalAmount !== '') existing.totalAmount = String(totalAmount);
         if (orderNumber) existing.orderNumber = orderNumber;
         return;
@@ -2192,11 +2312,13 @@ export default function RestaurantPosPage() {
         );
       }
     }
-    // Keep note from cached strip when payload omitted it (mid-switch).
+    // Keep user FOA note from cached strip when payload omitted it (mid-switch).
+    // Never copy journal "Hydrated …" back onto the list.
     for (const prev of tableTicketsRef.current.tabs) {
-      if (!prev.note) continue;
+      const prevNote = preferUserTicketNote(prev.note);
+      if (!prevNote) continue;
       const hit = tabs.find((t) => t.id === prev.id);
-      if (hit && !hit.note) hit.note = prev.note;
+      if (hit && !hit.note) hit.note = prevNote;
     }
     const openIds = openTicketIdsForTable(selectedTableId, checkQuery.data);
     const cleaned = scrubRestaurantTicketTabs(tabs).filter((t) => {
@@ -2230,26 +2352,30 @@ export default function RestaurantPosPage() {
   );
 
   // After a table pick: empty/single → detail (menu adds immediately).
-  // 2+ tickets → party list once. Never keep forcing list (drill-in / + Ticket).
-  useEffect(() => {
+  // 2+ → party list once. Layout effect: no detail→list flash. Do not keep driving view.
+  useLayoutEffect(() => {
     if (!selectedTableId) {
       partyListLandedForTableRef.current = null;
       return;
     }
-    if (partyListLandedForTableRef.current === selectedTableId) {
-      if (ticketTabs.length <= 1) setSambaTicketView('detail');
-      return;
-    }
-    if (ticketTabs.length <= 1) {
-      setSambaTicketView('detail');
-      if (ticketTabs.length === 1 || (checkQuery.isFetched && !checkQuery.isLoading)) {
-        partyListLandedForTableRef.current = selectedTableId;
-      }
-      return;
-    }
+    const land = resolveTableOpenLand({
+      alreadyLanded: partyListLandedForTableRef.current === selectedTableId,
+      ticketCount: ticketTabs.length,
+      siblingCount: siblingChecks.length,
+      floorOpenCount: Number(selectedTable?.openCheckCount || 0),
+      settled: checkQuery.isFetched && !checkQuery.isLoading,
+    });
+    if (land === 'hold') return;
+    setSambaTicketView((prev) => (prev === land ? prev : land));
     partyListLandedForTableRef.current = selectedTableId;
-    setSambaTicketView('list');
-  }, [selectedTableId, ticketTabs.length, checkQuery.isFetched, checkQuery.isLoading]);
+  }, [
+    selectedTableId,
+    ticketTabs.length,
+    siblingChecks.length,
+    selectedTable?.openCheckCount,
+    checkQuery.isFetched,
+    checkQuery.isLoading,
+  ]);
 
   /**
    * Toast/Samba: opening a multi-ticket table lands on the party list first.
@@ -2259,11 +2385,12 @@ export default function RestaurantPosPage() {
     if (!selectedTableId) return;
     if (!isMultiTicketTable || sambaTicketView !== 'list') return;
     if (chrome.fohTicketPane === 'sheet') {
-      setMobileSheet('order');
+      setMobileSheet((sheet) => (sheet === 'order' ? sheet : 'order'));
     }
   }, [selectedTableId, isMultiTicketTable, sambaTicketView, chrome.fohTicketPane]);
 
   /** Prefetch sibling checks so switching tickets is cache-instant. */
+  const ticketTabIdsKey = ticketTabs.map((t) => t.id).join(',');
   useEffect(() => {
     if (!isOnline || !selectedTableId || ticketTabs.length < 2) return;
     for (const t of ticketTabs) {
@@ -2291,7 +2418,7 @@ export default function RestaurantPosPage() {
       });
     }
   }, [
-    ticketTabs,
+    ticketTabIdsKey,
     selectedTableId,
     activeOrderId,
     order?.id,
@@ -2322,7 +2449,7 @@ export default function RestaurantPosPage() {
     }
   }, [user?.id, waiters, selectedWaiterId]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!selectedTableId) {
       setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
       setSelectedCustomer(null);
@@ -2334,16 +2461,35 @@ export default function RestaurantPosPage() {
       tableTicketsRef.current = { tableId: null, tabs: [] };
       return;
     }
-    // Fresh table: start in detail so empty/single tables can take menu taps.
-    // Hydration effect lands 2+ tables on the party list once.
+    // Fresh table: 2+ or occupied-without-sole-count → party list (no last-ticket flash).
     setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
     setSelectedCustomer(null);
     setActiveOrderId(null);
     setSelectedLineIds([]);
     setOpsMode(null);
-    setSambaTicketView('detail');
-    partyListLandedForTableRef.current = null;
-    tableTicketsRef.current = { tableId: selectedTableId, tabs: [] };
+    const row = (tablesQuery.data || getCachedRestaurantTables()).find(
+      (t) => t.id === selectedTableId,
+    );
+    const floorOpenCount = Number(row?.openCheckCount || 0);
+    const occupied = !!row?.status && String(row.status) !== 'FREE';
+    const pickView = resolveTablePickView({ floorOpenCount, occupied });
+    setSambaTicketView(pickView);
+    // Known 2+: lock list so a later 1-count hydrate cannot flash last-touched detail.
+    // Occupied with unknown count stays unlocked so 1-ticket tables can still land detail.
+    partyListLandedForTableRef.current =
+      pickView === 'list' && floorOpenCount > 1 ? selectedTableId : null;
+    const journalTabs = deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())
+      .filter((c) => c.tableId === selectedTableId)
+      .map((c) => ({
+        id: c.orderId,
+        orderNumber: c.offlineId,
+        totalAmount: String(totalsFromLines(c.lines).totalAmount),
+        note: preferUserTicketNote(c.notes),
+      }));
+    tableTicketsRef.current = {
+      tableId: selectedTableId,
+      tabs: scrubRestaurantTicketTabs(journalTabs),
+    };
   }, [selectedTableId]);
 
   useEffect(() => {
@@ -2365,12 +2511,18 @@ export default function RestaurantPosPage() {
     order?.id,
   ]);
 
-  // Seed active ticket only when opening a table (never overwrite a user switch mid-flight).
-  // Never seed optimistic tmp_ord_* — that would refetch GET check?orderId=tmp_* (Postgres 22P02).
-  // Copy cache null→orderId BEFORE setState so React Query does not fire a second GET.
+  // Sole ticket: bind GET check so menu adds have a target.
+  // 2+: do not seed last-touched as the chosen ticket (list is the surface).
   useEffect(() => {
     if (!selectedTableId || activeOrderId || !order?.id) return;
     if (isTempRestaurantId(order.id)) return;
+    if (
+      ticketTabs.length > 1 ||
+      siblingChecks.length > 1 ||
+      Number(selectedTable?.openCheckCount || 0) > 1
+    ) {
+      return;
+    }
     const fromKey = ['restaurant', 'check', selectedTableId, null, isOnline] as const;
     const toKey = ['restaurant', 'check', selectedTableId, order.id, isOnline] as const;
     const cached = queryClient.getQueryData(fromKey) as CheckUiPayload | undefined;
@@ -2378,7 +2530,16 @@ export default function RestaurantPosPage() {
       queryClient.setQueryData(toKey, cached);
     }
     setActiveOrderId(order.id);
-  }, [selectedTableId, activeOrderId, order?.id, isOnline, queryClient]);
+  }, [
+    selectedTableId,
+    activeOrderId,
+    order?.id,
+    isOnline,
+    queryClient,
+    ticketTabs.length,
+    siblingChecks.length,
+    selectedTable?.openCheckCount,
+  ]);
 
   useEffect(() => {
     setSelectedLineIds([]);
@@ -2489,7 +2650,7 @@ export default function RestaurantPosPage() {
    * Fire unsent lines to kitchen + best-effort KOT print.
    * Kitchen commit is awaited (SSOT). Print delivery is background by default so
    * the steward is never blocked on Get-Printer / PDF / spooler.
-   * Does not return to floor (caller decides). Returns how many tickets were produced.
+   * Does not return to floor. Returns how many tickets were produced.
    */
   const fireUnsentKotTickets = async (opts?: {
     /** When false (default), POST /print accept runs in background after kitchen commit. */
@@ -2500,7 +2661,6 @@ export default function RestaurantPosPage() {
     if (unsentCount === 0) return { kotCount: 0, printFailures: 0 };
 
     // Integrity: await spool confirm (ESC/POS is near-instant) so toast matches paper.
-    // Floor return still happens after this returns — steward is not stuck on HTML→PDF.
     const awaitPrint = opts?.awaitPrint !== false;
 
     const deliverJobs = async (
@@ -2575,7 +2735,37 @@ export default function RestaurantPosPage() {
       return { kotCount: tickets.length, printFailures: 0 };
     }
 
-    const res = await api.restaurant.sendKot(order.id);
+    const serverKotOrderId = toServerRestaurantOrderId(
+      resolveKotFireOrderId({
+        activeOrderId,
+        paintedOrderId: order.id,
+      }),
+    );
+    if (!serverKotOrderId) {
+      throw new Error('Ticket is still saving — try KOT again');
+    }
+    const leavingAfterKot = resolveKotSessionLeave({
+      ticketCount: ticketTabs.length,
+      partyListVisible: showSambaTicketList,
+    });
+    const refreshSelectedTicketAfterKot = async () => {
+      if (!selectedTableId || leavingAfterKot) return;
+      try {
+        await queryClient.cancelQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+        const checkRes = await api.restaurant.getTableCheck(selectedTableId, {
+          orderId: serverKotOrderId,
+        });
+        paintServerCheckWithInFlight(
+          selectedTableId,
+          checkRes.data.data as CheckUiPayload,
+          serverKotOrderId,
+        );
+        setActiveOrderId(serverKotOrderId);
+      } catch {
+        /* kitchen already committed — do not fail Close/KOT */
+      }
+    };
+    const res = await api.restaurant.sendKot(serverKotOrderId);
     const payload = res.data.data as
       | { kots?: unknown[]; printJobs?: ClientPrintJob[] }
       | unknown[];
@@ -2602,7 +2792,10 @@ export default function RestaurantPosPage() {
       | ClientPrintJob[]
       | undefined;
 
-    if (kots.length === 0 && !(printJobs?.length)) return { kotCount: 0, printFailures: 0 };
+    if (kots.length === 0 && !(printJobs?.length)) {
+      await refreshSelectedTicketAfterKot();
+      return { kotCount: 0, printFailures: 0 };
+    }
 
     const kotCount = Math.max(kots.length, printJobs?.length || 0);
 
@@ -2650,7 +2843,9 @@ export default function RestaurantPosPage() {
         printFailures = await runLegacyPrint();
       }
       publishLanKdsBoardChanged('KOT_FIRED_ONLINE');
-      invalidateCheck();
+      await refreshSelectedTicketAfterKot();
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+      void queryClient.invalidateQueries({ queryKey: ['restaurant', 'kitchen'] });
       return { kotCount, printFailures };
     }
 
@@ -2666,14 +2861,16 @@ export default function RestaurantPosPage() {
       },
     );
     publishLanKdsBoardChanged('KOT_FIRED_ONLINE');
-    invalidateCheck();
+    await refreshSelectedTicketAfterKot();
+    void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+    void queryClient.invalidateQueries({ queryKey: ['restaurant', 'kitchen'] });
     return { kotCount, printFailures: 0 };
   };
 
   /**
-   * Expert POS rule: kitchen commit is SSOT; print must be honest (spool-confirmed).
-   * After KOT (including no new items), always return to the floor — never leave
-   * the waiter stuck on a check. ESC/POS spool wait is near-instant.
+   * KOT / party-list Close: fire unsent lines for the selected ticket.
+   * Multi-ticket: waiter logout (shared FOH) then back to tables — same as before.
+   * Sole ticket: stay on the ticket with sent lines (unless waiter auto-logout).
    */
   const handleSendKot = async () => {
     if (!order) return;
@@ -2681,27 +2878,47 @@ export default function RestaurantPosPage() {
       toast.error('You need restaurant.order permission to send KOT');
       return;
     }
+    const fireOrderId = resolveKotFireOrderId({
+      activeOrderId,
+      paintedOrderId: order.id,
+    });
+    if (!fireOrderId) return;
+    const leaveAfterKot = resolveKotSessionLeave({
+      ticketCount: ticketTabs.length,
+      partyListVisible: showSambaTicketList,
+    });
+    const kotFinish = resolveKotSessionFinish({
+      ticketCount: ticketTabs.length,
+      partyListVisible: showSambaTicketList,
+      waiterShouldLogout: decideRestaurantFohAutoLogout({
+        kind: 'kot',
+        role: user?.role,
+        permissions,
+      }),
+    });
+    const finishKotSession = () => {
+      if (kotFinish === 'logout' && maybeAutoLogoutAfterPrint('kot')) return;
+      if (kotFinish === 'floor' || leaveAfterKot) returnToFloor();
+    };
     setBusy(true);
     try {
       const unsentCount = orderLines.filter((l) => !l.kitchenSentAt).length;
       if (unsentCount === 0) {
-        toast.success('Nothing new for kitchen — back to tables');
-        returnToFloor();
+        toast.success(
+          leaveAfterKot ? 'Already sent to kitchen — back to tables' : 'Already sent to kitchen',
+        );
+        finishKotSession();
         return;
       }
 
-      // Await spool + PRINTED so toast matches paper and re-login flush cannot re-paper.
-      const willAutoLogout = decideRestaurantFohAutoLogout({
-        kind: 'kot',
-        role: user?.role,
-        permissions,
-      });
       const { kotCount, printFailures } = await fireUnsentKotTickets({
         awaitPrint: true,
       });
       if (kotCount === 0) {
-        toast.success('Nothing new for kitchen — back to tables');
-        returnToFloor();
+        toast.success(
+          leaveAfterKot ? 'Already sent to kitchen — back to tables' : 'Already sent to kitchen',
+        );
+        finishKotSession();
         return;
       }
 
@@ -2718,11 +2935,10 @@ export default function RestaurantPosPage() {
           duration: 7000,
         });
       }
-      // Shared FOH: auto-logout after KOT for waiters / cashiers / staff (not admin/manager).
-      if (maybeAutoLogoutAfterPrint('kot')) return;
-      returnToFloor();
+      finishKotSession();
     } catch (err) {
       toastApiError(err, 'KOT failed');
+    } finally {
       setBusy(false);
     }
   };
@@ -3046,14 +3262,13 @@ export default function RestaurantPosPage() {
    */
   const openTicketFromList = (orderId: string) => {
     if (!selectedTableId || isTempRestaurantId(orderId)) return;
-    setSambaTicketView('detail');
-    setActiveOrderId(orderId);
-    activeOrderIdRef.current = orderId;
     setSelectedLineIds([]);
     setLoadingTicketId(orderId);
-    // Enterprise: after choosing a ticket, menu is primary for ringing items.
+    // Paint this ticket into cache first, then flip to detail — one render, no
+    // last-touched flash and no blank board while the query key changes.
     if (chrome.fohTicketPane === 'sheet') setMobileSheet(null);
     activateSibling(orderId, { fromPartyList: true });
+    setSambaTicketView('detail');
   };
 
   /** Return to party list (multi-ticket) so user can switch tickets. */
@@ -3323,8 +3538,45 @@ export default function RestaurantPosPage() {
       toast.error('Open or select a ticket first');
       return;
     }
-    setNoteDraft(displayTicketNote(order.notes));
+    setNoteDraft(ticketNote);
     setMobileSheet('note');
+  };
+
+  const returnToTicketSheet = () => {
+    setMobileSheet(useSheetTicket ? 'order' : null);
+  };
+
+  const paintTicketNoteNow = (orderId: string, notes: string | null) => {
+    if (!selectedTableId) return;
+    const cached = queryClient.getQueryData([
+      'restaurant',
+      'check',
+      selectedTableId,
+      orderId,
+      isOnline,
+    ]) as CheckUiPayload | undefined;
+    const base = cached || checkQuery.data;
+    if (!base) return;
+    const painted = applyTicketNoteToCheck(base, orderId, notes);
+    if (!painted) return;
+    const tabs = applyTicketNoteToTabs(
+      tableTicketsRef.current.tableId === selectedTableId
+        ? tableTicketsRef.current.tabs
+        : ticketTabs,
+      orderId,
+      notes,
+    );
+    tableTicketsRef.current = { tableId: selectedTableId, tabs };
+    const withTabs = attachSiblingTabs(painted, tabs, selectedTableId);
+    checkPaintGenRef.current += 1;
+    void queryClient.cancelQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+    for (const id of restaurantCheckQueryPaintIds({
+      paintedOrderId: orderId,
+      targetOrderId: orderId,
+      displayedOrderId: activeOrderId,
+    })) {
+      queryClient.setQueryData(['restaurant', 'check', selectedTableId, id, isOnline], withTabs);
+    }
   };
 
   const saveTicketNote = async () => {
@@ -3333,44 +3585,33 @@ export default function RestaurantPosPage() {
       toast.error('You need restaurant.order permission to edit notes');
       return;
     }
-    const next = noteDraft.trim().slice(0, 2000);
+    const orderId = order.id;
+    const next = noteDraft.trim().slice(0, 2000) || null;
+    paintTicketNoteNow(orderId, next);
+    returnToTicketSheet();
+    toast.success(next ? 'Note saved on ticket' : 'Note cleared');
     setNoteSaving(true);
     try {
-      if (preferLocalRestaurantWrites(order.id) || !isOnline) {
-        // Optimistic local paint; journal seed uses order.notes when present.
-        queryClient.setQueryData(
-          ['restaurant', 'check', selectedTableId, order.id, isOnline],
-          (prev: CheckUiPayload | undefined) => {
-            if (!prev?.order) return prev;
-            return {
-              ...prev,
-              order: { ...prev.order, notes: next || null },
-            };
-          },
+      if (preferLocalRestaurantWrites(orderId) || !isOnline) {
+        const derived = deriveRestaurantCheckForTable(
+          selectedTableId,
+          getAllEvents(),
+          getAllSyncState(),
+          orderId,
         );
-        setMobileSheet(null);
-        toast.success(next ? 'Note saved on ticket' : 'Note cleared');
+        if (derived) updateRestaurantCheckNotesOffline(derived, next);
         bumpJournal();
         return;
       }
-      const res = await api.restaurant.updateCheckNotes(order.id, {
-        notes: next || null,
+      const res = await api.restaurant.updateCheckNotes(orderId, {
+        notes: next,
       });
-      const payload = res.data.data as { order?: CheckUiPayload['order']; meta?: CheckUiPayload['meta'] };
-      queryClient.setQueryData(
-        ['restaurant', 'check', selectedTableId, order.id, isOnline],
-        (prev: CheckUiPayload | undefined) => {
-          const base = prev || checkQuery.data;
-          if (!base) return prev;
-          return {
-            ...base,
-            order: payload.order || { ...base.order!, notes: next || null },
-            meta: payload.meta || base.meta,
-          };
-        },
-      );
-      setMobileSheet(null);
-      toast.success(next ? 'Note saved on ticket' : 'Note cleared');
+      const payload = res.data.data as {
+        order?: CheckUiPayload['order'];
+        meta?: CheckUiPayload['meta'];
+      };
+      const confirmed = next === null ? null : preferUserTicketNote(payload.order?.notes, next);
+      paintTicketNoteNow(orderId, confirmed);
     } catch (err) {
       toastApiError(err, 'Could not save ticket note');
     } finally {
@@ -3945,21 +4186,52 @@ export default function RestaurantPosPage() {
       return;
     }
 
-    // Server void requires real pos_order_items UUIDs still on this painted check.
-    // Stale selection (double-void / tab race) is dropped client-side; server also ignores ghosts.
+    const serverVoidOrderId =
+      toServerRestaurantOrderId(order.id) || toServerRestaurantOrderId(activeOrderId);
     const liveVoidItems = voidItems.filter(
       (v) =>
         isServerOrderItemId(v.itemId) &&
         targetLines.some((l) => l.id === v.itemId),
     );
+    const tempVoidIds = voidItems
+      .map((v) => v.itemId)
+      .filter((id) => isTempRestaurantId(id) || !isServerOrderItemId(id));
+
+    const paintDroppedTemps = () => {
+      if (!selectedTableId || tempVoidIds.length === 0) return false;
+      const displayKey = ['restaurant', 'check', selectedTableId, activeOrderId, isOnline] as const;
+      const prev = queryClient.getQueryData(displayKey) as CheckUiPayload | undefined;
+      const next = dropOptimisticCheckLines(prev as OptimisticCheckPayload | undefined, tempVoidIds);
+      if (!next) return false;
+      checkPaintGenRef.current += 1;
+      queryClient.setQueryData(displayKey, next);
+      if (next.order?.id) {
+        queryClient.setQueryData(
+          ['restaurant', 'check', selectedTableId, next.order.id, isOnline],
+          next,
+        );
+      }
+      for (const id of tempVoidIds) inFlightOptimisticLinesRef.current.delete(id);
+      return true;
+    };
+
     if (liveVoidItems.length === 0) {
+      if (paintDroppedTemps()) {
+        setLineSheet(null);
+        setQtyPadSheet(null);
+        setSelectedLineIds([]);
+        toast.success(voidQty < totalQty ? `Removed ${voidQty}` : 'Line(s) removed');
+        return;
+      }
       toast.error('Ticket lines out of date — refreshing…');
       setSelectedLineIds([]);
       invalidateCheck();
       return;
     }
-    if (liveVoidItems.length !== voidItems.length) {
-      // keep going with survivors only
+
+    if (!serverVoidOrderId) {
+      toast.error('Ticket is still saving — try minus again');
+      return;
     }
 
     const reason =
@@ -3968,10 +4240,14 @@ export default function RestaurantPosPage() {
 
     setBusy(true);
     try {
-      const res = await api.restaurant.voidItems(order.id, {
-        items: liveVoidItems,
-        reason,
-      });
+      const res = await api.restaurant.voidItems(
+        serverVoidOrderId,
+        {
+          items: liveVoidItems,
+          reason,
+        },
+        { silentErrorToast: true },
+      );
       const data = res.data.data as {
         voidKots?: VoidKotPrint[];
         printJobs?: ClientPrintJob[];
@@ -3984,7 +4260,7 @@ export default function RestaurantPosPage() {
       setLineSheet(null);
       setQtyPadSheet(null);
       if (data.checkCancelled) {
-        settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', { reason });
+        settleCheckOnFloor(serverVoidOrderId, selectedTableId, 'CANCELLED', { reason });
         toast.success(hasKot ? 'Check voided — table freed' : 'Check cancelled — table freed');
         setActiveOrderId(null);
         returnToFloor();
@@ -4001,7 +4277,6 @@ export default function RestaurantPosPage() {
       invalidateCheck();
     } catch (err) {
       const msg = apiErr(err, hasKot ? 'Void failed' : 'Remove failed');
-      // Order already cancelled/paid (e.g. offline cancel synced) — clear ghost FOH state.
       const alreadyClosed =
         /Open restaurant check required to void/i.test(msg) ||
         (axios.isAxiosError(err) &&
@@ -4010,8 +4285,30 @@ export default function RestaurantPosPage() {
           /Open restaurant check/i.test(msg));
       const linesMissing =
         /no longer on this check|different check|lines are missing from this check/i.test(msg);
-      if (alreadyClosed && order) {
-        settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', {
+      if (alreadyClosed && selectedTableId) {
+        try {
+          const res = await api.restaurant.getTableCheck(
+            selectedTableId,
+            { orderId: serverVoidOrderId },
+            { silentErrorToast: true, silentForbidden: true },
+          );
+          const live = res.data.data as CheckUiPayload;
+          if (
+            live.order?.id &&
+            toServerRestaurantOrderId(live.order.id) &&
+            live.order.status === 'PENDING'
+          ) {
+            paintServerCheckWithInFlight(selectedTableId, live, live.order.id);
+            setActiveOrderId(live.order.id);
+            toast.error('Ticket was out of date — refreshed. Try void again.');
+            setSelectedLineIds([]);
+            setLineSheet(null);
+            return;
+          }
+        } catch {
+          // GET miss → treat as closed below.
+        }
+        settleCheckOnFloor(serverVoidOrderId, selectedTableId, 'CANCELLED', {
           reason: reason || 'Check already closed',
         });
         setActiveOrderId(null);
@@ -4103,8 +4400,11 @@ export default function RestaurantPosPage() {
       return;
     }
     const targetOrderId = plusTargetOrderId;
+    const displayKey = ['restaurant', 'check', selectedTableId, activeOrderId, isOnline] as const;
     const checkKey = ['restaurant', 'check', selectedTableId, targetOrderId, isOnline] as const;
-    const prevSnapshot = queryClient.getQueryData(checkKey) as CheckUiPayload | undefined;
+    const prevSnapshot =
+      (queryClient.getQueryData(checkKey) as CheckUiPayload | undefined) ||
+      (queryClient.getQueryData(displayKey) as CheckUiPayload | undefined);
     const tempLineId = newTempLineId();
     inFlightOptimisticLinesRef.current.set(tempLineId, {
       tempLineId,
@@ -4113,8 +4413,9 @@ export default function RestaurantPosPage() {
       quantity: 1,
       unitPrice: group.unitPrice,
     });
-    queryClient.setQueryData(checkKey, (latest) =>
-      appendOptimisticMenuItem(latest as OptimisticCheckPayload | undefined, {
+    const optimistic = appendOptimisticMenuItem(
+      prevSnapshot as OptimisticCheckPayload | undefined,
+      {
         table,
         product: {
           id: productId,
@@ -4135,22 +4436,28 @@ export default function RestaurantPosPage() {
           selectedCustomer?.address || guestDraft.deliveryAddress.trim() || null,
         pickupLabel: guestDraft.pickupLabel.trim() || null,
         knownTabs: tableTicketsRef.current.tabs,
-      }) as CheckUiPayload,
-    );
+      },
+    ) as CheckUiPayload;
+    for (const id of restaurantCheckQueryPaintIds({
+      paintedOrderId: optimistic.order?.id,
+      targetOrderId,
+      displayedOrderId: activeOrderId,
+    })) {
+      queryClient.setQueryData(['restaurant', 'check', selectedTableId, id, isOnline], optimistic);
+    }
     setLineSheet(null);
     const apiOrderId = toServerRestaurantOrderId(targetOrderId);
     try {
       const postItems = async (orderIdForApi: string | null | undefined) => {
-        await api.restaurant.addItems({
+        const res = await api.restaurant.addItems({
           tableId: selectedTableId,
           orderId: orderIdForApi ?? undefined,
           waiterId: selectedWaiterId,
           items: [{ productId, quantity: 1 }],
         });
+        return readRestaurantAddItemsPayload(res.data.data) || readRestaurantAddItemsPayload(res.data);
       };
-      try {
-        await postItems(apiOrderId);
-      } catch (firstErr) {
+      let added = await postItems(apiOrderId).catch(async (firstErr) => {
         if (!apiOrderId || !isRestaurantCheckClosedError(firstErr)) throw firstErr;
         setActiveOrderId(null);
         void queryClient.invalidateQueries({
@@ -4162,20 +4469,41 @@ export default function RestaurantPosPage() {
           : undefined;
         const openIds = details?.openOrderIds;
         if (Array.isArray(openIds) && openIds.length > 0) throw firstErr;
-        await postItems(undefined);
-      }
+        return postItems(undefined);
+      });
       if (selectedTableId && plusTargetOrderId) {
         clearRestaurantBillRequestedOffline(selectedTableId, plusTargetOrderId);
       }
-      const plusRefreshId = toServerRestaurantOrderId(plusTargetOrderId) || undefined;
-      const res = await api.restaurant.getTableCheck(
-        selectedTableId,
-        plusRefreshId ? { orderId: plusRefreshId } : undefined,
-      );
-      const data = res.data.data as CheckUiPayload;
       inFlightOptimisticLinesRef.current.delete(tempLineId);
-      paintServerCheckWithInFlight(selectedTableId, data, plusTargetOrderId);
-      setActiveOrderId(plusTargetOrderId);
+      if (!added) {
+        const plusRefreshId = toServerRestaurantOrderId(plusTargetOrderId) || undefined;
+        const res = await api.restaurant.getTableCheck(
+          selectedTableId,
+          plusRefreshId ? { orderId: plusRefreshId } : undefined,
+        );
+        const data = res.data.data as CheckUiPayload;
+        const stayOn =
+          toServerRestaurantOrderId(data.order?.id) ||
+          toServerRestaurantOrderId(plusTargetOrderId) ||
+          null;
+        await queryClient.cancelQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+        paintServerCheckWithInFlight(selectedTableId, data, stayOn);
+        if (stayOn) setActiveOrderId(stayOn);
+        toast.success('+1 added');
+        return;
+      }
+      await queryClient.cancelQueries({ queryKey: ['restaurant', 'check', selectedTableId] });
+      const prev =
+        (queryClient.getQueryData(displayKey) as CheckUiPayload | undefined) ||
+        (queryClient.getQueryData(checkKey) as CheckUiPayload | undefined);
+      const data: CheckUiPayload = {
+        table: added.table as CheckUiPayload['table'],
+        order: added.order as CheckUiPayload['order'],
+        meta: (added.meta as CheckUiPayload['meta']) || null,
+        siblingChecks: prev?.siblingChecks || [],
+      };
+      paintServerCheckWithInFlight(selectedTableId, data, added.order.id);
+      setActiveOrderId(added.order.id);
       toast.success('+1 added');
     } catch (err) {
       inFlightOptimisticLinesRef.current.delete(tempLineId);
@@ -4186,8 +4514,12 @@ export default function RestaurantPosPage() {
           plusRefreshId ? { orderId: plusRefreshId } : undefined,
         );
         const data = res.data.data as CheckUiPayload;
-        paintServerCheckWithInFlight(selectedTableId, data, plusTargetOrderId);
-        setActiveOrderId(plusTargetOrderId);
+        const stayOn =
+          toServerRestaurantOrderId(data.order?.id) ||
+          toServerRestaurantOrderId(plusTargetOrderId) ||
+          null;
+        paintServerCheckWithInFlight(selectedTableId, data, stayOn);
+        if (stayOn) setActiveOrderId(stayOn);
       } catch {
         queryClient.setQueryData(checkKey, prevSnapshot);
       }
@@ -5579,9 +5911,9 @@ export default function RestaurantPosPage() {
                         <button
                           type="button"
                           onClick={openTicketNoteEditor}
-                          disabled={!canOrder && !displayTicketNote(order.notes)}
+                          disabled={!canOrder && !ticketNote}
                           className={`${touchBtnGhost} min-h-10 px-2 type-caption font-bold ${
-                            displayTicketNote(order.notes)
+                            ticketNote
                               ? 'border-amber-400 bg-amber-50 text-amber-950'
                               : ''
                           }`}
@@ -5590,7 +5922,7 @@ export default function RestaurantPosPage() {
                           data-ticket-note="open"
                         >
                           Note
-                          {displayTicketNote(order.notes) ? (
+                          {ticketNote ? (
                             <span className="ml-0.5 text-amber-700" aria-hidden>
                               ●
                             </span>
@@ -5639,7 +5971,7 @@ export default function RestaurantPosPage() {
                         selectedTableId,
                         s.id,
                       );
-                      const noteText = displayTicketNote(s.note) || '';
+                      const noteText = s.note || '';
                       return (
                         <li key={s.id} role="none" className={isTouchDense ? '' : 'py-1'}>
                           <button
@@ -5720,6 +6052,16 @@ export default function RestaurantPosPage() {
                     className="py-4 lg:py-8 text-center space-y-3 px-3"
                     data-ticket-empty="true"
                   >
+                    {ticketNote ? (
+                      <TicketNotePreview
+                        note={ticketNote}
+                        dense={isTouchDense}
+                        clamp="2"
+                        canOrder={!!canOrder}
+                        onEdit={openTicketNoteEditor}
+                        preview="empty"
+                      />
+                    ) : null}
                     <p className="text-sm text-stone-500">
                       {order
                         ? 'This ticket is empty — add items from the menu'
@@ -6316,41 +6658,24 @@ export default function RestaurantPosPage() {
                   </span>
                 </div>
                 {/* Note when set; coach only on roomy tiers (hidden on Sunmi/mobile) */}
-                {(() => {
-                  const note = order ? displayTicketNote(order.notes) : '';
-                  if (note) {
-                    return (
-                      <button
-                        type="button"
-                        onClick={openTicketNoteEditor}
-                        disabled={!canOrder}
-                        className={`w-full text-left rounded-lg border border-amber-200 bg-amber-50/90 leading-snug active:bg-amber-100 disabled:opacity-80 ${
-                          isTouchDense
-                            ? 'px-2 py-1 text-[11px] line-clamp-1'
-                            : 'px-2.5 py-1.5 text-[11px]'
-                        }`}
-                        data-pos-coach="ticket"
-                        data-ticket-note-preview="true"
-                        title="Ticket note — tap to edit"
-                      >
-                        <span className="font-bold text-amber-900">Note · </span>
-                        <span className="text-stone-800">{note}</span>
-                      </button>
-                    );
-                  }
-                  if (shouldShowCoach(chrome, 'coach') && !isTouchDense) {
-                    return (
-                      <p className="text-[11px] text-stone-500" data-pos-coach="ticket">
-                        {chrome.coach === 'full'
-                          ? isMultiTicketTable
-                            ? 'Select lines → Void or Move. ← Tickets returns to the party list.'
-                            : 'Select lines → Void or Move. + Ticket for another check on this table.'
-                          : 'Select lines → Void or Move'}
-                      </p>
-                    );
-                  }
-                  return null;
-                })()}
+                {ticketNote ? (
+                    <TicketNotePreview
+                      note={ticketNote}
+                      dense={isTouchDense}
+                      clamp="1"
+                      canOrder={!!canOrder}
+                      onEdit={openTicketNoteEditor}
+                      preview="true"
+                    />
+                  ) : shouldShowCoach(chrome, 'coach') && !isTouchDense ? (
+                    <p className="text-[11px] text-stone-500" data-pos-coach="ticket">
+                      {chrome.coach === 'full'
+                        ? isMultiTicketTable
+                          ? 'Select lines → Void or Move. ← Tickets returns to the party list.'
+                          : 'Select lines → Void or Move. + Ticket for another check on this table.'
+                        : 'Select lines → Void or Move'}
+                    </p>
+                  ) : null}
                 <div
                   className={`grid min-w-0 grid-cols-2 ${isTouchDense ? 'gap-1.5' : 'gap-2'}`}
                   data-ticket-cta-grid="true"
@@ -6641,7 +6966,12 @@ export default function RestaurantPosPage() {
       <AdaptiveDialog
         open={mobileSheet === 'more'}
         onOpenChange={(open) => {
-          if (!open) setMobileSheet(null);
+          if (!open) {
+            setMobileSheet((cur) => {
+              if (cur !== 'more') return cur;
+              return useSheetTicket ? 'order' : null;
+            });
+          }
         }}
         title="Ticket actions"
         size="sm"
@@ -6650,7 +6980,7 @@ export default function RestaurantPosPage() {
           <button
             type="button"
             className={`${touchBtnGhost} w-full`}
-            onClick={() => setMobileSheet(null)}
+            onClick={() => returnToTicketSheet()}
           >
             Close
           </button>
@@ -6670,16 +7000,13 @@ export default function RestaurantPosPage() {
           </button>
           <button
             type="button"
-            disabled={!order || (!canOrder && !displayTicketNote(order?.notes))}
-            onClick={() => {
-              setMobileSheet(null);
-              openTicketNoteEditor();
-            }}
+            disabled={!order || (!canOrder && !ticketNote)}
+            onClick={() => openTicketNoteEditor()}
             className={`${touchBtnGhost} w-full`}
             data-ticket-note="menu"
           >
             Ticket note
-            {order && displayTicketNote(order.notes) ? ' · set' : ''}
+            {ticketNote ? ' · set' : ''}
           </button>
           <button
             type="button"
@@ -6724,7 +7051,7 @@ export default function RestaurantPosPage() {
       <AdaptiveDialog
         open={mobileSheet === 'note'}
         onOpenChange={(open) => {
-          if (!open) setMobileSheet(null);
+          if (!open) returnToTicketSheet();
         }}
         title={
           order?.orderNumber
@@ -6739,7 +7066,7 @@ export default function RestaurantPosPage() {
               type="button"
               className={`${touchBtnGhost} w-full`}
               disabled={noteSaving}
-              onClick={() => setMobileSheet(null)}
+              onClick={() => returnToTicketSheet()}
             >
               Cancel
             </button>

@@ -19,6 +19,7 @@ import {
   shouldUseLocalRestaurantMutation,
   splitRestaurantCheckOffline,
   resolveOfflineProductType,
+  updateRestaurantCheckNotesOffline,
   updateRestaurantGuestOffline,
   totalsFromLines,
 } from './restaurantOfflineOps';
@@ -678,6 +679,49 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(next.customerId).toBe('33333333-3333-3333-3333-333333333333');
     expect(next.guestName).toBe('Ada');
     expect(next.deliveryAddress).toBe('12 Main St');
+  });
+
+  it('ticket note is immediate on the same check and survives seed_refresh omit', () => {
+    const open = appendRestaurantItemOffline({
+      tableId: 't-note',
+      tableCode: 'N1',
+      tableName: 'Note Table',
+      channel: 'DINE_IN',
+      productId: 'p1',
+      productName: 'Soup',
+      unitPrice: 5,
+    });
+    const noted = updateRestaurantCheckNotesOffline(open, 'Birthday · window');
+    expect(noted.notes).toBe('Birthday · window');
+    expect(noted.lines).toHaveLength(1);
+    expect(totalsFromLines(noted.lines).totalAmount).toBe(5);
+
+    refreshRestaurantCheckSeedFromServer({
+      orderId: noted.orderId,
+      orderNumber: noted.offlineId,
+      tableId: 't-note',
+      tableCode: 'N1',
+      tableName: 'Note Table',
+      channel: 'DINE_IN',
+      items: noted.lines.map((l) => ({
+        id: l.lineId || l.productId,
+        productId: l.productId,
+        productName: l.productName,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        lineNotes: l.lineNotes,
+      })),
+    });
+    const afterSeed = deriveRestaurantCheckForTable(
+      't-note',
+      getAllEvents(),
+      getAllSyncState(),
+      noted.orderId,
+    );
+    expect(afterSeed?.notes).toBe('Birthday · window');
+
+    const cleared = updateRestaurantCheckNotesOffline(afterSeed!, '');
+    expect(cleared.notes).toBe('');
   });
 
   /**

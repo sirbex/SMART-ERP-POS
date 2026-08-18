@@ -479,23 +479,26 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(sql567).toMatch(/category_id = c\.id/);
   });
 
-  it('Expert KOT flow: kitchen commit then return to floor; print is best-effort', () => {
+  it('KOT/Close: waiter logout on multi-ticket; sole ticket stays with sent lines', () => {
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
-    // Shared fire helper + KOT button (Bill also calls fireUnsentKotTickets).
     const kotBlock = pos.slice(
       pos.indexOf('const fireUnsentKotTickets'),
       pos.indexOf('const handleBill'),
     );
-    // Floor return is mandatory after successful fire (online + offline).
-    expect(kotBlock).toMatch(/returnToFloor/);
     expect(kotBlock).toMatch(/api\.restaurant\.sendKot/);
     expect(kotBlock).toMatch(/fireRestaurantKotOffline/);
-    // Local ofl_ord_* checks must never hit the server KOT route.
     expect(kotBlock).toMatch(/shouldUseLocalRestaurantMutation|isJournalLocalOrderId/);
     expect(kotBlock).toMatch(/useLocalKot/);
-    // Empty / no-new-items still leaves the ticket (FOH close).
-    expect(kotBlock).toMatch(/Nothing new for kitchen/);
-    // Print failures must not abort the success path (no bare await print as sole post-commit gate).
+    expect(kotBlock).toMatch(/Already sent to kitchen/);
+    expect(kotBlock).toMatch(/maybeAutoLogoutAfterPrint\('kot'\)/);
+    expect(kotBlock).toMatch(/leaveAfterKot/);
+    expect(kotBlock).toMatch(/resolveKotSessionLeave/);
+    expect(kotBlock).toMatch(/returnToFloor\(\)/);
+    expect(kotBlock).toMatch(/refreshSelectedTicketAfterKot/);
+    expect(kotBlock).toMatch(/cancelQueries\(\{ queryKey: \['restaurant', 'check', selectedTableId\] \}\)/);
+    expect(kotBlock).toMatch(/setActiveOrderId\(serverKotOrderId\)/);
+    expect(kotBlock).toMatch(/getTableCheck\(selectedTableId/);
+    expect(kotBlock).toMatch(/paintServerCheckWithInFlight/);
     expect(kotBlock).toMatch(/printFailures|printOk/);
     expect(kotBlock).toMatch(/printKitchenTicket/);
     // createKot must resolve hasStatus before use (never ReferenceError on KOT fire).
@@ -721,6 +724,8 @@ describe('Restaurant architecture proof (Phase 1)', () => {
       service.indexOf('async sendKot'),
     );
     expect(addItems).toMatch(/closed orderId with no open siblings/);
+    expect(addItems).toMatch(/binding remaining open check/);
+    expect(addItems).toMatch(/resolveClosedCheckAddRetry/);
     expect(addItems).toMatch(/openOrderIds/);
     expect(addItems).toMatch(/ERR_RESTAURANT_CHECK_CLOSED/);
 
@@ -744,9 +749,9 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(service).toMatch(/same table/);
     // Client recovers from closed check on add (retry once without orderId).
     expect(pos).toMatch(/isRestaurantCheckClosedError/);
-    expect(pos).toMatch(/openOrderIds/);
-    // Party list menu ring → auto new order number (never block/toast only).
-    expect(pos).toMatch(/forceNewTicket|forceNewCheck/);
+    expect(pos).toMatch(/resolveClosedCheckAddRetry|closedCheckAddRetryFromError/);
+    expect(pos).toMatch(/openOrderIdsFromDetails/);
+    // Party list + Ticket opens a new check; menu add never force-news from the list.
     expect(pos).not.toMatch(/samba-open-ticket-first/);
     expect(service).toMatch(/forceNewCheck/);
     expect(routes).toMatch(/forceNewCheck/);

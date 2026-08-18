@@ -5,10 +5,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   appendOptimisticMenuItem,
+  applyTicketNoteToCheck,
+  applyTicketNoteToTabs,
+  displayTicketNote,
+  dropOptimisticCheckLines,
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
   mergeRestaurantSiblingTabs,
   newTempLineId,
+  readRestaurantAddItemsPayload,
+  restaurantCheckQueryPaintIds,
+  shouldDiscardStaleCheckFetch,
+  coalesceRestaurantCheckFetch,
   scrubRestaurantTicketTabs,
   toServerRestaurantOrderId,
   type OptimisticCheckPayload,
@@ -202,5 +210,246 @@ describe('Restaurant optimistic online add (behavioral proof)', () => {
     expect(
       merged.siblingChecks?.some((s) => s.id === 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'),
     ).toBe(false);
+  });
+
+  it('EVIDENCE add paint ids include on-screen [table, null] when pointer was cleared', () => {
+    const ids = restaurantCheckQueryPaintIds({
+      paintedOrderId: 'ord-a',
+      targetOrderId: 'ord-a',
+      displayedOrderId: null,
+    });
+    expect(ids).toContain('ord-a');
+    expect(ids).toContain(null);
+    expect(ids).toHaveLength(2);
+  });
+
+  it('EVIDENCE add paint ids stay on the displayed ticket when it matches', () => {
+    expect(
+      restaurantCheckQueryPaintIds({
+        paintedOrderId: 'ord-a',
+        targetOrderId: 'ord-a',
+        displayedOrderId: 'ord-a',
+      }),
+    ).toEqual(['ord-a']);
+  });
+
+  it('EVIDENCE add paint does not copy lines onto a different displayed ticket', () => {
+    expect(
+      restaurantCheckQueryPaintIds({
+        paintedOrderId: 'ord-b',
+        targetOrderId: 'ord-b',
+        displayedOrderId: 'ord-a',
+      }),
+    ).toEqual(['ord-b']);
+  });
+
+  it('EVIDENCE table GET that started before add must not wipe painted lines', () => {
+    expect(shouldDiscardStaleCheckFetch(0, 0)).toBe(false);
+    expect(shouldDiscardStaleCheckFetch(1, 1)).toBe(false);
+    expect(shouldDiscardStaleCheckFetch(3, 4)).toBe(true);
+    expect(shouldDiscardStaleCheckFetch(5, 4)).toBe(false);
+  });
+
+  it('EVIDENCE empty/stale check GET cannot blank a painted ticket after KOT', () => {
+    const painted = {
+      order: {
+        id: '398cb162-906b-42e9-a224-3248fdf5bb7c',
+        items: [{ id: 'line-1' }],
+      },
+    };
+    const empty = { order: null as null };
+    const emptySame = {
+      order: { id: '398cb162-906b-42e9-a224-3248fdf5bb7c', items: [] as { id: string }[] },
+    };
+    expect(
+      coalesceRestaurantCheckFetch({
+        startedGen: 1,
+        paintGen: 2,
+        cached: painted,
+        incoming: empty,
+      }).order?.items,
+    ).toEqual(painted.order.items);
+    expect(
+      coalesceRestaurantCheckFetch({
+        startedGen: 2,
+        paintGen: 2,
+        cached: painted,
+        incoming: emptySame,
+      }).order?.items,
+    ).toEqual(painted.order.items);
+    const sent = {
+      order: {
+        id: '398cb162-906b-42e9-a224-3248fdf5bb7c',
+        items: [{ id: 'line-1' }, { id: 'line-2' }],
+      },
+    };
+    expect(
+      coalesceRestaurantCheckFetch({
+        startedGen: 2,
+        paintGen: 2,
+        cached: painted,
+        incoming: sent,
+      }).order?.items,
+    ).toEqual(sent.order.items);
+  });
+
+  it('EVIDENCE addItems envelope without a server UUID is not a void target', () => {
+    expect(readRestaurantAddItemsPayload({ table, order: { id: 'tmp_ord_x', items: [] } })).toBeNull();
+    expect(readRestaurantAddItemsPayload({ success: true })).toBeNull();
+    const ok = readRestaurantAddItemsPayload({
+      table,
+      order: {
+        id: '398cb162-906b-42e9-a224-3248fdf5bb7c',
+        orderNumber: 'R-1',
+        subtotal: '10',
+        discountAmount: '0',
+        taxAmount: '0',
+        totalAmount: '10',
+        status: 'PENDING',
+        items: [],
+      },
+      meta: { tableCode: 'T1', tableName: 'Table 1', waiterId: null, waiterName: null, kitchenStatus: 'NONE', orderChannel: 'DINE_IN' },
+    });
+    expect(ok?.order.id).toBe('398cb162-906b-42e9-a224-3248fdf5bb7c');
+  });
+
+  it('EVIDENCE minus on tmp_line does not keep a tmp_ord void target', () => {
+    const open = appendOptimisticMenuItem(undefined, {
+      table,
+      product: { id: 'p1', name: 'Burger', sellingPrice: 10 },
+      quantity: 1,
+      tempLineId: 'tmp_line_void_me',
+      channel: 'DINE_IN',
+      now: 7,
+    });
+    const dropped = dropOptimisticCheckLines(open, ['tmp_line_void_me']);
+    expect(dropped?.order).toBeNull();
+    expect(toServerRestaurantOrderId(open.order?.id)).toBeUndefined();
+  });
+
+  it('EVIDENCE ticket note paints header + sibling row immediately', () => {
+    const payload: OptimisticCheckPayload = {
+      table: { ...table, status: 'OCCUPIED', currentOrderId: 'ord-a' },
+      order: {
+        id: 'ord-a',
+        orderNumber: 'R-1',
+        subtotal: '0',
+        discountAmount: '0',
+        taxAmount: '0',
+        totalAmount: '0',
+        status: 'PENDING',
+        items: [],
+        notes: null,
+      },
+      siblingChecks: [
+        {
+          id: 'ord-a',
+          orderNumber: 'R-1',
+          totalAmount: '0',
+          createdAt: '2026-01-01',
+          notes: null,
+        },
+        {
+          id: 'ord-b',
+          orderNumber: 'R-2',
+          totalAmount: '4',
+          createdAt: '2026-01-01',
+          notes: 'Other',
+        },
+      ],
+    };
+    const painted = applyTicketNoteToCheck(payload, 'ord-a', 'Birthday · window');
+    expect(painted?.order?.notes).toBe('Birthday · window');
+    expect(painted?.siblingChecks?.find((s) => s.id === 'ord-a')?.notes).toBe(
+      'Birthday · window',
+    );
+    expect(painted?.siblingChecks?.find((s) => s.id === 'ord-b')?.notes).toBe('Other');
+    expect(
+      applyTicketNoteToTabs(
+        [
+          { id: 'ord-a', orderNumber: 'R-1', totalAmount: '0' },
+          { id: 'ord-b', orderNumber: 'R-2', totalAmount: '4', note: 'Other' },
+        ],
+        'ord-a',
+        'Birthday · window',
+      ),
+    ).toEqual([
+      { id: 'ord-a', orderNumber: 'R-1', totalAmount: '0', note: 'Birthday · window' },
+      { id: 'ord-b', orderNumber: 'R-2', totalAmount: '4', note: 'Other' },
+    ]);
+  });
+
+  it('EVIDENCE stale GET cannot drop a painted ticket note on an empty check', () => {
+    const painted = {
+      order: {
+        id: '398cb162-906b-42e9-a224-3248fdf5bb7c',
+        items: [] as { id: string }[],
+        notes: 'No ice',
+      },
+    };
+    const incoming = {
+      order: {
+        id: '398cb162-906b-42e9-a224-3248fdf5bb7c',
+        items: [] as { id: string }[],
+        notes: null as string | null,
+      },
+    };
+    expect(
+      coalesceRestaurantCheckFetch({
+        startedGen: 1,
+        paintGen: 2,
+        cached: painted,
+        incoming,
+      }).order?.notes,
+    ).toBe('No ice');
+    expect(
+      coalesceRestaurantCheckFetch({
+        startedGen: 2,
+        paintGen: 2,
+        cached: painted,
+        incoming,
+      }).order?.notes,
+    ).toBe('No ice');
+  });
+
+  it('EVIDENCE journal Hydrated seed is never a ticket note; server FOA note wins', () => {
+    expect(displayTicketNote('Hydrated T1')).toBe('');
+    expect(displayTicketNote('Hydrated 11111111-1111-1111-1111-111111111111')).toBe('');
+    expect(displayTicketNote('Restaurant T1')).toBe('');
+    expect(displayTicketNote('Birthday · window')).toBe('Birthday · window');
+
+    const hydrated = {
+      order: {
+        id: '398cb162-906b-42e9-a224-3248fdf5bb7c',
+        items: [{ id: 'line-1' }],
+        notes: 'Hydrated T1',
+      },
+    };
+    const fromServer = {
+      order: {
+        id: '398cb162-906b-42e9-a224-3248fdf5bb7c',
+        items: [{ id: 'line-1' }],
+        notes: 'No ice',
+      },
+    };
+    expect(
+      coalesceRestaurantCheckFetch({
+        startedGen: 1,
+        paintGen: 2,
+        cached: hydrated,
+        incoming: fromServer,
+      }).order?.notes,
+    ).toBe('No ice');
+    expect(
+      coalesceRestaurantCheckFetch({
+        startedGen: 2,
+        paintGen: 2,
+        cached: hydrated,
+        incoming: fromServer,
+      }).order?.notes,
+    ).toBe('No ice');
+    expect(
+      applyTicketNoteToCheck(hydrated, hydrated.order.id, 'Hydrated T1')?.order?.notes,
+    ).toBeNull();
   });
 });

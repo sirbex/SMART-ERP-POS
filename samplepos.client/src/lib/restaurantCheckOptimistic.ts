@@ -48,6 +48,7 @@ export type OptimisticCheckPayload = {
     totalAmount: string;
     status: string;
     items: OptimisticOrderItem[];
+    notes?: string | null;
   } | null;
   meta?: {
     tableCode: string | null;
@@ -150,7 +151,7 @@ export function mergeRestaurantSiblingTabs(
 
   for (const s of data.siblingChecks || []) {
     if (!s?.id || s.id === activeId || isTempRestaurantId(s.id)) continue;
-    byId.set(s.id, s);
+    byId.set(s.id, { ...s, notes: preferUserTicketNote(s.notes) });
   }
 
   for (const t of scrubRestaurantTicketTabs(knownTabs)) {
@@ -164,7 +165,7 @@ export function mergeRestaurantSiblingTabs(
       orderNumber: t.orderNumber,
       totalAmount: t.totalAmount,
       createdAt: new Date().toISOString(),
-      notes: t.note ?? null,
+      notes: preferUserTicketNote(t.note),
     });
   }
 
@@ -192,6 +193,147 @@ function recalculateTotals(
     subtotal,
     total: subtotal - discountAmount + taxAmount,
   };
+}
+
+/**
+ * Query-key ids that must receive an add paint.
+ * FOH reads ['restaurant','check', tableId, activeOrderId]. Adds that only
+ * wrote [table, targetOrderId] left [table, null] stale until KOT refetch.
+ */
+export function restaurantCheckQueryPaintIds(input: {
+  paintedOrderId: string | null | undefined;
+  targetOrderId?: string | null;
+  displayedOrderId: string | null | undefined;
+}): Array<string | null> {
+  const ids = new Set<string | null>();
+  const painted = input.paintedOrderId ?? null;
+  ids.add(painted);
+  if (input.targetOrderId !== undefined) ids.add(input.targetOrderId);
+  const displayed = input.displayedOrderId ?? null;
+  if (displayed === null || displayed === painted || displayed === (input.targetOrderId ?? null)) {
+    ids.add(displayed);
+  }
+  return [...ids];
+}
+
+/** Table-open GET started before an add must not replace the painted ticket. */
+export function shouldDiscardStaleCheckFetch(startedGen: number, paintGen: number): boolean {
+  return paintGen > startedGen;
+}
+
+/** System journal / seed notes — never show as FOA ticket notes. */
+function isSystemGeneratedTicketNote(notes: string | null | undefined): boolean {
+  const n = (notes || '').trim();
+  if (!n) return true;
+  return (
+    /^hydrated\b/i.test(n) ||
+    /^Restaurant\s+.+\s*·\s*ticket$/i.test(n) ||
+    /^Restaurant\s+\S+$/i.test(n) ||
+    /^Split from\s+/i.test(n)
+  );
+}
+
+/** User-facing FOA note only. Journal "Hydrated T1" / "Restaurant T1" are not ticket notes. */
+export function displayTicketNote(notes: string | null | undefined): string {
+  if (isSystemGeneratedTicketNote(notes)) return '';
+  return (notes || '').trim();
+}
+
+/** First real FOA note from server / paint / journal (system seed text skipped). */
+export function preferUserTicketNote(
+  ...candidates: Array<string | null | undefined>
+): string | null {
+  for (const c of candidates) {
+    const n = displayTicketNote(c);
+    if (n) return n;
+  }
+  return null;
+}
+
+export function sanitizeCheckTicketNotes<
+  T extends {
+    order?: { notes?: string | null } | null;
+    siblingChecks?: Array<{ notes?: string | null }>;
+  },
+>(payload: T): T {
+  const order = payload.order
+    ? { ...payload.order, notes: preferUserTicketNote(payload.order.notes) }
+    : payload.order;
+  const siblingChecks = payload.siblingChecks
+    ? payload.siblingChecks.map((s) => ({
+        ...s,
+        notes: preferUserTicketNote(s.notes),
+      }))
+    : payload.siblingChecks;
+  return { ...payload, order, siblingChecks };
+}
+
+/**
+ * FOA ticket note — header + party-list sibling row. Does not touch lines/totals.
+ */
+export function applyTicketNoteToCheck<
+  T extends {
+    order?: { id?: string; notes?: string | null } | null;
+    siblingChecks?: Array<{ id: string; notes?: string | null }>;
+  },
+>(payload: T | undefined, orderId: string, notes: string | null): T | undefined {
+  if (!payload || !orderId) return payload;
+  const nextNotes = preferUserTicketNote(notes);
+  const order =
+    payload.order?.id === orderId
+      ? { ...payload.order, notes: nextNotes }
+      : payload.order;
+  const siblingChecks = (payload.siblingChecks || []).map((s) =>
+    s.id === orderId ? { ...s, notes: nextNotes } : s,
+  );
+  return sanitizeCheckTicketNotes({ ...payload, order, siblingChecks });
+}
+
+export function applyTicketNoteToTabs(
+  tabs: OptimisticTicketTab[],
+  orderId: string,
+  notes: string | null,
+): OptimisticTicketTab[] {
+  const nextNotes = preferUserTicketNote(notes);
+  return tabs.map((t) => (t.id === orderId ? { ...t, note: nextNotes } : t));
+}
+
+/**
+ * Check query vs in-place paint (add / KOT / ticket note).
+ * An empty or older fetch must not blank a ticket the waiter already sees.
+ */
+export function coalesceRestaurantCheckFetch<
+  T extends {
+    order?: { id?: string; items?: unknown[]; notes?: string | null } | null;
+    siblingChecks?: Array<{ id: string; notes?: string | null }>;
+  },
+>(input: {
+  startedGen: number;
+  paintGen: number;
+  cached: T | undefined;
+  incoming: T;
+}): T {
+  const cachedCount = input.cached?.order?.items?.length ?? 0;
+  const incomingCount = input.incoming?.order?.items?.length ?? 0;
+  let primary = input.incoming;
+  let secondary = input.cached;
+  if (shouldDiscardStaleCheckFetch(input.startedGen, input.paintGen) && cachedCount > 0) {
+    primary = input.cached as T;
+    secondary = input.incoming;
+  } else if (cachedCount > 0 && incomingCount === 0) {
+    const incomingId = input.incoming.order?.id;
+    if (!incomingId || incomingId === input.cached?.order?.id) {
+      primary = input.cached as T;
+      secondary = input.incoming;
+    }
+  }
+  const orderId = primary.order?.id || secondary?.order?.id;
+  if (!orderId) return sanitizeCheckTicketNotes(primary);
+  return applyTicketNoteToCheck(
+    primary,
+    orderId,
+    preferUserTicketNote(primary.order?.notes, secondary?.order?.notes),
+  ) as T;
 }
 
 /** Optimistic ticket line for online add — UI paints before API returns. */
@@ -347,6 +489,75 @@ export function mergeInFlightOptimisticLines(
     },
     order: {
       ...data.order,
+      items,
+      subtotal: String(subtotal),
+      totalAmount: String(total),
+    },
+  };
+}
+
+/**
+ * POST /checks/items body. Rejects envelopes that have no server check UUID —
+ * those must not become FOH order.id (void/KOT would 400 "check required").
+ */
+export function readRestaurantAddItemsPayload(raw: unknown): {
+  table: OptimisticCheckPayload['table'];
+  order: NonNullable<OptimisticCheckPayload['order']>;
+  meta: OptimisticCheckPayload['meta'];
+} | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const root = raw as Record<string, unknown>;
+  const nested = root.data;
+  const body =
+    root.order && typeof root.order === 'object'
+      ? root
+      : nested && typeof nested === 'object' && (nested as Record<string, unknown>).order
+        ? (nested as Record<string, unknown>)
+        : null;
+  if (!body) return null;
+  const order = body.order;
+  if (!order || typeof order !== 'object') return null;
+  const id = toServerRestaurantOrderId((order as { id?: string }).id);
+  if (!id) return null;
+  if (!body.table || typeof body.table !== 'object') return null;
+  return {
+    table: body.table as OptimisticCheckPayload['table'],
+    order: { ...(order as NonNullable<OptimisticCheckPayload['order']>), id },
+    meta: (body.meta as OptimisticCheckPayload['meta']) || undefined,
+  };
+}
+
+/** Minus on an optimistic line that has not been ACK'd — never POST tmp_line_* / tmp_ord_*. */
+export function dropOptimisticCheckLines(
+  prev: OptimisticCheckPayload | undefined,
+  lineIds: string[],
+): OptimisticCheckPayload | undefined {
+  if (!prev?.order || lineIds.length === 0) return prev;
+  const drop = new Set(lineIds);
+  const items = prev.order.items.filter((it) => !drop.has(it.id));
+  if (items.length === prev.order.items.length) return prev;
+  const { subtotal, total } = recalculateTotals(
+    items,
+    Number(prev.order.discountAmount || 0),
+    Number(prev.order.taxAmount || 0),
+  );
+  if (items.length === 0 && isTempRestaurantId(prev.order.id)) {
+    return {
+      ...prev,
+      order: null,
+      table: {
+        ...prev.table,
+        status: 'FREE',
+        currentOrderId: null,
+        orderTotal: null,
+      },
+    };
+  }
+  return {
+    ...prev,
+    table: { ...prev.table, orderTotal: String(total) },
+    order: {
+      ...prev.order,
       items,
       subtotal: String(subtotal),
       totalAmount: String(total),

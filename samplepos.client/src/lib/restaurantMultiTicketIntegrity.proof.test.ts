@@ -400,16 +400,20 @@ describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () =>
     expect(pos).toMatch(/resolveFohMenuAddTarget/);
     expect(pos).toMatch(/fohMenuAddBlockedMessage/);
     expect(pos).toMatch(/Tap the menu to start the first ticket/);
-    // Table pick must not force party list (that gated menu on phones)
-    expect(pos).toMatch(/setSambaTicketView\('detail'\)/);
-    expect(pos).not.toMatch(
-      /setSambaTicketView\('list'\);\s*tableTicketsRef\.current = \{ tableId: selectedTableId/,
-    );
+    // 2+ lands on party list once. Check row stays (merge/close/strip).
+    expect(pos).toMatch(/resolveTableOpenLand/);
+    expect(pos).toMatch(/resolveTablePickView/);
+    expect(pos).toMatch(/resolveKotSessionLeave/);
+    expect(pos).toMatch(/resolvePaintedOrder/);
+    expect(pos).toMatch(/showSambaTicketList = isMultiTicketTable && sambaTicketView === 'list'/);
     // +1 line sheet must share sole-ticket / party-list SSOT (no silent wrong target)
     expect(pos).toMatch(/plusTargetOrderId/);
     expect(pos).toMatch(/preferLocalRestaurantWrites\(plusTargetOrderId\)/);
-    expect(pos).toMatch(/orderId: refreshOrderId/);
-    expect(pos).toMatch(/orderId: plusRefreshId/);
+    expect(pos).toMatch(/coalesceRestaurantCheckFetch/);
+    expect(pos).toMatch(/cancelQueries\(\{ queryKey: \['restaurant', 'check', selectedTableId\] \}\)/);
+    expect(pos).toMatch(/readRestaurantAddItemsPayload/);
+    expect(pos).toMatch(/voidItems\(\s*serverVoidOrderId/);
+    expect(pos).toMatch(/toServerRestaurantOrderId\(order\.id\)/);
     expect(pos).toMatch(/seedRestaurantCheckFromServer/);
   });
 

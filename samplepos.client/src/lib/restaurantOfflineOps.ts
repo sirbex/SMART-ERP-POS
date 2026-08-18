@@ -636,6 +636,45 @@ export function updateRestaurantGuestOffline(
 }
 
 /**
+ * Per-ticket FOA note (journal). Lines/totals unchanged.
+ * Empty string clears the user note; later seed_refresh omits notes so this sticks.
+ */
+export function updateRestaurantCheckNotesOffline(
+  order: DerivedOrder,
+  notes: string | null,
+): DerivedOrder {
+  if (!order.tableId) throw new Error('Restaurant check missing table');
+  appendEvent({
+    eventType: 'ORDER_UPDATED',
+    key: generateEventKey(),
+    orderId: order.orderId,
+    offlineId: order.offlineId,
+    lines: order.lines,
+    notes: notes || '',
+    ts: Date.now(),
+    customerId: order.customerId ?? undefined,
+    channel: order.channel,
+    tableId: order.tableId,
+    tableCode: order.tableCode,
+    tableName: order.tableName,
+    waiterId: order.waiterId,
+    waiterName: order.waiterName,
+    guestName: order.guestName,
+    guestPhone: order.guestPhone,
+    deliveryAddress: order.deliveryAddress,
+    pickupLabel: order.pickupLabel,
+  });
+  const next = deriveRestaurantCheckForTable(
+    order.tableId,
+    getAllEvents(),
+    getAllSyncState(),
+    order.orderId,
+  );
+  if (!next) throw new Error('Failed to derive check after note update');
+  return next;
+}
+
+/**
  * Mark unsent lines as KOT-fired: one RESTAURANT_KOT_FIRED per station (same as online sendKot),
  * then ORDER_UPDATED with kitchenSentAt. Menu kitchenStation + station registry printers.
  */

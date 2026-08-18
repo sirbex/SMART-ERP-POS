@@ -1551,7 +1551,8 @@ export const api = {
         items?: Array<{ itemId: string; quantity?: number }>;
         itemIds?: string[];
       },
-    ) => apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/void-items`, data),
+      config?: AxiosRequestConfig,
+    ) => apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/void-items`, data, config),
     /** Marks table BILLING (Bill Requested); print is client best-effort. */
     requestBill: (orderId: string) =>
       apiClient.post<ApiResponse>(`restaurant/checks/${orderId}/bill`),
