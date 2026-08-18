@@ -66,12 +66,17 @@ describe('restaurant ownership + integrity SSOT', () => {
   it('sendKot locks unsent rows; partial void scales discount like split', () => {
     const service = read('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
     const repo = read('SamplePOS.Server/src/modules/restaurant/restaurantRepository.ts');
+    const ownership = read('shared/utils/restaurantCheckOwnership.ts');
     expect(repo).toMatch(/lockUnsentItemsForUpdate/);
     expect(service).toMatch(/lockUnsentItemsForUpdate/);
     expect(service).toMatch(/remainDiscount/);
     expect(service).toMatch(/discountAmount: remainDiscount/);
     expect(service).toMatch(/reassignOrphanedKotsAfterItemMove/);
     expect(service).toMatch(/syncOrderKitchenStatusFromKots/);
+    expect(service).toMatch(/canVoidKitchenSentRestaurantItems/);
+    expect(service).toMatch(/listVoidTicketsForOrder/);
+    expect(ownership).toMatch(/export function canVoidKitchenSentRestaurantItems/);
+    expect(ownership).toMatch(/role === 'ACCOUNTANT'/);
   });
 
   it('offline cancel uses cancelCheck; KOT fire replays sendKot', () => {

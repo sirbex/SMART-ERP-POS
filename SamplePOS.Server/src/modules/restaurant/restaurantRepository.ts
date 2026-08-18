@@ -147,6 +147,27 @@ export interface KotItemRecord {
   lineNotes: string | null;
 }
 
+export interface RestaurantVoidAudit {
+  kotNumber: string;
+  voidedByName: string | null;
+  reason: string | null;
+  firedAt: string;
+  items: Array<{ productName: string; quantity: string }>;
+}
+
+/** VOID KOT line notes are `VOID: {reason}` or `VOID: {reason} · {original}`. */
+export function parseVoidReasonFromKotItems(
+  items: Array<{ lineNotes?: string | null }>,
+): string | null {
+  for (const it of items) {
+    const n = String(it.lineNotes || '').trim();
+    const m = /^VOID:\s*([^·]+)/i.exec(n);
+    const reason = m?.[1]?.trim();
+    if (reason) return reason;
+  }
+  return null;
+}
+
 function mapTable(row: Record<string, unknown>): RestaurantTableRecord {
   return convertKeysToCamelCase(row) as RestaurantTableRecord;
 }
@@ -1353,9 +1374,49 @@ export const restaurantRepository = {
       );
       kot.items = items.rows.map((r) => convertKeysToCamelCase(r) as KotItemRecord);
       if (!kot.status) kot.status = 'SENT';
+      if (kot.ticketKind === 'VOID') {
+        kot.voidReason = kot.voidReason || parseVoidReasonFromKotItems(kot.items);
+      }
       tickets.push(kot);
     }
     return tickets;
+  },
+
+  async listVoidTicketsForOrder(conn: DbConn, orderId: string): Promise<RestaurantVoidAudit[]> {
+    const hasKind = await tableHasColumn(conn, 'restaurant_kot', 'ticket_kind');
+    if (!hasKind) return [];
+    const headers = await conn.query(
+      `SELECT k.id, k.kot_number, k.waiter_name, k.fired_at
+       FROM restaurant_kot k
+       WHERE k.order_id = $1
+         AND COALESCE(k.ticket_kind, 'FIRE') = 'VOID'
+       ORDER BY k.fired_at DESC
+       LIMIT 40`,
+      [orderId],
+    );
+    const out: RestaurantVoidAudit[] = [];
+    for (const row of headers.rows) {
+      const items = await conn.query(
+        `SELECT product_name, quantity, line_notes
+         FROM restaurant_kot_items
+         WHERE kot_id = $1
+         ORDER BY product_name`,
+        [row.id],
+      );
+      const mapped = items.rows.map((r) => ({
+        productName: String(r.product_name),
+        quantity: String(r.quantity),
+        lineNotes: r.line_notes != null ? String(r.line_notes) : null,
+      }));
+      out.push({
+        kotNumber: String(row.kot_number),
+        voidedByName: row.waiter_name != null ? String(row.waiter_name) : null,
+        reason: parseVoidReasonFromKotItems(mapped),
+        firedAt: row.fired_at instanceof Date ? row.fired_at.toISOString() : String(row.fired_at),
+        items: mapped.map((it) => ({ productName: it.productName, quantity: it.quantity })),
+      });
+    }
+    return out;
   },
 
   async getKotById(conn: DbConn, kotId: string): Promise<KotRecord | null> {
@@ -1389,6 +1450,9 @@ export const restaurantRepository = {
       [kot.id],
     );
     kot.items = items.rows.map((r) => convertKeysToCamelCase(r) as KotItemRecord);
+    if (kot.ticketKind === 'VOID') {
+      kot.voidReason = kot.voidReason || parseVoidReasonFromKotItems(kot.items);
+    }
     return kot;
   },
 

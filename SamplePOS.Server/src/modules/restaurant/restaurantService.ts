@@ -38,12 +38,15 @@ import {
   canAccessRestaurantServiceLane,
   canEditOtherWaitersChecks,
   canMutateRestaurantCheck,
+  canVoidKitchenSentRestaurantItems,
   isSharedRestaurantServiceCounter,
   isTableVisibleToWaiter,
   RESTAURANT_CHECK_OWNED_MESSAGE,
   RESTAURANT_SERVICE_LANE_RESTRICTED_MESSAGE,
+  RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE,
   type OwnershipActor,
 } from '../../../../shared/utils/restaurantCheckOwnership.js';
+import { resolveClosedCheckAddRetry } from '../../../../shared/utils/restaurantClosedCheckAdd.js';
 import { isMultistoreEnabled } from '../inventory/warehouse/multistoreSettings.js';
 import { posProductSearchService } from '../inventory/warehouse/posProductSearchService.js';
 import { printJobsService } from '../print-jobs/printJobsService.js';
@@ -632,12 +635,16 @@ export const restaurantService = {
     const meta = order
       ? await restaurantRepository.getOrderRestaurantMeta(pool, order.id)
       : null;
+    const voids = order
+      ? await restaurantRepository.listVoidTicketsForOrder(pool, order.id)
+      : [];
 
     return {
       table: await restaurantRepository.getTableById(pool, tableId),
       order,
       meta,
       siblingChecks: scopedSiblings,
+      voids,
     };
   },
 
@@ -959,25 +966,38 @@ export const restaurantService = {
         }
         const existing = await ordersRepository.getById(pool, input.orderId);
         if (!existing || existing.status !== 'PENDING') {
-          // Stale client orderId after pay/cancel — FOH often still paints the old ticket.
-          // If this table has no other open check, open a new one instead of blocking adds.
-          // Do not enforce ownership on the closed ticket (new check is owned by the actor).
+          // Stale client orderId after pay/cancel/void-last-lines — FOH often still paints it.
           const pending = await restaurantRepository.listPendingOrdersForTable(
             pool,
             input.tableId,
           );
-          if (pending.length === 0) {
+          const retry = resolveClosedCheckAddRetry(
+            input.orderId,
+            pending.map((p) => p.id),
+          );
+          if (retry.action === 'open-new') {
             logger.info('addItems: closed orderId with no open siblings — opening new check', {
               tableId: input.tableId,
               closedOrderId: input.orderId,
               status: existing?.status ?? null,
             });
             orderId = null;
+          } else if (retry.action === 'bind') {
+            logger.info('addItems: closed orderId — binding remaining open check', {
+              tableId: input.tableId,
+              closedOrderId: input.orderId,
+              bindOrderId: retry.orderId,
+            });
+            const bindMeta = await restaurantRepository.getOrderRestaurantMeta(pool, retry.orderId);
+            requireCheckMutationAccess(bindMeta?.waiterId, actor, {
+              sharedServiceCounter: tableIsSharedServiceCounter(table),
+            });
+            orderId = retry.orderId;
           } else {
             throw new BusinessError('Check is not open', 'ERR_RESTAURANT_CHECK_CLOSED', {
               orderId: input.orderId,
               status: existing?.status ?? null,
-              openOrderIds: pending.map((p) => p.id),
+              openOrderIds: retry.openOrderIds,
             });
           }
         } else {
@@ -1306,8 +1326,8 @@ export const restaurantService = {
       // Serialize concurrent fires (READ COMMITTED): lock unsent rows before reading.
       await restaurantRepository.lockUnsentItemsForUpdate(client, orderId);
       const unsent = await restaurantRepository.listUnsentItems(client, orderId);
-      // Expert FOH: KOT with nothing new is a no-op success — waiter still leaves the ticket
-      // (client returns to floor). Do not error; empty array means "already fired".
+      // Expert FOH: KOT with nothing new is a no-op success — ticket stays open.
+      // Do not error; empty array means "already fired".
       if (unsent.length === 0) {
         logger.info('Restaurant KOT no-op (no unsent items)', { orderId });
         return { kots: [], printJobs: [] };
@@ -1494,6 +1514,12 @@ export const restaurantService = {
       }
 
       const sentSlices = slices.filter((r) => !!r.kitchenSentAt);
+      if (
+        sentSlices.length > 0 &&
+        !canVoidKitchenSentRestaurantItems(input.actor || { userId: input.voidedBy })
+      ) {
+        throw new ForbiddenError(RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE);
+      }
       const voidKots: KotRecord[] = [];
       const printJobs: PrintJobRecord[] = [];
 

@@ -32,6 +32,7 @@ interface KitchenTicket {
   station: string;
   status: KotStatus;
   ticketKind?: 'FIRE' | 'VOID';
+  voidReason?: string | null;
   firedAt: string;
   orderChannel?: string | null;
   guestName?: string | null;
@@ -272,6 +273,13 @@ export default function KitchenDisplayPage() {
                               *** VOID — STOP ***
                             </div>
                           )}
+                          {ticket.ticketKind === 'VOID' && (ticket.voidReason || ticket.waiterName) ? (
+                            <div className="text-[11px] font-semibold text-red-900" data-kds-void-audit="true">
+                              {ticket.waiterName ? `Voided by ${ticket.waiterName}` : null}
+                              {ticket.waiterName && ticket.voidReason ? ' · ' : null}
+                              {ticket.voidReason ? ticket.voidReason : null}
+                            </div>
+                          ) : null}
                           {(ticket.orderChannel === 'TAKEAWAY' ||
                             ticket.orderChannel === 'DELIVERY') && (
                             <div className="text-[11px] font-semibold text-violet-800">
@@ -298,7 +306,9 @@ export default function KitchenDisplayPage() {
                         </div>
                         <div className="text-[11px] text-stone-600 text-right">
                           {new Date(ticket.firedAt).toLocaleTimeString()}
-                          {ticket.waiterName ? <div>Waiter: {ticket.waiterName}</div> : null}
+                          {ticket.ticketKind === 'VOID' ? null : ticket.waiterName ? (
+                            <div>Waiter: {ticket.waiterName}</div>
+                          ) : null}
                         </div>
                       </div>
                       <ul className="space-y-1 mb-3">

@@ -9,6 +9,7 @@ import {
   canCancelRestaurantCheck,
   canEditOtherWaitersChecks,
   canMutateRestaurantCheck,
+  canVoidKitchenSentRestaurantItems,
   formatOrderedByLabels,
   isSharedRestaurantServiceCounter,
   isTableVisibleToWaiter,
@@ -37,6 +38,12 @@ const cashier = {
   permissions: ['restaurant.read', 'restaurant.order', 'restaurant.pay'],
 };
 
+const accountant = {
+  userId: 'acc-1',
+  role: 'ACCOUNTANT',
+  permissions: ['restaurant.read', 'restaurant.order', 'restaurant.pay'],
+};
+
 describe('restaurant check ownership (behavioral evidence)', () => {
   it('EVIDENCE: Cancel check is managers only (not waiters or cashiers)', () => {
     expect(canCancelRestaurantCheck(waiter)).toBe(false);
@@ -47,6 +54,34 @@ describe('restaurant check ownership (behavioral evidence)', () => {
         userId: 'c-legacy',
         role: 'CASHIER',
         permissions: [],
+      }),
+    ).toBe(false);
+  });
+
+  it('EVIDENCE: Kitchen-sent void is managers/cashiers/accountants — waiters cannot void orders', () => {
+    expect(canVoidKitchenSentRestaurantItems(waiter)).toBe(false);
+    expect(canVoidKitchenSentRestaurantItems(cashier)).toBe(true);
+    expect(canVoidKitchenSentRestaurantItems(manager)).toBe(true);
+    expect(canVoidKitchenSentRestaurantItems(accountant)).toBe(true);
+    expect(
+      canVoidKitchenSentRestaurantItems({
+        userId: 'c-legacy',
+        role: 'CASHIER',
+        permissions: [],
+      }),
+    ).toBe(true);
+    expect(
+      canVoidKitchenSentRestaurantItems({
+        userId: 'acc-legacy',
+        role: 'ACCOUNTANT',
+        permissions: [],
+      }),
+    ).toBe(true);
+    expect(
+      canVoidKitchenSentRestaurantItems({
+        userId: 'staff-waiter',
+        role: 'STAFF',
+        permissions: ['restaurant.read', 'restaurant.order'],
       }),
     ).toBe(false);
   });

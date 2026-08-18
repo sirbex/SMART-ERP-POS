@@ -655,8 +655,13 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/Check was already closed/);
     expect(pos).toMatch(/voidItems/);
     expect(pos).toMatch(/allocateVoidQuantity/);
-    // FOH voids: no blocking confirm/prompt — default kitchen reason.
-    expect(pos).toMatch(/No confirm\/prompt|one-tap/);
+    // Kitchen-sent voids: managers/cashiers only; waiters remove unsent lines.
+    expect(pos).toMatch(/canVoidKitchenSentRestaurantItems/);
+    expect(pos).toMatch(/RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE/);
+    expect(pos).toMatch(/data-ticket-void-reason/);
+    expect(pos).toMatch(/data-ticket-voids/);
+    expect(pos).toMatch(/Voided by/);
+    expect(pos).not.toMatch(/No confirm\/prompt — FOH voids must be one-tap/);
     expect(pos).not.toMatch(/Kitchen will be notified\./);
     expect(pos).not.toMatch(/Void reason \(kitchen will get a VOID ticket\)/);
     // Touch qty pad for partial void / set qty — never window.prompt for quantities.
@@ -674,6 +679,10 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/isServiceLaneCode/);
     expect(pos).toMatch(/Set qty/);
     expect(pos).toMatch(/ticketKind: 'VOID'/);
+    expect(service).toMatch(/canVoidKitchenSentRestaurantItems/);
+    expect(service).toMatch(/listVoidTicketsForOrder/);
+    const ownership = readRepo('shared/utils/restaurantCheckOwnership.ts');
+    expect(ownership).toMatch(/role === 'ACCOUNTANT'/);
     // Unsent / On bill / KOT — never "New" (confused with bill-printed).
     expect(pos).toMatch(/ticketLineStatus/);
     expect(pos).toMatch(/On bill/);

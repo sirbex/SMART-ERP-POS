@@ -13,6 +13,7 @@ import {
   isInventoryStockAdjustPermission,
 } from '../../../shared/authorization/inventoryAdjustPermissions';
 import {
+  SYSTEM_ACCOUNTANT_EXTRA_KEYS,
   SYSTEM_WAITER_PERMISSION_KEYS,
   isSystemWaiterPermission,
 } from '../../../shared/authorization/systemRoleGrants';
@@ -20,6 +21,7 @@ import {
   canAccessRestaurantServiceLane,
   canCancelRestaurantCheck,
   canMutateRestaurantCheck,
+  canVoidKitchenSentRestaurantItems,
 } from '../../../shared/utils/restaurantCheckOwnership';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -164,6 +166,52 @@ describe('PROOF: Cancel check is managers only', () => {
       }),
     ).toBe(true);
     pass('cancel-check actor policy');
+  });
+
+  it('kitchen-sent void is managers/cashiers/accountants — waiters cannot void orders', () => {
+    expect(
+      canVoidKitchenSentRestaurantItems({
+        userId: 'w1',
+        role: 'STAFF',
+        permissions: SYSTEM_WAITER_PERMISSION_KEYS,
+      }),
+    ).toBe(false);
+    expect(
+      canVoidKitchenSentRestaurantItems({
+        userId: 'c1',
+        role: 'CASHIER',
+        permissions: ['restaurant.pay', 'restaurant.order'],
+      }),
+    ).toBe(true);
+    expect(
+      canVoidKitchenSentRestaurantItems({
+        userId: 'm1',
+        role: 'MANAGER',
+        permissions: ['restaurant.manage', 'restaurant.order'],
+      }),
+    ).toBe(true);
+    expect(
+      canVoidKitchenSentRestaurantItems({
+        userId: 'a1',
+        role: 'ACCOUNTANT',
+        permissions: SYSTEM_ACCOUNTANT_EXTRA_KEYS.filter((k) => k.startsWith('restaurant.')),
+      }),
+    ).toBe(true);
+    expect(
+      canVoidKitchenSentRestaurantItems({
+        userId: 'a-legacy',
+        role: 'ACCOUNTANT',
+        permissions: [],
+      }),
+    ).toBe(true);
+    const pos = readClient('pages/restaurant/RestaurantPosPage.tsx');
+    expect(pos).toMatch(/canVoidKitchenSentRestaurantItems/);
+    expect(pos).toMatch(/data-ticket-voids/);
+    expect(pos).toMatch(/data-ticket-void-reason/);
+    const service = readRepo('SamplePOS.Server/src/modules/restaurant/restaurantService.ts');
+    expect(service).toMatch(/canVoidKitchenSentRestaurantItems/);
+    expect(service).toMatch(/RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE/);
+    pass('kitchen-sent void actor policy');
   });
 
   it('API + FOH gate cancel to restaurant.manage', () => {

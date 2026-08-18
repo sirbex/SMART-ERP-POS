@@ -87,6 +87,29 @@ export function canCancelRestaurantCheck(actor: OwnershipActor): boolean {
 export const RESTAURANT_CANCEL_CHECK_RESTRICTED_MESSAGE =
   'Only managers can cancel a check. Waiters and cashiers cannot void an entire check.';
 
+/**
+ * Kitchen-sent line void (VOID KOT) — managers, cashiers, and accountants.
+ * Waiters may only remove unsent lines on their own check (not a kitchen void).
+ */
+export function canVoidKitchenSentRestaurantItems(actor: OwnershipActor): boolean {
+  const role = (actor.role || '').toUpperCase();
+  if (role === 'ADMIN' || role === 'MANAGER' || role === 'CASHIER' || role === 'ACCOUNTANT') {
+    return true;
+  }
+
+  const perms = permissionSet(actor.permissions);
+  if (perms.has('*')) return true;
+  for (const key of perms) {
+    if (key.startsWith('admin.')) return true;
+  }
+  if (perms.has('restaurant.manage')) return true;
+  if (perms.has('restaurant.pay')) return true;
+  return false;
+}
+
+export const RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE =
+  'Only managers, cashiers, and accountants can void kitchen-sent items. Waiters can remove unsent lines only.';
+
 /** True when the open check is owned by this user (or has no owner yet). */
 export function ownsRestaurantCheck(
   checkWaiterId: string | null | undefined,

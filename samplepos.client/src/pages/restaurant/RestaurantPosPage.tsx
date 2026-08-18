@@ -81,10 +81,12 @@ import { isRestaurantWaiterProfile } from '../../utils/restaurantWaiterLockdown'
 import {
   canCancelRestaurantCheck,
   canEditOtherWaitersChecks,
+  canVoidKitchenSentRestaurantItems,
   formatCheckOpenDuration,
   formatLineAddedClock,
   formatOrderedByLabels,
   RESTAURANT_CANCEL_CHECK_RESTRICTED_MESSAGE,
+  RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE,
   restaurantTicketLineMergeKey,
   shortWaiterLabel,
 } from '@shared/utils/restaurantCheckOwnership';
@@ -457,7 +459,6 @@ type QtyPadSheetState =
       digits: string;
     }
   | {
-      /** Samba Move: how many of this product go to the new ticket. */
       purpose: 'move-qty';
       itemIds: string[];
       lines: OrderItem[];
@@ -467,6 +468,19 @@ type QtyPadSheetState =
       sameTable: boolean;
       targetTableId?: string;
     };
+
+type VoidReasonSheetState = {
+  itemIds: string[];
+  lines: OrderItem[];
+  voidQuantity: number;
+};
+
+const KITCHEN_VOID_REASON_CHOICES = [
+  'Customer changed mind',
+  'Wrong item',
+  '86 / unavailable',
+  'Duplicate ring',
+] as const;
 
 const SERVICE_LANE_DEFS: Record<
   ServiceLaneKind,
@@ -625,6 +639,13 @@ type CheckUiPayload = {
     totalAmount: string;
     createdAt: string;
     notes?: string | null;
+  }>;
+  voids?: Array<{
+    kotNumber: string;
+    voidedByName: string | null;
+    reason: string | null;
+    firedAt: string;
+    items: Array<{ productName: string; quantity: string }>;
   }>;
 };
 
@@ -925,6 +946,12 @@ export default function RestaurantPosPage() {
     role: user?.role,
     permissions,
   });
+  /** Kitchen-sent void — managers, cashiers, and accountants. Waiters remove unsent only. */
+  const canVoidSent = canVoidKitchenSentRestaurantItems({
+    userId: user?.id || '',
+    role: user?.role,
+    permissions,
+  });
   /** Toast: Edit other employees' orders — managers/cashiers see every table. */
   const canEditOthers = canEditOtherWaitersChecks({
     userId: user?.id || '',
@@ -1037,6 +1064,8 @@ export default function RestaurantPosPage() {
   const [menuQtyPadOpen, setMenuQtyPadOpen] = useState(false);
   /** Touch qty sheet — Set qty / void qty (never window.prompt). */
   const [qtyPadSheet, setQtyPadSheet] = useState<QtyPadSheetState | null>(null);
+  const [voidReasonSheet, setVoidReasonSheet] = useState<VoidReasonSheetState | null>(null);
+  const [voidReasonDraft, setVoidReasonDraft] = useState('');
   /** Survive selectedTableId effect when opening a service lane on phone. */
   const pendingMobileSheetRef = useRef<null | 'details'>(null);
   /** Bump to re-read journal-derived offline checks */
@@ -2092,6 +2121,7 @@ export default function RestaurantPosPage() {
   const meta =
     order && checkQuery.data?.order?.id === order.id ? checkQuery.data?.meta ?? null : null;
   const siblingChecks = checkQuery.data?.siblingChecks ?? [];
+  const ticketVoids = checkQuery.data?.voids ?? [];
   const selectedTable =
     tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
 
@@ -4052,6 +4082,11 @@ export default function RestaurantPosPage() {
     }
 
     const totalQty = targetLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+    const wouldVoidSent = targetLines.some((l) => !!l.kitchenSentAt);
+    if (wouldVoidSent && !canVoidSent) {
+      toast.error(RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE);
+      return;
+    }
     let voidQty = opts?.voidQuantity;
     if (voidQty === undefined) {
       if (totalQty > 1 && !opts?.skipConfirm) {
@@ -4089,11 +4124,25 @@ export default function RestaurantPosPage() {
     const hasKot = targetLines.some(
       (l) => voidItems.some((v) => v.itemId === l.id) && l.kitchenSentAt,
     );
+    if (hasKot && !canVoidSent) {
+      toast.error(RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE);
+      return;
+    }
     const voidLineIds = voidItems.map((v) => v.itemId);
     const qtyMap = Object.fromEntries(voidItems.map((v) => [v.itemId, v.quantity]));
+    if (hasKot && !opts?.reason?.trim()) {
+      setLineSheet(null);
+      setQtyPadSheet(null);
+      setVoidReasonDraft('');
+      setVoidReasonSheet({
+        itemIds: voidLineIds,
+        lines: targetLines,
+        voidQuantity: voidQty,
+      });
+      return;
+    }
 
     // Journal-local checks: never POST ofl_ord_*/ofl_line_* to UUID APIs (online or offline).
-    // No confirm/prompt — FOH voids must be one-tap (default kitchen reason).
     if (preferLocalRestaurantWrites(order.id)) {
       const reason =
         opts?.reason?.trim() ||
@@ -4150,6 +4199,7 @@ export default function RestaurantPosPage() {
         }
         setLineSheet(null);
         setQtyPadSheet(null);
+        setVoidReasonSheet(null);
         setSelectedLineIds([]);
         if (next.lines.length === 0) {
           settleCheckOnFloor(order.id, selectedTableId, 'CANCELLED', {
@@ -4223,6 +4273,7 @@ export default function RestaurantPosPage() {
       if (paintDroppedTemps()) {
         setLineSheet(null);
         setQtyPadSheet(null);
+        setVoidReasonSheet(null);
         setSelectedLineIds([]);
         toast.success(voidQty < totalQty ? `Removed ${voidQty}` : 'Line(s) removed');
         return;
@@ -4263,6 +4314,7 @@ export default function RestaurantPosPage() {
       }
       setLineSheet(null);
       setQtyPadSheet(null);
+      setVoidReasonSheet(null);
       if (data.checkCancelled) {
         settleCheckOnFloor(serverVoidOrderId, selectedTableId, 'CANCELLED', { reason });
         toast.success(hasKot ? 'Check voided — table freed' : 'Check cancelled — table freed');
@@ -6292,6 +6344,31 @@ export default function RestaurantPosPage() {
                     })}
                   </ul>
                 )}
+                {ticketVoids.length > 0 && !showSambaTicketList ? (
+                  <div
+                    className="mt-3 space-y-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-2"
+                    data-ticket-voids="true"
+                  >
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-red-800">
+                      Voided on this ticket
+                    </p>
+                    {ticketVoids.map((v) => (
+                      <div key={v.kotNumber} className="text-xs text-red-950">
+                        <p className="font-semibold">
+                          Voided by {v.voidedByName || 'staff'}
+                          {v.reason ? ` · ${v.reason}` : ''}
+                        </p>
+                        <ul className="mt-0.5 space-y-0.5">
+                          {v.items.map((it, idx) => (
+                            <li key={`${v.kotNumber}-${idx}`}>
+                              {it.quantity} × {it.productName}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
 
               {/* Samba: select lines → Void / Move (split to new ticket) */}
@@ -6303,9 +6380,22 @@ export default function RestaurantPosPage() {
                     <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
-                        disabled={busy}
+                        disabled={
+                          busy ||
+                          (orderLines.some(
+                            (l) => selectedLineIds.includes(l.id) && l.kitchenSentAt,
+                          ) &&
+                            !canVoidSent)
+                        }
                         onClick={() => handleVoidSelected()}
                         className={`${touchBtnDanger} min-h-12 text-xs`}
+                        title={
+                          orderLines.some(
+                            (l) => selectedLineIds.includes(l.id) && l.kitchenSentAt,
+                          ) && !canVoidSent
+                            ? RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE
+                            : 'Void selected lines'
+                        }
                       >
                         Void
                       </button>
@@ -6402,9 +6492,14 @@ export default function RestaurantPosPage() {
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
-                            disabled={busy}
+                            disabled={busy || (lineSheet.kitchenSent && !canVoidSent)}
                             onClick={() => void handleLineMinusOne(lineSheet)}
                             className={`${touchBtnGhost} min-h-14 text-lg font-bold`}
+                            title={
+                              lineSheet.kitchenSent && !canVoidSent
+                                ? RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE
+                                : undefined
+                            }
                           >
                             −1
                           </button>
@@ -6431,16 +6526,25 @@ export default function RestaurantPosPage() {
                     ) : null}
                     <button
                       type="button"
-                      disabled={busy}
+                      disabled={
+                        busy || (lineSheet.kitchenSent && !canVoidSent)
+                      }
                       onClick={() =>
                         void handleVoidLines(lineSheet.itemIds, { lines: lineSheet.lines })
                       }
                       className={`${touchBtnDanger} w-full min-h-14`}
+                      title={
+                        lineSheet.kitchenSent && !canVoidSent
+                          ? RESTAURANT_VOID_SENT_RESTRICTED_MESSAGE
+                          : undefined
+                      }
                     >
                       {lineSheet.kitchenSent
-                        ? lineSheet.quantity > 1
-                          ? 'Void qty… (kitchen VOID ticket)'
-                          : 'Void (kitchen VOID ticket)'
+                        ? !canVoidSent
+                          ? 'Ask manager to void'
+                          : lineSheet.quantity > 1
+                            ? 'Void qty… (kitchen VOID ticket)'
+                            : 'Void (kitchen VOID ticket)'
                         : 'Remove (unsent)'}
                     </button>
                   </div>
@@ -6533,6 +6637,77 @@ export default function RestaurantPosPage() {
                   </div>
                 </div>
               )}
+
+              {voidReasonSheet ? (
+                <div className="fixed inset-0 z-[60] flex flex-col justify-end lg:justify-center lg:items-center bg-black/40">
+                  <button
+                    type="button"
+                    className="flex-1 w-full lg:absolute lg:inset-0 cursor-default"
+                    aria-label="Dismiss void reason"
+                    onClick={() => setVoidReasonSheet(null)}
+                  />
+                  <div
+                    className="relative w-full lg:max-w-sm bg-white rounded-t-2xl lg:rounded-2xl p-4 space-y-3 shadow-xl pb-[max(1rem,env(safe-area-inset-bottom))]"
+                    data-ticket-void-reason="true"
+                  >
+                    <p className="text-xs uppercase tracking-wide font-semibold text-stone-500">
+                      Void reason
+                    </p>
+                    <p className="text-sm text-stone-700">
+                      Kitchen gets a VOID ticket with your name and this reason.
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                      {KITCHEN_VOID_REASON_CHOICES.map((choice) => (
+                        <button
+                          key={choice}
+                          type="button"
+                          disabled={busy}
+                          className={`${touchBtnGhost} w-full min-h-12 justify-start`}
+                          onClick={() => {
+                            const sheet = voidReasonSheet;
+                            setVoidReasonSheet(null);
+                            void handleVoidLines(sheet.itemIds, {
+                              lines: sheet.lines,
+                              voidQuantity: sheet.voidQuantity,
+                              skipConfirm: true,
+                              reason: choice,
+                            });
+                          }}
+                        >
+                          {choice}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      className={`${touchField} min-h-[4.5rem] resize-y text-sm`}
+                      value={voidReasonDraft}
+                      onChange={(e) => setVoidReasonDraft(e.target.value.slice(0, 500))}
+                      placeholder="Other reason…"
+                      maxLength={500}
+                      aria-label="Other void reason"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy || !voidReasonDraft.trim()}
+                      className={`${touchBtnDanger} w-full min-h-12`}
+                      onClick={() => {
+                        const reason = voidReasonDraft.trim();
+                        if (!reason) return;
+                        const sheet = voidReasonSheet;
+                        setVoidReasonSheet(null);
+                        void handleVoidLines(sheet.itemIds, {
+                          lines: sheet.lines,
+                          voidQuantity: sheet.voidQuantity,
+                          skipConfirm: true,
+                          reason,
+                        });
+                      }}
+                    >
+                      Void with this reason
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               {opsMode &&
                 order &&
