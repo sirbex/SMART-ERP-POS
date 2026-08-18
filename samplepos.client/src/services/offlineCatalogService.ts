@@ -11,6 +11,7 @@
 
 import apiClient from '../utils/api';
 import type { TaxDefinitionLike } from '@shared/utils/taxCompute';
+import { persistLocalStorage, isQuotaExceededError } from '../lib/originStorageQuota';
 
 // ── Storage keys ──────────────────────────────────────────────
 const CATALOG_KEY = 'pos_product_catalog';
@@ -107,7 +108,7 @@ export function getCachedTaxSnapshot(): CachedTaxSnapshot | null {
 
 export function setCachedTaxSnapshot(snapshot: Omit<CachedTaxSnapshot, 'syncedAt'>): void {
     const payload: CachedTaxSnapshot = { ...snapshot, syncedAt: Date.now() };
-    localStorage.setItem(TAX_SNAPSHOT_KEY, JSON.stringify(payload));
+    persistLocalStorage(TAX_SNAPSHOT_KEY, JSON.stringify(payload));
 }
 
 export function getTaxCatalogForPreview(): TaxDefinitionLike[] {
@@ -180,8 +181,13 @@ export function getCachedCatalog(): CachedProduct[] {
 }
 
 export function setCachedCatalog(products: CachedProduct[]): void {
-    localStorage.setItem(CATALOG_KEY, JSON.stringify(products));
-    localStorage.setItem(SYNC_KEY, Date.now().toString());
+    try {
+        persistLocalStorage(CATALOG_KEY, JSON.stringify(products));
+        persistLocalStorage(SYNC_KEY, Date.now().toString());
+    } catch (err) {
+        if (!isQuotaExceededError(err)) throw err;
+        console.warn('[catalog] origin full — catalog will refresh later from server');
+    }
 }
 
 export function getLastSyncTime(): number {
@@ -218,7 +224,7 @@ export function getLocalStock(): LocalStockMap {
 }
 
 export function setLocalStock(stock: LocalStockMap): void {
-    localStorage.setItem(STOCK_KEY, JSON.stringify(stock));
+    persistLocalStorage(STOCK_KEY, JSON.stringify(stock));
 }
 
 /**
@@ -254,7 +260,7 @@ export function getPersistedCart<T>(): T | null {
 }
 
 export function persistCart<T>(cart: T): void {
-    localStorage.setItem(CART_KEY, JSON.stringify(cart));
+    persistLocalStorage(CART_KEY, JSON.stringify(cart));
 }
 
 export function clearPersistedCart(): void {

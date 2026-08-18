@@ -27,6 +27,7 @@ import {
   shouldForceReauthOnBoot,
   type DeviceSessionMode,
 } from '@shared/security/deviceSessionPolicySsot';
+import { persistLocalStorage } from './originStorageQuota';
 
 export {
   ACTOR_LOCK_KEY,
@@ -53,7 +54,13 @@ function writeLocal(key: string, value: string): void {
   if (typeof localStorage === 'undefined') {
     throw new DeviceSessionIntegrityError(`localStorage unavailable writing '${key}'`);
   }
-  localStorage.setItem(key, value);
+  try {
+    persistLocalStorage(key, value);
+  } catch (err) {
+    throw new DeviceSessionIntegrityError(
+      `localStorage write failed for '${key}': ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 function removeLocal(key: string): void {

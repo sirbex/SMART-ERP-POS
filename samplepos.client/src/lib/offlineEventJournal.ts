@@ -13,7 +13,16 @@
  * - Immutable journal prevents data loss during crashes or SW/FG sync races
  * - Separate sync state means journal replay is always deterministic
  * - Each event carries its own idempotency key for server-side deduplication
+ * - Quota reclaim may drop SYNCED/CANCELLED history for closed tickets only
+ *   (PENDING/FAILED/REVIEW + open checks stay — Toast/Square cache eviction)
  */
+
+import { deriveOpenOrders } from './offlineEventSelectors';
+import {
+  isQuotaExceededError,
+  reclaimOriginStorage,
+  registerOriginStorageReclaim,
+} from './originStorageQuota';
 
 // ── Storage Keys ──────────────────────────────────────────────
 export const JOURNAL_KEY = 'pos_offline_events';
@@ -278,9 +287,20 @@ function readJournal(): PosOfflineEvent[] {
     }
 }
 
-function writeJournal(events: PosOfflineEvent[]): void {
+function writeJournalUnchecked(events: PosOfflineEvent[]): void {
     journalCache = events;
     localStorage.setItem(JOURNAL_KEY, JSON.stringify(events));
+}
+
+function writeJournal(events: PosOfflineEvent[]): void {
+    journalCache = events;
+    try {
+        localStorage.setItem(JOURNAL_KEY, JSON.stringify(events));
+    } catch (err) {
+        if (!isQuotaExceededError(err)) throw err;
+        reclaimOriginStorage();
+        localStorage.setItem(JOURNAL_KEY, JSON.stringify(journalCache ?? events));
+    }
 }
 
 function readSyncState(): SyncStateMap {
@@ -301,9 +321,20 @@ function readSyncState(): SyncStateMap {
     }
 }
 
-function writeSyncState(state: SyncStateMap): void {
+function writeSyncStateUnchecked(state: SyncStateMap): void {
     syncStateCache = state;
     localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(state));
+}
+
+function writeSyncState(state: SyncStateMap): void {
+    syncStateCache = state;
+    try {
+        localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(state));
+    } catch (err) {
+        if (!isQuotaExceededError(err)) throw err;
+        reclaimOriginStorage();
+        localStorage.setItem(SYNC_STATE_KEY, JSON.stringify(syncStateCache ?? state));
+    }
 }
 
 /** Drop in-memory mirrors so other tabs / devices re-read localStorage. */
@@ -320,6 +351,59 @@ if (typeof window !== 'undefined') {
         }
     });
 }
+
+function orderIdsOnEvent(event: PosOfflineEvent): string[] {
+    const ids: string[] = [];
+    if ('orderId' in event && event.orderId) ids.push(event.orderId);
+    if ('primaryOrderId' in event && event.primaryOrderId) ids.push(event.primaryOrderId);
+    if ('secondaryOrderId' in event && event.secondaryOrderId) ids.push(event.secondaryOrderId);
+    if ('sourceOrderId' in event && event.sourceOrderId) ids.push(event.sourceOrderId);
+    if ('newOrderId' in event && event.newOrderId) ids.push(event.newOrderId);
+    return ids;
+}
+
+function isUnsyncedStatus(status: SyncStatus | undefined): boolean {
+    const st = status ?? 'PENDING';
+    return st === 'PENDING' || st === 'FAILED' || st === 'REVIEW';
+}
+
+/**
+ * Drop SYNCED/CANCELLED history for tickets already closed and fully synced.
+ * Never drops:
+ *  - PENDING/FAILED/REVIEW events
+ *  - any event for an order that still has an unsynced sibling (avoids resurrecting a closed check)
+ *  - events that still reconstruct an OPEN check
+ * Returns number of events removed.
+ */
+export function compactSyncedClosedJournal(): number {
+    const events = readJournal();
+    const state = readSyncState();
+    if (events.length === 0) return 0;
+    const openIds = new Set(deriveOpenOrders(events, state).map((o) => o.orderId));
+    const unsyncedOrderIds = new Set<string>();
+    for (const e of events) {
+        if (!isUnsyncedStatus(state[e.key]?.status)) continue;
+        for (const id of orderIdsOnEvent(e)) unsyncedOrderIds.add(id);
+    }
+    const keep = events.filter((e) => {
+        if (isUnsyncedStatus(state[e.key]?.status)) return true;
+        const ids = orderIdsOnEvent(e);
+        if (ids.length === 0) return false;
+        return ids.some((id) => openIds.has(id) || unsyncedOrderIds.has(id));
+    });
+    const dropped = events.length - keep.length;
+    if (dropped === 0) return 0;
+    const keepKeys = new Set(keep.map((e) => e.key));
+    const nextState: SyncStateMap = {};
+    for (const [key, entry] of Object.entries(state)) {
+        if (keepKeys.has(key)) nextState[key] = entry;
+    }
+    writeJournalUnchecked(keep);
+    writeSyncStateUnchecked(nextState);
+    return dropped;
+}
+
+registerOriginStorageReclaim(compactSyncedClosedJournal);
 
 // ── Public API ────────────────────────────────────────────────
 

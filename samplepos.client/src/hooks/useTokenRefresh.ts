@@ -19,6 +19,7 @@ import {
 } from '../lib/sessionLogoutPolicy';
 import { isAuthRecoveryPath } from '../lib/offlineLoginCredentials';
 import { AUTH_SESSION_WIPE_KEYS } from '@shared/security/deviceSessionPolicySsot';
+import { persistAuthStorage } from '../lib/originStorageQuota';
 
 // Bare axios instance used exclusively for the /token/refresh HTTP call.
 // Must have NO response interceptors so that a 401 from the refresh endpoint
@@ -71,12 +72,12 @@ export interface TokenResponse {
  * Store tokens in localStorage
  */
 export function storeTokens(accessToken: string, refreshToken: string, expiresIn: number) {
-    localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    persistAuthStorage(ACCESS_TOKEN_KEY, accessToken);
+    persistAuthStorage(REFRESH_TOKEN_KEY, refreshToken);
 
     // Calculate expiry timestamp (subtract 60 seconds buffer for refresh)
     const expiryTime = Date.now() + (expiresIn - 60) * 1000;
-    localStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString());
+    persistAuthStorage(TOKEN_EXPIRY_KEY, expiryTime.toString());
 }
 
 /**

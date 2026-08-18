@@ -4,6 +4,7 @@
  */
 
 import { shouldPersistRestaurantTablesCache } from './restaurantFloorSession';
+import { persistLocalStorage, isQuotaExceededError } from './originStorageQuota';
 
 const TABLES_KEY = 'restaurant_offline_tables';
 const STATIONS_KEY = 'restaurant_offline_stations';
@@ -93,7 +94,12 @@ function readJson<T>(key: string, fallback: T): T {
 }
 
 function writeJson(key: string, value: unknown): void {
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    persistLocalStorage(key, JSON.stringify(value));
+  } catch (err) {
+    if (!isQuotaExceededError(err)) throw err;
+    console.warn(`[restaurant cache] origin full — skipped persist of ${key}`);
+  }
 }
 
 /**

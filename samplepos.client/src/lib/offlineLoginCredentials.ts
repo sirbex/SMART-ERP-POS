@@ -14,6 +14,7 @@
  */
 
 import type { UserRole } from '../types';
+import { persistLocalStorage } from './originStorageQuota';
 
 export const OFFLINE_CREDENTIALS_KEY = 'offline_login_credentials';
 export const OFFLINE_CREDENTIALS_LEGACY_KEY = 'offline_login_credential';
@@ -150,7 +151,7 @@ export async function cacheLoginCredential(
     credentials = credentials.slice(0, MAX_OFFLINE_USERS);
   }
 
-  localStorage.setItem(OFFLINE_CREDENTIALS_KEY, JSON.stringify(credentials));
+  persistLocalStorage(OFFLINE_CREDENTIALS_KEY, JSON.stringify(credentials));
 }
 
 /** Validate offline login against cached credentials (multi-user). */

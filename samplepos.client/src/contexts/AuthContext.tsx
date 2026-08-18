@@ -27,6 +27,8 @@ import {
 } from '../lib/deviceSessionPolicy';
 import { isAuthRecoveryPath, peekCachedPermissionKeysForUser } from '../lib/offlineLoginCredentials';
 import { refreshRestaurantFloorSession } from '../lib/restaurantFloorSession';
+import { persistAuthStorage } from '../lib/originStorageQuota';
+import '../lib/offlineEventJournal';
 import type { AxiosError } from 'axios';
 import { HandledApiError, isHandledForbiddenError } from '../utils/errorHandler';
 import type { UserRole } from '../types';
@@ -186,7 +188,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 userData.email = serverUser.email ?? userData.email;
                 userData.fullName = serverUser.fullName ?? serverUser.full_name ?? userData.fullName;
                 userData.role = serverUser.role ?? userData.role;
-                localStorage.setItem('user', JSON.stringify(userData));
+                persistAuthStorage('user', JSON.stringify(userData));
               }
             } catch (err) {
               const handled = err instanceof HandledApiError ? err : null;
@@ -247,7 +249,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const freshPerms = await fetchPermissionKeys();
           if (freshPerms.length > 0) {
             setPermissionKeys(freshPerms);
-            localStorage.setItem('rbac_permissions', JSON.stringify(freshPerms));
+            persistAuthStorage('rbac_permissions', JSON.stringify(freshPerms));
           }
         }
       } catch (error) {
@@ -337,16 +339,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Access-only / offline session — never inherit prior RT (would revive wrong actor)
       localStorage.removeItem('refresh_token');
       localStorage.removeItem('token_expiry');
-      localStorage.setItem('auth_token', token);
+      persistAuthStorage('auth_token', token);
     }
-    localStorage.setItem('user', JSON.stringify(userData));
+    persistAuthStorage('user', JSON.stringify(userData));
 
     // ERP pattern: fetch permissions BEFORE marking authenticated
     // This prevents the race where routes render with empty permissions
     const perms = await fetchPermissionKeys();
     if (perms.length > 0) {
       setPermissionKeys(perms);
-      localStorage.setItem('rbac_permissions', JSON.stringify(perms));
+      persistAuthStorage('rbac_permissions', JSON.stringify(perms));
     } else if (sameUserCachedPerms && sameUserCachedPerms.length > 0) {
       // Same actor offline / fetch miss — keep last known rights for that user only
       setPermissionKeys(sameUserCachedPerms);
@@ -374,7 +376,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const perms = await fetchPermissionKeys();
     if (perms.length > 0) {
       setPermissionKeys(perms);
-      localStorage.setItem('rbac_permissions', JSON.stringify(perms));
+      persistAuthStorage('rbac_permissions', JSON.stringify(perms));
     }
   }, []);
 
