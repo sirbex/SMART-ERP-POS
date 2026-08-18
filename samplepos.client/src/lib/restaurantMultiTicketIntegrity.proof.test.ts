@@ -408,6 +408,9 @@ describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () =>
     // +1 line sheet must share sole-ticket / party-list SSOT (no silent wrong target)
     expect(pos).toMatch(/plusTargetOrderId/);
     expect(pos).toMatch(/preferLocalRestaurantWrites\(plusTargetOrderId\)/);
+    expect(pos).toMatch(/orderId: refreshOrderId/);
+    expect(pos).toMatch(/orderId: plusRefreshId/);
+    expect(pos).toMatch(/seedRestaurantCheckFromServer/);
   });
 
   it('S02 client API carries forceNewCheck; offline ops honor forceNewTicket', () => {

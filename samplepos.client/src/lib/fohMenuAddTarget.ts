@@ -1,10 +1,9 @@
 /**
  * FOH menu-add targeting SSOT (Toast / Samba).
  *
- * "Select a ticket" is ONLY for a table that already has 2+ open tickets
- * and the party list is showing. Empty and single-ticket tables must add
- * immediately — especially sheet/phone FOH, where the menu is the first surface
- * and activeOrderId is cleared on table pick.
+ * "Select a ticket" is ONLY when 2+ tickets are listed or the party list is up.
+ * Floor count > 1 with an empty strip is wait-check (hydrate, then pick) — never
+ * toast select while the phone menu is the only surface.
  */
 export type FohMenuAddDecision =
   | { action: 'select-ticket' }
@@ -36,10 +35,8 @@ export function resolveFohMenuAddTarget(input: {
   if (input.ticketCount > 1) return { action: 'select-ticket' };
 
   const floorCount = Number(input.floorOpenCount || 0);
-  if (floorCount > 1) return { action: 'select-ticket' };
-
-  // Occupied table, strip not hydrated yet — do not invent a second ticket,
-  // and do not tell the waiter to "select" a ticket that is not listed.
+  // Occupied / 2+ on the floor but the strip is not listed yet — fetch, don't toast.
+  if (!target && floorCount > 1) return { action: 'wait-check' };
   if (!input.checkSettled && (input.tableOccupied || floorCount === 1)) {
     return { action: 'wait-check' };
   }

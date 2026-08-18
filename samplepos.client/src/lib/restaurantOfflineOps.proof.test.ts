@@ -277,6 +277,72 @@ describe('Restaurant offline-first ops (behavioral proof)', () => {
     expect(deriveRestaurantOpenChecks(getAllEvents(), getAllSyncState())).toHaveLength(0);
   });
 
+  it('empty server check seeds so + Ticket / siblings exist offline (no duplicate ofl_ord)', () => {
+    const emptyId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const seeded = seedRestaurantCheckFromServer({
+      orderId: emptyId,
+      orderNumber: 'ORD-EMPTY-1',
+      tableId: 't-empty-seed',
+      tableCode: 'T9',
+      channel: 'DINE_IN',
+      items: [],
+    });
+    expect(seeded).toBe(true);
+    const derived = deriveRestaurantCheckForTable(
+      't-empty-seed',
+      getAllEvents(),
+      getAllSyncState(),
+      emptyId,
+    );
+    expect(derived?.orderId).toBe(emptyId);
+    expect(derived?.lines).toHaveLength(0);
+    expect(
+      seedRestaurantCheckFromServer({
+        orderId: emptyId,
+        tableId: 't-empty-seed',
+        items: [],
+      }),
+    ).toBe(true);
+    expect(
+      getAllEvents().filter(
+        (e) => e.eventType === 'ORDER_CREATED' && 'orderId' in e && e.orderId === emptyId,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('identical server refresh does not append another seed_refresh event', () => {
+    const orderId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    seedRestaurantCheckFromServer({
+      orderId,
+      orderNumber: 'ORD-REF',
+      tableId: 't-ref-same',
+      items: [
+        {
+          id: 'line-same-1',
+          productId: 'p1',
+          productName: 'A',
+          quantity: 1,
+          unitPrice: 2,
+        },
+      ],
+    });
+    const before = getAllEvents().length;
+    refreshRestaurantCheckSeedFromServer({
+      orderId,
+      tableId: 't-ref-same',
+      items: [
+        {
+          id: 'line-same-1',
+          productId: 'p1',
+          productName: 'A',
+          quantity: 1,
+          unitPrice: 2,
+        },
+      ],
+    });
+    expect(getAllEvents().length).toBe(before);
+  });
+
   it('EVIDENCE: refresh does not restore voided lines while ORDER_UPDATED is pending', () => {
     const orderId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     const lineKeep = '11111111-1111-1111-1111-111111111111';

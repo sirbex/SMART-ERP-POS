@@ -97,6 +97,7 @@ import {
   reconcileRestaurantJournalWithServerTables,
   removeRestaurantLinesOffline,
   refreshRestaurantCheckSeedFromServer,
+  seedRestaurantCheckFromServer,
   hasPendingRestaurantMutations,
   resolveDesiredLinesBeforePay,
   storePayDesiredLines,
@@ -692,23 +693,39 @@ function attachSiblingTabs(
 }
 
 function seedCheckPayloadIntoJournal(tableId: string, data: CheckUiPayload): void {
-  if (!data.order?.id || !data.order.items) return;
-  refreshRestaurantCheckSeedFromServer({
-    orderId: data.order.id,
-    orderNumber: data.order.orderNumber,
-    tableId,
-    tableCode: data.meta?.tableCode || data.table?.code,
-    tableName: data.meta?.tableName || data.table?.name,
-    channel:
-      (data.meta?.orderChannel as 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | null | undefined) || null,
-    waiterId: data.meta?.waiterId,
-    waiterName: data.meta?.waiterName,
-    guestName: data.meta?.guestName,
-    guestPhone: data.meta?.guestPhone,
-    deliveryAddress: data.meta?.deliveryAddress,
-    pickupLabel: data.meta?.pickupLabel,
-    items: data.order.items,
-  });
+  const tableCode = data.meta?.tableCode || data.table?.code;
+  const tableName = data.meta?.tableName || data.table?.name;
+  const channel =
+    (data.meta?.orderChannel as 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | null | undefined) || null;
+  if (data.order?.id) {
+    refreshRestaurantCheckSeedFromServer({
+      orderId: data.order.id,
+      orderNumber: data.order.orderNumber,
+      tableId,
+      tableCode,
+      tableName,
+      channel,
+      waiterId: data.meta?.waiterId,
+      waiterName: data.meta?.waiterName,
+      guestName: data.meta?.guestName,
+      guestPhone: data.meta?.guestPhone,
+      deliveryAddress: data.meta?.deliveryAddress,
+      pickupLabel: data.meta?.pickupLabel,
+      items: data.order.items || [],
+    });
+  }
+  for (const sibling of data.siblingChecks || []) {
+    if (!sibling.id || sibling.id === data.order?.id) continue;
+    seedRestaurantCheckFromServer({
+      orderId: sibling.id,
+      orderNumber: sibling.orderNumber,
+      tableId,
+      tableCode,
+      tableName,
+      channel,
+      items: [],
+    });
+  }
 }
 
 /** Clamp server check UI to one ticket (void-safe journal when mutations pending).
@@ -1598,6 +1615,7 @@ export default function RestaurantPosPage() {
             { silentForbidden: true },
           );
           const data = res.data.data as CheckUiPayload;
+          seedCheckPayloadIntoJournal(selectedTableId, data);
           const openIds = [
             data.order?.id,
             ...(data.siblingChecks || []).map((s) => s.id),
@@ -1696,6 +1714,7 @@ export default function RestaurantPosPage() {
       setMenuQtyPadOpen(false);
 
       const apiOrderId = toServerRestaurantOrderId(targetOrderId);
+      const refreshOrderId = apiOrderId || undefined;
 
       try {
         const postItems = async (orderIdForApi: string | null | undefined) => {
@@ -1730,19 +1749,24 @@ export default function RestaurantPosPage() {
           await postItems(undefined);
         }
         if (selectedTableId) {
-          clearRestaurantBillRequestedOffline(selectedTableId, order?.id ?? undefined);
+          const billOrderId = targetOrderId || order?.id;
+          if (billOrderId) clearRestaurantBillRequestedOffline(selectedTableId, billOrderId);
         }
-        const res = await api.restaurant.getTableCheck(selectedTableId);
+        const res = await api.restaurant.getTableCheck(
+          selectedTableId,
+          refreshOrderId ? { orderId: refreshOrderId } : undefined,
+        );
         const data = res.data.data as CheckUiPayload;
         inFlightOptimisticLinesRef.current.delete(tempLineId);
-        paintServerCheckWithInFlight(selectedTableId, data, data.order?.id ?? null);
-        if (data.order?.id) setActiveOrderId(data.order.id);
+        const stayOn = targetOrderId || data.order?.id || null;
+        paintServerCheckWithInFlight(selectedTableId, data, stayOn);
+        if (stayOn) setActiveOrderId(stayOn);
         const newest = [...(data.order?.items || [])]
           .reverse()
           .find((it) => it.productId === product.id);
-        if (data.order?.id && newest?.id && product.id) {
+        if (stayOn && newest?.id && product.id) {
           void openOrderTagPad({
-            orderId: data.order.id,
+            orderId: stayOn,
             itemId: newest.id,
             productId: product.id,
             productName: product.name,
@@ -1754,10 +1778,14 @@ export default function RestaurantPosPage() {
       } catch (err) {
         inFlightOptimisticLinesRef.current.delete(tempLineId);
         try {
-          const res = await api.restaurant.getTableCheck(selectedTableId);
+          const res = await api.restaurant.getTableCheck(
+            selectedTableId,
+            refreshOrderId ? { orderId: refreshOrderId } : undefined,
+          );
           const data = res.data.data as CheckUiPayload;
-          paintServerCheckWithInFlight(selectedTableId, data, data.order?.id ?? null);
-          if (data.order?.id) setActiveOrderId(data.order.id);
+          const stayOn = targetOrderId || data.order?.id || null;
+          paintServerCheckWithInFlight(selectedTableId, data, stayOn);
+          if (stayOn) setActiveOrderId(stayOn);
           else setActiveOrderId(null);
         } catch {
           queryClient.setQueryData(checkKey, prevSnapshot);
@@ -4020,26 +4048,15 @@ export default function RestaurantPosPage() {
       toast.error('Cannot change quantity for this line');
       return;
     }
-    const plusDecision = resolveFohMenuAddTarget({
-      partyListVisible: showSambaTicketList,
-      ticketCount: ticketTabs.length,
-      soleTicketId: ticketTabs.length === 1 ? ticketTabs[0]?.id ?? null : null,
-      activeOrderId,
-      currentOrderId: order?.id ?? null,
-      checkSettled: checkQuery.isFetched && !checkQuery.isLoading,
-      tableOccupied: Number(selectedTable?.openCheckCount || 0) > 0,
-      floorOpenCount: Number(selectedTable?.openCheckCount || 0),
-    });
-    const plusBlocked = fohMenuAddBlockedMessage(plusDecision);
-    if (plusBlocked) {
-      toast.error(plusBlocked, {
+    // +1 is on a visible line — always that ticket (Toast/Samba). Never re-gate.
+    const plusTargetOrderId = order?.id || activeOrderId || null;
+    if (!plusTargetOrderId) {
+      toast.error('Select a ticket to add items', {
         duration: 3500,
-        id: plusDecision.action === 'select-ticket' ? 'foh-select-ticket' : 'foh-wait-ticket',
+        id: 'foh-select-ticket',
       });
       return;
     }
-    const plusTargetOrderId =
-      plusDecision.action === 'bind' ? plusDecision.orderId : null;
     if (preferLocalRestaurantWrites(plusTargetOrderId)) {
       try {
         const table =
@@ -4147,21 +4164,30 @@ export default function RestaurantPosPage() {
         if (Array.isArray(openIds) && openIds.length > 0) throw firstErr;
         await postItems(undefined);
       }
-      if (selectedTableId) clearRestaurantBillRequestedOffline(selectedTableId, order?.id ?? undefined);
-      const res = await api.restaurant.getTableCheck(selectedTableId);
+      if (selectedTableId && plusTargetOrderId) {
+        clearRestaurantBillRequestedOffline(selectedTableId, plusTargetOrderId);
+      }
+      const plusRefreshId = toServerRestaurantOrderId(plusTargetOrderId) || undefined;
+      const res = await api.restaurant.getTableCheck(
+        selectedTableId,
+        plusRefreshId ? { orderId: plusRefreshId } : undefined,
+      );
       const data = res.data.data as CheckUiPayload;
       inFlightOptimisticLinesRef.current.delete(tempLineId);
-      paintServerCheckWithInFlight(selectedTableId, data, data.order?.id ?? null);
-      if (data.order?.id) setActiveOrderId(data.order.id);
+      paintServerCheckWithInFlight(selectedTableId, data, plusTargetOrderId);
+      setActiveOrderId(plusTargetOrderId);
       toast.success('+1 added');
     } catch (err) {
       inFlightOptimisticLinesRef.current.delete(tempLineId);
       try {
-        const res = await api.restaurant.getTableCheck(selectedTableId);
+        const plusRefreshId = toServerRestaurantOrderId(plusTargetOrderId) || undefined;
+        const res = await api.restaurant.getTableCheck(
+          selectedTableId,
+          plusRefreshId ? { orderId: plusRefreshId } : undefined,
+        );
         const data = res.data.data as CheckUiPayload;
-        paintServerCheckWithInFlight(selectedTableId, data, data.order?.id ?? null);
-        if (data.order?.id) setActiveOrderId(data.order.id);
-        else setActiveOrderId(null);
+        paintServerCheckWithInFlight(selectedTableId, data, plusTargetOrderId);
+        setActiveOrderId(plusTargetOrderId);
       } catch {
         queryClient.setQueryData(checkKey, prevSnapshot);
       }
@@ -5482,9 +5508,11 @@ export default function RestaurantPosPage() {
                         </p>
                       ) : (
                         <p className="type-caption text-stone-500 type-ellipsis">
-                          {isMultiTicketTable
+                          {showSambaTicketList
                             ? 'Select a ticket or start a new one'
-                            : 'Tap the menu to start the first ticket'}
+                            : loadingTicketId
+                              ? 'Loading ticket…'
+                              : 'Tap the menu to start the first ticket'}
                         </p>
                       )}
                       {(selectedCustomer?.name || guestDraft.guestName) ? (

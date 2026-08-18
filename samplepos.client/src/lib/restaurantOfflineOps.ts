@@ -108,7 +108,8 @@ export function seedRestaurantCheckFromServer(input: {
     productType?: string;
   }>;
 }): boolean {
-  if (!input.orderId || !input.tableId || !input.items?.length) return false;
+  if (!input.orderId || !input.tableId) return false;
+  const items = input.items ?? [];
   // Multi-ticket: only skip when THIS orderId is already in the journal — never treat
   // a sibling on the same table as a duplicate seed.
   const existing = deriveRestaurantCheckForTable(
@@ -119,7 +120,7 @@ export function seedRestaurantCheckFromServer(input: {
   );
   if (existing?.orderId === input.orderId) return true;
 
-  const lines: EventLine[] = input.items.map((it) => {
+  const lines: EventLine[] = items.map((it) => {
     const qty = Number(it.quantity) || 0;
     const unitPrice = Number(it.unitPrice) || 0;
     const productId = it.productId || `custom_${it.id}`;
@@ -408,6 +409,12 @@ export function refreshRestaurantCheckSeedFromServer(
     ...serverLines,
     ...pendingLocal.filter((l) => l.lineId && !serverIds.has(l.lineId)),
   ];
+  const lineFp = (rows: EventLine[]) =>
+    rows
+      .map((l) => `${l.lineId || ''}|${l.productId}|${l.quantity}|${l.lineNotes || ''}`)
+      .sort()
+      .join(';');
+  if (lineFp(existing.lines) === lineFp(merged)) return;
   appendSyncedEvent({
     eventType: 'ORDER_UPDATED',
     key: `seed_refresh_${input.orderId}_${Date.now()}`,

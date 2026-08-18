@@ -103,7 +103,22 @@ describe('FOH menu add target SSOT', () => {
     expect(d).toEqual({ action: 'bind', orderId: 'ord-a' });
   });
 
-  it('2+ tickets, no pointer, list not showing: still select (must pick)', () => {
+  it('floor says 2+ but strip not hydrated: wait — never select with no picker', () => {
+    const d = resolveFohMenuAddTarget({
+      partyListVisible: false,
+      ticketCount: 0,
+      soleTicketId: null,
+      activeOrderId: null,
+      currentOrderId: null,
+      checkSettled: false,
+      tableOccupied: true,
+      floorOpenCount: 2,
+    });
+    expect(d.action).toBe('wait-check');
+    expect(fohMenuAddBlockedMessage(d)).not.toMatch(/Select a ticket/i);
+  });
+
+  it('2+ tickets listed, no pointer, list not showing: still select (must pick)', () => {
     const d = resolveFohMenuAddTarget({
       partyListVisible: false,
       ticketCount: 2,
