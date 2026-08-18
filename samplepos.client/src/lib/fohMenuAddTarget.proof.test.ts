@@ -305,5 +305,11 @@ describe('FOH table pick / KOT session — enterprise lock', () => {
     expect(pos).toMatch(/TicketNotePreview/);
     expect(pos).toMatch(/preview="empty"/);
     expect(pos).toMatch(/setMobileSheet\(useSheetTicket \? 'order' : null\)/);
+    expect(pos).toMatch(/data-ticket-note="open"/);
+    expect(pos).toMatch(/data-ticket-note="dock"/);
+    expect(pos).toMatch(/data-ticket-note-empty=/);
+    expect(pos).toMatch(/\{text \|\| 'Add note'\}/);
+    expect(pos).not.toMatch(/order && inlineTicketNote \?/);
+    expect(pos).not.toMatch(/\{ticketNote \? \(\s*<TicketNotePreview/);
   });
 });

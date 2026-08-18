@@ -378,6 +378,7 @@ function TicketNotePreview({
   onEdit: () => void;
   preview: 'empty' | 'true';
 }) {
+  const text = (note || '').trim();
   return (
     <button
       type="button"
@@ -392,10 +393,13 @@ function TicketNotePreview({
       }`}
       data-pos-coach={preview === 'true' ? 'ticket' : undefined}
       data-ticket-note-preview={preview}
+      data-ticket-note-empty={text ? '0' : '1'}
       title="Ticket note — tap to edit"
     >
       <span className="font-bold text-amber-900">Note · </span>
-      <span className="text-stone-800">{note}</span>
+      <span className={text ? 'text-stone-800' : 'text-stone-500'}>
+        {text || 'Add note'}
+      </span>
     </button>
   );
 }
@@ -5907,7 +5911,7 @@ export default function RestaurantPosPage() {
                           </span>
                         )}
                       </button>
-                      {order && inlineTicketNote ? (
+                      {order ? (
                         <button
                           type="button"
                           onClick={openTicketNoteEditor}
@@ -5915,7 +5919,9 @@ export default function RestaurantPosPage() {
                           className={`${touchBtnGhost} min-h-10 px-2 type-caption font-bold ${
                             ticketNote
                               ? 'border-amber-400 bg-amber-50 text-amber-950'
-                              : ''
+                              : inlineTicketNote
+                                ? ''
+                                : 'shrink-0'
                           }`}
                           aria-label="Ticket note"
                           title="Note on this ticket only"
@@ -6052,7 +6058,7 @@ export default function RestaurantPosPage() {
                     className="py-4 lg:py-8 text-center space-y-3 px-3"
                     data-ticket-empty="true"
                   >
-                    {ticketNote ? (
+                    {order ? (
                       <TicketNotePreview
                         note={ticketNote}
                         dense={isTouchDense}
@@ -6657,8 +6663,7 @@ export default function RestaurantPosPage() {
                     {formatCurrency(Number(order?.totalAmount || 0))}
                   </span>
                 </div>
-                {/* Note when set; coach only on roomy tiers (hidden on Sunmi/mobile) */}
-                {ticketNote ? (
+                {order ? (
                     <TicketNotePreview
                       note={ticketNote}
                       dense={isTouchDense}
@@ -6762,11 +6767,13 @@ export default function RestaurantPosPage() {
                             : order?.orderNumber || 'Ticket'}
                       </span>
                       <span className="block type-caption font-semibold text-emerald-900 type-ellipsis">
-                        {sambaTicketView !== 'detail' && isMultiTicketTable
-                          ? 'Tap to select a ticket'
-                          : orderLines.length > 0
-                            ? `Tap to see ${orderLines.length} item${orderLines.length === 1 ? '' : 's'}`
-                            : 'Tap to view ticket'}
+                        {ticketNote && sambaTicketView === 'detail'
+                          ? ticketNote
+                          : sambaTicketView !== 'detail' && isMultiTicketTable
+                            ? 'Tap to select a ticket'
+                            : orderLines.length > 0
+                              ? `Tap to see ${orderLines.length} item${orderLines.length === 1 ? '' : 's'}`
+                              : 'Tap to view ticket'}
                       </span>
                     </span>
                     <span className="shrink-0 type-amount font-bold text-stone-900 tabular-nums">
@@ -6777,6 +6784,27 @@ export default function RestaurantPosPage() {
                       )}
                     </span>
                   </button>
+                  {order && sambaTicketView === 'detail' && !showSambaTicketList ? (
+                    <button
+                      type="button"
+                      onClick={openTicketNoteEditor}
+                      disabled={!canOrder && !ticketNote}
+                      className={`${touchBtnGhost} shrink-0 min-w-[3.25rem] px-2 type-caption font-bold ${
+                        ticketNote ? 'border-amber-400 bg-amber-50 text-amber-950' : ''
+                      }`}
+                      style={{ minHeight: Math.max(48, ctaMinH - 2) }}
+                      data-ticket-note="dock"
+                      aria-label="Ticket note"
+                      title="Note on this ticket only"
+                    >
+                      Note
+                      {ticketNote ? (
+                        <span className="ml-0.5 text-amber-700" aria-hidden>
+                          ●
+                        </span>
+                      ) : null}
+                    </button>
+                  ) : null}
                   {/* Compact KOT beside total — appears once this ticket has items */}
                   {canOrder &&
                   order &&
