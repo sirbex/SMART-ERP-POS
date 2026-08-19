@@ -302,8 +302,10 @@ describe('FOH table pick / KOT session — enterprise lock', () => {
     expect(pos).toMatch(/returnToTicketSheet/);
     expect(pos).toMatch(/applyTicketNoteToCheck/);
     expect(pos).toMatch(/updateRestaurantCheckNotesOffline/);
-    expect(pos).toMatch(/TicketNotePreview/);
-    expect(pos).toMatch(/preview="empty"/);
+    expect(pos).toMatch(/resolveTicketNoteOnCheckPaint/);
+    expect(pos).toMatch(/ticketNoteOnCheck\.visibleText/);
+    expect(pos).toMatch(/data-ticket-note-on-check="true"/);
+    expect(pos).toMatch(/preview=\{orderLines\.length === 0 \? 'empty' : 'true'\}/);
     expect(pos).toMatch(/setMobileSheet\(useSheetTicket \? 'order' : null\)/);
     expect(pos).toMatch(/data-ticket-note="open"/);
     expect(pos).toMatch(/data-ticket-note="dock"/);
@@ -311,5 +313,17 @@ describe('FOH table pick / KOT session — enterprise lock', () => {
     expect(pos).toMatch(/\{text \|\| 'Add note'\}/);
     expect(pos).not.toMatch(/order && inlineTicketNote \?/);
     expect(pos).not.toMatch(/\{ticketNote \? \(\s*<TicketNotePreview/);
+    expect(pos).not.toMatch(/preview="true"/);
+  });
+
+  it('wiring only: check-body note is in ticket lines, not the KOT bar', () => {
+    const pos = readFileSync(resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'), 'utf8');
+    const ticketBody =
+      pos.split('data-ticket-lines="true"')[1]?.split('data-ticket-primary-actions')[0] ?? '';
+    const kotBar = pos.split('data-ticket-primary-actions')[1] ?? '';
+    expect(ticketBody).toMatch(/ticketNoteOnCheck\.paint === 'on-check'/);
+    expect(ticketBody).toMatch(/TicketNotePreview/);
+    expect(ticketBody).toMatch(/ticketNoteOnCheck\.visibleText/);
+    expect(kotBar).not.toMatch(/TicketNotePreview/);
   });
 });

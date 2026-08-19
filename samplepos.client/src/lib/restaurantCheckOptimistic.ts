@@ -239,6 +239,22 @@ export function displayTicketNote(notes: string | null | undefined): string {
   return (notes || '').trim();
 }
 
+/**
+ * Waiter-facing note on the open check body (with or without lines).
+ * Party list and the empty loading shell do not paint the check-body note.
+ */
+export function resolveTicketNoteOnCheckPaint(input: {
+  partyListVisible: boolean;
+  loadingEmptyTicket: boolean;
+  hasOrder: boolean;
+  notes: string | null | undefined;
+}): { paint: 'on-check' | 'hidden'; visibleText: string } {
+  if (input.partyListVisible || input.loadingEmptyTicket || !input.hasOrder) {
+    return { paint: 'hidden', visibleText: '' };
+  }
+  return { paint: 'on-check', visibleText: displayTicketNote(input.notes) };
+}
+
 /** First real FOA note from server / paint / journal (system seed text skipped). */
 export function preferUserTicketNote(
   ...candidates: Array<string | null | undefined>

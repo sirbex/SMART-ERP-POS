@@ -132,6 +132,7 @@ import {
   applyTicketNoteToTabs,
   displayTicketNote,
   preferUserTicketNote,
+  resolveTicketNoteOnCheckPaint,
   sanitizeCheckTicketNotes,
   dropOptimisticCheckLines,
   isTempRestaurantId,
@@ -396,6 +397,7 @@ function TicketNotePreview({
       data-pos-coach={preview === 'true' ? 'ticket' : undefined}
       data-ticket-note-preview={preview}
       data-ticket-note-empty={text ? '0' : '1'}
+      data-ticket-note-on-check="true"
       title="Ticket note — tap to edit"
     >
       <span className="font-bold text-amber-900">Note · </span>
@@ -2369,6 +2371,15 @@ export default function RestaurantPosPage() {
 
   const isMultiTicketTable = ticketTabs.length > 1;
   const showSambaTicketList = isMultiTicketTable && sambaTicketView === 'list';
+  const ticketNoteOnCheck = resolveTicketNoteOnCheckPaint({
+    partyListVisible: showSambaTicketList,
+    loadingEmptyTicket:
+      !!loadingTicketId &&
+      loadingTicketId === (order?.id || activeOrderId) &&
+      orderLines.length === 0,
+    hasOrder: !!order,
+    notes: order?.notes,
+  });
   /** Compact packing from adaptive SSOT (not hard-coded brand/tier checks). */
   const isTouchDense = isAdaptiveDenseSurface(chrome);
   const isUltraDense = isAdaptiveUltraSurface(chrome);
@@ -6105,21 +6116,23 @@ export default function RestaurantPosPage() {
                       Items for this ticket will appear here
                     </p>
                   </div>
-                ) : orderLines.length === 0 ? (
-                  <div
-                    className="py-4 lg:py-8 text-center space-y-3 px-3"
-                    data-ticket-empty="true"
-                  >
-                    {order ? (
+                ) : (
+                  <>
+                    {ticketNoteOnCheck.paint === 'on-check' ? (
                       <TicketNotePreview
-                        note={ticketNote}
+                        note={ticketNoteOnCheck.visibleText}
                         dense={isTouchDense}
                         clamp="2"
                         canOrder={!!canOrder}
                         onEdit={openTicketNoteEditor}
-                        preview="empty"
+                        preview={orderLines.length === 0 ? 'empty' : 'true'}
                       />
                     ) : null}
+                {orderLines.length === 0 ? (
+                  <div
+                    className="py-4 lg:py-8 text-center space-y-3 px-3"
+                    data-ticket-empty="true"
+                  >
                     <p className="text-sm text-stone-500">
                       {order
                         ? 'This ticket is empty — add items from the menu'
@@ -6343,6 +6356,8 @@ export default function RestaurantPosPage() {
                       );
                     })}
                   </ul>
+                )}
+                  </>
                 )}
                 {ticketVoids.length > 0 && !showSambaTicketList ? (
                   <div
@@ -6838,16 +6853,7 @@ export default function RestaurantPosPage() {
                     {formatCurrency(Number(order?.totalAmount || 0))}
                   </span>
                 </div>
-                {order ? (
-                    <TicketNotePreview
-                      note={ticketNote}
-                      dense={isTouchDense}
-                      clamp="1"
-                      canOrder={!!canOrder}
-                      onEdit={openTicketNoteEditor}
-                      preview="true"
-                    />
-                  ) : shouldShowCoach(chrome, 'coach') && !isTouchDense ? (
+                {!order && shouldShowCoach(chrome, 'coach') && !isTouchDense ? (
                     <p className="text-[11px] text-stone-500" data-pos-coach="ticket">
                       {chrome.coach === 'full'
                         ? isMultiTicketTable

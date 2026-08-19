@@ -8,6 +8,7 @@ import {
   applyTicketNoteToCheck,
   applyTicketNoteToTabs,
   displayTicketNote,
+  resolveTicketNoteOnCheckPaint,
   dropOptimisticCheckLines,
   isTempRestaurantId,
   mergeInFlightOptimisticLines,
@@ -451,5 +452,115 @@ describe('Restaurant optimistic online add (behavioral proof)', () => {
     expect(
       applyTicketNoteToCheck(hydrated, hydrated.order.id, 'Hydrated T1')?.order?.notes,
     ).toBeNull();
+  });
+});
+
+describe('CASHIER: ticket note stays on the check after items', () => {
+  const openCheck = (): OptimisticCheckPayload => ({
+    table: { ...table, status: 'OCCUPIED', currentOrderId: 'ord-a' },
+    order: {
+      id: 'ord-a',
+      orderNumber: 'R-1',
+      subtotal: '0',
+      discountAmount: '0',
+      taxAmount: '0',
+      totalAmount: '0',
+      status: 'PENDING',
+      items: [],
+      notes: null,
+    },
+    siblingChecks: [
+      {
+        id: 'ord-a',
+        orderNumber: 'R-1',
+        totalAmount: '0',
+        createdAt: '2026-01-01',
+        notes: null,
+      },
+    ],
+  });
+
+  const onCheck = (
+    notes: string | null | undefined,
+    extra?: { partyListVisible?: boolean; loadingEmptyTicket?: boolean; hasOrder?: boolean },
+  ) =>
+    resolveTicketNoteOnCheckPaint({
+      partyListVisible: extra?.partyListVisible ?? false,
+      loadingEmptyTicket: extra?.loadingEmptyTicket ?? false,
+      hasOrder: extra?.hasOrder ?? true,
+      notes,
+    });
+
+  it('save note on empty ticket → check body shows that text', () => {
+    const painted = applyTicketNoteToCheck(openCheck(), 'ord-a', 'No ice');
+    expect(painted?.order?.items ?? []).toHaveLength(0);
+    expect(onCheck(painted?.order?.notes)).toEqual({
+      paint: 'on-check',
+      visibleText: 'No ice',
+    });
+  });
+
+  it('add a menu item after the note → same note still on the check with the line', () => {
+    const noted = applyTicketNoteToCheck(openCheck(), 'ord-a', 'No ice');
+    const withItem = appendOptimisticMenuItem(noted, {
+      table: noted!.table,
+      product: { id: 'p1', name: 'Burger', sellingPrice: 12 },
+      quantity: 1,
+      tempLineId: 'tmp_line_note_keep',
+      channel: 'DINE_IN',
+      now: 9,
+    });
+    expect(withItem.order?.items.map((i) => i.productName)).toEqual(['Burger']);
+    expect(displayTicketNote(withItem.order?.notes)).toBe('No ice');
+    expect(onCheck(withItem.order?.notes)).toEqual({
+      paint: 'on-check',
+      visibleText: 'No ice',
+    });
+  });
+
+  it('GET refresh after add does not blank the on-check note', () => {
+    const noted = applyTicketNoteToCheck(openCheck(), 'ord-a', 'No ice');
+    const withItem = appendOptimisticMenuItem(noted, {
+      table: noted!.table,
+      product: { id: 'p1', name: 'Burger', sellingPrice: 12 },
+      quantity: 1,
+      tempLineId: 'tmp_line_note_refresh',
+      channel: 'DINE_IN',
+      now: 11,
+    });
+    const incoming = {
+      ...withItem,
+      order: {
+        ...withItem.order!,
+        items: [{ id: 'line-uuid', productName: 'Burger' }],
+        notes: 'Hydrated T1',
+      },
+    };
+    const coalesced = coalesceRestaurantCheckFetch({
+      startedGen: 2,
+      paintGen: 2,
+      cached: withItem,
+      incoming,
+    });
+    expect(coalesced.order?.items.length).toBeGreaterThan(0);
+    expect(displayTicketNote(coalesced.order?.notes)).toBe('No ice');
+    expect(onCheck(coalesced.order?.notes)).toEqual({
+      paint: 'on-check',
+      visibleText: 'No ice',
+    });
+  });
+
+  it('journal Hydrated seed is not the on-check text', () => {
+    expect(onCheck('Hydrated T1')).toEqual({ paint: 'on-check', visibleText: '' });
+    expect(onCheck('Birthday · window')).toEqual({
+      paint: 'on-check',
+      visibleText: 'Birthday · window',
+    });
+  });
+
+  it('party list and empty loading shell do not paint the check-body note', () => {
+    expect(onCheck('No ice', { partyListVisible: true }).paint).toBe('hidden');
+    expect(onCheck('No ice', { loadingEmptyTicket: true }).paint).toBe('hidden');
+    expect(onCheck('No ice', { hasOrder: false }).paint).toBe('hidden');
   });
 });
