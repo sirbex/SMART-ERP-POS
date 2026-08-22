@@ -1,6 +1,6 @@
 # PROOF: Login soft keyboard + PIN number pad
 
-- Date: 2026-08-22T09:04:13.760Z
+- Date: 2026-08-22T11:57:58.354Z
 - Runner: `npm run proof:soft-keyboard` (login section) or `npx vitest run src/__tests__/login-soft-keyboard.proof.test.ts`
 
 ## Policy
