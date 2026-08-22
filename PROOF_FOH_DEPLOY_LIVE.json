@@ -1,18 +1,20 @@
 {
-  "commit": "69f798eae06275b38844e5e18d896810c20c4b89",
-  "short": "69f798ea",
-  "deployedAt": "2026-08-22T14:40:00.000Z",
-  "deployGate": "PASS",
-  "deployWorkflow": {
-    "id": 32578785125,
-    "url": "https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/32578785125",
-    "conclusion": "success",
-    "headSha": "69f798eae06275b38844e5e18d896810c20c4b89"
-  },
-  "liveProbe": "PASS",
+  "commit": "a86cc17594c1a841d6678e3ffa2f94e0222ac7df",
+  "short": "a86cc175",
+  "verdict": "PASS",
+  "deployRunId": 32596873518,
+  "deployUrl": "https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/32596873518",
+  "preDeployGate": "PROOF_FOH_KEYBOARD_OWNERSHIP_DEPLOY.json",
+  "liveProbe": "PROOF_FOH_KEYBOARD_OWNERSHIP_LIVE.json",
+  "markers": [
+    "min-h-9 min-w-9",
+    "data-foh-qty-dec",
+    "data-foh-qty-inc",
+    "data-pos-qty-stepper",
+    "Moved to new ticket"
+  ],
   "tenants": [
     "https://henber.wizarddigital-inv.com",
     "https://wizarddigital-inv.com"
-  ],
-  "verdict": "PASS"
+  ]
 }

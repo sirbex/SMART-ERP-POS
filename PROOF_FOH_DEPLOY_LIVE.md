@@ -1,7 +1,7 @@
-# FOH deploy proof — `69f798ea`
+# FOH deploy proof — `a86cc175`
 
-**Run:** 2026-08-22T14:28Z → deploy complete ~14:40Z  
-**Commit:** `69f798eae06275b38844e5e18d896810c20c4b89` — FohLineQtyEditors SSOT + fixed qty column  
+**Run:** 2026-08-22T20:30Z → deploy complete ~20:46Z  
+**Commit:** `a86cc17594c1a841d6678e3ffa2f94e0222ac7df` — restaurant ± restore + Move paint + keep-last floor  
 **Overall: PASS**
 
 ## Pre-deploy gate
@@ -10,27 +10,34 @@
 
 See `PROOF_FOH_KEYBOARD_OWNERSHIP_DEPLOY.md`
 
+Extra behavioral (local):
+- `pos-quantity-stepper` — restaurant inline `min-h-9 min-w-9`; retail `FohLineQtyEditors`
+- `restaurantSplitMovePaint` — deterministic Move paint
+- `restaurantFloorKeepLast` — shared floor query factory
+- `restaurantMultiTicketIntegrity` — multi-ticket SSOT
+
 ## GitHub Deploy
 
 | Gate | Result |
 |------|--------|
-| Workflow | [Deploy to Production #32578785125](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/32578785125) |
+| Workflow | [Deploy to Production #32596873518](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/32596873518) |
 | Conclusion | **success** |
-| headSha | `69f798eae06275b38844e5e18d896810c20c4b89` |
+| headSha | `a86cc17594c1a841d6678e3ffa2f94e0222ac7df` |
 
 ## Live probe
 
 `node scripts/proof-foh-keyboard-ownership-live.mjs` → **PASS** on both tenants
 
 Key markers now on production bundles:
-- `data-foh-line-qty-editors`
-- `data-foh-qty-inc`
-- `data-pos-qty-stepper` / `data-pos-qty-inc`
+- `min-h-9 min-w-9` (restaurant −/+ touch size restored)
+- `data-foh-qty-dec` / `data-foh-qty-inc`
+- `data-pos-qty-stepper` / `data-pos-qty-inc` (retail grid)
+- `Moved to new ticket`
 
 See `PROOF_FOH_KEYBOARD_OWNERSHIP_LIVE.md`
 
 ## Fix shipped
 
-Retail and restaurant share `FohLineQtyEditors` (restaurant −/+ pattern). Qty colgroup uses fixed **7.25rem** + CSS grid so −/+ no longer spill into unit price column.
+Restaurant −/+ stay **inline** with `min-h-9 min-w-9` (no shared-component crush). Retail keeps `FohLineQtyEditors` fixed 7.25rem grid. Split/Move paints the new ticket deterministically. Floor uses keep-last query factory.
 
 Raw JSON: `PROOF_FOH_DEPLOY_LIVE.json`
