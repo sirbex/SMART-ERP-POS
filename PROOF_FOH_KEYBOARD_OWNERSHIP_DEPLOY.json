@@ -1,0 +1,39 @@
+{
+  "started": "2026-08-22T07:56:34.554Z",
+  "commit": "b68cb86eb8d4509b22c71d72dc84aa3013aa9f08",
+  "short": "b68cb86eb8d4",
+  "verdict": "PASS",
+  "gates": [
+    {
+      "id": "PROOF_SOFT_KEYBOARD",
+      "label": "Behavioral: soft keyboard proofs (22 tests)",
+      "ok": true,
+      "detail": "6s"
+    },
+    {
+      "id": "PROOF_CHECK_OWNERSHIP",
+      "label": "Behavioral: restaurant check ownership (5 tests)",
+      "ok": true,
+      "detail": "5s"
+    },
+    {
+      "id": "CLIENT_VITE_BUILD",
+      "label": "Client production bundle (vite build — matches Dockerfile.deploy)",
+      "ok": true,
+      "detail": "97s"
+    },
+    {
+      "id": "SERVER_TSC",
+      "label": "Server TypeScript compile",
+      "ok": true,
+      "detail": "57s"
+    }
+  ],
+  "proofArtifacts": [
+    "PROOF_SEARCH_SOFT_KEYBOARD.md",
+    "PROOF_NUMERIC_SOFT_KEYBOARD.md",
+    "PROOF_LOGIN_SOFT_KEYBOARD.md",
+    "PROOF_RESTAURANT_CHECK_OWNERSHIP.md"
+  ],
+  "policy": "Behavioral vitest proofs only — grep evidence not accepted."
+}

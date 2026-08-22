@@ -12,7 +12,7 @@ import {
   type RefObject,
 } from 'react';
 import { Calculator } from 'lucide-react';
-import { requestSoftKeyboard, softKeyboardAttrs } from '../../lib/softKeyboard';
+import { requestSoftKeyboard } from '../../lib/softKeyboard';
 import { useNumericSoftKeyboard } from '../../hooks/useNumericSoftKeyboard';
 import { NumericSoftKeyboardPad } from './NumericSoftKeyboardPad';
 
@@ -101,11 +101,11 @@ export function NumericSoftKeyboardInput({
         enterKeyHint="done"
         autoComplete="off"
         autoCorrect="off"
+        autoCapitalize="none"
         spellCheck={false}
         value={value}
         disabled={disabled}
         className={paddedClass}
-        {...softKeyboardAttrs(allowDecimal ? 'decimal' : 'numeric', 'done')}
         data-numeric-soft-keyboard-input="true"
         data-numeric-mode={mode}
         onChange={(e) => {

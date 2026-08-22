@@ -115,9 +115,9 @@ describe('PROOF: search keyboard policy (behavioral)', () => {
     };
     const elsewhere = { closest: () => null };
 
-    expect(shouldCloseSearchKeyboardOnBlur(padBtn)).toBe(false);
-    expect(shouldCloseSearchKeyboardOnBlur(toggleBtn)).toBe(false);
-    expect(shouldCloseSearchKeyboardOnBlur(elsewhere)).toBe(true);
+    expect(shouldCloseSearchKeyboardOnBlur(padBtn as unknown as EventTarget)).toBe(false);
+    expect(shouldCloseSearchKeyboardOnBlur(toggleBtn as unknown as EventTarget)).toBe(false);
+    expect(shouldCloseSearchKeyboardOnBlur(elsewhere as unknown as EventTarget)).toBe(true);
     expect(shouldCloseSearchKeyboardOnBlur(null)).toBe(true);
     pass('blur guard');
   });

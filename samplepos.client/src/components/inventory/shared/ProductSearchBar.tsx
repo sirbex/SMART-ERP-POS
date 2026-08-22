@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { SearchSoftKeyboardInput } from '../../components/keyboard/SearchSoftKeyboardInput';
+import { SearchSoftKeyboardInput } from '../../keyboard/SearchSoftKeyboardInput';
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/utils/api";
 import { productKeys } from "@/hooks/useProducts";

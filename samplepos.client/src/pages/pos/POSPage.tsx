@@ -16,6 +16,7 @@ import {
   fetchReceiptPrintConfig,
   shouldAutoPrintAfterSale,
   applyReceiptPrintPresentation,
+  DEFAULT_RECEIPT_PRINT_CONFIG,
   type ReceiptPrintConfig,
 } from '../../lib/receiptPrintConfig';
 import { computeUomPrices } from '@shared/utils/uom-pricing';
@@ -645,7 +646,10 @@ export default function POSPage() {
     (opts?: { preferAutoPrint?: boolean }) => {
       const auto =
         opts?.preferAutoPrint !== false &&
-        shouldAutoPrintAfterSale(receiptPrintConfigRef.current ?? { enabled: true, autoPrint: receiptAutoPrint });
+        shouldAutoPrintAfterSale(receiptPrintConfigRef.current ?? {
+          ...DEFAULT_RECEIPT_PRINT_CONFIG,
+          autoPrint: receiptAutoPrint,
+        });
       setShowReceiptModal(true);
       if (auto) {
         setShowPrintDialog(true);
@@ -4694,6 +4698,7 @@ export default function POSPage() {
       <PrintReceiptDialog
         open={showPrintDialog}
         autoPrint={shouldAutoPrintAfterSale({
+          ...DEFAULT_RECEIPT_PRINT_CONFIG,
           enabled: receiptPrintEnabled,
           autoPrint: receiptAutoPrint,
         })}

@@ -102,9 +102,9 @@ describe('PROOF: numeric soft keyboard (behavioral)', () => {
     };
     const elsewhere = { closest: () => null };
 
-    expect(shouldCloseInAppKeyboardOnBlur(padBtn)).toBe(false);
-    expect(shouldCloseInAppKeyboardOnBlur(toggleBtn)).toBe(false);
-    expect(shouldCloseInAppKeyboardOnBlur(elsewhere)).toBe(true);
+    expect(shouldCloseInAppKeyboardOnBlur(padBtn as unknown as EventTarget)).toBe(false);
+    expect(shouldCloseInAppKeyboardOnBlur(toggleBtn as unknown as EventTarget)).toBe(false);
+    expect(shouldCloseInAppKeyboardOnBlur(elsewhere as unknown as EventTarget)).toBe(true);
     pass('blur guard');
   });
 });

@@ -857,8 +857,8 @@ function checkUiAfterServerSeed(tableId: string, data: CheckUiPayload): CheckUiP
     const quantity = jQty > 0 && jQty < sQty - 1e-9 ? jQty : sQty;
     return {
       ...it,
-      quantity,
-      lineTotal: quantity * (Number(it.unitPrice) || 0),
+      quantity: String(quantity),
+      lineTotal: String(quantity * (Number(it.unitPrice) || 0)),
       kitchenSentAt: j.kitchenSentAt ?? it.kitchenSentAt,
       lineNotes: j.lineNotes ?? it.lineNotes,
       addedBy: it.addedBy ?? j.addedBy ?? null,
@@ -2515,7 +2515,7 @@ export default function RestaurantPosPage() {
     setActiveOrderId(null);
     setSelectedLineIds([]);
     setOpsMode(null);
-    const row = (tablesQuery.data || getCachedRestaurantTables()).find(
+    const row = ((tablesQuery.data || getCachedRestaurantTables()) as RestaurantTable[]).find(
       (t) => t.id === selectedTableId,
     );
     const floorOpenCount = Number(row?.openCheckCount || 0);

@@ -2112,7 +2112,7 @@ export default function GoodsReceiptsPage() {
                               : 'bg-gray-100 text-gray-600'
                               }`}
                           >
-                            {r.returnGrnNumber || r.return_grn_number} ({r.status})
+                            {r.returnGrnNumber} ({r.status})
                           </span>
                         ))}
                         </div>
@@ -2152,7 +2152,7 @@ export default function GoodsReceiptsPage() {
                               })
                             }
                             disabled={createCreditNoteMutation.isPending}
-                            title={`Create Credit Note for ${r.returnGrnNumber || r.return_grn_number} — then apply to the supplier bill in Credit Notes`}
+                            title={`Create Credit Note for ${r.returnGrnNumber} — then apply to the supplier bill in Credit Notes`}
                             className={`${mobileActionBtnClass} text-sm px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex`}
                           >
                             {createCreditNoteMutation.isPending ? 'Creating…' : 'Create Credit Note'}
