@@ -1,7 +1,7 @@
 {
-  "started": "2026-08-22T09:17:42.738Z",
-  "commit": "c79d383be1a7569164e7ebab6908c1281dc066ef",
-  "short": "c79d383be1a7",
+  "started": "2026-08-22T12:26:04.439Z",
+  "commit": "91aacf6b63becb5cad4a4de8731e0853f94bd328",
+  "short": "91aacf6b63be",
   "bases": [
     "https://henber.wizarddigital-inv.com",
     "https://wizarddigital-inv.com"
@@ -20,7 +20,7 @@
       "base": "https://henber.wizarddigital-inv.com",
       "healthStatus": 200,
       "healthOk": true,
-      "uptime": 95.793843907,
+      "uptime": 69.74306542,
       "scanned": 194,
       "hits": {
         "data-numeric-soft-keyboard": true,
@@ -36,7 +36,7 @@
       "base": "https://wizarddigital-inv.com",
       "healthStatus": 200,
       "healthOk": true,
-      "uptime": 143.510009116,
+      "uptime": 133.01336383,
       "scanned": 194,
       "hits": {
         "data-numeric-soft-keyboard": true,
