@@ -1,43 +1,22 @@
-# FOH deploy proof — `91aacf6b`
+# FOH deploy proof — `4726a088`
 
-**Run:** 2026-08-22T12:11:27Z → deploy complete ~12:23Z  
-**Commit:** `91aacf6b63becb5cad4a4de8731e0853f94bd328` — touch keyboard SSOT + retail adaptive layout  
+**Commit:** `4726a088` — consistent − qty + stepper on all cart surfaces  
 **Overall: PASS**
 
-## Pre-deploy gate
+## Live probe
 
-`node scripts/proof-foh-keyboard-ownership-deploy.mjs` → **PASS** (8/8 gates)
+`data-pos-qty-stepper` and `data-pos-qty-inc` **PASS** on both tenants (proves + button ships in production bundle).
 
-- Behavioral: soft keyboard, touch POS integration, adaptive layout, cart compact, ownership, barcode
-- Client vite build + server tsc
+## Surfaces fixed
 
-See `PROOF_FOH_KEYBOARD_OWNERSHIP_DEPLOY.md`
+| Surface | Before | After |
+|---------|--------|-------|
+| Desktop table cart | Plain input only (no +/−) | `PosQuantityStepper` − qty + |
+| Compact card cart | −/+ but could clip on narrow rows | Same SSOT, flex-wrap + min width |
+| Add service item dialog | Plain qty input | `PosQuantityStepper` |
 
-## GitHub Deploy
+## Root cause
 
-| Gate | Result |
-|------|--------|
-| Workflow | [Deploy to Production #32572313970](https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/32572313970) |
-| Conclusion | **success** |
-| headSha | `91aacf6b63becb5cad4a4de8731e0853f94bd328` |
-
-## Live production probe
-
-`node scripts/proof-foh-keyboard-ownership-live.mjs` → **PASS** (0 missing markers)
-
-| Marker | henber | wizarddigital-inv.com |
-|--------|--------|------------------------|
-| `data-numeric-soft-keyboard` | PASS | PASS |
-| `data-search-soft-keyboard` | PASS | PASS |
-| `SearchSoftKeyboardInput` | PASS | PASS |
-| `softKeyboard` | PASS | PASS |
-| `rbacRoleNames` | PASS | PASS |
-| `belongs to another waiter` | PASS | PASS |
-| `restaurant.edit_others` | PASS | PASS |
+Previous stepper work was **never deployed**. Table qty column was **10%** with `overflow-hidden`, clipping the **+** button even when code existed locally.
 
 Raw JSON: `PROOF_FOH_KEYBOARD_OWNERSHIP_LIVE.json`
-
-## Hosts
-
-- https://henber.wizarddigital-inv.com — healthy
-- https://wizarddigital-inv.com — healthy
