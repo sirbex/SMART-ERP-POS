@@ -1,7 +1,7 @@
 {
-  "started": "2026-08-22T09:00:04.234Z",
-  "commit": "6af26e8d7d3e0b94369b7db146f5f77fd7ed9d57",
-  "short": "6af26e8d7d3e",
+  "started": "2026-08-22T09:05:57.534Z",
+  "commit": "63f4a756e87c2e9ec22a6bd96b5e9fa6cd90871d",
+  "short": "63f4a756e87c",
   "verdict": "PASS",
   "gates": [
     {
@@ -14,7 +14,7 @@
       "id": "PROOF_CHECK_OWNERSHIP",
       "label": "Behavioral: restaurant check ownership (5 tests)",
       "ok": true,
-      "detail": "5s"
+      "detail": "4s"
     },
     {
       "id": "PROOF_BARCODE_PHYSICAL_KEYBOARD",
@@ -26,13 +26,13 @@
       "id": "CLIENT_VITE_BUILD",
       "label": "Client production bundle (vite build — matches Dockerfile.deploy)",
       "ok": true,
-      "detail": "44s"
+      "detail": "40s"
     },
     {
       "id": "SERVER_TSC",
       "label": "Server TypeScript compile",
       "ok": true,
-      "detail": "57s"
+      "detail": "54s"
     }
   ],
   "proofArtifacts": [

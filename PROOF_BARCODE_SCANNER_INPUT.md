@@ -1,6 +1,6 @@
 # PROOF: Barcode scanner + physical keyboard (behavioral)
 
-- Date: 2026-08-22T08:58:22.380Z
+- Date: 2026-08-22T09:04:22.963Z
 - Runner: `npm run proof:barcode-scanner-input`
 
 ## Policy
