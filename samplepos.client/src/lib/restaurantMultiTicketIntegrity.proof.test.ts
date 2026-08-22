@@ -414,7 +414,9 @@ describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () =>
     expect(pos).toMatch(/readRestaurantAddItemsPayload/);
     expect(pos).toMatch(/voidItems\(\s*serverVoidOrderId/);
     expect(pos).toMatch(/toServerRestaurantOrderId\(order\.id\)/);
-    expect(pos).toMatch(/seedRestaurantCheckFromServer/);
+    expect(pos).toMatch(/refreshRestaurantCheckSeedFromServer/);
+    // Never seed empty sibling journal rows (Move flake / ghost empty tickets).
+    expect(pos).not.toMatch(/seedRestaurantCheckFromServer\(\{[\s\S]*?items:\s*\[\],/);
   });
 
   it('S02 client API carries forceNewCheck; offline ops honor forceNewTicket', () => {
@@ -559,5 +561,28 @@ describe('PROOF multi-ticket SSOT wiring (FOH + adaptive + API + server)', () =>
     expect(pos).not.toMatch(
       /canOrder && order && orderLines\.length > 0 && !isMultiTicketTable/,
     );
+  });
+
+  it('S09 Move/split paints new ticket and switches activeOrderId so moved lines display', () => {
+    const pos = readFileSync(
+      resolve(here, '../pages/restaurant/RestaurantPosPage.tsx'),
+      'utf8',
+    );
+    expect(pos).toMatch(/paintAfterSplitMove/);
+    expect(pos).toMatch(/selectedMoveUnits/);
+    expect(pos).toMatch(/restaurantSplitMovePaint/);
+    expect(pos).toMatch(/splitMovePartyPinRef/);
+    expect(pos).toMatch(/retainOpenTicketIdsWithPartyPin/);
+    const splitBlock = pos.slice(pos.indexOf('const runSplit'), pos.indexOf('const toggleGroupSelection'));
+    expect(splitBlock).toMatch(/paintAfterSplitMove\(/);
+    expect(splitBlock).toMatch(/refreshRestaurantCheckSeedFromServer/);
+    expect(splitBlock).toMatch(/getTableCheck/);
+    expect(splitBlock).not.toMatch(/setActiveOrderId\(order\.id\)/);
+
+    const replayer = readFileSync(
+      resolve(here, '../../../SamplePOS.Server/src/modules/pos/posEventReplayer.ts'),
+      'utf8',
+    );
+    expect(replayer).toMatch(/resolveSourceOrderIdForSplit/);
   });
 });

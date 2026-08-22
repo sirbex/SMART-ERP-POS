@@ -21,6 +21,7 @@ import {
   RESTAURANT_WAITERS_QUERY_PREFIX,
   refreshRestaurantFloorSession,
   resolveDiningFloorEmptyState,
+  restaurantTablesPlaceholder,
   restaurantTablesQueryKey,
   restaurantWaitersQueryKey,
   shouldPaintJournalOccupancyOnServerFree,
@@ -94,6 +95,26 @@ describe('Restaurant workspace cache & session isolation certification', () => {
     // Prefix still works for invalidateQueries partial match
     expect(aOnline.slice(0, 2)).toEqual([...RESTAURANT_TABLES_QUERY_PREFIX]);
     expect(wa.slice(0, 2)).toEqual([...RESTAURANT_WAITERS_QUERY_PREFIX]);
+  });
+
+  it('EVIDENCE: keep-last-floor placeholder never seeds [] and prefers previous then cache', () => {
+    const warm = [sampleTable('t1', 'T1'), sampleTable('t2', 'T2')];
+    const previous = [sampleTable('t9', 'T9')];
+
+    expect(restaurantTablesPlaceholder(undefined, [])).toBeUndefined();
+    expect(restaurantTablesPlaceholder([], [])).toBeUndefined();
+    expect(restaurantTablesPlaceholder(undefined, warm)).toEqual(warm);
+    expect(restaurantTablesPlaceholder([], warm)).toEqual(warm);
+    expect(restaurantTablesPlaceholder(previous, warm)).toEqual(previous);
+
+    // Login wipe: RQ empty, localStorage still warm → tiles stay
+    cacheRestaurantTables(warm);
+    const afterWipe = restaurantTablesPlaceholder(undefined, getCachedRestaurantTables());
+    expect(afterWipe).toHaveLength(2);
+    expect(afterWipe!.map((t) => t.code).sort()).toEqual(['T1', 'T2']);
+
+    // Quota evicted cache + RQ wipe → no fake floor (loading / cache-miss is honest)
+    expect(restaurantTablesPlaceholder(undefined, [])).toBeUndefined();
   });
 
   it('EVIDENCE: User B never inherits User A React Query floor after session refresh', () => {
@@ -290,12 +311,12 @@ describe('Restaurant workspace cache & session isolation certification', () => {
     expect(logoutBody).toMatch(/refreshRestaurantFloorSession\(queryClient\)/);
   });
 
-  it('EVIDENCE gate: RestaurantPosPage uses isolated keys, forced remount refresh, empty state', () => {
+  it('EVIDENCE gate: RestaurantPosPage uses isolated keys, keep-last-floor placeholder, empty state', () => {
     const pos = readRepo('samplepos.client/src/pages/restaurant/RestaurantPosPage.tsx');
     expect(pos).toMatch(/restaurantTablesQueryKey\(user\?\.id,\s*isOnline\)/);
     expect(pos).toMatch(/restaurantWaitersQueryKey\(user\?\.id,\s*isOnline\)/);
-    expect(pos).toMatch(/refetchOnMount:\s*['"]always['"]/);
-    expect(pos).toMatch(/staleTime:\s*0/);
+    expect(pos).toMatch(/buildRestaurantTablesQueryOptions/);
+    expect(pos).toMatch(/persistCache:\s*\(rows\)\s*=>\s*cacheRestaurantTables/);
     expect(pos).toMatch(/enabled:\s*!!restaurantEnabled\s*&&\s*!!user\?\.id/);
     expect(pos).toMatch(/resolveDiningFloorEmptyState/);
     expect(pos).toMatch(/shouldPaintJournalOccupancyOnServerFree/);
@@ -320,6 +341,9 @@ describe('Restaurant workspace cache & session isolation certification', () => {
     expect(ssot).toMatch(/export function shouldPersistRestaurantTablesCache/);
     expect(ssot).toMatch(/export function resolveDiningFloorEmptyState/);
     expect(ssot).toMatch(/export function shouldPaintJournalOccupancyOnServerFree/);
+    expect(ssot).toMatch(/export function restaurantTablesPlaceholder/);
+    expect(ssot).toMatch(/export function commitRestaurantTablesResult/);
+    expect(ssot).toMatch(/export function buildRestaurantTablesQueryOptions/);
     expect(ssot).toMatch(/removeQueries/);
   });
 });

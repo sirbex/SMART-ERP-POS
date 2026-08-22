@@ -1,17 +1,17 @@
 # PROOF: FOH line qty editors (behavioral)
 
-- Date: 2026-08-22T14:26:41.086Z
+- Date: 2026-08-22T20:14:21.304Z
 - Runner: `npm run proof:pos-quantity-stepper`
 
 ## Policy
-Restaurant and retail share `FohLineQtyEditors`: three separate rounded buttons (− qty +). Retail middle allows select-on-focus typing. Table column must not push + into unit price.
+Restaurant keeps inline `min-h-9 min-w-9` − qty + (dense same-line row). Retail uses `FohLineQtyEditors` with fixed 7.25rem grid so + stays in Qty column. Shared `commitFohQuantityDraft` for typed qty commit.
 
 ## Results
 - PASS empty/invalid draft reverts
 - PASS parses typed quantity
 - PASS − and + separate FOH buttons; no flex-1 middle expansion
-- PASS restaurant + retail qty surfaces share FohLineQtyEditors SSOT
+- PASS restaurant inline ±; retail FohLineQtyEditors SSOT
 - PASS table qty column fixed rem SSOT
 
 ## Verdict
-**PASS** — FOH −/+ SSOT on restaurant, compact, table, and service item; column width safe.
+**PASS** — restaurant inline ± intact; retail FohLineQtyEditors; column width safe.

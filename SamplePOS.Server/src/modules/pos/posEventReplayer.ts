@@ -261,6 +261,51 @@ async function resolvePendingOrderIdForTable(
     return (byTable.rows[0]?.id as string) ?? null;
 }
 
+const ORDER_UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function isPendingOrderOnTable(
+    pool: Pool,
+    orderId: string,
+    tableId: string,
+): Promise<boolean> {
+    if (!ORDER_UUID_RE.test(orderId)) return false;
+    const row = await pool.query(
+        `SELECT id FROM pos_orders WHERE id = $1 AND table_id = $2 AND status = 'PENDING'`,
+        [orderId, tableId],
+    );
+    return !!row.rows[0]?.id;
+}
+
+/** Multi-ticket tables: prefer event source id, then match split lines on siblings. */
+async function resolveSourceOrderIdForSplit(
+    pool: Pool,
+    event: RestaurantCheckSplitEvent,
+): Promise<string | null> {
+    if (
+        event.sourceOrderId &&
+        (await isPendingOrderOnTable(pool, event.sourceOrderId, event.sourceTableId))
+    ) {
+        return event.sourceOrderId;
+    }
+
+    const sibs = await pool.query(
+        `SELECT id FROM pos_orders
+         WHERE table_id = $1 AND status = 'PENDING'
+         ORDER BY created_at ASC`,
+        [event.sourceTableId],
+    );
+    const siblingIds = sibs.rows.map((r: { id: string }) => r.id as string);
+    if (event.lineIds?.length && siblingIds.length > 0) {
+        for (const orderId of siblingIds) {
+            const items = await resolveSplitItems(pool, orderId, event);
+            if (items.length === event.lineIds.length) return orderId;
+        }
+    }
+
+    return resolvePendingOrderIdForTable(pool, event.sourceTableId);
+}
+
 /**
  * Free restaurant floor after offline pay. Errors are returned — never swallowed as silent success.
  */
@@ -897,7 +942,17 @@ export const posEventReplayer = {
             if (!(await isRestaurantModeEnabled(pool))) {
                 return { status: 'ACKNOWLEDGED', eventType: 'RESTAURANT_CHECK_TRANSFERRED' };
             }
-            const orderId = await resolvePendingOrderIdForTable(pool as Pool, event.fromTableId);
+            let orderId = event.orderId;
+            if (
+                orderId &&
+                !(await isPendingOrderOnTable(pool as Pool, orderId, event.fromTableId))
+            ) {
+                orderId = '';
+            }
+            if (!orderId) {
+                orderId =
+                    (await resolvePendingOrderIdForTable(pool as Pool, event.fromTableId)) ?? '';
+            }
             if (!orderId) {
                 return {
                     status: 'REVIEW',
@@ -1007,7 +1062,7 @@ export const posEventReplayer = {
             if (!(await isRestaurantModeEnabled(pool))) {
                 return { status: 'ACKNOWLEDGED', eventType: 'RESTAURANT_CHECK_SPLIT' };
             }
-            const sourceId = await resolvePendingOrderIdForTable(pool as Pool, event.sourceTableId);
+            const sourceId = await resolveSourceOrderIdForSplit(pool as Pool, event);
             if (!sourceId) {
                 return {
                     status: 'REVIEW',

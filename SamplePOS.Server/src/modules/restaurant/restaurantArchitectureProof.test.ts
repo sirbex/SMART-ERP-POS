@@ -572,6 +572,8 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(pos).toMatch(/prefetchQuery/);
     expect(pos).toMatch(/attachSiblingTabs/);
     expect(pos).toMatch(/Moved to new ticket/);
+    expect(pos).toMatch(/paintAfterSplitMove/);
+    expect(pos).toMatch(/selectedMoveUnits/);
     expect(pos).toMatch(/Change table/);
     expect(pos).toMatch(/← Tables|Back to tables/);
     expect(pos).toMatch(/returnToFloor/);
@@ -1011,6 +1013,7 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     expect(replayer).toMatch(/transferRestaurantCheck/);
     expect(replayer).toMatch(/mergeRestaurantChecks/);
     expect(replayer).toMatch(/splitRestaurantCheck/);
+    expect(replayer).toMatch(/resolveSourceOrderIdForSplit/);
     expect(replayer).toMatch(/transferCheck/);
     expect(replayer).toMatch(/mergeChecks/);
     expect(replayer).toMatch(/splitCheck/);
@@ -1029,6 +1032,8 @@ describe('Restaurant architecture proof (Phase 1)', () => {
     const splitHandler = pos.slice(pos.indexOf('const runSplit'), pos.indexOf('const toggleGroupSelection'));
     expect(splitHandler).toMatch(/preferLocalRestaurantWrites\(order\.id\)/);
     expect(splitHandler).toMatch(/splitRestaurantCheckOffline/);
+    expect(splitHandler).toMatch(/paintAfterSplitMove\(split\.orderId/);
+    expect(splitHandler).toMatch(/getTableCheck/);
   });
 
   it('Phase 5.5 LAN KDS uses journal board + BroadcastChannel (no cloud dependency)', () => {

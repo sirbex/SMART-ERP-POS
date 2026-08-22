@@ -17,7 +17,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, X } from 'lucide-react';
 import { requestSoftKeyboard } from '../../lib/softKeyboard';
 import { SearchSoftKeyboardInput } from '../../components/keyboard/SearchSoftKeyboardInput';
-import { FohLineQtyEditors } from '../../components/foh/FohLineQtyEditors';
 import Layout from '../../components/Layout';
 import { AdaptiveDialog } from '../../components/adaptive';
 import { api, getStructuredError } from '../../utils/api';
@@ -116,7 +115,6 @@ import {
   reconcileRestaurantJournalWithServerTables,
   removeRestaurantLinesOffline,
   refreshRestaurantCheckSeedFromServer,
-  seedRestaurantCheckFromServer,
   hasPendingRestaurantMutations,
   resolveDesiredLinesBeforePay,
   storePayDesiredLines,
@@ -150,6 +148,17 @@ import {
   type InFlightOptimisticLine,
   type OptimisticCheckPayload,
 } from '../../lib/restaurantCheckOptimistic';
+import {
+  assertSplitMovePaintShowsMovedLines,
+  buildPartyTabsAfterSplitMove,
+  canMoveSelectedUnits,
+  createSplitMovePartyPin,
+  maxMoveUnitsForGroup,
+  resolveActiveOrderIdAfterSplitMove,
+  resolveSplitMovePartyPinAfterOpenIds,
+  retainOpenTicketIdsWithPartyPin,
+  type SplitMovePartyPin,
+} from '../../lib/restaurantSplitMovePaint';
 import { RestaurantOrderTagPad } from '../../components/restaurant/RestaurantOrderTagPad';
 import type { OrderTagGroupOption } from '../../components/restaurant/RestaurantOrderTagPad';
 import {
@@ -760,11 +769,16 @@ function attachSiblingTabs(
   data: CheckUiPayload,
   knownTabs: TicketTab[],
   tableId?: string | null,
+  partyPin?: SplitMovePartyPin | null,
 ): CheckUiPayload {
   return mergeRestaurantSiblingTabs(
     data as OptimisticCheckPayload,
     knownTabs,
-    openTicketIdsForTable(tableId ?? data.table?.id, data),
+    retainOpenTicketIdsWithPartyPin(
+      openTicketIdsForTable(tableId ?? data.table?.id, data),
+      partyPin,
+      tableId ?? data.table?.id,
+    ),
   ) as CheckUiPayload;
 }
 
@@ -792,15 +806,15 @@ function seedCheckPayloadIntoJournal(tableId: string, data: CheckUiPayload): voi
   }
   for (const sibling of data.siblingChecks || []) {
     if (!sibling.id || sibling.id === data.order?.id) continue;
-    seedRestaurantCheckFromServer({
-      orderId: sibling.id,
-      orderNumber: sibling.orderNumber,
+    // Never seed siblings with empty items — that ghosts an empty journal check
+    // and can wipe a real ticket after Move/refetch races. Tabs use metadata only.
+    const existing = deriveRestaurantCheckForTable(
       tableId,
-      tableCode,
-      tableName,
-      channel,
-      items: [],
-    });
+      getAllEvents(),
+      getAllSyncState(),
+      sibling.id,
+    );
+    if (existing?.orderId === sibling.id) continue;
   }
 }
 
@@ -1082,6 +1096,11 @@ export default function RestaurantPosPage() {
     tableId: null,
     tabs: [],
   });
+  /**
+   * After Samba Move: retain source+split ids until server sibling list catches up.
+   * Prevents intermittent strip scrub that made Move look broken the next day.
+   */
+  const splitMovePartyPinRef = useRef<SplitMovePartyPin | null>(null);
   /**
    * Party list auto-open is one-shot per table pick. Do not keep forcing `list`
    * while ticketTabs.length > 1 — that fights ticket drill-in and + Ticket.
@@ -2132,6 +2151,17 @@ export default function RestaurantPosPage() {
     tablesQuery.data?.find((t) => t.id === selectedTableId) ?? checkQuery.data?.table;
 
   const orderLines = useMemo(() => order?.items ?? [], [order]);
+  const totalOrderUnits = useMemo(
+    () => orderLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0),
+    [orderLines],
+  );
+  const selectedMoveUnits = useMemo(() => {
+    const idSet = new Set(selectedLineIds);
+    return orderLines.reduce(
+      (s, l) => s + (idSet.has(l.id) ? Number(l.quantity) || 0 : 0),
+      0,
+    );
+  }, [selectedLineIds, orderLines]);
   const ticketGroups = useMemo(
     () =>
       consolidateTicketLines(
@@ -2360,7 +2390,16 @@ export default function RestaurantPosPage() {
       const hit = tabs.find((t) => t.id === prev.id);
       if (hit && !hit.note) hit.note = prevNote;
     }
-    const openIds = openTicketIdsForTable(selectedTableId, checkQuery.data);
+    const openIds = retainOpenTicketIdsWithPartyPin(
+      openTicketIdsForTable(selectedTableId, checkQuery.data),
+      splitMovePartyPinRef.current,
+      selectedTableId,
+    );
+    splitMovePartyPinRef.current = resolveSplitMovePartyPinAfterOpenIds({
+      pin: splitMovePartyPinRef.current,
+      tableId: selectedTableId,
+      openIds,
+    });
     const cleaned = scrubRestaurantTicketTabs(tabs).filter((t) => {
       if (isJournalLocalOrderId(t.id) || isTempRestaurantId(t.id)) return true;
       // No open-id evidence yet (cold load) — keep strip; do not wipe.
@@ -2502,13 +2541,14 @@ export default function RestaurantPosPage() {
     if (!selectedTableId) {
       setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
       setSelectedCustomer(null);
-      setActiveOrderId(null);
-      setSelectedLineIds([]);
-      setOpsMode(null);
-      setSambaTicketView('detail');
-      partyListLandedForTableRef.current = null;
-      tableTicketsRef.current = { tableId: null, tabs: [] };
-      return;
+    setActiveOrderId(null);
+    setSelectedLineIds([]);
+    setOpsMode(null);
+    setSambaTicketView('detail');
+    partyListLandedForTableRef.current = null;
+    tableTicketsRef.current = { tableId: null, tabs: [] };
+    splitMovePartyPinRef.current = null;
+    return;
     }
     // Fresh table: 2+ or occupied-without-sole-count → party list (no last-ticket flash).
     setGuestDraft({ guestName: '', guestPhone: '', deliveryAddress: '', pickupLabel: '' });
@@ -3847,6 +3887,79 @@ export default function RestaurantPosPage() {
     }
   };
 
+  /** After Move/split: show the new ticket with moved lines (Samba expectation). */
+  const paintAfterSplitMove = (
+    splitOrderId: string,
+    opts?: {
+      knownTabs?: TicketTab[];
+      checkPayload?: CheckUiPayload;
+      sourceOrderId?: string;
+      splitLineUnitCount?: number;
+    },
+  ) => {
+    if (!selectedTableId) return;
+    const activeId = resolveActiveOrderIdAfterSplitMove(splitOrderId);
+    if (
+      !assertSplitMovePaintShowsMovedLines({
+        activeOrderId: activeId,
+        splitOrderId,
+        splitLineUnitCount: opts?.splitLineUnitCount ?? 1,
+      })
+    ) {
+      toast.error('Move completed but new ticket could not be shown — reopen the table');
+      return;
+    }
+    setSambaTicketView('detail');
+    if (chrome.fohTicketPane === 'sheet') setMobileSheet(null);
+    const knownTabs =
+      opts?.knownTabs ||
+      scrubRestaurantTicketTabs([
+        ...tableTicketsRef.current.tabs,
+        { id: splitOrderId, orderNumber: '…', totalAmount: '0' },
+      ]);
+    tableTicketsRef.current = { tableId: selectedTableId, tabs: knownTabs };
+    if (opts?.sourceOrderId) {
+      splitMovePartyPinRef.current = createSplitMovePartyPin(
+        selectedTableId,
+        opts.sourceOrderId,
+        splitOrderId,
+      );
+    }
+    // Invalidate any in-flight GET for the source ticket so it cannot wipe this paint.
+    checkPaintGenRef.current += 1;
+
+    if (opts?.checkPayload?.order?.id) {
+      const painted = attachSiblingTabs(
+        checkUiAfterServerSeed(selectedTableId, opts.checkPayload),
+        knownTabs,
+        selectedTableId,
+        splitMovePartyPinRef.current,
+      );
+      for (const id of restaurantCheckQueryPaintIds({
+        paintedOrderId: splitOrderId,
+        targetOrderId: splitOrderId,
+        displayedOrderId: activeOrderId,
+      })) {
+        queryClient.setQueryData(['restaurant', 'check', selectedTableId, id, isOnline], painted);
+      }
+    } else {
+      paintJournalCheck(selectedTableId, splitOrderId);
+    }
+
+    setActiveOrderId(activeId);
+    activeOrderIdRef.current = activeId;
+    queryClient.setQueryData(
+      restaurantTablesQueryKey(user?.id, isOnline),
+      (prev: RestaurantTable[] | undefined) =>
+        patchTableRowFloorFigures(
+          prev,
+          selectedTableId,
+          floorFiguresFromTicketTabs(knownTabs),
+        ),
+    );
+    void queryClient.invalidateQueries({ queryKey: ['restaurant', 'tables'] });
+  };
+
   const runSplit = async (opts?: {
     sameTable?: boolean;
     targetTableId?: string;
@@ -3877,17 +3990,12 @@ export default function RestaurantPosPage() {
       qtyBy[row.itemId] = requestedQty;
     }
     const movingUnits = Object.values(qtyBy).reduce((s, n) => s + n, 0);
-    const totalUnits = orderLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
-    if (movingUnits >= totalUnits - 1e-9) {
-      toast.error('Select some items to move — not the whole ticket (use Change table)');
-      return;
-    }
-    // Legacy whole-line guard when no partial qty: cannot select every line id.
-    if (!opts?.items && selectedLineIds.length >= orderLines.length) {
+    if (!canMoveSelectedUnits(movingUnits, totalOrderUnits)) {
       toast.error('Select some items to move — not the whole ticket (use Change table)');
       return;
     }
 
+    const sourceOrderIdBefore = order.id;
     setBusy(true);
     try {
       if (preferLocalRestaurantWrites(order.id)) {
@@ -3899,7 +4007,7 @@ export default function RestaurantPosPage() {
         if (!derived) throw new Error('Offline check not found');
         const target = (tablesQuery.data || []).find((t) => t.id === targetTableId);
         if (!target) throw new Error('Target table not found');
-        const { split } = splitRestaurantCheckOffline(derived, {
+        const { source: nextSource, split } = splitRestaurantCheckOffline(derived, {
           lineIds: [...moveIdSet],
           quantityByLineId: qtyBy,
           targetTableId: target.id,
@@ -3908,6 +4016,22 @@ export default function RestaurantPosPage() {
           sameTable,
           channel: channelHint(target),
         });
+        const splitUnits = split.lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+        const knownTabs = scrubRestaurantTicketTabs(
+          buildPartyTabsAfterSplitMove({
+            priorTabs: tableTicketsRef.current.tabs,
+            source: {
+              id: nextSource.orderId,
+              orderNumber: nextSource.offlineId,
+              totalAmount: totalsFromLines(nextSource.lines).totalAmount,
+            },
+            split: {
+              id: split.orderId,
+              orderNumber: split.offlineId,
+              totalAmount: totalsFromLines(split.lines).totalAmount,
+            },
+          }),
+        );
         toast.success(
           sameTable
             ? isOnline
@@ -3921,19 +4045,148 @@ export default function RestaurantPosPage() {
         setSelectedLineIds([]);
         if (!sameTable) {
           setSelectedTableId(targetTableId);
-          setActiveOrderId(split.orderId);
-        } else {
-          setActiveOrderId(order.id);
         }
         bumpJournal();
-        invalidateCheck();
+        // Paint source cache too so switching back never shows pre-move lines.
+        paintJournalCheck(selectedTableId, nextSource.orderId);
+        paintAfterSplitMove(split.orderId, {
+          knownTabs,
+          sourceOrderId: nextSource.orderId,
+          splitLineUnitCount: splitUnits,
+        });
         return;
       }
-      await api.restaurant.splitCheck(order.id, {
+
+      const res = await api.restaurant.splitCheck(order.id, {
         items: moveItems,
         targetTableId,
         sameTable,
       });
+      const splitPayload = res.data.data as {
+        split: { order: OrderDetail; meta?: CheckMeta | null };
+        source: { order: OrderDetail; meta?: CheckMeta | null };
+      };
+      const splitId = splitPayload.split.order.id;
+      const sourceId = splitPayload.source.order.id;
+      if (!splitId) throw new Error('Split succeeded but no new ticket id returned');
+
+      const tableCode = meta?.tableCode || selectedTable?.code;
+      const tableName = meta?.tableName || selectedTable?.name;
+      const channel =
+        (meta?.orderChannel as 'DINE_IN' | 'TAKEAWAY' | 'DELIVERY' | null | undefined) ||
+        channelHint(selectedTable);
+
+      // Seed BOTH checks from split response BEFORE paint — never wait on a lagging GET.
+      refreshRestaurantCheckSeedFromServer({
+        orderId: sourceId,
+        orderNumber: splitPayload.source.order.orderNumber,
+        tableId: selectedTableId!,
+        tableCode,
+        tableName,
+        channel,
+        waiterId: splitPayload.source.meta?.waiterId ?? meta?.waiterId,
+        waiterName: splitPayload.source.meta?.waiterName ?? meta?.waiterName,
+        items: (splitPayload.source.order.items || []).map((it) => ({
+          id: it.id,
+          productId: it.productId,
+          productName: it.productName,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          lineNotes: it.lineNotes,
+          kitchenSentAt: it.kitchenSentAt,
+          addedBy: it.addedBy,
+          addedByName: it.addedByName,
+          addedAt: it.addedAt,
+        })),
+      });
+      refreshRestaurantCheckSeedFromServer({
+        orderId: splitId,
+        orderNumber: splitPayload.split.order.orderNumber,
+        tableId: selectedTableId!,
+        tableCode,
+        tableName,
+        channel,
+        waiterId: splitPayload.split.meta?.waiterId ?? meta?.waiterId,
+        waiterName: splitPayload.split.meta?.waiterName ?? meta?.waiterName,
+        items: (splitPayload.split.order.items || []).map((it) => ({
+          id: it.id,
+          productId: it.productId,
+          productName: it.productName,
+          quantity: it.quantity,
+          unitPrice: it.unitPrice,
+          lineNotes: it.lineNotes,
+          kitchenSentAt: it.kitchenSentAt,
+          addedBy: it.addedBy,
+          addedByName: it.addedByName,
+          addedAt: it.addedAt,
+        })),
+      });
+
+      let checkPayload: CheckUiPayload;
+      try {
+        const getRes = await api.restaurant.getTableCheck(selectedTableId!, { orderId: splitId });
+        checkPayload = getRes.data.data as CheckUiPayload;
+        // Prefer split response items if GET somehow returns empty (race).
+        if (
+          (!checkPayload.order?.items || checkPayload.order.items.length === 0) &&
+          (splitPayload.split.order.items?.length || 0) > 0
+        ) {
+          checkPayload = {
+            ...checkPayload,
+            order: splitPayload.split.order,
+            meta: splitPayload.split.meta ?? checkPayload.meta,
+          };
+        }
+      } catch {
+        const cachedTable =
+          getCachedRestaurantTables().find((t) => t.id === selectedTableId) ||
+          tablesQuery.data?.find((t) => t.id === selectedTableId) ||
+          checkQuery.data?.table;
+        checkPayload = {
+          table: (cachedTable || { id: selectedTableId! }) as RestaurantTable,
+          order: splitPayload.split.order,
+          meta: splitPayload.split.meta ?? null,
+          siblingChecks: [
+            {
+              id: sourceId,
+              orderNumber: splitPayload.source.order.orderNumber,
+              totalAmount: splitPayload.source.order.totalAmount,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+        };
+      }
+
+      const knownTabs = scrubRestaurantTicketTabs(
+        buildPartyTabsAfterSplitMove({
+          priorTabs: [
+            ...tableTicketsRef.current.tabs,
+            ...(checkPayload.siblingChecks || []).map((s) => ({
+              id: s.id,
+              orderNumber: s.orderNumber,
+              totalAmount: s.totalAmount,
+            })),
+          ],
+          source: {
+            id: sourceId,
+            orderNumber: splitPayload.source.order.orderNumber,
+            totalAmount: splitPayload.source.order.totalAmount,
+          },
+          split: {
+            id: splitId,
+            orderNumber:
+              checkPayload.order?.orderNumber || splitPayload.split.order.orderNumber,
+            totalAmount:
+              checkPayload.order?.totalAmount ?? splitPayload.split.order.totalAmount,
+          },
+        }),
+      );
+
+      const splitUnits = (splitPayload.split.order.items || []).reduce(
+        (s, it) => s + (Number(it.quantity) || 0),
+        0,
+      );
+
       toast.success(
         sameTable ? 'Moved to new ticket on this table' : 'Items moved to other table',
       );
@@ -3942,15 +4195,53 @@ export default function RestaurantPosPage() {
       if (!sameTable) {
         setSelectedTableId(targetTableId);
       }
-      invalidateCheck();
+      paintAfterSplitMove(splitId, {
+        knownTabs,
+        checkPayload,
+        sourceOrderId: sourceId || sourceOrderIdBefore,
+        splitLineUnitCount: splitUnits,
+      });
+
+      // Keep source ticket cache fresh when user switches back.
+      if (sourceId && sourceId !== splitId) {
+        try {
+          const sourceRes = await api.restaurant.getTableCheck(selectedTableId!, {
+            orderId: sourceId,
+          });
+          let sourcePayload = sourceRes.data.data as CheckUiPayload;
+          if (
+            (!sourcePayload.order?.items || sourcePayload.order.items.length === 0) &&
+            (splitPayload.source.order.items?.length || 0) > 0
+          ) {
+            sourcePayload = {
+              ...sourcePayload,
+              order: splitPayload.source.order,
+              meta: splitPayload.source.meta ?? sourcePayload.meta,
+            };
+          }
+          const sourcePainted = attachSiblingTabs(
+            checkUiAfterServerSeed(selectedTableId!, sourcePayload),
+            knownTabs,
+            selectedTableId,
+          );
+          queryClient.setQueryData(
+            ['restaurant', 'check', selectedTableId, sourceId, isOnline],
+            sourcePainted,
+          );
+        } catch {
+          void queryClient.invalidateQueries({
+            queryKey: ['restaurant', 'check', selectedTableId, sourceId],
+          });
+        }
+      }
     } catch (err) {
-      if (isOnline) toastApiError(err, 'Move failed'); else toast.error(err instanceof Error ? err.message : 'Move failed');
+      if (isOnline) toastApiError(err, 'Move failed');
+      else toast.error(err instanceof Error ? err.message : 'Move failed');
     } finally {
       setBusy(false);
     }
   };
 
-  /** Samba: tap line to highlight (select underlying item ids). */
   const toggleGroupSelection = (group: TicketLineGroup) => {
     setOpsMode(null);
     const allOn = group.itemIds.every((id) => selectedLineIds.includes(id));
@@ -3979,9 +4270,7 @@ export default function RestaurantPosPage() {
         : null;
 
     if (singleGroup && singleGroup.quantity > 1) {
-      const totalUnits = orderLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
-      const otherRemain = totalUnits - singleGroup.quantity;
-      const maxMove = otherRemain > 0 ? singleGroup.quantity : singleGroup.quantity - 1;
+      const maxMove = maxMoveUnitsForGroup(singleGroup.quantity, totalOrderUnits);
       if (maxMove < 1) {
         toast.error('Select some items to move — not the whole ticket (use Change table)');
         return;
@@ -6185,15 +6474,60 @@ export default function RestaurantPosPage() {
                       const showQtyEditors =
                         showInlineRowEditors(chrome) && !group.kitchenSent && !!group.productId;
                       const qtyEditors = showQtyEditors ? (
-                        <FohLineQtyEditors
-                          variant="restaurant"
-                          quantity={group.quantity}
-                          sameLineEditors={sameLineEditors}
-                          disabled={busy}
-                          onDecrease={() => void handleLineMinusOne(group)}
-                          onIncrease={() => void handleLinePlusOne(group)}
-                          onSetQuantity={() => handleLineSetQty(group)}
-                        />
+                        <div
+                          className={`inline-flex items-center gap-0.5 shrink-0 ${
+                            sameLineEditors ? '' : 'mt-2'
+                          }`}
+                          onClick={(e) => e.stopPropagation()}
+                          data-foh-line-qty-editors="true"
+                          data-row-editors={sameLineEditors ? 'same-line' : 'stacked'}
+                        >
+                          <button
+                            type="button"
+                            aria-label="Decrease quantity"
+                            disabled={busy}
+                            onClick={() => void handleLineMinusOne(group)}
+                            className={`${TOUCH} ${
+                              sameLineEditors ? 'min-h-9 min-w-9 text-base' : 'min-h-10 min-w-10 text-lg'
+                            } rounded-lg border border-stone-300 bg-stone-50 font-bold text-stone-800`}
+                            data-foh-qty-dec="true"
+                          >
+                            −
+                          </button>
+                          {!sameLineEditors ? (
+                            <button
+                              type="button"
+                              aria-label="Set quantity"
+                              disabled={busy}
+                              onClick={() => handleLineSetQty(group)}
+                              className={`${TOUCH} min-h-10 min-w-12 rounded-lg border border-stone-300 bg-white text-sm font-bold text-stone-900`}
+                            >
+                              {group.quantity}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              aria-label="Set quantity"
+                              disabled={busy}
+                              onClick={() => handleLineSetQty(group)}
+                              className={`${TOUCH} min-h-9 min-w-9 rounded-lg border border-stone-300 bg-white text-xs font-bold tabular-nums text-stone-900`}
+                            >
+                              {group.quantity}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label="Increase quantity"
+                            disabled={busy}
+                            onClick={() => void handleLinePlusOne(group)}
+                            className={`${TOUCH} ${
+                              sameLineEditors ? 'min-h-9 min-w-9 text-base' : 'min-h-10 min-w-10 text-lg'
+                            } rounded-lg border border-stone-300 bg-stone-50 font-bold text-stone-800`}
+                            data-foh-qty-inc="true"
+                          >
+                            +
+                          </button>
+                        </div>
                       ) : null;
                       return (
                         <li
@@ -6378,7 +6712,11 @@ export default function RestaurantPosPage() {
                       </button>
                       <button
                         type="button"
-                        disabled={busy || selectedLineIds.length >= orderLines.length}
+                        disabled={
+                          busy ||
+                          selectedLineIds.length === 0 ||
+                          !canMoveSelectedUnits(selectedMoveUnits, totalOrderUnits)
+                        }
                         onClick={() => handleMoveSelected()}
                         className={`${touchBtnDark} min-h-12 text-xs`}
                       >

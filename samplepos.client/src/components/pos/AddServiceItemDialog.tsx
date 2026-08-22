@@ -222,7 +222,6 @@ export default function AddServiceItemDialog({ open, onOpenChange, onAdd }: AddS
                                 Quantity
                             </label>
                             <FohLineQtyEditors
-                                variant="retail"
                                 value={formData.quantity}
                                 productName={formData.name.trim() || 'service item'}
                                 onChange={(qty) => {

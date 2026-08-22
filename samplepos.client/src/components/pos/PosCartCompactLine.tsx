@@ -161,7 +161,6 @@ export const PosCartCompactLine = forwardRef<HTMLDivElement, PosCartCompactLineP
 
       <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1 min-w-0">
         <FohLineQtyEditors
-          variant="retail"
           value={item.quantity}
           overStock={lineQtyOverStock}
           uomLabel={stockUom.uomLabel}

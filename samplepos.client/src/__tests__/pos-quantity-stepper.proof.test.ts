@@ -1,5 +1,5 @@
 /**
- * BEHAVIORAL proof — FOH line qty editors (− qty +) SSOT (restaurant + retail).
+ * BEHAVIORAL proof — FOH line qty editors (− qty +) SSOT (retail) + restaurant inline parity.
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -46,7 +46,7 @@ describe('PROOF: FOH line qty editors (behavioral)', () => {
     pass('− and + separate FOH buttons; no flex-1 middle expansion');
   });
 
-  it('restaurant and retail surfaces import FohLineQtyEditors — not duplicated PosQuantityStepper', () => {
+  it('restaurant keeps inline min-w-9 ±; retail imports FohLineQtyEditors — no PosQuantityStepper', () => {
     const restaurant = readFileSync(
       join(__dirname, '../pages/restaurant/RestaurantPosPage.tsx'),
       'utf8',
@@ -60,14 +60,16 @@ describe('PROOF: FOH line qty editors (behavioral)', () => {
       join(__dirname, '../components/pos/AddServiceItemDialog.tsx'),
       'utf8',
     );
-    expect(restaurant).toContain('FohLineQtyEditors');
-    expect(restaurant).toContain("variant=\"restaurant\"");
+    expect(restaurant).not.toContain('FohLineQtyEditors');
+    expect(restaurant).toContain('data-foh-qty-dec="true"');
+    expect(restaurant).toContain('data-foh-qty-inc="true"');
+    expect(restaurant).toContain('min-h-9 min-w-9');
     expect(compact).toContain('FohLineQtyEditors');
     expect(pos).toContain('FohLineQtyEditors');
     expect(pos).toContain('POS_ADAPTIVE_CLASSES.cartColQty');
     expect(service).toContain('FohLineQtyEditors');
     expect(pos).not.toMatch(/handleQuantityChange\(idx, parseInt/);
-    pass('restaurant + retail qty surfaces share FohLineQtyEditors SSOT');
+    pass('restaurant inline ±; retail FohLineQtyEditors SSOT');
   });
 
   it('qty table column uses fixed rem width so + stays in Qty column', () => {
@@ -89,14 +91,14 @@ afterAll(() => {
       '- Runner: `npm run proof:pos-quantity-stepper`',
       '',
       '## Policy',
-      'Restaurant and retail share `FohLineQtyEditors`: three separate rounded buttons (− qty +). Retail middle allows select-on-focus typing. Table column must not push + into unit price.',
+      'Restaurant keeps inline `min-h-9 min-w-9` − qty + (dense same-line row). Retail uses `FohLineQtyEditors` with fixed 7.25rem grid so + stays in Qty column. Shared `commitFohQuantityDraft` for typed qty commit.',
       '',
       '## Results',
       ...results,
       '',
       '## Verdict',
       results.length >= 5
-        ? '**PASS** — FOH −/+ SSOT on restaurant, compact, table, and service item; column width safe.'
+        ? '**PASS** — restaurant inline ± intact; retail FohLineQtyEditors; column width safe.'
         : '**FAIL** — incomplete result set.',
       '',
     ].join('\n'),

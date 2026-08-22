@@ -6,6 +6,7 @@
  * - Login / logout forces a floor session refresh (no cross-user RQ inheritance)
  * - Offline warm tables never lose a non-empty floor to successful []
  * - Dining empty states are explicit (never silent blank when context known)
+ * - Tables query keeps last non-empty floor (placeholder) across PIN RQ wipe
  */
 
 import type { QueryClient } from '@tanstack/react-query';
@@ -30,6 +31,102 @@ export function restaurantWaitersQueryKey(
   isOnline: boolean,
 ): readonly ['restaurant', 'waiters', string, boolean] {
   return ['restaurant', 'waiters', userId?.trim() || 'anon', isOnline] as const;
+}
+
+/**
+ * Keep-last-floor seed (Toast / Samba / Square): never paint an empty dining
+ * grid while a refetch is in flight if we already have a warm floor.
+ *
+ * Login still calls `refreshRestaurantFloorSession` (drops React Query) so
+ * User B cannot inherit User A's check payloads. Tables themselves are a
+ * tenant floor — seed from localStorage cache when RQ is empty.
+ *
+ * Never return []: that would look like a successful empty tenant and hide
+ * the loading / cache-miss empty states.
+ */
+export function restaurantTablesPlaceholder<T>(
+  previous: readonly T[] | undefined,
+  cached: readonly T[],
+): T[] | undefined {
+  if (Array.isArray(previous) && previous.length > 0) return previous as T[];
+  if (Array.isArray(cached) && cached.length > 0) return cached as T[];
+  return undefined;
+}
+
+/**
+ * Toast / Samba: a 200 with [] must not blank a warm floor (proxy glitch,
+ * empty RBAC payload). True empty tenant: warm is also empty → [].
+ */
+export function commitRestaurantTablesResult<T>(
+  incoming: readonly T[] | null | undefined,
+  warm: readonly T[],
+): T[] {
+  const next = Array.isArray(incoming) ? [...incoming] : [];
+  if (next.length === 0 && Array.isArray(warm) && warm.length > 0) {
+    return [...warm] as T[];
+  }
+  return next as T[];
+}
+
+export type RestaurantTablesQueryHooks<T> = {
+  userId: string | null | undefined;
+  isOnline: boolean;
+  enabled: boolean;
+  fetchOnline: () => Promise<readonly T[]>;
+  getCached: () => readonly T[];
+  persistCache: (rows: T[]) => void;
+  isBackendUnavailable: (err: unknown) => boolean;
+  /** Tests pass false so Vitest does not keep a 15s poll alive. */
+  pollIntervalMs?: number | false;
+};
+
+/**
+ * Dining-tables useQuery options — page and proofs must share this factory.
+ * Login still removeQueries; placeholder + commit keep tiles painted.
+ */
+export function buildRestaurantTablesQueryOptions<T>(args: RestaurantTablesQueryHooks<T>) {
+  const poll =
+    args.pollIntervalMs !== undefined
+      ? args.pollIntervalMs
+      : args.isOnline
+        ? 15_000
+        : false;
+
+  return {
+    queryKey: restaurantTablesQueryKey(args.userId, args.isOnline),
+    queryFn: async (): Promise<T[]> => {
+      if (!args.isOnline) {
+        return [...args.getCached()] as T[];
+      }
+      try {
+        const incoming = await args.fetchOnline();
+        const rows = Array.isArray(incoming) ? ([...incoming] as T[]) : [];
+        args.persistCache(rows);
+        return commitRestaurantTablesResult(rows, args.getCached());
+      } catch (err) {
+        if (args.isBackendUnavailable(err)) {
+          const cached = [...args.getCached()] as T[];
+          if (cached.length > 0) return cached;
+        }
+        throw err;
+      }
+    },
+    enabled: args.enabled,
+    staleTime: 10_000,
+    refetchOnMount: true as const,
+    refetchInterval: poll,
+    placeholderData: (previousData: T[] | undefined) =>
+      restaurantTablesPlaceholder(previousData, args.getCached()),
+    retry: (failureCount: number, error: unknown) => {
+      if (args.isBackendUnavailable(error)) return failureCount < 6;
+      const status =
+        (error as { httpStatus?: number; response?: { status?: number } })?.httpStatus ??
+        (error as { response?: { status?: number } })?.response?.status;
+      if (status && status >= 400 && status < 500) return false;
+      return failureCount < 1;
+    },
+    retryDelay: (attempt: number) => Math.min(500 * 2 ** attempt, 8_000),
+  };
 }
 
 /**

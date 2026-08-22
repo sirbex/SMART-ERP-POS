@@ -100,6 +100,16 @@ describe('origin storage quota SSOT', () => {
     }
   });
 
+  it('evicts restaurant_offline_tables and never evicts restaurant_mode_enabled_v1', () => {
+    expect(RECONSTRUCTIBLE_CACHE_KEYS).toContain('restaurant_offline_tables');
+    expect(RECONSTRUCTIBLE_CACHE_KEYS).not.toContain('restaurant_mode_enabled_v1');
+    localStorage.setItem('restaurant_offline_tables', JSON.stringify([{ id: 't1', code: 'T1' }]));
+    localStorage.setItem('restaurant_mode_enabled_v1', '1');
+    evictReconstructibleCaches();
+    expect(localStorage.getItem('restaurant_offline_tables')).toBeNull();
+    expect(localStorage.getItem('restaurant_mode_enabled_v1')).toBe('1');
+  });
+
   it('PIN login persistAuthStorage reclaims catalog then writes rbac', () => {
     localStorage.setItem('pos_product_catalog', 'x'.repeat(1000));
     const mem = globalThis.localStorage as unknown as {
