@@ -1,6 +1,6 @@
 # PROOF: restaurant split/move paint (deterministic)
 
-- Date: 2026-08-22T20:14:20.697Z
+- Date: 2026-08-22T20:25:57.510Z
 - Runner: `npx vitest run src/lib/restaurantSplitMovePaint.proof.test.ts`
 
 ## Policy

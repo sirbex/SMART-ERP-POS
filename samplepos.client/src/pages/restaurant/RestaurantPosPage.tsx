@@ -175,6 +175,7 @@ import CustomerSelector from '../../components/pos/CustomerSelector';
 import type { Customer } from '@shared/zod/customer';
 import {
   getCachedRestaurantTables,
+  cacheRestaurantTables,
   getCachedRestaurantMenu,
   getCachedRestaurantCategories,
   getCachedRestaurantWaiters,
@@ -187,6 +188,7 @@ import {
   paintRestaurantTableFreeOffline,
 } from '../../lib/restaurantOfflineCache';
 import {
+  buildRestaurantTablesQueryOptions,
   floorFiguresFromTicketTabs,
   patchTableRowFloorFigures,
   resolveDiningFloorEmptyState,
@@ -1234,43 +1236,21 @@ export default function RestaurantPosPage() {
     }
   }, [restaurantEnabled]);
 
-  const tablesQuery = useQuery({
-    queryKey: restaurantTablesQueryKey(user?.id, isOnline),
-    queryFn: async () => {
-      if (!isOnline) {
-        return getCachedRestaurantTables() as RestaurantTable[];
-      }
-      try {
-        // silentForbidden: RBAC deny must not spam Access denied + look like logout
+  const tablesQuery = useQuery(
+    buildRestaurantTablesQueryOptions<RestaurantTable>({
+      userId: user?.id,
+      isOnline,
+      enabled: !!restaurantEnabled && !!user?.id && canReadFloor,
+      // silentForbidden: RBAC deny must not spam Access denied + look like logout
+      fetchOnline: async () => {
         const res = await api.restaurant.listTables(undefined, { silentForbidden: true });
-        const tables = (res.data.data || []) as RestaurantTable[];
-        // keep cache warm (never blank non-empty warm with [])
-        const { cacheRestaurantTables } = await import('../../lib/restaurantOfflineCache');
-        cacheRestaurantTables(tables);
-        return tables;
-      } catch (err) {
-        // Permanent UX: never blank the floor for a brief Node restart / proxy gap.
-        if (isBackendUnavailableError(err)) {
-          const cached = getCachedRestaurantTables() as RestaurantTable[];
-          if (cached.length > 0) return cached;
-        }
-        throw err;
-      }
-    },
-    enabled: !!restaurantEnabled && !!user?.id && canReadFloor,
-    staleTime: 10_000,
-    refetchOnMount: true,
-    refetchInterval: isOnline ? 15_000 : false,
-    retry: (failureCount, error) => {
-      if (isBackendUnavailableError(error)) return failureCount < 6;
-      const status =
-        (error as { httpStatus?: number; response?: { status?: number } })?.httpStatus ??
-        (error as { response?: { status?: number } })?.response?.status;
-      if (status && status >= 400 && status < 500) return false;
-      return failureCount < 1;
-    },
-    retryDelay: (attempt) => Math.min(500 * 2 ** attempt, 8_000),
-  });
+        return (res.data.data || []) as RestaurantTable[];
+      },
+      getCached: () => getCachedRestaurantTables() as RestaurantTable[],
+      persistCache: (rows) => cacheRestaurantTables(rows),
+      isBackendUnavailable: isBackendUnavailableError,
+    }),
+  );
 
   // Reconcile journal ghosts against live server floor (FREE tables must not look busy).
   useEffect(() => {

@@ -1,7 +1,7 @@
 {
-  "started": "2026-08-22T14:27:46.480Z",
-  "commit": "69f798eae06275b38844e5e18d896810c20c4b89",
-  "short": "69f798eae062",
+  "started": "2026-08-22T20:24:19.648Z",
+  "commit": "fe09361a0b644f6f88747b368407e2134694337e",
+  "short": "fe09361a0b64",
   "verdict": "PASS",
   "gates": [
     {
@@ -14,13 +14,13 @@
       "id": "PROOF_TOUCH_KEYBOARD_POS",
       "label": "Behavioral: touch POS keyboard integration (search + numeric + cart + layout)",
       "ok": true,
-      "detail": "2s"
+      "detail": "3s"
     },
     {
       "id": "PROOF_POS_ADAPTIVE_LAYOUT",
       "label": "Behavioral: retail POS adaptive layout SSOT (1600px wide tier)",
       "ok": true,
-      "detail": "2s"
+      "detail": "3s"
     },
     {
       "id": "PROOF_POS_CART_COMPACT",
@@ -44,7 +44,7 @@
       "id": "PROOF_CHECK_OWNERSHIP",
       "label": "Behavioral: restaurant check ownership (5 tests)",
       "ok": true,
-      "detail": "2s"
+      "detail": "3s"
     },
     {
       "id": "PROOF_BARCODE_PHYSICAL_KEYBOARD",
@@ -56,13 +56,13 @@
       "id": "CLIENT_VITE_BUILD",
       "label": "Client production bundle (vite build — matches Dockerfile.deploy)",
       "ok": true,
-      "detail": "23s"
+      "detail": "28s"
     },
     {
       "id": "SERVER_TSC",
       "label": "Server TypeScript compile",
       "ok": true,
-      "detail": "35s"
+      "detail": "45s"
     }
   ],
   "proofArtifacts": [
