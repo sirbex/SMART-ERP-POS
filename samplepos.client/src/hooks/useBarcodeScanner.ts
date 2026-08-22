@@ -13,6 +13,16 @@ interface BarcodeScannerOptions {
   enabled?: boolean;
 }
 
+/** True when the global wedge listener should handle the key (focus outside fields). */
+export function shouldCaptureBarcodeKeydownGlobally(target: EventTarget | null): boolean {
+  if (!target || typeof target !== 'object') return true;
+  const el = target as HTMLElement;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return false;
+  if (el.isContentEditable) return false;
+  return true;
+}
+
 /**
  * Hook to listen for barcode scanner input
  * Barcode scanners typically type very fast (< 50ms between chars)
@@ -34,17 +44,9 @@ export function useBarcodeScanner({
     if (!enabled) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if user is typing in an input field (except search)
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === 'INPUT' &&
-        !target.classList.contains('barcode-scanner-enabled') &&
-        target.getAttribute('type') !== 'search'
-      ) {
+      if (!shouldCaptureBarcodeKeydownGlobally(e.target)) {
         return;
       }
-      if (target.tagName === 'TEXTAREA') return;
-      if (target.tagName === 'SELECT') return;
 
       const now = Date.now();
       const timeSinceLastKeystroke = now - lastKeystrokeRef.current;

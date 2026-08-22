@@ -12,7 +12,7 @@ import {
   type RefObject,
 } from 'react';
 import { Calculator } from 'lucide-react';
-import { requestSoftKeyboard } from '../../lib/softKeyboard';
+import { readInAppKeyboardContext, requestSoftKeyboard } from '../../lib/softKeyboard';
 import { useNumericSoftKeyboard } from '../../hooks/useNumericSoftKeyboard';
 import { NumericSoftKeyboardPad } from './NumericSoftKeyboardPad';
 
@@ -61,6 +61,7 @@ export function NumericSoftKeyboardInput({
   const refToUse = inputRef ?? internalRef;
   const allowDecimal = mode === 'decimal';
   const kb = useNumericSoftKeyboard(onChange, value, { allowDecimal });
+  const hasHwKeyboard = readInAppKeyboardContext().hasHwKeyboard;
   const kbBind = kb.bindInput({
     onFocus: (e: FocusEvent<HTMLInputElement>) => {
       if (selectOnFocus) {
@@ -89,7 +90,8 @@ export function NumericSoftKeyboardInput({
     ? className
     : `${padRight} ${className}`.trim();
 
-  const inputMode = kb.open ? 'none' : allowDecimal ? 'decimal' : 'numeric';
+  const inputMode =
+    kb.open && !hasHwKeyboard ? 'none' : allowDecimal ? 'decimal' : 'numeric';
 
   return (
     <div className={`relative min-w-0 w-full ${wrapClassName}`.trim()}>

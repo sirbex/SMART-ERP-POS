@@ -66,6 +66,15 @@ allOk =
 
 allOk =
   runGate(
+    'PROOF_BARCODE_PHYSICAL_KEYBOARD',
+    'Behavioral: barcode scanner does not block physical typing (4 tests)',
+    'npm',
+    ['run', 'proof:barcode-scanner-input'],
+    clientRoot,
+  ) && allOk;
+
+allOk =
+  runGate(
     'CLIENT_VITE_BUILD',
     'Client production bundle (vite build — matches Dockerfile.deploy)',
     'npx',
@@ -93,6 +102,7 @@ const report = {
     'PROOF_NUMERIC_SOFT_KEYBOARD.md',
     'PROOF_LOGIN_SOFT_KEYBOARD.md',
     'PROOF_RESTAURANT_CHECK_OWNERSHIP.md',
+    'PROOF_BARCODE_SCANNER_INPUT.md',
   ],
   policy: 'Behavioral vitest proofs only — grep evidence not accepted.',
 };

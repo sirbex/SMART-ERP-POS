@@ -1,6 +1,6 @@
 # PROOF: Restaurant check ownership (behavioral)
 
-- Date: 2026-08-22T07:54:00.650Z
+- Date: 2026-08-22T08:58:17.360Z
 - Runner: `npx vitest run src/__tests__/restaurant-check-ownership.proof.test.ts`
 
 ## Policy

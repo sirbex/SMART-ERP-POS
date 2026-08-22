@@ -133,8 +133,11 @@ describe('Phase 2 adaptive components exist and stay presentation-only', () => {
   it('AdaptiveSearch enables HID-compatible input contract', () => {
     const src = readAdaptive('AdaptiveSearch.tsx');
     expect(src).toContain('barcode-scanner-enabled');
-    expect(src).toContain('type="search"');
+    expect(src).toContain('SearchSoftKeyboardInput');
     expect(src).toContain('resolveFloorplanFromWorkspace');
+    const kb = readFileSync(resolve(here, '../components/keyboard/SearchSoftKeyboardInput.tsx'), 'utf8');
+    expect(kb).toContain('type="text"');
+    expect(kb).toContain("inputMode={kb.open && !hasHwKeyboard ? 'none' : 'search'}");
   });
 
   it('AdaptivePrintPreview reuses lib/print.ts strategies only', () => {

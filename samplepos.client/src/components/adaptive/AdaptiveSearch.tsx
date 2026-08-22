@@ -21,8 +21,8 @@ type AdaptiveSearchProps = {
   autoFocus?: boolean;
   inputRef?: RefObject<HTMLInputElement | null>;
   /**
-   * When true, input accepts HID wedge while focused
-   * (`barcode-scanner-enabled` + type=search — matches useBarcodeScanner rules).
+   * When true, marks the field for HID wedge styling/docs.
+   * Wedge + typing go through the native input; global capture runs when unfocused.
    */
   scannerEnabled?: boolean;
   disabled?: boolean;

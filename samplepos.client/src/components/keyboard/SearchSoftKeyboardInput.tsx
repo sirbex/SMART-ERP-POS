@@ -13,7 +13,11 @@ import {
   type RefObject,
 } from 'react';
 import { Keyboard } from 'lucide-react';
-import { requestSoftKeyboard, softKeyboardAttrs } from '../../lib/softKeyboard';
+import {
+  readInAppKeyboardContext,
+  requestSoftKeyboard,
+  softKeyboardAttrs,
+} from '../../lib/softKeyboard';
 import { useSearchSoftKeyboard } from '../../hooks/useSearchSoftKeyboard';
 import { SoftKeyboardPad } from './SoftKeyboardPad';
 
@@ -52,6 +56,7 @@ export function SearchSoftKeyboardInput({
   const internalRef = useRef<HTMLInputElement>(null);
   const refToUse = inputRef ?? internalRef;
   const kb = useSearchSoftKeyboard(onChange, value);
+  const hasHwKeyboard = readInAppKeyboardContext().hasHwKeyboard;
   const kbBind = kb.bindInput({
     onFocus: (e: FocusEvent<HTMLInputElement>) => {
       if (selectOnFocus) {
@@ -78,13 +83,13 @@ export function SearchSoftKeyboardInput({
       <input
         {...rest}
         ref={refToUse}
-        type="search"
+        type="text"
         value={value}
         disabled={disabled}
         autoComplete={rest.autoComplete ?? 'off'}
         className={paddedClass}
         {...softKeyboardAttrs('search', 'search')}
-        inputMode={kb.open ? 'none' : 'search'}
+        inputMode={kb.open && !hasHwKeyboard ? 'none' : 'search'}
         data-search-soft-keyboard-input="true"
         onChange={(e) => onChange(e.target.value)}
         onPointerDown={kbBind.onPointerDown}

@@ -1,14 +1,14 @@
 {
-  "started": "2026-08-22T07:56:34.554Z",
-  "commit": "b68cb86eb8d4509b22c71d72dc84aa3013aa9f08",
-  "short": "b68cb86eb8d4",
+  "started": "2026-08-22T09:00:04.234Z",
+  "commit": "6af26e8d7d3e0b94369b7db146f5f77fd7ed9d57",
+  "short": "6af26e8d7d3e",
   "verdict": "PASS",
   "gates": [
     {
       "id": "PROOF_SOFT_KEYBOARD",
       "label": "Behavioral: soft keyboard proofs (22 tests)",
       "ok": true,
-      "detail": "6s"
+      "detail": "5s"
     },
     {
       "id": "PROOF_CHECK_OWNERSHIP",
@@ -17,10 +17,16 @@
       "detail": "5s"
     },
     {
+      "id": "PROOF_BARCODE_PHYSICAL_KEYBOARD",
+      "label": "Behavioral: barcode scanner does not block physical typing (4 tests)",
+      "ok": true,
+      "detail": "5s"
+    },
+    {
       "id": "CLIENT_VITE_BUILD",
       "label": "Client production bundle (vite build — matches Dockerfile.deploy)",
       "ok": true,
-      "detail": "97s"
+      "detail": "44s"
     },
     {
       "id": "SERVER_TSC",
@@ -33,7 +39,8 @@
     "PROOF_SEARCH_SOFT_KEYBOARD.md",
     "PROOF_NUMERIC_SOFT_KEYBOARD.md",
     "PROOF_LOGIN_SOFT_KEYBOARD.md",
-    "PROOF_RESTAURANT_CHECK_OWNERSHIP.md"
+    "PROOF_RESTAURANT_CHECK_OWNERSHIP.md",
+    "PROOF_BARCODE_SCANNER_INPUT.md"
   ],
   "policy": "Behavioral vitest proofs only — grep evidence not accepted."
 }
