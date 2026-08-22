@@ -1,24 +1,18 @@
 {
-  "started": "2026-08-22T12:26:04.439Z",
-  "commit": "91aacf6b63becb5cad4a4de8731e0853f94bd328",
-  "short": "91aacf6b63be",
-  "verdict": "PASS",
-  "deployGate": {
-    "runner": "node scripts/proof-foh-keyboard-ownership-deploy.mjs",
-    "verdict": "PASS",
-    "gates": 8
-  },
-  "githubDeploy": {
-    "workflow": "deploy-production.yml",
-    "runId": 32572313970,
-    "url": "https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/32572313970",
+  "commit": "69f798eae06275b38844e5e18d896810c20c4b89",
+  "short": "69f798ea",
+  "deployedAt": "2026-08-22T14:40:00.000Z",
+  "deployGate": "PASS",
+  "deployWorkflow": {
+    "id": 32578785125,
+    "url": "https://github.com/wizard-digital/SMART-ERP-POS/actions/runs/32578785125",
     "conclusion": "success",
-    "headSha": "91aacf6b63becb5cad4a4de8731e0853f94bd328"
+    "headSha": "69f798eae06275b38844e5e18d896810c20c4b89"
   },
-  "liveProbe": {
-    "runner": "node scripts/proof-foh-keyboard-ownership-live.mjs",
-    "verdict": "PASS",
-    "failCount": 0,
-    "artifact": "PROOF_FOH_KEYBOARD_OWNERSHIP_LIVE.json"
-  }
+  "liveProbe": "PASS",
+  "tenants": [
+    "https://henber.wizarddigital-inv.com",
+    "https://wizarddigital-inv.com"
+  ],
+  "verdict": "PASS"
 }

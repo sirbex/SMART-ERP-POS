@@ -1,6 +1,6 @@
 # PROOF: POS adaptive layout (behavioral)
 
-- Date: 2026-08-22T14:05:41.466Z
+- Date: 2026-08-22T14:26:35.430Z
 - Runner: `npm run proof:pos-adaptive-layout`
 
 ## Results

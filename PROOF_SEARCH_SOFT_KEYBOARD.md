@@ -1,6 +1,6 @@
 # PROOF: Search soft keyboard (behavioral)
 
-- Date: 2026-08-22T11:57:58.350Z
+- Date: 2026-08-22T14:26:30.608Z
 - Runner: `npm run proof:soft-keyboard` (search section) or `npx vitest run src/__tests__/search-soft-keyboard.proof.test.ts`
 
 ## Policy

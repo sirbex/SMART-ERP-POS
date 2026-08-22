@@ -1,6 +1,6 @@
 # PROOF: POS search typing performance (behavioral)
 
-- Date: 2026-08-22T12:45:33.905Z
+- Date: 2026-08-22T14:26:43.643Z
 - Runner: `npm run proof:pos-search-typing-perf`
 
 ## Policy

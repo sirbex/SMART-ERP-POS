@@ -1,6 +1,6 @@
 # PROOF: FOH line qty editors (behavioral)
 
-- Date: 2026-08-22T14:05:44.428Z
+- Date: 2026-08-22T14:26:41.086Z
 - Runner: `npm run proof:pos-quantity-stepper`
 
 ## Policy

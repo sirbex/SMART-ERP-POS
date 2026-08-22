@@ -1,6 +1,6 @@
 # PROOF: Numeric soft keyboard (behavioral)
 
-- Date: 2026-08-22T11:57:58.358Z
+- Date: 2026-08-22T14:26:30.637Z
 - Runner: `npm run proof:soft-keyboard` (numeric section) or `npx vitest run src/__tests__/numeric-soft-keyboard.proof.test.ts`
 
 ## Policy
